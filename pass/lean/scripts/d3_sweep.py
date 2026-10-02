@@ -348,39 +348,32 @@ def _aggregate_rss_kb() -> int:
 # the host: another machine may mount cgroup v2 without granting the memory
 # controller to a user slice, and a sweep must still run there.
 # ---------------------------------------------------------------------------
-# A child that joins a cgroup and then becomes /bin/true.  Detection runs this
-# for real, because the only way to know a process can MIGRATE into a candidate
-# is to migrate one.
-_JOIN_PROBE = (
-    "import os,sys\n"
-    "open(sys.argv[1] + '/cgroup.procs', 'w').write(str(os.getpid()))\n"
-    "os.execv('/bin/true', ['/bin/true'])\n"
-)
-
-
 def cgroup_base() -> "pathlib.Path | None":
     """The delegated cgroup directory probes can actually be confined in.
 
-    Every requirement is checked BY DOING IT, never inferred:
+    THE PREFLIGHT IS THE RUNTIME PATH.  It instantiates the same `Cgroup` class
+    with the same configuration (exclusive naming, memory.max, swap, oom.group)
+    and launches the same `CGEXEC_SRC` wrapper with the same Popen shape that
+    `run_one` uses, against /bin/true.  An earlier version used a separate
+    hand-rolled join probe, and the two DRIFTED: that probe succeeded while the
+    real wrapper got PermissionError on `cgroup.procs`, so detection reported
+    AVAILABLE and every probe then died before doing any work.  Duplicated
+    preflight logic was the defect; sharing the code is the fix.
 
-      * cgroup v2 (a unified `0::` hierarchy)
-      * the `memory` controller delegated AND enabled for subtrees
-      * a child directory creatable EXCLUSIVELY (no `exist_ok`: reusing a
-        directory somebody else made would mix two probes' accounting)
-      * `memory.max` and `memory.oom.group` writable -- the group kill is part
-        of the correctness claim, so a host that cannot set it is not a host
-        where this mechanism applies
-      * A REAL PROCESS MIGRATING IN, by running a child that writes its own pid
-        to `cgroup.procs` and then execs
-      * `memory.peak` readable afterwards
-      * the child directory removable
+    `Cgroup` and `CGEXEC_SRC` are defined below this function.  That is legal:
+    module-level names resolve at CALL time, and nothing calls this during module
+    initialisation.
 
-    The join check is the one that matters most, and its absence was a live
-    defect: a sandboxed context created and configured a child perfectly while
-    every write to `cgroup.procs` raised PermissionError.  Detection reported
-    availability, the sidecar recorded `cgroup-memory-max`, and every probe died
-    before doing any work -- a false guarantee, which is worse than a known-weak
-    one.
+    A candidate is accepted only when ALL of these hold:
+      * `memory` delegated AND present in `subtree_control`
+      * the `Cgroup` constructor succeeds -- which already requires exclusive
+        creation, a writable `memory.max` and a writable `memory.oom.group`
+      * the wrapper exits 0: a real process MIGRATED IN and exec'd
+      * accounting is readable and reports no OOM for /bin/true
+      * `destroy()` returns True
+
+    Acceptance happens OUTSIDE the try/finally, so a cleanup failure REJECTS the
+    candidate instead of being discovered after it was already returned.
     """
     try:
         own = pathlib.Path("/proc/self/cgroup").read_text().strip()
@@ -391,38 +384,34 @@ def cgroup_base() -> "pathlib.Path | None":
     for cand in (pathlib.Path("/sys/fs/cgroup") / own[3:].lstrip("/"),
                  pathlib.Path(f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice"
                               f"/user@{os.getuid()}.service")):
-        probe = None
         try:
             if "memory" not in (cand / "cgroup.controllers").read_text().split():
                 continue
             if "memory" not in (cand / "cgroup.subtree_control").read_text().split():
                 continue
-            probe = cand / f".d3detect-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-            probe.mkdir()                       # EXCLUSIVE: no exist_ok
-            (probe / "memory.max").write_text(str(64 * 1024 * 1024))
-            (probe / "memory.oom.group").write_text("1")
-            r = subprocess.run([sys.executable, "-c", _JOIN_PROBE, str(probe)],
-                               capture_output=True, text=True, timeout=30)
-            if r.returncode != 0:
-                continue                        # cannot migrate in -> unusable
-            int((probe / "memory.peak").read_text().strip())
-            return cand
-        except (OSError, ValueError, subprocess.SubprocessError):
+        except OSError:
             continue
+
+        cg, joined, removed = None, False, False
+        try:
+            cg = Cgroup(cand, f"detect-{uuid.uuid4().hex}", 64 * 1024)
+            CGEXEC_PATH.parent.mkdir(parents=True, exist_ok=True)
+            CGEXEC_PATH.write_text(CGEXEC_SRC)
+            r = subprocess.run(
+                [sys.executable, str(CGEXEC_PATH), str(cg.path), "/bin/true"],
+                capture_output=True, text=True, timeout=30,
+                start_new_session=True)          # same shape as run_group
+            joined = (r.returncode == 0
+                      and cg.peak_kb() is not None
+                      and cg.oom_killed() is False)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            joined = False
         finally:
-            if probe is not None:
-                try:
-                    (probe / "cgroup.kill").write_text("1")
-                except OSError:
-                    pass
-                for _ in range(20):
-                    try:
-                        probe.rmdir()
-                        break
-                    except FileNotFoundError:
-                        break
-                    except OSError:
-                        time.sleep(0.05)
+            removed = cg.destroy() if cg is not None else True
+
+        if joined and removed:
+            return cand
+    return None
 
 
 # The probe joins its cgroup in a tiny wrapper process, NOT in a `preexec_fn`.
