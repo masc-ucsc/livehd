@@ -343,80 +343,6 @@ def elabProveReified : CommandElab := fun stx => do
     logInfo m!"prove_reified: {corNm} proved, {R.bindings.size} bindings"
   | _ => throwUnsupportedSyntax
 
-/-- `emit_binding_values <designCert> as <reifiedDef>` — one named value per
-binding, plus the `<F>.vals` equation tying the reified definition to them.
-
-Increment 2 of the opt-in incremental path. It emits NO walk and proves nothing
-about `denoteResidual`; `prove_reified` is untouched and remains how every design
-is actually proved. What this establishes is the half the walk will need on the
-FAST side: that the reified let-chain equals a result built from named, opaque
-per-binding values.
-
-One definition per binding, each referring to earlier ones BY NAME. Inlining
-would duplicate a re-read binding at every consumer, so on a diamond the value
-tree would grow with the graph's reconvergence instead of its size — which is the
-cost the incremental walk exists to avoid, reappearing on the other side.
-
-FAILS LOUDLY rather than degrading: a design with flops or memory updates is
-refused here with a message naming what is missing, instead of emitting a weaker
-equation that silently covers only the outputs. -/
-syntax (name := emitBindingValues) "emit_binding_values " ident " as " ident : command
-
-@[command_elab emitBindingValues]
-def elabEmitBindingValues : CommandElab := fun stx => do
-  match stx with
-  | `(command| emit_binding_values $d:ident as $f:ident) => do
-    let R ← liftTermElabM do
-      let dExpr ← Term.elabTerm d none
-      let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
-      match compileDesign cert with
-      | .error _ => throwError "emit_binding_values: compileDesign refused {d}"
-      | .ok R    => pure R
-    if !R.flopUpdates.isEmpty || !R.memoryUpdates.isEmpty then
-      throwError "emit_binding_values: {d} has {R.flopUpdates.size} flop update(s) and \
-        {R.memoryUpdates.size} memory update(s); this increment emits values for the \
-        COMBINATIONAL result only. Refusing rather than emitting an equation that \
-        covers the outputs and silently omits the sequential next state."
-    let nsrc := R.sources.size
-    let base := f.getId
-    -- one definition per binding, in order, each naming its predecessors
-    for k in [0 : R.bindings.size] do
-      let b := R.bindings[k]!
-      let nm := mkIdent (base ++ Name.mkSimple s!"val{k}")
-      let rhs ← liftTermElabM (ReifyProof.valSyntax base nsrc b.rhs)
-      let e0b := mkIdent (Name.mkSimple "e0")
-      match b.ty with
-      | .bv _    => elabCommand (← `(command| def $nm ($e0b : Compiler.SlotEnv) : BV := $rhs))
-      | .mem _ _ => elabCommand (← `(command| def $nm ($e0b : Compiler.SlotEnv) : Int → BV := $rhs))
-    -- the fast side, in terms of those names
-    -- the theorem's own binders, raw so the generated body can mention them
-    let iId  := mkIdent (Name.mkSimple "i")
-    let stId := mkIdent (Name.mkSimple "st")
-    let envT ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)
-    let outs : Array Term ← R.outputs.mapM fun o => do
-      let v ← liftTermElabM (ReifyProof.valRefAt base nsrc o.slot envT)
-      `(bv_resize $(quote o.width) $v)
-    -- every value definition, so the fast side can be matched against them.
-    -- NOTE this one proof is NOT incremental: unfolding all of them reproduces
-    -- the inlined tree, at the same cost as today's single `simp`. It is the
-    -- CONNECTION lemma, proved once; the walk that follows uses only the names.
-    let valIds ← (Array.ofFn (n := R.bindings.size) (fun k => k.val)).mapM fun k => do
-      let vid := mkIdent (base ++ Name.mkSimple s!"val{k}")
-      `(Lean.Parser.Tactic.simpLemma| $vid:ident)
-    let eqNm := mkIdent (base ++ `vals)
-    elabCommand (← `(command|
-      theorem $eqNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
-          $f $iId $stId =
-          { outputs := #[$outs,*],
-            nextState := { flops := #[], mems := #[] } } := by
-        intro $iId $stId
-        simp [$f:ident, $d:ident, $(mkIdent ``Compiler.refBV_sourceEnv):ident,
-              $(mkIdent ``Compiler.refMem_sourceEnv):ident,
-              $(mkIdent ``CertVal.asBV):ident, $(mkIdent ``CertVal.asMem):ident,
-              $valIds,*]))
-    logInfo m!"emit_binding_values: {R.bindings.size} value(s) emitted, {eqNm} proved"
-  | _ => throwUnsupportedSyntax
-
 /-- `prove_reified_incr <designCert> as <name>` — the opt-in INCREMENTAL path.
 
 Emits, for a COMBINATIONAL design:
@@ -607,13 +533,18 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
     let anonCtor : Array Term ← termSlots.toArray.mapM fun sl =>
       if sl < nsrc then `($(agN nb) $(quote sl) (by simp only [$(szN 0):ident]; omega))
       else `($(bFact nb sl))
+    let trivTerm ← liftTermElabM `(trivial)
+    let closing : Array Term := if anonCtor.isEmpty then #[trivTerm] else anonCtor
     tacs := tacs.push (← `(tactic|
-      exact ⟨$(envN nb), by simp [Compiler.runBindings], $anonCtor,*⟩))
+      exact ⟨$(envN nb), by simp [Compiler.runBindings], $closing,*⟩))
     let factTerms ← liftTermElabM (termSlots.toArray.mapM (mkFact nb))
     -- the promised conjunction, built right-associated
-    let conj ← liftTermElabM (match factTerms.toList with
-      | []      => `(True)
-      | x :: xs => xs.foldlM (fun acc t => `($acc ∧ $t)) x)
+    let conj ← liftTermElabM (
+      let rec build : List Term → TermElabM Term
+        | []      => `(True)
+        | [x]     => pure x
+        | x :: xs => do `($x ∧ $(← build xs))
+      build factTerms.toList)
     let eNm := envN nb
     elabCommand (← `(command|
       theorem $walkNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
@@ -634,8 +565,13 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
     let mProjNm := mkIdent (base ++ `R_mems_proj)
     elabCommand (← `(command|
       theorem $mProjNm : ($rNm).memoryUpdates = ($d).memories.map Compiler.compileMemory := rfl))
-    let hNames : Array Ident := (Array.ofFn (n := termSlots.length) (fun t => t.val)).map
-      fun t => mkIdent (Name.mkSimple s!"hterm{t}")
+    let hNames : Array Ident :=
+      if termSlots.isEmpty then #[mkIdent (Name.mkSimple "htermNone")]
+      else (Array.ofFn (n := termSlots.length) (fun t => t.val)).map
+             fun t => mkIdent (Name.mkSimple s!"hterm{t}")
+    -- only the real facts go into the final `simp`; the `True` placeholder for a
+    -- design with no outputs is not a rewrite rule.
+    let hFacts : Array Ident := if termSlots.isEmpty then #[] else hNames
     -- `rfl` projections of the certificate, so the final `simp` never has to
     -- unfold the whole `DesignCert` literal to see that there are no flops.
     let dfNm := mkIdent (base ++ `D_flops)
@@ -648,7 +584,7 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
         `({ slot := $(quote o.slot), width := $(quote o.width) })
       `(#[$os,*])
     elabCommand (← `(command| theorem $doNm : ($d).outputs = $outsLit := rfl))
-    let hSimp ← hNames.mapM fun h => `(Lean.Parser.Tactic.simpLemma| $h:ident)
+    let hSimp ← hFacts.mapM fun h => `(Lean.Parser.Tactic.simpLemma| $h:ident)
     let eqNm := mkIdent (base ++ `eq_compileAndRun)
     let eVar := mkIdent (Name.mkSimple "eW")
     let hEq  := mkIdent (Name.mkSimple "hEqW")
@@ -661,7 +597,7 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
                    $sNm:ident, $btlNm:ident]
         rw [$hEq:ident]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
-        simp [$f:ident, $d:ident, Compiler.compileOutput, $dfNm:ident, $dmNm:ident,
+        simp [$f:ident, Compiler.compileOutput, $dfNm:ident, $dmNm:ident,
               $doNm:ident, $hSimp,*]))
     let corNm := mkIdent (base ++ `correct)
     elabCommand (← `(command|
