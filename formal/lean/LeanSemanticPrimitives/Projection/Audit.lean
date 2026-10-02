@@ -320,4 +320,17 @@ namespace Projection
 #print axioms Hw.evalNode_agree
 #print axioms Hw.evalNodes_agree
 
+-- Adequacy helper group 5: outputs.  Order and width resize, exactly.
+#print axioms Hw.mkOutputs_agree
+
+-- Adequacy helper group 6: flop updates.  Reset polarity, async-vs-sync edge
+-- priority, then enable/din/old-state hold, in that order.
+#print axioms Hw.firesAt_agree
+#print axioms Hw.srcFlopNext_named
+#print axioms Hw.rstActive_agree
+#print axioms Hw.capture_agree
+#print axioms Hw.flopNext_agree
+#print axioms Hw.flopNextsFrom_getElem
+#print axioms Hw.flopNexts_agree
+
 end Projection

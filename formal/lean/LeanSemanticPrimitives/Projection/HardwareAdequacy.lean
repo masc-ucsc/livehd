@@ -1550,5 +1550,265 @@ theorem evalNodes_agree {D : DesignCert} {i : RuntimeInput} {s : RuntimeState}
         exact .ref rfl
       · exact SEval_prim2 (.ref rfl) .lit (by simp [evalPrim] <;> omega)
 
+/-! ## Group 5: outputs
+
+Order and width resize, exactly.  `mkOutputs` walks `D.outputs` in order and
+resizes each slot read to the output's own width -- the same `bv_resize
+o.width` the shared side applies, so this lemma checks the ORDER and the
+RESIZE and contains nothing else. -/
+
+theorem mkOutputs_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg) :
+    ∀ (outs : List OutputDesc) (σ : SEnv) (eo ee en : SExp),
+      (∀ o ∈ outs, o.slot < vals.length) →
+      SEval hwS σ eo (encListG encOutput outs) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ en (.int (Int.ofNat vals.length)) →
+      SEval hwS σ (.call "mkOutputs" [eo, ee, en])
+        (encListG encBV (outs.map (fun o => bv_resize o.width (arg o.slot))))
+  | [],      _, _, _, _, _,  ho, henv, hlen => by
+      refine SEval_call3 ho henv hlen rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) .lit
+  | o :: os, _, _, _, _, hb, ho, henv, hlen => by
+      refine SEval_call3 ho henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      refine SEval_switch_of_tag (SEval_hd (.ref rfl)) rfl rfl ?_
+      exact SEval_consP
+        (SEval_prim2 (.ref rfl)
+          (slot_read hsv (hb o List.mem_cons_self) (.ref rfl) (.ref rfl) (.ref rfl)) rfl)
+        (mkOutputs_agree hsv os _ _ _ _
+          (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+          (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl))
+
+/-! ## Group 6: flop updates
+
+Reset polarity, async-vs-sync edge priority, then enable/din/old-state hold --
+in that order, because that is the order `srcFlopNext` tests them.  Every
+right-hand side reads the OLD state: `fq` is the incoming `s.flops` and nothing
+in this group reads a value it has just written. -/
+
+theorem firesAt_agree {σ : SEnv} {ee ec : SExp} {e : ClockEdges} {c : Nat}
+    (hb : c < e.size)
+    (hev : SEval hwS σ ee (encEdges e)) (hcv : SEval hwS σ ec (.int (Int.ofNat c))) :
+    SEval hwS σ (.call "firesAt" [ee, ec]) (.bool (fires e c)) := by
+  have hf : fires e c = e.toList[c]'(by simpa using hb) := by
+    simp [fires, Array.getElem?_eq_getElem hb]
+  rw [hf]
+  refine SEval_call2 hev hcv rfl rfl ?_
+  exact nthD_agree (e := fun b : Bool => (Val.bool b)) c _ _ _ e.toList
+    (by simpa using hb) (.ref rfl) (.ref rfl)
+
+/-- The enable and reset conditions, NAMED.  Written as matches inline they
+become dependent matches the moment a hypothesis mentions the same `Option`,
+and the per-flop statements stop matching `srcFlopNext`. -/
+def enabledOf (arg : Nat → BV) : Option Nat → Bool
+  | none   => true
+  | some x => bv_nonzero (arg x)
+
+def rstOf (arg : Nat → BV) (al : Bool) : Option Nat → Bool
+  | none   => false
+  | some r => xor al (bv_nonzero (arg r))
+
+/-- `srcFlopNext` through those names.  `rfl`: naming changed nothing. -/
+theorem srcFlopNext_named (rho : Nat → CertVal) (e : ClockEdges) (st : RuntimeState)
+    (idx : Nat) (f : FlopDesc) :
+    srcFlopNext rho e st idx f
+      = (if rstOf (fun k => (rho k).asBV) f.resetActiveLow f.resetPin
+             && (fires e f.clock || f.asyncReset)
+          then mk_bv f.width f.resetValue
+          else if fires e f.clock && enabledOf (fun k => (rho k).asBV) f.enable
+               then bv_resize f.width (rho f.din).asBV
+               else st.flops[idx]?.getD (mk_bv f.width 0)) := rfl
+
+theorem rstActive_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {σ : SEnv} {erp eal ee enn : SExp} {rp : Option Nat} {al : Bool}
+    (hbnd : ∀ r, rp = some r → r < vals.length)
+    (hrp : SEval hwS σ erp (encONat rp)) (hal : SEval hwS σ eal (.bool al))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ enn (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "rstActive" [erp, eal, ee, enn]) (.bool (rstOf arg al rp)) := by
+  cases rp with
+  | none =>
+      refine SEval_call4 hrp hal henv hlen rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) .lit
+  | some r =>
+      refine SEval_call4 hrp hal henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      cases al with
+      | false =>
+          simp only [rstOf, Bool.false_xor]
+          exact SEval.iteF (.ref rfl)
+            (nz_agree (slot_read hsv (hbnd r rfl) (.ref rfl) (.ref rfl)
+              (SEval_hd (.ref rfl))))
+      | true =>
+          simp only [rstOf, Bool.true_xor]
+          exact SEval.iteT (.ref rfl)
+            (SEval_prim1 (nz_agree (slot_read hsv (hbnd r rfl) (.ref rfl) (.ref rfl)
+              (SEval_hd (.ref rfl)))) rfl)
+
+theorem capture_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {σ : SEnv} {een eedge ew edin ee enn efq ei : SExp}
+    {enOpt : Option Nat} {edge : Bool} {w din idx : Nat} {st : RuntimeState}
+    (hben : ∀ x, enOpt = some x → x < vals.length)
+    (hbdin : din < vals.length) (hbidx : idx < st.flops.size)
+    (h1 : SEval hwS σ een (encONat enOpt))
+    (h2 : SEval hwS σ eedge (.bool edge))
+    (h3 : SEval hwS σ ew (.int (Int.ofNat w)))
+    (h4 : SEval hwS σ edin (.int (Int.ofNat din)))
+    (h5 : SEval hwS σ ee (objEnv vals))
+    (h6 : SEval hwS σ enn (.int (Int.ofNat vals.length)))
+    (h7 : SEval hwS σ efq (encBVs st.flops))
+    (h8 : SEval hwS σ ei (.int (Int.ofNat idx))) :
+    SEval hwS σ (.call "capture" [een, eedge, ew, edin, ee, enn, efq, ei])
+      (encBV (if edge && enabledOf arg enOpt
+              then bv_resize w (arg din)
+              else st.flops[idx]?.getD (mk_bv w 0))) := by
+  have hold : st.flops[idx]?.getD (mk_bv w 0) = st.flops[idx] := by
+    simp [Array.getElem?_eq_getElem hbidx]
+  rw [hold]
+  refine SEval_call8 h1 h2 h3 h4 h5 h6 h7 h8 rfl rfl ?_
+  cases enOpt with
+  | none =>
+      refine SEval.iteT (SEval_prim1 (.ref rfl) rfl) ?_
+      simp only [enabledOf, Bool.and_true]
+      cases edge with
+      | false =>
+          simp only [Bool.false_eq_true, if_false]
+          exact SEval.iteF (.ref rfl) (nthD_arr hbidx (.ref rfl) (.ref rfl))
+      | true =>
+          simp only [if_true]
+          exact SEval.iteT (.ref rfl)
+            (SEval_prim2 (.ref rfl)
+              (slot_read hsv hbdin (.ref rfl) (.ref rfl) (.ref rfl)) rfl)
+  | some x =>
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      simp only [enabledOf]
+      refine SEval_ite_of_bool (bb := edge && bv_nonzero (arg x))
+        (SEval_prim2 (.ref rfl)
+          (nz_agree (slot_read hsv (hben x rfl) (.ref rfl) (.ref rfl)
+            (SEval_hd (.ref rfl)))) rfl) ?_ ?_
+      · intro hT
+        simp only [hT, if_true]
+        exact SEval_prim2 (.ref rfl)
+          (slot_read hsv hbdin (.ref rfl) (.ref rfl) (.ref rfl)) rfl
+      · intro hF
+        simp only [hF, Bool.false_eq_true, if_false]
+        exact nthD_arr hbidx (.ref rfl) (.ref rfl)
+
+theorem flopNext_agree {vals : List Val} {rho : Nat → CertVal}
+    (hsv : SlotVals vals (fun k => (rho k).asBV))
+    {e : ClockEdges} {st : RuntimeState} {idx : Nat} {f : FlopDesc}
+    (hck : f.clock < e.size) (hdin : f.din < vals.length)
+    (hen : ∀ x, f.enable = some x → x < vals.length)
+    (hrpb : ∀ r, f.resetPin = some r → r < vals.length)
+    (hidx : idx < st.flops.size)
+    {σ : SEnv} {ef eedge ee enn efq ei : SExp}
+    (h1 : SEval hwS σ ef (encFlop f))
+    (h2 : SEval hwS σ eedge (encEdges e))
+    (h3 : SEval hwS σ ee (objEnv vals))
+    (h4 : SEval hwS σ enn (.int (Int.ofNat vals.length)))
+    (h5 : SEval hwS σ efq (encBVs st.flops))
+    (h6 : SEval hwS σ ei (.int (Int.ofNat idx))) :
+    SEval hwS σ (.call "flopNext" [ef, eedge, ee, enn, efq, ei])
+      (encBV (srcFlopNext rho e st idx f)) := by
+  rw [srcFlopNext_named]
+  refine SEval_call6 h1 h2 h3 h4 h5 h6 rfl rfl ?_
+  refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+  refine SEval.letN (firesAt_agree hck (.ref rfl) (.ref rfl)) ?_
+  refine SEval.letN (capture_agree hsv hen hdin hidx (.ref rfl) (.ref rfl) (.ref rfl)
+    (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)) ?_
+  cases hrp : f.resetPin with
+  | none =>
+      refine SEval.iteT (SEval_prim1 (.ref rfl) rfl) ?_
+      simp only [rstOf, Bool.false_and, Bool.false_eq_true, if_false]
+      exact .ref rfl
+  | some r =>
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      cases har : f.asyncReset with
+      | true =>
+          simp only [Bool.or_true, Bool.and_true]
+          refine SEval.iteT (.ref rfl) ?_
+          refine SEval_ite_of_bool
+            (bb := rstOf (fun k => (rho k).asBV) f.resetActiveLow (some r)) ?_ ?_ ?_
+          · rw [← hrp]
+            exact rstActive_agree hsv hrpb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)
+          · intro hT; simp only [hT, if_true]; exact SEval_prim2 (.ref rfl) (.ref rfl) rfl
+          · intro hF
+            simp only [hF, Bool.false_eq_true, if_false]
+            exact .ref rfl
+      | false =>
+          simp only [Bool.or_false]
+          refine SEval.iteF (.ref rfl) ?_
+          refine SEval_ite_of_bool
+            (bb := rstOf (fun k => (rho k).asBV) f.resetActiveLow (some r) && fires e f.clock)
+            (SEval_prim2 (a := Val.bool (rstOf (fun k => (rho k).asBV) f.resetActiveLow (some r)))
+              ?_ (.ref rfl) rfl) ?_ ?_
+          · rw [← hrp]
+            exact rstActive_agree hsv hrpb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)
+          · intro hT; simp only [hT, if_true]; exact SEval_prim2 (.ref rfl) (.ref rfl) rfl
+          · intro hF
+            simp only [hF, Bool.false_eq_true, if_false]
+            exact .ref rfl
+
+/-- The flop vector as the object builds it: one `srcFlopNext` per flop, with
+the index counting up.  Spelled as its own recursion rather than through
+`mapIdx` so that the fold lemma is the recursion itself and the bridge to
+`Array.mapIdx` is one separate, elementwise statement. -/
+def flopNextsFrom (rho : Nat → CertVal) (e : ClockEdges) (st : RuntimeState) :
+    Nat → List FlopDesc → List BV
+  | _,   []      => []
+  | idx, f :: fs => srcFlopNext rho e st idx f :: flopNextsFrom rho e st (idx + 1) fs
+
+@[simp] theorem flopNextsFrom_length (rho : Nat → CertVal) (e : ClockEdges)
+    (st : RuntimeState) :
+    ∀ (idx : Nat) (fl : List FlopDesc), (flopNextsFrom rho e st idx fl).length = fl.length
+  | _,   []      => rfl
+  | idx, _ :: fs => by
+      simp only [flopNextsFrom, List.length_cons, flopNextsFrom_length rho e st (idx + 1) fs]
+
+theorem flopNextsFrom_getElem (rho : Nat → CertVal) (e : ClockEdges) (st : RuntimeState) :
+    ∀ (idx : Nat) (fl : List FlopDesc) (k : Nat) (h : k < fl.length),
+      (flopNextsFrom rho e st idx fl)[k]'(by simpa using h)
+        = srcFlopNext rho e st (idx + k) (fl[k]'h)
+  | _,   [],      _,     h => absurd h (by simp)
+  | idx, _ :: _,  0,     _ => by simp [flopNextsFrom]
+  | idx, _ :: fs, n + 1, h => by
+      have hn : n < fs.length := by simpa using h
+      have := flopNextsFrom_getElem rho e st (idx + 1) fs n hn
+      simp only [flopNextsFrom, List.getElem_cons_succ, this]
+      congr 1
+      omega
+
+theorem flopNexts_agree {vals : List Val} {rho : Nat → CertVal}
+    (hsv : SlotVals vals (fun k => (rho k).asBV)) {e : ClockEdges} {st : RuntimeState} :
+    ∀ (fl : List FlopDesc) (idx : Nat) (σ : SEnv) (ef eedge ee enn efq ei : SExp),
+      (∀ f ∈ fl, f.clock < e.size ∧ f.din < vals.length ∧
+         (∀ x, f.enable = some x → x < vals.length) ∧
+         (∀ r, f.resetPin = some r → r < vals.length)) →
+      idx + fl.length ≤ st.flops.size →
+      SEval hwS σ ef (encListG encFlop fl) →
+      SEval hwS σ eedge (encEdges e) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ enn (.int (Int.ofNat vals.length)) →
+      SEval hwS σ efq (encBVs st.flops) →
+      SEval hwS σ ei (.int (Int.ofNat idx)) →
+      SEval hwS σ (.call "flopNexts" [ef, eedge, ee, enn, efq, ei])
+        (encListG encBV (flopNextsFrom rho e st idx fl))
+  | [],      _,   _, _, _, _, _, _, _, _,  _,    hfv, hev, henv, hlen, hfq, hi => by
+      refine SEval_call6 hfv hev henv hlen hfq hi rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) .lit
+  | f :: fs, idx, _, _, _, _, _, _, _, hb, hidx, hfv, hev, henv, hlen, hfq, hi => by
+      refine SEval_call6 hfv hev henv hlen hfq hi rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      obtain ⟨hck, hdin, hen, hrp⟩ := hb f List.mem_cons_self
+      have hidx0 : idx < st.flops.size := by simp only [List.length_cons] at hidx; omega
+      exact SEval_consP
+        (flopNext_agree hsv hck hdin hen hrp hidx0 (SEval_hd (.ref rfl)) (.ref rfl)
+          (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))
+        (flopNexts_agree hsv fs (idx + 1) _ _ _ _ _ _ _
+          (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+          (by simp only [List.length_cons] at hidx; omega)
+          (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)
+          (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim] <;> omega)))
+
 end Hw
 end Projection
