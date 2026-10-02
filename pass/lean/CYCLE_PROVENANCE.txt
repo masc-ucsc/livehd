@@ -414,3 +414,58 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 # set LIVEHD_SIM_SPLIT_DEBUG=1.  Only the standalone gtest ever showed them.
 # They go to stderr now, with //lhd/tests:split_selfref_debug_test pinning the
 # STREAM rather than any particular message.
+
+
+###############################################################################
+# PART 6.  txfmafrac_top -- a THIRD cycle class: the -ifx hold arm
+###############################################################################
+#
+# Provenance only. No rewrite, no coverage change.
+# Preserved: generated/provenance/txfmafrac_census/census.txt
+#
+# STAGE          SCC_LEAN  SCC_LEANMEM  SCC_NONE
+# s0_yosys2lg          39           39        39
+# s1_cprop             39           39        39
+# s2_singleedge        39           39        39
+#
+# MEASURED, and it is unlike either class before it:
+#   * cprop removes NONE of them. intpipe_csr_file went 8 -> 1 -> 0 once the
+#     signed reader was recognised; here nothing moves.
+#   * SCC_LEAN == SCC_LEANMEM == SCC_NONE, so no memory, flop or constant is
+#     involved -- not part 4's class either.
+#   * 39 SCCs, 107 members, sizes 2 (x12), 3 (x25), 4 (x2). Tiny.
+#   * ALL 39 contain a `mux`; 10 also contain a `sext`. ZERO contain
+#     get_mask, shl or sra -- the packed-aggregate signature is absent.
+#   * none carries an RTL source: these are synthetic pmuxtree nodes.
+#   * a representative SCC is a mux chain closing on itself:
+#       mux_158732.p0 -> mux_158736.p1
+#       mux_158736.p0 -> mux_158740.p1
+#       mux_158740.<txfma0_f3.f3_32csa.a_i[51:24]> -> sext_249268.p0
+#       sext_249268.p0 -> mux_158732.p1
+#     Every edge is 28 bits wide and every one lands on pin 1 -- the mux's
+#     ELSE arm. This is `Y = sel ? a : Y`, spread over a pmuxtree chain.
+#
+# CLASSIFICATION: not a reader shape at all, so neither "a supported reader
+# that refuses" nor "a new reader shape". It is a GENUINE bit-level
+# self-dependency IN THE LOWERED GRAPH -- the whole 28-bit word depends on
+# itself, there is no field to slice, and split_selfref has nothing to
+# recognise. It is the Class-B `proc -ifx` hold arm from part 2: `-ifx` skips
+# proc_rmdead, so the "no branch matched" arm of a FULL case survives as a
+# self-referencing mux. Part 2 measured the other half of that: 39 RTLIL SCCs
+# under -ifx, 0 under plain proc.
+#
+# split_selfref's own account agrees it is not its problem. It warns
+# "107 on-cycle bit-field read(s) could not be dissolved (6 rewired over 2
+# pass(es))" -- the 6 it rewired are ordinary packed reads elsewhere in the
+# design; the mux chains are never candidates.
+#
+# THE SMALLEST DEFENSIBLE NEXT EXPERIMENT is not a split_selfref rule. It is
+# the selective plain-proc escalation designed in DIRECTION2_RESULTS.md section
+# 11 and never implemented: re-lower THIS module with plain `proc`, confirm the
+# 39 SCCs go to 0, and gate the result on RTL equivalence -- because the two
+# lowerings differ exactly on the 4-state question of what an unmatched case
+# arm means, and the Lean model is 2-state. Part 1 already warns that plain
+# proc is NOT a safe global default (intpipe_decode blew up to 2.4 GB), so the
+# escalation has to be per module and justified per module. txfmafrac_top also
+# still refuses with NEEDS-SINGLE-EDGE in the part 2 comparator, so that leg
+# has to be measured on the real route rather than assumed.
