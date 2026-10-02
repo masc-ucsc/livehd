@@ -76,7 +76,8 @@ def main() -> int:
                   "def segtext_designCert : DesignCert := default\n", encoding="utf-8")
     pr16 = sweep.make_proof_probe(_c, "segtext", reifier="named", segment=16)
     pr0  = sweep.make_proof_probe(_c, "segtext", reifier="named", segment=0)
-    sim  = sweep.make_probe(_c, "segtext", 32, reifier="named")
+    sim  = sweep.make_probe(_c, "segtext", 32, reifier="named",
+                            phase_file=str(tmp / "segtext.phase"))
     check("seg_option_in_proof_probe", "set_option d3.segment 16" in pr16,
           "the proof probe carries `set_option d3.segment 16`")
     check("seg_option_before_the_command",
@@ -278,7 +279,8 @@ def main() -> int:
         for mode, simtok, provetok in (("legacy", "reify_design ", "prove_reified "),
                                        ("named", "reify_design_named ",
                                         "prove_reified_incr ")):
-            simp = sweep.make_probe(CERT, "tima_adder", 32, reifier=mode)
+            simp = sweep.make_probe(CERT, "tima_adder", 32, reifier=mode,
+                                    phase_file=str(tmp / f"{mode}.phase"))
             prvp = sweep.make_proof_probe(CERT, "tima_adder", reifier=mode)
             check(f"mode_{mode}_sim_stage",
                   simtok in simp and (mode == "legacy") == ("reify_design_named" not in simp),
@@ -306,7 +308,8 @@ def main() -> int:
         import re as _re
         _pat = r"^reify_design(?:_named)?: \S+ emitted, \d+ sources, (\d+) bindings$"
         for mode in ("legacy", "named"):
-            probe = sweep.make_probe(CERT, "tima_adder", 32, reifier=mode)
+            probe = sweep.make_probe(CERT, "tima_adder", 32, reifier=mode,
+                                    phase_file=str(tmp / f"{mode}.phase"))
             tok = "reify_design_named" if mode == "named" else "reify_design"
             check(f"gate_line_shape_{mode}",
                   _re.search(sweep.PROOF_GATE_RE, "") is None and tok in probe,

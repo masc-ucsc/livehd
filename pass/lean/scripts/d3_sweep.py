@@ -840,7 +840,17 @@ def d3_residual : ResidualProgram :=
   | .ok R    => R
   | .error _ => default
 
-#eval Compiler.D3.report "{m}" {m}_designCert d3_fast d3_residual {samples}
+-- ONE #eval, so the markers and the report share a process and the report is
+-- the SAME call on the SAME residual -- nothing is re-derived for the sake of
+-- measuring it. `bindings.size` forces `compileDesign`, which is exactly the
+-- work sitting between `reified` and the first line `report` prints, and which
+-- the earlier marker set could not separate from simulation.
+#eval show IO Unit from do
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn "report_started"
+  let nb := d3_residual.bindings.size
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"residual_ready bindings={{nb}}"
+  Compiler.D3.report "{m}" {m}_designCert d3_fast d3_residual {samples}
 """
 
 PROVE_TAIL_NAMED = """
