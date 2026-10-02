@@ -761,6 +761,35 @@ sh_test(
     data = ["//scripts:cycle_provenance_tools"],
 )
 
+# cgen emits `\`include "cgen_memory_1rd_1wr.v"` but not the file; the models
+# are tracked in ware/rtl. The differential harness passed no include path, so
+# EVERY design with a memory failed to build and came back NOT-MEASURED --
+# measured on txfmafrac_top after a clean certificate. //ware:cgen_memory_rtl
+# must be declared here: the script resolves ware/rtl relative to ITSELF, so
+# under bazel the models have to be in runfiles beside it.
+sh_test(
+    name = "diffsim_memory_include_test",
+    size = "medium",
+    srcs = ["diffsim_memory_include_test.sh"],
+    data = [
+        "//scripts:cycle_provenance_tools",
+        "//ware:cgen_memory_rtl",
+    ],
+)
+
+# coreet_equiv7.sh ended on a printf, so it exited 0 whatever its table said --
+# a differential returning 2 reported success to its caller. Stubs for the
+# runner, lhd and the differential drive each failure mode; no CORE-ET needed.
+sh_test(
+    name = "coreet_equiv7_exit_test",
+    size = "small",
+    srcs = ["coreet_equiv7_exit_test.sh"],
+    data = [
+        "//inou/yosys:inou_yosys_scripts",
+        "//scripts:cycle_provenance_tools",
+    ],
+)
+
 # The CORE-ET LEC gate decision. The gate used to exit only on the literal text
 # REFUTED, so UNKNOWN, a solver timeout, a crashed run and a MISSING verdict all
 # printed "inconclusive; not fatal" and continued -- with LEC_STRICT=true too,

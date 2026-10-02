@@ -46,6 +46,20 @@ import re
 import subprocess
 import sys
 
+# The cgen memory blackboxes an EMITTED netlist `include`s by BARE NAME
+# (`\`include "cgen_memory_1rd_1wr.v"`).  cgen writes the include but not the
+# file: the implementations are tracked sources under ware/rtl/.
+#
+# Resolved from THIS FILE, never from the caller's cwd.  A cwd-relative path
+# would appear to work from the repo root and nowhere else, and that is exactly
+# how it failed: scripts/coreet_equiv7.sh runs from wherever the operator
+# invoked it while the netlist lives under generated/, so verilator searched
+# only its own directory and reported "Cannot find include file".
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WARE_RTL = os.path.join(REPO_ROOT, 'ware', 'rtl')
+
+INCLUDE_RE = re.compile(r'^\s*`include\s+"([^"]+)"')
+
 PORT_RE = re.compile(
     r'^\s*[,(]?\s*(input|output)\s+(?:reg\s+|wire\s+|logic\s+)?(?:signed\s+)?'
     r'(?:\[\s*(\d+)\s*:\s*(\d+)\s*\]\s*)?([A-Za-z_]\w*)\s*$')
@@ -58,6 +72,28 @@ def sha(path):
         for chunk in iter(lambda: fh.read(1 << 16), b''):
             h.update(chunk)
     return h.hexdigest()[:16]
+
+
+def support_hashes(netlist):
+    """{included name: sha} for every `include a netlist names, resolved in
+    ware/rtl.
+
+    Recorded because hashing the emitted file alone does NOT identify what was
+    simulated: the memory model that implements its storage lives in a separate
+    tracked file, and two runs over the same netlist with different ware/rtl
+    would otherwise carry identical provenance."""
+    out = {}
+    try:
+        with open(netlist) as fh:
+            for line in fh:
+                m = INCLUDE_RE.match(line)
+                if not m:
+                    continue
+                p = os.path.join(WARE_RTL, m.group(1))
+                out[m.group(1)] = sha(p) if os.path.exists(p) else 'MISSING'
+    except OSError as e:
+        return {'<unreadable>': str(e)}
+    return out
 
 
 def parse_ports(path):
@@ -212,9 +248,15 @@ def main():
                 elif line and not line.startswith('//'):
                     srcs.append(line)
 
+    # ware/rtl goes to every EMITTED-netlist side -- always the impl, and the
+    # reference too when it is a netlist (--ref-netlist).  The RTL reference is
+    # the original sources, which include nothing from cgen, so it keeps
+    # exactly the +incdir+ set its own filelist declares and nothing else.
+    netlist_inc = ['-I' + WARE_RTL]
     ref_sources = [os.path.abspath(a.ref_netlist)] if a.ref_netlist else srcs
-    ref_extra = [] if a.ref_netlist else incs
-    sides = (('ref', ref_sources, ref_extra), ('impl', [os.path.abspath(a.impl)], []))
+    ref_extra = netlist_inc if a.ref_netlist else incs
+    sides = (('ref', ref_sources, ref_extra),
+             ('impl', [os.path.abspath(a.impl)], netlist_inc))
 
     meta = {
         'top': a.top, 'seed': a.seed, 'random_vectors': a.vectors,
@@ -228,6 +270,10 @@ def main():
                                             if os.path.exists(s)).encode()).hexdigest()[:16]),
         'verilator': subprocess.run(['verilator', '--version'], capture_output=True,
                                     text=True).stdout.strip(),
+        'ware_rtl': WARE_RTL,
+        'impl_support_sha256_16': support_hashes(a.impl),
+        'reference_support_sha256_16': (support_hashes(a.ref_netlist)
+                                        if a.ref_netlist else {}),
     }
 
     results = {}
