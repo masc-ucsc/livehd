@@ -1349,5 +1349,206 @@ theorem applyOp_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals 
   | Op_MemWrite => exact absurd hsup (by simp [OpSupported])
   | Op_MemWriteBE b => exact absurd hsup (by simp [OpSupported])
 
+/-! ## Group 4: the node fold
+
+The object walks the dense node array in order, consing each value onto its
+environment.  The shared side evaluates `evalGraphG` over the SAME order
+(`topo` is `slotsFrom`, so dense indices are already topological).
+
+Rather than build a second graph denotation and prove it equal, the object's
+environment is described directly in terms of `evalGraphG`'s own answer: slot
+`k` holds `encBV (rho k).asBV`.  The one fact that makes the induction go
+through is the FIXPOINT property of `evalGraphG` -- that its own result
+satisfies the local recurrence -- which `GraphRefine` assumes but never states,
+so it is proved here (over the shared definitions, editing nothing). -/
+
+section GraphFix
+variable {V : Type} [NodeSemantics V]
+
+/-- `evalGraphG`'s own result satisfies the per-node recurrence.  `GraphRefine`
+proves the converse (`evalGraphG_of_localAgree`: anything satisfying the
+recurrence IS `evalGraphG`); this is the direction an interpreter needs. -/
+theorem evalGraphG_rec (G : GraphCert) :
+    ∀ (ns : List Nat) (e : Nat → V), ns.Nodup → GraphRefine.DepOrdered G ns →
+      (∀ n ∈ ns, (G.nodes n).isSome) →
+      ∀ n ∈ ns, evalGraphG ns G e n = evalNodeG G (evalGraphG ns G e) n := by
+  intro ns
+  induction ns with
+  | nil => intro _ _ _ _ n hn; simp at hn
+  | cons m ms ih =>
+      intro e hnodup hdepord hsome n hn
+      have hm_notin : m ∉ ms := (List.nodup_cons.mp hnodup).1
+      have hstep : evalGraphG (m :: ms) G e
+          = evalGraphG ms G (envSetG e m (evalNodeG G e m)) := rfl
+      have hR : ∀ d, d ∉ ms →
+          evalGraphG ms G (envSetG e m (evalNodeG G e m)) d
+            = envSetG e m (evalNodeG G e m) d :=
+        fun d hd => GraphRefine.evalGraphG_not_mem G _ ms d hd
+      cases List.mem_cons.mp hn with
+      | inl hnm =>
+          subst hnm
+          rw [hstep]
+          have h1 : evalGraphG ms G (envSetG e n (evalNodeG G e n)) n = evalNodeG G e n := by
+            rw [hR n hm_notin]; simp [envSetG]
+          rw [h1]
+          refine GraphRefine.evalNodeG_congr_some G e _ n (hsome n List.mem_cons_self) ?_
+          intro d hd
+          have hdnot : d ∉ (n :: ms) := hdepord.1 d hd
+          have hd1 : d ∉ ms := fun hc => hdnot (List.mem_cons_of_mem _ hc)
+          have hd2 : d ≠ n := fun hc => hdnot (hc ▸ List.mem_cons_self)
+          rw [hR d hd1]
+          simp [envSetG, hd2]
+      | inr hnms =>
+          rw [hstep]
+          exact ih _ (List.nodup_cons.mp hnodup).2 hdepord.2
+            (fun n' h => hsome n' (List.mem_cons_of_mem _ h)) n hnms
+
+end GraphFix
+
+/-- Every supported operator is a non-memory operator, so `eval_op_cert`
+delegates to `eval_op`.  The memory operators are the only ones that do not,
+and `OpSupported` excludes all three. -/
+theorem evalOpCert_of_supported {op : LGraphOp} (h : OpSupported op = true)
+    (w : Nat) (vs : List CertVal) :
+    eval_op_cert op w vs = .bv (eval_op op w (vs.map CertVal.asBV)) := by
+  cases op <;> first | rfl | exact absurd h (by simp [OpSupported])
+
+/-! ### The environment, described through `evalGraphG` -/
+
+/-- Slot `k`'s value, as the shared semantics computes it. -/
+def slotVal (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) (k : Nat) : BV :=
+  (evalGraphG D.toGraphCert.topo D.toGraphCert (srcEnv D i s) k).asBV
+
+/-- The first `m` slots, in SLOT ORDER.  The object holds its reverse. -/
+def prefixVals (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) (m : Nat) : List Val :=
+  (List.range m).map (fun k => encBV (slotVal D i s k))
+
+@[simp] theorem prefixVals_length (D : DesignCert) (i : RuntimeInput)
+    (s : RuntimeState) (m : Nat) : (prefixVals D i s m).length = m := by
+  simp [prefixVals]
+
+theorem prefixVals_slotVals (D : DesignCert) (i : RuntimeInput) (s : RuntimeState)
+    (m : Nat) : SlotVals (prefixVals D i s m) (slotVal D i s) := by
+  intro k hk
+  simp [prefixVals]
+
+theorem prefixVals_succ (D : DesignCert) (i : RuntimeInput) (s : RuntimeState)
+    (m : Nat) :
+    prefixVals D i s (m + 1) = prefixVals D i s m ++ [encBV (slotVal D i s m)] := by
+  simp [prefixVals, List.range_succ]
+
+/-- The source prefix of the environment IS what `mkSources` built. -/
+theorem prefixVals_sources (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) :
+    prefixVals D i s D.sources.size
+      = D.sources.toList.map (fun sd => encBV (sourceValue i s sd).asBV) := by
+  apply List.ext_getElem
+  · simp
+  · intro k h1 h2
+    have hk : k < D.sources.size := by simpa [prefixVals] using h1
+    have hnot : k ∉ D.toGraphCert.topo := DesignCert.source_not_mem_topo (by simpa using hk)
+    simp only [prefixVals, List.getElem_map, List.getElem_range, slotVal]
+    rw [GraphRefine.evalGraphG_not_mem _ _ _ _ hnot]
+    simp [srcEnv, Array.getElem?_eq_getElem hk]
+
+/-! ### The local recurrence, at one node -/
+
+theorem nodeVal_rec {D : DesignCert} {i : RuntimeInput} {s : RuntimeState}
+    (hwf : DesignCert.DesignCertWF D) {j : Nat} {c : DenseNodeCert}
+    (hj : j < D.nodes.size) (hc : D.nodes[j]? = some c)
+    (hsup : OpSupported c.op = true) :
+    eval_op c.op c.width (c.deps.toList.map (slotVal D i s))
+      = slotVal D i s (D.slotOfNode j) := by
+  have hfacts := DesignCert.wf_graph_facts hwf
+  have hmem : D.slotOfNode j ∈ D.toGraphCert.topo :=
+    DesignCert.slotOfNode_mem_topo (by simpa [DesignCert.numNodes] using hj)
+  have hrec := evalGraphG_rec (V := CertVal) D.toGraphCert D.toGraphCert.topo
+    (srcEnv D i s) hfacts.1 hfacts.2.1 hfacts.2.2 _ hmem
+  have hnode : D.toGraphCert.nodes (D.slotOfNode j)
+      = some ⟨D.slotOfNode j, c.op, c.width, c.deps.toList⟩ := by
+    simp [DesignCert.toGraphCert, DesignCert.nodeAt?_slotOfNode, hc]
+  have hR : slotVal D i s (D.slotOfNode j)
+      = (evalNodeG D.toGraphCert
+          (evalGraphG D.toGraphCert.topo D.toGraphCert (srcEnv D i s))
+          (D.slotOfNode j)).asBV := by
+    simp only [slotVal]; rw [hrec]
+  rw [hR]
+  simp only [evalNodeG, hnode]
+  show _ = (eval_op_cert c.op c.width
+    (c.deps.toList.map (evalGraphG D.toGraphCert.topo D.toGraphCert (srcEnv D i s)))).asBV
+  rw [evalOpCert_of_supported hsup]
+  show eval_op c.op c.width (c.deps.toList.map (slotVal D i s))
+     = eval_op c.op c.width
+         ((c.deps.toList.map
+            (evalGraphG D.toGraphCert.topo D.toGraphCert (srcEnv D i s))).map CertVal.asBV)
+  rw [List.map_map]
+  rfl
+
+/-! ### `evalNode` and the fold -/
+
+theorem evalNode_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {c : DenseNodeCert} {σ : SEnv} {end_ eenv en : SExp}
+    (hsup : OpSupported c.op = true) (harity : ArityOK c.op c.deps.toList)
+    (hb : ∀ d ∈ c.deps.toList, d < vals.length)
+    (hnd : SEval hwS σ end_ (encNode c))
+    (henv : SEval hwS σ eenv (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "evalNode" [end_, eenv, en])
+      (encBV (eval_op c.op c.width (c.deps.toList.map arg))) := by
+  refine SEval_call3 hnd henv hlen rfl rfl ?_
+  refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+  exact applyOp_agree hsv hsup harity hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)
+    (.ref rfl)
+
+theorem evalNodes_agree {D : DesignCert} {i : RuntimeInput} {s : RuntimeState}
+    (hwf : DesignCert.DesignCertWF D)
+    (hops : ∀ c ∈ D.nodes.toList, OpSupported c.op = true)
+    (harity : ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList) :
+    ∀ (r j : Nat), j + r = D.nodes.size →
+      ∀ (σ : SEnv) (eno eenv en : SExp),
+        SEval hwS σ eno (encListG encNode (D.nodes.toList.drop j)) →
+        SEval hwS σ eenv (objEnv (prefixVals D i s (D.sources.size + j))) →
+        SEval hwS σ en (.int (Int.ofNat (D.sources.size + j))) →
+        SEval hwS σ (.call "evalNodes" [eno, eenv, en])
+          (objEnv (prefixVals D i s (D.sources.size + D.nodes.size)))
+  | 0,     j, hr, _, _, _, _, hno, henv, hlen => by
+      have hj : j = D.nodes.size := by omega
+      subst hj
+      refine SEval_call3 hno henv hlen rfl rfl ?_
+      refine SEval.iteT (SEval_prim1 (.ref rfl) ?_) (.ref rfl)
+      have : D.nodes.toList.drop D.nodes.size = [] := by simp
+      rw [this]
+      rfl
+  | r + 1, j, hr, _, _, _, _, hno, henv, hlen => by
+      have hj : j < D.nodes.size := by omega
+      have hjl : j < D.nodes.toList.length := by simpa using hj
+      have hdrop : D.nodes.toList.drop j
+          = D.nodes.toList[j] :: D.nodes.toList.drop (j + 1) :=
+        List.drop_eq_getElem_cons hjl
+      have hcj : D.nodes[j]? = some D.nodes.toList[j] := by
+        rw [Array.getElem?_eq_getElem hj]; simp
+      have hmemc : D.nodes.toList[j] ∈ D.nodes.toList := List.getElem_mem hjl
+      rw [hdrop] at hno
+      refine SEval_call3 hno henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      have hbnd : ∀ d ∈ (D.nodes.toList[j]).deps.toList,
+          d < (prefixVals D i s (D.sources.size + j)).length := by
+        intro d hd
+        have := hwf.depsBounded j D.nodes.toList[j] hcj d hd
+        simpa using this
+      have hnext : objEnv (prefixVals D i s (D.sources.size + j + 1))
+          = Val.cons (encBV (slotVal D i s (D.slotOfNode j)))
+              (objEnv (prefixVals D i s (D.sources.size + j))) := by
+        simp [objEnv, prefixVals_succ, DesignCert.slotOfNode, encListG]
+      refine evalNodes_agree hwf hops harity r (j + 1) (by omega) _ _ _ _ ?_ ?_ ?_
+      · exact SEval_tl (.ref rfl)
+      · rw [show D.sources.size + (j + 1) = D.sources.size + j + 1 from rfl, hnext]
+        refine SEval_consP ?_ (.ref rfl)
+        rw [← nodeVal_rec hwf hj hcj (hops _ hmemc)]
+        refine evalNode_agree (prefixVals_slotVals D i s (D.sources.size + j))
+          (hops _ hmemc) (harity _ hmemc) hbnd (SEval_hd (.ref rfl)) (.ref rfl) ?_
+        rw [prefixVals_length]
+        exact .ref rfl
+      · exact SEval_prim2 (.ref rfl) .lit (by simp [evalPrim] <;> omega)
+
 end Hw
 end Projection

@@ -311,4 +311,13 @@ namespace Projection
 #print axioms Hw.list_len_three
 #print axioms Hw.applyOp_agree
 
+-- Adequacy helper group 4: the node fold, against `evalGraphG` itself.
+#print axioms Hw.evalGraphG_rec
+#print axioms Hw.evalOpCert_of_supported
+#print axioms Hw.prefixVals_slotVals
+#print axioms Hw.prefixVals_sources
+#print axioms Hw.nodeVal_rec
+#print axioms Hw.evalNode_agree
+#print axioms Hw.evalNodes_agree
+
 end Projection
