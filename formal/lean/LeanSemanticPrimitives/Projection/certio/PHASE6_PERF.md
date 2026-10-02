@@ -109,6 +109,57 @@ entry is the growing spine, so each variable read converts an O(n) structure.
 * not `evalPrim` (1.77), not `PEnv.shiftBy` (1.49),
 * not memory.
 
+## 2b. CORRECTION — call counts are not costs
+
+The table above reports CALL COUNTS, and the first write-up of it treated the
+`List.lengthTR` row (888k calls, exponent 2.69) as a cost driver.  That was
+wrong, and the error was mine: a count was never converted to a cost.
+
+`callgrind_annotate --inclusive=yes`, n = 128, 10,198,578,991 Ir total.  These
+three are non-recursive, so their inclusive figures are exact:
+
+    l_List_lengthTR___redArg        14,336,547    0.14%
+    l_List_appendTR___redArg        10,037,924    0.10%
+    l_List_reverseAux___redArg       8,596,877    0.08%
+                                    ----------   ------
+                                                  0.32%
+
+The counts are high because they are called once per cons level; each call is
+on a SHORT binding list, so the total is negligible.  **Fix (B) -- carrying the
+binding count in `Prepared` -- is bounded above by 0.14%, and fix (C) by
+0.10%.**  Neither touches the exponent.
+
+Where the time actually is (inclusive; the entry wrappers, not the
+self-recursive workers whose inclusive figures are recursion-inflated and shown
+above 100%):
+
+    l_Projection_prepare            4,068,867,144   39.90%
+    l_Projection_PVal_shift         2,765,326,736   27.11%
+    l_Projection_PVal_toPRes        2,010,693,065   19.72%
+    l_Projection_PEnv_shiftBy       1,229,996,466   12.06%
+    l_Projection_PRes_toCode'2        960,671,716    9.42%
+
+and the top of the SELF profile is the un-inlined Lean runtime accessors that
+those functions call -- `lean_is_ctor` 14.9%, `lean_ptr_tag` 10.0%,
+`lean_ctor_obj_cptr` 6.9%, `lean_ctor_num_objs` 6.5%, `lean_to_ctor` 6.1%,
+`lean_ctor_get` 5.6%, `lean_ctor_set` 4.9% -- i.e. structural traversal and
+allocation, roughly 55% of the program, performed inside exactly those four.
+
+Two further facts from the same run:
+
+* `collectFor`/`collectFrom`/`closeFM` 49.72% and `generateFrom` 49.71`%`: the
+  specializer walks the term TWICE, once to discover requests and once to
+  generate.  That is by design, and it is a factor of 2, not an exponent.
+* `prepare` is entered 19,876 times at n = 128 -- about 1.2 n^2 -- and each
+  entry walks ~85 `PRes` nodes.  The cubic is the PRODUCT of those two growing
+  together, not any single list operation.
+
+So the asymptotic cost is re-traversal and re-shifting of the partially-static
+environment: indices are relative to the current binder depth, so every binder
+owes a shift and every environment read owes a conversion.  Removing that needs
+a representation change (de Bruijn LEVELS, or a suspended shift), not a
+bookkeeping change.
+
 ## 3. Status
 
 No optimization has been applied. The three candidate fixes differ sharply in
