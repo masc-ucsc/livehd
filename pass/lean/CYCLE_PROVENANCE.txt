@@ -336,12 +336,41 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 #   lec[hier]: 'intpipe_csr_file' UNKNOWN (0 child collapses)
 #   lec[hier]: 0/1 def(s) proven top-down (0 via cache, 0 via semdiff, 0 via solver)
 #
-# at formal.timeout=120 AND at 1200. That is a solver limit on a 35k-node design
-# with 1055 latches, not a refutation -- and it is PRE-EXISTING: the same LEC
-# run with the signed reader disabled is equally inconclusive, so the rule is
-# not implicated. Until the RTL side is settled, emit / checkDesign / runDirect
-# were deliberately NOT run for it and the coverage ledger is unchanged at
-# 109/122.
+# at formal.timeout=120 AND at 1200.
+#
+# *** CORRECTION (audit of ff4cb8094). The sentence that followed here called
+# *** that "a solver limit on a 35k-node design with 1055 latches". THAT WAS
+# *** WRONG, and the preserved JSON says so plainly:
+# ***
+# ***   error.class   = unsupported
+# ***   error.message = lec REFUSED 'intpipe_csr_file': the encoder does not
+# ***                   model a cell in this design
+# ***   error.hint    = ... ind=Unknown(6880ms) ... ref encode failed: operand
+# ***                   of 'or_184' has no encodable driver (combinational
+# ***                   cycle?); root: WORD-LEVEL CYCLE through: or_184 ->
+# ***                   get_mask_144632 -> sext_192 -> or_188 -> ...
+# ***
+# *** It is an ENCODER REFUSAL on the REFERENCE side, not a timeout. Both runs
+# *** stop after ~6.9s; neither reached 120s, let alone 1200s, so raising
+# *** formal.timeout cannot help and the 1200s run was wasted effort. `or_184`
+# *** and `or_188` are exactly the SCC #5 pair above: the reference is the RAW
+# *** RTL, which still carries the word-level cycle this rewrite removes from
+# *** the implementation, and the encoder cannot encode a cyclic reference.
+# ***
+# *** The control run (reader form disabled, equally inconclusive) is therefore
+# *** consistent with the encoder refusal and says nothing about scale -- it was
+# *** over-read as evidence of a pre-existing solver limit.
+# ***
+# *** Per-definition decomposition is not the answer either: this elaboration
+# *** has defs=1, so there are no child definitions to collapse.
+# ***
+# *** NOT A LICENCE TO TRANSFORM BOTH SIDES. Running split_selfref on the
+# *** reference too would make the encoder happy by reusing the transformation
+# *** under test on both sides of the comparison, which validates nothing.
+#
+# Until the RTL side is settled by INDEPENDENT evidence, emit / checkDesign /
+# runDirect were deliberately NOT run for intpipe_csr_file and the coverage
+# ledger is unchanged at 109/122.
 #
 # ONE DEFECT FIXED ALONG THE WAY.  The whole trace above was invisible: the
 # `split[dbg]` prints went to STDOUT, which `lhd` owns for its structured
