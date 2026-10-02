@@ -24,7 +24,13 @@ separately.
 
 ## What the agreement gate does and does not establish
 
-It is a DIFFERENTIAL test on sampled stimuli, not a proof.  It is here because
+It is a DIFFERENTIAL test on sampled stimuli, not a proof.  The stimuli are a
+deterministic EDGE prefix (all zero, all ones, LSB, MSB -- see `bvStim`)
+followed by a pseudo-random tail, NOT a uniform sample: uniform draws are blind
+to behaviour on a measure-zero input set, which is exactly where a zero
+detector, an overflow flag or a reset condition lives.  Even so the tail is
+sampling and the prefix is four points, so coverage remains a lower bound on
+what a design does.  It is here because
 it is the gate that catches a reifier bug immediately and costs milliseconds,
 and because the per-design proof — the claim that would subsume it — is the one
 Direction 3 measured as unaffordable.  Nothing in this file should be reported
@@ -78,12 +84,15 @@ def rnd32 (a b : Nat) : Nat := (rnd a b).toNat % 4294967296
 
 /-- A deterministic value whose bits vary across the WHOLE of `w`.
 
+The pseudo-random TAIL of the stimulus sequence -- `bvStim` serves samples
+`0..3` from a fixed edge prefix and delegates everything from 4 on to this.
+
 Built from `ceil(w/32)` independent chunks, each mixed from a different `b`, so
 no chunk is a function of its neighbours and a difference confined to the top
 bits of a 512-bit port still shows up.  The previous harness minted everything
 at width 128, which `bv_resize` then zero-extended: every bit above 127 was
-constant zero on every stimulus, and a translation bug living there could not
-have been seen.  Width 0 is explicit -- `mk_bv 0 v` is always 0 and there is
+constant zero on every pseudo-random stimulus, and a translation bug living
+there could not have been seen.  Width 0 is explicit -- `mk_bv 0 v` is always 0 and there is
 nothing to randomise. -/
 def bvRand (seed w : Nat) : BV :=
   if w = 0 then mk_bv 0 0
@@ -92,9 +101,50 @@ def bvRand (seed w : Nat) : BV :=
     mk_bv w (Int.ofNat ((List.range chunks).foldl
       (fun acc i => acc * 4294967296 + rnd32 seed (i + 1)) 0))
 
+/-- The stimulus value for sample `k`: a deterministic EDGE prefix, then the
+pseudo-random tail.
+
+    k = 0   all zero
+    k = 1   all ones
+    k = 2   one -- the LSB alone
+    k = 3   the sign bit -- the MSB alone
+    k >= 4  `bvRand`, unchanged
+
+WHY A PREFIX.  Uniform sampling is blind to behaviour that lives on a
+measure-zero set of inputs, and real designs put their whole purpose there.
+Measured on `txfma_frac_zero_detect`, a 33-bit zero detector: exactly one of
+2^33 inputs produces output 1, so 32 uniform samples hit it with probability
+about 4e-9, `distinct_obs` came back 1 of 32, and the agreement gate never once
+observed the behaviour the design exists to implement. The gate was not wrong,
+it was uninformative, and nothing in the row said so.
+
+The TOTAL sample count is unchanged: `k` still runs `0 .. n-1`, so a 32-sample
+run is still 32 stimuli -- four of them are now chosen rather than drawn. A run
+with fewer than 4 samples gets a prefix of this list and no random tail, which
+is a deliberate consequence: `k = 0` alone is a better single stimulus than one
+arbitrary draw.
+
+Width 0 is explicit and collapses every class to the single value it can take.
+At width 1 the LSB and the MSB are the same bit, so `k = 2` and `k = 3` coincide
+at 1; that is correct rather than a gap, and it costs one duplicate stimulus on
+1-bit ports.
+
+The MSB is built with `bits_to_int` rather than `2 ^ (w-1)`. It is the same
+value, but this file is reached from probes where a `Nat.pow` on a width-derived
+exponent has already caused an INTERNAL PANIC once, and there is no reason to
+reintroduce the shape. -/
+def bvStim (seed w k : Nat) : BV :=
+  if w = 0 then mk_bv 0 0
+  else match k with
+    | 0 => mk_bv w 0
+    | 1 => mk_bv w (-1)
+    | 2 => mk_bv w 1
+    | 3 => mk_bv w (bits_to_int w (fun i => decide (i = w - 1)))
+    | _ => bvRand seed w
+
 def stimIn (D : DesignCert) (k : Nat) : RuntimeInput :=
   let ws := inputWidths D
-  Array.ofFn (n := ws.size) (fun i => bvRand (k * 7919 + i.val) (ws[i.val]!))
+  Array.ofFn (n := ws.size) (fun i => bvStim (k * 7919 + i.val) (ws[i.val]!) k)
 
 /-- Memory images are sampled, never compared whole, so the addresses matter as
 much as the data.  The plan per memory: the lowest few, the TOP representable
@@ -126,11 +176,23 @@ def memAddrs (aw : Nat) : List Int :=
 def addrPlan (D : DesignCert) : Array (List Int) :=
   D.memories.map (fun m => memAddrs m.aw)
 
+/-- Sequential state for sample `k`, under the SAME class as `stimIn`.
+
+Coherence is the point. Driving the inputs all-zero while the flops and memory
+cells stay pseudo-random does not exercise an all-zero machine state, and a
+design whose interesting case is "everything is zero" -- which is what a reset
+or an idle cycle looks like -- would still never see it. So the class is chosen
+once per `k` and applied to inputs, flop state and memory CELL VALUES alike.
+
+Memory ADDRESSES are deliberately untouched: `memAddrs` already covers the low
+cells, the top representable address and the high-bit address explicitly, so it
+is not sampling uniformly and has no equivalent gap. -/
 def stimSt (D : DesignCert) (k : Nat) : RuntimeState :=
   { flops := Array.ofFn (n := D.flops.size)
-               (fun i => bvRand (k * 6151 + i.val + 977) ((D.flops[i.val]!).width)),
+               (fun i => bvStim (k * 6151 + i.val + 977) ((D.flops[i.val]!).width) k),
     mems  := Array.ofFn (n := D.memories.size)
-               (fun i x => bvRand (k * 3571 + i.val + 131 + x.toNat) ((D.memories[i.val]!).dw)) }
+               (fun i x => bvStim (k * 3571 + i.val + 131 + x.toNat)
+                                  ((D.memories[i.val]!).dw) k) }
 
 /-- Structural agreement on everything that admits it, plus the sampled reads
 for the function-valued memory images.
@@ -290,7 +352,14 @@ sampled stimuli produced, at `sameResult`'s own observation boundary.
 agreement row for it compares one value against itself `n` times and carries no
 differential evidence.  That is a property of the STIMULUS and the DESIGN, not
 of the checker — a sound checker still reports `agree=1` — which is why this is
-reported beside `checkerSelfTest` rather than instead of it. -/
+reported beside `checkerSelfTest` rather than instead of it.
+
+`1` is a STRONGER signal than it used to be.  The stimuli now open with four
+chosen edges (all zero, all ones, LSB, MSB — `bvStim`), so a `1` means the
+design did not separate even those, which usually means it really is constant
+over the observable.  Before the prefix, a `1` could equally mean the design was
+input-dependent in a way uniform draws could not reach: `txfma_frac_zero_detect`
+reported `1` while actually distinguishing exactly one input out of 2^33. -/
 def distinctObservables (D : DesignCert) (f : RuntimeInput → RuntimeState → RuntimeResult)
     (n : Nat) : Nat :=
   let plan := addrPlan D

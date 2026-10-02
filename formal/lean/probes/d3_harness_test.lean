@@ -314,12 +314,22 @@ private def hiAddrB : RuntimeResult :=
 #guard ((memAddrs 16).all fun a => 0 ≤ a ∧ a < Int.ofNat (2 ^ 16)) == true
 #guard ((memAddrs 64).all fun a => 0 ≤ a ∧ a < Int.ofNat (2 ^ 64)) == true
 
-/- full-width stimulus: a 512-bit input really is driven above bit 127 -/
+/- full-width stimulus: a 512-bit input really is driven above bit 127.
+
+   Sampled at k = 4, the FIRST pseudo-random stimulus.  k = 0..3 are now the
+   deterministic edge prefix (`bvStim`), and full-widthness is a property of the
+   random TAIL -- at k = 0 the correct value is all zero and has nothing above
+   bit 127 by construction.  Checking the prefix here would pin the wrong thing. -/
 private def wideCert : DesignCert :=
   { sources := #[.input 0 512], nodes := #[], outputs := #[], flops := #[], memories := #[] }
 #guard (inputWidths wideCert) == #[512]
-#guard ((stimIn wideCert 0)[0]!).width == 512
-#guard (((stimIn wideCert 0)[0]!).value / (2 ^ 128)) != 0
+#guard ((stimIn wideCert 4)[0]!).width == 512
+#guard (((stimIn wideCert 4)[0]!).value / (2 ^ 128)) != 0
+/- and the prefix is what it claims to be on the same port -/
+#guard ((stimIn wideCert 0)[0]!).value == 0
+#guard ((stimIn wideCert 1)[0]!).value + 1 == 2 ^ 512
+#guard ((stimIn wideCert 2)[0]!).value == 1
+#guard ((stimIn wideCert 3)[0]!).value == 2 ^ 511
 
 --------------------------------------------------------------------------------
 -- stimSt must stop zero-extending STATE as well as inputs
@@ -337,14 +347,23 @@ private def stateCert : DesignCert :=
   { sources := #[], nodes := #[], outputs := #[], flops := #[wideFlop],
     memories := #[{ aw := 16, dw := 128, nextImg := 0 }] }
 
-#guard ((stimSt stateCert 0).flops[0]!).width == 512
-#guard (((stimSt stateCert 0).flops[0]!).value / (2 ^ 128)) != 0
-#guard (((stimSt stateCert 0).flops[0]!).value / (2 ^ 384)) != 0
+#guard ((stimSt stateCert 4).flops[0]!).width == 512
+#guard (((stimSt stateCert 4).flops[0]!).value / (2 ^ 128)) != 0
+#guard (((stimSt stateCert 4).flops[0]!).value / (2 ^ 384)) != 0
 
-#guard (((stimSt stateCert 0).mems[0]!) 0).width == 128
-#guard ((((stimSt stateCert 0).mems[0]!) 0).value / (2 ^ 64)) != 0
-/- different addresses hold different words, including at a high address -/
-#guard (((stimSt stateCert 0).mems[0]!) 0 == ((stimSt stateCert 0).mems[0]!) 65535) == false
-#guard ((((stimSt stateCert 0).mems[0]!) 65535).value / (2 ^ 64)) != 0
+#guard (((stimSt stateCert 4).mems[0]!) 0).width == 128
+#guard ((((stimSt stateCert 4).mems[0]!) 0).value / (2 ^ 64)) != 0
+/- different addresses hold different words, including at a high address.
+   Tail sample again: under the edge prefix every cell of a memory holds the
+   SAME class value, which is the intended coherence and not an address bug. -/
+#guard (((stimSt stateCert 4).mems[0]!) 0 == ((stimSt stateCert 4).mems[0]!) 65535) == false
+#guard ((((stimSt stateCert 4).mems[0]!) 65535).value / (2 ^ 64)) != 0
+/- the prefix reaches STATE too, and coherently: at k = 1 the flop and every
+   memory cell are all ones, not just the inputs -/
+#guard ((stimSt stateCert 0).flops[0]!).value == 0
+#guard ((stimSt stateCert 1).flops[0]!).value + 1 == 2 ^ 512
+#guard (((stimSt stateCert 1).mems[0]!) 0).value + 1 == 2 ^ 128
+#guard (((stimSt stateCert 1).mems[0]!) 65535).value + 1 == 2 ^ 128
+#guard (((stimSt stateCert 0).mems[0]!) 12345).value == 0
 /- and the plan this design gets really does reach the top of its space -/
 #guard (addrPlan stateCert)[0]!.contains 65535 == true
