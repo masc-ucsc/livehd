@@ -112,7 +112,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     }
   }
   if (std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-    std::print("split[dbg]: peel seeds={} of {}\n", q.size(), indeg.size());
+    std::print(stderr, "split[dbg]: peel seeds={} of {}\n", q.size(), indeg.size());
     int shown = 0;
     for (auto& [n, d] : indeg) {
       if (shown++ >= 200) {
@@ -125,7 +125,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
                 : !is_comb(e.driver.get_master_node()) ? " noncomb"
                                                        : (" " + std::string(gu::debug_name(e.driver.get_master_node())));
       }
-      std::print("split[dbg]:   indeg {} = {} <-{}\n", gu::debug_name(n), d, drvs);
+      std::print(stderr, "split[dbg]:   indeg {} = {} <-{}\n", gu::debug_name(n), d, drvs);
     }
   }
   absl::flat_hash_set<hhds::Node_class> removed;
@@ -150,9 +150,9 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     }
   }
   if (std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-    std::print("split[dbg]: {} comb node(s), {} on a word-level cycle\n", comb_nodes.size(), in_cycle.size());
+    std::print(stderr, "split[dbg]: {} comb node(s), {} on a word-level cycle\n", comb_nodes.size(), in_cycle.size());
     for (auto& n : in_cycle) {
-      std::print("split[dbg]:   on-cycle {}\n", gu::debug_name(n));
+      std::print(stderr, "split[dbg]:   on-cycle {}\n", gu::debug_name(n));
     }
   }
   if (in_cycle.empty()) {
@@ -341,6 +341,13 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   int           total_created  = 0;  // global (never reset)
   // LIVEHD_SIM_SPLIT_DEBUG=1 traces every reader attempt + the deepest resolve
   // refusal (op, slice) -- the fast way to see WHY a pack did not split.
+  //
+  // STDERR, not stdout.  `lhd` owns stdout for its structured result, so these
+  // lines were swallowed on every run through the driver -- which is every run
+  // that matters, since the unresolved-cycle warning below tells the reader to
+  // set this variable.  The documented way to diagnose a surviving cycle
+  // produced nothing at all, and only the standalone gtest ever showed it.
+  // Same reason LIVEHD_MEM_TIMING_DEBUG and LIVEHD_LEAN_MEM_PROBE use stderr.
   const bool split_dbg = std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr;
   absl::flat_hash_map<std::tuple<hhds::Class_index, int, int>, hhds::Pin_class> memo;
   // A (pin,slice) already on the RESOLUTION STACK means this slice depends on
@@ -354,7 +361,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   auto resolve = [&](auto&& self, const hhds::Pin_class& v, int lo, int hi, int depth) -> hhds::Pin_class {
     if (depth > 64 || v.is_invalid() || lo < 0 || hi <= lo || created > per_reader_cap || total_created > global_cap) {
       if (split_dbg) {
-        std::print("split[dbg]: refuse depth={} lo={} hi={} created={} total={} invalid={}\n", depth, lo, hi, created,
+        std::print(stderr, "split[dbg]: refuse depth={} lo={} hi={} created={} total={} invalid={}\n", depth, lo, hi, created,
                    total_created, v.is_invalid());
       }
       cap_hit = true;
@@ -382,7 +389,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       // the slice's own value is on the current resolution path: a genuine
       // bit-level self-dependency -- permanently unresolvable
       if (split_dbg) {
-        std::print("split[dbg]: on-stack self-dependency [{},{}) depth={}\n", lo, hi, depth);
+        std::print(stderr, "split[dbg]: on-stack self-dependency [{},{}) depth={}\n", lo, hi, depth);
       }
       memo.emplace(key, hhds::Pin_class{});
       return {};
@@ -535,10 +542,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           int k = static_cast<int>(kc.to_just_i64());
           res   = self(self, drv_at(m, 0), lo + k, hi + k, depth + 1);
         } else if (split_dbg) {
-          std::print("split[dbg]:   sra amount const but unknowns/neg/wide\n");
+          std::print(stderr, "split[dbg]:   sra amount const but unknowns/neg/wide\n");
         }
       } else if (split_dbg) {
-        std::print("split[dbg]:   sra amount NON-CONST (dynamic shift)\n");
+        std::print(stderr, "split[dbg]:   sra amount NON-CONST (dynamic shift)\n");
       }
     } else if (op == Ntype_op::Sext) {
       // Op_Sext(a, n): bit i is a[i] for i < n, and a[n-1] (the replicated sign)
@@ -572,14 +579,14 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           if (hi <= n && hi <= aw) {
             res = self(self, src, lo, hi, depth + 1);
           } else if (split_dbg) {
-            std::print("split[dbg]:   sext slice [{},{}) not below both sign pos {} and operand width {}\n", lo, hi, n,
+            std::print(stderr, "split[dbg]:   sext slice [{},{}) not below both sign pos {} and operand width {}\n", lo, hi, n,
                        aw);
           }
         } else if (split_dbg) {
-          std::print("split[dbg]:   sext amount const but unknowns/neg/wide\n");
+          std::print(stderr, "split[dbg]:   sext amount const but unknowns/neg/wide\n");
         }
       } else if (split_dbg) {
-        std::print("split[dbg]:   sext amount NON-CONST\n");
+        std::print(stderr, "split[dbg]:   sext amount NON-CONST\n");
       }
     } else if (op == Ntype_op::Mux) {
       // Distribute the slice through the arms: Get_mask(mux(s, xs...), m) ==
@@ -658,7 +665,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             }
             if (whole_w == 0) {
               if (split_dbg) {
-                std::print("split[dbg]:   EQ operand {} bits={} unsigned={} has no complete bound\n",
+                std::print(stderr, "split[dbg]:   EQ operand {} bits={} unsigned={} has no complete bound\n",
                            op_name(gu::type_op_of(d.get_master_node())), db, gu::is_unsign(d));
               }
               ok = false;
@@ -666,7 +673,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             }
             d = self(self, d, 0, whole_w, depth + 1);
             if (split_dbg) {
-              std::print("split[dbg]:   EQ operand complete width={} -> {}\n", whole_w, d.is_invalid() ? "FAIL" : "ok");
+              std::print(stderr, "split[dbg]:   EQ operand complete width={} -> {}\n", whole_w, d.is_invalid() ? "FAIL" : "ok");
             }
           }
           if (d.is_invalid()) {
@@ -763,7 +770,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           }
         }
       }
-      std::print("split[dbg]: unresolved {} [{},{}) depth={} amt={}\n", op_name(op), lo, hi, depth, sext_amt);
+      std::print(stderr, "split[dbg]: unresolved {} [{},{}) depth={} amt={}\n", op_name(op), lo, hi, depth, sext_amt);
     }
     if (!res.is_invalid() || cap_hit == cap_before) {
       // memoize successes always; memoize failures only when NOT tainted by a
@@ -865,7 +872,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       }
       auto res = resolve(resolve, wd, k, k + j, 0);
       if (split_dbg) {
-        std::print("split[dbg]: And-reader j={} k={} sra={} -> {}\n", j, k, gu::type_op_of(sm) == Ntype_op::SRA,
+        std::print(stderr, "split[dbg]: And-reader j={} k={} sra={} -> {}\n", j, k, gu::type_op_of(sm) == Ntype_op::SRA,
                    res.is_invalid() ? "FAIL" : "ok");
       }
       if (res.is_invalid()) {

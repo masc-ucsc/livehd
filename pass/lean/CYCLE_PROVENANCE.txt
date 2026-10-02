@@ -228,3 +228,62 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 # certificate over 16 periods against a hand-derived golden trace, plus two
 # mutants that must mismatch ON A VALUE).  Reproducible mutation specs are in
 # scripts/mutation_specs/; every mutant is killed by a named case.
+
+
+###############################################################################
+# PART 5.  intpipe_csr_file -- a DIFFERENT cycle class, not yet fixed
+###############################################################################
+#
+# The one Class-A module the per-port memory model did not unblock.  It refuses
+# with `shl_147760 reads sext_5080`: no Memory in it at all.
+#
+# Produced by: scripts/lgraph_cycle_stages.sh intpipe_csr_file
+# Preserved:   generated/provenance/cycle_stages/intpipe_csr_file/
+#
+# STAGE          BUILD_RC DUMP_RC   SCC_LEAN  SCC_LEANMEM  SCC_NONE
+# s0_yosys2lg          0       0          8            8        26
+# s1_cprop             0       0          8            8        31
+# s2_singleedge        0       0          7            7        32
+#
+# MEASURED:
+#   * SCC_LEAN == SCC_LEANMEM at every stage.  Cutting Memory read outputs
+#     changes NOTHING, so this is not the dependency-granularity class part 4
+#     fixed.  (On minion_frontend_thread_buffer that same cut took 1 -> 0.)
+#   * seven SCCs at s2, 136 members, every one of them get_mask / sext / shl /
+#     sra / or.  No memory, no mux, no latch, no flop inside any of them.
+#   * the smallest (12 nodes) is two 48-bit packed words that feed each other:
+#       or_296  (CONV[1].conv_thread.tensorconv_ctrl_data)
+#       or_300  (reg_tensor_conv_ctrl[63:48])
+#     each reads a 16-bit field out of the other with sra -> sext and places it
+#     back with shl -> get_mask.  RTL: intpipe_csr_file_conv.sv:20-21 and
+#     tech_generic/prim_write_commit_en/rtl/prim_write_commit_en.sv:10.
+#   * cprop's split_packed_selfref_wires DOES run and DOES work: with
+#     LIVEHD_SIM_SPLIT_DEBUG=1 it reports 38153 comb nodes / 1341 on a
+#     word-level cycle in round 1 and 286 in round 2, and REFUSES NOTHING --
+#     every attempt in the 2155-line trace says `-> ok`.  No `unresolved-cycle`
+#     warning is emitted, because `unresolved` counts reads it tried and could
+#     not dissolve, and it never tried these.
+#
+# CLASSIFICATION: a packed-aggregate self-reference the pass does not RECOGNISE,
+# as opposed to one it recognises and refuses.  Its trigger is a constant
+# Get_mask slice-read of a packed Or; here the field read is spelled
+# `sra` + `sext`, so the reader never matches and the pack is never attempted.
+# That is a different gap from the Sext DESCENT rule (part 1 of this file):
+# that one was about descending THROUGH a Sext operand once a read had been
+# recognised.
+#
+# NOT YET ESTABLISHED, and the fix turns on it: whether the two fields are
+# DISJOINT.  If they are, the cycle is false and an sra/sext-shaped read rule
+# dissolves it; if they overlap, it is a genuine bit-level self-dependency and
+# the refusal is the correct final answer.  The shift amounts are constants on
+# the sra/shl `b` pins, which `lhd tool cat` does not print, so this needs
+# either a constant-value column in that dump or a targeted probe.  No fix is
+# attempted until that is measured.
+#
+# ONE DEFECT FIXED ALONG THE WAY.  The whole trace above was invisible: the
+# `split[dbg]` prints went to STDOUT, which `lhd` owns for its structured
+# result, so they were swallowed on every run through the driver -- which is
+# every run that matters, since the unresolved-cycle warning tells the reader to
+# set LIVEHD_SIM_SPLIT_DEBUG=1.  Only the standalone gtest ever showed them.
+# They go to stderr now, with //lhd/tests:split_selfref_debug_test pinning the
+# STREAM rather than any particular message.

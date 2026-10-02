@@ -852,6 +852,20 @@ sh_test(
     ],
 )
 
+# LIVEHD_SIM_SPLIT_DEBUG=1 is what the unresolved-cycle warning tells the reader
+# to set, and its trace went to stdout -- which `lhd` owns for its structured
+# result -- so every run through the driver showed nothing. The assertion is
+# about the STREAM, which is what was wrong.
+sh_test(
+    name = "split_selfref_debug_test",
+    size = "small",
+    srcs = ["split_selfref_debug_test.sh"],
+    data = [
+        "packed_selfref_cycle.v",
+        "//lhd",
+    ],
+)
+
 # A sweep TIMEOUT must leave nothing running. `subprocess.run(timeout=...)`
 # killed the `/usr/bin/time` wrapper and left `lean` reparented to init, burning
 # 100% CPU and ~8 GB RSS through the rest of the sweep. The test is about

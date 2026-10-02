@@ -1,0 +1,21 @@
+{
+  "_what": "LIVEHD_SIM_SPLIT_DEBUG's trace must reach a stream a caller can read. It went to stdout, which lhd owns for its structured result, so the documented way to diagnose a surviving cycle printed nothing through the driver.",
+  "target": "//lhd/tests:split_selfref_debug_test",
+  "file": "graph/split_selfref.cpp",
+  "bazel": [
+    "--repo_env=CC=/usr/bin/gcc-15",
+    "--repo_env=CXX=/usr/bin/g++-15"
+  ],
+  "mutants": [
+    {
+      "name": "S1 peel trace back to stdout",
+      "old": "    std::print(stderr, \"split[dbg]: peel seeds={} of {}\\n\", q.size(), indeg.size());",
+      "new": "    std::print(\"split[dbg]: peel seeds={} of {}\\n\", q.size(), indeg.size());"
+    },
+    {
+      "name": "S2 on-cycle count back to stdout",
+      "old": "    std::print(stderr, \"split[dbg]: {} comb node(s), {} on a word-level cycle\\n\", comb_nodes.size(), in_cycle.size());",
+      "new": "    std::print(\"split[dbg]: {} comb node(s), {} on a word-level cycle\\n\", comb_nodes.size(), in_cycle.size());"
+    }
+  ]
+}
