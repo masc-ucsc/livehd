@@ -22,6 +22,8 @@ import LeanSemanticPrimitives.Projection.HardwareInterpreter
 -- Phase 4 (reordered from Phase 8): the generic surface-semantics layer
 import LeanSemanticPrimitives.Projection.SurfaceSemantics
 import LeanSemanticPrimitives.Projection.HardwareAdequacy
+-- Phase 4 item 3: the first projection, on hardware
+import LeanSemanticPrimitives.Projection.ProjectionCorrect
 
 namespace Projection
 
@@ -340,5 +342,19 @@ namespace Projection
 #print axioms Hw.IHwAdequacyGoal_proved
 #print axioms Hw.IHwAdequate_of_runtimeWF
 #print axioms Hw.SupportCheck.not_arity_bites
+
+-- Phase 4 item 3: `projectDesign_correct`, and item 4: the acceptance guards
+-- restated as theorems.
+#print axioms Hw.mixDriver_entry
+#print axioms Hw.hwA_ok
+#print axioms Hw.hwAP_erases
+#print axioms Hw.hwAP_entry
+#print axioms Hw.specializeDesign_correct
+#print axioms Hw.projectDesign_correct
+#print axioms Hw.projectDesign_correct_body
+#print axioms Hw.GuardCorollary.tiny_cycle
+#print axioms Hw.GuardCorollary.tiny_cycle_value
+#print axioms Hw.GuardCorollary.seq_cycle
+#print axioms Hw.GuardCorollary.seq_cycle_value
 
 end Projection

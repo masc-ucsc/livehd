@@ -43,6 +43,7 @@ MODULES=(
   Projection/OperatorBridge
   Projection/HardwareInterpreter
   Projection/HardwareAdequacy
+  Projection/ProjectionCorrect
   Projection/Scaling
   Projection/Audit
 )
