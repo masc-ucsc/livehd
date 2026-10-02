@@ -44,7 +44,7 @@
       "new": "      auto res = resolve(resolve, wd, k + 1, k + n + 1, 0);"
     },
     {
-      "name": "S2 the rewrite keeps one extra sign bit",
+      "name": "S2 the rewrite drops the field's top bit",
       "old": "      auto res = resolve(resolve, wd, k, k + n, 0);",
       "new": "      auto res = resolve(resolve, wd, k, k + n - 1, 0);"
     }

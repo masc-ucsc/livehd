@@ -595,13 +595,17 @@ TEST(SplitSelfrefSignedReader, PartialMaskOnTheConsumerStillDissolves) {
 // and checks both against a closed-form golden derived from the fixture's
 // PARAMETERS rather than from the graph.
 //
-// WHAT MAKES IT INDEPENDENT. `eval_node` walks the graph op by op from the
+// WHAT MAKES IT INDEPENDENT. The evaluator walks the graph op by op from the
 // semantics in graph/cell.hpp. It never calls `resolve`, `footprint` or
 // anything else the rewrite uses, and the golden never looks at a graph at all.
-// The before-graph is CYCLIC, so it is evaluated the way hardware settles it --
-// iterate to a fixed point and fail if it does not converge. That is also what
-// makes the overlapping case meaningful: a genuine bit loop does NOT converge,
-// and the test says so.
+//
+// ONLY THE DISJOINT FIXTURE IS EVALUATED. Its bit-level dependency graph is
+// acyclic, so its equations have one solution and iterating to a fixed point
+// computes it. OVERLAP IS NOT CHECKED HERE: it is a structural, fail-closed
+// test (the refusal cases above, which assert the pass's own on-stack
+// diagnostic). An earlier draft of this comment claimed a genuine loop "does
+// not converge and the test says so" -- that was false, and the test does not
+// say it.
 //
 // WHAT IT DOES NOT PROVE. This is one small instance of the shape, not
 // intpipe_csr_file. It says the rewrite preserves meaning on a graph with these
@@ -621,6 +625,27 @@ uint64_t wmask(int bits) {
 }
 
 uint64_t trunc_to(uint64_t v, int bits) { return v & wmask(bits); }
+
+uint64_t sra_bits(uint64_t v, int bits, int sh) {
+  if (bits <= 0 || bits > 64 || sh < 0) {
+    return v;
+  }
+  const uint64_t x    = v & wmask(bits);
+  const bool     negv = ((x >> (bits - 1)) & 1u) != 0;
+  const int      keep = (sh >= bits) ? 0 : (bits - sh);
+  uint64_t       r    = (sh >= bits) ? uint64_t{0} : (x >> sh);
+  if (negv) {
+    r |= ~wmask(keep);  // ones from bit `keep` upwards: the replicated sign
+  }
+  return r;
+}
+
+// Arithmetic right shift of a `bits`-wide two's-complement value, built from
+// unsigned masks only -- no host signed shift, whose fill comes from bit 63 and
+// whose behaviour on a negative left operand is not something to rely on.
+// Handles sh >= bits (the result is all sign). The answer is sign-extended to
+// 64 so the caller can truncate it to whatever width carries it.
+uint64_t sra_bits(uint64_t v, int bits, int sh);
 
 // Interpret `v`'s low `bits` as two's complement and sign-extend to 64.
 uint64_t sext_from(uint64_t v, int bits) {
@@ -719,9 +744,9 @@ uint64_t op_value(const hhds::Node_class& n, uint64_t x, const std::map<uint64_t
       if (a0 == kBad || !shift_amount(in(1), &sh)) {
         return kBad;
       }
-      // ARITHMETIC, from the OPERAND's declared sign bit -- not bit 63.
-      const int64_t sv = static_cast<int64_t>(sext_from(a0, ob > 0 ? ob : 64));
-      return trunc_to(static_cast<uint64_t>(sv >> sh), nw);
+      // ARITHMETIC, from the OPERAND's declared sign bit -- not bit 63 -- and
+      // with the fill built from unsigned masks rather than a host signed shift.
+      return trunc_to(sra_bits(a0, ob > 0 ? ob : 64, static_cast<int>(sh)), nw);
     }
     case Ntype_op::Sext: {
       int            ob = 0;
@@ -839,10 +864,14 @@ TEST(SplitSelfrefSemantics, DisjointRewritePreservesEveryValue) {
     std::map<uint64_t, uint64_t> z, o;
     ASSERT_TRUE(settle(f.g.get(), x, 0, &z)) << "the DISJOINT fixture must settle: x=" << x;
     ASSERT_TRUE(settle(f.g.get(), x, ~uint64_t{0}, &o)) << "the DISJOINT fixture must settle: x=" << x;
-    // Unique fixed point: a disjoint pack is a FUNCTION of its inputs, so where
-    // it starts cannot matter. This is the property the rewrite relies on.
-    ASSERT_EQ(z[ida], o[ida]) << "disjoint word A is not input-determined at x=" << x;
-    ASSERT_EQ(z[idb], o[idb]) << "disjoint word B is not input-determined at x=" << x;
+    // A REGRESSION ON THE ORACLE, not a uniqueness proof: agreeing from two
+    // starts does not establish that the fixed point is unique. What makes the
+    // evaluation well defined here is the separately established fact that this
+    // fixture's BIT-LEVEL dependency graph is acyclic -- see
+    // scripts/packed_field_intervals.py and CYCLE_PROVENANCE.txt part 5. This
+    // check only catches an oracle whose answer drifts with its initial state.
+    ASSERT_EQ(z[ida], o[ida]) << "the oracle's answer for word A depends on where it started, x=" << x;
+    ASSERT_EQ(z[idb], o[idb]) << "the oracle's answer for word B depends on where it started, x=" << x;
     before.emplace_back(z[ida], z[idb]);
   }
 
