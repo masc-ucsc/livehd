@@ -23,6 +23,7 @@ filegroup(
         "lec_gate_verdict.sh",
         "proc_ifx_scc_compare.sh",
         "lgraph_scc.py",
+        "packed_field_intervals.py",
         "lgraph_cycle_stages.sh",
         "cert_reemit_diff.sh",
         "mutate_check.py",

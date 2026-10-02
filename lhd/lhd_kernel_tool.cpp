@@ -266,6 +266,32 @@ std::string tool_pin_label(const hhds::Pin_class& pin) {
   return pn.empty() ? std::format("p{}", pin.get_port_id()) : std::string{pn};
 }
 
+// Every CONSTANT feeding a node's sink pins, as `<pin>=<value>`.
+//
+// A constant driver is a pin on hhds' CONST_NODE, which the iterators SKIP --
+// so it has no node record and appears in no edge record, and the dump showed
+// the shape of a design but none of its literals. For a packed bit-field cycle
+// that is the whole question: `sra`/`shl` shift amounts and a `get_mask` mask
+// ARE the field intervals, and without them one can see that two words feed
+// each other but not whether they touch the same bits.
+std::string tool_node_consts(const hhds::Node_class& node) {
+  namespace gu = livehd::graph_util;
+  std::string out;
+  for (const auto& e : node.inp_edges()) {
+    if (e.driver.is_invalid() || !gu::is_const_pin(e.driver)) {
+      continue;
+    }
+    auto pn = gu::pin_name_of(e.sink);
+    std::string label = pn.empty() ? std::format("p{}", e.sink.get_port_id()) : std::string{pn};
+    auto v = gu::hydrate_const(e.driver);
+    if (!out.empty()) {
+      out += ",";
+    }
+    out += label + "=" + v.to_pyrope();
+  }
+  return out;
+}
+
 Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
   namespace gu = livehd::graph_util;
   Tool_record r;
@@ -279,6 +305,8 @@ Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
   r.cols.emplace_back("match", tool_match_str(node));
   r.cols.emplace_back("src", tool_node_src(g, node));
   r.cols.emplace_back("partitionable", livehd::color::is_partitionable(node) ? "1" : "0");
+  auto cs = tool_node_consts(node);
+  r.cols.emplace_back("consts", cs.empty() ? std::string{"nil"} : cs);
   return r;
 }
 
@@ -355,10 +383,10 @@ std::vector<std::string> tool_display_cols(const Options& opts, Tool_target tgt)
     return tool_split_csv(opts.tool_attr);
   }
   switch (tgt) {
-    case Tool_target::node: return {"color", "match", "src"};
+    case Tool_target::node: return {"color", "match", "src", "consts"};
     case Tool_target::pin: return {"bits", "signed", "match"};
     case Tool_target::edge: return {"bits"};
-    default: return {"color", "match", "src", "bits", "signed"};  // target=all flat (grep)
+    default: return {"color", "match", "src", "consts", "bits", "signed"};  // target=all flat (grep)
   }
 }
 

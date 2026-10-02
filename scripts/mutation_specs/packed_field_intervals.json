@@ -1,0 +1,42 @@
+{
+  "_what": "The disjoint/overlap verdict that licenses a split_selfref rule for sra/sext-shaped reads. Every guard that could turn 'I could not follow it' into 'it is safe'.",
+  "target": "//lhd/tests:packed_field_intervals_test",
+  "file": "scripts/packed_field_intervals.py",
+  "bazel": [
+    "--repo_env=CC=/usr/bin/gcc-15",
+    "--repo_env=CXX=/usr/bin/g++-15"
+  ],
+  "rebuild": [],
+  "mutants": [
+    {
+      "name": "F1 unknown edges ignored",
+      "old": "        if unknown:\n            verdict = \"UNKNOWN\"",
+      "new": "        if False:\n            verdict = \"UNKNOWN\""
+    },
+    {
+      "name": "F2 no loop detection",
+      "old": "            if hit:\n                loops.append(startkey)",
+      "new": "            if False:\n                loops.append(startkey)"
+    },
+    {
+      "name": "F3 any mask is a zext",
+      "old": "            if mask != -1:\n                return None, f\"get_mask_{nid} mask is {mask}, not all-ones (-1)\"",
+      "new": "            if False:\n                return None, f\"get_mask_{nid} mask is {mask}, not all-ones (-1)\""
+    },
+    {
+      "name": "F4 missing shift treated as 0",
+      "old": "            sh = c.get(\"p1\", c.get(\"b\"))\n            if sh is None:\n                return None, f\"sra_{nid} has a non-constant shift\"",
+      "new": "            sh = c.get(\"p1\", c.get(\"b\"))\n            if sh is None:\n                sh = 0"
+    },
+    {
+      "name": "F5 unmodelled op is a pass-through",
+      "old": "        if kind not in WALK_OPS:\n            return None, f\"op `{kind}` is not a modelled reshaping op\"",
+      "new": "        if kind not in WALK_OPS:\n            return {}, None"
+    },
+    {
+      "name": "F6 get_mask back to a pass-through",
+      "old": "            m, err = sub(min(want, sw))",
+      "new": "            m, err = sub(want)"
+    }
+  ]
+}

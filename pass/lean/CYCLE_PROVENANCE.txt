@@ -272,13 +272,48 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 # that one was about descending THROUGH a Sext operand once a read had been
 # recognised.
 #
-# NOT YET ESTABLISHED, and the fix turns on it: whether the two fields are
-# DISJOINT.  If they are, the cycle is false and an sra/sext-shaped read rule
-# dissolves it; if they overlap, it is a genuine bit-level self-dependency and
-# the refusal is the correct final answer.  The shift amounts are constants on
-# the sra/shl `b` pins, which `lhd tool cat` does not print, so this needs
-# either a constant-value column in that dump or a targeted probe.  No fix is
-# attempted until that is measured.
+# MEASURED: ALL SEVEN ARE DISJOINT.  Every one is a false word-level cycle.
+#
+#   scripts/packed_field_intervals.py walks each edge into a packed `or` back
+#   through get_mask / shl / sra / sext and builds an explicit destination-bit
+#   -> source-bit map, then asks whether any (word, bit) reaches itself.
+#   `lhd tool cat` gained a `consts` column for it: a constant driver sits on
+#   hhds' CONST_NODE, which the iterators skip, so the dump showed the shape of
+#   the design but none of its literals -- and the shift amounts and masks ARE
+#   the field intervals.
+#
+#   SCC  verdict    bit intervals
+#    #0  DISJOINT   or_5228[0,32) <- or_5636[0,32); or_5276[.] <- or_5636[32,64);
+#                   or_5636[12,14) <- or_5228[12,14); [44,46) <- or_5276[12,14)
+#    #1  DISJOINT   or_216[0,16)+[24,48)+[56,64) <- or_220; or_220[16,24)+[48,56) <- or_216
+#    #2  DISJOINT   same shape as #1 (or_332 / or_336)
+#    #3  DISJOINT   or_2792[28,59) <- or_5072; or_5072[0,28)+[59,64) <- or_2792
+#    #4  DISJOINT   or_2908[28,60) <- or_7932; or_7932[0,28)+[60,64) <- or_2908
+#    #5  DISJOINT   or_184[0,16)+[32,48) <- or_188; or_188[16,32) <- or_184
+#    #6  DISJOINT   or_296[0,16)+[32,48) <- or_300; or_300[16,32) <- or_296
+#
+#   Preserved: generated/provenance/cycle_stages/intpipe_csr_file/s2_intervals.txt
+#
+#   FAIL-CLOSED, and tested as such: a non-constant shift, a get_mask that is
+#   not all-ones, an op the walk does not model, or a slice running past a
+#   sign-extension boundary each mark the SCC UNKNOWN, never disjoint.
+#   //lhd/tests:packed_field_intervals_test carries a genuine OVERLAPPING case
+#   -- both words reading the same field -- so the verdict is not vacuous, and
+#   six mutants are each killed by a named case.
+#
+#   TWO MODELLING ERRORS FOUND BY THAT TEST, both of which had made the first
+#   run report UNKNOWN on all seven: treating `get_mask(x,-1)` as a plain
+#   pass-through when it is a ZERO-EXTENSION (so the walk asked a 16-bit sext
+#   for bit 17 and refused), and reporting a sparse bit set by its min..max
+#   hull, which rendered {[0,16),[32,48)} as [0,48) -- the opposite of what the
+#   bits say.
+#
+# SO A DISSOLUTION RULE IS LICENSED for this shape, and is the next step: a
+# narrow `sra`/`sext`-shaped reader recognition in split_selfref, with the same
+# guards the probe uses (constant shift, mask all-ones, width bounds,
+# sign-extension boundary, non-overlap) and a refusal otherwise.  It is NOT
+# implemented yet -- the measurement is committed first so the rule can be
+# reviewed against it.
 #
 # ONE DEFECT FIXED ALONG THE WAY.  The whole trace above was invisible: the
 # `split[dbg]` prints went to STDOUT, which `lhd` owns for its structured

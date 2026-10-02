@@ -852,6 +852,17 @@ sh_test(
     ],
 )
 
+# Does a packed-aggregate cycle's fields OVERLAP? That verdict licenses -- or
+# forbids -- a split_selfref rule for sra/sext-shaped reads, so a tool that
+# could only ever say DISJOINT would be worse than none. Covers a genuine
+# overlap and the three ways the walk gives up.
+sh_test(
+    name = "packed_field_intervals_test",
+    size = "small",
+    srcs = ["packed_field_intervals_test.sh"],
+    data = ["//scripts:cycle_provenance_tools"],
+)
+
 # LIVEHD_SIM_SPLIT_DEBUG=1 is what the unresolved-cycle warning tells the reader
 # to set, and its trace went to stdout -- which `lhd` owns for its structured
 # result -- so every run through the driver showed nothing. The assertion is
