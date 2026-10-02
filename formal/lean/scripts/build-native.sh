@@ -39,6 +39,7 @@ MODULES=(
   Projection/ProjectionCorrect
   Projection/ResidualFragment
   Projection/ProjectedStep
+  Projection/Proto/PartialEvaluatorFast
 )
 
 # Dependency-aware invalidation.  MODULES is in DEPENDENCY ORDER, so once any

@@ -38,53 +38,52 @@ error.  The `deep recursion was detected at 'interpreter'` failure was observed
 on `rt_intpipe_alu` (5118 nodes), and the two were conflated.  The experiment
 below was run to settle it properly.
 
-### 1b. Where the interpreter stack ceiling actually is
+### 1b. Interpreter stack: what was OBSERVED
 
-A stack overflow fails in well under a second; a run that is merely slow does
-not. So a short timeout separates them cleanly.  `chainD`, interpreted,
-120 s budget:
+A stack overflow fails in well under a second; a slow run does not. `chainD`,
+interpreted, 120 s budget:
 
-    n = 1024   timed out at 120 s, no stack error
-    n = 2048   timed out at 120 s, no stack error
-    n = 2560   STACK OVERFLOW  (deep recursion at 'interpreter')
-    n = 3072   STACK OVERFLOW
-    n = 4096   STACK OVERFLOW
-    n = 8192   STACK OVERFLOW
+    n = 1024   TIMED OUT at 120 s      -- outcome UNKNOWN
+    n = 2048   TIMED OUT at 120 s      -- outcome UNKNOWN
+    n = 2560   stack overflow (deep recursion at 'interpreter')
+    n = 3072   stack overflow
+    n = 4096   stack overflow
+    n = 8192   stack overflow
 
-so the interpreted ceiling on `chainD` is between 2048 and 2560 nodes, and
-`rt_intpipe_alu` at 5118 is above it -- which is why the runner hit a stack
-error there and not a timeout.
+A TIMEOUT IS NOT A PASS.  The 1024 and 2048 rows say only that no stack error
+appeared within 120 s; they do not say the run would have completed, and they
+do not establish a threshold.  What is established is that `chainD` overflows
+at 2560 and above.  Nothing here generalises to other designs: `chainD` is one
+shape, and recursion depth depends on the design.
 
-Natively, at the same depths:
+Natively, `chainD` n = 4096 ran 120 s with no stack error (again: observed
+absence within a budget, not a completion).  `rt_intpipe_alu` DID produce the
+interpreter stack error, which is the one real-design observation.
 
-    n = 4096   survived 120 s with no stack error (still computing)
-
-so the native build does move that wall, as expected. It is the TIME wall it
-leaves untouched.
+An earlier revision of this file said the interpreted n = 1024 run failed from
+stack depth.  It did not -- it timed out.  The stack error was on
+`rt_intpipe_alu`, and the two were conflated.
 
 ### 1c. A FOURTH wall: the hardcoded specialization fuel
 
-`projectDesign` is `mixDriver 20000 200`. Natively, with per-stage reporting:
+`projectDesign` is `mixDriver 20000 200`.  Natively, with per-stage reporting
+and a 25 s budget:
 
-    n = 4096   no fuel error within 25 s  (would succeed, given time)
-    n = 5118   no fuel error within 25 s
-    n = 6144   no fuel error within 25 s
+    n = 4096   no fuel error within 25 s   -- outcome UNKNOWN (timeout)
+    n = 5118   no fuel error within 25 s   -- outcome UNKNOWN (timeout)
+    n = 6144   no fuel error within 25 s   -- outcome UNKNOWN (timeout)
     n = 7168   projectDesign FAILED (MixError.outOfFuel) after 100 ms
     n = 8192   projectDesign FAILED (MixError.outOfFuel) after  93 ms
 
-A hard ceiling between 6144 and 7168 nodes that no amount of time or stack
-fixes -- and it fails FAST and HONESTLY, with an `.error`, not a wrong answer.
+OBSERVED: `chainD` at 7168 and 8192 exhausts the hardcoded step fuel, fast and
+honestly -- an `.error`, not a wrong answer.
 
-`rt_intpipe_alu`'s 5118 nodes are BELOW it, so fuel is not what stops that
-design. Recorded because it is the next wall after the time one.
-
-Residual size is linear (`15n + 33`, as `Scaling` already pins) and the checked
-bound is linear (`3n + 5`). The blow-up is entirely in the specializer's WORK,
-not in what it produces.
-
-Extrapolating cubic from the n = 1024 point, `rt_intpipe_alu`'s 5118 nodes cost
-roughly `(5118/1024)^3 x 417 s ~ 14 hours`. A native build alone does not reach
-it; that is why native is recorded here as a DIAGNOSTIC and not as the fix.
+NOT ESTABLISHED: that the ceiling lies between 6144 and 7168; the smaller rows
+are timeouts and say nothing.  NOT ESTABLISHED: that `rt_intpipe_alu` cannot
+hit the fuel limit.  Its node count is below 7168, but fuel consumption depends
+on the design's shape and not on node count alone, and `chainD` does not
+establish any other design's fuel behaviour.  What stopped `rt_intpipe_alu` in
+the recorded run was the interpreter stack, before fuel was ever reached.
 
 ## 2. The concrete cause — call counts, not wall time
 
@@ -259,13 +258,19 @@ and, at the measured native constant, n = 1024 would fall from 417 s to the
 order of a second, with `rt_intpipe_alu`'s 5118 nodes landing in tens of
 seconds rather than the extrapolated ~14 hours.
 
-THIS IS A PROJECTION FROM CALL COUNTS, NOT A MEASUREMENT OF AN IMPLEMENTATION.
-`scripts/repr_prototype.lean` attempted to measure it directly and is
-INCONCLUSIVE: both sides report 0 us at every n while the level counts grow as
-1.5 n^2, i.e. the per-level calls are optimised away because the benchmark's
-results are structurally constant.  Two hardening rounds did not fix it.  A
-faithful end-to-end prototype needs the representation implemented in a forked
-copy of `PartialEvaluator.lean` and the real `projectDesign` run against it.
+THIS WAS A PROJECTION FROM CALL COUNTS.  Section 5 measures it, and REFUTES it.
+
+`scripts/repr_prototype.lean` reported 0 ms (ms, not microseconds -- an earlier
+revision of this file said "0 us", which was wrong) for both sides.  The
+diagnosis given then -- that the calls were deleted -- was ALSO wrong.  The
+generated C shows why: in `.native-dev/repr_prototype.c`, `l_bench` takes all
+three timestamps (lines 1431, 1435, 1439) and only then calls `l_loop` (1450,
+1452).  Lean reordered the pure work to AFTER the final timestamp.  `l_walkA`
+still calls `toPRes` and `prepare`; the work happens, outside the interval.
+
+The lesson is about measurement, not about the compiler: in-process timestamps
+around PURE work are not trustworthy in Lean.  Section 5 therefore times
+SEPARATE PROCESSES.
 
 ### Cost of doing it for real
 
@@ -278,6 +283,78 @@ keep the current specializer as the SEMANTIC REFERENCE and prove a
 representation/operation bridge to the optimized one, rather than weakening any
 existing theorem.  Guarded discards, binding order, scope and object-specializer
 agreement all have to be preserved across that bridge.
+
+## 5. MEASURED: the representation change, end to end -- hypothesis REFUTED
+
+`Projection/Proto/PartialEvaluatorFast.lean` is a diagnostic fork of the
+specializer: a copy in namespace `Projection.ProtoFast` with `PRes` gaining
+`| val : PVal → PRes`, the `var` rule returning `.val (.cons a b)` instead of
+copying the spine, `prepare (.val v) = ⟨[], v⟩`, `PRes.total (.val _) = true`,
+and the three peels answering from the spine.  Nothing else differs.  It is NOT
+proved and is not in the core build or the axiom audit; the verified
+specializer remains the semantic reference.
+
+### Residuals are identical
+
+Real `Hw.projectDesign` versus the fork, same `chainD`:
+
+    n = 64    ref size 993    fast size 993    identical true   same-result true
+    n = 128   ref size 1953   fast size 1953   identical true   same-result true
+    n = 256   ref size 3873   fast size 3873   identical true   same-result true
+
+`identical` is `==` on the shared `Program`; `same-result` runs both residuals
+through `evalFuel` on the same stimulus and compares `encResult`.  Entry arity
+is 3 on both sides.  So the change is shape- and semantics-preserving on this
+workload -- which is evidence, not a proof.
+
+### Timing: separate processes, clean build
+
+    n        reference      fast     speedup
+      64        0.23 s     0.17 s      1.35x
+     128        1.21 s     0.62 s      1.95x
+     256        7.99 s     3.50 s      2.28x
+     512       56.41 s    22.65 s      2.49x
+    1024      430.24 s   162.02 s      2.66x
+
+Exponent per doubling:
+
+    reference   2.40  2.72  2.82  2.93
+    fast        1.87  2.50  2.69  2.84
+
+**THE HYPOTHESIS n^3 -> n^2 IS REFUTED.**  The fork is a growing CONSTANT
+factor -- 2.66x at n = 1024 -- and its exponent is still converging on 3.  The
+"seconds on the ALU design" hypothesis goes with it: extrapolating the fast
+side to 5118 nodes gives hours, not seconds.
+
+### Why, exactly
+
+callgrind on the fork, inclusive:
+
+    prepare          1.22%   (was 39.90%)
+    PVal.toPRes      absent  (was 19.72%)
+    PVal.shift      61.28%   (was 27.11%)   exponent 2.74
+    PEnv.shiftBy    37.75%   (was 12.06%)
+
+The change did exactly what it claimed: its two targets are gone.  But
+`PVal.shift`'s call count is UNCHANGED between the two -- 527,484 -> 3,512,188
+(reference) against 527,140 -> 3,511,844 (fork) -- and it was ALREADY growing
+at 2.74.  There were two independent cubic terms; removing one leaves the
+other, now exposed as 61% of the runtime.
+
+So the next target is `PVal.shift` / `PEnv.shiftBy`, i.e. de Bruijn LEVELS
+instead of indices, which was correctly identified earlier as separate and
+larger.  Whether THAT removes the exponent is an open question, to be measured
+the same way -- a fork first, a proof only if the measurement justifies it.
+
+### Bearing on the verified path
+
+Nothing is promoted.  On these numbers the change does not justify a broad
+proof rewrite on performance grounds: 2.66x does not reach any design that the
+current specializer cannot already handle, and it does not move the asymptote.
+If it is ever bridged in, the shape the audit prescribed still applies -- keep
+the proved specializer as the semantic reference and prove a
+representation/operation bridge -- and the obligations are unchanged: guarded
+discards, binding order, scope, object-specializer agreement, axiom audit.
 
 ## 3. Status
 

@@ -30,26 +30,25 @@ So the claim under test is n^3 -> n^2, NOT n^3 -> n.  A suspended shift alone
 would remove neither of the two traversals above, which is why it is not what
 is prototyped here.
 
-## STATUS: INCONCLUSIVE AS A TIMING EXPERIMENT -- read PHASE6_PERF.md instead
+## STATUS: SUPERSEDED, and its 0 ms reading was MISDIAGNOSED
 
-Side A calls the REAL `Projection.prepare` and `Projection.PVal.toPRes`.  But
-the measured times are 0 us for BOTH sides at every n up to 1024, while the
-printed `checks` grow exactly as 1.5 n^2 -- so the loops genuinely run the
-expected number of LEVELS and the per-level calls are being optimised away.
-Two rounds of hardening (consuming the results instead of binding them to `_`,
-and threading a varying `seed` to defeat loop-invariant hoisting) each changed
-the checks but not the 0 us.
+This file reports 0 ms (milliseconds -- it uses `IO.monoMsNow`) for both sides
+at every n.  The first diagnosis, that the calls were deleted, was WRONG.
 
-This file is kept because the attempt is worth recording and the trap is easy
-to fall into again: a microbenchmark whose results are structurally constant
-(`binds.length` is 0 for a pure spine, every time) gives the compiler exactly
-what it needs to delete the work.
+The generated C says what really happened: in `.native-dev/repr_prototype.c`,
+`l_bench` takes ALL THREE timestamps (lines 1431, 1435, 1439) and only then
+calls `l_loop` (1450, 1452).  Lean reordered the pure work to after the final
+timestamp.  `l_walkA` does still call `toPRes` and `prepare` -- the work is
+performed, just outside the measured interval.
 
-The projection in `certio/PHASE6_PERF.md` section 4 is derived instead from
-callgrind call counts on the REAL specializer, which cannot be optimised away.
-A faithful end-to-end prototype needs the representation actually implemented
-in a forked copy of `PartialEvaluator.lean`; that is the next bounded step, not
-this file.
+The lesson is about measurement: in-process timestamps around PURE work are not
+trustworthy in Lean.  Use separate processes, or an IO sequencing barrier, and
+check the generated C.
+
+SUPERSEDED BY `scripts/proto_probe.lean`, which runs the REAL `projectDesign`
+against a forked specializer and times separate processes.  Its result refutes
+the n^3 -> n^2 hypothesis this file was written to test.  Kept only as a record
+of the trap.
 -/
 import LeanSemanticPrimitives.Projection.PartialEvaluator
 
