@@ -493,6 +493,47 @@ def main() -> int:
                   "mechanism -- the sampled guard is secondary, not a fallback",
                   str(m_hs.get("scheduling", {}))[:200])
 
+            # ---- HYBRID, case 3: the sampled guard kills the PROOF stage -------
+            # End to end, and the reason the classification had to become
+            # stage-aware. `SLEEP_ONLY=proof` matches the proof probe's stem
+            # (`<m>.proof`) and not the sim probe's, so the sim stage finishes
+            # fast and the proof stage is still running when the scripted
+            # sampler trips. The sim's rc is then 0 and only the proof
+            # subprocess is killed -- the shape that used to be misreported as
+            # an ordinary proof failure.
+            r = run(["--enforce", "cgroup", "--kill-over-rss-kb", "900000",
+                     "--prove", "--rss-sample-seconds", "0.5"],
+                    env_extra={"ALLOC_MB": "16", "STUB_MODE": "sleep",
+                               "SLEEP_S": "25", "SLEEP_ONLY": "proof",
+                               "D3_TEST_RSS_SEQ": "10,10,10,9999999"},
+                    out="hy_proofkill.tsv", timeout=180)
+            pk = (rt.rows_of(tmp / "hy_proofkill.tsv")
+                  if (tmp / "hy_proofkill.tsv").is_file() else [])
+            check("sampled_kill_on_proof_is_attributed_to_the_stage",
+                  pk and pk[0]["proof"] == "0"
+                  and "sampled aggregate hard limit" in pk[0]["detail"],
+                  f"a sampled kill landing on the proof subprocess is reported as "
+                  f"a proof-STAGE resource outcome, not an ordinary proof failure "
+                  f"(proof={pk[0]['proof'] if pk else None!r})",
+                  str(pk[:1])[:400] or r.stderr[-400:])
+            check("sampled_kill_on_proof_keeps_executable_gates",
+                  pk and all(pk[0][g] == "1" for g in
+                             ("cert", "compile", "reify", "typecheck", "sim",
+                              "checker", "agree"))
+                  and pk[0]["verdict"] == "agree",
+                  "and the cert..agree the SIM stage already earned survive it -- "
+                  "the row is not relabelled rss_killed with zero credit",
+                  str(pk[:1])[:300])
+            check("sampled_kill_on_proof_rss_is_a_lower_bound",
+                  pk and pk[0]["proof_max_rss_source"] == sweep.SRC_SAMPLED
+                  and pk[0]["proof_max_rss_kb"].isdigit()
+                  and pk[0]["max_rss_source"] == sweep.SRC_SAMPLED,
+                  f"with the killed_at figure standing in for the /usr/bin/time "
+                  f"report SIGKILL destroyed, labelled a lower bound -- and the "
+                  f"whole-target provenance drops to the weaker claim too "
+                  f"(proof={pk[0]['proof_max_rss_source'] if pk else None!r})",
+                  str(pk[:1])[:300])
+
             # ---- a measured peak survives a row that turns into runner_error ------
             # Three ways the semantic row can become unusable AFTER the kernel's
             # accounting was read successfully. The reading is gone once the

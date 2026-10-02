@@ -138,9 +138,40 @@ def main() -> int:
               "a proof-stage OOM is proof=0 with the cause named", r["detail"])
         intact(r, "proof_oom")
 
+        # ---- 3a. a sampled kill that lands on the PROOF stage -----------------
+        # The gap: the sampled hard-kill branch is gated on the SIM stage's rc,
+        # so a kill during the proof subprocess left rc == 0 and only proof_rc
+        # nonzero -- the probe was physically SIGKILLed by the budget and the row
+        # said `proof=0`, as if the proof had merely not worked out.
+        r = agree_row()
+        sweep.extract_proof_gate(r, "", -9, expect_module="tima_adder",
+                                 sampled_kill_kb=8800000)
+        check("proof_sampled_kill_is_a_resource_outcome",
+              r["proof"] == "0" and "sampled aggregate hard limit" in r["detail"]
+              and "8800000" in r["detail"] and "LOWER BOUND" in r["detail"],
+              "a sampled kill on the proof stage says so, quotes the killed_at "
+              "figure, and marks it a lower bound", r["detail"])
+        check("proof_sampled_kill_says_nothing_was_decided",
+              "never decided" in r["detail"],
+              "and states the theorem was never decided -- a resource outcome is "
+              "not evidence about the theorem")
+        intact(r, "proof_sampled_kill")
+
+        # Kernel precedence: when both could be read as applying, the exact
+        # verdict wins and the sampled one is not reported.
+        r = agree_row()
+        sweep.extract_proof_gate(r, "", -9, expect_module="tima_adder",
+                                 oom=True, sampled_kill_kb=8800000)
+        check("kernel_oom_outranks_sampled_on_the_proof_stage",
+              r["proof"] == "0" and "memory.max" in r["detail"]
+              and "sampled aggregate hard limit" not in r["detail"],
+              "an oom_kill event outranks the sampled guard", r["detail"])
+        intact(r, "proof_oom_over_sampled")
+
         # ---- 3b. the schema carries the proof stage's own figures -------------
         for c in ("sim_max_rss_kb", "sim_user_s", "sim_sys_s", "sim_wall_s",
-                  "proof_max_rss_kb", "proof_user_s", "proof_sys_s", "proof_wall_s"):
+                  "proof_max_rss_kb", "proof_max_rss_source",
+                  "proof_user_s", "proof_sys_s", "proof_wall_s"):
             check(f"schema_has_{c}", c in sweep.RESULT_COLS,
                   f"{c} is part of RESULT_COLS, so merge and resume see it")
         # Every stage-scoped column is named for its stage, and the generic ones

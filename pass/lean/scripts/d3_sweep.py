@@ -1214,7 +1214,8 @@ PROOF_GATE_RE = r"^D3GATE proof=1 thm=(\S+) axioms=(.*)$"
 PROOF_THEOREM = "d3_fast.correct"
 
 
-def extract_proof_gate(row, out: str, rc, expect_module=None, oom: bool = False) -> None:
+def extract_proof_gate(row, out: str, rc, expect_module=None, oom: bool = False,
+                       sampled_kill_kb: int = 0) -> None:
     """Credit `proof` from the SEPARATE proof probe.  Writes nothing else.
 
     Three outcomes, kept apart because they mean different things:
@@ -1223,7 +1224,9 @@ def extract_proof_gate(row, out: str, rc, expect_module=None, oom: bool = False)
               reach `agree`, so there was nothing worth proving about.  An
               unattempted gate is not a failed one.
       `0`  -- attempted and did not come back clean.  That INCLUDES a
-              proof-stage timeout and a proof-stage OOM kill.
+              proof-stage timeout, a proof-stage kernel OOM kill, and a
+              proof-stage SAMPLED kill.  All three are RESOURCE outcomes rather
+              than anything learned about the theorem, and `detail` says which.
 
     TERMINAL ON PURPOSE, and this is a real trade-off rather than an oversight.
     A proof-stage timeout or OOM could instead make the row NONTERMINAL so
@@ -1251,12 +1254,22 @@ def extract_proof_gate(row, out: str, rc, expect_module=None, oom: bool = False)
         row["proof"] = "na"
         return
     hits = re.findall(PROOF_GATE_RE, out, re.M)
-    if oom or rc != 0 or len(hits) != 1:
+    if oom or sampled_kill_kb or rc != 0 or len(hits) != 1:
         row["proof"] = "0"
         if oom:
             # The kernel killed the PROOF stage at memory.max.  The row stays
             # terminal with its executable verdict: see the docstring.
+            # FIRST, because the kernel's verdict is exact and keeps precedence
+            # over the sampled guard's whenever both could be read as applying.
             why = "proof stage killed by the kernel at the cgroup memory.max"
+        elif sampled_kill_kb:
+            # The SAMPLED guard killed the proof subprocess.  Said as a RESOURCE
+            # outcome, not a proof failure: nothing was learned about the
+            # theorem, and the figure quoted is a lower bound because the sampler
+            # can miss a peak between two samples.
+            why = (f"proof stage killed by the sampled aggregate hard limit at "
+                   f"{sampled_kill_kb} kB (a SAMPLED LOWER BOUND, not a "
+                   f"/usr/bin/time peak); the theorem was never decided")
         elif rc == 124:
             # A proof-stage TIMEOUT.  Deliberately NOT `_mark_timeout`: that sets
             # `run_status`/`verdict` to `timeout`, which would retract an
@@ -1315,8 +1328,8 @@ def deferred_row(target: Target, samples: int, why: str) -> dict:
         "max_rss_kb": "", "max_rss_source": "", "cgroup_peak_kb": "",
         "user_s": "", "sys_s": "", "wall_s": "0.00",
         "sim_max_rss_kb": "", "sim_user_s": "", "sim_sys_s": "", "sim_wall_s": "",
-        "proof_max_rss_kb": "", "proof_user_s": "", "proof_sys_s": "",
-        "proof_wall_s": "",
+        "proof_max_rss_kb": "", "proof_max_rss_source": "",
+        "proof_user_s": "", "proof_sys_s": "", "proof_wall_s": "",
         "drift": "", "launched": "0",
     })
     for k in ("sources", "nodes", "outputs", "flops", "mems", "inputs", "bindings",
@@ -1604,6 +1617,16 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         r["cgroup_peak_kb"] = str(cg_peak)
         return r
 
+    # STAGE-AWARE.  `rc` is the SIM stage's, so a sampled kill that landed on the
+    # PROOF subprocess leaves `rc == 0` and only `proof_rc` nonzero -- and the
+    # branch below, gated on `rc != 0`, used to skip it entirely.  The probe was
+    # physically SIGKILLed by the budget and the row said `proof=0`, as if the
+    # proof had simply not worked out.  Attributed here instead, which also keeps
+    # the `cert`..`agree` the sim stage already earned.
+    proof_sampled_kill = (_RSS_KILL.is_set() and rc == 0
+                          and proof_rc is not None and proof_rc != 0
+                          and not proof_oom)
+
     if _RSS_KILL.is_set() and rc != 0:
         # The SAMPLED guard acted.  Reached only when the cgroup branch above did
         # not: a kernel OOM raises an `oom_kill` event and is handled there, and
@@ -1664,6 +1687,17 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         proof_t = read_time_report(log_dir / f"{m}.proof.time")
         for k, v in proof_t.items():
             row[f"proof_{k}"] = v
+        if row.get("proof_max_rss_kb"):
+            row["proof_max_rss_source"] = SRC_TIME
+        if proof_sampled_kill:
+            # SIGKILL: `/usr/bin/time` writes its report at exit and never got
+            # there, so `proof_max_rss_kb` is blank. The sampled peak at the kill
+            # is a real measurement and a LOWER BOUND -- better than an empty
+            # cell, which reads as "not measured" when the truth is "measured, by
+            # a different instrument, as at least this much". Labelled as such so
+            # it can never be mistaken for a /usr/bin/time peak.
+            row["proof_max_rss_kb"] = str(_RSS_PEAK["killed_at_kb"])
+            row["proof_max_rss_source"] = SRC_SAMPLED
         # Widen the generic columns from "the sim stage" to "the whole target":
         # max over stages for RSS, SUM over stages for CPU.  `wall_s` already
         # spanned both.  Leaving `user_s`/`sys_s` sim-only -- which is what they
@@ -1675,6 +1709,12 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         elif row.get("proof_max_rss_kb"):
             row["max_rss_kb"] = row["proof_max_rss_kb"]
             row["max_rss_source"] = SRC_TIME_STAGES
+        if proof_sampled_kill:
+            # A max over stages one of which is a LOWER BOUND is itself a lower
+            # bound: the true proof peak is at least `killed_at`. The weaker
+            # claim is the only honest one, so the whole-target provenance drops
+            # to it rather than keeping the stronger label.
+            row["max_rss_source"] = SRC_SAMPLED
         for k in ("user_s", "sys_s"):
             a_, b_ = row.get(f"sim_{k}"), row.get(f"proof_{k}")
             if a_ and b_:
@@ -1705,7 +1745,9 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
     # STRICTLY after `extract_gates`, and it only ever writes `row["proof"]`.
     # `proof` is the last gate: it can be 0 on a design whose earlier gates are
     # all 1, and it can never pull an earlier gate down.
-    extract_proof_gate(row, proof_out, proof_rc, expect_module=m, oom=proof_oom)
+    extract_proof_gate(row, proof_out, proof_rc, expect_module=m, oom=proof_oom,
+                       sampled_kill_kb=(_RSS_PEAK["killed_at_kb"]
+                                        if proof_sampled_kill else 0))
     if rc == 124:
         # After `extract_gates`, which writes `detail` and the raw gates.
         _mark_timeout(row, timeout)
@@ -1934,7 +1976,8 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
     "max_rss_kb", "max_rss_source", "cgroup_peak_kb",
     "user_s", "sys_s", "wall_s",
     "sim_max_rss_kb", "sim_user_s", "sim_sys_s", "sim_wall_s",
-    "proof_max_rss_kb", "proof_user_s", "proof_sys_s", "proof_wall_s",
+    "proof_max_rss_kb", "proof_max_rss_source",
+    "proof_user_s", "proof_sys_s", "proof_wall_s",
     "detail"])
 
 # COLUMN SCOPES, so no generic column quietly mixes them.
@@ -1951,7 +1994,8 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
 # stages while `user_s`/`sys_s` were silently sim-only -- three columns side by
 # side with two different scopes.
 STAGE_COLS = ("sim_max_rss_kb", "sim_user_s", "sim_sys_s", "sim_wall_s",
-              "proof_max_rss_kb", "proof_user_s", "proof_sys_s", "proof_wall_s")
+              "proof_max_rss_kb", "proof_max_rss_source",
+              "proof_user_s", "proof_sys_s", "proof_wall_s")
 
 # Provenance for `max_rss_kb`, and the cgroup's own peak beside it.
 #
