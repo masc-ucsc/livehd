@@ -327,7 +327,7 @@ def main() -> int:
         # exemption had to go: this pins that no column is privileged.
         _ol = out.read_text().splitlines()
         _oh = next(i for i, l in enumerate(_ol) if not l.startswith("#"))
-        for _col in ("cgroup_peak_kb", "cert_sha256"):
+        for _col in ("cgroup_peak_kb", "proof_max_rss_kb", "cert_sha256"):
             _sx = tmp / f"drop_{_col}.tsv"
             _si = _ol[_oh].split("\t").index(_col)
             _sk = lambda line: "\t".join(

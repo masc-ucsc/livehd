@@ -102,6 +102,10 @@ def main() -> int:
             ("nonzero_exit_with_marker", GOOD + "\nerror: something later broke", 1),
             ("duplicate_marker", GOOD + "\n" + GOOD, 0),
             ("wrong_theorem", "D3GATE proof=1 thm=other.thm axioms=[propext]", 0),
+            # A PREFIX of the right name. The earlier check was `startswith`,
+            # so this was credited as a pass for a theorem nobody asked for.
+            ("prefix_theorem", "D3GATE proof=1 thm=d3_fast.wrong axioms=[propext]", 0),
+            ("proof_timeout", "", 124),
         ]
         for label, out, rc in cases:
             r = agree_row()
@@ -117,6 +121,31 @@ def main() -> int:
         check("duplicate_marker_not_credited", r["proof"] == "0"
               and "2 proof markers" in r["detail"],
               "a duplicated marker is refused and says why", r["detail"])
+
+        r = agree_row()
+        sweep.extract_proof_gate(r, "", 124, expect_module="tima_adder")
+        check("timeout_names_the_stage", r["proof"] == "0"
+              and "proof stage timed out" in r["detail"]
+              and r.get("run_status") is None,
+              "a proof-stage timeout is proof=0 and does NOT set run_status: a "
+              "nonterminal row would make d3_join drop the executable result "
+              "from the denominator over an optional gate", r["detail"])
+
+        r = agree_row()
+        sweep.extract_proof_gate(r, GOOD, 0, expect_module="tima_adder", oom=True)
+        check("proof_oom_keeps_executable_gates", r["proof"] == "0"
+              and "memory.max" in r["detail"],
+              "a proof-stage OOM is proof=0 with the cause named", r["detail"])
+        intact(r, "proof_oom")
+
+        # ---- 3b. the schema carries the proof stage's own figures -------------
+        for c in ("proof_max_rss_kb", "proof_user_s", "proof_sys_s", "proof_wall_s"):
+            check(f"schema_has_{c}", c in sweep.RESULT_COLS,
+                  f"{c} is part of RESULT_COLS, so merge and resume see it")
+        check("schema_has_stage_provenance",
+              sweep.SRC_TIME_STAGES in ("time-max-rss-max-of-stages",)
+              and sweep.SRC_TIME != sweep.SRC_TIME_STAGES,
+              "a two-stage max_rss_kb is labelled distinctly from a one-process peak")
 
         # ---- 4. Lean: the audit must REFUSE sorryAx and ofReduceBool ----------
         if not CERT.is_file():

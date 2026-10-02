@@ -1179,8 +1179,11 @@ def make_proof_probe(cert: pathlib.Path, m: str) -> str:
 
 PROOF_GATE_RE = r"^D3GATE proof=1 thm=(\S+) axioms=(.*)$"
 
+# The one theorem a proof probe is allowed to be reporting.
+PROOF_THEOREM = "d3_fast.correct"
 
-def extract_proof_gate(row, out: str, rc, expect_module=None) -> None:
+
+def extract_proof_gate(row, out: str, rc, expect_module=None, oom: bool = False) -> None:
     """Credit `proof` from the SEPARATE proof probe.  Writes nothing else.
 
     Three outcomes, kept apart because they mean different things:
@@ -1188,7 +1191,18 @@ def extract_proof_gate(row, out: str, rc, expect_module=None) -> None:
       `na` -- not attempted.  No `--prove`, or the executable probe did not
               reach `agree`, so there was nothing worth proving about.  An
               unattempted gate is not a failed one.
-      `0`  -- attempted and did not come back clean.
+      `0`  -- attempted and did not come back clean.  That INCLUDES a
+              proof-stage timeout and a proof-stage OOM kill.
+
+    TERMINAL ON PURPOSE, and this is a real trade-off rather than an oversight.
+    A proof-stage timeout or OOM could instead make the row NONTERMINAL so
+    `--resume` retries it.  It must not: `d3_join.py` treats every nonterminal
+    status as uncredited, so a target whose executable gates genuinely passed
+    cert..agree would drop out of the milestone denominator because an OPTIONAL
+    last gate ran out of memory.  That erases established evidence to report a
+    failure of something else.  The row therefore stays `done` with its
+    executable verdict intact, `proof=0`, and a `detail` naming the cause; a
+    proof retry is an explicit `--prove` re-run, which is already opt-in.
       `1`  -- the marker is present exactly once AND the probe exited 0.
 
     The marker is emitted by `d3_proof_gate`, which audits the axioms and prints
@@ -1206,17 +1220,32 @@ def extract_proof_gate(row, out: str, rc, expect_module=None) -> None:
         row["proof"] = "na"
         return
     hits = re.findall(PROOF_GATE_RE, out, re.M)
-    if rc != 0 or len(hits) != 1:
+    if oom or rc != 0 or len(hits) != 1:
         row["proof"] = "0"
-        why = ("proof probe exited {}".format(rc) if rc != 0
-               else "{} proof markers in the log, expected exactly 1".format(len(hits)))
+        if oom:
+            # The kernel killed the PROOF stage at memory.max.  The row stays
+            # terminal with its executable verdict: see the docstring.
+            why = "proof stage killed by the kernel at the cgroup memory.max"
+        elif rc == 124:
+            # A proof-stage TIMEOUT.  Deliberately NOT `_mark_timeout`: that sets
+            # `run_status`/`verdict` to `timeout`, which would retract an
+            # executable verdict this target had already earned.
+            why = "proof stage timed out"
+        elif rc != 0:
+            why = f"proof probe exited {rc}"
+        else:
+            why = f"{len(hits)} proof markers in the log, expected exactly 1"
         row["detail"] = (row.get("detail") or "") + ("; " if row.get("detail") else "") + why
         return
-    thm, axioms = hits[0]
-    if expect_module is not None and not thm.startswith("d3_fast"):
-        # The marker must name the theorem this probe generated.
+    thm, _axioms = hits[0]
+    if thm != PROOF_THEOREM:
+        # EXACT, not a prefix.  `d3_fast.wrong` starts with `d3_fast` and would
+        # have been credited; the marker has to name the theorem the probe was
+        # asked to prove, not a neighbour of it.
         row["proof"] = "0"
-        row["detail"] = (row.get("detail") or "") + f"; proof marker names {thm!r}"
+        row["detail"] = ((row.get("detail") or "")
+                         + ("; " if row.get("detail") else "")
+                         + f"proof marker names {thm!r}, expected {PROOF_THEOREM!r}")
         return
     row["proof"] = "1"
 
@@ -1254,6 +1283,8 @@ def deferred_row(target: Target, samples: int, why: str) -> dict:
         "verdict": "deferred", "proof": "na", "detail": why,
         "max_rss_kb": "", "max_rss_source": "", "cgroup_peak_kb": "",
         "user_s": "", "sys_s": "", "wall_s": "0.00",
+        "proof_max_rss_kb": "", "proof_user_s": "", "proof_sys_s": "",
+        "proof_wall_s": "",
         "drift": "", "launched": "0",
     })
     for k in ("sources", "nodes", "outputs", "flops", "mems", "inputs", "bindings",
@@ -1324,6 +1355,8 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
     row["cgroup_peak_kb"] = ""
     row["user_s"] = ""
     row["sys_s"] = ""
+    for k in ("proof_max_rss_kb", "proof_user_s", "proof_sys_s", "proof_wall_s"):
+        row[k] = ""
     row["drift"] = ""
     row["launched"] = "0"
     row["proof"] = "na"  # never attempted by this pass; see the module docstring
@@ -1405,16 +1438,34 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             return row
     cg_peak, cg_oom, cg_leaked = 0, False, False
     proof_out, proof_rc = "", None
+    sim_oom, sim_peak = False, None
     try:
         out, rc = run_group(cmd, LEAN_DIR, timeout, env=penv)
+        # The proof stage launches only on a FULL executable pass, judged by the
+        # same parser that will credit the row.  `rc == 0` is not that: a probe
+        # can exit cleanly having disagreed, and proving a theorem about a design
+        # whose simulation disagreed is a claim about the wrong thing.  Running
+        # `extract_gates` on a COPY keeps the decision and the final credit from
+        # drifting apart -- they are literally the same function on the same log.
+        _pre = dict(row)
         if PROVE and not native and rc == 0 and not _SHUTDOWN.is_set():
+            extract_gates(_pre, out, rc, timeout, expect_module=m, expect_samples=samples)
+        if (PROVE and not native and rc == 0 and not _SHUTDOWN.is_set()
+                and _pre.get("agree") == 1):
+            # Read the cgroup's OOM state BEFORE the proof stage, so a proof-stage
+            # kill can be told apart from a sim-stage one.  Without this the two
+            # share a cgroup and a proof OOM would come back as `rss_killed` for
+            # the whole row -- zeroing executable gates that were already earned.
+            if cg is not None:
+                sim_oom, sim_peak = cg.oom_killed(), cg.peak_kb()
             # A SECOND process, so a failed proof cannot put `error:` in the
             # executable probe's log or a nonzero exit on its run -- either of
             # which `extract_gates` reads as `clean_exit = False` and turns into
             # a `typecheck` failure for a design that passed cert..agree.
             # Inside the same cgroup, so the memory cap still governs it; that
             # makes `cgroup_peak_kb` the max over BOTH stages, which is what the
-            # cap is protecting anyway.
+            # cap is protecting anyway.  Per-stage RSS lives in the two
+            # `/usr/bin/time` reports instead.
             pprobe = probe_dir / f"{m}.proof.lean"
             pprobe.write_text(make_proof_probe(cert, m), encoding="utf-8")
             ptv = log_dir / f"{m}.proof.time"
@@ -1492,7 +1543,17 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         row["wall_s"] = f"{time.time() - t0:.2f}"
         return row
 
-    if cg is not None and cg_oom:
+    if cg is not None and cg_oom and sim_oom is False and proof_rc is not None:
+        # The kill happened AFTER the sim stage read a clean OOM state, so it was
+        # the PROOF stage that hit memory.max.  Falling through to the
+        # `rss_killed` row below would zero `cert`..`agree` -- discarding an
+        # executable result that was already established -- to report a failure
+        # of the optional last gate.  The proof simply does not get credited.
+        proof_oom = True
+    else:
+        proof_oom = False
+
+    if cg is not None and cg_oom and not proof_oom:
         # The KERNEL killed it at memory.max.  Continuous enforcement, and
         # `memory.peak` is a TRUE peak rather than a sampled lower bound.
         r = deferred_row(target, samples,
@@ -1557,6 +1618,40 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         # could not be read leaves `max_rss_kb` blank, and a blank figure keeps
         # a blank provenance.
         row["max_rss_source"] = SRC_TIME
+    if proof_rc is not None:
+        # The proof stage's OWN `/usr/bin/time`, in its OWN columns.  Reporting
+        # one `max_rss_kb` for a two-stage run understated the expensive stage by
+        # 4.4x on tima_adder (1,566,104 kB sim against 6,887,764 kB proof) while
+        # `wall_s` spanned both, so the row contradicted itself.
+        try:
+            ptt = (log_dir / f"{m}.proof.time").read_text()
+            for key, pat in (("proof_max_rss_kb",
+                              r"Maximum resident set size \(kbytes\): (\d+)"),
+                             ("proof_user_s", r"User time \(seconds\): ([\d.]+)"),
+                             ("proof_sys_s", r"System time \(seconds\): ([\d.]+)"),
+                             ("proof_wall_s",
+                              r"Elapsed \(wall clock\) time .*?: (?:(\d+):)?(\d+):([\d.]+)")):
+                mo = re.search(pat, ptt)
+                if not mo:
+                    continue
+                if key == "proof_wall_s":
+                    h, mi, sec = mo.group(1), mo.group(2), mo.group(3)
+                    row[key] = f"{int(h or 0) * 3600 + int(mi) * 60 + float(sec):.2f}"
+                else:
+                    row[key] = mo.group(1)
+        except OSError:
+            pass
+        # `max_rss_kb` becomes the max over the stages that actually ran, so the
+        # column keeps meaning "the biggest this target got" rather than silently
+        # meaning "the first stage".  Provenance says which it is.
+        if row.get("proof_max_rss_kb") and row.get("max_rss_kb"):
+            row["max_rss_kb"] = str(max(int(row["max_rss_kb"]),
+                                        int(row["proof_max_rss_kb"])))
+            row["max_rss_source"] = SRC_TIME_STAGES
+        elif row.get("proof_max_rss_kb") and not row.get("max_rss_kb"):
+            row["max_rss_kb"] = row["proof_max_rss_kb"]
+            row["max_rss_source"] = SRC_TIME_STAGES
+
     if cg is not None:
         # The point of the change: retained on the SUCCESSFUL path too, not just
         # where the kernel killed the probe.  `cg_peak` is read in the `finally`
@@ -1580,7 +1675,7 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
     # STRICTLY after `extract_gates`, and it only ever writes `row["proof"]`.
     # `proof` is the last gate: it can be 0 on a design whose earlier gates are
     # all 1, and it can never pull an earlier gate down.
-    extract_proof_gate(row, proof_out, proof_rc, expect_module=m)
+    extract_proof_gate(row, proof_out, proof_rc, expect_module=m, oom=proof_oom)
     if rc == 124:
         # After `extract_gates`, which writes `detail` and the raw gates.
         _mark_timeout(row, timeout)
@@ -1807,7 +1902,9 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
     "tier", "manifest_nodes", "requested_samples", "cert_sha256", "run_status",
     "drift", "launched",
     "max_rss_kb", "max_rss_source", "cgroup_peak_kb",
-    "user_s", "sys_s", "wall_s", "detail"])
+    "user_s", "sys_s", "wall_s",
+    "proof_max_rss_kb", "proof_user_s", "proof_sys_s", "proof_wall_s",
+    "detail"])
 
 # Provenance for `max_rss_kb`, and the cgroup's own peak beside it.
 #
@@ -1852,6 +1949,12 @@ SRC_CGROUP = "cgroup-memory-peak-exact-accounted"
 # `max_rss_kb` holds the sampled aggregate at the moment of the kill: a LOWER
 # BOUND, because the sampler can miss a peak between two samples.
 SRC_SAMPLED = "sampled-aggregate-lower-bound"
+# `max_rss_kb` is the MAX over the stages that ran, each measured by its own
+# `/usr/bin/time`. Only a `--prove` run that reached the proof stage uses it.
+# Named distinctly so a reader cannot mistake a two-stage maximum for one
+# process's peak; the per-stage figures are in `user_s`/`sys_s`/`wall_s` and the
+# `proof_*` columns.
+SRC_TIME_STAGES = "time-max-rss-max-of-stages"
 
 
 def main() -> int:
@@ -2619,8 +2722,17 @@ def main() -> int:
     checkpoint()
     print(f"\nwrote {out_path} ({len(rows)} rows) and {meta_path.name}", file=sys.stderr)
     for g in GATES:
-        n = sum(1 for r in rows if r.get(g) == 1)
-        print(f"  {g:<10} {n}/{len(rows)}", file=sys.stderr)
+        # `proof` is a STRING ("na"/"0"/"1"), every other gate an int, so a bare
+        # `== 1` reported `proof 0/1` for a run whose row said `proof='1'` -- the
+        # summary contradicting its own table.
+        n = sum(1 for r in rows if r.get(g) in (1, "1"))
+        extra = ""
+        if g == "proof":
+            na = sum(1 for r in rows if r.get(g) == "na")
+            # `na` spelled out rather than folded into the denominator: not
+            # attempted is not the same as attempted and failed.
+            extra = f"  ({na} na, {len(rows) - n - na} failed)"
+        print(f"  {g:<10} {n}/{len(rows)}{extra}", file=sys.stderr)
     ntmo = sum(1 for r in rows if r.get("run_status") == "timeout")
     if ntmo:
         print(f"  timeout    {ntmo}/{len(rows)} ran past --timeout and were killed; "
