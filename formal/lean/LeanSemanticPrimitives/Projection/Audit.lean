@@ -24,6 +24,8 @@ import LeanSemanticPrimitives.Projection.SurfaceSemantics
 import LeanSemanticPrimitives.Projection.HardwareAdequacy
 -- Phase 4 item 3: the first projection, on hardware
 import LeanSemanticPrimitives.Projection.ProjectionCorrect
+-- Phase 5: the residual-fragment checker and the simulator bundle
+import LeanSemanticPrimitives.Projection.ResidualFragment
 
 namespace Projection
 
@@ -356,5 +358,19 @@ namespace Projection
 #print axioms Hw.GuardCorollary.tiny_cycle_value
 #print axioms Hw.GuardCorollary.seq_cycle
 #print axioms Hw.GuardCorollary.seq_cycle_value
+
+-- Phase 5 increment 1: the checker's guarantee.  `checkResidual_sound` is the
+-- one that matters -- an accepted residual never answers `.outOfFuel` at the
+-- bound the checker computed for it.
+#print axioms Hw.height_pos
+#print axioms Hw.fragAltsB_find
+#print axioms Hw.heightAlts_find
+#print axioms Hw.fragB_no_outOfFuel
+#print axioms Hw.fragListB_no_outOfFuel
+#print axioms Hw.fragAltsB_no_outOfFuel
+#print axioms Hw.checkResidual_entry
+#print axioms Hw.checkResidual_sound
+#print axioms Hw.mkSim_proj_chk
+#print axioms Hw.runProjected_never_boundExceeded
 
 end Projection

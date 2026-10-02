@@ -50,6 +50,7 @@
 -/
 
 import LeanSemanticPrimitives.Projection.HardwareInterpreter
+import LeanSemanticPrimitives.Projection.ResidualFragment
 
 namespace Projection
 namespace Scaling
@@ -256,6 +257,30 @@ rediscovered. -/
 #guard [8, 16, 32, 64].all (fun n => pOf .bvAnd (flopD n) == n)
 #guard [8, 16, 32, 64].all (fun n => pOf .andB  (flopD n) == 0)
 #guard [8, 16, 32, 64].all (fun n => pOf .orB   (flopD n) == 0)
+
+/-! ## The checked evaluation bound scales LINEARLY
+
+Phase 1 made the residual's SIZE linear in N.  This is the consequence for
+RUNNING it: the bound `checkResidual` computes is the residual's height plus
+one, and it comes out linear too -- so a cycle costs O(N), not O(N^2).
+
+Recorded as measurements, not as a theorem about `mix`. -/
+
+def boundOf (D : Compiler.DesignCert) : Option Nat :=
+  (Hw.mkSim D).map Hw.ProjectedSimulator.bound
+
+-- every Scaling residual is IN THE FRAGMENT: one function, arity 3, call-free
+#guard [1, 4, 16, 64].all (fun n => (boundOf (fanD n)).isSome)
+#guard [16, 64, 256].all (fun n => (boundOf (chainD n)).isSome)
+#guard [8, 32].all (fun n => (boundOf (flopD n)).isSome)
+
+-- and the bound is linear in N -- slope 3, measured
+#guard boundOf (fanD 1)    == some 9
+#guard boundOf (fanD 4)    == some 17
+#guard boundOf (fanD 16)   == some 53
+#guard boundOf (fanD 64)   == some 197
+#guard [16, 64, 256].all (fun n => boundOf (chainD n) == some (3 * n + 5))
+#guard [8, 32].all        (fun n => boundOf (flopD n)  == some (3 * n + 5))
 
 end Scaling
 end Projection

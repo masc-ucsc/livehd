@@ -25,44 +25,16 @@
 -/
 
 import LeanSemanticPrimitives.Projection.PartialEvaluatorCorrect
+import LeanSemanticPrimitives.Projection.SurfaceSemantics
 import LeanSemanticPrimitives.Projection.BTA
 
 namespace Projection
 
-/-! ## Calling an entry point
-
-`Eval` evaluates a function BODY in an environment; the object programs are
-driven by a `call` to the entry.  These are the same thing, and the projection
-statements are more readable in the second form. -/
-
-theorem EvalList_lits {P : Program} : ∀ (args : List Val),
-    EvalList P [] (args.map Term.lit) args
-  | []      => .nil
-  | a :: as => .cons .lit (EvalList_lits as)
-
-/-- An argument list of literals evaluates to itself. -/
-theorem EvalList_lits_inj {P : Program} : ∀ (args vs : List Val),
-    EvalList P [] (args.map Term.lit) vs → vs = args
-  | [],      _, h => by cases h; rfl
-  | a :: as, _, h => by
-      cases h with
-      | cons ha ht => cases ha; rw [EvalList_lits_inj as _ ht]
-
-theorem Eval_entry {P : Program} {fd : FunDef} {args : List Val} {v : Val}
-    (hf : P.fn P.entry = some fd) (har : fd.arity = args.length) :
-    Eval P args fd.body v ↔ Eval P [] (.call P.entry (args.map Term.lit)) v := by
-  constructor
-  · intro h; exact .call (EvalList_lits args) hf har h
-  · intro h
-    cases h with
-    | call hargs hfd harr hbody =>
-        rename_i vs fdx
-        rw [hf] at hfd
-        cases hfd
-        -- the argument list is literals, so it evaluates to itself
-        have : vs = args := EvalList_lits_inj args vs hargs
-        subst this
-        exact hbody
+/-! The entry-call lemmas this file used to carry (`EvalList_lits`,
+`EvalList_lits_inj`, `Eval_entry`) are generic -- they say a `call` to an entry
+and an evaluation of its body are the same thing, and nothing about the second
+projection.  They moved to `SurfaceSemantics.lean` so that a file needing them
+does not have to import this one. -/
 
 /-! ## The second projection -/
 

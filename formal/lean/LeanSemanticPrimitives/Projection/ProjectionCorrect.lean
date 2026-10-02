@@ -24,7 +24,6 @@ so the cost is paid once and shows up in the per-module timing.
 
 import LeanSemanticPrimitives.Projection.HardwareAdequacy
 import LeanSemanticPrimitives.Projection.PartialEvaluatorCorrect
-import LeanSemanticPrimitives.Projection.SecondProjection
 
 namespace Projection
 namespace Hw
