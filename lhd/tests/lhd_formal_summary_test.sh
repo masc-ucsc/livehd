@@ -72,11 +72,26 @@ OUT="$W/bout"
 grep -qE '\[COI [0-9]+ node\(s\), [1-9][0-9]* state\]' "$OUT" || fail "design assert must report a cone with state: $(grep -i coi "$OUT")"
 grep -qE '^  COI +[0-9]+ +largest cone' "$OUT" || fail "no COI summary row: $(grep -i coi "$OUT")"
 
-# A sidecar formal block is its own monitor graph, so its cone is NOT the
-# design's -- say unmeasured rather than print the monitor's size.
+# A sidecar formal block is its own monitor graph. Its cone must be continued
+# through the binds into the DESIGN, so it reports design state, not the
+# monitor's expression size (which has none).
 OUT="$W/sout"
 (cd "$W" && "$LHD" formal verify d.prp d.verify.prp --top cnt --set formal.bound=20) >"$OUT" 2>&1
-grep -q 'COI not measured for 3 sidecar' "$OUT" || fail "sidecar COI must be declared unmeasured: $(grep -i coi "$OUT")"
-grep -qE '\[COI [0-9]+ node' "$OUT" && fail "sidecar must not print a per-property COI: $(grep -i coi "$OUT")"
+grep -qE '\[COI [0-9]+ node\(s\), [1-9][0-9]* state\]' "$OUT" \
+  || fail "sidecar COI must reach design state through the binds: $(grep -i coi "$OUT")"
+grep -q 'COI not measured' "$OUT" && fail "sidecar COI should now be measured: $(grep -i coi "$OUT")"
+
+# A property over a constant has a cone of its own, not the whole design.
+cat >"$W/k.verify.prp" <<'EOF'
+const dut = import("d.cnt")
+
+formal cnt.konst {
+  mut acc = dut
+  assert(acc.q >= 0, "trivial")
+}
+EOF
+OUT="$W/kout"
+(cd "$W" && "$LHD" formal verify d.prp k.verify.prp --top cnt --set formal.bound=20) >"$OUT" 2>&1
+grep -qE '\[COI [0-9]+ node' "$OUT" || fail "a sidecar property must carry a cone: $(grep -i coi "$OUT")"
 
 echo "PASS: formal verify prints a verdict and kind tally"
