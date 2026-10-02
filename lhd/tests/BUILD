@@ -626,6 +626,17 @@ sh_test(
 # LNAST cassert -> fproperty path a Pyrope `assert` takes). These used to be
 # dropped silently, so a design whose properties are all immediate asserts
 # verified as "no obligations found" -- proving nothing at exit 0.
+# `disable iff (d)` discharges the property while d holds, so the obligation is
+# `d || prop`. It used to be lowered as `!d || prop` -- the inverse -- which
+# checked a property ONLY during its disable window: loud false refutations one
+# way, silent vacuous passes the other.
+sh_test(
+    name = "lhd_sv_disable_iff_test",
+    size = "large",
+    srcs = ["lhd_sv_disable_iff_test.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "lhd_sv_immediate_assert_test",
     size = "large",

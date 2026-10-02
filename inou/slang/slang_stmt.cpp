@@ -410,13 +410,22 @@ bool Slang_context::lower_concurrent_assertion(const slang::ast::ConcurrentAsser
   set_pending_loc(stmt.sourceRange);
   auto cond = booleanize(lower_rvalue(simple.expr));
   // `disable iff (d)` : the obligation is `!d implies cond`, spelled as the
-  // disjunction so it reuses the ordinary boolean path.
+  // disjunction so it reuses the ordinary boolean path. `!d implies cond` is
+  // `!(!d) || cond`, i.e. `d || cond` -- the implication ALREADY supplies the
+  // negation, so `d` goes in as it stands.
+  //
+  // This used to or in `!d`, which is `d implies cond`: the exact inverse. It
+  // asserted the property WHILE the disable condition held and discharged it
+  // once the condition cleared, so a `disable iff (rst)` property was checked
+  // only during reset. That both false-refutes (the probe in lhdverif's
+  // assert_concurrent, refuted at cycle 2 on a design that satisfies it) and,
+  // worse, passes VACUOUSLY on any design whose reset state happens to satisfy
+  // the claim, while never once checking the behaviour the property is about.
   for (const auto* d : disables) {
-    auto dis    = booleanize(lower_rvalue(*d));
-    // Both results are BOOLs and must be registered as such: pyrope keeps bool
+    // The result is a BOOL and must be registered as such: pyrope keeps bool
     // and int apart, and an unmarked temp would be re-booleanized as an integer.
-    auto not_d = mark_bool(builder_.create_log_not_stmts(dis));
-    cond       = mark_bool(builder_.create_log_or_stmts(not_d, cond));
+    auto dis = booleanize(lower_rvalue(*d));
+    cond     = mark_bool(builder_.create_log_or_stmts(dis, cond));
   }
   auto idx = builder_.add_child(Lnast_ntype::create_cassert());
   builder_.add_value_child_pub(idx, cond);
