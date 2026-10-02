@@ -65,6 +65,56 @@ def main() -> int:
                 print(f"     {detail[:500]}")
             fails.append(name)
 
+    # ---- segmented-proof probe text -------------------------------------
+    # Pure text, so it is checked here rather than by running Lean.  The hazard
+    # is placement: the option must reach the command it affects and NOTHING
+    # else.  If it leaked into the sim probe, the executable stage would compile
+    # a different artifact than the one it is credited for.
+    _c = tmp / "segtext_Lgraph.lean"
+    _c.write_text("import LeanSemanticPrimitives.Compiler.CompileDesign\n"
+                  "open Compiler\n"
+                  "def segtext_designCert : DesignCert := default\n", encoding="utf-8")
+    pr16 = sweep.make_proof_probe(_c, "segtext", reifier="named", segment=16)
+    pr0  = sweep.make_proof_probe(_c, "segtext", reifier="named", segment=0)
+    sim  = sweep.make_probe(_c, "segtext", 32, reifier="named")
+    check("seg_option_in_proof_probe", "set_option d3.segment 16" in pr16,
+          "the proof probe carries `set_option d3.segment 16`")
+    check("seg_option_before_the_command",
+          "set_option d3.segment 16" in pr16
+          and pr16.index("set_option d3.segment 16") < pr16.index("prove_reified_incr"),
+          "and it precedes `prove_reified_incr`, which is what reads it")
+    check("seg_option_after_cert_body",
+          "set_option d3.segment 16" in pr16
+          and pr16.index("set_option d3.segment 16") > pr16.index("segtext_designCert"),
+          "and follows the imports and the certificate body")
+    check("seg_zero_emits_nothing", "d3.segment" not in pr0,
+          "size 0 emits no option at all, so the default probe is unchanged")
+    check("seg_option_never_in_sim_probe", "d3.segment" not in sim,
+          "the SIM probe never carries it -- segmentation is how the walk is PROVED")
+    check("seg_gate_still_last",
+          pr16.rstrip().endswith("d3_proof_gate d3_fast.correct"),
+          "and the gate is still the last command in the proof probe")
+    _legacy_refused = False
+    try:
+        sweep.make_proof_probe(_c, "segtext", reifier="legacy", segment=16)
+    except ValueError:
+        _legacy_refused = True
+    check("seg_refused_for_legacy_reifier", _legacy_refused,
+          "a legacy probe with a segment size raises rather than dropping it")
+
+    class _A:
+        manifest = ""
+        samples = 32
+        timeout = 900
+        native = False
+        tier = ""
+        proof_segment_size = 16
+    check("seg_in_resume_key",
+          sweep.run_config(_A(), "d")["proof_segment_size"] == 16
+          and sweep.run_config(_A(), "d") != (lambda a: (setattr(a, "proof_segment_size", 0),
+                                                         sweep.run_config(a, "d"))[1])(_A()),
+          "and a segmented run cannot resume into or merge with a monolithic one")
+
     EXEC_GATES = [g for g in sweep.GATES if g != "proof"]
 
     def intact(r, label):

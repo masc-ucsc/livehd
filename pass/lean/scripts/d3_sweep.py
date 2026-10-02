@@ -110,6 +110,8 @@ PROVE = False
 # simulating one function and proving another, and the row would credit a
 # theorem that says nothing about what ran.
 REIFIER = "legacy"
+# Segment size for the incremental walk, passed to the PROOF probe only (0 = off).
+PROOF_SEGMENT = 0
 
 # ---------------------------------------------------------------------------
 # Child lifetime.
@@ -816,7 +818,7 @@ def d3_residual : ResidualProgram :=
 
 PROVE_TAIL_NAMED = """
 reify_design_named {m}_designCert as d3_fast
-
+{segopt}
 prove_reified_incr {m}_designCert as d3_fast
 d3_proof_gate d3_fast.correct
 """
@@ -1151,6 +1153,10 @@ def run_config(a, manifest_digest: str) -> dict:
         "timeout": a.timeout,
         "native": bool(a.native),
         "tier": a.tier or "",
+        # SEMANTIC: a segmented proof and a monolithic one are different
+        # experiments over the same design, so they must not resume into or
+        # merge with one another.
+        "proof_segment_size": int(getattr(a, "proof_segment_size", 0) or 0),
         "lake": LAKE,
         "worktree_head": subprocess.run(
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
@@ -1216,7 +1222,8 @@ def _cert_body(cert: pathlib.Path, head: str) -> str:
     return head + "\n".join(body)
 
 
-def make_proof_probe(cert: pathlib.Path, m: str, reifier: str = "legacy") -> str:
+def make_proof_probe(cert: pathlib.Path, m: str, reifier: str = "legacy",
+                     segment: int = 0) -> str:
     """The last-mile proof, in its OWN file and its OWN process.
 
     SEPARATE ON PURPOSE.  In one process a failed `prove_reified` or a failed
@@ -1226,8 +1233,22 @@ def make_proof_probe(cert: pathlib.Path, m: str, reifier: str = "legacy") -> str
     by a proof that did not work out.  `proof` is the LAST gate and must not be
     able to retract an earlier one.
     """
-    tail = PROVE_TAIL_NAMED if reifier == "named" else PROVE_TAIL
-    return _cert_body(cert, PROVE_HEAD) + tail.format(m=m)
+    if reifier == "named":
+        # `set_option d3.segment` goes HERE -- after the imports and the
+        # certificate body, immediately before the command it affects, and in
+        # the PROOF probe only.  The sim probe compiles the same certificate
+        # body but must not carry it: segmentation is a property of how the
+        # walk is PROVED, and putting it in the executable probe would change
+        # the artifact the simulation ran against for no reason.
+        segopt = f"set_option d3.segment {int(segment)}\n" if segment else ""
+        return _cert_body(cert, PROVE_HEAD) + PROVE_TAIL_NAMED.format(m=m, segopt=segopt)
+    if segment:
+        # Unreachable from `main`, which refuses the combination up front; kept
+        # so a direct caller cannot quietly get a legacy probe with the option
+        # silently dropped.
+        raise ValueError("segment size is meaningless for the legacy reifier: "
+                         "`prove_reified` has no segmented path")
+    return _cert_body(cert, PROVE_HEAD) + PROVE_TAIL.format(m=m)
 
 
 _TIME_PATS = (("max_rss_kb", r"Maximum resident set size \(kbytes\): (\d+)"),
@@ -1602,7 +1623,8 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             # cap is protecting anyway.  Per-stage RSS lives in the two
             # `/usr/bin/time` reports instead.
             pprobe = probe_dir / f"{m}.proof.lean"
-            pprobe.write_text(make_proof_probe(cert, m, reifier=REIFIER), encoding="utf-8")
+            pprobe.write_text(make_proof_probe(cert, m, reifier=REIFIER,
+                                               segment=PROOF_SEGMENT), encoding="utf-8")
             ptv = log_dir / f"{m}.proof.time"
             pcmd = ([LEAN_BIN, str(pprobe)] if LEAN_BIN
                     else [LAKE, "env", "lean", str(pprobe)])
@@ -2217,6 +2239,11 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="print the selected targets IN RUN ORDER and exit, "
                          "writing nothing")
+    ap.add_argument("--proof-segment-size", type=int, default=0, metavar="N",
+                    help="emit the incremental walk in segments of at most N "
+                         "bindings (0 = one monolithic walk, the default). Sets "
+                         "`d3.segment` in the PROOF probe only, and requires "
+                         "--reifier named.")
     ap.add_argument("--reifier", choices=("legacy", "named"), default="legacy",
                     help="which reifier BOTH stages use. `legacy` (default) is "
                          "`reify_design` + `prove_reified`, unchanged. `named` is "
@@ -2542,9 +2569,19 @@ def main() -> int:
             return 2
 
     external, why = build_root_is_external()
-    global PROVE, REIFIER
+    global PROVE, REIFIER, PROOF_SEGMENT
     PROVE = bool(a.prove)
     REIFIER = a.reifier
+    if a.proof_segment_size < 0:
+        print("REFUSING: --proof-segment-size must be >= 0.", file=sys.stderr)
+        return 2
+    if a.proof_segment_size and a.reifier != "named":
+        print("REFUSING: --proof-segment-size requires --reifier named. The legacy "
+              "reifier proves through `prove_reified`, which has no segmented path, "
+              "so the option would be accepted and silently do nothing.",
+              file=sys.stderr)
+        return 2
+    PROOF_SEGMENT = int(a.proof_segment_size)
     cfg["runner_selftest"] = bool(a.runner_selftest)
     # SEMANTIC, not scheduling: a `--prove` run and a plain one are different
     # experiments, so they must not resume into or merge with one another.
@@ -2552,6 +2589,7 @@ def main() -> int:
     # SEMANTIC: a named-model row and a legacy row describe different emitted
     # functions, so they must not resume into or merge with one another.
     cfg["reifier"] = a.reifier
+    cfg["proof_segment_size"] = int(a.proof_segment_size)
     if a.runner_selftest:
         # Branded in the metadata rather than forbidden: the drift regressions
         # must exercise the manifest path.  The brand is what stops the result
