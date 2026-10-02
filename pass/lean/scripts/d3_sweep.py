@@ -1586,6 +1586,17 @@ def main() -> int:
             # The rows must be the rows this sidecar was written for.  A table
             # edited between runs is not a table to resume from.
             prev_results_sha = prev.get("results_sha256", "")
+            if not prev_results_sha and a.manifest:
+                # Checking only when present would silently resume an UNBOUND
+                # table, and the next checkpoint would then write a fresh
+                # `results_sha256` over rows nothing ever vouched for -- blessing
+                # them. A canonical run refuses instead.
+                print(f"--resume REFUSED: {meta_path.name} carries no "
+                      f"`results_sha256`, so the rows in {out_path.name} are not "
+                      f"bound to it. Resuming would re-bind rows that nothing "
+                      f"vouches for. Rerun the stage, or resume without "
+                      f"--manifest for an exploratory run.", file=sys.stderr)
+                return 2
             if prev_results_sha:
                 actual = hashlib.sha256(out_path.read_bytes()).hexdigest()
                 if actual != prev_results_sha:

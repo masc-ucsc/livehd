@@ -442,6 +442,112 @@ def main() -> int:
                 "a row whose requested_samples disagrees with the config is refused",
                 rows_over=lambda rs: [dict(rs[0], requested_samples="8")] + rs[1:])
 
+        # ---- 5b. the merged output is itself bound, and the join checks it ---
+        ba = stage(tmp, "bd_a", ["k1", "k2"], run_id="RUN-A")
+        bb = stage(tmp, "bd_b", ["k3", "k4"], run_id="RUN-B")
+        bout = tmp / "bound.tsv"
+        rb = run_merge(bout, ba, bb)
+        bmeta = json.loads((tmp / "bound.tsv.meta.json").read_text())
+        check("merged_output_is_bound",
+              rb.returncode == 0
+              and bmeta.get("results_sha256")
+              == hashlib.sha256(bout.read_bytes()).hexdigest(),
+              "the merged sidecar binds the merged table's bytes", rb.stderr[-300:])
+
+        def join(res, meta=None):
+            cmd = [sys.executable, str(JOIN), "--manifest", str(_man),
+                   "--results", str(res), "--out", str(tmp / "jx.tsv")]
+            if meta:
+                cmd += ["--meta", str(meta)]
+            return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
+                                  timeout=120)
+        jb = join(bout, tmp / "bound.tsv.meta.json")
+        check("join_accepts_bound_merge",
+              "changed after the run" not in jb.stderr,
+              "a join of the unmodified merged table does not complain about binding",
+              jb.stderr[-300:])
+        _bl = bout.read_text().splitlines()
+        _vi = _bl[[i for i, l in enumerate(_bl) if not l.startswith("#")][0]].split("\t").index("verdict")
+        _first = [i for i, l in enumerate(_bl) if not l.startswith("#")][1]
+        _ff = _bl[_first].split("\t"); _ff[_vi] = "EDITED"; _bl[_first] = "\t".join(_ff)
+        bout.write_text("\n".join(_bl) + "\n")
+        jt2 = join(bout, tmp / "bound.tsv.meta.json")
+        check("join_refuses_post_merge_edit",
+              jt2.returncode == 2 and "changed after the run" in jt2.stderr,
+              "a post-merge edit is refused by the join", jt2.stderr[-300:])
+        ju = join(bout)                       # no --meta at all
+        check("join_without_meta_is_unauthenticated",
+              ju.returncode != 0 and "UNAUTHENTICATED" in (ju.stdout + ju.stderr),
+              "a join without --meta says it is not milestone evidence",
+              (ju.stdout + ju.stderr)[-300:])
+
+        # ---- 5c. source-lock identity and validation -------------------------
+        la2 = stage(tmp, "lv_a", ["k1", "k2"], run_id="RUN-A")
+        lb2 = stage(tmp, "lv_b", ["k3", "k4"], run_id="RUN-B")
+        for f in (tmp / "lv_a.tsv.meta.json", tmp / "lv_b.tsv.meta.json"):
+            d = json.loads(f.read_text()); d.pop("results_sha256", None)
+            f.write_text(json.dumps(d, indent=2))
+
+        def mklock(name, text):
+            q = tmp / name; q.write_text(text); return q
+
+        good_rows = "".join(
+            f"{f.name}\t{hashlib.sha256(f.read_bytes()).hexdigest()}\t"
+            f"{hashlib.sha256((tmp / (f.name + '.meta.json')).read_bytes()).hexdigest()}\n"
+            for f in (la2, lb2))
+        HDR = "file\tresults_sha256\tsidecar_sha256\n"
+        gl = mklock("lv_ok.tsv", HDR + good_rows)
+        rgl = run_merge(tmp / "lv1.tsv", la2, lb2, lock=gl)
+        mgl = json.loads((tmp / "lv1.tsv.meta.json").read_text()) if rgl.returncode == 0 else {}
+        check("lock_identity_recorded",
+              rgl.returncode == 0
+              and mgl.get("source_lock", {}).get("sha256")
+              == hashlib.sha256(gl.read_bytes()).hexdigest()
+              and mgl["source_lock"]["entries"] == 2,
+              "the merged sidecar records the lock's path, digest and entry count, "
+              "so `source-lock` binding can be re-checked", rgl.stderr[-300:])
+
+        for nm, text, why, needle in [
+            ("lv_badhdr", "name\tr\ts\n" + good_rows,
+             "a lock with the wrong header is refused", "header is"),
+            ("lv_dupe", HDR + good_rows + good_rows.splitlines()[0] + "\n",
+             "a lock with a duplicate file entry is refused", "duplicate entry"),
+            ("lv_nothex", HDR + f"{la2.name}\tnothex\t{'a'*64}\n",
+             "a lock digest that is not 64 hex characters is refused",
+             "64 hex characters"),
+            ("lv_extra", HDR + good_rows + f"ghost.tsv\t{'a'*64}\t{'b'*64}\n",
+             "a lock naming a file that was not merged is refused",
+             "not among the inputs"),
+        ]:
+            r_ = run_merge(tmp / f"{nm}.out.tsv", la2, lb2, lock=mklock(f"{nm}.tsv", text))
+            check(f"reject_{nm[3:]}", r_.returncode == 2 and needle in r_.stderr,
+                  why, r_.stderr[-250:])
+
+        # ---- 5d. native_ok may not appear on a non-native run ----------------
+        nb = stage(tmp, "nv_b", ["k3", "k4"], run_id="RUN-B",
+                   rows_over=lambda rs: [dict(rs[0], verdict="native_ok")] + rs[1:])
+        rnv = run_merge(tmp / "nv.tsv", ba, nb)
+        check("reject_native_ok_on_non_native_run",
+              rnv.returncode == 2 and "native=False" in rnv.stderr,
+              "verdict=native_ok on a run with native=false is refused",
+              rnv.stderr[-300:])
+
+        # ---- 5e. malformed input is a refusal, not a traceback ---------------
+        za = stage(tmp, "mz_a", ["k1", "k2"], run_id="RUN-A")
+        zb = stage(tmp, "mz_b", ["k3", "k4"], run_id="RUN-B")
+        (tmp / "mz_b.tsv.meta.json").write_text(json.dumps({"config": "not-an-object",
+                                                            "run_id": "RUN-B"}))
+        rz = run_merge(tmp / "mz.tsv", za, zb)
+        check("malformed_config_is_refusal_not_traceback",
+              rz.returncode == 2 and "MERGE REFUSED" in rz.stderr
+              and "Traceback" not in rz.stderr,
+              "a config that is not an object is refused cleanly", rz.stderr[-250:])
+
+        refuses("reject_missing_semantic_field",
+                "a sidecar missing ANY semantic field is refused, not just one of "
+                "a short required list",
+                cfg_over={"build_root": None})
+
         # ---- 6. the classification must cover every key the RUNNER emits ----
         # Fixtures only contain keys this test author thought of, and temp/ is
         # gitignored so real sidecars may not exist. So the authoritative source

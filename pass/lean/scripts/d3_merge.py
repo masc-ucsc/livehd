@@ -73,10 +73,25 @@ SELECTION_KEYS = ["tier", "selection_digest"]
 # Must be PRESENT, not merely equal.  Two sidecars that both omit a field agree
 # on `None`, and an equality check alone would wave that through -- which is how
 # a merge of two runs that recorded no toolchain at all could look authenticated.
-REQUIRED_CONFIG = [
-    "manifest", "manifest_digest", "samples", "timeout", "artifact_digest",
-    "tool_digest", "lean_version", "lean_toolchain", "worktree_head",
-]
+# One rule per SEMANTIC key, so none can be satisfied by two sidecars that both
+# omit it.  "nonempty" must be present and truthy; "present" may legitimately be
+# False or 0 but must exist; "if_direct" may be empty only when the run went
+# through `lake env lean`, which is the one case where no binary or environment
+# is resolved separately.
+PRESENCE_RULES = {
+    "manifest": "nonempty", "manifest_digest": "nonempty",
+    "samples": "nonempty", "timeout": "nonempty",
+    "native": "present",
+    "artifact_digest": "nonempty", "tool_digest": "nonempty",
+    "lean_version": "nonempty", "lean_toolchain": "nonempty",
+    "lake_version": "nonempty", "lake": "nonempty",
+    "lean_bin": "if_direct", "lean_bin_version": "if_direct",
+    "lean_env_digest": "if_direct",
+    "via_lake": "present",
+    "build_root": "nonempty", "build_root_external": "present",
+    "worktree_head": "nonempty", "worktree_dirty": "present",
+    "runner_selftest": "present",
+}
 
 
 class MergeError(Exception):
@@ -111,21 +126,34 @@ def load_lock(path):
     Format: TSV with columns file, results_sha256, sidecar_sha256.
     """
     if not path:
-        return {}
+        return {}, {}
     p = pathlib.Path(path)
     if not p.is_file():
         raise MergeError(f"source lock {p} does not exist")
+    rows, header = read_tsv(p)
+    want = ["file", "results_sha256", "sidecar_sha256"]
+    if header[:3] != want:
+        raise MergeError(f"source lock {p.name}: header is {header} but must begin "
+                         f"with {want}")
     out = {}
-    rows, _ = read_tsv(p)
     for r in rows:
         name = (r.get("file") or "").strip()
         if not name:
-            continue
-        out[name] = ((r.get("results_sha256") or "").strip(),
-                     (r.get("sidecar_sha256") or "").strip())
+            raise MergeError(f"source lock {p.name}: a row has an empty `file`")
+        if name in out:
+            raise MergeError(f"source lock {p.name}: duplicate entry for {name!r}; "
+                             f"which digest is authoritative is undefined")
+        pair = ((r.get("results_sha256") or "").strip(),
+                (r.get("sidecar_sha256") or "").strip())
+        for h in pair:
+            if len(h) != 64 or any(c not in "0123456789abcdef" for c in h.lower()):
+                raise MergeError(f"source lock {p.name}: {name!r} has a digest that "
+                                 f"is not 64 hex characters: {h[:24]!r}")
+        out[name] = pair
     if not out:
-        raise MergeError(f"source lock {p} lists no files")
-    return out
+        raise MergeError(f"source lock {p.name} lists no files")
+    ident = {"path": str(p), "sha256": sha256_file(p), "entries": len(out)}
+    return out, ident
 
 
 class Source:
@@ -158,7 +186,15 @@ class Source:
         self.sched = self.meta.get("scheduling", {}) or {}
         self.certs = self.meta.get("cert_sha256", {}) or {}
         self.modules = self.meta.get("modules", {}) or {}
-        self.rows, self.header = read_tsv(tsv)
+        try:
+            self.rows, self.header = read_tsv(tsv)
+        except (OSError, UnicodeDecodeError, csv.Error) as e:
+            raise MergeError(f"{tsv.name}: results table is unreadable: {e}")
+        if not isinstance(self.cfg, dict):
+            raise MergeError(f"{self.meta_path.name}: `config` is not an object")
+        for fld in ("cert_sha256", "modules"):
+            if not isinstance(self.meta.get(fld, {}), dict):
+                raise MergeError(f"{self.meta_path.name}: `{fld}` is not an object")
         self.results_sha = sha256_file(tsv)
         self.meta_sha = sha256_file(self.meta_path)
         self.bound_by = ""
@@ -220,11 +256,20 @@ class Source:
                       "A merged table is presented as authenticated evidence and "
                       "cannot rest on a tree nobody can reconstruct.")
 
-        for k in REQUIRED_CONFIG:
-            if self.cfg.get(k) in (None, ""):
-                self._bad(f"sidecar config is missing required field {k!r}. Two "
-                          f"sidecars that both omit it would compare EQUAL, which is "
-                          f"how an unidentified toolchain slips through a merge.")
+        missing = sorted(set(PRESENCE_RULES) - set(self.cfg))
+        if missing:
+            self._bad(f"sidecar config is missing field(s) {missing}. Two sidecars "
+                      f"that both omit a field compare EQUAL, which is how an "
+                      f"unidentified toolchain slips through a merge.")
+        via_lake = bool(self.cfg.get("via_lake"))
+        for k, rule in sorted(PRESENCE_RULES.items()):
+            v = self.cfg.get(k)
+            if rule == "nonempty" and v in (None, ""):
+                self._bad(f"sidecar config field {k!r} is empty; it must name a value")
+            if rule == "if_direct" and not via_lake and v in (None, ""):
+                self._bad(f"sidecar config field {k!r} is empty although via_lake is "
+                          f"false, so a lean binary and environment WERE resolved "
+                          f"separately and must be recorded")
 
         # --- the header must be exactly RESULT_COLS ---------------------------
         if self.header != RESULT_COLS:
@@ -288,11 +333,8 @@ class Source:
                           f"compiler moved during that run")
             self._validate_row(r, key)
 
-        # EXACT equality, not subset.  A partial stage -- one killed partway, so
-        # that selected targets produced no row -- would otherwise contribute its
-        # whole selection to the union while contributing only some rows, and the
-        # unmeasured targets would vanish from the merged denominator instead of
-        # showing up as missing.
+        # EXACT equality, not subset: a partial stage would otherwise contribute
+        # its whole selection to the union while contributing only some rows.
         if seen != set(self.certs):
             unmeasured = sorted(set(self.certs) - seen)
             extra = sorted(seen - set(self.certs))
@@ -334,10 +376,17 @@ class Source:
         bad = [g for g in GATES if g != "proof" and r.get(g) not in ("0", "1")]
         if bad:
             self._bad(f"row {key!r} has non-boolean gate value(s) {bad}")
-        recomputed = sweep.verdict({g: int(r[g]) for g in GATES if g != "proof"})
-        if (r.get("verdict") or "") not in (recomputed, "native_ok"):
+        gates = {g: int(r[g]) for g in GATES if g != "proof"}
+        # EXACTLY one expected verdict.  Accepting `native_ok` unconditionally let
+        # a non-native run carry a kernel-checked claim it never made.
+        if self.cfg.get("native") and gates.get("compile") == 1:
+            expected = "native_ok"
+        else:
+            expected = sweep.verdict(gates)
+        if (r.get("verdict") or "") != expected:
             self._bad(f"row {key!r} claims verdict {r.get('verdict')!r} but its own "
-                      f"gates give {recomputed!r}. The row contradicts itself.")
+                      f"gates and this run's native={bool(self.cfg.get('native'))} "
+                      f"give {expected!r}. The row contradicts itself.")
 
     # the selection controls this stage used, for the merged sidecar's record
     def selection_record(self) -> dict:
@@ -379,8 +428,14 @@ class _T:
         self.key, self.module, self.sha256 = key, module, sha
 
 
-def merge(paths, out_path: pathlib.Path, lock=None) -> dict:
+def merge(paths, out_path: pathlib.Path, lock=None, lock_ident=None) -> dict:
+    lock = lock or {}
     srcs = [Source(p, lock) for p in paths]
+    unused = sorted(set(lock) - {s.tsv.name for s in srcs})
+    if unused:
+        # A lock naming files that were not merged is a sign the wrong lock was
+        # passed, which is exactly the situation it exists to prevent.
+        raise MergeError(f"source lock names file(s) not among the inputs: {unused}")
     if len(srcs) < 2:
         raise MergeError("a merge needs at least two inputs")
 
@@ -479,6 +534,9 @@ def merge(paths, out_path: pathlib.Path, lock=None) -> dict:
         "rows": len(rows),
         "incomplete_limit_rows": limit_rows,
         "source_binding": bindings,
+        # Without this, `source_binding: source-lock` names an authority nobody
+        # can re-check.
+        "source_lock": lock_ident or {},
         "manifest_sha256_verified": actual,
         "caveats": [
             "proof is `na` on every row: no per-design translation theorem is "
@@ -511,6 +569,10 @@ def merge(paths, out_path: pathlib.Path, lock=None) -> dict:
     for r in rows:
         body.append("\t".join(str(r.get(c, "")) for c in RESULT_COLS))
     sweep._atomic_write(out_path, "\n".join(body) + "\n")
+    # Bind the MERGED bytes too, in the same order and for the same reason the
+    # runner binds a stage: otherwise the merged table is the one artifact in the
+    # chain that can be edited without contradiction.
+    meta["results_sha256"] = hashlib.sha256(out_path.read_bytes()).hexdigest()
     sweep._atomic_write(out_path.with_suffix(out_path.suffix + ".meta.json"),
                         json.dumps(meta, indent=2, sort_keys=True) + "\n")
     return meta
@@ -526,7 +588,8 @@ def main() -> int:
                          "digests must come from a record made at the time.")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
-    meta = merge([pathlib.Path(p) for p in a.inputs], out, load_lock(a.source_lock))
+    lock, lock_ident = load_lock(a.source_lock)
+    meta = merge([pathlib.Path(p) for p in a.inputs], out, lock, lock_ident)
 
     print(f"merged {len(meta['sources'])} stage(s) -> {out} "
           f"({meta['rows']} rows over {meta['targets']} selected targets)")

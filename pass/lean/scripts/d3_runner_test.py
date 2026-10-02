@@ -295,6 +295,18 @@ def main() -> int:
               "and an edited table with an untouched sidecar refuses", f,
               pb.stderr[-200:])
 
+        # an UNBOUND sidecar (legacy, no results_sha256) must not resume a
+        # manifest run: the next checkpoint would re-bind rows nothing vouches for
+        unb_out = tmp / "unbound_res.tsv"
+        shutil.copy(out, unb_out)
+        _um = json.loads(side.read_text()); _um.pop("results_sha256", None)
+        (tmp / "unbound_res.tsv.meta.json").write_text(json.dumps(_um, indent=2))
+        pu = sweep(tmp, man, cdir, unb_out, extra=["--resume"])
+        check("resume_refuses_unbound_table",
+              pu.returncode != 0 and "no `results_sha256`" in pu.stderr,
+              "a sidecar with no results binding refuses to resume a manifest run",
+              f, pu.stderr[-250:])
+
         check("resume_duplicate_rows", p.returncode != 0 and "duplicate target_key" in p.stderr,
               "a duplicated row refuses the resume", f, p.stderr[-200:])
 

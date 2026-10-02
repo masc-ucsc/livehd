@@ -21,6 +21,11 @@ the sweep's module, while the output keeps the BLOCK name: `ras` and `ras_gate`
 are the same target under two spellings, and collapsing them early loses the one
 the milestone is written in.
 
+CANONICAL JOINS REQUIRE `--meta`.  Without it nothing checks the artifact digest,
+the manifest digest, the selftest brand, the drift marker, or that the rows are
+the ones their sidecar vouches for.  A join run without `--meta` is a convenience
+for looking at a table; it is NOT milestone evidence, and it says so.
+
 Usage:
   d3_join.py --manifest M.tsv --results R.tsv --out J.tsv [--meta R.tsv.meta.json]
 Exit 0 iff the join is complete and consistent.
@@ -196,11 +201,31 @@ def main() -> int:
     if orphan_candidates:
         problems.append(f"result rows no target claims: {sorted(orphan_candidates)}")
 
+    if not a.meta:
+        problems.append(
+            "no --meta sidecar was given, so nothing verified the artifact digest, "
+            "the manifest digest, the selftest brand, the drift marker, or the row "
+            "bytes. This join is UNAUTHENTICATED and is not milestone evidence.")
     if a.meta:
         try:
             meta = json.loads(pathlib.Path(a.meta).read_text())
         except (OSError, json.JSONDecodeError) as e:
             raise JoinError(f"sidecar {a.meta} is unreadable: {e}")
+        # The rows must be the rows this sidecar vouches for.  Both the runner
+        # and the merger bind their output; a join that skipped the check would
+        # be the one step in the chain where an edited table passes unnoticed.
+        bound = (meta.get("results_sha256") or "").strip()
+        if bound:
+            actual = hashlib.sha256(res_path.read_bytes()).hexdigest()
+            if actual != bound:
+                raise JoinError(
+                    f"{res_path.name} hashes to {actual[:16]} but its sidecar binds "
+                    f"{bound[:16]}: the results table changed after the run or merge "
+                    f"that wrote it.")
+        else:
+            problems.append(
+                f"{a.meta}: no results_sha256, so the rows are UNBOUND; this join is "
+                f"not authenticated and must not be cited as milestone evidence")
         cfg = meta.get("config", {}) or {}
         if cfg.get("runner_selftest"):
             raise JoinError(
