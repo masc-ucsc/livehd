@@ -253,9 +253,13 @@ for _s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
 # So the live run is also sampled.  This machine is shared, so there are TWO
 # limits, and they do different jobs:
 #
-#   --max-aggregate-rss-kb  SOFT.  Stops handing out NEW work.  Never touches a
-#                           running worker: killing it would spend the memory and
-#                           discard the row, which is the worst of both.
+#   --max-aggregate-rss-kb  SOFT.  Stops handing out NEW work.  Never KILLS a
+#                           running worker: that would spend the memory and
+#                           discard the row, the worst of both.  With `--prove`,
+#                           a proof stage that has not started yet counts as new
+#                           work and is suppressed, so the cap can affect a
+#                           target already in flight -- its executable gates are
+#                           kept and `proof` is `na`.
 #   --kill-over-rss-kb      HARD, opt-in, default off.  TERMINATES the running
 #                           probe.  The soft cap cannot help against one probe
 #                           that grows past the budget by itself, and the two
@@ -324,11 +328,20 @@ def _descendants(root: int) -> set:
 # monitor regression can pin an exact ORDER of crossings rather than racing a
 # real process.  It replaces the MEASUREMENT, so a manifest run refuses outright
 # when it is set -- the same rule as `D3_ARTIFACT_DIR`.
-# Trip the hard limit BETWEEN the sim and proof stages, which is the one window
-# a scripted RSS sequence cannot target reliably: the sampler runs on its own
-# clock and the gap between the stages is microseconds.  Names the module whose
-# probe the trip should follow.
+# Trip the budget BETWEEN the sim and proof stages, which is the one window a
+# scripted RSS sequence cannot target reliably: the sampler runs on its own clock
+# and the gap between the stages is microseconds.
+#
+#   `<module>`        both caps -- the HARD trip (`_RSS_KILL` + `_RSS_STOP`)
+#   `<module>:soft`   the SOFT cap only (`_RSS_STOP`, `_RSS_KILL` CLEAR)
+#
+# The soft-only mode exists because the two produce different reasons and only
+# the hard one was covered; a regression that could not tell them apart would
+# not notice the soft path silently acquiring the hard path's wording.
 _TEST_KILL_BETWEEN_STAGES = os.environ.get("D3_TEST_KILL_BETWEEN_STAGES") or ""
+_TEST_KILL_SOFT_ONLY = _TEST_KILL_BETWEEN_STAGES.endswith(":soft")
+if _TEST_KILL_SOFT_ONLY:
+    _TEST_KILL_BETWEEN_STAGES = _TEST_KILL_BETWEEN_STAGES[: -len(":soft")]
 
 _TEST_RSS_SEQ = [int(x) for x in
                  (os.environ.get("D3_TEST_RSS_SEQ") or "").replace(" ", "").split(",")
@@ -653,9 +666,10 @@ def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
             with _RSS_LOCK:
                 _RSS_PEAK["tripped_at_kb"] = total
             print(f"d3_sweep: AGGREGATE RSS {total} kB reached the cap {cap_kb} kB -- "
-                  f"no further targets will be launched; the running one is left to "
-                  f"finish. (logged once; the sampler keeps watching)",
-                  file=sys.stderr)
+                  f"no further targets will be launched; the EXECUTABLE stage of the "
+                  f"running one may finish, but a --prove proof stage that has not "
+                  f"started yet is suppressed. (logged once; the sampler keeps "
+                  f"watching)", file=sys.stderr)
             _RSS_STOP.set()
             # Deliberately NOT a return when a hard limit is armed: the probe
             # already running is the one that can still cross it, and it is
@@ -1514,8 +1528,11 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         if _TEST_KILL_BETWEEN_STAGES == m:
             # The seam fires exactly where the race lives: after the sim stage
             # has exited and before the proof stage exists to be reaped.
-            _RSS_PEAK["killed_at_kb"] = _RSS_PEAK.get("killed_at_kb") or 1
-            _RSS_KILL.set()
+            if not _TEST_KILL_SOFT_ONLY:
+                _RSS_PEAK["killed_at_kb"] = _RSS_PEAK.get("killed_at_kb") or 1
+                _RSS_KILL.set()
+            else:
+                _RSS_PEAK["tripped_at_kb"] = _RSS_PEAK.get("tripped_at_kb") or 1
             _RSS_STOP.set()
         # `_RSS_KILL` as well as `_SHUTDOWN`.  The hard monitor sets `_RSS_KILL`,
         # sets `_RSS_STOP`, reaps, and then RETURNS -- the thread is gone.  Trip
@@ -2139,11 +2156,15 @@ def main() -> int:
                          "killed, while another was caught 20,996 kB over. Use "
                          "--rss-sample-seconds to trade overhead for tightness.")
     ap.add_argument("--max-aggregate-rss-kb", type=_nonneg_int, default=20_000_000,
-                    help="SOFT cap, sampled: stop LAUNCHING new targets once a "
-                         "sample of this run's aggregate resident total reaches it; "
-                         "0 disables. A running target is never killed by this, so "
-                         "at --jobs 1 with one target it has no effect. Logged once, "
-                         "at the first crossing.")
+                    help="SOFT cap, sampled: stop LAUNCHING new work once a sample "
+                         "of this run's aggregate resident total reaches it; 0 "
+                         "disables. It never KILLS anything: a running executable "
+                         "probe is left to finish. With --prove it does affect a "
+                         "running target, because a proof stage that has not started "
+                         "yet is new work and is suppressed (the row keeps its "
+                         "executable gates and reports proof=na). Without --prove, "
+                         "at --jobs 1 with one target, it has no effect. Logged "
+                         "once, at the first crossing.")
     ap.add_argument("--enforce", choices=("sampled", "cgroup", "auto"),
                     default="sampled",
                     help="how --kill-over-rss-kb is enforced. `sampled` (default) "
@@ -2197,8 +2218,9 @@ def main() -> int:
         # Same reasoning as the scripted sampler below: it fabricates the budget
         # state the scheduler acts on, so a canonical run must never see it.
         print("REFUSING a manifest run: D3_TEST_KILL_BETWEEN_STAGES is set, which "
-              "fabricates a hard-limit trip. It exists for the guard regressions "
-              "and can never produce evidence.", file=sys.stderr)
+              "fabricates a budget trip between the probe stages (hard, or soft "
+              "with the `:soft` suffix). It exists for the guard regressions and "
+              "can never produce evidence.", file=sys.stderr)
         return 2
     if _TEST_RSS_SEQ and a.manifest:
         # It replaces the MEASUREMENT the memory budget is enforced from, so a

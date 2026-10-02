@@ -566,6 +566,44 @@ def main() -> int:
                   "and no proof probe ran at all -- no proof log was written",
                   str(rd_b))
 
+            # ---- SOFT-ONLY trip between the stages ------------------------------
+            # `_RSS_STOP` set, `_RSS_KILL` CLEAR. Nothing was killed and nothing
+            # overran; the cap merely latched, and a proof stage that has not
+            # started is new work. The two paths give different reasons, so this
+            # is checked separately -- otherwise the soft path could silently
+            # acquire the hard path's wording and nothing would notice.
+            r = run(["--enforce", "cgroup", "--kill-over-rss-kb", "900000",
+                     "--prove"],
+                    env_extra={"ALLOC_MB": "16",
+                               "D3_TEST_KILL_BETWEEN_STAGES": "aaa_gate:soft"},
+                    out="hy_soft.tsv", timeout=180)
+            sf = (rt.rows_of(tmp / "hy_soft.tsv")
+                  if (tmp / "hy_soft.tsv").is_file() else [])
+            check("soft_cap_suppresses_proof_stage",
+                  sf and sf[0]["proof"] == "na"
+                  and "not attempted" in sf[0]["detail"]
+                  and "cap latched" in sf[0]["detail"],
+                  f"a soft-cap latch between the stages suppresses the proof with "
+                  f"the SOFT reason (proof={sf[0]['proof'] if sf else None!r})",
+                  str(sf[:1])[:400] or r.stderr[-400:])
+            check("soft_cap_reason_is_not_the_hard_one",
+                  sf and "hard limit" not in sf[0]["detail"],
+                  "and does not borrow the hard limit's wording -- nothing was "
+                  "killed and nothing overran",
+                  sf[0]["detail"] if sf else "")
+            check("soft_cap_keeps_executable_gates",
+                  sf and all(sf[0][g] == "1" for g in
+                             ("cert", "compile", "reify", "typecheck", "sim",
+                              "checker", "agree"))
+                  and sf[0]["verdict"] == "agree",
+                  "while the executable gates earned before the latch are kept",
+                  str(sf[:1])[:300])
+            rd_s = run_dir_of(r.stderr)
+            check("soft_cap_wrote_no_proof_artifact",
+                  rd_s is not None and (rd_s / "logs").is_dir()
+                  and not list((rd_s / "logs").glob("*.proof.log")),
+                  "and no proof probe ran: no proof log exists", str(rd_s))
+
             # ---- a measured peak survives a row that turns into runner_error ------
             # Three ways the semantic row can become unusable AFTER the kernel's
             # accounting was read successfully. The reading is gone once the

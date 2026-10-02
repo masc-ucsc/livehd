@@ -315,6 +315,23 @@ def main() -> int:
               "a manifest run refuses the scripted RSS sampler outright",
               d8e.stderr[-300:])
 
+        # The between-stages seam is refused on the same grounds, in BOTH modes:
+        # it fabricates the budget state the scheduler acts on. The `:soft`
+        # suffix must not be a way around the guard.
+        for _v, _lbl in (("blk00_gate", "hard"), ("blk00_gate:soft", "soft")):
+            d8f = subprocess.run(
+                [sys.executable, str(SWEEP), "--certs", str(cdir),
+                 "--manifest", str(tbl), "--out", str(tmp / f"o8f_{_lbl}.tsv"),
+                 "--allow-dirty"],
+                cwd=ROOT, env=dict(os.environ, LAKE=str(tmp / "fake_lake"),
+                                   D3_TEST_KILL_BETWEEN_STAGES=_v),
+                capture_output=True, text=True, timeout=120)
+            check(f"between_stages_seam_refused_on_manifest_{_lbl}",
+                  d8f.returncode == 2
+                  and "D3_TEST_KILL_BETWEEN_STAGES" in d8f.stderr,
+                  f"a manifest run refuses the between-stages seam ({_lbl} mode)",
+                  d8f.stderr[-300:])
+
         # ---- 8c. direct lean and `lake env lean` agree on every gate ----------
         # The two invocation forms must differ ONLY in process count. Measured on
         # three real certificates the output is byte-identical; this pins the
