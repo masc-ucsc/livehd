@@ -70,6 +70,14 @@ ABORT_KEYS = ["aborted_artifact_drift", "aborted_at_target", "aborted_phase",
 # differ silently just because this file has not heard of it.
 SELECTION_KEYS = ["tier", "selection_digest"]
 
+# Must be PRESENT, not merely equal.  Two sidecars that both omit a field agree
+# on `None`, and an equality check alone would wave that through -- which is how
+# a merge of two runs that recorded no toolchain at all could look authenticated.
+REQUIRED_CONFIG = [
+    "manifest", "manifest_digest", "samples", "timeout", "artifact_digest",
+    "tool_digest", "lean_version", "lean_toolchain", "worktree_head",
+]
+
 
 class MergeError(Exception):
     pass
@@ -80,9 +88,44 @@ def sha256_file(p: pathlib.Path) -> str:
 
 
 def read_tsv(path: pathlib.Path):
-    with path.open(encoding="utf-8") as fh:
-        return list(csv.DictReader((l for l in fh if not l.startswith("#")),
-                                   delimiter="\t"))
+    """Rows plus the RAW header, because `DictReader` hides exactly the damage
+    that matters: a duplicated column silently keeps one value, an extra column
+    lands under `None`, and a truncated header drops fields without comment."""
+    lines = [l for l in path.read_text(encoding="utf-8").splitlines()
+             if not l.startswith("#")]
+    if not lines:
+        return [], []
+    header = lines[0].split("\t")
+    rows = list(csv.DictReader(lines, delimiter="\t"))
+    return rows, header
+
+
+def load_lock(path):
+    """A source lock: independently recorded SHA256 for a stage's TSV and sidecar.
+
+    Needed because stages archived BEFORE `results_sha256` existed carry no
+    binding of their own.  Re-hashing such a file proves only that it hashes to
+    whatever it currently is; the lock supplies the expected value from a record
+    made at the time (the ARCHIVE.txt manifests), so a later edit is detectable.
+
+    Format: TSV with columns file, results_sha256, sidecar_sha256.
+    """
+    if not path:
+        return {}
+    p = pathlib.Path(path)
+    if not p.is_file():
+        raise MergeError(f"source lock {p} does not exist")
+    out = {}
+    rows, _ = read_tsv(p)
+    for r in rows:
+        name = (r.get("file") or "").strip()
+        if not name:
+            continue
+        out[name] = ((r.get("results_sha256") or "").strip(),
+                     (r.get("sidecar_sha256") or "").strip())
+    if not out:
+        raise MergeError(f"source lock {p} lists no files")
+    return out
 
 
 class Source:
@@ -92,7 +135,8 @@ class Source:
     merging it with another, so this happens first and independently per input.
     """
 
-    def __init__(self, tsv: pathlib.Path):
+    def __init__(self, tsv: pathlib.Path, lock=None):
+        self.lock = lock or {}
         self.tsv = tsv
         self.meta_path = tsv.with_suffix(tsv.suffix + ".meta.json")
         if not tsv.is_file():
@@ -114,10 +158,46 @@ class Source:
         self.sched = self.meta.get("scheduling", {}) or {}
         self.certs = self.meta.get("cert_sha256", {}) or {}
         self.modules = self.meta.get("modules", {}) or {}
-        self.rows = read_tsv(tsv)
+        self.rows, self.header = read_tsv(tsv)
         self.results_sha = sha256_file(tsv)
         self.meta_sha = sha256_file(self.meta_path)
+        self.bound_by = ""
+        self._bind()
         self._validate()
+
+    def _bind(self):
+        """Prove the rows are the rows the sidecar was written for.
+
+        Re-hashing a file and recording the result is NOT authentication: it
+        describes whatever the file currently is, so an edited row simply gets
+        its post-edit hash written down.  The binding has to come from somewhere
+        that predates the edit -- the sidecar's own `results_sha256`, or a
+        source lock recorded independently.
+        """
+        declared = (self.meta.get("results_sha256") or "").strip()
+        if declared:
+            if declared != self.results_sha:
+                self._bad(f"results table hashes to {self.results_sha[:16]} but its "
+                          f"sidecar binds {declared[:16]}. The rows changed after the "
+                          f"run that wrote them.")
+            self.bound_by = "sidecar"
+            return
+        want = self.lock.get(self.tsv.name)
+        if not want:
+            self._bad("sidecar carries no `results_sha256` (it predates source "
+                      "binding) and no --source-lock entry names this file. Re-hashing "
+                      "it here would prove only that it hashes to whatever it now is. "
+                      "Supply a lock recorded at the time, or rerun the stage.")
+        wr, wm = want
+        if not wr or not wm:
+            self._bad("source-lock entry is missing results_sha256 or sidecar_sha256")
+        if wr != self.results_sha:
+            self._bad(f"results table hashes to {self.results_sha[:16]} but the source "
+                      f"lock expects {wr[:16]}")
+        if wm != self.meta_sha:
+            self._bad(f"sidecar hashes to {self.meta_sha[:16]} but the source lock "
+                      f"expects {wm[:16]}")
+        self.bound_by = "source-lock"
 
     def _bad(self, why: str):
         raise MergeError(f"{self.tsv.name}: {why}")
@@ -140,14 +220,42 @@ class Source:
                       "A merged table is presented as authenticated evidence and "
                       "cannot rest on a tree nobody can reconstruct.")
 
+        for k in REQUIRED_CONFIG:
+            if self.cfg.get(k) in (None, ""):
+                self._bad(f"sidecar config is missing required field {k!r}. Two "
+                          f"sidecars that both omit it would compare EQUAL, which is "
+                          f"how an unidentified toolchain slips through a merge.")
+
+        # --- the header must be exactly RESULT_COLS ---------------------------
+        if self.header != RESULT_COLS:
+            extra = [c for c in self.header if c not in RESULT_COLS]
+            missing = [c for c in RESULT_COLS if c not in self.header]
+            dupes = sorted({c for c in self.header if self.header.count(c) > 1})
+            self._bad(f"header does not match RESULT_COLS exactly "
+                      f"(missing={missing}, extra={extra}, duplicated={dupes}). "
+                      f"DictReader would hide all three.")
+
         # --- the sidecar must describe itself consistently --------------------
         if set(self.certs) != set(self.modules):
             self._bad("sidecar's cert_sha256 and modules describe different target "
                       "sets")
         declared = self.meta.get("targets")
-        if declared is not None and declared != len(self.certs):
+        if declared is None:
+            self._bad("sidecar records no `targets` count")
+        if declared != len(self.certs):
             self._bad(f"sidecar says targets={declared} but lists {len(self.certs)} "
                       f"certificate hashes")
+
+        # --- the sidecar's own selection digest must be REAL ------------------
+        want_sel = (self.cfg.get("selection_digest") or "").strip()
+        if not want_sel:
+            self._bad("sidecar records no selection_digest")
+        got_sel = sweep.selection_digest(
+            [_T(k, self.modules[k], self.certs[k]) for k in self.certs])
+        if got_sel != want_sel:
+            self._bad(f"sidecar's selection_digest is {want_sel[:16]} but its own "
+                      f"cert/module maps hash to {got_sel[:16]}. A stale or forged "
+                      f"digest must not be carried into the union.")
 
         # --- rows must match the sidecar they ship with -----------------------
         seen = set()
@@ -178,7 +286,58 @@ class Source:
             if (r.get("drift") or "").strip():
                 self._bad(f"row {key!r} is marked drift={r.get('drift')!r}: the "
                           f"compiler moved during that run")
+            self._validate_row(r, key)
+
+        # EXACT equality, not subset.  A partial stage -- one killed partway, so
+        # that selected targets produced no row -- would otherwise contribute its
+        # whole selection to the union while contributing only some rows, and the
+        # unmeasured targets would vanish from the merged denominator instead of
+        # showing up as missing.
+        if seen != set(self.certs):
+            unmeasured = sorted(set(self.certs) - seen)
+            extra = sorted(seen - set(self.certs))
+            self._bad(
+                f"rows do not cover the selection exactly: {len(unmeasured)} selected "
+                f"target(s) produced no row {unmeasured[:5]}"
+                f"{'...' if len(unmeasured) > 5 else ''}"
+                + (f", and {len(extra)} row(s) are outside it {extra[:5]}" if extra else "")
+                + ". A partial or interrupted stage cannot be merged: its unmeasured "
+                  "targets would disappear from the denominator.")
+        if len(self.rows) != declared:
+            self._bad(f"{len(self.rows)} row(s) for a declared selection of {declared}")
         self.keys = seen
+
+    def _validate_row(self, r, key):
+        """A terminal row must be internally coherent.
+
+        Without this a merge happily carries `verdict=agree_TAMPERED`, or an
+        `agree` whose gates say otherwise -- the row's own fields contradict each
+        other and nothing notices.
+        """
+        st = (r.get("run_status") or "").strip()
+        if (r.get("proof") or "") != "na":
+            self._bad(f"row {key!r} has proof={r.get('proof')!r}; this pass generates "
+                      f"no per-design theorem, so `na` is the only honest value")
+        want_samples = str(self.cfg.get("samples"))
+        if (r.get("requested_samples") or "") != want_samples:
+            self._bad(f"row {key!r} records requested_samples="
+                      f"{r.get('requested_samples')!r} but the run config says "
+                      f"{want_samples}")
+        if st in NONTERMINAL:
+            if (r.get("verdict") or "") != st:
+                self._bad(f"row {key!r} has run_status={st!r} but verdict="
+                          f"{r.get('verdict')!r}; a limit outcome names itself")
+            return
+        if st != "done":
+            self._bad(f"row {key!r} has run_status={st!r}, which is neither `done` "
+                      f"nor a known limit outcome {sorted(NONTERMINAL)}")
+        bad = [g for g in GATES if g != "proof" and r.get(g) not in ("0", "1")]
+        if bad:
+            self._bad(f"row {key!r} has non-boolean gate value(s) {bad}")
+        recomputed = sweep.verdict({g: int(r[g]) for g in GATES if g != "proof"})
+        if (r.get("verdict") or "") not in (recomputed, "native_ok"):
+            self._bad(f"row {key!r} claims verdict {r.get('verdict')!r} but its own "
+                      f"gates give {recomputed!r}. The row contradicts itself.")
 
     # the selection controls this stage used, for the merged sidecar's record
     def selection_record(self) -> dict:
@@ -196,6 +355,17 @@ class Source:
             "order_by": self.sched.get("order_by", ""),
             "order_by_digest": self.sched.get("order_by_digest", ""),
             "jobs": self.sched.get("jobs"),
+            # The memory limits a stage ran under are part of how it was produced
+            # and must not be dropped: a merged table whose stages ran under
+            # different caps is still valid, but a reader has to be able to see it.
+            "max_aggregate_rss_kb": self.sched.get("max_aggregate_rss_kb"),
+            "kill_over_rss_kb": self.sched.get("kill_over_rss_kb"),
+            "defer_over_rss_kb": self.sched.get("defer_over_rss_kb"),
+            "deferred": self.sched.get("deferred", []),
+            "aggregate_rss_peak_kb": self.meta.get("aggregate_rss_peak_kb"),
+            "aggregate_rss_tripped_kb": self.meta.get("aggregate_rss_tripped_kb"),
+            "aggregate_rss_killed_kb": self.meta.get("aggregate_rss_killed_kb"),
+            "bound_by": self.bound_by,
             "targets_selected": len(self.certs),
             "rows_written": len(self.rows),
         }
@@ -209,10 +379,17 @@ class _T:
         self.key, self.module, self.sha256 = key, module, sha
 
 
-def merge(paths, out_path: pathlib.Path) -> dict:
-    srcs = [Source(p) for p in paths]
+def merge(paths, out_path: pathlib.Path, lock=None) -> dict:
+    srcs = [Source(p, lock) for p in paths]
     if len(srcs) < 2:
         raise MergeError("a merge needs at least two inputs")
+
+    ids = [s.run_id for s in srcs]
+    dupe = sorted({i for i in ids if ids.count(i) > 1})
+    if dupe:
+        raise MergeError(
+            f"two inputs share run_id {dupe}. Either the same run was passed twice "
+            f"or a sidecar was copied; neither gives two independent stages.")
 
     # CANONICAL ORDER.  Sorting by run_id means the output bytes -- and therefore
     # the merged digest -- do not depend on the order the inputs were typed.
@@ -238,15 +415,21 @@ def merge(paths, out_path: pathlib.Path) -> dict:
                 f"{sorted(unknown)}. Classify them as semantic or selection in "
                 f"d3_merge.py before merging.")
 
-    # The manifest must be the same BYTES, not just the same recorded digest.
+    # The manifest must EXIST and be the same BYTES.  Skipping the check when the
+    # file is absent would make the strictest input -- the denominator itself --
+    # the easiest one to omit.
     man = pathlib.Path(ref.cfg.get("manifest") or "")
-    if man.is_file():
-        actual = sha256_file(man)
-        if actual != ref.cfg.get("manifest_digest"):
-            raise MergeError(
-                f"the manifest on disk ({man.name}, {actual[:16]}) no longer matches "
-                f"the digest these runs recorded ({str(ref.cfg.get('manifest_digest'))[:16]}). "
-                f"The denominator moved after the stages ran.")
+    if not man.is_file():
+        raise MergeError(
+            f"the manifest these stages ran against is not readable at {man}. "
+            f"A merged table is stated over a denominator; without the manifest "
+            f"bytes there is nothing to confirm the denominator is unchanged.")
+    actual = sha256_file(man)
+    if actual != ref.cfg.get("manifest_digest"):
+        raise MergeError(
+            f"the manifest on disk ({man.name}, {actual[:16]}) no longer matches "
+            f"the digest these runs recorded ({str(ref.cfg.get('manifest_digest'))[:16]}). "
+            f"The denominator moved after the stages ran.")
 
     # --- disjointness ------------------------------------------------------
     for i, a in enumerate(srcs):
@@ -284,6 +467,7 @@ def merge(paths, out_path: pathlib.Path) -> dict:
 
     limit_rows = sorted(r["target_key"] for r in rows
                         if (r.get("run_status") or "") in NONTERMINAL)
+    bindings = sorted({s.bound_by for s in srcs})
     meta = {
         "merged": True,
         "merged_by": "d3_merge.py",
@@ -294,6 +478,8 @@ def merge(paths, out_path: pathlib.Path) -> dict:
         "targets": len(certs),
         "rows": len(rows),
         "incomplete_limit_rows": limit_rows,
+        "source_binding": bindings,
+        "manifest_sha256_verified": actual,
         "caveats": [
             "proof is `na` on every row: no per-design translation theorem is "
             "generated or checked by this pass, so no row carries proof credit.",
@@ -306,6 +492,10 @@ def merge(paths, out_path: pathlib.Path) -> dict:
             "Rows with run_status in {deferred, rss_killed, timeout} are LIMIT "
             "outcomes carrying zero credit, and they keep that status here. The "
             "merged table is incomplete until they run.",
+            "Every source's rows were bound to its sidecar before merging (see "
+            "`source_binding`): `sidecar` means the run itself recorded the "
+            "results digest; `source-lock` means an independently recorded "
+            "expected digest was supplied and matched.",
         ],
     }
 
@@ -330,15 +520,20 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--inputs", nargs="+", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--source-lock", default="",
+                    help="TSV of file/results_sha256/sidecar_sha256, for stages "
+                         "whose sidecars predate `results_sha256`. The expected "
+                         "digests must come from a record made at the time.")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
-    meta = merge([pathlib.Path(p) for p in a.inputs], out)
+    meta = merge([pathlib.Path(p) for p in a.inputs], out, load_lock(a.source_lock))
 
     print(f"merged {len(meta['sources'])} stage(s) -> {out} "
           f"({meta['rows']} rows over {meta['targets']} selected targets)")
     for s in meta["sources"]:
         print(f"  {s['run_id']}  {s['results']:<24} rows={s['rows_written']:<4} "
-              f"tier={s['tier'] or 'all'}  sel={s['selection_digest'][:12]}")
+              f"tier={s['tier'] or 'all'}  sel={s['selection_digest'][:12]}  "
+              f"bound_by={s['bound_by']}")
     print(f"  recomputed selection digest {meta['config']['selection_digest'][:16]}")
     # Gate counts are deliberately NOT printed here. They belong to d3_join,
     # which states them against a manifest denominator; printing them from a

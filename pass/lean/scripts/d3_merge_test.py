@@ -37,9 +37,12 @@ _spec.loader.exec_module(sweep)
 RESULT_COLS = sweep.RESULT_COLS
 
 
+MANIFEST = {"path": None, "digest": ""}
+
+
 def base_cfg():
     return {
-        "manifest": "", "manifest_digest": "m" * 64,
+        "manifest": MANIFEST["path"], "manifest_digest": MANIFEST["digest"],
         "samples": 32, "timeout": 3600, "native": False,
         "artifact_digest": "a" * 64, "tool_digest": "t" * 64,
         "lean_version": "Lean 4.31.0", "lean_bin_version": "Lean 4.31.0",
@@ -76,7 +79,8 @@ def stage(d: pathlib.Path, name, keys, tier="small", run_id=None, cfg_over=None,
         rows = rows_over(rows)
     cfg = base_cfg()
     cfg["tier"] = tier
-    cfg["selection_digest"] = hashlib.sha256(("|".join(sorted(keys))).encode()).hexdigest()
+    cfg["selection_digest"] = sweep.selection_digest(
+        [type("T", (), {"key": k, "module": mods[k], "sha256": certs[k]})() for k in keys])
     cfg.update(cfg_over or {})
     tsv = d / f"{name}.tsv"
     with tsv.open("w") as fh:
@@ -84,6 +88,7 @@ def stage(d: pathlib.Path, name, keys, tier="small", run_id=None, cfg_over=None,
         for r in rows:
             fh.write("\t".join(str(r.get(c, "")) for c in RESULT_COLS) + "\n")
     meta = {"config": cfg, "run_id": run_id or f"RUN-{name}",
+            "results_sha256": hashlib.sha256(tsv.read_bytes()).hexdigest(),
             "scheduling": {"jobs": 1, "only": "", "limit": 0, "one_per_tier": False,
                            "order_by": "", "order_by_digest": ""},
             "cert_sha256": certs, "modules": mods, "targets": len(keys)}
@@ -92,10 +97,12 @@ def stage(d: pathlib.Path, name, keys, tier="small", run_id=None, cfg_over=None,
     return tsv
 
 
-def run_merge(out, *inputs):
-    return subprocess.run(
-        [sys.executable, str(MERGE), "--out", str(out), "--inputs", *[str(i) for i in inputs]],
-        cwd=ROOT, capture_output=True, text=True, timeout=120)
+def run_merge(out, *inputs, lock=None):
+    cmd = [sys.executable, str(MERGE), "--out", str(out),
+           "--inputs", *[str(i) for i in inputs]]
+    if lock:
+        cmd += ["--source-lock", str(lock)]
+    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=120)
 
 
 def rows_of(p):
@@ -126,6 +133,16 @@ def main() -> int:
         return r
 
     try:
+        # Every fixture points at a REAL manifest: the merger requires the file to
+        # exist and to hash to the recorded digest.
+        _man = tmp / "fixture_manifest.tsv"
+        _lines = ["# fixture manifest", "module\tcert_available\tsha256\tnodes"]
+        for k in ["k1", "k2", "k3", "k4", "k5", "k9"]:
+            _lines.append(f"{k}\t1\t{hashlib.sha256(k.encode()).hexdigest()}\t10")
+        _man.write_text("\n".join(_lines) + "\n")
+        MANIFEST["path"] = str(_man)
+        MANIFEST["digest"] = hashlib.sha256(_man.read_bytes()).hexdigest()
+
         # ---- 1. the positive case ----------------------------------------
         a = stage(tmp, "a", ["k1", "k2"], tier="tiny", run_id="RUN-A")
         b = stage(tmp, "b", ["k3", "k4"], tier="small", run_id="RUN-B")
@@ -168,15 +185,7 @@ def main() -> int:
               "and a sidecar whose source order is canonical, not CLI order")
 
         # ---- 3. the merged table is usable by d3_join ----------------------
-        man = tmp / "man.tsv"
-        lines = ["# fixture manifest", "module\tcert_available\tsha256\tnodes"]
-        for k in ["k1", "k2", "k3", "k4", "k5"]:
-            av = 0 if k == "k5" else 1
-            lines.append(f"{k}\t{av}\t{hashlib.sha256(k.encode()).hexdigest() if av else ''}\t10")
-        man.write_text("\n".join(lines) + "\n")
-        mcfg = json.loads((out.with_suffix(".tsv.meta.json")).read_text())
-        mcfg["config"]["manifest_digest"] = hashlib.sha256(man.read_bytes()).hexdigest()
-        (out.with_suffix(".tsv.meta.json")).write_text(json.dumps(mcfg, indent=2))
+        man = _man
         j = subprocess.run(
             [sys.executable, str(JOIN), "--manifest", str(man), "--results", str(out),
              "--meta", str(out.with_suffix(".tsv.meta.json")), "--out", str(tmp / "j.tsv")],
@@ -184,7 +193,7 @@ def main() -> int:
         jr = rows_of(tmp / "j.tsv") if (tmp / "j.tsv").is_file() else []
         agreed = [x for x in jr if x["agree"] == "1"]
         check("join_accepts_merged_table",
-              len(jr) == 5 and len(agreed) == 4
+              len(jr) == 6 and len(agreed) == 4
               and all(x["proof"] == "na" for x in jr),
               f"d3_join reads the merged table: {len(jr)} rows, {len(agreed)} agree, "
               f"proof na throughout", j.stdout[-300:] + j.stderr[-300:])
@@ -277,6 +286,10 @@ def main() -> int:
               "an unparseable sidecar is refused", rbad.stderr[-300:])
 
         # overlapping SELECTIONS with disjoint rows
+        # Now SUBSUMED: with exact row/selection equality required, overlapping
+        # selections imply overlapping rows. The fixture is kept because it is
+        # refused for a reason that is itself worth pinning -- the sidecar's
+        # recorded selection_digest does not match its own cert/module maps.
         oa = stage(tmp, "os_a", ["k1"], run_id="RUN-A",
                    meta_over={"cert_sha256": {k: hashlib.sha256(k.encode()).hexdigest()
                                               for k in ("k1", "k9")},
@@ -288,26 +301,44 @@ def main() -> int:
                               "modules": {k: f"{k}_gate" for k in ("k2", "k9")},
                               "targets": 2})
         ros = run_merge(tmp / "os.tsv", oa, ob)
-        check("reject_overlapping_selection",
-              ros.returncode == 2 and "OVERLAPPING SELECTIONS" in ros.stderr,
-              "disjoint ROWS but overlapping selections are still refused -- the "
-              "union digest would describe a set neither run measured",
+        check("reject_forged_selection_digest",
+              ros.returncode == 2 and "cert/module maps hash to" in ros.stderr,
+              "a sidecar whose selection_digest disagrees with its own cert/module "
+              "maps is refused, so a stale or forged digest cannot enter the union",
               ros.stderr[-300:])
 
-        # tampering: a row edited after the stage was written
-        # The property is not "the merge fails" -- an edited row can still be
-        # well-formed. It is that the merged sidecar pins the SOURCE FILE digest,
-        # so the edit is visible by comparing against the stage as it was.
+        # a stage whose rows do not COVER its selection -- the partial-run case
+        pa = stage(tmp, "pr_a", ["k1", "k2"], run_id="RUN-A")
+        pb = stage(tmp, "pr_b", ["k3", "k4"], run_id="RUN-B")
+        # drop one row, leaving the sidecar claiming two targets
+        _l = pb.read_text().splitlines()
+        pb.write_text("\n".join(_l[:-1]) + "\n")
+        _mb = json.loads((tmp / "pr_b.tsv.meta.json").read_text())
+        _mb["results_sha256"] = hashlib.sha256(pb.read_bytes()).hexdigest()
+        (tmp / "pr_b.tsv.meta.json").write_text(json.dumps(_mb, indent=2))
+        rpr = run_merge(tmp / "pr.tsv", pa, pb)
+        check("reject_partial_stage",
+              rpr.returncode == 2 and "produced no row" in rpr.stderr,
+              "a stage whose rows do not cover its selection is refused: its "
+              "unmeasured targets would vanish from the merged denominator",
+              rpr.stderr[-300:])
+
+        # ---- tampering is REFUSED, not recorded --------------------------
+        # Recording an edited row's post-edit hash is not authentication: it
+        # describes whatever the file now is. The sidecar binds the results bytes
+        # at the moment they are written, so an edit with an unchanged sidecar is
+        # a contradiction the merge must refuse.
         ta = stage(tmp, "tp_a", ["k1", "k2"], run_id="RUN-A")
         tb = stage(tmp, "tp_b", ["k3", "k4"], run_id="RUN-B")
-        before_sha = hashlib.sha256(tb.read_bytes()).hexdigest()
-        r_before = run_merge(tmp / "tp1.tsv", ta, tb)
-        m_before = json.loads((tmp / "tp1.tsv.meta.json").read_text())
-        rec_before = {x["results"]: x["results_sha256"] for x in m_before["sources"]}
-        # Edit a DATA row's verdict, not the header -- `agree` is also a column
-        # name, and renaming the column makes the table malformed, which the
-        # merger refuses for a different (also correct) reason. The property
-        # under test is about a well-formed but altered row.
+        r_clean = run_merge(tmp / "tp1.tsv", ta, tb)
+        check("bound_source_merges", r_clean.returncode == 0,
+              "an unmodified, bound stage merges normally", r_clean.stderr[-300:])
+        m_clean = json.loads((tmp / "tp1.tsv.meta.json").read_text())
+        check("binding_recorded",
+              set(m_clean["source_binding"]) == {"sidecar"}
+              and all(x["bound_by"] == "sidecar" for x in m_clean["sources"]),
+              "and the merged sidecar records HOW each source was bound")
+
         _lines = tb.read_text().splitlines()
         _vi = _lines[1].split("\t").index("verdict")
         for _i in range(2, len(_lines)):
@@ -316,24 +347,100 @@ def main() -> int:
                 _f[_vi] = "agree_TAMPERED"
                 _lines[_i] = "\t".join(_f)
                 break
-        tb.write_text("\n".join(_lines) + "\n")
-        after_sha = hashlib.sha256(tb.read_bytes()).hexdigest()
-        r_after = run_merge(tmp / "tp2.tsv", ta, tb)
-        m_after = json.loads((tmp / "tp2.tsv.meta.json").read_text())
-        rec_after = {x["results"]: x["results_sha256"] for x in m_after["sources"]}
-        check("tamper_changes_recorded_source_digest",
-              r_before.returncode == 0 and r_after.returncode == 0
-              and before_sha != after_sha
-              and rec_before.get(tb.name) == before_sha
-              and rec_after.get(tb.name) == after_sha
-              and rec_before.get(tb.name) != rec_after.get(tb.name),
-              "editing a source row changes the digest the merged sidecar records, "
-              "so the edit is detectable after the fact",
-              f"{str(rec_before)[:150]} -> {str(rec_after)[:150]}")
-        check("tamper_not_silently_identical",
-              hashlib.sha256((tmp / "tp1.tsv").read_bytes()).hexdigest()
-              != hashlib.sha256((tmp / "tp2.tsv").read_bytes()).hexdigest(),
-              "and the merged output itself differs, so the two cannot be confused")
+        tb.write_text("\n".join(_lines) + "\n")          # sidecar left untouched
+        r_tamper = run_merge(tmp / "tp2.tsv", ta, tb)
+        check("reject_tampered_rows",
+              r_tamper.returncode == 2 and "rows changed after the run" in r_tamper.stderr
+              and not (tmp / "tp2.tsv").exists(),
+              "an edited row with an unchanged sidecar is REFUSED and nothing is "
+              "written", r_tamper.stderr[-300:])
+
+        # ...and a self-contradictory row is refused even when properly bound
+        cb = stage(tmp, "ct_b", ["k3", "k4"], run_id="RUN-B",
+                   rows_over=lambda rs: [dict(rs[0], verdict="agree_TAMPERED")] + rs[1:])
+        rct = run_merge(tmp / "ct.tsv", ta, cb)
+        check("reject_row_contradicting_its_gates",
+              rct.returncode == 2 and "contradicts itself" in rct.stderr,
+              "a row whose verdict disagrees with its own gates is refused even "
+              "with a valid binding", rct.stderr[-300:])
+
+        # ---- the legacy source-lock path ----------------------------------
+        la = stage(tmp, "lk_a", ["k1", "k2"], run_id="RUN-A")
+        lb = stage(tmp, "lk_b", ["k3", "k4"], run_id="RUN-B")
+        for f in (tmp / "lk_a.tsv.meta.json", tmp / "lk_b.tsv.meta.json"):
+            d = json.loads(f.read_text()); d.pop("results_sha256", None)
+            f.write_text(json.dumps(d, indent=2))          # simulate a legacy sidecar
+        r_nolock = run_merge(tmp / "lk0.tsv", la, lb)
+        check("reject_legacy_without_lock",
+              r_nolock.returncode == 2 and "no --source-lock entry" in r_nolock.stderr,
+              "a legacy sidecar with no results_sha256 and no lock is refused",
+              r_nolock.stderr[-300:])
+
+        lock = tmp / "lock.tsv"
+        lock.write_text("file\tresults_sha256\tsidecar_sha256\n" + "".join(
+            f"{f.name}\t{hashlib.sha256(f.read_bytes()).hexdigest()}\t"
+            f"{hashlib.sha256((tmp / (f.name + '.meta.json')).read_bytes()).hexdigest()}\n"
+            for f in (la, lb)))
+        r_lock = run_merge(tmp / "lk1.tsv", la, lb, lock=lock)
+        m_lock = json.loads((tmp / "lk1.tsv.meta.json").read_text()) if r_lock.returncode == 0 else {}
+        check("legacy_lock_authenticates",
+              r_lock.returncode == 0
+              and set(m_lock.get("source_binding", [])) == {"source-lock"},
+              "a matching source lock authenticates a legacy stage, and the merged "
+              "sidecar says the binding came from the lock", r_lock.stderr[-300:])
+
+        bad_lock = tmp / "badlock.tsv"
+        bad_lock.write_text(lock.read_text().replace(
+            hashlib.sha256(lb.read_bytes()).hexdigest(), "f" * 64, 1))
+        r_badlock = run_merge(tmp / "lk2.tsv", la, lb, lock=bad_lock)
+        check("reject_legacy_lock_mismatch",
+              r_badlock.returncode == 2 and "source lock expects" in r_badlock.stderr,
+              "a lock whose expected digest does not match the file is refused",
+              r_badlock.stderr[-300:])
+
+        # duplicate run_id
+        da = stage(tmp, "dup_a", ["k1", "k2"], run_id="SAME")
+        db = stage(tmp, "dup_b", ["k3", "k4"], run_id="SAME")
+        rdup = run_merge(tmp / "dup.tsv", da, db)
+        check("reject_duplicate_run_id",
+              rdup.returncode == 2 and "share run_id" in rdup.stderr,
+              "two inputs sharing a run_id are refused", rdup.stderr[-300:])
+
+        # missing manifest
+        ma = stage(tmp, "mm_a", ["k1", "k2"], run_id="RUN-A",
+                   cfg_over={"manifest": str(tmp / "gone.tsv")})
+        mb = stage(tmp, "mm_b", ["k3", "k4"], run_id="RUN-B",
+                   cfg_over={"manifest": str(tmp / "gone.tsv")})
+        rmm = run_merge(tmp / "mm.tsv", ma, mb)
+        check("reject_missing_manifest",
+              rmm.returncode == 2 and "not readable" in rmm.stderr,
+              "an absent manifest is refused, not skipped -- the denominator "
+              "cannot be the easiest input to omit", rmm.stderr[-300:])
+
+        # header damage
+        ha = stage(tmp, "hd_a", ["k1", "k2"], run_id="RUN-A")
+        hb = stage(tmp, "hd_b", ["k3", "k4"], run_id="RUN-B")
+        _hl = hb.read_text().splitlines()
+        _hl[1] = _hl[1].replace("\tverdict\t", "\tverdict\tverdict\t", 1)
+        hb.write_text("\n".join(_hl) + "\n")
+        _hm = json.loads((tmp / "hd_b.tsv.meta.json").read_text())
+        _hm["results_sha256"] = hashlib.sha256(hb.read_bytes()).hexdigest()
+        (tmp / "hd_b.tsv.meta.json").write_text(json.dumps(_hm, indent=2))
+        rhd = run_merge(tmp / "hd.tsv", ha, hb)
+        check("reject_header_mismatch",
+              rhd.returncode == 2 and "does not match RESULT_COLS" in rhd.stderr,
+              "a duplicated/extra/missing header column is refused -- DictReader "
+              "would hide all three", rhd.stderr[-300:])
+
+        refuses("reject_missing_required_config",
+                "a sidecar missing a required semantic field is refused "
+                "(two absent fields would compare EQUAL)",
+                cfg_over={"lean_toolchain": ""})
+        refuses("reject_proof_not_na", "a row claiming proof credit is refused",
+                rows_over=lambda rs: [dict(rs[0], proof="ok")] + rs[1:])
+        refuses("reject_samples_mismatch",
+                "a row whose requested_samples disagrees with the config is refused",
+                rows_over=lambda rs: [dict(rs[0], requested_samples="8")] + rs[1:])
 
         # ---- 6. the classification must cover every key the RUNNER emits ----
         # Fixtures only contain keys this test author thought of, and temp/ is

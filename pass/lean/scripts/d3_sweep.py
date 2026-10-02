@@ -1583,6 +1583,18 @@ def main() -> int:
                 for k, (was, now) in mismatch.items():
                     print(f"    {k}: was {was!r}, now {now!r}", file=sys.stderr)
                 return 2
+            # The rows must be the rows this sidecar was written for.  A table
+            # edited between runs is not a table to resume from.
+            prev_results_sha = prev.get("results_sha256", "")
+            if prev_results_sha:
+                actual = hashlib.sha256(out_path.read_bytes()).hexdigest()
+                if actual != prev_results_sha:
+                    print(f"--resume REFUSED: {out_path.name} hashes to "
+                          f"{actual[:16]} but its sidecar records "
+                          f"{prev_results_sha[:16]}. The results table changed "
+                          f"after the run that wrote it.", file=sys.stderr)
+                    return 2
+
             prev_hashes = prev.get("cert_sha256", {})
             live = {t.key: t for t in targets}
             seen = set()
@@ -1696,8 +1708,14 @@ def main() -> int:
 
     def checkpoint():
         write_rows_atomic(out_path, RESULT_COLS, rows)
+        # BIND the results bytes to the sidecar, written in this order so the
+        # digest describes the file that now exists.  Without it a results table
+        # can be edited after the run and nothing contradicts it: the sidecar
+        # vouches for the certificates and the toolchain, but says nothing about
+        # the ROWS.  `--resume` and `d3_merge.py` both check this.
         _atomic_write(meta_path, json.dumps(
             {"config": cfg, "scheduling": sched, "run_id": RUN_ID,
+             "results_sha256": hashlib.sha256(out_path.read_bytes()).hexdigest(),
              "aggregate_rss_peak_kb": _RSS_PEAK["kb"],
              "aggregate_rss_tripped_kb": _RSS_PEAK["tripped_at_kb"],
              "aggregate_rss_killed_kb": _RSS_PEAK["killed_at_kb"],
