@@ -161,7 +161,7 @@ private def qValueType : ValueType → MetaM Term
 /-- The residual expression as its own CONSTRUCTOR syntax -- the dual of
 `ReifyGen.rhsSyntax`, which builds the value-level application instead.  Total
 over the datatype: a missing case is a compile error here, not a silent gap. -/
-private def qExpr : ResidualExpr → MetaM Term
+def qExpr : ResidualExpr → MetaM Term
   | .rsum w n a     => do `(Compiler.ResidualExpr.rsum $(qNat w) $(qNat n) $(← qRefs a))
   | .rmult w a      => do `(Compiler.ResidualExpr.rmult $(qNat w) $(← qRefs a))
   | .rand w a       => do `(Compiler.ResidualExpr.rand $(qNat w) $(← qRefs a))
@@ -195,6 +195,13 @@ private def qBinding (b : ResidualBinding) : MetaM Term := do
 private def qBindings (bs : Array ResidualBinding) : MetaM Term := do
   let xs ← bs.mapM qBinding
   `(#[$xs,*])
+
+/-- The same bindings as a LIST literal.  `runBindings` walks a list, and
+`runBindings_step` matches a `cons`; stating the walk over `#[...].toList` leaves
+an `Array.toList` the rewrite cannot see through. -/
+def qBindingsList (bs : Array ResidualBinding) : MetaM Term := do
+  let xs ← bs.mapM qBinding
+  `([$xs,*])
 
 /-- The VALUE-level right-hand side of a binding, written against named earlier
 values rather than an environment lookup.
@@ -408,6 +415,263 @@ def elabEmitBindingValues : CommandElab := fun stx => do
               $(mkIdent ``CertVal.asBV):ident, $(mkIdent ``CertVal.asMem):ident,
               $valIds,*]))
     logInfo m!"emit_binding_values: {R.bindings.size} value(s) emitted, {eqNm} proved"
+  | _ => throwUnsupportedSyntax
+
+/-- `prove_reified_incr <designCert> as <name>` — the opt-in INCREMENTAL path.
+
+Emits, for a COMBINATIONAL design:
+
+    <F>.val0 .. <F>.valN   one named value per binding, each naming its
+                           predecessors rather than inlining them
+    <F>                    the fast function, built DIRECTLY from those names
+    <F>.walk               runBindings reaches an environment whose terminal
+                           slots hold exactly those values -- proved one binding
+                           at a time, every intermediate environment generalized
+    <F>.eq_compileAndRun   <F> = compileAndRun D
+    <F>.correct            <F> = interpretDesign D
+
+`reify_design` / `prove_reified` are untouched and remain the path every sweep
+uses; this exists to be compared against them.
+
+WHY THE FAST FUNCTION IS EMITTED HERE rather than bridged to `reify_design`'s.
+An earlier shape proved `<F>.vals : reified = <result built from the names>`, and
+that proof has to unfold every value definition -- which rebuilds the inlined DAG
+and costs exactly what the single `simp` costs. Emitting the function FROM the
+names removes the bridge: its body already mentions them, so no proof has to
+relate the two spellings.
+
+The walk carries, at each step, ONLY the facts `liveAfter` says are still needed:
+the universal source agreements (one each for bit vectors and memory images) and
+one fact per live produced slot. A dead value's fact is not transported, which is
+what keeps the cost at O(N * live-cutwidth) rather than O(N^2).
+
+FAILS LOUDLY on flops and memory updates: `denoteResidual` folds `flopNext` over
+`flopUpdates`, and nothing here proves anything about it. -/
+syntax (name := proveReifiedIncr) "prove_reified_incr " ident " as " ident : command
+
+@[command_elab proveReifiedIncr]
+def elabProveReifiedIncr : CommandElab := fun stx => do
+  match stx with
+  | `(command| prove_reified_incr $d:ident as $f:ident) => do
+    let R ← liftTermElabM do
+      let dExpr ← Term.elabTerm d none
+      let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
+      match compileDesign cert with
+      | .error e => throwError "prove_reified_incr: compileDesign refused {d}"
+      | .ok R    => pure R
+    if !R.flopUpdates.isEmpty || !R.memoryUpdates.isEmpty then
+      throwError "prove_reified_incr: {d} has {R.flopUpdates.size} flop update(s) and \
+        {R.memoryUpdates.size} memory update(s). The incremental walk covers the \
+        COMBINATIONAL result only: `denoteResidual` folds `flopNext` over the flop \
+        updates and nothing here proves anything about it. Refusing rather than \
+        emitting a theorem whose statement looks complete."
+    let nsrc  := R.sources.size
+    let nb    := R.bindings.size
+    let base  := f.getId
+    let e0    := mkIdent (Name.mkSimple "e0")
+    let iId   := mkIdent (Name.mkSimple "i")
+    let stId  := mkIdent (Name.mkSimple "st")
+    let live  := ReifyProof.liveAfter R
+    -- ---- values -----------------------------------------------------------
+    for k in [0 : nb] do
+      let b   := R.bindings[k]!
+      let nm  := mkIdent (base ++ Name.mkSimple s!"val{k}")
+      let rhs ← liftTermElabM (ReifyProof.valSyntax base nsrc b.rhs)
+      match b.ty with
+      | .bv _    => elabCommand (← `(command| def $nm ($e0 : Compiler.SlotEnv) : BV := $rhs))
+      | .mem _ _ => elabCommand (← `(command| def $nm ($e0 : Compiler.SlotEnv) : Int → BV := $rhs))
+    -- ---- the fast function, straight from the names -----------------------
+    let envT ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)
+    let outs : Array Term ← R.outputs.mapM fun o => do
+      let v ← liftTermElabM (ReifyProof.valRefAt base nsrc o.slot envT)
+      `(bv_resize $(quote o.width) $v)
+    elabCommand (← `(command|
+      def $f ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState) :
+          Compiler.RuntimeResult :=
+        { outputs := #[$outs,*], nextState := { flops := #[], mems := #[] } }))
+    -- ---- the residual, and its shape, as named facts -----------------------
+    let rNm := mkIdent (base ++ `R)
+    elabCommand (← `(command|
+      def $rNm : Compiler.ResidualProgram :=
+        match Compiler.compileDesign $d with | .ok R => R | .error _ => default))
+    let okNm := mkIdent (base ++ `compilesOk)
+    elabCommand (← `(command| theorem $okNm : Compiler.compilesOk $d = true := by rfl))
+    let hRNm := mkIdent (base ++ `hR)
+    elabCommand (← `(command|
+      theorem $hRNm : Compiler.compileDesign $d = .ok $rNm :=
+        Compiler.compileDesign_ok_witness $d $okNm))
+    let bindsLit ← liftTermElabM (ReifyProof.qBindings R.bindings)
+    let bindsList ← liftTermElabM (ReifyProof.qBindingsList R.bindings)
+    let bNm := mkIdent (base ++ `R_bindings)
+    elabCommand (← `(command| theorem $bNm : ($rNm).bindings = $bindsLit := rfl))
+    let sNm := mkIdent (base ++ `R_sources)
+    elabCommand (← `(command| theorem $sNm : ($rNm).sources = ($d).sources := rfl))
+    -- ---- the walk ----------------------------------------------------------
+    let envN  := fun (k : Nat) => mkIdent (Name.mkSimple s!"e{k}")
+    let szN   := fun (k : Nat) => mkIdent (Name.mkSimple s!"hsz{k}")
+    let agN   := fun (k : Nat) => mkIdent (Name.mkSimple s!"hag{k}")
+    let agmN  := fun (k : Nat) => mkIdent (Name.mkSimple s!"hagm{k}")
+    let bFact := fun (k sl : Nat) => mkIdent (Name.mkSimple s!"hb{k}_{sl}")
+    let valN  := fun (k : Nat) => mkIdent (base ++ Name.mkSimple s!"val{k}")
+    let termSlots := (R.outputs.map (fun o => o.slot)).toList.eraseDups
+    -- the promised conclusion, one conjunct per distinct output slot
+    -- The STATEMENT must name the actual source environment, not the proof's
+    -- local `e0`: `e0` is introduced by `set` inside the proof and is not bound
+    -- where the theorem is stated. `set` then folds these occurrences into `e0`,
+    -- so the walk's facts match without any further rewriting.
+    let mkFact : Nat → Nat → TermElabM Term := fun k sl =>
+      if sl < nsrc then
+        `(Compiler.refBV $(envN k) $(quote sl) = Compiler.refBV $envT $(quote sl))
+      else `(Compiler.refBV $(envN k) $(quote sl) = $(valN (sl - nsrc)) $envT)
+    let walkNm := mkIdent (base ++ `walk)
+    let mut tacs : Array (TSyntax `tactic) := #[]
+    let he0 := mkIdent (Name.mkSimple "he0")
+    tacs := tacs.push (← `(tactic| intro $iId:ident $stId:ident))
+    tacs := tacs.push (← `(tactic|
+      set $(envN 0):ident : Compiler.SlotEnv :=
+        Compiler.sourceEnvArr ($d).sources $iId $stId with $he0:ident))
+    tacs := tacs.push (← `(tactic|
+      have $(szN 0):ident : ($(envN 0)).size = $(quote nsrc) := by
+        rw [$he0:ident, Compiler.sourceEnvArr_size]; rfl))
+    tacs := tacs.push (← `(tactic|
+      have $(agN 0):ident : ∀ j, j < ($(envN 0)).size →
+        Compiler.refBV $(envN 0) j = Compiler.refBV $(envN 0) j := fun _ _ => rfl))
+    tacs := tacs.push (← `(tactic|
+      have $(agmN 0):ident : ∀ j, j < ($(envN 0)).size →
+        Compiler.refMem $(envN 0) j = Compiler.refMem $(envN 0) j := fun _ _ => rfl))
+    for k in [0 : nb] do
+      let b := R.bindings[k]!
+      let isMem := match b.ty with | .mem _ _ => true | .bv _ => false
+      let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
+      let pushV ← liftTermElabM (if isMem then `(CertVal.mem ($(valN k) $(envN 0)))
+                                 else `(CertVal.bv ($(valN k) $(envN 0))))
+      -- operand reads: source agreement, or a live produced-slot fact
+      let reads := ReifyProof.exprRefsTyped b.rhs
+      let mut simpArgs : Array (TSyntax `Lean.Parser.Tactic.simpLemma) := #[]
+      simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| Compiler.denoteExpr))
+      simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| Compiler.refBVs))
+      simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| List.map_cons))
+      simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| List.map_nil))
+      simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| $(valN k):ident))
+      for (sl, m) in reads do
+        if sl < nsrc then
+          let ag := if m then agmN k else agN k
+          simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma|
+            $ag:ident $(quote sl) (by simp only [$(szN 0):ident]; omega)))
+        else
+          simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| $(bFact k sl):ident))
+      let hvN := mkIdent (Name.mkSimple s!"hv{k}")
+      tacs := tacs.push (← `(tactic|
+        have $hvN:ident : Compiler.denoteExpr $(envN k) $rhsQ = $pushV := by
+          simp only [$simpArgs,*]))
+      tacs := tacs.push (← `(tactic| rw [Compiler.runBindings_step _ _ $(envN k) _ $hvN]))
+      tacs := tacs.push (← `(tactic|
+        have $(szN (k+1)):ident : (($(envN k)).push $pushV).size = $(quote (nsrc + k + 1)) := by
+          simp [$(szN k):ident]))
+      tacs := tacs.push (← `(tactic|
+        have $(agN (k+1)):ident := Compiler.srcAgree_push (base := $(envN 0)) $pushV
+          (by simp only [$(szN k):ident, $(szN 0):ident]; omega) $(agN k):ident))
+      tacs := tacs.push (← `(tactic|
+        have $(agmN (k+1)):ident := Compiler.srcAgreeMem_push (base := $(envN 0)) $pushV
+          (by simp only [$(szN k):ident, $(szN 0):ident]; omega) $(agmN k):ident))
+      -- transport exactly the live set, and nothing else
+      let mut keep : Array (TSyntax `Lean.Parser.Tactic.locationWildcard) := #[]
+      let mut names : Array Ident := #[szN (k+1), agN (k+1), agmN (k+1)]
+      for (sl, m) in live[k]! do
+        if sl == nsrc + k then
+          let fnm := bFact (k+1) sl
+          let selfLem := if m then mkIdent ``Compiler.refMem_push_self
+                         else mkIdent ``Compiler.refBV_push_self
+          let proj := if m then mkIdent ``CertVal.asMem else mkIdent ``CertVal.asBV
+          let readFn := if m then mkIdent ``Compiler.refMem else mkIdent ``Compiler.refBV
+          tacs := tacs.push (← `(tactic|
+            have $fnm:ident : $readFn (($(envN k)).push $pushV) $(quote sl)
+                = $(valN k) $(envN 0) := by
+              have hh := $selfLem:ident $(envN k) $pushV
+              rw [$(szN k):ident] at hh
+              simpa [$proj:ident] using hh))
+          names := names.push fnm
+        else
+          let fnm := bFact (k+1) sl
+          let lem := if m then mkIdent ``Compiler.bindAgreeMem_push
+                     else mkIdent ``Compiler.bindAgree_push
+          tacs := tacs.push (← `(tactic|
+            have $fnm:ident := $lem:ident (env := $(envN k)) $pushV $(quote sl) _
+              (by simp only [$(szN k):ident]; omega) $(bFact k sl):ident))
+          names := names.push fnm
+      let _ := keep
+      let locs : Array Ident := names
+      tacs := tacs.push (← `(tactic|
+        generalize (($(envN k)).push $pushV) = $(envN (k+1)):ident at $[$locs:ident]* ⊢))
+    -- close
+    let anonCtor : Array Term ← termSlots.toArray.mapM fun sl =>
+      if sl < nsrc then `($(agN nb) $(quote sl) (by simp only [$(szN 0):ident]; omega))
+      else `($(bFact nb sl))
+    tacs := tacs.push (← `(tactic|
+      exact ⟨$(envN nb), by simp [Compiler.runBindings], $anonCtor,*⟩))
+    let factTerms ← liftTermElabM (termSlots.toArray.mapM (mkFact nb))
+    -- the promised conjunction, built right-associated
+    let conj ← liftTermElabM (match factTerms.toList with
+      | []      => `(True)
+      | x :: xs => xs.foldlM (fun acc t => `($acc ∧ $t)) x)
+    let eNm := envN nb
+    elabCommand (← `(command|
+      theorem $walkNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
+        ∃ $eNm:ident,
+          Compiler.runBindings $bindsList
+            (Compiler.sourceEnvArr ($d).sources $iId $stId) = $eNm
+          ∧ $conj := by
+        $tacs*))
+    -- ---- shape lemmas, then the two theorems -------------------------------
+    let btlNm := mkIdent (base ++ `R_bindings_toList)
+    elabCommand (← `(command| theorem $btlNm : ($rNm).bindings.toList = $bindsList := rfl))
+    let oProjNm := mkIdent (base ++ `R_outputs_proj)
+    elabCommand (← `(command|
+      theorem $oProjNm : ($rNm).outputs = ($d).outputs.map Compiler.compileOutput := rfl))
+    let fProjNm := mkIdent (base ++ `R_flops_proj)
+    elabCommand (← `(command|
+      theorem $fProjNm : ($rNm).flopUpdates = ($d).flops.map Compiler.compileFlop := rfl))
+    let mProjNm := mkIdent (base ++ `R_mems_proj)
+    elabCommand (← `(command|
+      theorem $mProjNm : ($rNm).memoryUpdates = ($d).memories.map Compiler.compileMemory := rfl))
+    let hNames : Array Ident := (Array.ofFn (n := termSlots.length) (fun t => t.val)).map
+      fun t => mkIdent (Name.mkSimple s!"hterm{t}")
+    -- `rfl` projections of the certificate, so the final `simp` never has to
+    -- unfold the whole `DesignCert` literal to see that there are no flops.
+    let dfNm := mkIdent (base ++ `D_flops)
+    elabCommand (← `(command| theorem $dfNm : ($d).flops = #[] := rfl))
+    let dmNm := mkIdent (base ++ `D_mems)
+    elabCommand (← `(command| theorem $dmNm : ($d).memories = #[] := rfl))
+    let doNm := mkIdent (base ++ `D_outputs)
+    let outsLit ← liftTermElabM do
+      let os ← R.outputs.mapM fun o =>
+        `({ slot := $(quote o.slot), width := $(quote o.width) })
+      `(#[$os,*])
+    elabCommand (← `(command| theorem $doNm : ($d).outputs = $outsLit := rfl))
+    let hSimp ← hNames.mapM fun h => `(Lean.Parser.Tactic.simpLemma| $h:ident)
+    let eqNm := mkIdent (base ++ `eq_compileAndRun)
+    let eVar := mkIdent (Name.mkSimple "eW")
+    let hEq  := mkIdent (Name.mkSimple "hEqW")
+    elabCommand (← `(command|
+      theorem $eqNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
+          $f $iId $stId = Compiler.compileAndRun $d $iId $stId := by
+        intro $iId:ident $stId:ident
+        obtain ⟨$eVar:ident, $hEq:ident, $hNames,*⟩ := $walkNm $iId $stId
+        simp only [Compiler.compileAndRun, $hRNm:ident, Compiler.denoteResidual,
+                   $sNm:ident, $btlNm:ident]
+        rw [$hEq:ident]
+        simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
+        simp [$f:ident, $d:ident, Compiler.compileOutput, $dfNm:ident, $dmNm:ident,
+              $doNm:ident, $hSimp,*]))
+    let corNm := mkIdent (base ++ `correct)
+    elabCommand (← `(command|
+      theorem $corNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
+          $f $iId $stId = Compiler.interpretDesign $d $iId $stId := by
+        intro $iId:ident $stId:ident
+        rw [$eqNm:ident $iId $stId]
+        exact Compiler.compileAndRun_correct $d $okNm $iId $stId))
+    logInfo m!"prove_reified_incr: {nb} value(s), {f} emitted, {termSlots.length} \
+      terminal slot(s), max live cut {(live.map (fun a => a.size)).foldl max 0}"
   | _ => throwUnsupportedSyntax
 
 /-- `audit_axioms <thm>` — FAIL the build unless `<thm>`'s axiom set is within

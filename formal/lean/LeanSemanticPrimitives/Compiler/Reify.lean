@@ -104,4 +104,16 @@ theorem bindAgree_push {env : SlotEnv} (v : CertVal) (j : Nat) (val : BV)
     refBV (env.push v) j = val := by
   rw [refBV_push_lt env v j hj]; exact h
 
+/-- The memory-image counterpart of `bindAgree_push`.
+
+`srcAgreeMem_push` transports the UNIVERSAL memory agreement over the source
+block; this transports ONE already-written memory-valued slot.  A binding whose
+`ty` is `.mem` produces an `Int → BV`, and carrying it across a push with
+`bindAgree_push` would be a type error -- so a walk over any design with a
+memory-valued intermediate needs this and nothing else will do. -/
+theorem bindAgreeMem_push {env : SlotEnv} (v : CertVal) (j : Nat) (val : Int → BV)
+    (hj : j < env.size) (h : refMem env j = val) :
+    refMem (env.push v) j = val := by
+  rw [refMem_push_lt env v j hj]; exact h
+
 end Compiler
