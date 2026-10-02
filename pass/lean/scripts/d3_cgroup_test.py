@@ -23,6 +23,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -74,7 +75,12 @@ if mode == "selfkill137":
     # read as a memory kill.
     os.kill(os.getpid(), 9)
 if mode == "sleep":
-    import time as _t; _t.sleep(float(os.environ.get("SLEEP_S", "30")))
+    # SLEEP_ONLY restricts the sleep to one module, so a multi-target case can
+    # have one FAST probe and one slow one. Unset means every probe sleeps,
+    # which is what the timeout cases rely on.
+    _only = os.environ.get("SLEEP_ONLY", "")
+    if not _only or _only in pathlib.Path(sys.argv[-1]).stem:
+        import time as _t; _t.sleep(float(os.environ.get("SLEEP_S", "30")))
 mb = int(os.environ.get("ALLOC_MB", "0"))
 if mb:
     buf = bytearray(mb * 1024 * 1024)
@@ -172,15 +178,30 @@ def main() -> int:
             "    self._probe = not name.startswith('detect-')\n"
             "m.Cgroup.__init__ = _ni\n")
 
-        def run_patched(patch_src, extra, out, env_extra=None, timeout=180):
+        def run_patched(patch_src, extra, out, env_extra=None, timeout=180,
+                        certs=None, jobs="1"):
             drv = tmp / f"patch_{out.replace('.', '_')}.py"
             drv.write_text(PATCH % (str(SWEEP), patch_src))
             env = dict(os.environ, LAKE=str(stub), TMPDIR=str(tmp))
             env.update(env_extra or {})
             return subprocess.run(
-                [sys.executable, str(drv), "--certs", str(cdir),
-                 "--out", str(tmp / out), "--jobs", "1", "--timeout", "120", *extra],
+                [sys.executable, str(drv), "--certs", str(certs or cdir),
+                 "--out", str(tmp / out), "--jobs", jobs, "--timeout", "120", *extra],
                 cwd=ROOT, env=env, capture_output=True, text=True, timeout=timeout)
+
+        # Reports failure from destroy() while really removing the directory, so
+        # the case leaves nothing behind for the leftover scan, and only for the
+        # PROBE's cgroup so detection still passes for the right reason.
+        LEAK_PATCH = (MARK_PROBE +
+                      "_d = m.Cgroup.destroy\n"
+                      "def _nd(self):\n"
+                      "    ok = _d(self)\n"
+                      "    return False if getattr(self, '_probe', False) else ok\n"
+                      "m.Cgroup.destroy = _nd\n")
+
+        def run_dir_of(stderr):
+            mo = re.search(r"dir=(\S+)", stderr)
+            return pathlib.Path(mo.group(1)) if mo else None
 
         def run_forced(extra, out, env_extra=None):
             env = dict(os.environ, LAKE=str(stub), TMPDIR=str(tmp))
@@ -440,12 +461,7 @@ def main() -> int:
             # That must fail closed rather than warn and return a verdict.
             # The patch really does remove the directory and merely REPORTS
             # failure, so the case leaves nothing behind for the leftover scan.
-            r = run_patched(MARK_PROBE +
-                            "_d = m.Cgroup.destroy\n"
-                            "def _nd(self):\n"
-                            "    ok = _d(self)\n"
-                            "    return False if getattr(self, '_probe', False) else ok\n"
-                            "m.Cgroup.destroy = _nd\n",
+            r = run_patched(LEAK_PATCH,
                             ["--enforce", "cgroup", "--kill-over-rss-kb", "400000"],
                             "leak.tsv", env_extra={"ALLOC_MB": "32"})
             rows = (rt.rows_of(tmp / "leak.tsv")
@@ -463,6 +479,86 @@ def main() -> int:
                   f"and still reports the peak it read before the failed removal "
                   f"(peak={rows[0]['cgroup_peak_kb'] if rows else None!r})",
                   str(rows[:1])[:400])
+            check("cleanup_failure_status_is_fatal",
+                  rows and rows[0]["run_status"] == "fatal_cleanup"
+                  and rows[0]["verdict"] == "runner_error",
+                  f"carrying the dedicated fatal status without losing "
+                  f"runner_error (got {rows[0]['run_status'] if rows else None!r})",
+                  str(rows[:1])[:300])
+
+            # ---- cleanup failure is FATAL TO THE RUN, not to one row -------------
+            # Two targets, jobs=1. A leaked cgroup keeps its memory charge, so the
+            # budget every LATER probe is scheduled against is already wrong.
+            # Carrying on would run the rest of a cohort under a silently
+            # weakened limit while each row still got an ordinary verdict.
+            cdir2 = tmp / "certs2"
+            rt.make_certs(cdir2, ["aaa", "bbb"])
+            r2 = run_patched(LEAK_PATCH,
+                             ["--enforce", "cgroup", "--kill-over-rss-kb", "400000"],
+                             "fatal2.tsv", env_extra={"ALLOC_MB": "32"}, certs=cdir2)
+            rows2 = (rt.rows_of(tmp / "fatal2.tsv")
+                     if (tmp / "fatal2.tsv").is_file() else [])
+            meta2 = (json.loads((tmp / "fatal2.tsv.meta.json").read_text())
+                     if (tmp / "fatal2.tsv.meta.json").is_file() else {})
+            check("fatal_cleanup_exits_nonzero",
+                  r2.returncode != 0 and "ABORTED" in r2.stderr,
+                  f"a two-target run aborts on the first cleanup failure "
+                  f"(rc={r2.returncode})", r2.stderr[-400:])
+            check("fatal_cleanup_keeps_failing_row",
+                  len(rows2) == 1 and rows2[0]["run_status"] == "fatal_cleanup"
+                  and rows2[0]["cgroup_peak_kb"].isdigit(),
+                  f"the failing row is PRESERVED as the diagnosis, unlike a drifted "
+                  f"row ({len(rows2)} row(s))", str(rows2)[:300])
+            # The strong form of "the second never launched": its probe file is
+            # written INSIDE run_one, after the shutdown guard, so an absent probe
+            # proves the target never got as far as being prepared -- not merely
+            # that its row was dropped.
+            rd = run_dir_of(r2.stderr)
+            probes = sorted(p.name for p in (rd / "probes").iterdir()) if rd else []
+            check("fatal_cleanup_second_never_launched",
+                  len(probes) == 1 and meta2.get("targets") == 2,
+                  f"the queued target never launched: {len(probes)} probe(s) prepared "
+                  f"of {meta2.get('targets')} selected -- the jobs=1 worker had already "
+                  f"picked it up, so only the shutdown guard could stop it "
+                  f"({probes})", str(probes)[:200])
+            check("fatal_cleanup_sidecar_marked",
+                  meta2.get("config", {}).get("aborted_run") is True
+                  and meta2["config"].get("aborted_reason") == "fatal_cleanup"
+                  and meta2["config"].get("aborted_at_target"),
+                  f"and the sidecar carries the GENERIC abort marker with its reason "
+                  f"(reason={meta2.get('config', {}).get('aborted_reason')!r}, at "
+                  f"{meta2.get('config', {}).get('aborted_at_target')!r})",
+                  json.dumps(meta2.get("config", {}))[:300])
+            check("fatal_cleanup_not_mislabelled_drift",
+                  not meta2.get("config", {}).get("aborted_artifact_drift"),
+                  "without borrowing the artifact-drift marker, which would report "
+                  "the wrong cause")
+
+            # ---- a LIVE worker is torn down, not waited on -----------------------
+            # jobs=2 with the second probe sleeping 60 s. The fast probe fails
+            # cleanup first; if teardown did not kill the sleeper the run could
+            # only finish by waiting it out, so the wall time is the assertion.
+            t_live = time.time()
+            r3 = run_patched(LEAK_PATCH,
+                             ["--enforce", "cgroup", "--kill-over-rss-kb", "400000"],
+                             "fatal_live.tsv",
+                             env_extra={"ALLOC_MB": "32", "STUB_MODE": "sleep",
+                                        "SLEEP_S": "60", "SLEEP_ONLY": "bbb_gate"},
+                             certs=cdir2, jobs="2", timeout=120)
+            live_s = time.time() - t_live
+            rd3 = run_dir_of(r3.stderr)
+            probes3 = sorted(p.name for p in (rd3 / "probes").iterdir()) if rd3 else []
+            # BOTH halves are needed. The wall time alone would also pass if the
+            # sleeper had never started -- the shutdown guard would have stopped
+            # it and nothing would have been torn down. Two prepared probes prove
+            # it got past that guard and was live, so only teardown can explain
+            # the run ending in under a second.
+            check("fatal_cleanup_tears_down_live_worker",
+                  r3.returncode != 0 and live_s < 30 and len(probes3) == 2,
+                  f"an already-running probe is killed rather than waited out: "
+                  f"{len(probes3)} probe(s) launched, run ended in {live_s:.1f}s "
+                  f"against a 60 s sleeper (rc={r3.returncode})",
+                  f"{probes3} {r3.stderr[-300:]}")
 
             # ---- no cgroup and no process survives any of the above --------------
             leftover = [d.name for d in base.iterdir()

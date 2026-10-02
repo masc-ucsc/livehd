@@ -267,6 +267,11 @@ def main() -> int:
                 cfg_over={"runner_selftest": True})
         refuses("reject_drifted_run", "an artifact-drift run is refused",
                 cfg_over={"aborted_artifact_drift": True})
+        refuses("reject_aborted_run", "a run marked aborted_run is refused on the "
+                "GENERIC marker, so an abort reason the merger has never heard of "
+                "still cannot be merged",
+                cfg_over={"aborted_run": True, "aborted_reason": "fatal_cleanup",
+                          "aborted_at_target": "k3"})
         refuses("reject_dirty_worktree", "a dirty-worktree run is refused",
                 cfg_over={"worktree_dirty": True})
         refuses("reject_unknown_config_key",

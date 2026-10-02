@@ -62,7 +62,7 @@ SEMANTIC_KEYS = [
 # Present only on a run that aborted on artifact drift.  Classified so the
 # unknown-key check does not fire on them; such runs are refused earlier anyway.
 ABORT_KEYS = ["aborted_artifact_drift", "aborted_at_target", "aborted_phase",
-              "artifact_digest_end"]
+              "artifact_digest_end", "aborted_run", "aborted_reason"]
 
 # May differ: these describe WHICH targets ran and in what order, not what a row
 # means.  Anything in `config` outside both lists is unknown to this merger and
@@ -251,6 +251,12 @@ class Source:
             self._bad(f"is marked aborted_artifact_drift (at "
                       f"{self.cfg.get('aborted_at_target')!r}): its rows came from a "
                       f"run whose build artifacts changed underneath it.")
+        if self.cfg.get("aborted_run"):
+            # The generic marker, checked beside the drift-specific one so a
+            # reason added later refuses by default rather than by being listed.
+            self._bad(f"is marked aborted_run (reason "
+                      f"{self.cfg.get('aborted_reason')!r}, at "
+                      f"{self.cfg.get('aborted_at_target')!r}): the run was void.")
         if self.cfg.get("worktree_dirty"):
             self._bad("ran from a DIRTY worktree, so its rows are not reproducible. "
                       "A merged table is presented as authenticated evidence and "

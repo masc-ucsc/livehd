@@ -343,6 +343,31 @@ def main() -> int:
                   and _col in ps.stderr,
                   f"a resume missing {_col} is refused", f, ps.stderr[-300:])
 
+        # ---- the GENERIC aborted_run marker is refused everywhere -------------
+        # A void run's rows must not be extended by a resume or credited by a
+        # join. Tested on the generic key rather than a specific reason, because
+        # the point of the key is that a reason added later refuses by default.
+        ab_out = tmp / "aborted_res.tsv"
+        shutil.copy(out, ab_out)
+        _am = json.loads(side.read_text())
+        _am["config"]["aborted_run"] = True
+        _am["config"]["aborted_reason"] = "fatal_cleanup"
+        _am["config"]["aborted_at_target"] = blocks[0]
+        _am["results_sha256"] = hashlib.sha256(ab_out.read_bytes()).hexdigest()
+        (tmp / "aborted_res.tsv.meta.json").write_text(json.dumps(_am, indent=2))
+        pa = sweep(tmp, man, cdir, ab_out, extra=["--resume"])
+        check("resume_refuses_aborted_run",
+              pa.returncode != 0 and "aborted_run" in pa.stderr,
+              "resume refuses rows from a run marked aborted_run", f,
+              pa.stderr[-300:])
+        ja = subprocess.run([sys.executable, str(JOIN), "--manifest", str(man),
+                             "--results", str(ab_out), "--out", str(tmp / "ab_join.tsv"),
+                             "--meta", str(tmp / "aborted_res.tsv.meta.json")],
+                            cwd=ROOT, capture_output=True, text=True, timeout=120)
+        check("join_refuses_aborted_run",
+              ja.returncode != 0 and "aborted_run" in ja.stderr,
+              "and the join refuses to credit them", f, ja.stderr[-300:])
+
         # an UNBOUND sidecar (legacy, no results_sha256) must not resume a
         # manifest run: the next checkpoint would re-bind rows nothing vouches for
         unb_out = tmp / "unbound_res.tsv"

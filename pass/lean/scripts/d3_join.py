@@ -241,6 +241,14 @@ def main() -> int:
                 f"{cfg.get('aborted_at_target')!r}, phase {cfg.get('aborted_phase')!r}): "
                 f"its rows came from a run whose build artifacts changed and cannot be "
                 f"joined or credited")
+        if cfg.get("aborted_run"):
+            # The generic marker.  A join is exactly where a void run's rows
+            # would otherwise acquire the authority of a milestone table, so an
+            # abort reason this code has never heard of must still refuse.
+            raise JoinError(
+                f"the sweep is marked aborted_run (reason "
+                f"{cfg.get('aborted_reason')!r}, at {cfg.get('aborted_at_target')!r}): "
+                f"the run was void and its rows cannot be joined or credited")
         # Basename equality proves nothing: two files can share a name and
         # differ in every row. Authenticate the manifest's BYTES.
         want_digest = cfg.get("manifest_digest", "")

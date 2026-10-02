@@ -83,6 +83,18 @@ GATES = ["cert", "compile", "reify", "typecheck", "sim", "checker", "agree", "pr
 # timeout as finished work.
 NONTERMINAL_SCHEDULER_STATUSES = {"deferred", "rss_killed", "timeout"}
 
+# Per-probe failures that invalidate the WHOLE run rather than one row.
+#
+# A cgroup that cannot be removed keeps its memory charge, so the budget every
+# LATER probe is scheduled against is already wrong.  Reporting one
+# `runner_error` row and carrying on would let the rest of a cohort run under a
+# silently weakened limit while each row still receives an ordinary verdict --
+# the same shape of hazard as artifact drift, and it gets the same treatment:
+# stop launching, cancel what is queued, tear down what is live, mark the
+# sidecar, and exit nonzero.  Unlike drift, the failing row IS kept, because it
+# is the diagnosis.
+FATAL_RUN_STATUSES = {"fatal_cleanup"}
+
 # ---------------------------------------------------------------------------
 # Child lifetime.
 #
@@ -1219,6 +1231,16 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
               "mutable_out", "mutable_flop", "mutable_mem", "distinct_obs"):
         row[k] = ""
 
+    if _SHUTDOWN.is_set():
+        # The run is already ending -- a fatal cleanup failure, a drift abort or
+        # a signal.  `run_group` would return 143 and the gates would all read
+        # zero, which `classify` would present as a design result; a deferred row
+        # says what actually happened and stays nonterminal for `--resume`.
+        # This is what stops a QUEUED target at jobs=1, where cancelling futures
+        # cannot help: the next task is already submitted.
+        return deferred_row(target, samples,
+                            "the run was shutting down before this target launched")
+
     if _RSS_STOP.is_set():
         return deferred_row(target, samples,
                             f"aggregate RSS cap reached before launch "
@@ -1320,7 +1342,12 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         # measurement survives the error row.
         print(f"d3_sweep: WARNING: could not remove the cgroup for {m}; it still "
               f"holds a memory charge", file=sys.stderr)
-        row["run_status"], row["verdict"] = "error", "runner_error"
+        # BEFORE this worker returns, so that at jobs=1 the already-submitted
+        # next task hits the guard at the top of `run_one` and never reaches
+        # `run_group`.  Cancelling futures in `main` happens too late for a task
+        # the executor has already picked up.
+        _SHUTDOWN.set()
+        row["run_status"], row["verdict"] = "fatal_cleanup", "runner_error"
         row["detail"] = (f"the per-probe cgroup could not be removed, so its "
                          f"memory charge still counts against the budget and the "
                          f"next probe's limit would be weakened"
@@ -2106,6 +2133,16 @@ def main() -> int:
                       f"phase {prev['config'].get('aborted_phase')!r}). Those rows came from a "
                       f"run whose compiler changed; they cannot be extended.", file=sys.stderr)
                 return 2
+            if prev["config"].get("aborted_run"):
+                # The GENERIC marker, which covers every abort reason including
+                # ones added after this code was written.  Checked separately
+                # from the drift key above so that a reason this branch has never
+                # heard of still refuses rather than falling through.
+                print(f"--resume REFUSED: {meta_path.name} is marked aborted_run "
+                      f"(reason {prev['config'].get('aborted_reason')!r}, at "
+                      f"{prev['config'].get('aborted_at_target')!r}). The run was "
+                      f"void, so its rows cannot be extended.", file=sys.stderr)
+                return 2
             mismatch = {k: (prev["config"].get(k), v)
                         for k, v in cfg.items() if prev["config"].get(k) != v}
             if mismatch:
@@ -2348,6 +2385,12 @@ def main() -> int:
                 cfg["aborted_artifact_drift"] = True
                 cfg["aborted_at_target"] = t.key
                 cfg["aborted_phase"] = r["drift"]
+                # The GENERIC marker alongside the specific one, so a consumer
+                # has a single key to refuse on and does not have to learn every
+                # abort reason that will ever exist.  Drift keeps its own key for
+                # the readers that already know it.
+                cfg["aborted_run"] = True
+                cfg["aborted_reason"] = "artifact_drift"
                 with lock:
                     checkpoint()
                 print(f"\nABORTED: build artifacts changed {r['drift']} {t.key} "
@@ -2355,6 +2398,30 @@ def main() -> int:
                       f"already written are preserved for diagnosis but must NOT be "
                       f"reported, and the tainted row was not recorded.",
                       file=sys.stderr, flush=True)
+                break
+
+            if r.get("run_status") in FATAL_RUN_STATUSES:
+                # Same treatment as drift -- the run is void from here on -- with
+                # one deliberate difference: the failing row IS kept, because
+                # unlike a drifted row it is not tainted evidence about a design,
+                # it is the diagnosis of what broke the run.  `_SHUTDOWN` was
+                # already set by the worker, so nothing new can launch; this
+                # cancels what is queued and kills what is still live.
+                aborted = True
+                for f2 in futs:
+                    f2.cancel()
+                _teardown()
+                cfg["aborted_run"] = True
+                cfg["aborted_reason"] = r["run_status"]
+                cfg["aborted_at_target"] = t.key
+                r["tier"] = tier_of(t.nodes)
+                with lock:
+                    rows.append(r)
+                    checkpoint()
+                print(f"\nABORTED: {r.get('detail') or r['run_status']} at {t.key}. "
+                      f"The run is void: the failing row is preserved for diagnosis "
+                      f"and rows already written are kept, but the output must NOT "
+                      f"be reported as evidence.", file=sys.stderr, flush=True)
                 break
 
             r["tier"] = tier_of(t.nodes)
