@@ -147,6 +147,41 @@ def main() -> int:
         forced = tmp / "force_unavail.py"
         forced.write_text(FORCE)
 
+        # The same idea as `run_forced`, but with the patch supplied per case, so
+        # a failure mode that cannot be provoked from outside -- an unreadable
+        # `memory.events`, a cgroup that refuses to be removed -- can be exercised
+        # WITHOUT a seam in the runner. The real class and the real wrapper run;
+        # one method is replaced in the child only.
+        PATCH = ("import importlib.util,sys\n"
+                 "s=importlib.util.spec_from_file_location('sw',%r)\n"
+                 "m=importlib.util.module_from_spec(s); s.loader.exec_module(m)\n"
+                 "%s\n"
+                 "sys.argv=['d3_sweep.py']+sys.argv[1:]\n"
+                 "sys.exit(m.main())\n")
+
+        # Detection builds a Cgroup of its own (named `detect-...`) and requires
+        # `oom_killed() is False` and `destroy()` to succeed. A patch applied to
+        # the whole class therefore breaks DETECTION, the run refuses, and the
+        # case under test never executes -- which is what the first version of
+        # these cases did. Tagging at construction confines the fault to the
+        # probe's cgroup, so the preflight still passes for the real reason.
+        MARK_PROBE = (
+            "_init = m.Cgroup.__init__\n"
+            "def _ni(self, base, name, max_kb):\n"
+            "    _init(self, base, name, max_kb)\n"
+            "    self._probe = not name.startswith('detect-')\n"
+            "m.Cgroup.__init__ = _ni\n")
+
+        def run_patched(patch_src, extra, out, env_extra=None, timeout=180):
+            drv = tmp / f"patch_{out.replace('.', '_')}.py"
+            drv.write_text(PATCH % (str(SWEEP), patch_src))
+            env = dict(os.environ, LAKE=str(stub), TMPDIR=str(tmp))
+            env.update(env_extra or {})
+            return subprocess.run(
+                [sys.executable, str(drv), "--certs", str(cdir),
+                 "--out", str(tmp / out), "--jobs", "1", "--timeout", "120", *extra],
+                cwd=ROOT, env=env, capture_output=True, text=True, timeout=timeout)
+
         def run_forced(extra, out, env_extra=None):
             env = dict(os.environ, LAKE=str(stub), TMPDIR=str(tmp))
             env.update(env_extra or {})
@@ -353,6 +388,81 @@ def main() -> int:
                   f"a probe killed by --timeout under cgroup enforcement is a `timeout` "
                   f"row, not rss_killed (got {rows[0]['run_status'] if rows else 'NO ROW'})",
                   str(rows[:1])[:300])
+
+            # ---- a measured peak survives a row that turns into runner_error ------
+            # Three ways the semantic row can become unusable AFTER the kernel's
+            # accounting was read successfully. The reading is gone once the
+            # cgroup directory is removed, so in each case it must be carried out
+            # on the row rather than discarded with the verdict.
+            #
+            # (a) `peak_kb()` succeeds, `oom_killed()` does not. The row is
+            # correctly `runner_error` -- an unknown OOM state cannot be told
+            # apart from a design result -- but the peak WAS measured.
+            r = run_patched(MARK_PROBE +
+                            "_ok = m.Cgroup.oom_killed\n"
+                            "m.Cgroup.oom_killed = lambda self: (\n"
+                            "    None if getattr(self, '_probe', False) else _ok(self))\n",
+                            ["--enforce", "cgroup", "--kill-over-rss-kb", "400000"],
+                            "peak_noevents.tsv", env_extra={"ALLOC_MB": "32"})
+            rows = (rt.rows_of(tmp / "peak_noevents.tsv")
+                    if (tmp / "peak_noevents.tsv").is_file() else [])
+            check("peak_kept_when_events_unreadable",
+                  rows and rows[0]["verdict"] == "runner_error"
+                  and rows[0]["cgroup_peak_kb"].isdigit()
+                  and int(rows[0]["cgroup_peak_kb"]) > 0,
+                  f"unreadable memory.events still fails closed, and keeps the peak "
+                  f"it DID read (verdict={rows[0]['verdict'] if rows else None!r}, "
+                  f"peak={rows[0]['cgroup_peak_kb'] if rows else None!r})",
+                  str(rows[:1])[:400] or r.stderr[-300:])
+
+            # (b) An exception thrown AFTER the probe and after accounting. It
+            # unwinds past every return in `run_one`, so `main` synthesizes the
+            # row -- and the synthesized row has to recover the peak from the
+            # side channel, because the cgroup it came from is already gone.
+            r = run(["--enforce", "cgroup", "--kill-over-rss-kb", "400000"],
+                    env_extra={"ALLOC_MB": "32", "D3_TEST_RAISE_ON": "aaa_gate"},
+                    out="peak_raise.tsv")
+            rows = (rt.rows_of(tmp / "peak_raise.tsv")
+                    if (tmp / "peak_raise.tsv").is_file() else [])
+            check("peak_kept_when_row_synthesized",
+                  rows and rows[0]["verdict"] == "runner_error"
+                  and "D3_TEST_RAISE_ON" in rows[0]["detail"]
+                  and rows[0]["cgroup_peak_kb"].isdigit()
+                  and int(rows[0]["cgroup_peak_kb"]) > 0,
+                  f"a post-probe exception yields a synthesized runner_error row that "
+                  f"still carries the peak "
+                  f"(peak={rows[0]['cgroup_peak_kb'] if rows else None!r})",
+                  str(rows[:1])[:400] or r.stderr[-300:])
+
+            # (c) Cleanup failure. A cgroup that will not die keeps its memory
+            # charge, so the budget the run is scheduling against is now wrong
+            # and the NEXT probe would launch under a partly-consumed limit.
+            # That must fail closed rather than warn and return a verdict.
+            # The patch really does remove the directory and merely REPORTS
+            # failure, so the case leaves nothing behind for the leftover scan.
+            r = run_patched(MARK_PROBE +
+                            "_d = m.Cgroup.destroy\n"
+                            "def _nd(self):\n"
+                            "    ok = _d(self)\n"
+                            "    return False if getattr(self, '_probe', False) else ok\n"
+                            "m.Cgroup.destroy = _nd\n",
+                            ["--enforce", "cgroup", "--kill-over-rss-kb", "400000"],
+                            "leak.tsv", env_extra={"ALLOC_MB": "32"})
+            rows = (rt.rows_of(tmp / "leak.tsv")
+                    if (tmp / "leak.tsv").is_file() else [])
+            check("cleanup_failure_fails_closed",
+                  rows and rows[0]["verdict"] == "runner_error"
+                  and "could not be removed" in rows[0]["detail"]
+                  and "could not remove the cgroup" in r.stderr,
+                  f"a cgroup that will not die is a runner_error, not an ordinary "
+                  f"verdict (got {rows[0]['verdict'] if rows else None!r})",
+                  str(rows[:1])[:400] or r.stderr[-300:])
+            check("cleanup_failure_keeps_peak",
+                  rows and rows[0]["cgroup_peak_kb"].isdigit()
+                  and int(rows[0]["cgroup_peak_kb"]) > 0,
+                  f"and still reports the peak it read before the failed removal "
+                  f"(peak={rows[0]['cgroup_peak_kb'] if rows else None!r})",
+                  str(rows[:1])[:400])
 
             # ---- no cgroup and no process survives any of the above --------------
             leftover = [d.name for d in base.iterdir()

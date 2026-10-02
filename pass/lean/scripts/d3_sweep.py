@@ -1176,6 +1176,17 @@ def _mark_timeout(row: dict, timeout: int) -> None:
         row["detail"] = f"timeout {timeout}s"
 
 
+# Cgroup peaks read before the cgroup was destroyed, keyed by `target.key`.
+#
+# A side channel, because the peak is read in `run_one`'s `finally` while the row
+# that reports it may be synthesized by `main` after an exception unwound past
+# every `return` in between.  The kernel's reading is gone once the directory is
+# removed, so losing it to an unrelated crash would mean losing it for good.
+# Written once per probe from the worker that owns that target, and read only
+# after that worker's future has completed.
+_CG_PEAK: dict = {}
+
+
 def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: str = ""):
     cert, m = target.path, target.module
     probe_dir = RUN_DIR / ("probes_native" if native else "probes")
@@ -1279,6 +1290,19 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             # so no cgroup survives its probe.
             cg_peak, cg_oom = cg.peak_kb(), cg.oom_killed()
             cg_leaked = not cg.destroy()
+            if cg_peak is not None:
+                # Recorded the INSTANT it is read, so every path out of here
+                # already carries it -- including the ones that go on to return
+                # `runner_error`.  A reading the kernel already took must not be
+                # discarded because the semantic row turned out to be unusable:
+                # `peak_kb()` can succeed while `oom_killed()` fails, and the
+                # peak is the whole reason the cgroup existed.
+                row["cgroup_peak_kb"] = str(cg_peak)
+                # The one exit this function does not own: an exception below
+                # unwinds past every `return`, and `main` synthesizes the row
+                # instead.  Keyed by target so the synthesized row can recover
+                # what was measured before the throw.
+                _CG_PEAK[target.key] = cg_peak
     if os.environ.get("D3_TEST_RAISE_ON") == m:
         # Test seam, placed where the real hazard is: AFTER the probe ran, in the
         # window where timing capture, log writing and gate parsing happen.  main
@@ -1286,10 +1310,23 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         # still be subject to the artifact check.
         raise RuntimeError("D3_TEST_RAISE_ON (post-probe)")
     if cg_leaked:
-        # Said out loud rather than swallowed: a cgroup that will not die still
-        # holds its memory charge against the budget.
+        # Fail CLOSED.  Cleanup is part of the enforcement guarantee rather than
+        # housekeeping after it: a cgroup that will not die keeps its memory
+        # charge, so the budget this run is scheduling against is now wrong and
+        # the NEXT probe would launch under a limit that is already partly
+        # consumed.  Warning and returning an ordinary verdict -- what this did
+        # before -- let the run continue on a weakened guarantee while reporting
+        # a design result.  `cgroup_peak_kb` is already set above, so the
+        # measurement survives the error row.
         print(f"d3_sweep: WARNING: could not remove the cgroup for {m}; it still "
               f"holds a memory charge", file=sys.stderr)
+        row["run_status"], row["verdict"] = "error", "runner_error"
+        row["detail"] = (f"the per-probe cgroup could not be removed, so its "
+                         f"memory charge still counts against the budget and the "
+                         f"next probe's limit would be weakened"
+                         + (f" (an OOM kill was also observed)" if cg_oom else ""))
+        row["wall_s"] = f"{time.time() - t0:.2f}"
+        return row
 
     if cg is not None and (cg_oom is None or cg_peak is None):
         # The kernel's own accounting could not be read, so whether this probe
@@ -1627,9 +1664,28 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
 # peak at all.  `cgroup_peak_kb` is a separate column rather than a relabelling
 # of `max_rss_kb`, because the two are not substitutes and a run wants both.
 #
-# Resume-OPTIONAL: a row written before this schema is semantically complete
-# without them, so `--resume` fills them with `unknown-pre-schema` rather than
-# refusing the run or guessing `time-max-rss`.
+# CHARGE IS NOT RSS, and the gap is large enough to mislead a reader who treats
+# the columns as comparable.  `memory.peak` counts what THIS cgroup was charged;
+# a file page already in the page cache is not re-charged to a second cgroup
+# that maps it.  Lean mmaps ~5.8 GB of Mathlib oleans, so on a warm cache those
+# pages are charged to whoever faulted them in first and not to the probe.
+# Measured on `tima_adder`: max_rss_kb 1,566,244 kB against cgroup_peak_kb
+# 168,212 kB, with ZERO major page faults -- the probe read nothing from disk.
+# The synthetic allocator, which uses ANONYMOUS memory, shows near agreement
+# instead (38,232 vs 44,176 kB), because anon is always charged to the allocator.
+# Consequence for limit-setting: `--kill-over-rss-kb N` becomes `memory.max = N`,
+# which bounds CHARGE, not RSS, and is therefore more permissive in RSS terms on
+# a warm cache than the same N as a sampled RSS cap.  It still bounds what
+# actually blows up here, since elaboration heap is anonymous.
+#
+# Part of the schema `--resume` requires in full, like every other column.  An
+# earlier revision made them resume-optional and backfilled reused rows with
+# `unknown-pre-schema`, which was unreachable dead code: `TOOL_FILES` includes
+# this file, so a table genuinely written before these columns necessarily
+# carries a different `tool_digest` and is refused by the CONFIG comparison long
+# before any column is inspected.  The only way to reach the exception was to
+# fabricate a table that cannot exist.  Migrating a real old run is an offline
+# job for a migration tool, not something `--resume` should do silently.
 PROVENANCE_COLS = ("max_rss_source", "cgroup_peak_kb")
 
 # `max_rss_kb` came from `/usr/bin/time -v`: the maximum over the wait tree.
@@ -1640,10 +1696,6 @@ SRC_CGROUP = "cgroup-memory-peak-exact-accounted"
 # `max_rss_kb` holds the sampled aggregate at the moment of the kill: a LOWER
 # BOUND, because the sampler can miss a peak between two samples.
 SRC_SAMPLED = "sampled-aggregate-lower-bound"
-# Reused by `--resume` from a row that predates `PROVENANCE_COLS`.  Named rather
-# than left blank so it cannot be read as "no measurement": there IS a figure in
-# `max_rss_kb`, and what is unknown is which instrument produced it.
-SRC_UNKNOWN = "unknown-pre-schema"
 
 
 def main() -> int:
@@ -2100,23 +2152,12 @@ def main() -> int:
                 header = next((l for l in fh if not l.startswith("#")), "")
             have_cols = header.rstrip("\n").split("\t")
             missing_cols = set(RESULT_COLS) - set(have_cols)
-            # `PROVENANCE_COLS` are the one exception to "the FULL schema".  They
-            # were added after these rows could have been written, and they
-            # ANNOTATE a measurement rather than being one, so refusing the whole
-            # resume over them would discard real terminal work to gain nothing.
-            # Every SEMANTIC column stays strictly required.
-            pre_schema = missing_cols & set(PROVENANCE_COLS)
-            missing_cols -= pre_schema
             if missing_cols:
                 print(f"--resume REFUSED: previous output is missing column(s) "
                       f"{sorted(missing_cols)}", file=sys.stderr)
                 return 2
-            if pre_schema:
-                print(f"--resume: previous output predates {sorted(pre_schema)}; "
-                      f"reused rows are marked max_rss_source={SRC_UNKNOWN!r} "
-                      f"rather than assumed to be {SRC_TIME!r}", file=sys.stderr)
             for r in prev_rows:
-                if any(r.get(c) is None for c in RESULT_COLS if c not in pre_schema):
+                if any(r.get(c) is None for c in RESULT_COLS):
                     print(f"--resume REFUSED: truncated row in {out_path.name} "
                           f"(target_key={r.get('target_key')!r})", file=sys.stderr)
                     return 2
@@ -2164,14 +2205,6 @@ def main() -> int:
                           f"{r.get('module')!r}, manifest resolves {t.module!r}",
                           file=sys.stderr)
                     return 2
-                for c in pre_schema:
-                    # Backfilled, never inferred.  A reused row's `max_rss_kb` is
-                    # almost certainly `/usr/bin/time`'s, since `--resume` only
-                    # reuses `done` rows and the other two instruments fill
-                    # `max_rss_kb` only on killed rows -- but "almost certainly"
-                    # is not a measurement, and this column exists precisely so
-                    # that the instrument is recorded rather than deduced.
-                    r[c] = SRC_UNKNOWN if c == "max_rss_source" else ""
                 done[key] = r
             print(f"--resume: reusing {len(done)} terminal row(s)", file=sys.stderr)
 
@@ -2267,6 +2300,12 @@ def main() -> int:
                           "verdict": "runner_error", "wall_s": "",
                           "drift": "", "launched": "unknown",
                           "detail": f"{type(e).__name__}: {e}"[:200]})
+                # Recover anything the probe's cgroup told us before the throw.
+                # The exception unwound past the returns that would normally
+                # carry it, but the reading itself was taken successfully and
+                # the cgroup it came from no longer exists to be re-read.
+                if t.key in _CG_PEAK:
+                    r["cgroup_peak_kb"] = str(_CG_PEAK[t.key])
 
             # UNCONDITIONAL, for every outcome: a normal result, a --native
             # result, and a synthesized `runner_error`.  Doing this inside
@@ -2281,10 +2320,17 @@ def main() -> int:
                     r["drift"] = {"1": "after", "0": "between"}.get(launched_hint, "unknown")
 
             if (not r.get("drift") and not synthesized
-                    and r.get("run_status") not in NONTERMINAL_SCHEDULER_STATUSES):
-                # A synthesized row already carries `runner_error`; recomputing a
-                # verdict from its all-zero gates would relabel a crash as the
-                # ordinary "no gate passed" outcome.
+                    and r.get("run_status") == "done"):
+                # Only a row that actually COMPLETED the gate pipeline has gates
+                # worth reading a verdict from.  Previously this excluded just
+                # `NONTERMINAL_SCHEDULER_STATUSES`, which let every `run_status`
+                # of `error` through: a `runner_error` returned by `run_one` --
+                # unreadable cgroup accounting, or a cgroup that would not die --
+                # was silently relabelled `cert` from the gates it had passed
+                # before the failure, turning a runner fault into a design
+                # result.  Requiring `done` names the real condition instead of
+                # enumerating the statuses that must be kept out, so a status
+                # added later is excluded by default rather than by memory.
                 r["verdict"] = ("native_ok" if (a.native and r.get("compile") == 1)
                                 else verdict(r))
 
