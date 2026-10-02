@@ -122,14 +122,13 @@ product's correctness gates.</p>
   staged by frontend risk: <strong>Stage 1 is PicoRV32 only</strong> (plain
   Verilog-2001, smallest, ISC) with a reconstructed firmware build, as the feasibility
   spike; DarkRISCV and SERV follow; Ibex and biRISC-V (heavy SystemVerilog, far beyond
-  the current 31-fixture sim scale) are explicitly stretch. Two prerequisite
-  deliverables the plan names because nothing existing covers them:</p>
+  the current 31-fixture sim scale) are explicitly stretch. The plan uses the
+  existing memory-preload support and requires signal-name mapping:</p>
 
 <ul>
-<li><strong>Memory preload.</strong> Deliver the first-class
-  <code>std.readmemh</code> / imported <code>$readmemh</code> path in
-  <a href="2m-readmemh.html">2m-readmemh</a>. Its simulation image must also
-  preserve the memory's external-initialization contract through synthesis;
+<li><strong>Memory preload.</strong> Use the implemented
+  <code>std.readmemh</code> / imported <code>$readmemh</code> path, which
+  preserves the memory's external-initialization contract through synthesis;
   initial-checkpoint injection can remain a harness technique.</li>
 <li><strong>Signal-name mapping.</strong> A published-VCD-name → catalog-name map per
   core, with a reported mapping-coverage percentage. lhd names can be synthetic
