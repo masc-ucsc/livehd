@@ -189,14 +189,37 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 # cones the old walk pulled in and nothing ever read).  Both now have zero
 # unreferenced nodes.
 #
-# The four Class-A modules, re-run end to end:
-#     minion_frontend_thread_buffer  compile 0  single_edge 0  emit 0  gates 0  ACCEPTED
-#     minion_frontend                compile 0  single_edge 0  emit 0  gates 0
-#     minion_dcache_top              compile 0  single_edge 0  emit 0  gates 0
-#     intpipe_csr_file               emit 7
-# Three of the four are unblocked.  intpipe_csr_file is NOT a memory cycle: it
-# refuses with `shl_147760 reads sext_5080`, a word-level loop with no Memory
-# in it, which is the packed-aggregate/split_selfref class and a separate fix.
+# The four Class-A modules, re-run end to end.  THREE ARE UNBLOCKED, and all
+# three reach checkDesign ACCEPTED with the requested 4 cycles executed -- not
+# merely "it emitted something":
+#
+#   module                         gen   verdict    nodes   wall_s   rss_kb  cycles
+#   minion_frontend_thread_buffer  0000  ACCEPTED   18840    372.9        -       -
+#   minion_dcache_top              0000  ACCEPTED   56878   4261.6        -       -
+#   minion_frontend                0000  ACCEPTED   76871   7412.0 12193620       4
+#   intpipe_csr_file               emit 7 -- still refused, see below
+#
+# `gen` is compile/single_edge/emit/static_gates, all zero.  minion_frontend's
+# full row (run 34fac25b5_20261001-154122_2876382_29371):
+#     sources=68189 nodes=76871 outputs=13 flops=281 mems=7 inputs=23
+#     check_ms=1293 step1_ms=11494 run_ms=42867 cycles=4
+#     wall_s=7412.0 rss_kb=12193620 (~11.6 GiB)
+#   reason is EMPTY: a harness timeout would say "harness limit, not a model
+#   refusal", and a refusal would carry its tag.  `.partial` and `.tmp` are both
+#   absent beside a present direct_sweep.tsv, which is what says the run
+#   finished rather than was interrupted.
+#   `rtl_evidence = not-measured`: a census stops after emit, so the LEC gate
+#   did not run for it.
+#
+# The other two ACCEPTED verdicts come from their sweeps' PROGRESS LOGS, not
+# from a TSV row -- both runs were stopped before the table was written, which
+# is what made direct_sweep persist rows incrementally.  Their timing columns
+# therefore do not exist.  thread_buffer is cheap to re-measure (372.9s);
+# dcache_top is 71 minutes and was deliberately not repeated.
+#
+# intpipe_csr_file is NOT a memory cycle: it refuses with
+# `shl_147760 reads sext_5080`, a word-level loop with no Memory in it, which
+# is the packed-aggregate/split_selfref class and a separate fix.
 #
 # GATES.  //pass/lean:cert_dag_order_test (the sort and the pool's fail-closed
 # validation, 18 cases), //lhd/tests:mem_read_write_feedback_test (four RTL and
