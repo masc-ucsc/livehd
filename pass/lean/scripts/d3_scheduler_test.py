@@ -35,6 +35,7 @@ import tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 SWEEP = HERE / "d3_sweep.py"
+JOIN = HERE / "d3_join.py"
 
 spec = importlib.util.spec_from_file_location("d3_runner_test", HERE / "d3_runner_test.py")
 rt = importlib.util.module_from_spec(spec)
@@ -334,6 +335,109 @@ def main() -> int:
               and ml.get("via_lake") is True and not ml.get("lean_bin"),
               "which binary ran is part of `config`, so a resume cannot mix the two",
               f"{md.get('lean_bin')!r} / {ml.get('via_lake')!r}")
+
+        # ---- 8f. a TIMEOUT is a limit outcome, not a design result ------------
+        # Learned from a real run: scoreboard_gate exceeded 3600 s, and because a
+        # timeout was not a nonterminal scheduler status its verdict was
+        # recomputed from its own all-zero gates into `cert` -- which reads as
+        # "this design passed only the first gate" -- while run_status=done made
+        # the row terminal, so --resume would have reused a timeout as finished
+        # work. Both halves are pinned here.
+        #
+        # Run WITH a manifest: an exploratory run records no cert_sha256, so the
+        # join could only ever call it `unauthenticated` and would never reach
+        # the timeout branch under test.
+        man8 = rt.make_manifest(tmp / "man8.tsv", certs)
+        out8f = tmp / "o8f.tsv"
+        TMO = ["--timeout", "1"]
+        d8f = rt.sweep(tmp, man8, cdir, out8f,
+                       extra=["--order-by", str(tbl), "--jobs", "1"] + TMO,
+                       env_extra={"STUB_DELAY": "4"})
+        rows8f = {r["module"]: r for r in rt.rows_of(out8f)}
+        tmo = {m for m, r in rows8f.items() if r["run_status"] == "timeout"}
+        check("timeout_is_its_own_status", d8f.returncode == 0 and len(tmo) >= 1,
+              f"a probe that runs past --timeout gets run_status=timeout: {sorted(tmo)}",
+              d8f.stderr[-700:])
+        # `tmo and` on every one of these: `all(...)` over an EMPTY set is True,
+        # so without it a build that produces no timeout row at all would pass
+        # every assertion below while testing nothing.
+        check("timeout_verdict_not_recomputed",
+              tmo and all(rows8f[m]["verdict"] == "timeout" for m in tmo),
+              "its verdict stays `timeout` instead of being recomputed from zeros",
+              str({m: rows8f[m]["verdict"] for m in tmo}))
+        check("timeout_not_cert",
+              tmo and all(rows8f[m]["verdict"] != "cert" for m in tmo),
+              "and is never `cert`, which would be a claim about the design")
+        check("timeout_launched_and_detailed",
+              tmo and all(rows8f[m]["launched"] == "1" and "timeout" in rows8f[m]["detail"]
+                          for m in tmo),
+              "launched=1 is kept (it DID run) and the detail still says timeout",
+              str({m: (rows8f[m]["launched"], rows8f[m]["detail"]) for m in tmo}))
+        # The resume MUST carry the same --timeout: `timeout` is part of the
+        # semantic config, so a resume at a different one is correctly refused
+        # and would be testing the config guard, not resumability.
+        rr = rt.sweep(tmp, man8, cdir, out8f,
+                      extra=["--resume", "--jobs", "1", "--dry-run"] + TMO)
+        check("timeout_resumable", tmo and set(order_of(rr.stdout)) >= tmo,
+              "and --resume (same config) runs it again rather than treating it as done",
+              rr.stdout[-400:] + rr.stderr[-400:])
+
+        # ---- 8f-native: the --native early return must not skip it ------------
+        # An earlier version of this fix classified the timeout only after the
+        # native branch had already returned, so a --native timeout stayed
+        # `done` and terminal -- the exact bug the non-native path was fixed for.
+        out8n = tmp / "o8n.tsv"
+        d8n = rt.sweep(tmp, man8, cdir, out8n,
+                       extra=["--jobs", "1", "--native"] + TMO,
+                       env_extra={"STUB_DELAY": "4"})
+        rows8n = {r["module"]: r for r in rt.rows_of(out8n)}
+        ntmo = {m for m, r in rows8n.items() if r["run_status"] == "timeout"}
+        check("native_timeout_nonterminal",
+              d8n.returncode == 0 and len(ntmo) >= 1
+              and all(rows8n[m]["verdict"] == "timeout" for m in ntmo),
+              f"a --native timeout is also run_status/verdict=timeout: {sorted(ntmo)}",
+              d8n.stderr[-700:])
+        check("native_timeout_not_native_ok",
+              ntmo and all(rows8n[m]["verdict"] != "native_ok" for m in ntmo),
+              "and never `native_ok`, which would credit a kernel-checked claim "
+              "that was never finished")
+
+        # ---- 8g. the three limit outcomes stay distinguishable ----------------
+        out8g = tmp / "o8g.tsv"
+        d8g = rt.sweep(tmp, man8, cdir, out8g,
+                       extra=["--order-by", str(tbl), "--jobs", "1",
+                              "--defer-over-rss-kb", "5000"] + TMO,
+                       env_extra={"STUB_DELAY": "4"})
+        rows8g = {r["module"]: r for r in rt.rows_of(out8g)}
+        kinds = {m: r["run_status"] for m, r in rows8g.items()}
+        check("limit_outcomes_distinct",
+              "timeout" in kinds.values() and "deferred" in kinds.values(),
+              f"timeout and deferred coexist in one run: {sorted(set(kinds.values()))}",
+              str(kinds))
+        check("deferred_never_launched",
+              any(k == "deferred" for k in kinds.values())
+              and any(k == "timeout" for k in kinds.values())
+              and all(rows8g[m]["launched"] == "0" for m, k in kinds.items() if k == "deferred")
+              and all(rows8g[m]["launched"] == "1" for m, k in kinds.items() if k == "timeout"),
+              "a deferred target was never launched; a timed-out one was")
+
+        # ---- 8h. the join gives a timeout zero credit, never a failure --------
+        j8 = subprocess.run(
+            [sys.executable, str(JOIN), "--manifest", str(man8), "--results", str(out8f),
+             "--out", str(tmp / "j8.tsv")],
+            cwd=ROOT, capture_output=True, text=True, timeout=120)
+        jt = [r for r in rt.rows_of(tmp / "j8.tsv") if r["status"] == "timeout"]
+        check("join_timeout_uncredited",
+              j8.returncode != 0 and jt
+              and all(all(r[g] == "0" for g in ("cert", "compile", "reify", "typecheck",
+                                                "sim", "checker", "agree"))
+                      and r["proof"] == "na" for r in jt),
+              f"zero credit on every gate for {len(jt)} timeout row(s), and the join "
+              f"refuses to call the table complete",
+              j8.stdout[-400:] + j8.stderr[-400:])
+        check("join_timeout_not_failure",
+              jt and all(r["verdict"] == "timeout" for r in jt),
+              "and records it as `timeout`, never as a design failure")
 
         # ---- 9. the descendant walk sees a grandchild the marker misses -------
         spec2 = importlib.util.spec_from_file_location("d3_sweep", SWEEP)

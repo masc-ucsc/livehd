@@ -164,11 +164,18 @@ def main() -> int:
                                  f"manifest records {want[:12]}")
                 row["status"] = "stale_result"
                 problems.append(f"{key}: certificate hash mismatch")
-            elif (r.get("run_status") or "").strip() in ("deferred", "rss_killed"):
-                # The scheduler declined to start it, so no gate was attempted.
-                # Crediting this as `ran` with an all-zero gate row would read as
-                # "it got nowhere" when the truth is "it was never tried", and
-                # the two have opposite implications for the milestone.
+            elif (r.get("run_status") or "").strip() in ("deferred", "rss_killed",
+                                                         "timeout"):
+                # A LIMIT outcome, not a design result: the scheduler declined
+                # to start it, or started it and killed it at a limit.  Either
+                # way there is no COMPLETE probe result, so no milestone credit.
+                #
+                # Not "no gate was judged": a timed-out probe may legitimately
+                # have emitted gate output before the kill, and the sweep KEEPS
+                # it as raw observation.  What is missing is a finished run, and
+                # that is what credit requires.  Crediting the partial row as
+                # `ran` would read as "it got nowhere" when the truth is "we
+                # stopped it" -- opposite implications for the milestone.
                 for g in CREDITABLE:
                     row[g] = 0
                 st = (r.get("run_status") or "").strip()
@@ -254,10 +261,12 @@ def main() -> int:
     for g in CREDITABLE:
         print(f"  {g:<10} {sum(1 for r in out_rows if r.get(g) == 1)}/{len(out_rows)}")
     print(f"  {'proof':<10} 0/{len(out_rows)} (na -- not attempted)")
-    ndef = sum(1 for r in out_rows if r.get("status") in ("deferred", "rss_killed"))
+    ndef = sum(1 for r in out_rows if r.get("status") in ("deferred", "rss_killed",
+                                                         "timeout"))
     if ndef:
-        print(f"  {ndef} target(s) were DEFERRED by the scheduler and never attempted; "
-              f"they are uncredited and the table is incomplete until they run.")
+        print(f"  {ndef} target(s) hit a LIMIT (deferred / rss_killed / timeout) rather "
+              f"than being judged; they are uncredited, carry zero milestone credit, "
+              f"and the table is incomplete until they run. None is a design failure.")
     nocert = sum(1 for r in out_rows if r["cert_available"] == 0)
     if nocert:
         print(f"  {nocert} target(s) have no certificate and cannot be credited; "

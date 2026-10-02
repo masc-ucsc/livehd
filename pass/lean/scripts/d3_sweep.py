@@ -70,7 +70,15 @@ GATES = ["cert", "compile", "reify", "typecheck", "sim", "checker", "agree", "pr
 #
 #   deferred    the scheduler declined to START it (threshold, or soft cap)
 #   rss_killed  it was started and then TERMINATED by the hard aggregate limit
-NONTERMINAL_SCHEDULER_STATUSES = {"deferred", "rss_killed"}
+#   timeout     it was started and ran past `--timeout`, so it was killed
+#
+# `timeout` is the one that was learned the expensive way.  `scoreboard_gate`
+# exceeded 3600 s, and because a timeout was not in this set its verdict was
+# recomputed from its own all-zero gates into `cert` -- a statement about the
+# DESIGN ("it passed only the first gate") that nothing had established -- and
+# `run_status=done` made the row terminal, so `--resume` would have reused a
+# timeout as finished work.
+NONTERMINAL_SCHEDULER_STATUSES = {"deferred", "rss_killed", "timeout"}
 
 # ---------------------------------------------------------------------------
 # Child lifetime.
@@ -881,6 +889,23 @@ def deferred_row(target: Target, samples: int, why: str) -> dict:
     return row
 
 
+def _mark_timeout(row: dict, timeout: int) -> None:
+    """Record a probe killed by `--timeout` as a LIMIT outcome.
+
+    Idempotent, and called on EVERY path out of `run_one` that can see rc 124 --
+    including the `--native` early return, which an earlier version of this fix
+    skipped, leaving native timeouts `done` and terminal.
+
+    Whatever gate output arrived before the kill is deliberately KEPT as raw
+    observation: it is real, and discarding it would lose the only clue to where
+    the time went.  What it must not become is a verdict.
+    """
+    row["run_status"], row["verdict"] = "timeout", "timeout"
+    row["launched"] = "1"
+    if "timeout" not in (row.get("detail") or ""):
+        row["detail"] = f"timeout {timeout}s"
+
+
 def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: str = ""):
     cert, m = target.path, target.module
     probe_dir = RUN_DIR / ("probes_native" if native else "probes")
@@ -991,9 +1016,14 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         ax = re.search(r"depends on axioms: \[([^\]]*)\]", out, re.S)
         row["detail"] = classify(out, rc, timeout) or (
             " ".join(ax.group(1).split()) if ax else "")
+        if rc == 124:
+            _mark_timeout(row, timeout)   # after `detail`, which classify rewrote
         return row
 
     extract_gates(row, out, rc, timeout, expect_module=m, expect_samples=samples)
+    if rc == 124:
+        # After `extract_gates`, which writes `detail` and the raw gates.
+        _mark_timeout(row, timeout)
     return row
 
 
@@ -1769,6 +1799,10 @@ def main() -> int:
     for g in GATES:
         n = sum(1 for r in rows if r.get(g) == 1)
         print(f"  {g:<10} {n}/{len(rows)}", file=sys.stderr)
+    ntmo = sum(1 for r in rows if r.get("run_status") == "timeout")
+    if ntmo:
+        print(f"  timeout    {ntmo}/{len(rows)} ran past --timeout and were killed; "
+              f"resumable, and NOT a gate failure", file=sys.stderr)
     nkill = sum(1 for r in rows if r.get("run_status") == "rss_killed")
     if nkill:
         print(f"  rss_killed {nkill}/{len(rows)} started and then terminated by the "
