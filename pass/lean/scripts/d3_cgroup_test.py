@@ -199,6 +199,32 @@ def main() -> int:
                       "    return False if getattr(self, '_probe', False) else ok\n"
                       "m.Cgroup.destroy = _nd\n")
 
+        # The REALISTIC failure, and the one that matters for the shared machine:
+        # the first destroy attempt reports failure WITHOUT removing anything, so
+        # an actual cgroup directory survives -- which is what production looks
+        # like when the probe's children are still holding it after destroy() has
+        # spent its 5 s. Later attempts behave normally, modelling the retry that
+        # runs once teardown has killed the holders.
+        # LEAK_PATCH cannot test this: it removes the directory for real and only
+        # REPORTS failure, so nothing ever survives to be recovered.
+        SURVIVE_PATCH = (MARK_PROBE +
+                         "_d = m.Cgroup.destroy\n"
+                         "def _nd(self):\n"
+                         "    if (getattr(self, '_probe', False)\n"
+                         "            and not getattr(self, '_tried', False)):\n"
+                         "        self._tried = True\n"
+                         "        return False\n"
+                         "    return _d(self)\n"
+                         "m.Cgroup.destroy = _nd\n")
+
+        # Never recovers: every attempt on the probe's cgroup fails and removes
+        # nothing, so the directory genuinely leaks. The case asserts the runner
+        # says so, then removes it here.
+        NEVER_PATCH = (MARK_PROBE +
+                       "_d = m.Cgroup.destroy\n"
+                       "m.Cgroup.destroy = lambda self: (\n"
+                       "    False if getattr(self, '_probe', False) else _d(self))\n")
+
         def run_dir_of(stderr):
             mo = re.search(r"dir=(\S+)", stderr)
             return pathlib.Path(mo.group(1)) if mo else None
@@ -493,7 +519,7 @@ def main() -> int:
             # weakened limit while each row still got an ordinary verdict.
             cdir2 = tmp / "certs2"
             rt.make_certs(cdir2, ["aaa", "bbb"])
-            r2 = run_patched(LEAK_PATCH,
+            r2 = run_patched(SURVIVE_PATCH,
                              ["--enforce", "cgroup", "--kill-over-rss-kb", "400000"],
                              "fatal2.tsv", env_extra={"ALLOC_MB": "32"}, certs=cdir2)
             rows2 = (rt.rows_of(tmp / "fatal2.tsv")
@@ -533,6 +559,52 @@ def main() -> int:
                   not meta2.get("config", {}).get("aborted_artifact_drift"),
                   "without borrowing the artifact-drift marker, which would report "
                   "the wrong cause")
+            # Aborting the EVIDENCE does not give the machine its memory back.
+            # Here the first attempt left a real directory behind, so these
+            # assertions are about the resource, not the bookkeeping.
+            c2 = meta2.get("config", {})
+            left2 = c2.get("cleanup_path", "")
+            check("fatal_cleanup_retry_frees_the_cgroup",
+                  c2.get("cleanup_retry_succeeded") is True
+                  and left2 and not pathlib.Path(left2).exists()
+                  and c2.get("cleanup_residual") == "",
+                  f"the cgroup that SURVIVED the worker's destroy is removed by the "
+                  f"post-teardown retry, and the path is gone from disk "
+                  f"(retry_succeeded={c2.get('cleanup_retry_succeeded')!r})",
+                  f"{left2} exists={pathlib.Path(left2).exists() if left2 else None}")
+            check("fatal_cleanup_retry_reported",
+                  "removed on retry" in r2.stderr and left2 in r2.stderr,
+                  "and the run says so, naming the path", r2.stderr[-300:])
+
+            # ---- a retry that does NOT recover must say the leak is still there --
+            # The one claim nobody could check is "no leak", so it is never made.
+            r4 = run_patched(NEVER_PATCH,
+                             ["--enforce", "cgroup", "--kill-over-rss-kb", "400000"],
+                             "never.tsv", env_extra={"ALLOC_MB": "32"}, certs=cdir2)
+            meta4 = (json.loads((tmp / "never.tsv.meta.json").read_text())
+                     if (tmp / "never.tsv.meta.json").is_file() else {})
+            c4 = meta4.get("config", {})
+            resid = c4.get("cleanup_residual", "")
+            check("fatal_cleanup_residual_declared",
+                  r4.returncode != 0
+                  and c4.get("cleanup_retry_succeeded") is False
+                  and resid and pathlib.Path(resid).exists()
+                  and "SURVIVES" in r4.stderr and resid in r4.stderr,
+                  f"an unrecoverable leak stays aborted, names the residual path, and "
+                  f"never claims zero leak (residual={resid!r}, still present)",
+                  r4.stderr[-400:])
+            # This case leaks on purpose, so the test owns the cleanup. Removing
+            # it here also re-proves it was genuinely there.
+            if resid and pathlib.Path(resid).exists():
+                try:
+                    (pathlib.Path(resid) / "cgroup.kill").write_text("1")
+                except OSError:
+                    pass
+                try:
+                    pathlib.Path(resid).rmdir()
+                except OSError as e:
+                    check("fatal_cleanup_residual_removable", False,
+                          f"the test could not remove the residual it created: {e}")
 
             # ---- a LIVE worker is torn down, not waited on -----------------------
             # jobs=2 with the second probe sleeping 60 s. The fast probe fails

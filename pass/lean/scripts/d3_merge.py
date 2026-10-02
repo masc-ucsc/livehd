@@ -62,7 +62,8 @@ SEMANTIC_KEYS = [
 # Present only on a run that aborted on artifact drift.  Classified so the
 # unknown-key check does not fire on them; such runs are refused earlier anyway.
 ABORT_KEYS = ["aborted_artifact_drift", "aborted_at_target", "aborted_phase",
-              "artifact_digest_end", "aborted_run", "aborted_reason"]
+              "artifact_digest_end", "aborted_run", "aborted_reason",
+              "cleanup_path", "cleanup_retry_succeeded", "cleanup_residual"]
 
 # May differ: these describe WHICH targets ran and in what order, not what a row
 # means.  Anything in `config` outside both lists is unknown to this merger and

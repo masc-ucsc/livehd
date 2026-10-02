@@ -1198,6 +1198,15 @@ def _mark_timeout(row: dict, timeout: int) -> None:
 # after that worker's future has completed.
 _CG_PEAK: dict = {}
 
+# The Cgroup of a probe whose removal FAILED, keyed by `target.key`.
+#
+# `main` retries removal after `_teardown()`, which is the first point at which
+# every process holding the cgroup has certainly been killed.  The OBJECT is kept
+# rather than just the path, so the retry runs the real `destroy()` -- its
+# `cgroup.kill` write and its bounded rmdir loop -- instead of a second,
+# divergent copy of that sequence at the call site.
+_FATAL_CGROUP: dict = {}
+
 
 def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: str = ""):
     cert, m = target.path, target.module
@@ -1347,6 +1356,10 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         # `run_group`.  Cancelling futures in `main` happens too late for a task
         # the executor has already picked up.
         _SHUTDOWN.set()
+        # Handed to `main` so the removal can be retried once the teardown has
+        # killed whatever was holding it.  Without this the object -- and with it
+        # the path -- would be lost when this frame returns.
+        _FATAL_CGROUP[target.key] = cg
         row["run_status"], row["verdict"] = "fatal_cleanup", "runner_error"
         row["detail"] = (f"the per-probe cgroup could not be removed, so its "
                          f"memory charge still counts against the budget and the "
@@ -2414,6 +2427,28 @@ def main() -> int:
                 cfg["aborted_run"] = True
                 cfg["aborted_reason"] = r["run_status"]
                 cfg["aborted_at_target"] = t.key
+                # Marking the evidence void does not give the shared machine its
+                # memory back.  The worker's `destroy()` had already spent its 5 s
+                # and failed, most plausibly because the probe's own children were
+                # still holding the cgroup -- and `_teardown()` above is the first
+                # moment every one of them has certainly been killed.  So retry
+                # HERE, where the first attempt could not have succeeded and this
+                # one can.  Bounded, because a cgroup that will not die after
+                # teardown will not die by being asked more often.
+                cg_left = _FATAL_CGROUP.get(t.key)
+                if cg_left is not None:
+                    cfg["cleanup_path"] = str(cg_left.path)
+                    freed = False
+                    for attempt in range(2):
+                        if cg_left.destroy():
+                            freed = True
+                            break
+                        if attempt == 0:
+                            time.sleep(0.5)
+                    cfg["cleanup_retry_succeeded"] = freed
+                    # The residual is named, not summarised as a boolean: whoever
+                    # reads this has to be able to go and remove it by hand.
+                    cfg["cleanup_residual"] = "" if freed else str(cg_left.path)
                 r["tier"] = tier_of(t.nodes)
                 with lock:
                     rows.append(r)
@@ -2422,6 +2457,19 @@ def main() -> int:
                       f"The run is void: the failing row is preserved for diagnosis "
                       f"and rows already written are kept, but the output must NOT "
                       f"be reported as evidence.", file=sys.stderr, flush=True)
+                if cg_left is not None:
+                    if cfg.get("cleanup_retry_succeeded"):
+                        print(f"  cleanup: the leaked cgroup was removed on retry "
+                              f"after teardown ({cfg['cleanup_path']}); no residual "
+                              f"charge remains.", file=sys.stderr, flush=True)
+                    else:
+                        # Never "no leak": it is still there, it still holds a
+                        # charge against a shared machine, and saying otherwise
+                        # would be the one claim nobody could check.
+                        print(f"  cleanup: FAILED AGAIN after teardown. The cgroup "
+                              f"{cfg['cleanup_residual']} SURVIVES and still holds a "
+                              f"memory charge; remove it by hand before the next run.",
+                              file=sys.stderr, flush=True)
                 break
 
             r["tier"] = tier_of(t.nodes)
