@@ -211,4 +211,27 @@ OUT="$W/dyn.out"
 "$LHD" formal verify "$W/dyn.sv" --top dyn --workdir "$W/wd" --diag-fmt pretty >"$OUT" 2>&1
 [ $? -ne 0 ] || fail "a non-literal \$past depth must be refused: $(cat "$OUT")"
 
+# ---- $rose/$fell read the LSB, not "any bit set" ----------------------------
+# IEEE 1800-2017 16.9.3 defines $rose/$fell on the LEAST SIGNIFICANT BIT of the
+# expression. The two readings agree on a 1-bit operand, which is why every
+# case above passes under either, so this is the one that pins the semantics:
+# `w` steps 2'b10 -> 2'b01, where the LSB RISES while the value stays nonzero.
+# The old lowering compared the whole operand against zero and called that no
+# edge. yosys masks with `& 1` in the same place (frontends/ast/simplify.cc).
+cat >"$W/lsb.sv" <<EOF
+module lsb(input clk, input [1:0] w);
+$RST
+  // \$past takes a signal, not an expression, so the bit is named first.
+  wire b = w[0];
+  always @(posedge clk) if (!rst && !rst_d) begin
+    assert (\$rose(w) == (b && !\$past(b)));
+    assert (\$fell(w) == (!b && \$past(b)));
+  end
+endmodule
+EOF
+OUT="$W/lsb.out"
+"$LHD" formal verify "$W/lsb.sv" --top lsb --set formal.bound=20 --workdir "$W/wl" --diag-fmt pretty >"$OUT" 2>&1 \
+  || fail "\$rose/\$fell must read the LSB of a wide operand: $(cat "$OUT")"
+grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for the LSB case: $(cat "$OUT")"
+
 echo "PASS: SystemVerilog \$past/\$rose/\$fell/\$stable/\$changed lower to a design history chain"

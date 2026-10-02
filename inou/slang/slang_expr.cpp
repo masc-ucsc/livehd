@@ -1821,14 +1821,26 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
       if (name == "$past") {
         return prev;
       }
-      // rose/fell/stable/changed are sugar over one cycle of history. Each is
-      // a 1-bit result, so compare rather than mask: the operand may be wider.
+      // rose/fell/stable/changed are sugar over one cycle of history, and the
+      // four do NOT read the operand the same way.
+      //
+      // $rose/$fell are defined on the LEAST SIGNIFICANT BIT alone (IEEE
+      // 1800-2017 16.9.3), so a wider operand must be masked to bit 0 — not
+      // compared against zero. This used to be `!= 0`, i.e. "any bit set",
+      // which agrees only for a 1-bit operand: on a 2-bit `x` stepping
+      // 2'b10 -> 2'b01 the LSB rises, so `$rose(x)` is TRUE, while nonzero ->
+      // nonzero made it false. yosys masks with `& 1` in the same place
+      // (frontends/ast/simplify.cc, the $rose/$fell rewrite).
+      //
+      // $stable/$changed ARE whole-expression comparisons, so they keep the
+      // unmasked values below.
+      //
       // The comparisons yield pyrope BOOLs, but a SystemVerilog expression is
       // integer-valued (SV has no bool type), so each is converted back on the
       // way out -- otherwise `$rose(a) == (a && !$past(a))` fails typecheck
       // with "`==` requires both operands to be the same type".
-      const auto cur_nz  = mark_bool(builder_.create_ne_stmts(cur, "0"));
-      const auto prev_nz = mark_bool(builder_.create_ne_stmts(prev, "0"));
+      const auto cur_nz  = mark_bool(builder_.create_ne_stmts(builder_.create_bit_and_stmts(cur, "1"), "0"));
+      const auto prev_nz = mark_bool(builder_.create_ne_stmts(builder_.create_bit_and_stmts(prev, "1"), "0"));
       if (name == "$rose") {
         return to_int_value(mark_bool(builder_.create_log_and_stmts(cur_nz, mark_bool(builder_.create_log_not_stmts(prev_nz)))));
       }
