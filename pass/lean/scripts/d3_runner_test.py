@@ -260,7 +260,41 @@ def main() -> int:
         shutil.copy(side, tmp / "dup_res.tsv.meta.json")
         lines = dup_out.read_text().rstrip("\n").split("\n")
         dup_out.write_text("\n".join(lines + [lines[-1]]) + "\n")
+        # Re-bind: the sidecar now carries `results_sha256`, so an edited table is
+        # refused on the BINDING before the duplicate-key check is ever reached.
+        # Both checks matter and they are tested separately -- `resume_rebound_*`
+        # below covers the binding; this case is about duplicate keys, so the
+        # sidecar is updated to match the file it describes.
+        _dm = json.loads((tmp / "dup_res.tsv.meta.json").read_text())
+        _dm["results_sha256"] = hashlib.sha256(dup_out.read_bytes()).hexdigest()
+        (tmp / "dup_res.tsv.meta.json").write_text(json.dumps(_dm, indent=2))
         p = sweep(tmp, man, cdir, dup_out, extra=["--resume"])
+        # the binding, tested on its own: edit the table, leave the sidecar alone
+        bind_out = tmp / "bind_res.tsv"
+        shutil.copy(out, bind_out)
+        shutil.copy(side, tmp / "bind_res.tsv.meta.json")
+        _bm = json.loads((tmp / "bind_res.tsv.meta.json").read_text())
+        _bm["results_sha256"] = hashlib.sha256(bind_out.read_bytes()).hexdigest()
+        (tmp / "bind_res.tsv.meta.json").write_text(json.dumps(_bm, indent=2))
+        pb_ok = sweep(tmp, man, cdir, bind_out, extra=["--resume"])
+        check("resume_rebound_ok", pb_ok.returncode == 0,
+              "a results table matching its sidecar binding resumes normally", f,
+              pb_ok.stderr[-200:])
+        # A REAL edit to a data row: edit the verdict field, not the header
+        # (`agree` is also a column name) and not a no-op substitution.
+        _bl = bind_out.read_text().splitlines()
+        _hdr = next(i for i, l in enumerate(_bl) if not l.startswith("#"))
+        _vi = _bl[_hdr].split("\t").index("verdict")
+        _fl = _bl[_hdr + 1].split("\t")
+        _fl[_vi] = "EDITED"
+        _bl[_hdr + 1] = "\t".join(_fl)
+        bind_out.write_text("\n".join(_bl) + "\n")
+        pb = sweep(tmp, man, cdir, bind_out, extra=["--resume"])
+        check("resume_rebound_tamper",
+              pb.returncode != 0 and "changed after the run" in pb.stderr,
+              "and an edited table with an untouched sidecar refuses", f,
+              pb.stderr[-200:])
+
         check("resume_duplicate_rows", p.returncode != 0 and "duplicate target_key" in p.stderr,
               "a duplicated row refuses the resume", f, p.stderr[-200:])
 
