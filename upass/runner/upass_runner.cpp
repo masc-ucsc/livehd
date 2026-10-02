@@ -18167,12 +18167,12 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   // fields (not a scalar "0" range) and is materialized by constprop's
   // named-type default path instead -- its "0" entry has no decl range, so
   // this leaves the outputs unset.
-  auto borrow_alias = [&](const std::string& type_name, Dlop& out_max, Dlop& out_min, upass::Kind& out_kind) {
+  auto borrow_alias = [&](const std::string& alias_type, Dlop& out_max, Dlop& out_min, upass::Kind& out_kind) {
     // An integer-encoded enum (`reg st:Color`) borrows the range of its hidden
     // encoding alias (user ruling 2026-09-28 (29)): in this unit, or in the
     // file shell for a file-scope `const Color = enum(…)`.
-    const auto  enc   = Lnast::enum_encoding_type(type_name);
-    const auto& alias = symbol_table_.has_bundle(enc) ? enc : type_name;
+    const auto  enc   = Lnast::enum_encoding_type(alias_type);
+    const auto& alias = symbol_table_.has_bundle(enc) ? enc : alias_type;
     if (alias != enc) {
       if (const auto [owner, type_n] = lookup_file_type(enc); owner && Lnast_ntype::is_prim_type_int(owner->get_type(type_n))) {
         const auto max_n = owner->get_first_child(type_n);

@@ -7,6 +7,7 @@ COPTS = [
     "-Wextra",
     "-Werror",  # LiveHD C++ is warning-clean; external deps (MODULE.bazel) keep their own lenient flags
     "-Wno-error=deprecated-copy",  # abseil/abseil-cpp#948
+    "-Wno-missing-field-initializers",  # partial designated initializers are idiomatic here (clang does not warn); GCC -Wextra does
     "-Wno-unknown-pragmas",
     "-Wno-error=deprecated",
     # GCC -O2 emits a false-positive -Warray-bounds on slang's SLANG_ENUM

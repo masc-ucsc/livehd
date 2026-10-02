@@ -377,12 +377,12 @@ std::optional<livehd::port_reach::Def_reach> callee_reach(const std::shared_ptr<
 
 // The register a constant clock reaches: the one a constant-clock error names.
 struct Clocked_state {
-  std::string        name;            // "" for an anonymous (compiler-inserted) register
-  std::string        owner;           // the graph (module) declaring it
-  livehd::diag::Span span;            // its declaration, when its graph records one
+  std::string        name{};          // "" for an anonymous (compiler-inserted) register
+  std::string        owner{};         // the graph (module) declaring it
+  livehd::diag::Span span{};          // its declaration, when its graph records one
   bool               memory = false;  // a memory port's clock, not a flop's
   int                port   = -1;     // that memory port, when its ports have their own clocks
-  std::string        enable_input;    // the body input enabling that port ("" local): bound to 0, it is idle
+  std::string        enable_input{};    // the body input enabling that port ("" local): bound to 0, it is idle
 };
 
 // What the memory clock sink `clock_sink` clocks: the ports it drives (every
@@ -5781,9 +5781,9 @@ private:
     auto          field = [&](const Pin& v, int lo, int hi) {
       auto gm = make_node(Ntype_op::Get_mask);
       livehd::graph_util::connect_mask_operands(gm, v, lo, hi);
-      auto out = gm.create_driver_pin(0);
-      set_ubits(out, hi - lo);
-      return out;
+      auto res = gm.create_driver_pin(0);
+      set_ubits(res, hi - lo);
+      return res;
     };
     // Every value in the replay is the entry's unsigned `bits`-wide pattern.
     auto word = [&](const Pin& v) { return field(v, 0, bits); };
@@ -5795,9 +5795,9 @@ private:
       livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(sel);
       livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(keep);
       livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(take);
-      auto out = mux.create_driver_pin(0);
-      set_ubits(out, bits);
-      return out;
+      auto res = mux.create_driver_pin(0);
+      set_ubits(res, bits);
+      return res;
     };
     // Entry `raddr` of bulk store `b`'s bus, which holds entry i at bits
     // [i*bits, (i+1)*bits).
@@ -5896,9 +5896,9 @@ private:
     auto          field  = [&](const Pin& v, int lo, int hi) {
       auto gm = make_node(Ntype_op::Get_mask);
       livehd::graph_util::connect_mask_operands(gm, v, lo, hi);
-      auto out = gm.create_driver_pin(0);
-      set_ubits(out, hi - lo);
-      return out;
+      auto res = gm.create_driver_pin(0);
+      set_ubits(res, hi - lo);
+      return res;
     };
     auto pick = [&](const Pin& sel, const Pin& keep, const Pin& take) {
       if (sel.is_invalid()) {
@@ -5908,17 +5908,17 @@ private:
       livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(sel);
       livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(keep);
       livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(take);
-      auto out = mux.create_driver_pin(0);
-      set_ubits(out, packed);
-      return out;
+      auto res = mux.create_driver_pin(0);
+      set_ubits(res, packed);
+      return res;
     };
     auto shl = [&](const Pin& v, const Pin& amt) {
       auto sh = make_node(Ntype_op::SHL);
       setup_sink_by_name(sh, "a").connect_driver(v);
       setup_sink_by_name(sh, "b").connect_driver(amt);
-      auto out = sh.create_driver_pin(0);
-      set_ubits(out, packed);
-      return field(out, 0, packed);
+      auto res = sh.create_driver_pin(0);
+      set_ubits(res, packed);
+      return field(res, 0, packed);
     };
     Pin           v                = mi.read_all_pin;  // the committed contents
     const int64_t lane_bits        = bits % mi.wensize == 0 ? bits / mi.wensize : bits;
@@ -13270,9 +13270,9 @@ struct Stale_instance {
   std::string   callee;
   std::string   caller;
   hhds::Port_id pid = 0;
-  std::string   was;  // empty: the id was not declared
+  std::string   was{};// empty: the id was not declared
   std::string   now;
-  std::string   hint;  // how to fix it, naming where `caller` came from (stale_instance_hint)
+  std::string   hint{};  // how to fix it, naming where `caller` came from (stale_instance_hint)
 };
 
 // Where the library's modules came from (uPass_tolg::set_library_origins).
