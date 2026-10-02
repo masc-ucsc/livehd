@@ -1177,6 +1177,37 @@ def make_proof_probe(cert: pathlib.Path, m: str) -> str:
     return _cert_body(cert, PROVE_HEAD) + PROVE_TAIL.format(m=m)
 
 
+_TIME_PATS = (("max_rss_kb", r"Maximum resident set size \(kbytes\): (\d+)"),
+              ("user_s", r"User time \(seconds\): ([\d.]+)"),
+              ("sys_s", r"System time \(seconds\): ([\d.]+)"),
+              ("wall_s", r"Elapsed \(wall clock\) time .*?: (?:(\d+):)?(\d+):([\d.]+)"))
+
+
+def read_time_report(path: pathlib.Path) -> dict:
+    """One `/usr/bin/time -v` report -> {max_rss_kb, user_s, sys_s, wall_s}.
+
+    Shared by both stages so they cannot parse the same format differently and
+    then be compared as if they had.  Missing fields are simply absent: a report
+    that was never written -- the process was SIGKILLed before it could flush --
+    yields {} rather than zeros, because zero is a measurement and this is not.
+    """
+    out = {}
+    try:
+        tt = path.read_text()
+    except OSError:
+        return out
+    for key, pat in _TIME_PATS:
+        mo = re.search(pat, tt)
+        if not mo:
+            continue
+        if key == "wall_s":
+            h, mi, sec = mo.group(1), mo.group(2), mo.group(3)
+            out[key] = f"{int(h or 0) * 3600 + int(mi) * 60 + float(sec):.2f}"
+        else:
+            out[key] = mo.group(1)
+    return out
+
+
 PROOF_GATE_RE = r"^D3GATE proof=1 thm=(\S+) axioms=(.*)$"
 
 # The one theorem a proof probe is allowed to be reporting.
@@ -1283,6 +1314,7 @@ def deferred_row(target: Target, samples: int, why: str) -> dict:
         "verdict": "deferred", "proof": "na", "detail": why,
         "max_rss_kb": "", "max_rss_source": "", "cgroup_peak_kb": "",
         "user_s": "", "sys_s": "", "wall_s": "0.00",
+        "sim_max_rss_kb": "", "sim_user_s": "", "sim_sys_s": "", "sim_wall_s": "",
         "proof_max_rss_kb": "", "proof_user_s": "", "proof_sys_s": "",
         "proof_wall_s": "",
         "drift": "", "launched": "0",
@@ -1355,7 +1387,7 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
     row["cgroup_peak_kb"] = ""
     row["user_s"] = ""
     row["sys_s"] = ""
-    for k in ("proof_max_rss_kb", "proof_user_s", "proof_sys_s", "proof_wall_s"):
+    for k in STAGE_COLS:
         row[k] = ""
     row["drift"] = ""
     row["launched"] = "0"
@@ -1573,6 +1605,11 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         return r
 
     if _RSS_KILL.is_set() and rc != 0:
+        # The SAMPLED guard acted.  Reached only when the cgroup branch above did
+        # not: a kernel OOM raises an `oom_kill` event and is handled there, and
+        # a SIGKILL from this monitor raises none, so the two are distinguishable
+        # rather than racing for the same row.  Under hybrid enforcement the
+        # kernel's verdict is checked first because it is exact.
         # Killed by the budget, not by anything the design did.  Recorded as a
         # nonterminal row so `--resume` picks it up, and never passed to
         # `classify`, which would read the SIGKILL as a compiler failure.
@@ -1602,55 +1639,48 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         if cg is not None and cg_peak is not None:
             r["cgroup_peak_kb"] = str(cg_peak)
         return r
+    # WHOLE TARGET, measured end to end: with `--prove` this spans both stages.
     row["wall_s"] = f"{time.time() - t0:.2f}"
-    try:
-        tt = tv.read_text()
-        for key, pat in (("max_rss_kb", r"Maximum resident set size \(kbytes\): (\d+)"),
-                         ("user_s", r"User time \(seconds\): ([\d.]+)"),
-                         ("sys_s", r"System time \(seconds\): ([\d.]+)")):
-            mo = re.search(pat, tt)
-            if mo:
-                row[key] = mo.group(1)
-    except OSError:
-        pass
+    sim_t = read_time_report(tv)
+    for k, v in sim_t.items():
+        row[f"sim_{k}"] = v
+    # The generic columns start as the sim stage's and are widened to totals
+    # below if a proof stage ran.  Without `--prove` that is the whole story.
+    for k in ("max_rss_kb", "user_s", "sys_s"):
+        if k in sim_t:
+            row[k] = sim_t[k]
     if row["max_rss_kb"]:
         # Only once a figure is actually present.  A `/usr/bin/time` report that
         # could not be read leaves `max_rss_kb` blank, and a blank figure keeps
         # a blank provenance.
         row["max_rss_source"] = SRC_TIME
     if proof_rc is not None:
-        # The proof stage's OWN `/usr/bin/time`, in its OWN columns.  Reporting
-        # one `max_rss_kb` for a two-stage run understated the expensive stage by
-        # 4.4x on tima_adder (1,566,104 kB sim against 6,887,764 kB proof) while
-        # `wall_s` spanned both, so the row contradicted itself.
-        try:
-            ptt = (log_dir / f"{m}.proof.time").read_text()
-            for key, pat in (("proof_max_rss_kb",
-                              r"Maximum resident set size \(kbytes\): (\d+)"),
-                             ("proof_user_s", r"User time \(seconds\): ([\d.]+)"),
-                             ("proof_sys_s", r"System time \(seconds\): ([\d.]+)"),
-                             ("proof_wall_s",
-                              r"Elapsed \(wall clock\) time .*?: (?:(\d+):)?(\d+):([\d.]+)")):
-                mo = re.search(pat, ptt)
-                if not mo:
-                    continue
-                if key == "proof_wall_s":
-                    h, mi, sec = mo.group(1), mo.group(2), mo.group(3)
-                    row[key] = f"{int(h or 0) * 3600 + int(mi) * 60 + float(sec):.2f}"
-                else:
-                    row[key] = mo.group(1)
-        except OSError:
-            pass
-        # `max_rss_kb` becomes the max over the stages that actually ran, so the
-        # column keeps meaning "the biggest this target got" rather than silently
-        # meaning "the first stage".  Provenance says which it is.
+        # The proof stage's OWN report, in its OWN columns.  Its provenance is
+        # definitionally `/usr/bin/time`: it is the only instrument that writes
+        # these, and if the stage was killed before flushing they come back BLANK
+        # rather than from some other source.  So there is no `proof_max_rss_source`
+        # to disambiguate -- there is nothing it could say but one value or
+        # "not measured", and blank already says the latter.
+        proof_t = read_time_report(log_dir / f"{m}.proof.time")
+        for k, v in proof_t.items():
+            row[f"proof_{k}"] = v
+        # Widen the generic columns from "the sim stage" to "the whole target":
+        # max over stages for RSS, SUM over stages for CPU.  `wall_s` already
+        # spanned both.  Leaving `user_s`/`sys_s` sim-only -- which is what they
+        # were -- put three columns side by side with two different scopes.
         if row.get("proof_max_rss_kb") and row.get("max_rss_kb"):
             row["max_rss_kb"] = str(max(int(row["max_rss_kb"]),
                                         int(row["proof_max_rss_kb"])))
             row["max_rss_source"] = SRC_TIME_STAGES
-        elif row.get("proof_max_rss_kb") and not row.get("max_rss_kb"):
+        elif row.get("proof_max_rss_kb"):
             row["max_rss_kb"] = row["proof_max_rss_kb"]
             row["max_rss_source"] = SRC_TIME_STAGES
+        for k in ("user_s", "sys_s"):
+            a_, b_ = row.get(f"sim_{k}"), row.get(f"proof_{k}")
+            if a_ and b_:
+                row[k] = f"{float(a_) + float(b_):.2f}"
+            elif b_ and not a_:
+                row[k] = b_
 
     if cg is not None:
         # The point of the change: retained on the SUCCESSFUL path too, not just
@@ -1903,8 +1933,25 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
     "drift", "launched",
     "max_rss_kb", "max_rss_source", "cgroup_peak_kb",
     "user_s", "sys_s", "wall_s",
+    "sim_max_rss_kb", "sim_user_s", "sim_sys_s", "sim_wall_s",
     "proof_max_rss_kb", "proof_user_s", "proof_sys_s", "proof_wall_s",
     "detail"])
+
+# COLUMN SCOPES, so no generic column quietly mixes them.
+#
+#   max_rss_kb / user_s / sys_s / wall_s   WHOLE TARGET: every stage that ran.
+#       `max_rss_kb` is the max over stages, `user_s`/`sys_s` are sums, `wall_s`
+#       is measured end to end across both.
+#   sim_*                                  the executable probe alone.
+#   proof_*                                the `--prove` probe alone.
+#   cgroup_peak_kb                         the probe's cgroup, over both stages.
+#
+# Without `--prove` only one stage runs, so the generic columns and `sim_*` hold
+# the same figures and `proof_*` is blank.  Before this, `wall_s` spanned both
+# stages while `user_s`/`sys_s` were silently sim-only -- three columns side by
+# side with two different scopes.
+STAGE_COLS = ("sim_max_rss_kb", "sim_user_s", "sim_sys_s", "sim_wall_s",
+              "proof_max_rss_kb", "proof_user_s", "proof_sys_s", "proof_wall_s")
 
 # Provenance for `max_rss_kb`, and the cgroup's own peak beside it.
 #
@@ -2179,7 +2226,27 @@ def main() -> int:
     # lower bound -- under a sidecar claiming `cgroup-memory-peak-exact`. The two
     # would disagree about the same row. Sampling still runs for the soft cap and
     # the aggregate measurement; only the kill moves to the kernel.
-    sampled_kill_kb = 0 if CGROUP_BASE is not None else a.kill_over_rss_kb
+    # HYBRID under cgroup enforcement: the kernel's `memory.max` AND the sampled
+    # aggregate hard kill, both armed at the same ceiling.
+    #
+    # The sampled killer used to be disarmed here, so that it could not win a
+    # race and write a sampled LOWER BOUND into `max_rss_kb` under a sidecar
+    # claiming an exact cgroup peak.  That reasoning was about provenance and is
+    # answered by recording WHICH guard acted; what it missed is that the two
+    # guards do not measure the same thing.  `memory.max` bounds cgroup CHARGE,
+    # and a page already in the page cache is not re-charged to a second cgroup
+    # that maps it -- so a probe mapping warm Mathlib oleans is nearly invisible
+    # to it.  Measured on the tima_adder proof probe: 6,897,312 kB RSS against a
+    # cgroup peak of 694,948 kB, with zero major page faults.  A 10,000,000 kB
+    # `memory.max` was therefore not enforcing anything close to a 10 GB RSS
+    # ceiling, which is the quantity that matters on a shared machine.
+    #
+    # So: keep the kernel guard for anonymous charge, where it is exact and
+    # continuous, and arm the sampled guard for resident set, where it is the
+    # only instrument that sees the mapping at all.  Sampled remains ADVISORY --
+    # it bounds sustained memory, not instantaneous peaks -- which is why it is
+    # the SECONDARY guard and not a replacement.
+    sampled_kill_kb = a.kill_over_rss_kb
 
     sel_digest = selection_digest(targets)
     cfg = run_config(a, manifest_digest)
@@ -2221,8 +2288,15 @@ def main() -> int:
         # a green row, and a green cgroup row's exact peak now lives in
         # `cgroup_peak_kb`.  The same constants as the row column, so the two can
         # never drift into describing the same thing differently.
-        "rss_killed_max_rss_source": (SRC_CGROUP if CGROUP_BASE is not None
-                                      else SRC_SAMPLED),
+        # Under HYBRID enforcement either guard can be the one that acts, and
+        # they write different quantities into `max_rss_kb`, so a single
+        # run-wide answer would be a guess. The row says which acted, in its own
+        # `max_rss_source`; this states that it is per-row rather than naming a
+        # mechanism that may not have been the one.
+        "rss_killed_max_rss_source": (
+            "per-row: see max_rss_source" if (CGROUP_BASE is not None and sampled_kill_kb)
+            else SRC_CGROUP if CGROUP_BASE is not None
+            else SRC_SAMPLED),
         # Both caps are SAMPLED: they bound sustained memory, not instantaneous
         # peaks.  Recorded so a reader of these rows knows which guarantee applies.
         # What ACTUALLY enforced the limit, not what was asked for.
@@ -2230,6 +2304,15 @@ def main() -> int:
                             else "sampled-advisory"),
         "rss_enforcement_requested": a.enforce,
         "sampled_kill_armed": bool(sampled_kill_kb),
+        # What is enforcing, in full.  `rss_enforcement` names the primary
+        # mechanism; this names every guard that is actually armed, because
+        # under cgroup mode there are now two and they bound DIFFERENT
+        # quantities (cgroup charge vs resident set).
+        "rss_guards": ([g for g in (
+            "cgroup-memory-max" if CGROUP_BASE is not None else "",
+            "sampled-aggregate-hard-kill" if sampled_kill_kb else "",
+            "sampled-aggregate-soft-stop" if a.max_aggregate_rss_kb else "",
+        ) if g]),
         "cgroup_base": str(CGROUP_BASE) if CGROUP_BASE is not None else "",
         "deferred": [{"module": t.module, "why": why} for t, why in deferred_targets],
     }

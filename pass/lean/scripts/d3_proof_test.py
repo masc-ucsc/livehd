@@ -139,9 +139,19 @@ def main() -> int:
         intact(r, "proof_oom")
 
         # ---- 3b. the schema carries the proof stage's own figures -------------
-        for c in ("proof_max_rss_kb", "proof_user_s", "proof_sys_s", "proof_wall_s"):
+        for c in ("sim_max_rss_kb", "sim_user_s", "sim_sys_s", "sim_wall_s",
+                  "proof_max_rss_kb", "proof_user_s", "proof_sys_s", "proof_wall_s"):
             check(f"schema_has_{c}", c in sweep.RESULT_COLS,
                   f"{c} is part of RESULT_COLS, so merge and resume see it")
+        # Every stage-scoped column is named for its stage, and the generic ones
+        # are whole-target. The bug this pins: `wall_s` spanned both stages while
+        # `user_s`/`sys_s` were silently sim-only.
+        check("no_generic_column_is_stage_scoped",
+              all(c.startswith(("sim_", "proof_")) for c in sweep.STAGE_COLS)
+              and not any(c.startswith(("sim_", "proof_"))
+                          for c in ("max_rss_kb", "user_s", "sys_s", "wall_s")),
+              f"the {len(sweep.STAGE_COLS)} stage columns are all prefixed, and the "
+              f"generic four are whole-target")
         check("schema_has_stage_provenance",
               sweep.SRC_TIME_STAGES in ("time-max-rss-max-of-stages",)
               and sweep.SRC_TIME != sweep.SRC_TIME_STAGES,

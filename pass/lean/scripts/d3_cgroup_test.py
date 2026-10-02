@@ -288,7 +288,7 @@ def main() -> int:
                       "cgroup_killed_row_zero_credit",
                       "exit137_without_oom_is_not_rss_killed",
                       "cgroup_timeout_is_timeout_not_oom", "no_leftover_cgroups",
-                      "sampled_kill_disarmed_under_cgroup",
+                      "hybrid_arms_both_guards",
                       "requested_vs_actual_recorded",
                       "auto_uses_cgroup_when_available"):
                 skip(n, "no usable cgroup delegation here (a child cannot migrate in)")
@@ -342,13 +342,17 @@ def main() -> int:
                   "a probe that stays under memory.max completes normally under cgroup "
                   "enforcement", r.stderr[-300:])
             meta = json.loads((tmp / "under.tsv.meta.json").read_text())
+            # The run-wide `rss_killed_max_rss_source` claim this used to make --
+            # that a killed row's RSS WOULD be an exact memory.peak -- is no
+            # longer true under hybrid enforcement, where either guard can act.
+            # `hybrid_sidecar_defers_provenance_to_the_row` covers what replaced
+            # it; this keeps the part that is still a run-wide fact.
             check("sidecar_records_cgroup_enforcement",
                   meta["scheduling"]["rss_enforcement"] == "cgroup-memory-max"
-                  and meta["scheduling"]["rss_killed_max_rss_source"]
-                      == "cgroup-memory-peak-exact-accounted"
+                  and meta["scheduling"]["rss_enforcement_requested"] == "cgroup"
                   and meta["scheduling"]["cgroup_base"],
-                  "the sidecar records that the KERNEL enforced the limit and that a "
-                  "killed row's RSS would be an exact memory.peak",
+                  "the sidecar records that the KERNEL is the primary mechanism, "
+                  "what was requested, and the base it used",
                   json.dumps(meta["scheduling"])[:300])
 
             # ---- the SUCCESSFUL path retains the kernel's own peak ----------------
@@ -435,6 +439,59 @@ def main() -> int:
                   f"a probe killed by --timeout under cgroup enforcement is a `timeout` "
                   f"row, not rss_killed (got {rows[0]['run_status'] if rows else 'NO ROW'})",
                   str(rows[:1])[:300])
+
+            # ---- HYBRID, case 1: the KERNEL guard acts -----------------------
+            # Anonymous memory over `memory.max`, with the sampled guard set far
+            # higher so it cannot be the one that fires. The row must carry the
+            # EXACT cgroup peak, not a sampled bound.
+            r = run(["--enforce", "cgroup", "--kill-over-rss-kb", "80000",
+                     "--max-aggregate-rss-kb", "4000000"],
+                    env_extra={"ALLOC_MB": "400"}, out="hy_kernel.tsv")
+            hk = [x for x in (rt.rows_of(tmp / "hy_kernel.tsv")
+                              if (tmp / "hy_kernel.tsv").is_file() else [])
+                  if x["run_status"] == "rss_killed"]
+            check("hybrid_kernel_guard_acts",
+                  hk and hk[0]["max_rss_source"] == sweep.SRC_CGROUP
+                  and "cgroup-ACCOUNTED" in hk[0]["detail"],
+                  f"a charge overrun is attributed to the KERNEL guard "
+                  f"(source={hk[0]['max_rss_source'] if hk else None!r})",
+                  str(hk[:1])[:300] or r.stderr[-300:])
+
+            # ---- HYBRID, case 2: the SAMPLED guard acts, under cgroup mode ----
+            # The whole point of the hybrid. `memory.max` is set high enough that
+            # the kernel will not fire, while the sampled aggregate ceiling is
+            # low -- which is the shape of the real hazard: resident set the
+            # cgroup is not charged for. The scripted-sampler seam provides the
+            # RSS sequence, so the trip is deterministic rather than a race
+            # against a real allocator.
+            r = run(["--enforce", "cgroup", "--kill-over-rss-kb", "900000",
+                     "--rss-sample-seconds", "0.1"],
+                    env_extra={"ALLOC_MB": "16", "STUB_MODE": "sleep",
+                               "SLEEP_S": "20",
+                               "D3_TEST_RSS_SEQ": "1000,1000,9999999"},
+                    out="hy_sampled.tsv", timeout=180)
+            hs = [x for x in (rt.rows_of(tmp / "hy_sampled.tsv")
+                              if (tmp / "hy_sampled.tsv").is_file() else [])
+                  if x["run_status"] == "rss_killed"]
+            m_hs = (json.loads((tmp / "hy_sampled.tsv.meta.json").read_text())
+                    if (tmp / "hy_sampled.tsv.meta.json").is_file() else {})
+            check("hybrid_sampled_guard_acts_under_cgroup",
+                  hs and hs[0]["max_rss_source"] == sweep.SRC_SAMPLED
+                  and "LOWER BOUND" in hs[0]["detail"],
+                  f"an RSS overrun the cgroup was NOT charged for is still caught, "
+                  f"by the sampled guard, with its own provenance "
+                  f"(source={hs[0]['max_rss_source'] if hs else None!r})",
+                  str(hs[:1])[:400] or r.stderr[-400:])
+            check("hybrid_sampled_trip_is_nonterminal",
+                  hs and hs[0]["verdict"] == "rss_killed"
+                  and all(hs[0][g] == "0" for g in ("cert", "compile", "agree")),
+                  "and is a scheduling outcome with zero gate credit, exactly as "
+                  "in sampled-only mode")
+            check("hybrid_sidecar_still_says_cgroup_is_primary",
+                  m_hs.get("scheduling", {}).get("rss_enforcement") == "cgroup-memory-max",
+                  "while the sidecar still names the kernel as the PRIMARY "
+                  "mechanism -- the sampled guard is secondary, not a fallback",
+                  str(m_hs.get("scheduling", {}))[:200])
 
             # ---- a measured peak survives a row that turns into runner_error ------
             # Three ways the semantic row can become unusable AFTER the kernel's
@@ -644,14 +701,29 @@ def main() -> int:
             check("no_orphan_processes", "cgexec.py" not in orphans,
                   "and no cgexec wrapper or probe process survives")
 
-            # ---- the sampled killer is DISARMED when the kernel enforces ----------
+            # ---- HYBRID: both guards armed, because they bound different things --
+            # The sampled killer used to be disarmed here. That was about
+            # provenance -- it must not write a sampled lower bound under a
+            # sidecar claiming an exact cgroup peak -- and provenance is now
+            # recorded per row. What it missed is that `memory.max` bounds cgroup
+            # CHARGE: warm page-cache pages are charged to whoever faulted them
+            # in, so a probe mapping warm oleans is nearly invisible to it
+            # (measured: 6,897,312 kB RSS against a 694,948 kB cgroup peak). The
+            # sampled guard is the only one that sees resident set at all.
             m_under = json.loads((tmp / "under.tsv.meta.json").read_text())
-            check("sampled_kill_disarmed_under_cgroup",
-                  m_under["scheduling"]["sampled_kill_armed"] is False,
-                  "with the kernel enforcing, the sampled killer is disarmed so it "
-                  "cannot win the race and emit sampled evidence under a sidecar that "
-                  "claims an exact cgroup peak",
+            check("hybrid_arms_both_guards",
+                  m_under["scheduling"]["sampled_kill_armed"] is True
+                  and set(m_under["scheduling"]["rss_guards"]) >=
+                      {"cgroup-memory-max", "sampled-aggregate-hard-kill"},
+                  f"under cgroup enforcement BOTH guards are armed: "
+                  f"{m_under['scheduling'].get('rss_guards')}",
                   str(m_under["scheduling"])[:300])
+            check("hybrid_sidecar_defers_provenance_to_the_row",
+                  "per-row" in m_under["scheduling"]["rss_killed_max_rss_source"],
+                  "and the sidecar stops naming one mechanism run-wide, because "
+                  "either guard can be the one that acts and they write different "
+                  "quantities into max_rss_kb",
+                  m_under["scheduling"]["rss_killed_max_rss_source"])
             check("requested_vs_actual_recorded",
                   m_under["scheduling"]["rss_enforcement_requested"] == "cgroup"
                   and m_under["scheduling"]["rss_enforcement"] == "cgroup-memory-max",
