@@ -1,0 +1,42 @@
+{
+  "_what": "The signed field reader Sext(SRA(w,k),n) and every guard that keeps it sound. Each mutant must CHANGE BEHAVIOUR -- an earlier G3 rejected a dynamic sign position both before and after, so no test could kill it and it proved nothing.",
+  "target": "//graph:split_selfref_test",
+  "file": "graph/split_selfref.cpp",
+  "bazel": [
+    "--repo_env=CC=/usr/bin/gcc-15",
+    "--repo_env=CXX=/usr/bin/g++-15"
+  ],
+  "rebuild": [],
+  "mutants": [
+    {
+      "name": "G1 out-of-range field accepted",
+      "old": "      if (wb64 <= 0 || n64 <= 0 || n64 > wb64 || k64 < 0 || k64 > wb64 || k64 > wb64 - n64) {",
+      "new": "      if (wb64 <= 0 || n64 <= 0 || n64 > wb64 || k64 < 0 || k64 > wb64) {"
+    },
+    {
+      "name": "G2 dynamic field position accepted as k=0",
+      "old": "        auto kd = drv_at(sm, 1);\n        if (kd.is_invalid() || !gu::is_const_pin(kd)) {\n          continue;  // dynamic shift: the field position is not a constant\n        }\n        auto kc = gu::hydrate_const(kd);\n        if (kc.has_unknowns() || kc.is_negative() || !kc.is_just_i64()) {\n          continue;\n        }\n        k64 = kc.to_just_i64();",
+      "new": "        auto kd = drv_at(sm, 1);\n        if (kd.is_invalid()) {\n          continue;\n        }\n        if (gu::is_const_pin(kd)) {\n          auto kc = gu::hydrate_const(kd);\n          if (kc.has_unknowns() || kc.is_negative() || !kc.is_just_i64()) {\n            continue;\n          }\n          k64 = kc.to_just_i64();\n        } else {\n          k64 = 0;\n        }"
+    },
+    {
+      "name": "G3 dynamic sign position guessed instead of refused",
+      "old": "      auto nd = drv_at(R, 1);\n      if (nd.is_invalid() || !gu::is_const_pin(nd)) {\n        continue;  // non-constant sign position\n      }\n      auto nc = gu::hydrate_const(nd);\n      if (nc.has_unknowns() || nc.is_negative() || !nc.is_just_i64()) {\n        continue;\n      }\n      // VALIDATE AT 64 BITS, NARROW AFTERWARDS. A constant wider than `int`\n      // wraps on the cast -- a positive 2^40 sign position becomes 0 -- and\n      // `k + n` can overflow before any range test sees it. Both are silent,\n      // and both would hand `resolve` a slice that is not the field.\n      const int64_t n64 = nc.to_just_i64();",
+      "new": "      auto nd = drv_at(R, 1);\n      if (nd.is_invalid()) {\n        continue;\n      }\n      const bool n_is_const = gu::is_const_pin(nd);\n      int64_t    n64        = 8;  // a dynamic sign position guessed, not refused\n      if (n_is_const) {\n        auto nc = gu::hydrate_const(nd);\n        if (nc.has_unknowns() || nc.is_negative() || !nc.is_just_i64()) {\n          continue;\n        }\n        n64 = nc.to_just_i64();\n      }"
+    },
+    {
+      "name": "G4 the signed reader form removed",
+      "old": "    } else if (rop == Ntype_op::Sext) {",
+      "new": "    } else if (false && rop == Ntype_op::Sext) {"
+    },
+    {
+      "name": "G5 self-dependency no longer fails the slice",
+      "old": "    if (!on_stack.insert(key).second) {",
+      "new": "    if (false) {"
+    },
+    {
+      "name": "G6 narrow before validating",
+      "old": "      if (wb64 <= 0 || n64 <= 0 || n64 > wb64 || k64 < 0 || k64 > wb64 || k64 > wb64 - n64) {",
+      "new": "      if (wb64 <= 0 || static_cast<int>(n64) + static_cast<int>(k64) > static_cast<int>(wb64)) {"
+    }
+  ]
+}

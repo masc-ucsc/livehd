@@ -308,12 +308,40 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 #   hull, which rendered {[0,16),[32,48)} as [0,48) -- the opposite of what the
 #   bits say.
 #
-# SO A DISSOLUTION RULE IS LICENSED for this shape, and is the next step: a
-# narrow `sra`/`sext`-shaped reader recognition in split_selfref, with the same
-# guards the probe uses (constant shift, mask all-ones, width bounds,
-# sign-extension boundary, non-overlap) and a refusal otherwise.  It is NOT
-# implemented yet -- the measurement is committed first so the rule can be
-# reviewed against it.
+# THE RULE IS NOW IMPLEMENTED: reader form (c) in graph/split_selfref.cpp,
+# `Sext(SRA(w, const k), const n)` -- the SIGNED sibling of the existing
+# `And(SRA(w,k), 2^j-1)` form, which zero-extends and so cannot spell a read
+# that keeps its sign.
+#
+#   MEASURED AFTER:   s0_yosys2lg 8 SCCs -> s1_cprop 1 -> s2_singleedge 0
+#   (before:          s0 8 -> s1 8 -> s2 7)
+#   The one SCC left at s1 has packs=0 -- no packed `or` in it at all, so it is
+#   not this shape -- and pass.single_edge removes it.
+#
+#   THE TWO CHECKERS AGREE.  The C++ rule dissolves all seven; the independent
+#   Python probe finds 0 SCCs in the resulting s2 graph.  Nothing in the C++
+#   trusts the Python verdict: disjointness is enforced locally by `resolve`'s
+#   own on-stack set, which fails any slice whose value is on the current
+#   resolution path.
+#
+#   NO REGRESSION over the 105 accepted CORE-ET certificates: re-emitting each
+#   from its stored lgdb_norm gives identical=76 changed=29, byte-for-byte the
+#   SAME split as before this rule -- the 29 are the memory designs the per-port
+#   dependency model moved in part 4. This rule changed nothing there, as a pass
+#   that is a strict no-op on acyclic graphs should not.
+#
+# BUT intpipe_csr_file IS NOT COUNTED AS COVERED, because its RTL evidence does
+# not pass:
+#
+#   lec[hier]: 'intpipe_csr_file' UNKNOWN (0 child collapses)
+#   lec[hier]: 0/1 def(s) proven top-down (0 via cache, 0 via semdiff, 0 via solver)
+#
+# at formal.timeout=120 AND at 1200. That is a solver limit on a 35k-node design
+# with 1055 latches, not a refutation -- and it is PRE-EXISTING: the same LEC
+# run with the signed reader disabled is equally inconclusive, so the rule is
+# not implicated. Until the RTL side is settled, emit / checkDesign / runDirect
+# were deliberately NOT run for it and the coverage ledger is unchanged at
+# 109/122.
 #
 # ONE DEFECT FIXED ALONG THE WAY.  The whole trace above was invisible: the
 # `split[dbg]` prints went to STDOUT, which `lhd` owns for its structured

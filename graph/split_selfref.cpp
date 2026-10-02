@@ -783,10 +783,35 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   // ---- collect on-cycle bit-field readers -----------------------------------
   // (a) constant Get_mask slice-reads; (b) `(w >> k) & m` spelled as
   // And(SRA(w, const k), const 2^j-1) -- the other reader form the slang->prp
-  // regeneration emits. Mutation is deferred so the analysis sees a stable
-  // graph (created helper nodes are new and never on the cycle).
+  // regeneration emits; (c) the SIGNED sibling of (b), `$signed(w[k +: n])`
+  // spelled as Sext(SRA(w, const k), const n). Mutation is deferred so the
+  // analysis sees a stable graph (created helper nodes are new and never on the
+  // cycle).
+  //
+  // FORM (c) AND WHY IT IS A SEPARATE SHAPE. (b) zero-extends -- the mask kills
+  // everything above bit j -- so a reader that must KEEP the field's sign
+  // cannot be spelled that way, and yosys emits Sext instead. core-et's CSR
+  // files are full of it: seven word-level cycles in intpipe_csr_file are two
+  // packed words exchanging 16-bit signed fields, and every one of them is
+  // false (pass/lean/CYCLE_PROVENANCE.txt part 5). Before this, the pass walked
+  // past them without even attempting a rewrite -- not a refusal, a shape it
+  // did not recognise, which is why it warned about nothing while the cycle
+  // survived into pass.lean.
+  //
+  // The rewrite is the same one (b) performs: replace the reader's packed-word
+  // operand with `resolve(word, k, k+n)`, the bits that field actually names.
+  // `Sext(slice, n)` of the packed-down [0,n) slice is the same signed value as
+  // `Sext(SRA(word,k), n)`, because the low n bits are identical and n is the
+  // sign position in both.
+  //
+  // DISJOINTNESS IS ENFORCED LOCALLY, by `resolve` itself: its `on_stack` set
+  // fails any slice whose own value is on the current resolution path, which is
+  // exactly "this field depends on itself". Nothing here trusts an offline
+  // analysis -- if the fields overlap, resolve returns invalid and the read is
+  // counted unresolved like any other.
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> gm_rewires;   // (reader, resolved, new mask)
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> and_rewires;  // (And, old SRA driver, resolved)
+  std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> sext_rewires; // (Sext, old operand, resolved)
   int  unresolved_on_cycle = 0;      // on-cycle bit-field reads we could not dissolve (diagnostic)
   bool any_cap_hit         = false;  // ... and whether the budget (vs a genuine loop) was the cause
   for (auto& R : comb_nodes) {
@@ -881,6 +906,72 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
         continue;
       }
       and_rewires.emplace_back(R, other, res);
+    } else if (rop == Ntype_op::Sext) {
+      // (c) Sext(w, n) or Sext(SRA(w, const k), n): the signed field w[k +: n].
+      auto nd = drv_at(R, 1);
+      if (nd.is_invalid() || !gu::is_const_pin(nd)) {
+        continue;  // non-constant sign position
+      }
+      auto nc = gu::hydrate_const(nd);
+      if (nc.has_unknowns() || nc.is_negative() || !nc.is_just_i64()) {
+        continue;
+      }
+      // VALIDATE AT 64 BITS, NARROW AFTERWARDS. A constant wider than `int`
+      // wraps on the cast -- a positive 2^40 sign position becomes 0 -- and
+      // `k + n` can overflow before any range test sees it. Both are silent,
+      // and both would hand `resolve` a slice that is not the field.
+      const int64_t n64 = nc.to_just_i64();
+      auto          vd  = drv_at(R, 0);
+      if (vd.is_invalid() || gu::is_const_pin(vd)) {
+        continue;
+      }
+      int64_t k64 = 0;
+      auto    wd  = vd;  // direct `$signed(w[0 +: n])` with no shift
+      auto    sm  = vd.get_master_node();
+      if (gu::type_op_of(sm) == Ntype_op::SRA) {
+        auto kd = drv_at(sm, 1);
+        if (kd.is_invalid() || !gu::is_const_pin(kd)) {
+          continue;  // dynamic shift: the field position is not a constant
+        }
+        auto kc = gu::hydrate_const(kd);
+        if (kc.has_unknowns() || kc.is_negative() || !kc.is_just_i64()) {
+          continue;
+        }
+        k64 = kc.to_just_i64();
+        wd  = drv_at(sm, 0);
+        if (wd.is_invalid() || gu::is_const_pin(wd)) {
+          continue;
+        }
+      }
+      // OUT OF RANGE IS A REFUSAL, not a zero fill. Above the packed word's own
+      // width an arithmetic shift yields the word's replicated SIGN, and
+      // `resolve`'s Or/footprint descent would answer "outside every operand ->
+      // zero" instead. That is only the same answer for a non-negative word, so
+      // reading past the end is declined rather than guessed.
+      //
+      // `k > wb - n` and not `k + n > wb`: the sum can overflow, the difference
+      // cannot once `0 < n <= wb` is already proved.
+      const int64_t wb64 = static_cast<int64_t>(gu::bits_of(wd));
+      if (wb64 <= 0 || n64 <= 0 || n64 > wb64 || k64 < 0 || k64 > wb64 || k64 > wb64 - n64) {
+        if (split_dbg) {
+          std::print(stderr, "split[dbg]: Sext-reader REFUSE k={} n={} word_bits={} (out of range)\n", k64, n64, wb64);
+        }
+        continue;
+      }
+      const int n  = static_cast<int>(n64);   // both now proved to lie in [1, wb]
+      const int k  = static_cast<int>(k64);
+      const int wb = static_cast<int>(wb64);
+      auto res = resolve(resolve, wd, k, k + n, 0);
+      if (split_dbg) {
+        std::print(stderr, "split[dbg]: Sext-reader n={} k={} sra={} word_bits={} -> {}\n", n, k,
+                   gu::type_op_of(sm) == Ntype_op::SRA, wb, res.is_invalid() ? "FAIL" : "ok");
+      }
+      if (res.is_invalid()) {
+        ++unresolved_on_cycle;
+        any_cap_hit |= cap_hit;
+        continue;
+      }
+      sext_rewires.emplace_back(R, vd, res);
     }
   }
 
@@ -908,7 +999,21 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     // their (possibly still cyclic) reads and fail loudly if unresolvable.
     res.connect_sink(A.create_sink_pin(static_cast<hhds::Port_id>(0)));
   }
-  const int nrew = static_cast<int>(gm_rewires.size() + and_rewires.size());
+  for (auto& [S, oldd, res] : sext_rewires) {
+    auto edges = S.inp_edges();  // snapshot before mutating
+    for (auto e : edges) {
+      if (e.driver == oldd) {
+        e.del_edge();
+      }
+    }
+    // Sext(res, n) == Sext(SRA(word,k), n): resolve returned the field packed
+    // down to [0,n), whose low n bits -- and therefore whose bit n-1 sign -- are
+    // the same. The sign-position operand (pid 1) is untouched. Any other
+    // consumer of the old SRA keeps its own read and fails loudly if it cannot
+    // be resolved.
+    res.connect_sink(S.create_sink_pin(static_cast<hhds::Port_id>(0)));
+  }
+  const int nrew = static_cast<int>(gm_rewires.size() + and_rewires.size() + sext_rewires.size());
   // Report the survivors to the caller (the iterating wrapper decides whether to
   // warn -- an intermediate round leaves nested reads unresolved only because the
   // next round's rewrites are not applied yet, so warning per pass would spam).
@@ -922,7 +1027,9 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     // of the forward-traversal caches on the now-acyclic graph (same effect the
     // node/pin creation in flatten_false_loop_subs has for free), so the scheduler
     // re-derives a correct topological order.
-    auto& R = gm_rewires.empty() ? std::get<0>(and_rewires.front()) : std::get<0>(gm_rewires.front());
+    auto& R = !gm_rewires.empty()    ? std::get<0>(gm_rewires.front())
+              : !and_rewires.empty() ? std::get<0>(and_rewires.front())
+                                     : std::get<0>(sext_rewires.front());
     R.set_type(R.get_type());
   }
   return nrew;
