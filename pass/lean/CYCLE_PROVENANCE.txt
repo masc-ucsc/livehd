@@ -459,6 +459,26 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 # pass(es))" -- the 6 it rewired are ordinary packed reads elsewhere in the
 # design; the mux chains are never candidates.
 #
+# TRACED, one representative SCC (full detail in the census file):
+#
+#   a ring of three muxes, each taking its p1 (else) arm from the next, closed
+#   through a width-preserving Sext. EVERY selector and EVERY p2 arm is
+#   EXTERNAL to the ring, so the ring is taken only if all three selectors
+#   choose p1. The selectors are
+#       eq(X == 0)                    txfma_f3.sv:306
+#       eq(X == 1)                    txfma_f3.sv:307
+#       eq(X == 3) | eq(X == 2)       txfma_f3.sv:309, :308
+#   over a TWO-BIT X (the cone reaches an `and` with a constant mask of 3), and
+#   the RTL is a four-arm case on `op3p2c_sel_f3a_h[1:0]` with no default.
+#
+# VERDICT: ANOTHER FALSE WORD-LEVEL CYCLE. Not genuine self-selection, and not
+# a state/latch edge misclassified as combinational -- there is no state in or
+# around the ring. The four arms cover every value of a 2-bit selector, so the
+# three ring selectors are COLLECTIVELY EXHAUSTIVE: one mux always takes its
+# external arm and the p1 chain can never close. The hold arm is UNREACHABLE,
+# and exists only because `proc -ifx` skips the proc_rmdead that would prove
+# the case full and delete it.
+#
 # THE SMALLEST DEFENSIBLE NEXT EXPERIMENT is not a split_selfref rule. It is
 # the selective plain-proc escalation designed in DIRECTION2_RESULTS.md section
 # 11 and never implemented: re-lower THIS module with plain `proc`, confirm the
@@ -469,3 +489,13 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 # escalation has to be per module and justified per module. txfmafrac_top also
 # still refuses with NEEDS-SINGLE-EDGE in the part 2 comparator, so that leg
 # has to be measured on the real route rather than assumed.
+#
+# A SECOND CANDIDATE, now that the shape is known: a narrow rule for a mux ring
+# whose selectors are a COMPLETE DECODE of one value -- collect the ring's
+# selectors, require each to be `eq(V, const)` or an Or of those over the SAME
+# V of width w, and check the constants cover all 2^w values. That is decidable
+# and cheap, needs no lowering change, and would dissolve all 39 here. It is
+# also strictly narrower than plain-proc escalation, which changes the
+# 4-state semantics of EVERY case in the module rather than only the ones it
+# can prove full. Neither is implemented; both need the exhaustiveness argument
+# made explicit and gated the way the signed reader was.
