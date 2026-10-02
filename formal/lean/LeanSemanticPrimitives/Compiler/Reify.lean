@@ -27,6 +27,22 @@ import LeanSemanticPrimitives.Compiler.CompileGraphDefs
 
 namespace Compiler
 
+/-- Run a binding list in two pieces.
+
+`runBindings` is a fold that threads the environment, so splitting the list
+splits the fold: the left piece produces an environment and the right piece
+continues from it.  This is what lets a walk be proved in SEGMENTS, each stating
+only its own bindings, instead of one proof whose goal carries the whole
+remaining list at every step.
+
+Proved by induction on the LEFT list, generalizing the environment -- the
+environment differs at each step, so it cannot be fixed before the induction. -/
+theorem runBindings_append (bs cs : List ResidualBinding) (env : SlotEnv) :
+    runBindings (bs ++ cs) env = runBindings cs (runBindings bs env) := by
+  induction bs generalizing env with
+  | nil          => rfl
+  | cons b bs ih => simp only [List.cons_append, runBindings, ih]
+
 /-- Advance the fold by one binding.  The hypothesis is discharged against the
 CURRENT environment, so the caller may keep that environment opaque. -/
 theorem runBindings_step (b : ResidualBinding) (bs : List ResidualBinding)

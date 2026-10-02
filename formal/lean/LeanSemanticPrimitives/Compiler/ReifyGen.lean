@@ -38,6 +38,18 @@ register_option d3.traceCtx : Bool := {
   descr    := "D3: log local-context and goal size after each incremental walk step"
 }
 
+/-- Segment size for the incremental walk.  0 (the default) keeps the single
+monolithic walk; `n > 0` emits the walk as segment theorems of at most `n`
+bindings each, composed through `Compiler.runBindings_append`.
+
+Registered here, not in ReifyProof, for the same reason as `d3.traceCtx`: a
+certificate carrying `set_option d3.segment` is copied into BOTH probes, and the
+simulation probe does not import ReifyProof. -/
+register_option d3.segment : Nat := {
+  defValue := 0
+  descr    := "D3: emit the incremental walk in segments of this many bindings (0 = one walk)"
+}
+
 namespace Compiler
 
 /-- Slot `sl` names a source (`s<sl>`) or an earlier binding (`v<sl-nsrc>`). -/

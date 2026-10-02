@@ -207,6 +207,16 @@ end ReifyProof
 
 open ReifyProof
 
+/-- Right-nested conjunction.  `obtain ⟨a, b, c⟩` and the anonymous constructor
+both nest RIGHT, so a left fold here would destructure correctly only for a
+single conjunct. -/
+partial def mkConjR (ts : List Term) : TermElabM Term :=
+  match ts with
+  | []      => `(True)
+  | [x]     => pure x
+  | x :: xs => do `($x ∧ $(← mkConjR xs))
+
+
 /-- Refuse to claim success for a theorem that did not close.
 
 Both emitters used to `logInfo "... proved"` unconditionally, because
@@ -403,150 +413,282 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
          else `(Compiler.refBV $(envN k) $(quote sl) = $(valN (sl - nsrc)) $envT))
     let walkNm := mkIdent (base ++ `walk)
     let traceCtx := (← getOptions).getBool `d3.traceCtx false
-    let mut tacs : Array (TSyntax `tactic) := #[]
-    let he0 := mkIdent (Name.mkSimple "he0")
-    tacs := tacs.push (← `(tactic| intro $iId:ident $stId:ident))
-    tacs := tacs.push (← `(tactic|
-      set $(envN 0):ident : Compiler.SlotEnv :=
-        Compiler.sourceEnvArr ($d).sources $iId $stId with $he0:ident))
-    tacs := tacs.push (← `(tactic|
-      have $(szN 0):ident : ($(envN 0)).size = $(quote nsrc) := by
-        rw [$he0:ident, Compiler.sourceEnvArr_size]; rfl))
-    tacs := tacs.push (← `(tactic|
-      have $(agN 0):ident : ∀ j, j < ($(envN 0)).size →
-        Compiler.refBV $(envN 0) j = Compiler.refBV $(envN 0) j := fun _ _ => rfl))
-    tacs := tacs.push (← `(tactic|
-      have $(agmN 0):ident : ∀ j, j < ($(envN 0)).size →
-        Compiler.refMem $(envN 0) j = Compiler.refMem $(envN 0) j := fun _ _ => rfl))
-    for k in [0 : nb] do
-      let b := R.bindings[k]!
-      let isMem := match b.ty with | .mem _ _ => true | .bv _ => false
-      let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
-      let pushV ← liftTermElabM (if isMem then `(CertVal.mem ($(valN k) $(envN 0)))
-                                 else `(CertVal.bv ($(valN k) $(envN 0))))
-      -- operand reads: source agreement, or a live produced-slot fact
-      let reads := ReifyProof.exprRefsTyped b.rhs
-      let mut simpArgs : Array (TSyntax `Lean.Parser.Tactic.simpLemma) := #[]
-      simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| Compiler.denoteExpr))
-      simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| Compiler.refBVs))
-      simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| List.map_cons))
-      simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| List.map_nil))
-      simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| $(valN k):ident))
-      for (sl, m) in reads do
-        if sl < nsrc then
-          let ag := if m then agmN k else agN k
-          simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma|
-            $ag:ident $(quote sl) (by simp only [$(szN 0):ident]; omega)))
-        else
-          simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| $(bFact k sl):ident))
-      let hvN := mkIdent (Name.mkSimple s!"hv{k}")
-      tacs := tacs.push (← `(tactic|
-        have $hvN:ident : Compiler.denoteExpr $(envN k) $rhsQ = $pushV := by
-          simp only [$simpArgs,*]))
-      tacs := tacs.push (← `(tactic| rw [Compiler.runBindings_step _ _ $(envN k) _ $hvN]))
-      tacs := tacs.push (← `(tactic|
-        have $(szN (k+1)):ident : (($(envN k)).push $pushV).size = $(quote (nsrc + k + 1)) := by
-          simp [$(szN k):ident]))
-      tacs := tacs.push (← `(tactic|
-        have $(agN (k+1)):ident := Compiler.srcAgree_push (base := $(envN 0)) $pushV
-          (by simp only [$(szN k):ident, $(szN 0):ident]; omega) $(agN k):ident))
-      tacs := tacs.push (← `(tactic|
-        have $(agmN (k+1)):ident := Compiler.srcAgreeMem_push (base := $(envN 0)) $pushV
-          (by simp only [$(szN k):ident, $(szN 0):ident]; omega) $(agmN k):ident))
-      -- transport exactly the live set, and nothing else
-      let mut keep : Array (TSyntax `Lean.Parser.Tactic.locationWildcard) := #[]
-      let mut names : Array Ident := #[szN (k+1), agN (k+1), agmN (k+1)]
-      for (sl, m) in live[k]! do
-        if sl == nsrc + k then
-          let fnm := bFact (k+1) sl
-          let selfLem := if m then mkIdent ``Compiler.refMem_push_self
-                         else mkIdent ``Compiler.refBV_push_self
-          let proj := if m then mkIdent ``CertVal.asMem else mkIdent ``CertVal.asBV
-          let readFn := if m then mkIdent ``Compiler.refMem else mkIdent ``Compiler.refBV
-          tacs := tacs.push (← `(tactic|
-            have $fnm:ident : $readFn (($(envN k)).push $pushV) $(quote sl)
-                = $(valN k) $(envN 0) := by
-              have hh := $selfLem:ident $(envN k) $pushV
-              rw [$(szN k):ident] at hh
-              simpa [$proj:ident] using hh))
-          names := names.push fnm
-        else
-          let fnm := bFact (k+1) sl
-          let lem := if m then mkIdent ``Compiler.bindAgreeMem_push
-                     else mkIdent ``Compiler.bindAgree_push
-          tacs := tacs.push (← `(tactic|
-            have $fnm:ident := $lem:ident (env := $(envN k)) $pushV $(quote sl) _
-              (by simp only [$(szN k):ident]; omega) $(bFact k sl):ident))
-          names := names.push fnm
-      let _ := keep
-      let locs : Array Ident := names
-      tacs := tacs.push (← `(tactic|
-        generalize (($(envN k)).push $pushV) = $(envN (k+1)):ident at $[$locs:ident]* ⊢))
-      -- BOUNDED CONTEXT.  `generalize ... at` transports the live facts, but it
-      -- does not DISCARD the ones it replaced: measured, a 48-binding walk whose
-      -- live set is 1 at every step still ended with 296 hypotheses in scope.
-      -- Every context-scanning tactic in the remaining steps then pays for them.
-      --
-      -- So drop, at the end of each step, exactly what the invariant at step k+1
-      -- does not mention: this step's `hv`, its size fact, its two source
-      -- agreements, the produced-slot facts it just superseded, and finally the
-      -- environment itself.  `e0` and `hsz0` are NOT dropped -- every fact is
-      -- stated relative to `e0`, and the source-agreement side conditions read
-      -- `hsz0` to the very end.  Dependents are listed before their dependencies
-      -- so `clear` never has to refuse.
-      let mut dead : Array Ident := #[hvN]
-      if k > 0 then
-        for (sl, _) in live[k-1]! do
-          dead := dead.push (bFact k sl)
-        dead := dead.push (szN k)
-      dead := dead.push (agN k)
-      dead := dead.push (agmN k)
-      if k > 0 then
-        dead := dead.push (envN k)
-      tacs := tacs.push (← `(tactic| clear $[$dead:ident]*))
-      if traceCtx then
-        let kq := quote k
-        let nliveq := quote (live[k]!.size)
+    let segSize : Nat := (← getOptions).get `d3.segment 0
+    -- The per-step tactics, shared by BOTH walks so the monolithic proof and the
+    -- segmented one cannot drift apart.  `baseEnv` is the environment every fact
+    -- is stated against -- the proof-local `e0` in the monolithic walk, and the
+    -- source environment itself inside a segment, which has no `e0` binder --
+    -- and `srcSz` names the fact that that environment has `nsrc` slots.
+    let mkStep : Term → Ident → Nat → CommandElabM (Array (TSyntax `tactic)) :=
+      fun baseEnv srcSz k => do
+        let mut tacs : Array (TSyntax `tactic) := #[]
+        let b := R.bindings[k]!
+        let isMem := match b.ty with | .mem _ _ => true | .bv _ => false
+        let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
+        let pushV ← liftTermElabM (if isMem then `(CertVal.mem ($(valN k) $baseEnv))
+                                   else `(CertVal.bv ($(valN k) $baseEnv)))
+        -- operand reads: source agreement, or a live produced-slot fact
+        let reads := ReifyProof.exprRefsTyped b.rhs
+        let mut simpArgs : Array (TSyntax `Lean.Parser.Tactic.simpLemma) := #[]
+        simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| Compiler.denoteExpr))
+        simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| Compiler.refBVs))
+        simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| List.map_cons))
+        simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| List.map_nil))
+        simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| $(valN k):ident))
+        for (sl, m) in reads do
+          if sl < nsrc then
+            let ag := if m then agmN k else agN k
+            simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma|
+              $ag:ident $(quote sl) (by simp only [$srcSz:ident]; omega)))
+          else
+            simpArgs := simpArgs.push (← `(Lean.Parser.Tactic.simpLemma| $(bFact k sl):ident))
+        let hvN := mkIdent (Name.mkSimple s!"hv{k}")
         tacs := tacs.push (← `(tactic|
-          run_tac do
-            let g ← Lean.Elab.Tactic.getMainGoal
-            let lc := (← g.getDecl).lctx
-            let ndecl := lc.decls.toList.filterMap id |>.length
-            let gt ← Lean.instantiateMVars (← g.getType)
-            Lean.logInfo s!"D3CTX step={$kq} live={$nliveq} ctx={ndecl} goal={gt.approxDepth}"))
-    -- close
-    let anonCtor : Array Term ← termSlots.toArray.mapM fun p =>
-      let (sl, isMem) := p
-      if sl < nsrc then
-        (if isMem then `($(agmN nb) $(quote sl) (by simp only [$(szN 0):ident]; omega))
-         else `($(agN nb) $(quote sl) (by simp only [$(szN 0):ident]; omega)))
-      else `($(bFact nb sl))
-    let trivTerm ← liftTermElabM `(trivial)
-    let closing : Array Term := if anonCtor.isEmpty then #[trivTerm] else anonCtor
-    tacs := tacs.push (← `(tactic|
-      exact ⟨$(envN nb), by simp [Compiler.runBindings], $closing,*⟩))
-    let factTerms ← liftTermElabM (termSlots.toArray.mapM (mkFact nb))
-    -- the promised conjunction, built right-associated
-    let conj ← liftTermElabM (
-      let rec build : List Term → TermElabM Term
-        | []      => `(True)
-        | [x]     => pure x
-        | x :: xs => do `($x ∧ $(← build xs))
-      build factTerms.toList)
-    let eNm := envN nb
-    elabCommand (← `(command|
-      theorem $walkNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
-        ∃ $eNm:ident,
-          Compiler.runBindings $bindsList
-            (Compiler.sourceEnvArr ($d).sources $iId $stId) = $eNm
-          ∧ $conj := by
-        $tacs*))
-    -- DIAGNOSTIC: the exact size of the GENERATED proof -- the number of tactics
-    -- the walk emits.  (The kernel's own proof-term size is a different figure
-    -- and is NOT measured here: reading it back from the environment races with
-    -- async elaboration of the theorem body.)
-    if traceCtx then
-      logInfo s!"D3SIZE walk tactics={tacs.size} bindings={nb}"
+          have $hvN:ident : Compiler.denoteExpr $(envN k) $rhsQ = $pushV := by
+            simp only [$simpArgs,*]))
+        tacs := tacs.push (← `(tactic| rw [Compiler.runBindings_step _ _ $(envN k) _ $hvN]))
+        tacs := tacs.push (← `(tactic|
+          have $(szN (k+1)):ident : (($(envN k)).push $pushV).size = $(quote (nsrc + k + 1)) := by
+            simp [$(szN k):ident]))
+        tacs := tacs.push (← `(tactic|
+          have $(agN (k+1)):ident := Compiler.srcAgree_push (base := $baseEnv) $pushV
+            (by simp only [$(szN k):ident, $srcSz:ident]; omega) $(agN k):ident))
+        tacs := tacs.push (← `(tactic|
+          have $(agmN (k+1)):ident := Compiler.srcAgreeMem_push (base := $baseEnv) $pushV
+            (by simp only [$(szN k):ident, $srcSz:ident]; omega) $(agmN k):ident))
+        -- transport exactly the live set, and nothing else
+        let mut keep : Array (TSyntax `Lean.Parser.Tactic.locationWildcard) := #[]
+        let mut names : Array Ident := #[szN (k+1), agN (k+1), agmN (k+1)]
+        for (sl, m) in live[k]! do
+          if sl == nsrc + k then
+            let fnm := bFact (k+1) sl
+            let selfLem := if m then mkIdent ``Compiler.refMem_push_self
+                           else mkIdent ``Compiler.refBV_push_self
+            let proj := if m then mkIdent ``CertVal.asMem else mkIdent ``CertVal.asBV
+            let readFn := if m then mkIdent ``Compiler.refMem else mkIdent ``Compiler.refBV
+            tacs := tacs.push (← `(tactic|
+              have $fnm:ident : $readFn (($(envN k)).push $pushV) $(quote sl)
+                  = $(valN k) $baseEnv := by
+                have hh := $selfLem:ident $(envN k) $pushV
+                rw [$(szN k):ident] at hh
+                simpa [$proj:ident] using hh))
+            names := names.push fnm
+          else
+            let fnm := bFact (k+1) sl
+            let lem := if m then mkIdent ``Compiler.bindAgreeMem_push
+                       else mkIdent ``Compiler.bindAgree_push
+            tacs := tacs.push (← `(tactic|
+              have $fnm:ident := $lem:ident (env := $(envN k)) $pushV $(quote sl) _
+                (by simp only [$(szN k):ident]; omega) $(bFact k sl):ident))
+            names := names.push fnm
+        let _ := keep
+        let locs : Array Ident := names
+        tacs := tacs.push (← `(tactic|
+          generalize (($(envN k)).push $pushV) = $(envN (k+1)):ident at $[$locs:ident]* ⊢))
+        -- BOUNDED CONTEXT.  `generalize ... at` transports the live facts, but it
+        -- does not DISCARD the ones it replaced: measured, a 48-binding walk whose
+        -- live set is 1 at every step still ended with 296 hypotheses in scope.
+        -- Every context-scanning tactic in the remaining steps then pays for them.
+        --
+        -- So drop, at the end of each step, exactly what the invariant at step k+1
+        -- does not mention: this step's `hv`, its size fact, its two source
+        -- agreements, the produced-slot facts it just superseded, and finally the
+        -- environment itself.  `e0` and `hsz0` are NOT dropped -- every fact is
+        -- stated relative to `e0`, and the source-agreement side conditions read
+        -- `hsz0` to the very end.  Dependents are listed before their dependencies
+        -- so `clear` never has to refuse.
+        let mut dead : Array Ident := #[hvN]
+        if k > 0 then
+          for (sl, _) in live[k-1]! do
+            dead := dead.push (bFact k sl)
+          dead := dead.push (szN k)
+        dead := dead.push (agN k)
+        dead := dead.push (agmN k)
+        if k > 0 then
+          dead := dead.push (envN k)
+        tacs := tacs.push (← `(tactic| clear $[$dead:ident]*))
+        if traceCtx then
+          let kq := quote k
+          let nliveq := quote (live[k]!.size)
+          tacs := tacs.push (← `(tactic|
+            run_tac do
+              let g ← Lean.Elab.Tactic.getMainGoal
+              let lc := (← g.getDecl).lctx
+              let ndecl := lc.decls.toList.filterMap id |>.length
+              let gt ← Lean.instantiateMVars (← g.getType)
+              Lean.logInfo s!"D3CTX step={$kq} live={$nliveq} ctx={ndecl} goal={gt.approxDepth}"))
+        return tacs
+    if segSize == 0 then
+      -- ---- one monolithic walk (unchanged) --------------------------------
+      let mut tacs : Array (TSyntax `tactic) := #[]
+      let he0 := mkIdent (Name.mkSimple "he0")
+      tacs := tacs.push (← `(tactic| intro $iId:ident $stId:ident))
+      tacs := tacs.push (← `(tactic|
+        set $(envN 0):ident : Compiler.SlotEnv :=
+          Compiler.sourceEnvArr ($d).sources $iId $stId with $he0:ident))
+      tacs := tacs.push (← `(tactic|
+        have $(szN 0):ident : ($(envN 0)).size = $(quote nsrc) := by
+          rw [$he0:ident, Compiler.sourceEnvArr_size]; rfl))
+      tacs := tacs.push (← `(tactic|
+        have $(agN 0):ident : ∀ j, j < ($(envN 0)).size →
+          Compiler.refBV $(envN 0) j = Compiler.refBV $(envN 0) j := fun _ _ => rfl))
+      tacs := tacs.push (← `(tactic|
+        have $(agmN 0):ident : ∀ j, j < ($(envN 0)).size →
+          Compiler.refMem $(envN 0) j = Compiler.refMem $(envN 0) j := fun _ _ => rfl))
+      let e0T ← liftTermElabM `($(envN 0):ident)
+      for k in [0 : nb] do
+        tacs := tacs ++ (← mkStep e0T (szN 0) k)
+      let anonCtor : Array Term ← termSlots.toArray.mapM fun p =>
+        let (sl, isMem) := p
+        if sl < nsrc then
+          (if isMem then `($(agmN nb) $(quote sl) (by simp only [$(szN 0):ident]; omega))
+           else `($(agN nb) $(quote sl) (by simp only [$(szN 0):ident]; omega)))
+        else `($(bFact nb sl))
+      let trivTerm ← liftTermElabM `(trivial)
+      let closing : Array Term := if anonCtor.isEmpty then #[trivTerm] else anonCtor
+      tacs := tacs.push (← `(tactic|
+        exact ⟨$(envN nb), by simp [Compiler.runBindings], $closing,*⟩))
+      let factTerms ← liftTermElabM (termSlots.toArray.mapM (mkFact nb))
+      let conj ← liftTermElabM (mkConjR factTerms.toList)
+      let eNm := envN nb
+      elabCommand (← `(command|
+        theorem $walkNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
+          ∃ $eNm:ident,
+            Compiler.runBindings $bindsList
+              (Compiler.sourceEnvArr ($d).sources $iId $stId) = $eNm
+            ∧ $conj := by
+          $tacs*))
+      if traceCtx then
+        logInfo s!"D3SIZE walk tactics={tacs.size} bindings={nb}"
+    else
+      -- ---- the walk in SEGMENTS -------------------------------------------
+      -- Each segment is its own theorem over its own binding list, so no goal
+      -- ever carries the whole remaining list.  They are composed through
+      -- `runBindings_append`, which is proved once and generically.
+      let nseg   := (nb + segSize - 1) / segSize
+      let bnd    : Nat → Nat := fun j => min (j * segSize) nb
+      let segNm  : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"seg{j}")
+      let segThm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"walk_seg{j}")
+      let hwN    : Nat → Ident := fun j => mkIdent (Name.mkSimple s!"hw{j}")
+      let srcSz  := mkIdent (Name.mkSimple "hsrcsz")
+      let boundary : Nat → Array (Nat × Bool) := fun b => if b == 0 then #[] else live[b-1]!
+      let factOf : Ident → (Nat × Bool) → TermElabM Term := fun e p =>
+        let (sl, isMem) := p
+        if sl < nsrc then
+          (if isMem then `(Compiler.refMem $e $(quote sl) = Compiler.refMem $envT $(quote sl))
+           else `(Compiler.refBV $e $(quote sl) = Compiler.refBV $envT $(quote sl)))
+        else
+          (if isMem then `(Compiler.refMem $e $(quote sl) = $(valN (sl - nsrc)) $envT)
+           else `(Compiler.refBV $e $(quote sl) = $(valN (sl - nsrc)) $envT))
+      -- 1. the segment lists, named
+      for j in [0 : nseg] do
+        let segLit ← liftTermElabM
+          (ReifyProof.qBindingsList (R.bindings.extract (bnd j) (bnd (j+1))))
+        elabCommand (← `(command|
+          def $(segNm j) : List Compiler.ResidualBinding := $segLit))
+      -- 2. one theorem per segment, carrying only the boundary invariant
+      let envTT ← liftTermElabM `($envT)
+      for j in [0 : nseg] do
+        let lo := bnd j
+        let hi := bnd (j+1)
+        let eLo := envN lo
+        let eHi := envN hi
+        let stmt ← liftTermElabM do
+          let szLo  ← `(($eLo).size = $(quote (nsrc + lo)))
+          let agLo  ← `(∀ k, k < ($envT).size →
+                          Compiler.refBV $eLo k = Compiler.refBV $envT k)
+          let agmLo ← `(∀ k, k < ($envT).size →
+                          Compiler.refMem $eLo k = Compiler.refMem $envT k)
+          let szHi  ← `(($eHi).size = $(quote (nsrc + hi)))
+          let agHi  ← `(∀ k, k < ($envT).size →
+                          Compiler.refBV $eHi k = Compiler.refBV $envT k)
+          let agmHi ← `(∀ k, k < ($envT).size →
+                          Compiler.refMem $eHi k = Compiler.refMem $envT k)
+          let hypTerms ← (boundary lo).mapM (factOf eLo)
+          let cclTerms ← (boundary hi).mapM (factOf eHi)
+          let rest ← mkConjR (szHi :: agHi :: agmHi :: cclTerms.toList)
+          let mut acc ← `(∃ $eHi:ident,
+            Compiler.runBindings $(segNm j) $eLo = $eHi ∧ $rest)
+          for h in (#[szLo, agLo, agmLo] ++ hypTerms).reverse do
+            acc ← `($h → $acc)
+          `(∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState)
+              ($eLo : Compiler.SlotEnv), $acc)
+        let introIds : Array Ident :=
+          #[iId, stId, eLo, szN lo, agN lo, agmN lo]
+            ++ (boundary lo).map (fun p => bFact lo p.1)
+        let mut tacs : Array (TSyntax `tactic) := #[]
+        tacs := tacs.push (← `(tactic| intro $[$introIds:ident]*))
+        tacs := tacs.push (← `(tactic|
+          have $srcSz:ident : ($envT).size = $(quote nsrc) := by
+            rw [Compiler.sourceEnvArr_size]; rfl))
+        tacs := tacs.push (← `(tactic| simp only [$(segNm j):ident]))
+        for k in [lo : hi] do
+          tacs := tacs ++ (← mkStep envTT srcSz k)
+        let cclIds : Array Term ←
+          ((boundary hi).map (fun p => bFact hi p.1)).mapM fun h => `($h)
+        tacs := tacs.push (← `(tactic|
+          exact ⟨$eHi, by simp [Compiler.runBindings],
+                 $(szN hi), $(agN hi), $(agmN hi), $cclIds,*⟩))
+        elabCommand (← `(command| theorem $(segThm j) : $stmt := by $tacs*))
+      -- 3. the flat list IS the segments appended -- one `rfl`, O(N) once
+      let segsEqNm := mkIdent (base ++ `segs_eq)
+      let appTerm ← liftTermElabM do
+        let rec go (j : Nat) : TermElabM Term :=
+          if j + 1 ≥ nseg then `($(segNm j))
+          else do `($(segNm j) ++ $(← go (j+1)))
+        go 0
+      elabCommand (← `(command|
+        theorem $segsEqNm : $bindsList = $appTerm := rfl))
+      -- 4. compose, without ever unfolding the flat list
+      let mut tacs : Array (TSyntax `tactic) := #[]
+      tacs := tacs.push (← `(tactic| intro $iId:ident $stId:ident))
+      tacs := tacs.push (← `(tactic|
+        have $srcSz:ident : ($envT).size = $(quote nsrc) := by
+          rw [Compiler.sourceEnvArr_size]; rfl))
+      for j in [0 : nseg] do
+        let lo := bnd j
+        let hi := bnd (j+1)
+        let args : Array Term ←
+          if j == 0 then do
+            pure #[← `($iId), ← `($stId), ← `($envT), ← `($srcSz),
+                   ← `(fun _ _ => rfl), ← `(fun _ _ => rfl)]
+          else do
+            let fs : Array Term ← ((boundary lo).map (fun p => bFact lo p.1)).mapM fun h => `($h)
+            pure (#[← `($iId), ← `($stId), ← `($(envN lo)), ← `($(szN lo)),
+                    ← `($(agN lo)), ← `($(agmN lo))] ++ fs)
+        let pat : Array Ident :=
+          #[envN hi, hwN j, szN hi, agN hi, agmN hi]
+            ++ (boundary hi).map (fun p => bFact hi p.1)
+        tacs := tacs.push (← `(tactic|
+          obtain ⟨$[$pat:ident],*⟩ := $(segThm j) $args*))
+      let mut rules : Array (TSyntax `Lean.Parser.Tactic.rwRule) :=
+        #[← `(Lean.Parser.Tactic.rwRule| $segsEqNm:ident)]
+      for j in [0 : nseg] do
+        if j + 1 < nseg then
+          rules := rules.push (← `(Lean.Parser.Tactic.rwRule| Compiler.runBindings_append))
+        rules := rules.push (← `(Lean.Parser.Tactic.rwRule| $(hwN j):ident))
+      let anonCtor : Array Term ← termSlots.toArray.mapM fun p =>
+        let (sl, isMem) := p
+        if sl < nsrc then
+          (if isMem then `($(agmN nb) $(quote sl) (by simp only [$srcSz:ident]; omega))
+           else `($(agN nb) $(quote sl) (by simp only [$srcSz:ident]; omega)))
+        else `($(bFact nb sl))
+      let trivTerm ← liftTermElabM `(trivial)
+      let closing : Array Term := if anonCtor.isEmpty then #[trivTerm] else anonCtor
+      tacs := tacs.push (← `(tactic|
+        exact ⟨$(envN nb), by rw [$rules,*], $closing,*⟩))
+      let factTerms ← liftTermElabM (termSlots.toArray.mapM (mkFact nb))
+      let conj ← liftTermElabM (mkConjR factTerms.toList)
+      let eNm := envN nb
+      elabCommand (← `(command|
+        theorem $walkNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
+          ∃ $eNm:ident,
+            Compiler.runBindings $bindsList
+              (Compiler.sourceEnvArr ($d).sources $iId $stId) = $eNm
+            ∧ $conj := by
+          $tacs*))
+      if traceCtx then
+        logInfo s!"D3SIZE segmented walk segments={nseg} segSize={segSize} bindings={nb}"
     -- ---- shape lemmas, then the two theorems -------------------------------
     let btlNm := mkIdent (base ++ `R_bindings_toList)
     elabCommand (← `(command| theorem $btlNm : ($rNm).bindings.toList = $bindsList := rfl))
