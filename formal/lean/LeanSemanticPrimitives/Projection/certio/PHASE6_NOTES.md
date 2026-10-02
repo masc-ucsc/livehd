@@ -72,14 +72,23 @@ failure, 0.6 s each.
 Separately, specialization time is SUPERLINEAR in node count.  Measured through
 `Hw.mkSim (Scaling.chainD n)`, interpreted:
 
-    n     mkSim        ratio
-    256    14212 ms
-    512   101480 ms    7.1x for 2x nodes   (~ n^2.8)
+    n      mkSim          ratio
+     256    14212 ms
+     512   101480 ms      7.1x for 2x nodes   (~ n^2.8)
+    1024   >600000 ms     did not finish in a 600 s budget
+    2048   >600000 ms     did not finish in a 600 s budget
+
+Each `n` ran in its own `lean --run` with `timeout 600`; 1024 and 2048 were
+killed by that timeout, not by a stack overflow.  The fitted exponent predicts
+101.5 s * 2^2.8 ~ 710 s for n = 1024, which is consistent with timing out at
+600 s, so the two timeouts corroborate the exponent rather than adding a new
+failure mode.
 
 Phase 1 made the residual's SIZE linear and increment 1 measured its BOUND
 linear (`3n + 5`).  Neither says anything about how long the specializer TAKES,
 and this is the first measurement of that.  At n^2.8, 5118 nodes is ~3 orders of
-magnitude beyond n = 512 even without the stack limit.
+magnitude beyond n = 512 even without the stack limit -- and n = 1024 already
+exceeds ten minutes.
 
 So there are two independent walls, and the stack one fires first:
 
