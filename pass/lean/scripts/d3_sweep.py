@@ -55,6 +55,8 @@ LAKE = os.environ.get("LAKE", "/mada/users/czeng14/.elan/bin/lake")
 # Filled by `main` from `resolve_lean()`.  Empty means "go through lake env",
 # which is what `--via-lake` selects and what a failed resolution falls back to.
 LEAN_BIN, LEAN_ENV, LEAN_ENV_DIGEST = "", {}, ""
+# Set by `main` when cgroup enforcement is active; None means sampled-only.
+CGROUP_BASE, CGROUP_MAX_KB = None, 0
 
 # `checker` sits BETWEEN sim and agree deliberately.  An agreement result from a
 # checker that cannot reject a wrong answer is not weak evidence, it is no
@@ -108,6 +110,8 @@ _SHUTDOWN = threading.Event()
 RUN_ID = os.environ.get("D3_RUN_ID") or f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
 RUN_DIR = ROOT / "temp" / "d3_sweep" / "runs" / RUN_ID
 _MARK = str(RUN_DIR)
+# The cgroup-join wrapper, written per run beside the probes it launches.
+CGEXEC_PATH = RUN_DIR / "cgexec.py"
 
 
 def _killpg(pgid: int, sig: int) -> None:
@@ -322,6 +326,139 @@ def _aggregate_rss_kb() -> int:
     pids = _descendants(os.getpid()) | set(_marked_pids())
     return _rss_kb_of(os.getpid()) + sum(_rss_kb_of(pid) for pid in pids)
 
+
+
+# ---------------------------------------------------------------------------
+# cgroup v2 enforcement.
+#
+# The sampled caps are ADVISORY: they bound sustained memory, not instantaneous
+# peaks.  Measured on real runs at a 5 s interval against a 19,000,000 kB limit,
+# `frontend` peaked 161,996 kB OVER and was never killed, while `issue_stage` was
+# caught 20,996 kB over -- same limit, opposite outcomes, decided by sampling
+# phase alone.
+#
+# cgroup v2 `memory.max` is enforced by the kernel continuously, and
+# `memory.peak` reports the true peak rather than a sampled lower bound.  Probed
+# on this machine with a tiny allocator: OOM-killed at exactly the limit with
+# exit 137, `memory.events` carrying an `oom_kill` counter that distinguishes it
+# from any other kill, and `rmdir` succeeding with zero processes left.
+#
+# It is OPT-IN and falls back to sampling, because delegation is a property of
+# the host: another machine may mount cgroup v2 without granting the memory
+# controller to a user slice, and a sweep must still run there.
+# ---------------------------------------------------------------------------
+def cgroup_base() -> "pathlib.Path | None":
+    """The delegated cgroup directory this process may create children under.
+
+    Returns None unless cgroup v2 is mounted, the `memory` controller is
+    delegated AND enabled for subtrees, and a child is actually creatable --
+    all four checked by doing it, not by inferring it from the mount table.
+    """
+    try:
+        own = pathlib.Path("/proc/self/cgroup").read_text().strip()
+    except OSError:
+        return None
+    if not own.startswith("0::"):
+        return None                      # not a unified (v2) hierarchy
+    for cand in (pathlib.Path("/sys/fs/cgroup") / own[3:].lstrip("/"),
+                 pathlib.Path(f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice"
+                              f"/user@{os.getuid()}.service")):
+        try:
+            if "memory" not in (cand / "cgroup.controllers").read_text().split():
+                continue
+            if "memory" not in (cand / "cgroup.subtree_control").read_text().split():
+                continue
+            probe = cand / f".d3probe{os.getpid()}"
+            probe.mkdir(exist_ok=True)
+            probe.rmdir()
+            return cand
+        except (OSError, PermissionError):
+            continue
+    return None
+
+
+# The probe joins its cgroup in a tiny wrapper process, NOT in a `preexec_fn`.
+# CPython documents `preexec_fn` as unsafe in the presence of threads -- it runs
+# arbitrary Python between fork and exec, where only async-signal-safe work is
+# legal, and this runner always has threads (the RSS sampler plus a
+# ThreadPoolExecutor).  The wrapper is a fresh single-threaded process, so the
+# same two operations are safe, and `execvpe` replaces it immediately: the probe
+# is inside the cgroup before it executes a single instruction.
+CGEXEC_SRC = '''#!/usr/bin/env python3
+"""Join a cgroup, then become the real command.  Single-threaded by construction."""
+import os, sys
+with open(os.path.join(sys.argv[1], "cgroup.procs"), "w") as fh:
+    fh.write(str(os.getpid()))
+os.execvpe(sys.argv[2], sys.argv[2:], os.environ)
+'''
+
+
+class Cgroup:
+    """One cgroup per probe, so `memory.peak` is that probe's own peak."""
+
+    def __init__(self, base: pathlib.Path, name: str, max_kb: int):
+        # Hashed: a module name can carry characters a cgroup path must not, and
+        # a collision would merge two probes' accounting into one.
+        safe = hashlib.sha256(name.encode()).hexdigest()[:32]
+        self.path = base / f"d3-{safe}"
+        self.path.mkdir(exist_ok=True)
+        try:
+            if max_kb:
+                (self.path / "memory.max").write_text(str(max_kb * 1024))
+            for f, v in (("memory.swap.max", "0"),      # no swap escape hatch
+                         ("memory.oom.group", "1")):    # kill the probe as a UNIT
+                try:
+                    (self.path / f).write_text(v)
+                except OSError:
+                    pass
+            # The baseline for the DELTA.  An absolute count would misread a
+            # pre-existing event, and exit 137 alone proves nothing: any SIGKILL
+            # produces it, including our own teardown and an external `kill`.
+            self.oom_before = self._oom_count()
+        except Exception:
+            self.destroy()          # never leave a partially configured child
+            raise
+
+    def _oom_count(self) -> int:
+        try:
+            ev = dict(l.split() for l in
+                      (self.path / "memory.events").read_text().splitlines() if l)
+            return int(ev.get("oom_kill", 0))
+        except (OSError, ValueError):
+            return 0
+
+    def peak_kb(self) -> int:
+        for f in ("memory.peak", "memory.max_usage_in_bytes"):
+            try:
+                return int((self.path / f).read_text().strip()) // 1024
+            except (OSError, ValueError):
+                continue
+        return 0
+
+    def oom_killed(self) -> bool:
+        """A DELTA in the kernel's own counter -- the only sound evidence."""
+        return self._oom_count() > self.oom_before
+
+    def destroy(self) -> bool:
+        """Kill anything left, remove the cgroup, and SAY whether it worked.
+
+        Returns False on a leak rather than swallowing it: a cgroup that cannot
+        be removed still holds its memory charge, and a sweep that quietly
+        accumulates them would drift away from the budget it claims to keep.
+        """
+        try:
+            (self.path / "cgroup.kill").write_text("1")   # v2: kill the subtree
+        except OSError:
+            pass
+        for _ in range(50):
+            try:
+                self.path.rmdir()
+                return True
+            except FileNotFoundError:
+                return True
+            except OSError:
+                time.sleep(0.1)
+        return False
 
 
 def _positive_finite(text: str) -> float:
@@ -1030,13 +1167,55 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
 
     row["launched"] = "1"
     t0 = time.time()
-    out, rc = run_group(cmd, LEAN_DIR, timeout, env=penv)
+    cg = None
+    if CGROUP_BASE is not None:
+        try:
+            cg = Cgroup(CGROUP_BASE, f"{RUN_ID}-{m}", CGROUP_MAX_KB)
+            # Outermost, so EVERYTHING -- /usr/bin/time included -- is inside the
+            # cgroup and counted against it.
+            cmd = [sys.executable, str(CGEXEC_PATH), str(cg.path)] + cmd
+        except OSError as e:
+            # Enforcement was requested and cannot be provided.  Refusing is the
+            # only honest option: silently falling back would run the probe
+            # unguarded while the sidecar claims otherwise.
+            row["detail"] = f"cgroup enforcement unavailable at launch: {e}"
+            row["run_status"], row["verdict"] = "error", "runner_error"
+            row["wall_s"] = "0.00"
+            return row
+    cg_peak, cg_oom, cg_leaked = 0, False, False
+    try:
+        out, rc = run_group(cmd, LEAN_DIR, timeout, env=penv)
+    finally:
+        if cg is not None:
+            # Read BEFORE destroying -- the counters vanish with the directory.
+            # This runs on every path out, including a timeout and an exception,
+            # so no cgroup survives its probe.
+            cg_peak, cg_oom = cg.peak_kb(), cg.oom_killed()
+            cg_leaked = not cg.destroy()
     if os.environ.get("D3_TEST_RAISE_ON") == m:
         # Test seam, placed where the real hazard is: AFTER the probe ran, in the
         # window where timing capture, log writing and gate parsing happen.  main
         # converts an exception here into a `runner_error` row, and that row must
         # still be subject to the artifact check.
         raise RuntimeError("D3_TEST_RAISE_ON (post-probe)")
+    if cg_leaked:
+        # Said out loud rather than swallowed: a cgroup that will not die still
+        # holds its memory charge against the budget.
+        print(f"d3_sweep: WARNING: could not remove the cgroup for {m}; it still "
+              f"holds a memory charge", file=sys.stderr)
+
+    if cg is not None and cg_oom:
+        # The KERNEL killed it at memory.max.  Continuous enforcement, and
+        # `memory.peak` is a TRUE peak rather than a sampled lower bound.
+        r = deferred_row(target, samples,
+                         f"terminated by the kernel at the cgroup memory.max of "
+                         f"{CGROUP_MAX_KB} kB (max_rss_kb is cgroup memory.peak, an "
+                         f"EXACT peak, not a sampled bound)")
+        r["run_status"], r["verdict"] = "rss_killed", "rss_killed"
+        r["launched"], r["wall_s"] = "1", f"{time.time() - t0:.2f}"
+        r["max_rss_kb"] = str(cg_peak)
+        return r
+
     if _RSS_KILL.is_set() and rc != 0:
         # Killed by the budget, not by anything the design did.  Recorded as a
         # nonterminal row so `--resume` picks it up, and never passed to
@@ -1367,6 +1546,15 @@ def main() -> int:
                          "0 disables. A running target is never killed by this, so "
                          "at --jobs 1 with one target it has no effect. Logged once, "
                          "at the first crossing.")
+    ap.add_argument("--enforce", choices=("sampled", "cgroup", "auto"),
+                    default="sampled",
+                    help="how --kill-over-rss-kb is enforced. `sampled` (default) "
+                         "polls every --rss-sample-seconds and is ADVISORY: a peak "
+                         "between samples passes unobserved. `cgroup` uses cgroup v2 "
+                         "memory.max, which the kernel enforces continuously and "
+                         "which reports an EXACT memory.peak; it REFUSES to run if "
+                         "delegation is unavailable rather than silently degrading. "
+                         "`auto` uses cgroup when available and sampled otherwise.")
     ap.add_argument("--rss-sample-seconds", type=_positive_finite, default=5.0,
                     help="how often the aggregate RSS sampler runs. Smaller tightens "
                          "the advisory hard limit at the cost of more /proc reads; it "
@@ -1480,6 +1668,35 @@ def main() -> int:
                   file=sys.stderr)
             return 2
 
+    global CGROUP_BASE, CGROUP_MAX_KB
+    if a.enforce in ("cgroup", "auto"):
+        CGROUP_BASE = cgroup_base()
+        CGROUP_MAX_KB = a.kill_over_rss_kb
+        if CGROUP_BASE is None and a.enforce == "cgroup":
+            print("REFUSING: --enforce cgroup was requested but cgroup v2 memory "
+                  "delegation is not available here. Running under the sampled "
+                  "advisory limit while claiming kernel enforcement would be a "
+                  "false guarantee; pass --enforce sampled to accept the weaker "
+                  "one deliberately.", file=sys.stderr)
+            return 2
+        if CGROUP_BASE is not None:
+            CGEXEC_PATH.parent.mkdir(parents=True, exist_ok=True)
+            CGEXEC_PATH.write_text(CGEXEC_SRC)
+        if CGROUP_BASE is not None and not a.kill_over_rss_kb:
+            print("REFUSING: --enforce cgroup/auto needs --kill-over-rss-kb to set "
+                  "memory.max; without it the cgroup would impose no limit.",
+                  file=sys.stderr)
+            return 2
+
+    # Decided here, beside the enforcement choice, because the sidecar records it
+    # long before the sampler thread starts. When the KERNEL enforces the limit
+    # the sampled killer is disarmed: left armed it can win the race and emit
+    # SAMPLED kill evidence -- an rss_killed row whose max_rss_kb is a sampled
+    # lower bound -- under a sidecar claiming `cgroup-memory-peak-exact`. The two
+    # would disagree about the same row. Sampling still runs for the soft cap and
+    # the aggregate measurement; only the kill moves to the kernel.
+    sampled_kill_kb = 0 if CGROUP_BASE is not None else a.kill_over_rss_kb
+
     sel_digest = selection_digest(targets)
     cfg = run_config(a, manifest_digest)
     cfg["selection_digest"] = sel_digest
@@ -1515,10 +1732,17 @@ def main() -> int:
         "rss_sample_seconds_effective": a.rss_sample_seconds,
         # Machine-readable provenance for `max_rss_kb` on an rss_killed row.
         # `detail` says the same thing in prose, but prose is not checkable.
-        "rss_killed_max_rss_source": "sampled-aggregate-lower-bound",
+        "rss_killed_max_rss_source": ("cgroup-memory-peak-exact"
+                                      if CGROUP_BASE is not None
+                                      else "sampled-aggregate-lower-bound"),
         # Both caps are SAMPLED: they bound sustained memory, not instantaneous
         # peaks.  Recorded so a reader of these rows knows which guarantee applies.
-        "rss_enforcement": "sampled-advisory",
+        # What ACTUALLY enforced the limit, not what was asked for.
+        "rss_enforcement": ("cgroup-memory-max" if CGROUP_BASE is not None
+                            else "sampled-advisory"),
+        "rss_enforcement_requested": a.enforce,
+        "sampled_kill_armed": bool(sampled_kill_kb),
+        "cgroup_base": str(CGROUP_BASE) if CGROUP_BASE is not None else "",
         "deferred": [{"module": t.module, "why": why} for t, why in deferred_targets],
     }
     cfg["tool_digest"] = tool_digest()
@@ -1826,11 +2050,11 @@ def main() -> int:
 
     checkpoint()
     _RSS_PEAK["cap_kb"] = a.max_aggregate_rss_kb
-    _RSS_PEAK["kill_kb"] = a.kill_over_rss_kb
-    if a.max_aggregate_rss_kb or a.kill_over_rss_kb:
+    _RSS_PEAK["kill_kb"] = sampled_kill_kb
+    if a.max_aggregate_rss_kb or sampled_kill_kb:
         threading.Thread(target=_rss_monitor,
                          args=(a.max_aggregate_rss_kb, a.rss_sample_seconds,
-                               a.kill_over_rss_kb),
+                               sampled_kill_kb),
                          daemon=True).start()
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as ex:
         futs = {ex.submit(run_one, t, a.samples, a.timeout, a.native, baseline_artifacts): t
