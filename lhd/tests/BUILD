@@ -845,6 +845,8 @@ sh_test(
     size = "small",
     srcs = ["module_params_test.sh"],
     data = [
+        "param_width_leaf.v",
+        "//lhd",
         "//pass/lean:census_data",
         "//scripts:cycle_provenance_tools",
     ],

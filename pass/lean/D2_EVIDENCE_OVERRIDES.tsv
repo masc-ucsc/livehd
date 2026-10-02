@@ -1,0 +1,13 @@
+# Results that are REAL but are not in a canonical sweep table.
+#
+# A sweep row records what the DEFAULT invocation did.  A result obtained by
+# changing a knob is still a result, but it is a different claim, and collapsing
+# the two is how "accepted" quietly stops meaning one thing.  So such a result
+# lives here, is rendered with its override spelled out, and never replaces the
+# canonical row.
+#
+# The ledger refuses an override for a module with no canonical row at all: an
+# override is a QUALIFICATION of a measured result, not a substitute for one.
+#
+# module<TAB>status<TAB>override<TAB>detail<TAB>source
+cva6_hpdcache_wrapper_gate	accepted-under-override	maxRecDepth=20000000 (emitted default is 1000000)	107213 nodes, 515 flops, 12 memories; checkDesign 1.8s, 4 cycles in 35s; 4h wall, 16.6 GB	pass/lean/DIRECTION2_IMPLEMENTATION.md:528 and DIRECTION2_RESULTS.md:147,169

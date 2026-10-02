@@ -59,7 +59,17 @@ questions:
   The three DINO CPUs in that table are neither CORE-ET nor CVA6 and are
   deliberately not counted in either section.
 
-**47 blocks with any evidence: 22 legacy PROVEN, 44 direct-simulator ACCEPTED with cycles run, 22 both.**
+**47 blocks with any evidence: 22 legacy PROVEN, 44 direct-simulator ACCEPTED with cycles run in the canonical table, 22 both, 1 accepted only under an explicit override.**
+
+### Accepted under an override -- NOT in the canonical table
+
+These ran, and they ran with a knob changed. The canonical row records what
+the DEFAULT invocation did and is left alone; collapsing the two is how
+"accepted" quietly stops meaning one thing.
+
+| block | canonical | status | override | detail | source |
+|---|---|---|---|---|---|
+| `cva6_hpdcache_wrapper_gate` | LEAN_ERROR | accepted-under-override | `maxRecDepth=20000000 (emitted default is 1000000)` | 107213 nodes, 515 flops, 12 memories; checkDesign 1.8s, 4 cycles in 35s; 4h wall, 16.6 GB | pass/lean/DIRECTION2_IMPLEMENTATION.md:528 and DIRECTION2_RESULTS.md:147,169 |
 
 | block | legacy | axioms | gate name | direct-sim | cycles | d2 rows |
 |---|---|---|---|---|---|---|
@@ -79,7 +89,7 @@ questions:
 | `cva6_fifo_v3_gate` | - | - | `cva6_fifo_v3_gate` | ACCEPTED | 4 | 1 |
 | `cva6_hpdcache_if_adapter_gate` | - | - | `cva6_hpdcache_if_adapter_gate` | ACCEPTED | 4 | 1 |
 | `cva6_hpdcache_subsystem_gate` | - | - | `cva6_hpdcache_subsystem_gate` | LEAN_ERROR | 4 | 1 |
-| `cva6_hpdcache_wrapper_gate` | - | - | `cva6_hpdcache_wrapper_gate` | LEAN_ERROR | 4 | 1 |
+| `cva6_hpdcache_wrapper_gate` | - | - | `cva6_hpdcache_wrapper_gate` | LEAN_ERROR (+override, see below) | 4 | 1 |
 | `cva6_icache_gate` | - | - | `cva6_icache_gate` | ACCEPTED | 4 | 1 |
 | `cva6_ptw_gate` | - | - | `cva6_ptw_gate` | ACCEPTED | 4 | 1 |
 | `cva6_shared_tlb` | PROVEN | 1/1 | `cva6_shared_tlb_gate` | ACCEPTED | 4 | 1 |

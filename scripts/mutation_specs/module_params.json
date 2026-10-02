@@ -1,0 +1,17 @@
+{
+  "_what": "The -G parameter must reach slang AND set the parameter. A test that only checks the table and the wiring passes even when the flag is silently dropped.",
+  "target": "//lhd/tests:module_params_test",
+  "file": "lhd/tests/param_width_leaf.v",
+  "bazel": [
+    "--repo_env=CC=/usr/bin/gcc-15",
+    "--repo_env=CXX=/usr/bin/g++-15"
+  ],
+  "rebuild": [],
+  "mutants": [
+    {
+      "name": "W1 leaf has a usable default",
+      "old": "  parameter int unsigned Width = 0",
+      "new": "  parameter int unsigned Width = 10"
+    }
+  ]
+}

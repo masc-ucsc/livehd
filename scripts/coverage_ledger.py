@@ -187,12 +187,32 @@ def main():
     ap.add_argument("--runs", default="generated/census_d2")
     ap.add_argument("--cva6-legacy", default="pass/lean/SWEEP_cva6.tsv")
     ap.add_argument("--d2-sweep", default="pass/lean/SWEEP_direction2.tsv")
+    ap.add_argument("--overrides", default="pass/lean/D2_EVIDENCE_OVERRIDES.tsv")
     ap.add_argument("--out", default="", help="write the ledger here (markdown)")
     args = ap.parse_args()
 
     errors = []
     ce = coreet(args, errors)
-    cb = cva6(args, errors, ce['corpus'])
+    cb = cva6(args, errors, ce["corpus"])
+
+    # Results obtained with a knob changed: real, differently-qualified, and
+    # never a replacement for the canonical row.
+    ov = {}
+    if os.path.exists(args.overrides):
+        with open(args.overrides, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.rstrip("\n")
+                if not line.strip() or line.startswith("#"):
+                    continue
+                f = line.split("\t")
+                if len(f) != 5:
+                    errors.append(f"{args.overrides}: a row has {len(f)} fields, not 5")
+                    continue
+                ov[f[0]] = {"status": f[1], "override": f[2], "detail": f[3], "source": f[4]}
+    for m in ov:
+        if m not in cb:
+            errors.append(f"{args.overrides} names `{m}`, which has no canonical sweep row; "
+                          f"an override qualifies a measured result, it does not replace one")
 
     out = []
     w = out.append
@@ -256,14 +276,32 @@ def main():
     n_legacy = sum(1 for b in cb.values() if b["legacy"] == "PROVEN")
     n_d2 = sum(1 for b in cb.values() if b["d2"] == ACCEPTED)
     n_both = sum(1 for b in cb.values() if b["legacy"] == "PROVEN" and b["d2"] == ACCEPTED)
+    n_ov = sum(1 for m in ov if m in cb and cb[m]["d2"] != ACCEPTED)
     w(f"**{len(cb)} blocks with any evidence: {n_legacy} legacy PROVEN, "
-      f"{n_d2} direct-simulator ACCEPTED with cycles run, {n_both} both.**")
+      f"{n_d2} direct-simulator ACCEPTED with cycles run in the canonical table, "
+      f"{n_both} both, {n_ov} accepted only under an explicit override.**")
     w("")
+    if ov:
+        w("### Accepted under an override -- NOT in the canonical table")
+        w("")
+        w("These ran, and they ran with a knob changed. The canonical row records what")
+        w("the DEFAULT invocation did and is left alone; collapsing the two is how")
+        w("\"accepted\" quietly stops meaning one thing.")
+        w("")
+        w("| block | canonical | status | override | detail | source |")
+        w("|---|---|---|---|---|---|")
+        for m, o in sorted(ov.items()):
+            w(f"| `{m}` | {cb.get(m, {}).get('d2', '-')} | {o['status']} | `{o['override']}` | "
+              f"{o['detail']} | {o['source']} |")
+        w("")
     w("| block | legacy | axioms | gate name | direct-sim | cycles | d2 rows |")
     w("|---|---|---|---|---|---|---|")
     for m, b in sorted(cb.items()):
+        d2 = b["d2"] or "-"
+        if m in ov and d2 != ACCEPTED:
+            d2 += " (+override, see below)"
         w(f"| `{m}` | {b['legacy'] or '-'} | {b['legacy_axioms'] or '-'} | "
-          f"`{b['gate'] or '-'}` | {b['d2'] or '-'} | {b['d2_cycles'] or '-'} | "
+          f"`{b['gate'] or '-'}` | {d2} | {b['d2_cycles'] or '-'} | "
           f"{b['d2_runs']} |")
     w("")
     if ce["conflicts"]:

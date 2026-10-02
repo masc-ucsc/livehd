@@ -47,6 +47,7 @@ filegroup(
         "CENSUS_D2_122_BASELINE_PROVISIONAL.tsv",
         "CENSUS_D2_122_MANIFEST.json",
         "MODULE_PARAMS.tsv",
+        "D2_EVIDENCE_OVERRIDES.tsv",
     ],
     visibility = ["//visibility:public"],
 )

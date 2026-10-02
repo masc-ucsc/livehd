@@ -9,9 +9,27 @@
 #
 # `txfma_adder` declares `parameter int unsigned Width = 0` and is correct when
 # INSTANTIATED; standalone it elaborates to `logic [-1:0]` ports and slang
-# refuses it, which is the whole of its "compile-failed" census row.  Width 10
-# is `TXFMA_EXP_SEXT_PS_SZ` (vpu_defs_pkg.sv:855), the value 10 of its 10
-# in-tree instantiations use -- txfma_e5's three adders among them.
+# refuses it, which is the whole of its "compile-failed" census row.
+#
+# Width 10 is `TXFMA_EXP_SEXT_PS_SZ` (vpu_defs_pkg.sv:855).  It is the most
+# common instantiation by a wide margin but NOT the only one -- an earlier note
+# here said "10 of 10", which was the right numerator against the wrong
+# denominator.  Measured over every `txfma_adder` instantiation in core-et's
+# RTL (16 sites; two more in testbenches pass their own parameter through):
+#
+#   Width expression          value  sites  where
+#   TXFMA_EXP_SEXT_PS_SZ         10     10  txfma_e1:165,198,213,229,245
+#                                           txfma_e2:270,285  txfma_e5:144,188,205
+#   TXFMA_ETRZ_PROD_PS_SZ         6      1  txfma_e1:278
+#   TXFMA_ETRZ_PROD_PH_SZ         5      1  txfma_e1:261
+#   TXFMA_EXP_PS_SZ         FLOAT32_E     1  txfma_e6:76
+#   TXFMA_A3+1                   64      1  txfma_f2:124
+#   TXFMA_A3-TXFMA_B47+1         52      1  txfma_f4:72
+#   rnd_adder_width          (local)      1  txfma_rnd_adder:50
+#
+# So this certificate covers the 10-bit member, which 10 of the 16 RTL
+# instantiations use.  The other six widths are NOT covered by it, and a
+# certificate for a different member would need its own row.
 #
 # The flags go to BOTH elaborations: the implementation read AND the LEC
 # reference read.  Giving only one of them the parameters would have the two
