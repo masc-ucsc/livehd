@@ -269,6 +269,31 @@ def main() -> int:
                   "killed row's RSS would be an exact memory.peak",
                   json.dumps(meta["scheduling"])[:300])
 
+            # ---- the SUCCESSFUL path retains the kernel's own peak ----------------
+            # The regression this pins: `run_one` read `cg_peak` in its `finally`
+            # and then discarded it on every path except an OOM kill, so a GREEN
+            # cgroup run kept no exact peak at all -- the sidecar's
+            # `rss_killed_max_rss_source` describes killed rows only.  Found on
+            # the first real Lean smoke, where the row was green and the peak was
+            # gone.
+            ok_row = rows[0] if rows else {}
+            check("cgroup_peak_retained_on_success",
+                  ok_row.get("cgroup_peak_kb", "").isdigit()
+                  and int(ok_row["cgroup_peak_kb"]) > 0,
+                  f"a green cgroup row carries memory.peak in its own column "
+                  f"(got {ok_row.get('cgroup_peak_kb')!r})", str(ok_row)[:300])
+            # Two instruments, two columns, neither overwriting the other.  The
+            # allocator touches 32 MB, so both figures are positive and the row
+            # cannot pass by both being blank.
+            check("cgroup_peak_distinct_from_time_rss",
+                  ok_row.get("max_rss_kb", "").isdigit()
+                  and int(ok_row["max_rss_kb"]) > 0
+                  and ok_row.get("max_rss_source") == sweep.SRC_TIME,
+                  f"while max_rss_kb independently keeps /usr/bin/time's figure, "
+                  f"labelled {sweep.SRC_TIME!r} "
+                  f"(got {ok_row.get('max_rss_kb')!r} / "
+                  f"{ok_row.get('max_rss_source')!r})", str(ok_row)[:300])
+
             # ---- end to end: over the limit, the kernel kills it ------------------
             r = run(["--enforce", "cgroup", "--kill-over-rss-kb", "80000"],
                     env_extra={"ALLOC_MB": "400"}, out="over.tsv")
@@ -291,6 +316,17 @@ def main() -> int:
                   and all(killed[0][g] == "0" for g in ("cert", "compile", "agree"))
                   and killed[0]["proof"] == "na",
                   "with zero gate credit -- a scheduling outcome, not a design failure")
+            # The killed row states its instrument in a machine-readable column
+            # too, and fills `cgroup_peak_kb` uniformly with every other cgroup
+            # row -- so a consumer never has to special-case the one status where
+            # the peak was also promoted into `max_rss_kb`.
+            check("cgroup_killed_row_provenance",
+                  killed and killed[0]["max_rss_source"] == sweep.SRC_CGROUP
+                  and killed[0]["cgroup_peak_kb"] == killed[0]["max_rss_kb"],
+                  f"and names its source {sweep.SRC_CGROUP!r} in both columns "
+                  f"(got {killed[0]['max_rss_source'] if killed else None!r} / "
+                  f"{killed[0]['cgroup_peak_kb'] if killed else None!r})",
+                  str(killed[0] if killed else {})[:300])
 
             # ---- exit 137 WITHOUT an OOM is not an rss_killed row ----------------
             # Any SIGKILL yields 137 -- our own teardown, an external kill, a crash

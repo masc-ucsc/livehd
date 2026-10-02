@@ -1148,7 +1148,8 @@ def deferred_row(target: Target, samples: int, why: str) -> dict:
         "cert_sha256": target.sha256, "manifest_nodes": target.nodes,
         "requested_samples": samples, "run_status": "deferred",
         "verdict": "deferred", "proof": "na", "detail": why,
-        "max_rss_kb": "", "user_s": "", "sys_s": "", "wall_s": "0.00",
+        "max_rss_kb": "", "max_rss_source": "", "cgroup_peak_kb": "",
+        "user_s": "", "sys_s": "", "wall_s": "0.00",
         "drift": "", "launched": "0",
     })
     for k in ("sources", "nodes", "outputs", "flops", "mems", "inputs", "bindings",
@@ -1193,6 +1194,10 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
     row["requested_samples"] = samples
     row["run_status"] = "done"
     row["max_rss_kb"] = ""
+    # Blank until something actually measures: an unmeasured row must not carry
+    # a provenance, or "not measured" reads as "measured by that instrument".
+    row["max_rss_source"] = ""
+    row["cgroup_peak_kb"] = ""
     row["user_s"] = ""
     row["sys_s"] = ""
     row["drift"] = ""
@@ -1310,6 +1315,11 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         r["run_status"], r["verdict"] = "rss_killed", "rss_killed"
         r["launched"], r["wall_s"] = "1", f"{time.time() - t0:.2f}"
         r["max_rss_kb"] = str(cg_peak)
+        r["max_rss_source"] = SRC_CGROUP
+        # The same figure, also in its own column, so a consumer reading
+        # `cgroup_peak_kb` uniformly across every cgroup row does not have to
+        # special-case the one status where it was promoted into `max_rss_kb`.
+        r["cgroup_peak_kb"] = str(cg_peak)
         return r
 
     if _RSS_KILL.is_set() and rc != 0:
@@ -1334,6 +1344,13 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         # sources can never be confused; `user_s`/`sys_s` stay blank because
         # nothing measured them at all.
         r["max_rss_kb"] = str(killed_at)
+        r["max_rss_source"] = SRC_SAMPLED
+        # Normally blank: the sampled killer is DISARMED under cgroup
+        # enforcement, so reaching here with a cgroup is not expected.  Filled
+        # anyway if one exists, because discarding a reading the kernel already
+        # took is what this whole change is fixing.
+        if cg is not None and cg_peak is not None:
+            r["cgroup_peak_kb"] = str(cg_peak)
         return r
     row["wall_s"] = f"{time.time() - t0:.2f}"
     try:
@@ -1346,6 +1363,18 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
                 row[key] = mo.group(1)
     except OSError:
         pass
+    if row["max_rss_kb"]:
+        # Only once a figure is actually present.  A `/usr/bin/time` report that
+        # could not be read leaves `max_rss_kb` blank, and a blank figure keeps
+        # a blank provenance.
+        row["max_rss_source"] = SRC_TIME
+    if cg is not None:
+        # The point of the change: retained on the SUCCESSFUL path too, not just
+        # where the kernel killed the probe.  `cg_peak` is read in the `finally`
+        # above and was, until now, discarded here on every non-OOM path -- so a
+        # green cgroup run kept no exact peak at all.  Reaching this line proves
+        # `cg_peak is not None`; the unreadable case returned `runner_error`.
+        row["cgroup_peak_kb"] = str(cg_peak)
     (log_dir / f"{m}.log").write_text(out, encoding="utf-8")
 
     if native:
@@ -1584,7 +1613,37 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
     "sources", "nodes", "outputs", "flops", "mems", "inputs", "bindings",
     "tier", "manifest_nodes", "requested_samples", "cert_sha256", "run_status",
     "drift", "launched",
-    "max_rss_kb", "user_s", "sys_s", "wall_s", "detail"])
+    "max_rss_kb", "max_rss_source", "cgroup_peak_kb",
+    "user_s", "sys_s", "wall_s", "detail"])
+
+# Provenance for `max_rss_kb`, and the cgroup's own peak beside it.
+#
+# Three different instruments can fill `max_rss_kb`, and they measure three
+# DIFFERENT quantities: `/usr/bin/time`'s max over the wait tree, the sampled
+# aggregate over the marked descendant tree (a lower bound), and the cgroup's
+# `memory.peak` (an exact cgroup-ACCOUNTED peak for the whole subtree).  The
+# column alone never said which, and the sidecar's `rss_killed_max_rss_source`
+# describes killed rows only -- so a SUCCESSFUL cgroup run retained no exact
+# peak at all.  `cgroup_peak_kb` is a separate column rather than a relabelling
+# of `max_rss_kb`, because the two are not substitutes and a run wants both.
+#
+# Resume-OPTIONAL: a row written before this schema is semantically complete
+# without them, so `--resume` fills them with `unknown-pre-schema` rather than
+# refusing the run or guessing `time-max-rss`.
+PROVENANCE_COLS = ("max_rss_source", "cgroup_peak_kb")
+
+# `max_rss_kb` came from `/usr/bin/time -v`: the maximum over the wait tree.
+SRC_TIME = "time-max-rss"
+# `max_rss_kb` holds the cgroup's `memory.peak`: exact, cgroup-accounted, whole
+# subtree.  Only ever set where the kernel killed the probe at `memory.max`.
+SRC_CGROUP = "cgroup-memory-peak-exact-accounted"
+# `max_rss_kb` holds the sampled aggregate at the moment of the kill: a LOWER
+# BOUND, because the sampler can miss a peak between two samples.
+SRC_SAMPLED = "sampled-aggregate-lower-bound"
+# Reused by `--resume` from a row that predates `PROVENANCE_COLS`.  Named rather
+# than left blank so it cannot be read as "no measurement": there IS a figure in
+# `max_rss_kb`, and what is unknown is which instrument produced it.
+SRC_UNKNOWN = "unknown-pre-schema"
 
 
 def main() -> int:
@@ -1839,9 +1898,13 @@ def main() -> int:
         "rss_sample_seconds_effective": a.rss_sample_seconds,
         # Machine-readable provenance for `max_rss_kb` on an rss_killed row.
         # `detail` says the same thing in prose, but prose is not checkable.
-        "rss_killed_max_rss_source": ("cgroup-memory-peak-exact-accounted"
-                                      if CGROUP_BASE is not None
-                                      else "sampled-aggregate-lower-bound"),
+        # Run-wide and KILLED-ROW-ONLY, which is why the per-row
+        # `max_rss_source` column exists beside it: this field says nothing about
+        # a green row, and a green cgroup row's exact peak now lives in
+        # `cgroup_peak_kb`.  The same constants as the row column, so the two can
+        # never drift into describing the same thing differently.
+        "rss_killed_max_rss_source": (SRC_CGROUP if CGROUP_BASE is not None
+                                      else SRC_SAMPLED),
         # Both caps are SAMPLED: they bound sustained memory, not instantaneous
         # peaks.  Recorded so a reader of these rows knows which guarantee applies.
         # What ACTUALLY enforced the limit, not what was asked for.
@@ -2037,12 +2100,23 @@ def main() -> int:
                 header = next((l for l in fh if not l.startswith("#")), "")
             have_cols = header.rstrip("\n").split("\t")
             missing_cols = set(RESULT_COLS) - set(have_cols)
+            # `PROVENANCE_COLS` are the one exception to "the FULL schema".  They
+            # were added after these rows could have been written, and they
+            # ANNOTATE a measurement rather than being one, so refusing the whole
+            # resume over them would discard real terminal work to gain nothing.
+            # Every SEMANTIC column stays strictly required.
+            pre_schema = missing_cols & set(PROVENANCE_COLS)
+            missing_cols -= pre_schema
             if missing_cols:
                 print(f"--resume REFUSED: previous output is missing column(s) "
                       f"{sorted(missing_cols)}", file=sys.stderr)
                 return 2
+            if pre_schema:
+                print(f"--resume: previous output predates {sorted(pre_schema)}; "
+                      f"reused rows are marked max_rss_source={SRC_UNKNOWN!r} "
+                      f"rather than assumed to be {SRC_TIME!r}", file=sys.stderr)
             for r in prev_rows:
-                if any(r.get(c) is None for c in RESULT_COLS):
+                if any(r.get(c) is None for c in RESULT_COLS if c not in pre_schema):
                     print(f"--resume REFUSED: truncated row in {out_path.name} "
                           f"(target_key={r.get('target_key')!r})", file=sys.stderr)
                     return 2
@@ -2090,6 +2164,14 @@ def main() -> int:
                           f"{r.get('module')!r}, manifest resolves {t.module!r}",
                           file=sys.stderr)
                     return 2
+                for c in pre_schema:
+                    # Backfilled, never inferred.  A reused row's `max_rss_kb` is
+                    # almost certainly `/usr/bin/time`'s, since `--resume` only
+                    # reuses `done` rows and the other two instruments fill
+                    # `max_rss_kb` only on killed rows -- but "almost certainly"
+                    # is not a measurement, and this column exists precisely so
+                    # that the instrument is recorded rather than deduced.
+                    r[c] = SRC_UNKNOWN if c == "max_rss_source" else ""
                 done[key] = r
             print(f"--resume: reusing {len(done)} terminal row(s)", file=sys.stderr)
 

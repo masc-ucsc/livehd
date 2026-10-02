@@ -143,6 +143,29 @@ def main() -> int:
         MANIFEST["path"] = str(_man)
         MANIFEST["digest"] = hashlib.sha256(_man.read_bytes()).hexdigest()
 
+        # ---- 0. the provenance columns survive a merge ---------------------
+        # Two stages measured by DIFFERENT instruments is the normal case once
+        # some runs are cgroup-enforced and some are not, and the merged table is
+        # what a reader audits. Carried through per row, never flattened to one
+        # run-wide answer, because there is no single true answer to flatten to.
+        pa = stage(tmp, "pa", ["k1", "k2"], tier="tiny", run_id="RUN-PA",
+                   rows_over=lambda rs: [dict(r, max_rss_source=sweep.SRC_TIME,
+                                              cgroup_peak_kb="") for r in rs])
+        pb = stage(tmp, "pb", ["k3", "k4"], tier="small", run_id="RUN-PB",
+                   rows_over=lambda rs: [dict(r, max_rss_source=sweep.SRC_TIME,
+                                              cgroup_peak_kb="4242") for r in rs])
+        pout = tmp / "prov.tsv"
+        pr = run_merge(pout, pa, pb)
+        prows = {x["target_key"]: x for x in (rows_of(pout) if pout.is_file() else [])}
+        check("merge_preserves_provenance",
+              pr.returncode == 0 and len(prows) == 4
+              and all(prows[k]["cgroup_peak_kb"] == "" for k in ("k1", "k2"))
+              and all(prows[k]["cgroup_peak_kb"] == "4242" for k in ("k3", "k4"))
+              and all(prows[k]["max_rss_source"] == sweep.SRC_TIME for k in prows),
+              "per-row memory provenance survives the merge unflattened",
+              pr.stderr[-400:] or str({k: (v["max_rss_source"], v["cgroup_peak_kb"])
+                                       for k, v in prows.items()})[:300])
+
         # ---- 1. the positive case ----------------------------------------
         a = stage(tmp, "a", ["k1", "k2"], tier="tiny", run_id="RUN-A")
         b = stage(tmp, "b", ["k3", "k4"], tier="small", run_id="RUN-B")

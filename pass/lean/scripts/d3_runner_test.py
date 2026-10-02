@@ -32,6 +32,15 @@ ROOT = HERE.parents[2]
 SWEEP = HERE / "d3_sweep.py"
 JOIN = HERE / "d3_join.py"
 
+# The runner as a MODULE, so schema constants are quoted from the source of
+# truth rather than re-spelled here -- a test that hardcodes "time-max-rss"
+# keeps passing after the runner renames it.  (`sweep` is the subprocess helper
+# below, hence the distinct name.)
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location("d3_sweep_mod", SWEEP)
+sweep_mod = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(sweep_mod)
+
 CERT_BODY = """-- fixture
 import LeanSemanticPrimitives.Compiler.CompileDesign
 def {m}_designCert : DesignCert := {{ sources := #[], nodes := #[], outputs := #[], flops := #[], memories := #[] }}
@@ -214,6 +223,18 @@ def main() -> int:
               f"target_key={rs[0]['target_key']} module={rs[0]['module']}", f)
         check("rss_captured", any(r.get("max_rss_kb") for r in rs),
               f"peak RSS recorded (e.g. {rs[0].get('max_rss_kb')} kB)", f)
+        # Provenance without a cgroup: `max_rss_kb` is /usr/bin/time's and says
+        # so, and `cgroup_peak_kb` stays EMPTY rather than defaulting to a zero
+        # that would read as "the cgroup peaked at nothing".  Guarded on a
+        # non-empty row set so it cannot pass vacuously.
+        timed = [r for r in rs if r.get("max_rss_kb")]
+        check("rss_provenance_without_cgroup",
+              timed and all(r["max_rss_source"] == sweep_mod.SRC_TIME
+                            and r["cgroup_peak_kb"] == "" for r in timed),
+              f"{len(timed)} measured row(s) labelled {sweep_mod.SRC_TIME!r} with "
+              f"cgroup_peak_kb blank", f,
+              str({k: rs[0].get(k) for k in
+                   ("max_rss_kb", "max_rss_source", "cgroup_peak_kb")}))
 
         # 2. refuse to clobber an existing output
         p = sweep(tmp, man, cdir, out)
@@ -294,6 +315,55 @@ def main() -> int:
               pb.returncode != 0 and "changed after the run" in pb.stderr,
               "and an edited table with an untouched sidecar refuses", f,
               pb.stderr[-200:])
+
+        # ---- a table written BEFORE the provenance columns still resumes ------
+        # They annotate a measurement rather than being one, so refusing the whole
+        # resume over them would discard real terminal work to gain nothing. The
+        # reused rows must say `unknown-pre-schema` -- NOT `time-max-rss`, which
+        # would be an inference dressed as a reading.
+        old_out = tmp / "preschema_res.tsv"
+        _ol = out.read_text().splitlines()
+        _oh = next(i for i, l in enumerate(_ol) if not l.startswith("#"))
+        _drop = [_ol[_oh].split("\t").index(c) for c in sweep_mod.PROVENANCE_COLS]
+        _keep = lambda line: "\t".join(
+            v for j, v in enumerate(line.split("\t")) if j not in _drop)
+        old_out.write_text("\n".join(
+            l if l.startswith("#") else _keep(l) for l in _ol) + "\n")
+        _om = json.loads(side.read_text())
+        _om["results_sha256"] = hashlib.sha256(old_out.read_bytes()).hexdigest()
+        (tmp / "preschema_res.tsv.meta.json").write_text(json.dumps(_om, indent=2))
+        po = sweep(tmp, man, cdir, old_out, extra=["--resume"])
+        po_rows = rows_of(old_out) if old_out.is_file() else []
+        check("resume_pre_schema_accepted",
+              po.returncode == 0 and "predates" in po.stderr
+              and len(po_rows) == len(blocks),
+              f"a pre-provenance table resumes ({len(po_rows)} rows)", f,
+              po.stderr[-300:])
+        check("resume_pre_schema_not_inferred",
+              po_rows and all(r["max_rss_source"] == sweep_mod.SRC_UNKNOWN
+                              and r["cgroup_peak_kb"] == "" for r in po_rows),
+              f"with every reused row marked {sweep_mod.SRC_UNKNOWN!r} rather than "
+              f"assigned an instrument nothing recorded", f,
+              str({k: po_rows[0].get(k) for k in sweep_mod.PROVENANCE_COLS}
+                  if po_rows else {}))
+        # Dropping a SEMANTIC column must still refuse: the exemption is for the
+        # two provenance columns only, and this pins that it was not widened into
+        # "any missing column is tolerable".
+        sem_out = tmp / "preschema_sem.tsv"
+        _si = _ol[_oh].split("\t").index("cert_sha256")
+        _sk = lambda line: "\t".join(
+            v for j, v in enumerate(line.split("\t")) if j != _si)
+        sem_out.write_text("\n".join(
+            l if l.startswith("#") else _sk(l) for l in _ol) + "\n")
+        _sm = json.loads(side.read_text())
+        _sm["results_sha256"] = hashlib.sha256(sem_out.read_bytes()).hexdigest()
+        (tmp / "preschema_sem.tsv.meta.json").write_text(json.dumps(_sm, indent=2))
+        ps = sweep(tmp, man, cdir, sem_out, extra=["--resume"])
+        check("resume_missing_semantic_col_refused",
+              ps.returncode != 0 and "missing column" in ps.stderr
+              and "cert_sha256" in ps.stderr,
+              "a missing semantic column still refuses the resume", f,
+              ps.stderr[-300:])
 
         # an UNBOUND sidecar (legacy, no results_sha256) must not resume a
         # manifest run: the next checkpoint would re-bind rows nothing vouches for
