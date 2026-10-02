@@ -1,0 +1,19 @@
+    58.88%  perf_probe  perf_probe         [.] l_Projection_mixFun
+    16.12%  perf_probe  perf_probe         [.] l_Projection_bta
+     8.62%  perf_probe  perf_probe         [.] l_Projection_annFuns
+     4.11%  perf_probe  perf_probe         [.] l_Projection_instReprMixError_repr
+     2.61%  perf_probe  perf_probe         [.] initialize_LeanSemanticPrimitives_Projection_BTA
+     1.44%  perf_probe  perf_probe         [.] l_Projection_mixTerm
+     1.43%  perf_probe  perf_probe         [.] libunwind::DwarfInstructions<libunwind::LocalAddressSpace, libunwind::Registers_x86_64>::evaluateExpression(unsigned long, libunwind::LocalAddressSpace&, libunwind::Registers_x86_64 const&, unsigned long)
+     0.81%  perf_probe  perf_probe         [.] lean::lean_in6_addr_to_ipv6_addr(in6_addr const*)
+     0.63%  perf_probe  perf_probe         [.] mi_large_huge_page_alloc(mi_heap_s*, unsigned long, unsigned long)
+     0.62%  perf_probe  perf_probe         [.] l_Projection_PRes_toCode
+     0.50%  perf_probe  perf_probe         [.] lean_alloc_ctor
+     0.50%  perf_probe  perf_probe         [.] lean_nat_eq
+     0.44%  perf_probe  perf_probe         [.] lean_ctor_set
+     0.44%  perf_probe  perf_probe         [.] lean_io_result_mk_ok
+     0.42%  perf_probe  perf_probe         [.] l_Projection_evalPrim
+     0.31%  perf_probe  perf_probe         [.] lean_ctor_set_uint8
+     0.31%  perf_probe  perf_probe         [.] lean_obj_once
+
+

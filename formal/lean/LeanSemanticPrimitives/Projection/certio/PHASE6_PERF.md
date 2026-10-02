@@ -1,5 +1,11 @@
 # Phase 6 specialization performance — native diagnostic, then the measured cause
 
+Raw profiler output, the exact commands, the build flags, the toolchain and the
+repository revision are under `certio/perf-artifacts/`. Note the toolchain trap
+recorded there: `lean` resolves PER DIRECTORY, `formal/lean/lean-toolchain`
+pins v4.31.0, and the repository root gets elan's default (v4.34.1 here)
+instead. Every number in this file is v4.31.0.
+
 Reproduce:
 
     bash formal/lean/scripts/build-native.sh          # builds .native-dev/perf_probe
@@ -19,16 +25,58 @@ Reproduce:
      512      101480 ms    54701 ms      1.86x            7713    1541   17.0 MB
     1024     >600000 ms   416600 ms      >1.4x           15393    3077   27.1 MB
 
-Three things this settles:
+Two things this settles:
 
-* **The native build removes the STACK wall.** `n = 1024` completes natively;
-  interpreted it is the `deep recursion was detected at 'interpreter'` failure
-  that stops `rt_intpipe_alu`. Confirmed: the stack limit was an interpreter
-  limit, and a native binary moves it to the OS stack.
 * **It does not touch the TIME wall.** A flat ~1.87x. The native wall-time
   ratios per doubling are 5.6, 6.5, 7.2, 7.6 -- exponents 2.48, 2.70, 2.85,
   2.93, converging on CUBIC.
 * **It is not memory.** 27 MB at n = 1024, growing linearly.
+
+CORRECTION.  An earlier revision of this file said the interpreted `n = 1024`
+run failed from stack depth.  It did not: it TIMED OUT at 600 s with no stack
+error.  The `deep recursion was detected at 'interpreter'` failure was observed
+on `rt_intpipe_alu` (5118 nodes), and the two were conflated.  The experiment
+below was run to settle it properly.
+
+### 1b. Where the interpreter stack ceiling actually is
+
+A stack overflow fails in well under a second; a run that is merely slow does
+not. So a short timeout separates them cleanly.  `chainD`, interpreted,
+120 s budget:
+
+    n = 1024   timed out at 120 s, no stack error
+    n = 2048   timed out at 120 s, no stack error
+    n = 2560   STACK OVERFLOW  (deep recursion at 'interpreter')
+    n = 3072   STACK OVERFLOW
+    n = 4096   STACK OVERFLOW
+    n = 8192   STACK OVERFLOW
+
+so the interpreted ceiling on `chainD` is between 2048 and 2560 nodes, and
+`rt_intpipe_alu` at 5118 is above it -- which is why the runner hit a stack
+error there and not a timeout.
+
+Natively, at the same depths:
+
+    n = 4096   survived 120 s with no stack error (still computing)
+
+so the native build does move that wall, as expected. It is the TIME wall it
+leaves untouched.
+
+### 1c. A FOURTH wall: the hardcoded specialization fuel
+
+`projectDesign` is `mixDriver 20000 200`. Natively, with per-stage reporting:
+
+    n = 4096   no fuel error within 25 s  (would succeed, given time)
+    n = 5118   no fuel error within 25 s
+    n = 6144   no fuel error within 25 s
+    n = 7168   projectDesign FAILED (MixError.outOfFuel) after 100 ms
+    n = 8192   projectDesign FAILED (MixError.outOfFuel) after  93 ms
+
+A hard ceiling between 6144 and 7168 nodes that no amount of time or stack
+fixes -- and it fails FAST and HONESTLY, with an `.error`, not a wrong answer.
+
+`rt_intpipe_alu`'s 5118 nodes are BELOW it, so fuel is not what stops that
+design. Recorded because it is the next wall after the time one.
 
 Residual size is linear (`15n + 33`, as `Scaling` already pins) and the checked
 bound is linear (`3n + 5`). The blow-up is entirely in the specializer's WORK,
@@ -131,7 +179,13 @@ binding count in `Prepared` -- is bounded above by 0.14%, and fix (C) by
 
 Where the time actually is (inclusive; the entry wrappers, not the
 self-recursive workers whose inclusive figures are recursion-inflated and shown
-above 100%):
+above 100%).
+
+**INCLUSIVE COSTS OVERLAP AND MUST NOT BE SUMMED.** `prepare` at 39.90% and
+`PVal.shift` at 27.11% share every instruction `PVal.shift` executes when
+called from `prepare`; adding them double-counts. They are listed to rank the
+candidates, not to partition the runtime. The SELF-cost figures below them are
+the disjoint, addable ones.
 
     l_Projection_prepare            4,068,867,144   39.90%
     l_Projection_PVal_shift         2,765,326,736   27.11%

@@ -41,13 +41,26 @@ MODULES=(
   Projection/ProjectedStep
 )
 
+# Dependency-aware invalidation.  MODULES is in DEPENDENCY ORDER, so once any
+# module is rebuilt every later one is stale too -- an .olean change upstream
+# changes the code generated downstream.  Comparing only a module's own source
+# mtime (the first version of this script) silently kept stale .o files and
+# would have made a before/after measurement meaningless.
+#
+#   --clean   wipe $NAT first.  USE THIS FOR ANY BEFORE/AFTER NUMBER.
+CLEAN=0
+if [ "${1:-}" = "--clean" ]; then CLEAN=1; shift; fi
+if [ $CLEAN -eq 1 ]; then echo "  (clean: removing $NAT)"; rm -rf "$NAT"; mkdir -p "$NAT"; fi
+
+DIRTY=0
 OBJS=()
 for m in "${MODULES[@]}"; do
   flat=${m//\//_}
   src=LeanSemanticPrimitives/$m.lean
   c=$NAT/$flat.c
   o=$NAT/$flat.o
-  if [ ! -f "$o" ] || [ "$src" -nt "$o" ]; then
+  if [ $DIRTY -eq 1 ] || [ ! -f "$o" ] || [ "$src" -nt "$o" ]; then
+    DIRTY=1
     printf '  %-44s ' "$m"
     s=$(date +%s%N)
     lean -o "$OUT/LeanSemanticPrimitives/$m.olean" -c "$c" "$src" || exit 1
@@ -58,6 +71,7 @@ for m in "${MODULES[@]}"; do
   OBJS+=("$o")
 done
 
+# the probe is always rebuilt: it is cheap and it is what the numbers come from
 PROBE=${1:-scripts/perf_probe.lean}
 pb=$(basename "$PROBE" .lean)
 printf '  %-44s ' "$pb (probe)"

@@ -32,14 +32,25 @@ def rss : IO String := do
     | none   => pure "n/a"
   catch _ => pure "n/a"
 
+/-- Which STAGE fails, not just that one did: `projectDesign` running out of
+its hardcoded fuel and the fragment checker rejecting are different answers. -/
 def one (n : Nat) : IO Unit := do
   let t0 ← IO.monoMsNow
-  match Projection.Hw.mkSim (chainD n) with
-  | none     => IO.println s!"n={n}  mkSim FAILED"
-  | some sim =>
+  match Projection.Hw.projectDesign (chainD n) with
+  | .error e => do
       let t1 ← IO.monoMsNow
-      let sz := (sim.prog.funs.map (fun fd => tsize fd.body)).foldl (·+·) 0
-      IO.println s!"n={n}  mkSim {t1 - t0} ms  residual size {sz}  bound {sim.bound}  RSS{← rss}"
+      IO.println s!"n={n}  projectDesign FAILED ({repr e}) after {t1 - t0} ms"
+  | .ok R =>
+  match Projection.Hw.checkResidual R with
+  | none => do
+      let t1 ← IO.monoMsNow
+      IO.println s!"n={n}  checkResidual REJECTED after {t1 - t0} ms  (funs {R.funs.length})"
+  | some b =>
+      -- build the bundle from the residual ALREADY computed; calling `mkSim`
+      -- here would re-run `projectDesign` and double every timing
+      let t1 ← IO.monoMsNow
+      let sz := (R.funs.map (fun fd => tsize fd.body)).foldl (·+·) 0
+      IO.println s!"n={n}  mkSim {t1 - t0} ms  residual size {sz}  bound {b}  RSS{← rss}"
 
 def main (args : List String) : IO UInt32 := do
   for a in args do
