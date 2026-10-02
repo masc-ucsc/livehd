@@ -6140,7 +6140,8 @@ static void emit_formal_report(const std::string& path, const std::string& desig
         "    {{\"id\": \"{}\", \"kind\": \"{}\", \"file\": \"{}\", \"line\": {}, \"msg\": \"{}\", "
         "\"block\": \"{}\", \"instance\": \"{}\", \"aclass\": \"{}\", \"verdict\": \"{}\", \"unbounded\": {}, \"proven_to\": {}, "
         "\"refuted_at\": {}, \"unknown_at\": {}, \"unknown_why\": {}, \"solve_ms\": {}, "
-        "\"in_timeout_core\": {}, \"guarded\": {}, \"vacuous_guard\": {}, \"witness\": {}}}{}\n",
+        "\"in_timeout_core\": {}, \"guarded\": {}, \"vacuous_guard\": {}, "
+        "\"cone_nodes\": {}, \"cone_state\": {}, \"witness\": {}}}{}\n",
         json_esc(prop_id(p)),
         json_esc(p.kind),
         json_esc(file),
@@ -6159,6 +6160,8 @@ static void emit_formal_report(const std::string& path, const std::string& desig
         in_core.contains(i) ? "true" : "false",
         p.guarded ? "true" : "false",
         p.vacuous_guard ? "true" : "false",
+        p.cone_nodes,
+        p.cone_state,
         p.witness.empty() ? std::string{"null"} : "\"" + json_esc(p.witness) + "\"",
         i + 1 < r.props.size() ? "," : "");
   }
@@ -7498,6 +7501,9 @@ void formal_verify_command(Options& opts, Result& res) {
   for (const auto& p : r.props) {
     std::string where = p.loc.empty() ? std::string{} : " at " + p.loc;
     std::string msg   = p.msg.empty() ? std::string{} : " \"" + p.msg + "\"";
+    // COI of this property, when the encoder measured it.
+    std::string coi = p.cone_nodes < 0 ? std::string{}
+                                       : std::format("  [COI {} node(s), {} state]", p.cone_nodes, p.cone_state);
     if (!p.block.empty()) {
       msg += " [" + p.block + "]";  // block (+@instance) attribution
     } else if (!p.instance.empty()) {
@@ -7518,7 +7524,7 @@ void formal_verify_command(Options& opts, Result& res) {
     };
     if (p.kind == "assume" && livehd::lec::is_unchecked_assume_class(p.aclass)) {
       const char* why = p.aclass == "check_disabled" ? "formal.assume_check=false; treated as assume_nocheck" : "assume_nocheck";
-      std::print("  assume{}{}: in force (UNCHECKED {}; verdicts are conditional and unchecked)\n", where, msg, why);
+      std::print("  assume{}{}: in force (UNCHECKED {}; verdicts are conditional and unchecked){}\n", where, msg, why, coi);
       vacuity_note();  // an env assume whose guard never holds constrains nothing
       continue;
     }
@@ -7526,13 +7532,13 @@ void formal_verify_command(Options& opts, Result& res) {
     switch (p.verdict) {
       case livehd::lec::Verdict::Proven:
         if (p.unbounded) {
-          std::print("  {}{}{}: PROVEN (inductive — every cycle of every bound)\n", p.kind, where, msg);
+          std::print("  {}{}{}: PROVEN (inductive — every cycle of every bound){}\n", p.kind, where, msg, coi);
         } else {
-          std::print("  {}{}{}: PROVEN to cycle {} (bounded)\n", p.kind, where, msg, p.proven_to);
+          std::print("  {}{}{}: PROVEN to cycle {} (bounded){}\n", p.kind, where, msg, p.proven_to, coi);
         }
         break;
       case livehd::lec::Verdict::Refuted:
-        std::print("  {}{}{}: REFUTED at cycle {}\n", p.kind, where, msg, p.refuted_at);
+        std::print("  {}{}{}: REFUTED at cycle {}{}\n", p.kind, where, msg, p.refuted_at, coi);
         if (!p.witness.empty()) {
           std::print("    counterexample inputs: {}\n", p.witness);
         }
@@ -7570,7 +7576,7 @@ void formal_verify_command(Options& opts, Result& res) {
         if (p.kind == "assume") {
           why += "; unproven assume — NOT used (make it provable, or spell assume_nocheck to impose it UNCHECKED)";
         }
-        std::print("  {}{}{}: UNKNOWN ({})\n", p.kind, where, msg, why);
+        std::print("  {}{}{}: UNKNOWN ({}){}\n", p.kind, where, msg, why, coi);
         if (!p.witness.empty()) {
           std::print("    candidate violation inputs: {}\n", p.witness);
         }
@@ -7615,6 +7621,22 @@ void formal_verify_command(Options& opts, Result& res) {
       }
     }
     const int assumes = as_unchecked + as_proven + as_refuted + as_unproven;
+    int coi_max = -1, coi_state_max = 0, coi_sum = 0, coi_n = 0, coi_skipped = 0;
+    for (const auto& p : r.props) {
+      if (p.kind == "assume") {
+        continue;
+      }
+      if (p.cone_nodes < 0) {
+        ++coi_skipped;
+        continue;
+      }
+      ++coi_n;
+      coi_sum += p.cone_nodes;
+      if (p.cone_nodes > coi_max) {
+        coi_max       = p.cone_nodes;
+        coi_state_max = p.cone_state;
+      }
+    }
     std::print("\nformal summary: '{}'\n", g->get_name());
     std::print("  properties    {:4}  ({} assert, {} assume, {} cover)\n", asserts + assumes + covers, asserts, assumes, covers);
     std::print("  proven        {:4}  ({} unbounded, {} bounded)\n", proven_unb + proven_bnd, proven_unb, proven_bnd);
@@ -7634,7 +7656,16 @@ void formal_verify_command(Options& opts, Result& res) {
     if (covers == 0) {
       std::print("  note: cover is not an obligation in lhd yet, so no reachability was measured\n");
     }
-    std::print("  note: per-property cone (COI) size is not tracked yet\n");
+    if (coi_n > 0) {
+      std::print("  COI           {:4}  largest cone ({} state), {} avg over {} assert(s)\n",
+                 coi_max,
+                 coi_state_max,
+                 coi_sum / coi_n,
+                 coi_n);
+    }
+    if (coi_skipped > 0) {
+      std::print("  note: COI not measured for {} sidecar formal-block assert(s)\n", coi_skipped);
+    }
   }
 
   // lhd.stats: the cvc5 solve-insight report for the whole verify run (one

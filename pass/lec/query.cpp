@@ -956,6 +956,8 @@ std::string serialize_verify(const Verify_result& v) {
     b.push_back(static_cast<char>(p.guarded ? 1 : 0));
     b.push_back(static_cast<char>(p.vacuous_guard ? 1 : 0));
     put_str(b, p.unknown_why);
+    put_u32(b, static_cast<uint32_t>(p.cone_nodes));
+    put_u32(b, static_cast<uint32_t>(p.cone_state));
     put_str(b, p.witness);
     put_trace(b, p.trace);
   }
@@ -1099,7 +1101,13 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
     b.remove_prefix(1);
     p.vacuous_guard = b.front() != 0;
     b.remove_prefix(1);
-    if (!get_str(b, p.unknown_why) || !get_str(b, p.witness) || !get_trace(b, p.trace)) {
+    uint32_t cn = 0, cst = 0;
+    if (!get_str(b, p.unknown_why) || !get_u32(b, cn) || !get_u32(b, cst)) {
+      return false;
+    }
+    p.cone_nodes = static_cast<int>(cn);  // 0xffffffff -> -1 round-trips
+    p.cone_state = static_cast<int>(cst);
+    if (!get_str(b, p.witness) || !get_trace(b, p.trace)) {
       return false;
     }
     v.props.push_back(std::move(p));
@@ -12490,6 +12498,15 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           if (mon == nullptr) {
             if (auto pit = eo.prop_instance.find(ob.k.occ); pit != eo.prop_instance.end()) {
               pr.instance = pit->second;
+            }
+          }
+          // Only for a property in the DESIGN. A sidecar formal block is its
+          // own monitor graph, so the walk would stop at the monitor boundary
+          // and report the expression size with no state -- left unmeasured.
+          if (mon == nullptr) {
+            if (auto cit = eo.prop_cone.find(ob.k.occ); cit != eo.prop_cone.end()) {
+              pr.cone_nodes = cit->second.nodes;
+              pr.cone_state = cit->second.state;
             }
           }
           if (mon != nullptr) {

@@ -58,4 +58,25 @@ OUT="$W/aout"
 grep -qE 'properties +2 +\(1 assert, 1 assume, 0 cover\)' "$OUT" || fail "assume not split out: $(grep properties "$OUT")"
 grep -qE 'assumes +1 +\(1 unchecked' "$OUT" || fail "unchecked assume not counted: $(grep assumes "$OUT")"
 
+# COI: a DESIGN-body assert reports its cone, including state.
+cat >"$W/body.prp" <<'EOF'
+pub mod cnt2(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  q = c
+  if en and (c < 10) { wrap c = c + 1 }
+  assert(c <= 10, "bounded")
+}
+EOF
+OUT="$W/bout"
+(cd "$W" && "$LHD" formal verify body.prp --top cnt2 --set formal.bound=20) >"$OUT" 2>&1
+grep -qE '\[COI [0-9]+ node\(s\), [1-9][0-9]* state\]' "$OUT" || fail "design assert must report a cone with state: $(grep -i coi "$OUT")"
+grep -qE '^  COI +[0-9]+ +largest cone' "$OUT" || fail "no COI summary row: $(grep -i coi "$OUT")"
+
+# A sidecar formal block is its own monitor graph, so its cone is NOT the
+# design's -- say unmeasured rather than print the monitor's size.
+OUT="$W/sout"
+(cd "$W" && "$LHD" formal verify d.prp d.verify.prp --top cnt --set formal.bound=20) >"$OUT" 2>&1
+grep -q 'COI not measured for 3 sidecar' "$OUT" || fail "sidecar COI must be declared unmeasured: $(grep -i coi "$OUT")"
+grep -qE '\[COI [0-9]+ node' "$OUT" && fail "sidecar must not print a per-property COI: $(grep -i coi "$OUT")"
+
 echo "PASS: formal verify prints a verdict and kind tally"

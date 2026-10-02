@@ -88,6 +88,14 @@ struct Encoded {
   // proof at all, which turns a real difference into a PROVEN verdict.
   absl::flat_hash_set<int>              prop_active_assume;
 
+  // Cone of influence per property occ: design nodes reachable backward from
+  // its cond, and how many of those are state (Flop/Latch/Memory).
+  struct Cone_stats {
+    int nodes = 0;
+    int state = 0;
+  };
+  absl::flat_hash_map<int, Cone_stats>  prop_cone;
+
   // M4 memory state. Each Memory cell is cut like a Flop: its current contents
   // are an SMT array symbol (shared across the two designs by mem_state_key, so
   // corresponding memories "collapse"), and its post-cycle contents are the

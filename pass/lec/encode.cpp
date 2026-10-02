@@ -1034,6 +1034,36 @@ std::string box_node_key(const hhds::Occurrence_node& n) {
   return key;
 }
 
+// Backward walk from a property's cond driver. Counts each occurrence node
+// once and keeps going through state, so the result is the whole COI.
+static Encoded::Cone_stats cone_of(const hhds::Occurrence_pin& start) {
+  Encoded::Cone_stats              cs;
+  absl::flat_hash_set<std::string> seen;
+  std::vector<hhds::Occurrence_pin> work{start};
+  while (!work.empty()) {
+    auto pin = work.back();
+    work.pop_back();
+    if (pin.is_invalid()) {
+      continue;
+    }
+    auto node = pin.get_master_node();
+    if (node.is_invalid() || !seen.insert(box_node_key(node)).second) {
+      continue;
+    }
+    ++cs.nodes;
+    const auto op = gu::type_op_of(node);
+    if (op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Memory) {
+      ++cs.state;
+    }
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        work.push_back(drv);
+      }
+    }
+  }
+  return cs;
+}
+
 Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, std::string_view prefix,
                         const Io_name_map<cvc5::Term>* shared_mems, const Io_name_map<Val>* shared_reads) {
   Encoded out;
@@ -3763,6 +3793,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       auto        nm  = gu::node_name_of(node);
       std::string raw = nm.empty() ? std::string{"assert"} : std::string{nm};
       out.outputs[std::string("\x04") + "prop:" + std::to_string(occ) + "\x1f" + raw] = cv;
+      out.prop_cone[occ] = cone_of(cond_drv);
       // Which assumes are ACTIVE hypotheses (see Encoded::prop_active_assume).
       // Record the decision by occ so the design-assumption asserter never has to
       // re-derive it from the name alone.

@@ -927,6 +927,10 @@ struct Prop_result {
   // per-scope check takes, and deliberately so).
   bool          guarded       = false;
   bool          vacuous_guard = false;
+  // Cone of influence: design nodes the property's cond depends on, and how
+  // many of those are state. -1 = not measured.
+  int           cone_nodes    = -1;
+  int           cone_state    = -1;
   std::string   witness;  // per-cycle input assignment reaching the violation (Refuted)
   // Structured, uncapped input trace for witness reproduction (Refuted only):
   // the same shape the lec engine fills, so `lhd formal verify --workdir` can
