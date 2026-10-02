@@ -3010,6 +3010,14 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(2 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_CLK).extract(i, 1), false));
       }
+    } else if (cell->type.in(ID($memrd), ID($memrd_v2), ID($memwr), ID($memwr_v2), ID($meminit), ID($meminit_v2))) {
+      // A memory port cell is only representable once `memory_collect` packs it
+      // into $mem/$mem_v2 (above). A bare one is left by a script that skips the
+      // collect, or by `memory_map` refusing a memory (e.g. write ports on two
+      // clocks); dropping it here silently left every read output undriven.
+      log_error("Memory port cell %s (%s) was not collected into a $mem cell; run memory_collect before yosys2lg\n",
+                cell->name.c_str(),
+                cell->type.c_str());
     } else if (cell->type.c_str()[0] == '$' && cell->type.c_str()[1] != '_' && strncmp(cell->type.c_str(), "$paramod", 8) != 0) {
       log("likely error: add this cell type %s to lgraph\n", cell->type.c_str());
     } else if (std::strncmp(cell->type.c_str(), "$_AND_", 6) == 0) {

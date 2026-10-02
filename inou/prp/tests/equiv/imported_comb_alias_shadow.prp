@@ -1,0 +1,20 @@
+/*
+:name: imported_comb_alias_shadow
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// suggestions7 item 5 (silent-miscompile face): the imported comb `mid`
+// calls `leaf` through its file-scope alias `lf`; this caller ALSO binds a
+// different unit to `lf`. Inlining mid must resolve the alias in mid's
+// inline frame, never in the caller's scope (it used to call `other`, so
+// z = a ^ 0xFF instead of a & 0x0F).
+const mid = import("imported_comb_alias_shadow/mid.mid")
+const lf  = import("imported_comb_alias_shadow/other.other")
+pub mod top(a:U8) -> (z:U8@[0], w:U8@[0]) {
+  const r = mid(a=a)
+  z = r.z
+  const q = lf(a=a)
+  w = q.z
+}

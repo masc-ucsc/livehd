@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"  // also brings in ankerl::unordered_dense (the Gid set below)
 
 // todo/livehd/2f-lec + 2f-latch M10 — the HIERARCHY-AWARE FORMAL PHASE SCHEDULE.
@@ -124,6 +125,9 @@ struct Phase_plan {
   int         n_guard_high        = 0;  // ...sampled before the FALL (the active-low gate flavour)
   int         n_roots             = 0;  // distinct clock roots any endpoint commits on
   std::string root_clock;               // the resolved root clock net name ("" = implicit)
+  // With ONE root that is a bit of a multi-bit input: which bit (root_clock is
+  // then `bus` for bit 0, `bus[b]` otherwise). -1 = a scalar / implicit root.
+  int         root_bus_bit        = -1;
 
   // The encoder needs the plan (latch cells it otherwise refuses, or a gate
   // chain it otherwise cannot canonicalize) even when there is no SUB-PERIOD
@@ -197,6 +201,15 @@ struct Phase_plan {
 // disagree gets no entry and falls back to per-endpoint resolution.
 struct Clock_forest {
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::string>> port_root;
+  // Every root a forest row names is an input of the selected TOP (of its own
+  // side), not of the def being proven. The phase-schedule root-agreement check
+  // (query.cpp plan_root_clash) asks whether a root is an input of BOTH designs;
+  // for a forest-named root the question is about the two TOPS, so the inputs
+  // the ref top and the impl top have in common go here. Without it a per-def
+  // (hierarchical) proof looked `c0` up among the CHILD's ports `a`/`b`, found
+  // nothing, and scheduled a child clocked from `c0` on one side and `c1` on the
+  // other on one microstep sequence (false PROVEN).
+  absl::flat_hash_set<std::string> top_inputs_both;
 
   [[nodiscard]] const std::string* find(std::string_view def, std::string_view port) const {
     auto d = port_root.find(std::string{def});

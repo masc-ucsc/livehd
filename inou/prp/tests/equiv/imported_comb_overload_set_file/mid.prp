@@ -1,0 +1,7 @@
+comb add2(a:U8, b:U8)       -> (r:U9)  { r = a + b }
+comb add3(a:U8, b:U8, c:U8) -> (r:U10) { r = a + b + c }
+const add = [add2, add3]
+pub comb mid(x:U8, y:U8, z:U8) -> (s2:U9, s3:U10) {
+  s2 = add(a=x, b=y)
+  s3 = add(a=x, b=y, c=z)
+}

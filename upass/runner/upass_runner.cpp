@@ -3509,8 +3509,94 @@ void uPass_function_registry::ensure(const std::vector<std::shared_ptr<Lnast>>& 
 std::shared_ptr<Lnast> uPass_runner::lookup_callee(std::string_view name) const {
   // Delegated to the resolver (name resolution is its job). The caller's own
   // unit name gives lexical priority: a nested helper resolves to THIS scope's
-  // definition before any same-named sibling-scope one.
-  return upass::call_resolver::lookup_callee(reg().function_registry, name, root_lnast_->get_top_module_name());
+  // definition before any same-named sibling-scope one. Inside an inline frame
+  // the scope is the INLINED callee's own unit: a bare `helper(...)` in an
+  // imported comb's body is that file's helper, never a same-named one the
+  // caller's file defines (inlining the caller's helper is a silent miscompile).
+  return upass::call_resolver::lookup_callee(reg().function_registry, name, lexical_unit());
+}
+
+std::string_view uPass_runner::lexical_unit() const {
+  if (const auto* frame = lm ? lm->inline_frame_lnast() : nullptr) {
+    return frame->get_top_module_name();
+  }
+  return root_lnast_->get_top_module_name();
+}
+
+std::string uPass_runner::frame_portable_func_name(const std::string& name, std::string_view callee_unit) const {
+  // A function-valued actual is captured by its raw spelling in the CALLER's
+  // scope, but the body that calls it resolves in the callee's scope (see
+  // lookup_callee). When the two scopes pick different bodies, pin the binding
+  // to the caller's choice by its full registry name; otherwise keep the raw
+  // spelling (unchanged naming for the common case).
+  const auto here = lookup_callee(name);
+  if (!here) {
+    return name;
+  }
+  const auto there = upass::call_resolver::lookup_callee(reg().function_registry, name, callee_unit);
+  return there == here ? name : std::string(here->get_top_module_name());
+}
+
+std::string uPass_runner::frame_portable_callee_name(const std::string& name, const std::shared_ptr<Lnast>& callee) {
+  // Inside a spliced body the callee resolved in the INLINED unit's scope
+  // (lookup_callee), but the re-emitted call is re-walked with no frame and
+  // tolg resolves it against the root unit: a bare `helper` in an imported
+  // generic's body would bind the CALLER file's same-named helper there (a
+  // silent wrong Sub instance). Pin the full registry name when the two scopes
+  // disagree; keep the spelling otherwise (unchanged instance naming).
+  if (!callee || !lm || !lm->in_inline_frame()) {
+    return name;
+  }
+  const auto root_unit = root_lnast_->get_top_module_name();
+  const auto pinned    = std::string(callee->get_top_module_name());
+  if (upass::call_resolver::lookup_callee(reg().function_registry, name, root_unit) != callee) {
+    return pinned;
+  }
+  // The registry agrees, but the re-walk also honors a VALUE binding of the
+  // bare spelling in the caller's scope (`const helper = import("lib2.hh")`,
+  // see the callee_var fold in try_inline_call), which shadows the by-name hit.
+  // The frame tags its own variables (`inl<N>_x`), so an untagged binding here
+  // is the caller's. Any such binding that does not name `callee` itself would
+  // hijack the Sub instance: pin.
+  if (auto fv = try_fold_ref(name)) {
+    auto fn = fv->is_string() ? fv->to_pyrope() : std::string{};
+    if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
+      fn = fn.substr(1, fn.size() - 2);
+    }
+    if (fn.starts_with("ln:")) {
+      fn = fn.substr(3);
+    }
+    if (fn.empty() || upass::call_resolver::lookup_callee(reg().function_registry, fn, root_unit) != callee) {
+      return pinned;
+    }
+  }
+  return name;
+}
+
+std::string uPass_runner::value_bound_func_name(std::string_view var, std::string_view raw) {
+  const auto by_name = lookup_callee(raw);
+  if (!by_name) {
+    return {};  // no by-name hit to shadow: the value path binds the alias
+  }
+  auto fv = try_fold_ref(var);
+  if (!fv || !fv->is_string()) {
+    return {};
+  }
+  auto fn = fv->to_pyrope();
+  if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
+    fn = fn.substr(1, fn.size() - 2);
+  }
+  if (fn.starts_with("ln:")) {
+    fn = fn.substr(3);
+  }
+  if (fn.empty()) {
+    return {};
+  }
+  const auto target = lookup_callee(fn);
+  if (!target || target == by_name) {
+    return {};
+  }
+  return std::string(target->get_top_module_name());
 }
 
 void uPass_runner::flush_deferred_emits() { dispatch_to_passes(&upass::uPass::flush_deferred); }
@@ -4098,13 +4184,15 @@ std::optional<std::pair<std::string, uPass_runner::Int_type>> uPass_runner::type
   const auto  saved = lm->save_cursor();
   std::string dst;
   std::string callee;
+  std::string callee_var;  // frame-tagged spelling: generic_cast_binds_ key
   std::string arg;
   bool        simple = false;
   lm->move_to_child();
   if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
     dst = std::string(lm->current_text());
     if (lm->move_to_sibling()) {
-      callee = std::string(lm->current_raw_text());  // an inlined body tag-prefixes it; the builtin name is raw
+      callee     = std::string(lm->current_raw_text());  // an inlined body tag-prefixes it; the builtin name is raw
+      callee_var = std::string(lm->current_text());
       if (lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
         arg    = std::string(lm->current_text());
         simple = !lm->move_to_sibling();
@@ -4117,7 +4205,7 @@ std::optional<std::pair<std::string, uPass_runner::Int_type>> uPass_runner::type
   }
   auto tc = upass::classify_typecast(callee);
   if (!tc) {
-    if (const auto gb = generic_cast_binds_.find(callee); gb != generic_cast_binds_.end()) {
+    if (const auto gb = generic_cast_binds_.find(callee_var); gb != generic_cast_binds_.end()) {
       tc = upass::classify_typecast(gb->second);
     }
   }
@@ -4872,8 +4960,9 @@ bool uPass_runner::try_lower_typecast() {
   auto              tc = upass::classify_typecast(callee);
   if (!tc) {
     // A type-valued generic used as a constructor/cast (`T(a)` with T bound to
-    // `u8`): reclassify against the bound concrete token (todo 3g A).
-    if (auto gb = generic_cast_binds_.find(callee); gb != generic_cast_binds_.end()) {
+    // `u8`): reclassify against the bound concrete token (todo 3g A). Keyed by
+    // the frame-tagged spelling (see generic_cast_binds_).
+    if (auto gb = generic_cast_binds_.find(lm->current_text()); gb != generic_cast_binds_.end()) {
       tc = upass::classify_typecast(gb->second);
     }
     if (!tc) {
@@ -5896,6 +5985,11 @@ void uPass_runner::stash_sub_instance_port_facts(std::string_view handle, const 
           std::string(handle),
           absl::StrCat(cn.substr(cn.rfind('.') == std::string_view::npos ? 0 : cn.rfind('.') + 1), "(…).", outs.front().name));
     }
+  }
+  if (Lnast::is_tmp(handle)) {  // an absent-field read names the call (upass.constprop)
+    const auto cn = callee->get_top_module_name();
+    symbol_table_.call_result_callee.insert_or_assign(std::string(handle),
+                                                      cn.substr(cn.rfind('.') == std::string_view::npos ? 0 : cn.rfind('.') + 1));
   }
   const auto& outs  = callee->io_meta().outputs;
   auto&       names = symbol_table_.sub_output_names[std::string(handle)];
@@ -7448,13 +7542,26 @@ bool uPass_runner::try_inline_func_call() {
     return false;
   }
   std::string callee_name(lm->current_raw_text());  // function id — never renamed
+  // The same identifier as a VARIABLE in the current scope: inside an inline
+  // frame it carries the frame tag (`inl<N>_lf`). A callee spelled through a
+  // value binding — a lambda-ref/import alias (`const lf = import("leaf.leaf")`,
+  // re-bound at the top of every streamed body) or a gathered overload set —
+  // lives under THIS name, so those folds must read it, never the raw name: the
+  // raw name misses the frame-local binding (the call survives unresolved and a
+  // generic callee reaches tolg unspecialized) or, worse, hits a same-named
+  // binding in the CALLER's scope and inlines the wrong function. Outside a
+  // frame it equals the raw name.
+  const std::string callee_var(lm->current_text());
 
   // Higher-order resolution: inside an inlined body, `f(x)` where `f` is a
   // function-valued param resolves to the function bound at the outer call
-  // site (closure_capture / fcall6). func_param_bindings_ is keyed by the raw
-  // param name as it appears in the body.
+  // site (closure_capture / fcall6). func_param_bindings_ is keyed by the
+  // FRAME-TAGGED name (`inl<N>_f`), so it is read through callee_var: only the
+  // frame that bound the param sees it. Keyed by the raw name, a callee
+  // inlined from inside that body (an imported comb calling ITS own `f`
+  // alias, or a file-local `comb f`) was hijacked by the outer param.
   bool via_param_binding = false;
-  if (auto fb = func_param_bindings_.find(callee_name); fb != func_param_bindings_.end()) {
+  if (auto fb = func_param_bindings_.find(callee_var); fb != func_param_bindings_.end()) {
     callee_name       = fb->second;
     via_param_binding = true;
   }
@@ -7463,6 +7570,27 @@ bool uPass_runner::try_inline_func_call() {
   const std::string source_callee_name(callee_name);
 
   auto callee                = lookup_callee(callee_name);
+  // A value binding of the callee identifier in the CURRENT scope (an import /
+  // lambda-ref alias, `const lf = import("leaf.leaf")`) shadows a same-named
+  // registry function found by name: inside an inline frame the bare-name
+  // lookup can land on a function some OTHER file defines under the alias's
+  // spelling. Only a DIFFERENT body overrides the by-name hit, so the common
+  // `const bpur_vec = import("bpur_vec.bpur_vec")` keeps its raw callee name.
+  if (callee && !via_param_binding) {
+    if (auto fv = try_fold_ref(callee_var); fv && fv->is_string()) {
+      auto fn = fv->to_pyrope();
+      if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
+        fn = fn.substr(1, fn.size() - 2);
+      }
+      if (fn.starts_with("ln:")) {
+        fn = fn.substr(3);
+      }
+      if (auto m = lookup_callee(fn); m && m != callee) {
+        callee      = m;
+        callee_name = fn;
+      }
+    }
+  }
   // compile.upass.inline=false: a DIRECTLY-resolved, Sub-convertible `comb`
   // whose call produces RUNTIME hardware is left as a func_call so tolg lowers
   // it to a module instance instead of inlining (preserving the comb boundary
@@ -7502,7 +7630,10 @@ bool uPass_runner::try_inline_func_call() {
   // string (the fcall-ref-const lambda-value form). Resolve it like the
   // bundle-field method path below.
   if (!callee) {
-    if (auto fv = try_fold_ref(callee_name); fv && fv->is_string()) {
+    // A function-valued param already rebound callee_name to the OUTER call
+    // site's function (a registry name, folded as-is); otherwise the binding
+    // lives in the current scope under its (frame-renamed) variable name.
+    if (auto fv = try_fold_ref(via_param_binding ? callee_name : callee_var); fv && fv->is_string()) {
       auto fn = fv->to_pyrope();
       if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
         fn = fn.substr(1, fn.size() - 2);
@@ -7650,7 +7781,7 @@ bool uPass_runner::try_inline_func_call() {
   // arg-shape diagnostics still fire; a multi-entry set with no match is a
   // fatal `fcall-no-overload`.
   if (!callee) {
-    auto cands = overload_candidates_of(callee_name);
+    auto cands = overload_candidates_of(via_param_binding ? callee_name : callee_var);
     if (!cands.empty()) {
       std::vector<Actual>         ov_actuals;
       std::vector<Generic_actual> ov_generics;
@@ -7965,7 +8096,7 @@ bool uPass_runner::try_inline_func_call() {
         }
       }
       named.insert(named.end(), minted_actuals.begin(), minted_actuals.end());
-      emit_named_instance_call(dst_name, callee_name, call_inst_name, named);
+      emit_named_instance_call(dst_name, frame_portable_callee_name(callee_name, callee), call_inst_name, named);
       return true;
     }
   }
@@ -8134,7 +8265,7 @@ bool uPass_runner::try_inline_func_call() {
     // body): the plain decline copies the func_call through the frame rename,
     // which tags the CALLEE ref too (`inc` -> `inl1_inc`, or a generic lambda
     // `F` -> `inl1_F`), naming a function tolg cannot find. The re-emit spells
-    // the resolved callee.
+    // the resolved callee (frame_portable_callee_name).
     if ((tuple_actual_expanded || (any_unnamed && !any_ref) || (lm->in_inline_frame() && !any_ref)) && !has_self) {
       std::vector<std::pair<std::string, Lnast_node>> named;
       named.reserve(nbind);
@@ -8144,7 +8275,7 @@ bool uPass_runner::try_inline_func_call() {
         }
       }
       named.insert(named.end(), minted_actuals.begin(), minted_actuals.end());
-      emit_named_instance_call(dst_name, callee_name, call_inst_name, named);
+      emit_named_instance_call(dst_name, frame_portable_callee_name(callee_name, callee), call_inst_name, named);
       return true;
     }
     lm->restore_cursor(saved);
@@ -8229,10 +8360,13 @@ bool uPass_runner::try_inline_func_call() {
       continue;
     }
     if (!param_func[i].empty()) {
-      auto it = func_param_bindings_.find(e.name);
-      saved_func_bindings.emplace_back(e.name,
+      // Keyed by the frame-tagged name (see try_inline_func_call): a nested
+      // frame tags its own `f` differently, so the binding never leaks there.
+      const auto fname = upass::Lnast_manager::make_inlined_name(tag, e.name);
+      auto       it    = func_param_bindings_.find(fname);
+      saved_func_bindings.emplace_back(fname,
                                        it == func_param_bindings_.end() ? std::nullopt : std::optional<std::string>(it->second));
-      func_param_bindings_[e.name] = param_func[i];
+      func_param_bindings_[fname] = frame_portable_func_name(param_func[i], callee->get_top_module_name());
       continue;  // function value — no width/value binding
     }
     const auto pname = upass::Lnast_manager::make_inlined_name(tag, e.name);
@@ -8284,19 +8418,20 @@ bool uPass_runner::try_inline_func_call() {
   // (todo 3g A). A generic binds one of three comptime entities:
   //   * a CONSTANT (`f<3>`): the body reads it as a value (`a + N`) — emit the
   //     literal binding for the tagged name (`inlN_N = 3`).
-  //   * a LAMBDA  (`f<inc>`): the body calls it (`F(v)`) — register the raw
-  //     name in func_param_bindings_ so the call dispatches (same seam as a
-  //     function-valued param).
+  //   * a LAMBDA  (`f<inc>`): the body calls it (`F(v)`) — register the
+  //     frame-tagged name in func_param_bindings_ so the call dispatches (same
+  //     seam, and same frame scoping, as a function-valued param).
   //   * a TYPE    (`f<u8>`): the body uses it as a `:T` type slot (declare refs
   //     renamed to `inlN_T`, bound via the named-type machinery) AND/OR as a
   //     constructor cast (`T(a)` → generic_cast_binds_ so try_lower_typecast
   //     reclassifies it against the concrete token).
   for (const auto& [g, gb] : gbinds) {
     if (!gb.func_name.empty()) {
+      const auto gname = upass::Lnast_manager::make_inlined_name(tag, g);
       saved_func_bindings.emplace_back(
-          g,
-          func_param_bindings_.count(g) != 0u ? std::optional<std::string>(func_param_bindings_[g]) : std::nullopt);
-      func_param_bindings_[g] = gb.func_name;
+          gname,
+          func_param_bindings_.count(gname) != 0u ? std::optional<std::string>(func_param_bindings_[gname]) : std::nullopt);
+      func_param_bindings_[gname] = frame_portable_func_name(gb.func_name, callee->get_top_module_name());
       continue;
     }
     if (!gb.const_text.empty()) {
@@ -8316,10 +8451,13 @@ bool uPass_runner::try_inline_func_call() {
     // verbatim; an integer/bool envelope maps back to its scalar token.
     const std::string cast_token = generic_cast_token(gb);
     if (!cast_token.empty()) {
+      // Frame-tagged key, like func_param_bindings_: a nested frame's own `T`
+      // is tagged differently and never reads this frame's bind.
+      const auto gname = upass::Lnast_manager::make_inlined_name(tag, g);
       saved_cast_binds.emplace_back(
-          g,
-          generic_cast_binds_.count(g) != 0u ? std::optional<std::string>(generic_cast_binds_[g]) : std::nullopt);
-      generic_cast_binds_[g] = cast_token;
+          gname,
+          generic_cast_binds_.count(gname) != 0u ? std::optional<std::string>(generic_cast_binds_[gname]) : std::nullopt);
+      generic_cast_binds_[gname] = cast_token;
     }
   }
   // An output may share the Pyrope name of an input (`comb f(x) -> (x)`):
@@ -8570,6 +8708,12 @@ bool uPass_runner::try_inline_func_call() {
     } else {
       generic_cast_binds_.erase(key);
     }
+  }
+
+  // A destructure slot that matches no output reads an absent field of this
+  // temp (upass.constprop `unknown-field`): let that diagnostic name the call.
+  if (Lnast::is_tmp(dst_name)) {
+    symbol_table_.call_result_callee.insert_or_assign(dst_name, source_callee_name);
   }
 
   // Epilogue: map the callee outputs back to the caller's dst, then apply
@@ -9900,8 +10044,36 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
                                                       binding.tuple_fields);
     }
   }
+  // A LAMBDA-valued generic (`apply<inc>`) is captured by its raw spelling
+  // in the CALLER's scope, but the clone writes it into the callee body as a
+  // bare `inc(...)`, which then resolves lexically in the callee's own unit
+  // (lookup_callee): a same-named helper nested in (or defined by the file
+  // of) the generic would silently win over the caller's `inc`. Pin each such
+  // binding to the caller's choice (full registry name) whenever the
+  // template's scope or the clone's scope would pick a different body. This
+  // runs before the clone is pushed as a source, so lookup_callee still
+  // resolves in the caller's scope.
+  absl::flat_hash_map<std::string, Generic_bind> portable_subst;
+  const auto* subst_src = &type_subst;
+  for (const auto& [generic, binding] : type_subst) {
+    if (binding.func_name.empty()) {
+      continue;
+    }
+    auto pinned = frame_portable_func_name(binding.func_name, tmpl->get_top_module_name());
+    if (pinned == binding.func_name) {
+      pinned = frame_portable_func_name(binding.func_name, mangled);
+    }
+    if (pinned == binding.func_name) {
+      continue;
+    }
+    if (subst_src != &portable_subst) {
+      portable_subst = type_subst;
+      subst_src      = &portable_subst;
+    }
+    portable_subst[generic].func_name = std::move(pinned);
+  }
   auto        clone    = std::make_shared<Lnast>(mangled);
-  const auto* subst    = type_subst.empty() ? nullptr : &type_subst;
+  const auto* subst    = subst_src->empty() ? nullptr : subst_src;
   auto        src_root = tmpl->get_root();
   auto        dst_root = clone->set_root(tmpl->get_type(src_root));  // top
   // Module anchor: the clone keeps pointing at the template's
@@ -11860,6 +12032,24 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
                 sp = Spec_port{.inject = true, .kind = Io_kind::boolean};
                 return true;
               }
+              // An ARRAY port after upass.ssa's full rebuild (forced by any
+              // repeated definition, e.g. `mut t:U12 = 0 ; t = 0`): the rebuild
+              // re-emits the io slot as the flat packed prim_type_int and only
+              // io_meta keeps the `[N]T` view. Read as a plain N*T-bit integer,
+              // the lifted body's `b[i]` no longer indexes an array and
+              // lnast.tolg cannot resolve it. Rebuild the same one-dimension
+              // integer-lane port the comp_type_array branch below produces.
+              if (io_port && Lnast_ntype::is_prim_type_int(tt)) {
+                const auto* ci = encl_input(std::string(wanted));
+                if (ci != nullptr && ci->array_size > 0 && ci->elem_bits > 0 && ci->inner_dims.empty() && !ci->elem_bool
+                    && ci->kind != Io_kind::boolean) {
+                  const auto elem_max = ci->elem_signed ? upass::signed_max_from_bits(ci->elem_bits)
+                                                        : upass::unsigned_max_from_bits(ci->elem_bits);
+                  const auto elem_min = ci->elem_signed ? upass::signed_min_from_bits(ci->elem_bits) : *Dlop::from_pyrope("0");
+                  sp = Spec_port{.inject = true, .max = elem_max, .min = elem_min, .array_size = ci->array_size};
+                  return true;
+                }
+              }
               if (Lnast_ntype::is_prim_type_int(tt)) {
                 auto max_n = tree.get_first_child(type_n);
                 auto min_n = max_n.is_invalid() ? max_n : tree.get_sibling_next(max_n);
@@ -12656,9 +12846,34 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
   // A re-rolled inline body lives in the caller's namespace. The hardware
   // payload already binds actual_names; retain the same names in the source
   // body used by the Pyrope writer and by any subsequent inline replay.
+  //
+  // Under STREAMING SSA (a `::[timecheck=false]` unit that reassigns a plain
+  // scalar in straight-line code) the LNAST keeps the BASE name on every read
+  // and only the runner versions it, at emit time (emit_ref_or_folded ->
+  // stream_ssa_ref_name). A loop INVARIANT is such a read: `mut x = 0 ; x = a ;
+  // for .. { .. x .. }` must see `x___ssa_1`, not the version-0 seed `x` --
+  // binding the raw name made the loop read the declaration's 0 and DCE then
+  // deleted the now-unread `x___ssa_1 = a` (lhdtrack br_ram_data_rd_pipe's
+  // Pyrope re-emission: an inlined comb's `mut inl_in = 0 ; inl_in = row_data_q`
+  // read by its rolled mux loop). The retained source body must read the same
+  // version, or the Pyrope writer re-prints the stale seed. Only read-only
+  // names: a name the body writes is renamed on both sides of its stores, and
+  // upass_ssa forces the full SSA rebuild for a stream name written under a
+  // `for` (so a carry is never versioned here).
+  const auto bound_actual = [&](const std::string& n) -> std::string {
+    const auto& actual = plan.actual_names.at(n);
+    if (std::ranges::find(plan.invariants, n) == plan.invariants.end()) {
+      return actual;
+    }
+    return stream_ssa_ref_name(actual);
+  };
   for (const auto& [name, actual] : plan.actual_names) {
-    if (name != plan.ivar && name != actual && !captured.contains(name)) {
-      captured[name].func_name = actual;
+    if (name == plan.ivar || captured.contains(name)) {
+      continue;
+    }
+    auto bound = bound_actual(name);
+    if (name != bound) {
+      captured[name].func_name = std::move(bound);
     }
   }
   // Compiler temporaries are local to this retained loop, too. Multiple
@@ -12680,9 +12895,13 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
   auto                                            lowered = staging->add_child(rolled, Lnast_ntype::create_stmts());
   std::vector<std::pair<std::string, Lnast_node>> actuals;
   for (const auto& n : plan.invariants) {
-    actuals.emplace_back(port_of(n), Lnast_node::create_ref(plan.actual_names.at(n)));
+    actuals.emplace_back(port_of(n), Lnast_node::create_ref(bound_actual(n)));
   }
   for (const auto& n : plan.carries) {
+    // See bound_actual: upass_ssa keeps a stream-SSA name written in a loop
+    // body off the streaming path, so a carry's raw name IS its live version
+    // (the result binding below writes the raw name back).
+    I(stream_ssa_ref_name(plan.actual_names.at(n)) == plan.actual_names.at(n), "a rolled-loop carry is a streaming-SSA name");
     if (plan.registers.contains(n)) {
       actuals.emplace_back(port_of(n), Lnast_node::create_ref(plan.actual_names.at(n)));
       actuals.emplace_back(n + std::string(kCarryInSuffix), Lnast_node::create_ref("%" + plan.inst + "_" + n + "_seed"));
@@ -12975,7 +13194,10 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
   // never be a type or lambda identifier, so classify on the first character;
   // otherwise a registry function name is a lambda bind, and anything else is a
   // type (named user type or a `'type'` tmp carrying an envelope).
-  const auto bind_of_explicit_arg = [&](const std::string& s, std::string from) -> Generic_bind {
+  // `raw` is the arg's SOURCE spelling (Generic_actual::src_name; empty for a
+  // const / tmp / declaration default): `s` is frame-renamed inside an inlined
+  // body, `raw` never is.
+  const auto bind_of_explicit_arg = [&](const std::string& s, std::string from, const std::string& raw = {}) -> Generic_bind {
     const char c0 = s.empty() ? '\0' : s.front();
     if (c0 == '\'' || c0 == '"') {
       Generic_bind gb;
@@ -13005,11 +13227,55 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       gb.const_text = s;
       return gb;
     }
-    if (lookup_callee(s) != nullptr) {
+    // A ref to THIS frame's own function-valued param (`apply_g<F=f>` inside
+    // `outer(f)`, `s` is the frame-tagged `inlN_f`) forwards the function it is
+    // bound to, exactly as func_actual_name does for a value-param `g(f=f)`.
+    // It is registered only in func_param_bindings_ (never as a value), so
+    // without this it fell through to a TYPE bind and the body's `F(v)` became
+    // a call to an undefined `inlM_inlN_f`.
+    if (const auto fb = func_param_bindings_.find(s); fb != func_param_bindings_.end()) {
       Generic_bind gb;
       gb.from      = std::move(from);
-      gb.func_name = s;
+      gb.func_name = fb->second;
       return gb;
+    }
+    if (lookup_callee(s) != nullptr) {
+      // An import alias spelled like a registry function (`const inc =
+      // import("lib2.hh")` while the template's file has its own `inc`) binds
+      // the alias TARGET, pinned by its full registry name: the raw spelling
+      // resolves by name to the same wrong body from both scopes, so
+      // frame_portable_func_name / the clone pin could never tell them apart.
+      auto         aliased = value_bound_func_name(s, s);
+      Generic_bind gb;
+      gb.from      = std::move(from);
+      gb.func_name = aliased.empty() ? s : std::move(aliased);
+      return gb;
+    }
+    // Inside an inline frame (e.g. a generic's clone spliced in place, `e<inc>`
+    // in `g<N>`) the ref arrives frame-tagged (`inl1_inc`), which no registry
+    // function is named. Resolve its SOURCE spelling exactly as
+    // func_actual_name does for a value-param `f(g=inc)`; without this it fell
+    // through to a TYPE bind and the body's `F(v)` became a call to an
+    // undefined `inl2_inl1_inc`. A frame-local value of that spelling (a
+    // comptime constant, a variable) shadows the function and keeps the paths
+    // below; an import-alias string binds its target (value_bound_func_name).
+    if (!raw.empty() && raw != s && lm->in_inline_frame() && lookup_callee(raw) != nullptr) {
+      auto aliased = value_bound_func_name(s, raw);
+      if (!aliased.empty()) {
+        Generic_bind gb;
+        gb.from      = std::move(from);
+        gb.func_name = std::move(aliased);
+        return gb;
+      }
+      const auto fv = try_fold_ref(s);
+      const bool shadowed
+          = (fv && !fv->is_invalid()) || upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), s).has_value();
+      if (!shadowed) {
+        Generic_bind gb;
+        gb.from      = std::move(from);
+        gb.func_name = raw;
+        return gb;
+      }
     }
     // A generic bound to a comptime VALUE rather than a literal: a named
     // constant (`f<N=SIZE>`), a loop index bound by the unroller
@@ -13157,7 +13423,7 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
                        std::format("generic `{}` of `{}` is bound more than once", ga.name, callee_name),
                        "bind each generic at most once");
       }
-      binds[ga.name] = bind_of_explicit_arg(ga.value, std::format("the named bind `{}=…`", ga.name));
+      binds[ga.name] = bind_of_explicit_arg(ga.value, std::format("the named bind `{}=…`", ga.name), ga.src_name);
     }
     // Positional binds follow the SAME naming exceptions as call arguments
     // (06-functions.md §"Argument naming"), NOT declaration-order fill: a bare
@@ -13170,7 +13436,7 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       if (!ga.name.empty()) {
         continue;  // named binds already applied above
       }
-      const Generic_bind cand         = bind_of_explicit_arg(ga.value, std::format("the explicit `<…>` argument `{}`", ga.value));
+      const Generic_bind cand         = bind_of_explicit_arg(ga.value, std::format("the explicit `<…>` argument `{}`", ga.value), ga.src_name);
       const bool         cand_is_type = cand.const_text.empty() && cand.func_name.empty();  // type bind vs value/lambda
       std::size_t        target       = gens.size();
       // Exception 2: a bare identifier whose SOURCE name matches an unbound
@@ -13687,7 +13953,14 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
     if (it == gbinds.end()) {
       continue;
     }
-    const std::string tok = !it->second.const_text.empty() ? it->second.const_text : it->second.func_name;
+    // A lambda bind names the CALLER's function: two call sites binding
+    // `m<inc>` to different `inc` bodies (each file's own) must not share one
+    // clone, so key it by the same caller-portable spelling the clone writes
+    // into the body (clone_template_specialized).
+    const std::string tok = !it->second.const_text.empty() ? it->second.const_text
+                            : it->second.func_name.empty()
+                                ? std::string{}
+                                : frame_portable_func_name(it->second.func_name, callee->get_top_module_name());
     if (tok.empty()) {
       continue;  // a type bind already contributed its width/name token
     }
@@ -13887,9 +14160,22 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
 
   // A ref actual whose raw name is itself a registry function is a higher-order
   // / closure argument: capture the function name so the body's `f(x)` can
-  // resolve to it (see func_param_bindings_).
+  // resolve to it (see func_param_bindings_). A ref to THIS frame's own
+  // function-valued param (`apply(f=f)` inside `outer(f)`) forwards the
+  // function it is bound to; it shadows a same-named registry function.
   auto func_actual_name = [&]() -> std::string {
-    if (Lnast_ntype::is_ref(lm->get_raw_ntype()) && lookup_callee(lm->current_raw_text()) != nullptr) {
+    if (!Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+      return {};
+    }
+    if (const auto fb = func_param_bindings_.find(lm->current_text()); fb != func_param_bindings_.end()) {
+      return fb->second;
+    }
+    if (lookup_callee(lm->current_raw_text()) != nullptr) {
+      // A value binding (import alias) of the spelling shadows the by-name hit:
+      // capture the alias target (see bind_of_explicit_arg).
+      if (auto aliased = value_bound_func_name(lm->current_text(), lm->current_raw_text()); !aliased.empty()) {
+        return aliased;
+      }
       return std::string(lm->current_raw_text());
     }
     return {};
@@ -15334,6 +15620,7 @@ void uPass_runner::run() {
   symbol_table_.sub_output_ranges.clear();
   symbol_table_.single_output_port.clear();
   symbol_table_.call_result_label.clear();
+  symbol_table_.call_result_callee.clear();
   symbol_table_.unchecked_typed.clear();
   symbol_table_.wide_values.clear();
   symbol_table_.instance_handles.clear();
@@ -15683,6 +15970,15 @@ void uPass_runner::dead_code_eliminate_staging() {
     absl::flat_hash_map<std::string_view, int>                  use_count;   // refs in non-LHS positions, per name
     absl::flat_hash_map<std::string_view, std::vector<int64_t>> defs_of;     // name -> candidate stmt-level def nids
     absl::flat_hash_map<int64_t, std::vector<std::string_view>> stmt_reads;  // candidate def nid -> subtree read names
+    // `wire` declares on the spine, and every def-producing write of each name
+    // (spine or payload). A wire is a combinational net, not a state root: once
+    // its readers are gone its driver is swept like any other dead def, and the
+    // declaration must go WITH it — a surviving `declare x … wire` with no
+    // driver reads as an UNDRIVEN wire to lnast.tolg ("wire 'x' is never
+    // driven"), e.g. a wire whose only reader was an argument the inlined
+    // callee ignores.
+    absl::flat_hash_map<std::string_view, std::vector<int64_t>> wire_decls;
+    absl::flat_hash_map<std::string_view, int>                  write_count;
 
     // One recursive scan. A statement-level def is a def-producing node whose
     // direct parent is a `stmts` block — nested `assign` nodes living inside a
@@ -15728,6 +16024,8 @@ void uPass_runner::dead_code_eliminate_staging() {
             if (active != 0) {
               stmt_reads[active].push_back(nm);
             }
+          } else if (dce_is_def_producing(nt)) {
+            ++write_count[staging->get_name(c)];
           }
           continue;
         }
@@ -15743,6 +16041,8 @@ void uPass_runner::dead_code_eliminate_staging() {
                   const auto m = staging->get_name(mode);
                   if (m == "mut" || m == "reg") {
                     protected_names.insert(staging->get_name(nm));
+                  } else if (on_spine && (m == "wire" || m.starts_with("wire "))) {
+                    wire_decls[staging->get_name(nm)].push_back(c.get_class_index().value);
                   }
                 }
               }
@@ -15790,6 +16090,29 @@ void uPass_runner::dead_code_eliminate_staging() {
             work.insert(work.end(), dit->second.begin(), dit->second.end());
           }
         }
+      }
+    }
+    // A dead wire's declaration dies with its driver(s): only when nothing
+    // reads it and EVERY write of the name was swept (a write kept as payload,
+    // e.g. under a unique_if arm, keeps the declaration too).
+    for (const auto& [name, ids] : wire_decls) {
+      if (!droppable(name)) {
+        continue;
+      }
+      if (const auto uit = use_count.find(name); uit != use_count.end() && uit->second != 0) {
+        continue;
+      }
+      int dead_writes = 0;
+      if (const auto dit = defs_of.find(name); dit != defs_of.end()) {
+        for (const auto id : dit->second) {
+          dead_writes += dead_stmts.contains(id) ? 1 : 0;
+        }
+      }
+      // A wire that was NEVER written stays: its declaration is what lets
+      // lnast.tolg report the undriven wire.
+      const auto wit = write_count.find(name);
+      if (dead_writes > 0 && wit != write_count.end() && dead_writes == wit->second) {
+        dead_stmts.insert(ids.begin(), ids.end());
       }
     }
   }

@@ -1,0 +1,14 @@
+/*
+:name: style_compact_bit_packing_clean
+:type: style
+:style: none
+*/
+comb f(counters:[4]U16) -> (out:U96) {
+  mut packed = 0
+  packed#[0..<16] = counters[0]
+  packed#[16..<32] = counters[1]
+  // Preserve the hole: packing the array would move the last two lanes.
+  packed#[0x40..<0x50] = counters[2]
+  packed#[0x50..<0x60] = counters[3]
+  out = packed
+}

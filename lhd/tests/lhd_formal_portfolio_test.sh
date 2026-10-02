@@ -91,5 +91,70 @@ grep -q 'settled every obligation definitively' "$OUT" \
 [ "$?" -eq 0 ] || fail "engine=bmc must also prove the pure invariant: $(cat "$OUT")"
 grep -q 'PROVEN' "$OUT" || fail "engine=bmc must prove the invariant: $(cat "$OUT")"
 
+# Step 6's run (see below) is launched now so its 12 s wall wait overlaps step 5's.
+rm -rf "$W/wd6"
+LIVEHD_LEC_RACER_STALL_ONLY=0 LIVEHD_LEC_RACER_STALL_S=60 "$LHD" formal verify "$W/portfolio.prp" --top portfolio \
+  --workdir "$W/wd6" --set formal.bound=10 --set formal.timeout=1 --set formal.min_timeout=1 >"$W/out6" 2>&1 &
+WD6_PID=$!
+
+# 5. bmc-first WALL-KILLED, ind-first survives. The race deadline SIGKILLs a
+#    strategy stuck past formal.timeout (cvc5 preprocessing is not covered by its
+#    own limit); LIVEHD_LEC_RACER_STALL_ONLY=0 stalls just bmc-first so it is the
+#    one killed (deadline = max(1+1+10, 3x1) = 12 s). The survivor ran at the
+#    SHALLOW ind-first bound, so its bounded-Proven of `a != 5` (true only to
+#    cycle ~2; the bug is at cycle 7) must NOT be adopted as the run's verdict:
+#    it was a false PASS (rc=0). Only what ind-first SETTLED survives -- the
+#    unbounded twin invariant stays PROVEN, the shallow one becomes UNKNOWN.
+LIVEHD_LEC_RACER_STALL_ONLY=0 LIVEHD_LEC_RACER_STALL_S=60 "$LHD" formal verify "$W/portfolio.prp" --top portfolio \
+  --set formal.bound=10 --set formal.timeout=1 --set formal.min_timeout=1 >"$OUT" 2>&1
+RC=$?
+[ "$RC" -ne 0 ] || fail "a wall-killed bmc-first must not turn ind-first's shallow bounded proof into a PASS (rc=0): $(cat "$OUT")"
+grep -q 'bmc-first racer exceeded formal.timeout' "$OUT" || fail "the run must name the wall-killed bmc-first: $(cat "$OUT")"
+grep -q 'counter hit five.*PROVEN' "$OUT" \
+  && fail "the reachable violation (cycle 7) must not read PROVEN from a bound-1 strategy: $(cat "$OUT")"
+grep -q 'counter hit five.*UNKNOWN' "$OUT" || fail "the shallow obligation must be UNKNOWN: $(cat "$OUT")"
+# The demoted obligation names WHY it is open: no solver gave up at any cycle
+# (bmc-first was killed, ind-first was never asked past its shallow bound).
+grep -q 'counter hit five.*solver gave up' "$OUT" \
+  && fail "a demoted shallow proof must not read 'solver gave up at cycle N': $(cat "$OUT")"
+grep -q 'counter hit five.*UNKNOWN (not checked past cycle [0-9]*: bmc-first' "$OUT" \
+  || fail "a demoted shallow proof must name the demotion: $(cat "$OUT")"
+grep -q 'twin counters stay equal.*PROVEN (inductive' "$OUT" \
+  || fail "ind-first's settled (unbounded) proof must survive the wall kill: $(cat "$OUT")"
+
+# 6. Same wall bound with a VERDICT CACHE active (any --workdir: incremental is on
+#    by default). The cache path runs the strategies SEQUENTIALLY (bmc-first, then
+#    ind-first) so ind-first reuses bmc-first's cache stores -- but each strategy
+#    still runs in a forked, wall-bounded worker: the stalled bmc-first is killed
+#    at the same 12 s deadline instead of holding `--workdir` runs forever, and
+#    the verdicts match step 5 (no workdir-dependent PASS).
+#    It runs CONCURRENTLY with step 5 (both wait out the same 12 s deadline).
+wait "$WD6_PID"
+RC=$?
+OUT6="$W/out6"
+[ "$RC" -ne 0 ] || fail "--workdir: a wall-killed bmc-first must not turn ind-first's shallow bounded proof into a PASS (rc=0): $(cat "$OUT6")"
+grep -q 'bmc-first racer exceeded formal.timeout' "$OUT6" \
+  || fail "--workdir (verdict cache active): the stalled bmc-first must be wall-killed like the no-workdir run: $(cat "$OUT6")"
+grep -q 'counter hit five.*PROVEN' "$OUT6" \
+  && fail "--workdir: the reachable violation (cycle 7) must not read PROVEN from a bound-1 strategy: $(cat "$OUT6")"
+grep -q 'twin counters stay equal.*PROVEN (inductive' "$OUT6" \
+  || fail "--workdir: ind-first's settled (unbounded) proof must survive the wall kill: $(cat "$OUT6")"
+grep -q 'counter hit five.*UNKNOWN (not checked past cycle [0-9]*: bmc-first' "$OUT6" \
+  || fail "--workdir: a demoted shallow proof must name the demotion: $(cat "$OUT6")"
+grep -q '"unknown_why": "not checked past cycle [0-9]*: bmc-first' "$W/wd6/formal_report.json" \
+  || fail "--workdir: formal_report.json must carry the demotion reason: $(cat "$W/wd6/formal_report.json")"
+
+# 7. The cache-active strategies still feed the verdict cache from their forked
+#    workers (the keys travel back over the pipe): a clean --workdir run stores
+#    verify obligations in formal_cache.json, and a warm rerun still proves.
+rm -rf "$W/wd7"
+for pass_no in 1 2; do
+  "$LHD" formal verify "$W/inv.prp" --top inv --workdir "$W/wd7" --set formal.bound=8 >"$OUT" 2>&1
+  [ "$?" -eq 0 ] || fail "--workdir run $pass_no: a pure inductive invariant must prove and exit clean: $(cat "$OUT")"
+  grep -q 'twins equal forever.*PROVEN' "$OUT" || fail "--workdir run $pass_no: the invariant must be PROVEN: $(cat "$OUT")"
+  grep -q '"verify:' "$W/wd7/formal_cache.json" 2>/dev/null \
+    || fail "--workdir run $pass_no: the forked strategy's verify cache stores must reach formal_cache.json"
+done
+
 echo "PASS: formal verify portfolio (engine=auto) merge + no-regression"
 exit 0

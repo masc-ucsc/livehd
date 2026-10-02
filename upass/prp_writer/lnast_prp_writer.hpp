@@ -129,6 +129,8 @@ private:
   // dropped from the emission AND excluded from the fold analysis, so the
   // surviving def counts as single-use and can inline at its reader.
   void                             scan_dead_init_stores();
+  void                             drop_redundant_zero_seed(Lnast_nid decl_nid, std::string_view lhs);
+  std::string                      io_array_view_type(Lnast_nid type_nid, std::string_view raw_name, bool is_output) const;
   Lnast_nid                        body_stmts_nid() const;
   absl::flat_hash_set<int64_t>     dead_init_stmts_;
   // Names a NESTED store writes to. Their top-level declaration/seed is what

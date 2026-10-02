@@ -1964,7 +1964,18 @@ absl::flat_hash_set<std::string> clock_port_names(hhds::Graph* def, int depth) {
   }
   for (auto n : def->body().nodes()) {
     const auto op = gu::type_op_of(n);
-    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Memory || op == Ntype_op::Latch) {
+    if (op == Ntype_op::Memory) {
+      // EVERY port's clock lane (pid `p*Memory_port_stride + clock_pin`), not
+      // just the "clock_pin" name -- that one is port 0's sink only, so a clock
+      // reaching port 1+ alone made the port look unclocked.
+      gu::for_each_memory_clock_driver(n, [&out](const hhds::Pin_class& d) {
+        if (auto in = walk_to_graph_input(d); !in.is_invalid()) {
+          out.insert(std::string(gu::pin_name_of(in)));
+        }
+      });
+      continue;
+    }
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
       if (auto in = walk_to_graph_input(gu::get_driver_of_sink_name(n, "clock_pin")); !in.is_invalid()) {
         out.insert(std::string(gu::pin_name_of(in)));
       }
@@ -2029,7 +2040,14 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const st
   };
   for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
-    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Memory || op == Ntype_op::Latch) {
+    if (op == Ntype_op::Memory) {
+      // Every per-port clock lane: the "clock_pin" name is port 0's sink only,
+      // so a gate clocking port 1+ (pid 18, 34, ...) was never recognized and
+      // stayed an opaque Sub the encoder could only refuse.
+      gu::for_each_memory_clock_driver(n, note_clock_driver);
+      continue;
+    }
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
       note_clock_driver(gu::get_driver_of_sink_name(n, "clock_pin"));
       continue;
     }

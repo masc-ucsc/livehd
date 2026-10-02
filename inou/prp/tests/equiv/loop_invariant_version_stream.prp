@@ -1,0 +1,24 @@
+/*
+:name: loop_invariant_version_stream
+:type: equiv
+:verilog_top: loop_invariant_version_stream.top
+:pyrope_top: top
+*/
+// loop_invariant_version under STREAMING SSA (`::[timecheck=false]`, every
+// slang/v2prp unit and generated Pyrope that carries the attribute): the LNAST
+// keeps the BASE name on reads and only the runner versions it at emit time.
+// A compact (rolled) loop binds its invariant actuals by raw name, so the
+// loop read `value`'s declaration-time 0 instead of `a`, and DCE then deleted
+// the real `value = a` write. The byte-identical unit without the attribute
+// (loop_invariant_version) was correct.
+pub comb top::[timecheck=false](a:U8) -> (z:U12) {
+  mut value:U8 = 0
+  value = a
+  mut total:U12 = 0
+  for i in 0..<2 {
+    for j in 0..<3 {
+      total = total + value
+    }
+  }
+  z = total
+}

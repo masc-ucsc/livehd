@@ -5,7 +5,10 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
@@ -21,6 +24,9 @@ namespace lc = livehd::latch_contract;
 // box_node_key lives in encode.cpp (one definition, shared identity).
 std::string box_node_key(const hhds::Node_class& n);
 std::string box_node_key(const hhds::Occurrence_node& n);
+// clock_input_bit lives in encode.cpp too: the SAME bit walk the encoder's
+// Clk_root keys a clock by, so a root here and a clock there agree on identity.
+std::optional<std::pair<std::string, int>> clock_input_bit(const hhds::Occurrence_pin& driver);
 
 const char* phase_name(Phase p) {
   switch (p) {
@@ -62,6 +68,15 @@ struct Clock_chain {
   // A latch whose own window is `clk & held_en` consumes held_en LIVE; replacing
   // it with the ICG latch's transparent input samples the wrong half-period.
   std::vector<hhds::Occurrence_pin> live_guards;
+  // WHICH BIT of a multi-bit root input the chain lands on, as a key suffix:
+  // "" for bit 0 (and for any 1-bit input), "[b]" for bit b, and a per-cone
+  // "[?id]" when the bit walk cannot tell (never assume bit 0 -- that is the
+  // conflation this exists to stop). control_root follows a bit select to the
+  // WHOLE input, so without it clks[0] and clks[1] were one root `clks`.
+  std::string root_bit;
+  // The same bit as a number when it is DECIDED (-1 = a 1-bit input, or a bit
+  // the walk could not tell -- `root_bit` then holds the "[?id]" key).
+  int         root_bit_index = -1;
 };
 
 // Structural digest of a cone, used to give the SAMPLED GUARD a name. Two
@@ -163,6 +178,18 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
     }
     if (gu::is_graph_input_pin(cr.net) || cr.net.is_const()) {
       ch.root = cr.net;
+      if (!cr.net.is_const() && gu::bits_of(cr.net) > 1) {
+        // A bit of a clock BUS: key it the way encode.cpp's Clk_root does
+        // (bare name for bit 0, `name[b]` otherwise), from the hop's own start
+        // pin -- that is where the bit select sits.
+        const auto cb = clock_input_bit(cur);
+        if (cb && cb->first == gu::pin_name_of(cr.net)) {
+          ch.root_bit       = cb->second == 0 ? std::string{} : "[" + std::to_string(cb->second) + "]";
+          ch.root_bit_index = cb->second;
+        } else {
+          ch.root_bit = "[?" + std::to_string(static_cast<uint64_t>(cur.get_class_index().value)) + "]";
+        }
+      }
       return ch;
     }
     auto       n  = cr.net.get_master_node();
@@ -325,7 +352,13 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
 // `owner` is the def the ENDPOINT lives in, needed for the implicit clock: a
 // `reg x = 0` has no cone at all, so the only thing that identifies its clock is
 // which module it is in.
-std::string root_key(const hhds::Occurrence_pin& root, const hhds::Occurrence_node* owner, const Clock_forest* forest) {
+//
+// `bit` is Clock_chain::root_bit: a multi-bit input's bits are DISTINCT roots
+// (`clks` for bit 0, `clks[1]`, ...), the same identity encode.cpp's Clk_root
+// gives them, so a design clocked from two bits of one bus is multi-root here
+// and keeps the encoder's bit-aware detected-edge path.
+std::string root_key(const hhds::Occurrence_pin& root, const hhds::Occurrence_node* owner, const Clock_forest* forest,
+                     std::string_view bit = {}) {
   if (root.is_invalid()) {
     if (forest != nullptr && owner != nullptr) {
       if (auto* r = forest->find(owner->get_graph()->get_name(), "")) {
@@ -338,10 +371,18 @@ std::string root_key(const hhds::Occurrence_pin& root, const hhds::Occurrence_no
     std::string nm{gu::pin_name_of(root)};
     if (forest != nullptr) {
       if (auto* r = forest->find(root.get_graph()->get_name(), nm)) {
-        return *r;
+        // A forest root may already name a bus bit (`clks[1]`, a 1-bit port
+        // bound to that bit); the forest maps a MULTI-bit port only to a whole
+        // input, so `bit` (non-empty only on a multi-bit port) never stacks on
+        // a bit. Should it ever, the composed key is not that bit: fall back
+        // to the port's own name, as an unmapped port does.
+        if (bit.empty() || r->empty() || r->back() != ']') {
+          return *r + std::string{bit};
+        }
+        return nm + std::string{bit};
       }
     }
-    return nm;
+    return nm + std::string{bit};
   }
   return "\x02" + std::to_string(static_cast<uint64_t>(root.get_class_index().value));
 }
@@ -424,6 +465,20 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
   bool                             implicit_root     = false;
   std::string                      implicit_root_key = "\x01implicit";
   std::string                      derived_root;  // an endpoint whose clock is not a clock INPUT
+  // A multi-bit clock input's root key -> the ONE bit it stands for (decided
+  // bits only), and an endpoint whose bus bit the walk could NOT decide.
+  absl::flat_hash_map<std::string, int> bus_root_bit;
+  std::string                           bus_undecided;
+  auto note_bus_root = [&](const Clock_chain& c, const std::string& key, const std::string& who) {
+    if (!gu::is_graph_input_pin(c.root) || gu::bits_of(c.root) <= 1) {
+      return;
+    }
+    if (c.root_bit_index >= 0) {
+      bus_root_bit[key] = c.root_bit_index;
+    } else if (bus_undecided.empty()) {
+      bus_undecided = who;
+    }
+  };
 
   auto refuse = [&](const std::string& msg) {
     if (plan.ok) {
@@ -539,7 +594,7 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
       e.guard_sample     = ch.guard_before_fall ? Phase::Close_high : Phase::Close_low;
       e.live_guard       = is_latch && clock_role && !ch.live_guards.empty();
       const auto& guards = e.live_guard ? ch.live_guards : ch.guards;
-      std::string digest = root_key(ch.root, &node, clock_forest) + (ch.guard_before_fall ? "-" : "+");
+      std::string digest = root_key(ch.root, &node, clock_forest, ch.root_bit) + (ch.guard_before_fall ? "-" : "+");
       for (const auto& gp : guards) {
         digest += "&" + cone_digest(gp);
       }
@@ -557,7 +612,9 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     // clock-role and one data-role latch and PROVES standalone in 20ms).
     const bool clock_root_endpoint = !is_latch || clock_role;
     if (!implicit && clock_root_endpoint) {
-      roots.insert(root_key(ch.root, &node, clock_forest));
+      const auto rk = root_key(ch.root, &node, clock_forest, ch.root_bit);
+      roots.insert(rk);
+      note_bus_root(ch, rk, gu::debug_name(node));
       // v1 orders ONE ROOT CLOCK, and a root is a clock INPUT. Anything else --
       // a mux-selected clock, a divider built from logic, an unrecognized gate
       // whose cell materialization did not fire -- has no defined edge sequence
@@ -567,6 +624,57 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
       // encoder's existing detected-edge path either way).
       if (!gu::is_graph_input_pin(ch.root)) {
         derived_root = gu::debug_name(node);
+      }
+    }
+    // A Memory with PER-PORT clocks: `clock_pin` above is only sink 0 (port 0 /
+    // the whole array). Port `p` is clocked by sink `p*Memory_port_stride +
+    // clock_pin` -- the rule encode.cpp's memory_clocks applies -- and every one
+    // of those lanes is a commit class too. Reading sink 0 alone made a memory
+    // with port 0 on Clock_cell(clk_a,en) and port 1 on clk_b look single-root:
+    // the plan then owned the memory and committed EVERY port on clk_a's
+    // schedule with port 0's guard, so moving the clk_b write to clk_a, or
+    // gating it with `&& en`, was PROVEN (equiv/lec/mem_clock_cell_planroot*).
+    // Each lane's root joins `roots`; two roots make the plan multi-root, and
+    // the encoder's per-port detected-edge path (each sink with its own
+    // Clock_cell gate) commits the memory instead. A lane's GATE is not a plan
+    // guard: the endpoint carries ONE guard (sink 0's), and the encoder refuses a
+    // phase-scheduled port behind a different Clock_cell than port 0.
+    if (op == Ntype_op::Memory) {
+      constexpr auto stride = static_cast<int>(Ntype::Memory_port_stride);
+      const auto     ck_pid = static_cast<int>(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin"));
+      for (const auto& sink : node.inp_sorted_pins()) {
+        const auto raw = static_cast<int>(sink.get_port_id());
+        if (raw == ck_pid || raw % stride != ck_pid) {
+          continue;
+        }
+        for (const auto& lane_drv : sink.get_driver_pins()) {
+          if (lane_drv.is_invalid() || lane_drv.is_const()) {
+            continue;  // a tied-off (idle) port clock never ticks
+          }
+          Clock_chain lch = resolve_chain(lane_drv, clocks);
+          if (lch.refused) {
+            refuse("memory `" + gu::debug_name(node) + "` port " + std::to_string(raw / stride) + " clock " + lch.why);
+            continue;
+          }
+          if (lch.root.is_invalid()) {
+            implicit_root_key = root_key({}, &node, clock_forest);
+            implicit_root     = true;
+            continue;
+          }
+          // One phase per memory endpoint: a lane on the opposite edge of the
+          // same root has no microstep here (the encoder refuses mixed-edge
+          // memories too, so this is belt and braces for a plan that IS used).
+          if (lch.inverted != ch.inverted) {
+            refuse("memory `" + gu::debug_name(node) + "` port " + std::to_string(raw / stride)
+                   + " commits on the opposite clock edge to port 0; the phase schedule models one phase per memory");
+          }
+          const auto lrk = root_key(lch.root, &node, clock_forest, lch.root_bit);
+          roots.insert(lrk);
+          note_bus_root(lch, lrk, gu::debug_name(node));
+          if (!gu::is_graph_input_pin(lch.root)) {
+            derived_root = gu::debug_name(node);
+          }
+        }
       }
     }
     if (op == Ntype_op::Fflop && e.phase != Phase::Rise) {
@@ -598,6 +706,11 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     std::vector<std::string> sorted(roots.begin(), roots.end());
     std::sort(sorted.begin(), sorted.end());
     plan.root_clock = sorted.front() == "\x01implicit" ? "" : sorted.front();
+    if (sorted.size() == 1) {
+      if (auto it = bus_root_bit.find(sorted.front()); it != bus_root_bit.end()) {
+        plan.root_bus_bit = it->second;
+      }
+    }
     if (sorted.size() > 1 && plan.multi) {
       // v1 imposes a TOTAL ORDER for ONE root clock. Two unrelated roots have no
       // order to impose, and inventing one is a wrong verdict, so fail closed
@@ -615,6 +728,24 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     refuse("state element `" + derived_root
            + "` has a derived clock the phase schedule cannot model (not a clock input, and not a recognized "
              "Clock_cell / `<clock> & <enables>` gate)");
+  }
+  // The ROOTS above are bit-aware (Clock_chain::root_bit, the identity
+  // encode.cpp's Clk_root gives a clock): `clks` for bit 0, `clks[1]`, ... So two
+  // bits of one bus are two roots -- multi-root, which keeps the encoder's
+  // bit-aware detected-edge path for flops and memories, or a by-name refusal
+  // when microsteps are needed -- and ONE bit used alone is one root that
+  // schedules like any scalar clock (the schedule never reads the root's value
+  // to commit an endpoint; the one place it does, a Clock_cell read as data,
+  // checks `root_bus_bit`). Whether the two SIDES schedule on the same root is
+  // the caller's cross-side check (query.cpp), as it is for scalar clocks.
+  //
+  // What stays refused is a bus bit the walk could NOT decide: its "[?id]" key
+  // is unique per cone, so as the ONLY root it would let a plan that owns the
+  // flops commit them on an unknown bit, which no cross-side check can compare.
+  if (!bus_undecided.empty() && plan.n_roots <= 1 && plan.needs_plan()) {
+    refuse("state element `" + bus_undecided
+           + "` is clocked by a bit of a multi-bit input that the clock walk cannot identify; the phase schedule "
+             "cannot tell which bit of the bus it commits on");
   }
   // LEC_PHASE_LOG-style diagnostic, emitted LAST: `multi`, `n_roots` and the
   // refusals are all decided above, and printing before they are set reports a

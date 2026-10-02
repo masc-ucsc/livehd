@@ -1,0 +1,5 @@
+const leaf = import("leaf.leaf")
+pub comb mid(a:U8) -> (z:U8) {
+  const u = leaf(a=a)
+  z = u.z
+}

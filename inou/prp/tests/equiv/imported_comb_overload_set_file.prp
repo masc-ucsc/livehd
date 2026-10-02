@@ -1,0 +1,20 @@
+/*
+:name: imported_comb_overload_set_file
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// suggestions7 item 5 (overload-set face): the imported comb `mid` calls a
+// gathered overload set `add = [add2, add3]` bound at the imported FILE's
+// scope (imported_comb_overload_set binds it in mid's body). Inlining mid
+// frame-renames that binding (`inl1_add`); the overload lookup must read
+// the renamed binding, not the source name, or tolg reports "call to
+// undefined function 'inl1_add'". Same-file overload_* fixtures never hit
+// this: there the callee is never inlined from an import.
+const mid = import("imported_comb_overload_set_file/mid.mid")
+pub mod top(x:U8, y:U8, z:U8) -> (s2:U9@[0], s3:U10@[0]) {
+  const r = mid(x=x, y=y, z=z)
+  s2 = r.s2
+  s3 = r.s3
+}

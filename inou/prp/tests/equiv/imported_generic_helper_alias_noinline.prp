@@ -1,0 +1,23 @@
+/*
+:name: imported_generic_helper_alias_noinline
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:set: compile.upass.inline=false
+*/
+
+// Alias variant of imported_generic_helper_scope_noinline. The imported
+// GENERIC comb `c` is spliced (it binds `N`) even under
+// compile.upass.inline=false, and its body calls its file-private `helper`,
+// which stays a Sub instance. This caller has no `comb helper`, but it binds
+// the VALUE `helper` to an import of a different comb. The Sub re-emitted from
+// the spliced body kept the bare `helper` spelling (the root-scope registry
+// lookup also found lib's helper), so the re-walk resolved it through the
+// caller's alias and instantiated other.hh: z = (a | 0x80) + 3 instead of
+// (a & 0x0F) + 3, with no diagnostic.
+const c = import("imported_generic_helper_alias_noinline/lib.c")
+const helper = import("imported_generic_helper_alias_noinline/other.hh")
+pub mod top(a:U8) -> (z:U8@[0], y:U8@[0]) {
+  z = c<N=3>(a=a)
+  y = helper(v=a)
+}

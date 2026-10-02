@@ -1,0 +1,20 @@
+/*
+:name: imported_generic_helper_scope_noinline
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:set: compile.upass.inline=false
+*/
+
+// The imported GENERIC comb `c` is spliced (it binds `N`) even under
+// compile.upass.inline=false, and its body calls its file-private `helper`,
+// which stays a Sub instance. This caller ALSO defines a `comb helper`. The
+// Sub re-emitted from the spliced body spelled the callee as written
+// (`helper`), so tolg resolved it in THIS file and instantiated top.helper:
+// z = a ^ 0xFF instead of a & 0x0F, with no diagnostic.
+const c = import("imported_generic_helper_scope_noinline/lib.c")
+comb helper(v:U8) -> (o:U8) { o = v ^ 0xFF }
+pub mod top(a:U8) -> (z:U8@[0], y:U8@[0]) {
+  z = c<N=0>(a=a)
+  y = helper(v=a)
+}

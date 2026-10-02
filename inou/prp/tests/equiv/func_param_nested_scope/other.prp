@@ -1,0 +1,1 @@
+pub comb other(a:U8) -> (z:U8) { z = a ^ 0xFF }

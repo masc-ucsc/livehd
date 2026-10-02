@@ -1,0 +1,5 @@
+const core_t = import("core.core")
+pub comb gmid<N=8>(a:Unsigned(bits=N)) -> (z:Unsigned(bits=N)) {
+  const r = core_t<W=N>(a=a)
+  z = r.z
+}

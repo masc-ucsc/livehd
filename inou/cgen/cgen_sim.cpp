@@ -1839,6 +1839,8 @@ bool Cgen_sim::raw_width_adjust_ok(const hhds::Pin_class& drv, int wbits) {
   return true;
 }
 
+void Cgen_sim::compact_pure_temps(std::string& body) { compact_body_temps(body); }
+
 std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
   slop_u_expr_  = false;
   const auto op = type_op_of(node);
@@ -1930,6 +1932,9 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
     }
     if (wbits_of(n) > 30 || !pin2var.contains(n.get_class_index())) {
       return {};
+    }
+    if (const auto it = native_values_.find(n.get_class_index()); it != native_values_.end()) {
+      return absl::StrCat("static_cast<int>(", it->second.expression, ")");
     }
     return absl::StrCat("static_cast<int>((", operation_operand(n), ").to_i64_low())");
   };
@@ -2075,7 +2080,7 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
     for (int keep_index = 0; keep_index < 2; ++keep_index) {
       const auto keep  = and_halves(e[keep_index].get_driver_pin());
       const auto place = and_halves(e[1 - keep_index].get_driver_pin());
-      if (!keep || !place) {
+      if (!keep) {
         continue;
       }
       for (int ki = 0; ki < 2; ++ki) {
@@ -2084,9 +2089,9 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         if (m.is_invalid()) {
           continue;
         }
-        for (int pi = 0; pi < 2; ++pi) {
-          const auto& shifted = pi == 0 ? place->value : place->mask;
-          const auto& pm      = pi == 0 ? place->mask : place->value;
+        for (int pi = 0; pi < (place ? 2 : 1); ++pi) {
+          const auto shifted = place ? (pi == 0 ? place->value : place->mask) : e[1 - keep_index].get_driver_pin();
+          const auto pm      = place ? (pi == 0 ? place->mask : place->value) : m;
           if (!(pm == m)) {
             continue;
           }
@@ -2109,29 +2114,39 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
             continue;
           }
           const int width = placed->first;
+          // Bitwidth can remove the placement mask when the inserted value
+          // already fits its window. Recognize that equally bounded spelling.
+          if (!place
+              && !(v.is_const()
+                       ? (!const_of(v).has_unknowns() && !const_of(v).is_negative() && const_of(v).get_signed_bits() <= width + 1)
+                       : (is_unsign(v) && wbits_of(v) > 0 && wbits_of(v) <= width))) {
+            continue;
+          }
           const int bw    = wbits_of(base);
           const int vw    = v.is_const() ? static_cast<int>(const_of(v).get_signed_bits()) : wbits_of(v);
           if (bw <= 0 || vw <= 0 || vw > bw) {
             continue;
           }
-          const bool canonical_base = is_unsign(base) && slop_u_values_.contains(base.get_class_index());
+          const bool native_base    = is_unsign(base) && native_values_.contains(base.get_class_index());
+          const bool canonical_base = is_unsign(base) && (slop_u_values_.contains(base.get_class_index()) || native_base);
           if (canonical_base && slop_u_ && wbits == bw + 1 && wbits_of(output) == bw) {
             // Slop_u<bw>::set_mask_op_opt keeps the base canonical; the value
             // rides its Slop<bw+1> carrier.
             slop_u_expr_ = true;
-            return absl::StrCat("([&]{ const int __lo = ",
-                                lo,
-                                "; return ",
-                                operation_operand(base),
-                                ".set_mask_op_opt(__lo, std::min(__lo + ",
-                                width,
-                                ", ",
-                                bw,
-                                "), Slop<",
-                                bw + 1,
-                                ">{",
-                                operation_operand(v),
-                                "}); }())");
+            return absl::StrCat(
+                "([&]{ const int __lo = ",
+                lo,
+                "; return ",
+                native_base ? absl::StrCat("Slop_u<", bw, ">{", operation_operand(base), "}") : operation_operand(base),
+                ".set_mask_op_opt(__lo, std::min(__lo + ",
+                width,
+                ", ",
+                bw,
+                "), Slop<",
+                bw + 1,
+                ">{",
+                operation_operand(v),
+                "}); }())");
           }
           // A SIGNED base only at the SAME width: `set_mask_op_opt` returns a
           // Slop<bw> that keeps the base's sign bit, and the Or node this
@@ -5709,7 +5724,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     const auto& loop          = *s.loop;
     auto        sio           = s.node.get_subnode_io();
     const auto  storage_shape = loop_storage_shape(s.node.get_subnode_graph());
-    const bool  shared_lane   = !vcd_on && loop.count != 0 && storage_shape.stateless && !storage_shape.nested_loop;
+    const bool  pure_loop                        = pure_graph(s.node.get_subnode_graph().get());
+    pure_loop_structs_[s.node.get_class_index()] = s.loop_struct;
+    const bool shared_lane   = !vcd_on && loop.count != 0 && storage_shape.stateless && (!storage_shape.nested_loop || pure_loop);
     const auto  carry_out_for = [&](std::string_view out) -> const std::string* {
       for (const auto& [in_name, out_name] : s.carries) {
         if (out_name == out) {
@@ -5997,70 +6014,160 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                   " = __k0;\n"));
       }
     };
-    hout->append("  void __compact_publish() {\n");
-    emit_loop_gate("publish", "");
-    hout->append("    __compact_bind_invariants();\n");
-    emit_carry_decls();
-    emit_activation_decl();
-    hout->append("    LHD_SIM_PRESERVE_LOOP for (std::size_t ordinal = 0; ordinal < count; ++ordinal) {\n      auto& lane = lanes[",
-                 shared_lane ? "0" : "ordinal",
-                 "];\n");
-    emit_lane_inputs("lane", "ordinal");
-    if (loop.activation_input) {
-      hout->append("      const bool __lane_active = (__active).is_known_true();\n");
-    }
-    if (loop.activation_input && activation_skip_safe) {
-      hout->append("      if (__lane_active",
-                   reset_run_condition.empty() ? "" : absl::StrCat(" || ", reset_run_condition),
-                   ") lane.__compact_publish();  // conditional activation (reset keeps it open)\n");
+    // A pure wrapper is a rolled reduction over references and local carries.
+    // Keep its boundary cache, but never update a lane generation or call a
+    // simulator phase method for an ordinal. The body is visible to the host
+    // optimizer; LHD_SIM_PRESERVE_LOOP still prohibits loop unrolling.
+    if (pure_loop) {
+      hout->append("  static Out __pure_eval(", pure_parameters(*sio), ") {\n");
+      for (size_t ci = 0; ci < s.carries.size(); ++ci) {
+        const auto& name = s.carries[ci].first;
+        for (const auto& d : sio->get_input_pin_decls()) {
+          if (d.name == name) {
+            const auto param = absl::StrCat("__p", d.port_id);
+            const auto value = d.bits > 0 && d.bits <= 30
+                                   ? absl::StrCat("Slop<", d.bits + (d.unsign ? 1 : 0), ">::create_integer(", param, ")")
+                                   : param;
+            hout->append(absl::StrCat("    ",
+                                      value_type(std::max<uint32_t>(1, d.bits), d.unsign),
+                                      " __carry",
+                                      std::to_string(ci),
+                                      "{",
+                                      value,
+                                      "};\n"));
+          }
+        }
+      }
+      if (loop.activation_input) {
+        hout->append("    auto __active = __p", std::to_string(*loop.activation_input), ";\n");
+      }
+      hout->append("    Out __last{};\n    LHD_SIM_PRESERVE_LOOP for (std::size_t ordinal = 0; ordinal < count; ++ordinal) {\n");
+      if (loop.activation_input) {
+        hout->append("      const bool __lane_active = __active != 0;\n");
+      }
+      std::string args;
+      for (const auto& d : sio->get_input_pin_decls()) {
+        if (!args.empty()) {
+          args += ", ";
+        }
+        std::string arg = absl::StrCat("__p", d.port_id);
+        if (loop.index_input == d.port_id) {
+          arg = absl::StrCat(loop.first, " + static_cast<int64_t>(ordinal) * ", loop.step);
+          // Preserve the declared index port boundary before the native ABI.
+          arg = absl::StrCat("Slop<", std::max<uint32_t>(1, d.bits), ">::create_integer(", arg, ")");
+          arg = pure_argument(std::move(arg), d);
+        } else if (loop.activation_input == d.port_id) {
+          arg = "__active";
+        } else {
+          for (size_t ci = 0; ci < s.carries.size(); ++ci) {
+            if (s.carries[ci].first == d.name) {
+              arg = pure_argument(absl::StrCat("__carry", ci), d);
+            }
+          }
+        }
+        args += arg;
+      }
+      hout->append("      __last = Callee::__pure_eval(", args, ");\n");
+      emit_carry_advances("__last");
+      if (loop.activation_input && loop.next_active_output) {
+        for (const auto& d : sio->get_output_pin_decls()) {
+          if (d.port_id == *loop.next_active_output) {
+            hout->append("      __active = __lane_active ? __last.", cpp_port_path(d.name), ".to_i64_low() : 0;\n");
+          }
+        }
+      }
+      hout->append("    }\n");
+      for (size_t ci = 0; ci < s.carries.size(); ++ci) {
+        hout->append("    __last.", cpp_port_path(s.carries[ci].second), " = __carry", std::to_string(ci), ";\n");
+      }
+      hout->append("    return __last;\n  }\n");
+      std::string entry_args;
+      for (const auto& d : sio->get_input_pin_decls()) {
+        if (!entry_args.empty()) {
+          entry_args += ", ";
+        }
+        entry_args += pure_argument(absl::StrCat("__in.", cpp_port_path(d.name)), d);
+      }
+      hout->append("  void __compact_publish() {\n");
+      emit_loop_gate("publish", "");
+      hout->append("    const auto value = __pure_eval(", entry_args, ");\n");
+      for (const auto& d : sio->get_output_pin_decls()) {
+        hout->append("    __gen += slop_update(__out.", cpp_port_path(d.name), ", value.", cpp_port_path(d.name), ");\n");
+      }
+      emit_loop_done("publish");
+      hout->append("  }\n  const Out& __compact_advance() {\n");
+      emit_loop_gate("advance", " __last_out");
+      hout->append("    __last_out = __pure_eval(", entry_args, ");\n");
+      emit_loop_done("advance");
+      hout->append("    return __last_out;\n  }\n");
     } else {
-      hout->append("      lane.__compact_publish();\n");
-    }
-    emit_carry_advances("lane.__out");
-    emit_next_active("lane.__out");
-    hout->append("    }\n");
-    emit_outputs("__out", "lanes[storage_count - 1].__out");
-    hout->append("    __sync_kids();\n");
-    emit_loop_done("publish");
-    hout->append("  }\n");
-    hout->append("  const Out& __compact_advance() {\n");
-    emit_loop_gate("advance", " __last_out");
-    hout->append("    __compact_bind_invariants();\n");
-    emit_carry_decls();
-    emit_activation_decl();
-    const bool needs_last = loop.count != 0 && std::ranges::any_of(sio->get_output_pin_decls(), [&](const auto& d) {
-                              return carry_out_for(d.name) == nullptr;
-                            });
-    if (needs_last) {
-      hout->append("    const Out* __last = nullptr;\n");
-    }
-    hout->append("    LHD_SIM_PRESERVE_LOOP for (std::size_t ordinal = 0; ordinal < count; ++ordinal) {\n      auto& lane = lanes[",
-                 shared_lane ? "0" : "ordinal",
-                 "];\n");
-    emit_lane_inputs("lane", "ordinal");
-    if (loop.activation_input) {
-      hout->append("      const bool __lane_active = (__active).is_known_true();\n");
-      hout->append("      const Out* __period = &lane.__out;\n");
-      if (activation_skip_safe) {
+    hout->append("  void __compact_publish() {\n");
+      emit_loop_gate("publish", "");
+      hout->append("    __compact_bind_invariants();\n");
+      emit_carry_decls();
+      emit_activation_decl();
+      hout->append(
+          "    LHD_SIM_PRESERVE_LOOP for (std::size_t ordinal = 0; ordinal < count; ++ordinal) {\n      auto& lane = lanes[",
+          shared_lane ? "0" : "ordinal",
+          "];\n");
+      emit_lane_inputs("lane", "ordinal");
+      if (loop.activation_input) {
+        hout->append("      const bool __lane_active = (__active).is_known_true();\n");
+      }
+      if (loop.activation_input && activation_skip_safe) {
         hout->append("      if (__lane_active",
                      reset_run_condition.empty() ? "" : absl::StrCat(" || ", reset_run_condition),
-                     ") __period = &lane.__compact_advance();\n");
+                     ") lane.__compact_publish();  // conditional activation (reset keeps it open)\n");
       } else {
-        hout->append("      __period = &lane.__compact_advance();\n");
+        hout->append("      lane.__compact_publish();\n");
       }
-    } else {
-      hout->append("      const auto& __period = lane.__compact_advance();\n");
-    }
-    emit_carry_advances(loop.activation_input ? "(*__period)" : "__period");
-    emit_next_active(loop.activation_input ? "(*__period)" : "__period");
-    if (needs_last) {
-      hout->append(loop.activation_input ? "      __last = __period;\n" : "      __last = &__period;\n");
-    }
-    hout->append("    }\n");
-    emit_outputs("__last_out", "(*__last)");
-    hout->append("    __sync_kids();\n");
-    emit_loop_done("advance");
-    hout->append("    return __last_out;\n  }\n");
+      emit_carry_advances("lane.__out");
+      emit_next_active("lane.__out");
+      hout->append("    }\n");
+      emit_outputs("__out", "lanes[storage_count - 1].__out");
+      hout->append("    __sync_kids();\n");
+      emit_loop_done("publish");
+      hout->append("  }\n");
+      hout->append("  const Out& __compact_advance() {\n");
+      emit_loop_gate("advance", " __last_out");
+      hout->append("    __compact_bind_invariants();\n");
+      emit_carry_decls();
+      emit_activation_decl();
+      const bool needs_last = loop.count != 0 && std::ranges::any_of(sio->get_output_pin_decls(), [&](const auto& d) {
+                                return carry_out_for(d.name) == nullptr;
+                              });
+      if (needs_last) {
+        hout->append("    const Out* __last = nullptr;\n");
+      }
+      hout->append(
+          "    LHD_SIM_PRESERVE_LOOP for (std::size_t ordinal = 0; ordinal < count; ++ordinal) {\n      auto& lane = lanes[",
+          shared_lane ? "0" : "ordinal",
+          "];\n");
+      emit_lane_inputs("lane", "ordinal");
+      if (loop.activation_input) {
+        hout->append("      const bool __lane_active = (__active).is_known_true();\n");
+        hout->append("      const Out* __period = &lane.__out;\n");
+        if (activation_skip_safe) {
+          hout->append("      if (__lane_active",
+                       reset_run_condition.empty() ? "" : absl::StrCat(" || ", reset_run_condition),
+                       ") __period = &lane.__compact_advance();\n");
+        } else {
+          hout->append("      __period = &lane.__compact_advance();\n");
+        }
+      } else {
+        hout->append("      const auto& __period = lane.__compact_advance();\n");
+      }
+      emit_carry_advances(loop.activation_input ? "(*__period)" : "__period");
+      emit_next_active(loop.activation_input ? "(*__period)" : "__period");
+      if (needs_last) {
+        hout->append(loop.activation_input ? "      __last = __period;\n" : "      __last = &__period;\n");
+      }
+      hout->append("    }\n");
+      emit_outputs("__last_out", "(*__last)");
+      hout->append("    __sync_kids();\n");
+      emit_loop_done("advance");
+      hout->append("    return __last_out;\n  }\n");
+    }  // scheduled stateful/observed wrapper
     hout->append(
         "  void reset_cycle(bool zero_uninitialized = false) { LHD_SIM_PRESERVE_LOOP for (auto& lane : lanes) "
         "lane.reset_cycle(zero_uninitialized); __broadcast_valid = false; ++__gen; __compact_publish(); }\n");
@@ -7327,6 +7434,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append("  };\n  struct Out {\n");
   emit_io_block(false);
   hout->append("  };\n");
+  emit_pure_eval(*hout, g);
 
   // Persistent input latch. The testbench writes inputs through a ref
   // (`acc.x = v` -> __in.x) and advances with `step()`; internal registers are
@@ -9188,7 +9296,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           // pre-rise observation directly. The recursive commit happens only
           // after the whole parent cone has parked its pending values.
           fout->append(absl::StrCat("    ", s.inst, ".__color_pre_rise();\n"));
-          fout->append(absl::StrCat("    const auto& ", s.inst, "__o = ", s.inst, ".__last_out;\n"));
+          if (runtime_skip) {
+            // Retarget the pointer declared OUTSIDE the guard: the output
+            // bindings below read `<inst>__o->`, so a block-scoped
+            // `const auto& <inst>__o` here would only shadow it, and the parent
+            // would publish the post-fall `__out` instead of this pre-rise
+            // observation.
+            fout->append(absl::StrCat("    ", s.inst, "__o = &", s.inst, ".__last_out;\n"));
+          } else {
+            fout->append(absl::StrCat("    const auto& ", s.inst, "__o = ", s.inst, ".__last_out;\n"));
+          }
         } else if (runtime_skip) {
           fout->append(absl::StrCat("    ", s.inst, "__o = &", s.inst, ".__compact_advance();\n"));
         } else {
@@ -15659,7 +15776,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               // a conditional child whose guard is not representable reads
               // this slot as its commit test, and the reference level is low
               // in the pre-edge slots, so ANDing it in would never commit.
-              if (direct_data_read[version.base_site]) {
+              //
+              // The level only exists in the phase where the reference is at its
+              // active level. In the other phases it is constant 0, every level
+              // reader has it folded to a literal (see clock_cell_level_low in
+              // sim_color_plan.cpp), and the slot carries the bare activation:
+              // a commit guard that falls back to this slot would otherwise read
+              // 0 and never commit.
+              const bool level_phase = (version.version == livehd::sim::Color_plan::State_version::post_rise) != cone->clock_inverted;
+              if (direct_data_read[version.base_site] && level_phase) {
                 const auto level = operand(cone->clock, 1);
                 enabled = combine_activation(enabled,
                                              absl::StrCat(level, cone->clock_inverted ? ".is_known_false()" : ".is_known_true()"));

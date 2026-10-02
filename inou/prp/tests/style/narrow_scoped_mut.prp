@@ -1,0 +1,15 @@
+/*
+:name: style_narrow_scoped_mut
+:type: style
+:style: narrow-scoped-mut
+:message: assigned once.*narrower scope
+:help: const scratch:U2
+*/
+comb f(data:U2, enable:Bool) -> (out:U2) {
+  mut scratch:U2 = 0  // locate_style_narrow-scoped-mut
+  out = 0
+  if enable {
+    scratch = if data == 0 { U2(1) } else { data }
+    out = scratch
+  }
+}

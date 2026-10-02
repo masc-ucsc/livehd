@@ -1,0 +1,15 @@
+/*
+:name: style_compact_bit_packing
+:type: style
+:style: compact-bit-packing
+:message: contiguous writes covering all 4 bits
+:help: const packed:U4 = \(U1\(a\), U1\(b\), U1\(c\), U1\(d\)\)#\[\.\.\]
+*/
+comb f(a:Bool, b:Bool, c:Bool, d:Bool, initial:U4) -> (out:U4) {
+  mut packed = initial  // locate_style_compact-bit-packing
+  packed#[0..<1] = U1(a)
+  packed#[1..<2] = U1(b)
+  packed#[2..<3] = U1(c)
+  packed#[3..<4] = U1(d)
+  out = packed
+}

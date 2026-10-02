@@ -1,0 +1,3 @@
+pub comb core<W=1>(a:Unsigned(bits=W)) -> (z:Unsigned(bits=W)) {
+  z = a ^ 0x5A
+}

@@ -1,8 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -214,6 +216,22 @@ private:
   bool        proven_canonical_unsigned_result(const hhds::Node_class& node, const hhds::Pin_class& output) const;
   bool        raw_width_adjust_ok(const hhds::Pin_class& drv, int wbits);
   std::string node_expr(const hhds::Node_class& node, int wbits);
+
+  // Pure compact bodies have a functional ABI, without persistent simulator
+  // input latches, generations or phase caches inside the ordinal walk.
+  struct Native_value {
+    std::string expression;
+    int64_t     lo, hi;
+  };
+  absl::flat_hash_map<const hhds::Graph*, bool>       pure_graphs_;
+  absl::flat_hash_map<pin_key_t, Native_value>        native_values_;
+  absl::flat_hash_map<hhds::Class_index, std::string> pure_loop_structs_;
+  bool                                                pure_graph(hhds::Graph* graph);
+  std::string                                         pure_parameters(const hhds::GraphIO& io);
+  static std::string          pure_argument(std::string expression, const hhds::GraphIO::DeclaredIoPin& port);
+  std::optional<Native_value> native_expression(const hhds::Node_class& node);
+  static void                 compact_pure_temps(std::string& body);
+  void                        emit_pure_eval(File_output& out, hhds::Graph* graph);
 
   std::string vcd_file;            // --set compile.sim.vcd=FILE ("" = no VCD)
   std::string top;                 // --top: only this module bakes the VCD path (avoids file collisions)

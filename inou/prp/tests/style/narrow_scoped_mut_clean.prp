@@ -1,0 +1,13 @@
+/*
+:name: style_narrow_scoped_mut_clean
+:type: style
+:style: none
+*/
+comb f(data:U2, enable:Bool) -> (out:U2) {
+  mut scratch:U2 = 0
+  if enable {
+    scratch = data
+  }
+  // The initializer is still needed on the other path.
+  out = scratch
+}

@@ -390,3 +390,83 @@ TEST(UpassTolgIo, OwnedOrUnaffectedInstancesAreNotRefused) {
   EXPECT_NO_THROW(register_all(registry, path));
   EXPECT_EQ(decls_of(*lib.find_io("c.child")), fresh_decls("owned", "c.child", {in("b", 1), in("a", 2), out("q", 3)}));
 }
+
+namespace {
+
+// `t.top` (a mod: `a` in, `y` out) whose body is one call `r = <callee>(a=a)`,
+// with an explicit generic binding `store(__generic_arg, 8)` ahead of the
+// actual when `generic_arg` is set (what prp2lnast emits for `f<W=8>(a=a)`).
+std::shared_ptr<Lnast> caller_of(std::string_view callee, bool generic_arg) {
+  auto ln = module_unit("t.top", {in("a", 1), out("y", 2)});
+  ln->set_lambda_kind("mod");
+  auto stmts = ln->get_first_child(ln->get_root());
+  auto call  = ln->add_child(stmts, Lnast_ntype::create_func_call());
+  ln->add_child(call, Lnast_node::create_ref("r"));
+  ln->add_child(call, Lnast_node::create_ref(callee));
+  if (generic_arg) {
+    auto g = ln->add_child(call, Lnast_ntype::create_store());
+    ln->add_child(g, Lnast_node::create_ref("__generic_arg"));
+    ln->add_child(g, Lnast_node::create_const("8"));
+  }
+  auto arg = ln->add_child(call, Lnast_ntype::create_store());
+  ln->add_child(arg, Lnast_node::create_ref("a"));
+  ln->add_child(arg, Lnast_node::create_ref("a"));
+  return ln;
+}
+
+// A comb `t.f` (`a` in, `y` out); `is_template` = its generic, unspecialized
+// definition, which register_io/run skip.
+std::shared_ptr<Lnast> comb_callee(bool is_template, std::string_view name = "t.f") {
+  auto ln = module_unit(name, {in("a", 1), out("y", 2)});
+  ln->set_lambda_kind("comb");
+  ln->set_template(is_template);
+  return ln;
+}
+
+// The error run() raises lowering `registry.front()`, or "" when it lowers.
+std::string tolg_error(std::string_view tag, const uPass_tolg::Registry& registry) {
+  const auto path = fresh_lib_dir(tag);
+  register_all(registry, path);
+  livehd::diag::sink().clear();
+  std::string what;
+  try {
+    (void)uPass_tolg::run(registry.front(), path, registry);
+  } catch (const std::runtime_error& e) {
+    what = e.what();
+  }
+  livehd::diag::sink().clear();
+  return what;
+}
+
+}  // namespace
+
+TEST(UpassTolgCall, CallReachingOnlyAGenericTemplateIsNamedUnspecialized) {
+  // The name matches a definition, but only its generic template: saying
+  // "undefined function" sent users hunting for an import that is present.
+  for (const auto* name : {"t.f", "f"}) {  // exact, and unique `.f` suffix
+    SCOPED_TRACE(name);
+    const auto what = tolg_error("tmpl", {caller_of(name, false), comb_callee(true)});
+    EXPECT_NE(what.find(std::format("call to generic comb '{}' reached lowering unspecialized", name)), std::string::npos) << what;
+    EXPECT_EQ(what.find("undefined function"), std::string::npos) << what;
+  }
+  // Two `.h` templates make the suffix scan ambiguous; the caller's own
+  // nested helper `t.top.h` still wins, as it does for a specialization.
+  {
+    const auto scoped = tolg_error("tmpl_scoped", {caller_of("h", false), comb_callee(true, "t.top.h"), comb_callee(true, "u.h")});
+    EXPECT_NE(scoped.find("call to generic comb 'h' reached lowering unspecialized"), std::string::npos) << scoped;
+  }
+  // No definition at all keeps the plain message.
+  const auto what = tolg_error("tmpl_none", {caller_of("g", false), comb_callee(true)});
+  EXPECT_NE(what.find("call to undefined function 'g'"), std::string::npos) << what;
+}
+
+TEST(UpassTolgCall, UnconsumedGenericBindingIsRefused) {
+  // A call still carrying `f<W=8>` reached a non-template (identity/default)
+  // definition: the binding would be silently dropped.
+  const auto what = tolg_error("generic_arg", {caller_of("t.f", true), comb_callee(false)});
+  EXPECT_NE(what.find("the explicit generic binding on the call to 't.f' was not consumed"), std::string::npos) << what;
+
+  // Without the binding the same call lowers past the argument loop.
+  const auto ok = tolg_error("generic_arg_none", {caller_of("t.f", false), comb_callee(false)});
+  EXPECT_EQ(ok.find("generic binding"), std::string::npos) << ok;
+}

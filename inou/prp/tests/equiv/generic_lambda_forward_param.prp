@@ -1,0 +1,26 @@
+/*
+:name: generic_lambda_forward_param
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A function-valued PARAM forwarded into a LAMBDA generic (`apply_g<F=f>`
+// inside `outer(f)`) binds the function `f` is bound to at outer's call site.
+// The generic bind classifier only tried registry names and comptime values,
+// never the frame's function-param bindings, so `f` fell through to a TYPE bind
+// and the body's `F(v=a)` became a call to an undefined `inl2_inl1_f`.
+// `z`: named bind, `y`: positional bind, `x`: forwarded two frames deep, `w`:
+// a registry `inc` bound directly next to the forwarded ones (no cross-talk).
+comb inc(v:U8) -> (o:U8) { o = v & 0x0F }
+comb other(v:U8) -> (o:U8) { o = v ^ 0xFF }
+comb apply_g<F>(a:U8) -> (r:U8) { r = F(v=a) }
+comb outer(f, a:U8) -> (z:U8) { z = apply_g<F=f>(a=a) }
+comb outer_pos(f, a:U8) -> (z:U8) { z = apply_g<f>(a=a) }
+comb outer2(g, a:U8) -> (z:U8) { z = outer(f=g, a=a) }
+pub mod top(a:U8) -> (z:U8@[0], y:U8@[0], x:U8@[0], w:U8@[0]) {
+  z = outer(f=other, a=a)
+  y = outer_pos(f=other, a=a)
+  x = outer2(g=other, a=a)
+  w = apply_g<F=inc>(a=a)
+}

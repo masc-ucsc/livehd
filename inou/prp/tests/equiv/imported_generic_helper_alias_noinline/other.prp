@@ -1,0 +1,1 @@
+pub comb hh(v:U8) -> (o:U8) { o = v | 0x80 }

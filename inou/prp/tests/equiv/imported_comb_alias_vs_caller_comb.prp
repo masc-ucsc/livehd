@@ -1,0 +1,17 @@
+/*
+:name: imported_comb_alias_vs_caller_comb
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// The imported comb `mid` calls `leaf` through its file-scope alias `lf`;
+// this caller defines its own `comb lf`. Inside mid's inline frame the alias
+// binding must shadow the by-name registry hit (a bare `lf` lookup lands on
+// THIS file's comb, so z = a ^ 0xFF instead of a & 0x0F).
+const mid = import("imported_comb_alias_vs_caller_comb/mid.mid")
+comb lf(a:U8) -> (z:U8) { z = a ^ 0xFF }
+pub mod top(a:U8) -> (z:U8@[0], w:U8@[0]) {
+  z = mid(a=a)
+  w = lf(a=a)
+}

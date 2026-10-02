@@ -1,0 +1,2 @@
+comb helper(v:U8) -> (o:U8) { o = v & 0x0F }
+pub comb c<N>(a:U8) -> (r:U8) { wrap r = helper(v=a) + N }

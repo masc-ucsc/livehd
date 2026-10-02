@@ -104,9 +104,30 @@ everything the encoder needs.
   must never hard-fail the build); BMC bounded-**Proven** (no CEX ≤ bound) ⇒
   accepted as PASS by the bounded-proof policy (`try_bounded_proven`), disclosed
   as bounded — cycles beyond the bound stay unproven, and the bound is part of the
-  verdict-cache key; neither trustworthy ⇒ **inconclusive**. The per-query `formal.timeout`
-  bounds each worker, so a hard miter self-limits and the portfolio degrades to
-  inconclusive rather than hanging.
+  verdict-cache key; neither trustworthy ⇒ **inconclusive**. The per-query
+  `formal.timeout` (cvc5 `tlimit-per`) does **not** by itself bound a worker:
+  it limits each `checkSat`, but not cvc5 preprocessing (`push`/NonClausalSimp)
+  or one eager CaDiCaL solve, so a hard miter once ran 15+ minutes under
+  `formal.timeout=60`. The **parent** therefore enforces a wall deadline on
+  every racer (`race_deadline_ms`): `formal.timeout + formal.min_timeout +
+  clamp(formal.timeout/4, 10 s, 60 s)`. A racer that outlives it is SIGKILLed and
+  reported as a witness-free UNKNOWN (never PROVEN or REFUTED) with the note
+  `racer exceeded formal.timeout: killed at the <N>s wall deadline`, so the
+  portfolio degrades to inconclusive rather than hanging. Such a wall-killed
+  Unknown (`Query_result::wall_killed`) gets **no** flat (shape-collapse)
+  retry, and **no** int-blast retry when the *ind* racer was the one killed
+  (`ind_wall_killed`): a query that ran out of time would only run out again,
+  adding another full deadline. A bmc-only wall kill still lets the int-blast
+  retry re-solve ind's genuine solver give-up (the retry's race trusts an ind
+  PROVEN at once, and its own deadline bounds a stuck bmc). The same deadline bounds the cube workers and
+  the verify-strategy race (the latter never tighter than the isolated worker's
+  `timeout × hard_timeout_mult` backstop). With a verdict cache active (any
+  `formal verify --workdir`), the two verify strategies run back to back
+  instead of raced, but each still runs in its own forked worker under that
+  same per-strategy deadline; the worker ships its cache hits and stores back to
+  the parent, so `--workdir` changes neither the wall bound nor the
+  verdicts. `formal.hard_timeout_mult=0` (or
+  `formal.timeout<=0`) disables the wall deadline.
   **The step CEX behind a weak verdict is reported** (`Query_result::step_cex`):
   when the result is a bounded PASS or inconclusive and the inductive leg found a
   step counterexample, `lhd lec` prints it under the verdict line ("induction
@@ -521,11 +542,65 @@ Without it, a flop moved from `dst_clk` to `src_clk` left each side with one
 clock, both encoded as "every step is an edge", and the pair was PROVEN
 (suggestions6 1.1; `equiv/clock_identity_1`, `equiv/clock_identity_wrong`).
 The restriction keeps a renamed single clock (`clk` in Verilog, Pyrope's minted
-`clock`) one clock. A port's TYPE (`Clock`/`Reset` vs `U1`/untyped Verilog) plays
-no part: only the net that clocks or resets a flop does (`equiv/clock_identity`,
-`clock_identity_2`). The yosys oracle (`lgcheck`, async2sync) does see that window, so
-`equiv/async_mem_reset_demoted` stays a `fixme` tracker that fails only
-through its lgyosys leg while the native LEC proves it.
+`clock`) one clock. A port's TYPE (`Clock`/`Reset` vs `U1`/untyped Verilog)
+plays no part: only the net that clocks or resets a flop does
+(`equiv/clock_identity`, `clock_identity_2`). The yosys oracle (`lgcheck`,
+async2sync) does see that window, so `equiv/async_mem_reset_demoted` stays a
+`fixme` tracker that fails only through its lgyosys leg while the native LEC
+proves it.
+
+**Memories and gated domains are clocks too (2026-10-02).** The census counts a
+Memory's clock lanes (`memory_clocks`: the global `clock_pin`, or one per port
+when the cell has several) and the `clk_ref` of a recognized `Clock_cell`, not
+only bare flop clocks. In a multi-clock design every memory commit point --
+each write port, the whole-array `update`, a sync `reset` (an async one
+overrides), and each sync-read register -- is gated on a detected rising edge
+of that port's own clock, and a `Clock_cell` or `clk & en` flop commits on its
+reference's edge AND its enable. A Memory's `Clock_cell` enable is a property
+of each clock SINK, not of the memory: with per-port clocks a port commits on
+its own sink's enable only (a plain-clock port used to inherit port 0's gate,
+so `if (we0 && en)` on it was PROVEN equal to `if (we0)`;
+`equiv/lec/mem_clock_cell_twoport*`, `mem_clock_cell_oneroot*`). A whole-array
+`update` whose ports carry different gates, and a phase-scheduled memory whose
+ports sit behind a different `Clock_cell` than port 0, are refused. All of them
+share ONE previous-level state per clock net (`\x01clkprev:<net>`), so a
+reference Memory and the flops a netlist blasted out of it step together. A
+memory clock lane that resolves to no input (a derived clock, a mapped buffer
+cell) is refused (rc 7) in a multi-clock design rather than encoded as
+committing every step. Before this, a memory committed every step:
+`br_ram_flops` (memory on `wr_clk`, read register on `rd_clk`) was falsely
+REFUTED against its own netlist, and moving a memory's write clock was falsely
+PROVEN (`equiv/lec/mem_multiclock*`, `mem_wrrd_clk*`,
+`mem_clock_cell_multiclock*`, `clock_cell_multiclock*`, `icg_multiclock*`, and
+the netlist fixtures `tests/abc/mem_multiclock.sv`, `mem_wrrd_clk.sv`). Two
+write ports on different clocks each commit on their own lane
+(`equiv/lec/mem_two_wr_clk*`), and a memory's sync clear / whole-array update
+is gated by its own clock edge (`equiv/lec/mem_rst_multiclock*`, netlist
+fixtures `tests/abc/mem_rst_multiclock.sv`, `mem_arst_multiclock.sv`,
+`mem_clkb_only.sv`).
+
+**A clock is one BIT of an input (2026-10-02).** `resolve_clk_input` tracks
+which bit of the input the edge is detected on (`Clk_root`): a constant-range
+`Get_mask` moves it, a mask `And`/pad `Or` keeps it only when the constant
+leaves that bit alone, and a non-constant select (`clks[sel]`) does not resolve.
+Bit 0 keeps the bare input name; bit k>0 is `name[k]` (the census key, the
+`\x01clkprev:` key and the memory lane name), and every endpoint reads its level
+from that bit (`clock_level`), never `input != 0`. The peel used to take the
+`a` operand of every Get_mask, so `clks[0]` and `clks[1]` were one clock and
+moving a memory write or a flop between them was PROVEN
+(`equiv/lec/clock_bus_bits*`, `clock_bus_bit_flop*`). prove_equal's
+cross-design clock identity strips `[k]` to find the input. Edge normalization
+(pass.single_edge, code `clock-bus-bit`) keys a commit class by its INPUT
+(`latch_contract::control_root` follows a bit select to the whole bus, and tolg
+relies on that), so it tracks the bit separately (`clock_bit_on`) and declines
+only when TWO different bits of one input (or a bit it cannot decide) clock
+state -- UNKNOWN, rc 7 (`clock_bus_bits_negedge*`; it was PROVEN as
+"structurally identical"). One bit used alone is one clock: it normalizes,
+every clock_pin is rebound to a select of that bit (a bare bus reads bit 0),
+and the reported reference clock is `bus[k]` so a side on clks[0] and one on
+clks[1] refuse as different time bases (`clock_bus_bit_single_edge*`,
+`clock_bus_bit_lone*`). A DATA-role latch enable is not a clock and is not
+checked (`clock_bus_bit_data_latch*`).
 
 **Memory (`Ntype_op::Memory`)** → SMT theory of arrays. **16-pin port stride**
 (`Ntype::Memory_port_stride`): port *k*'s pins are at `pid + 16*k`

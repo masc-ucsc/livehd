@@ -1,0 +1,20 @@
+/*
+:name: destructure_callee_slot_mismatch
+:type: error
+:error: unknown field `cu` on the result of `core\(…\)`
+:help: fields: upd, vld.*`\(cu=<field>
+*/
+// lhdtrack suggestions7 item 5 (br_flow_mux_core): a by-name destructure whose
+// slots match no callee output is an error (qa.md §8), but the diagnostic named
+// the compiler temp holding the call result (`unknown field `cu` on tuple
+// `%3563282449_i0``) and suggested `%… has 'cu'`. It must name the call, list
+// the result's fields and point at the `slot=field` rename.
+comb core(a:U8) -> (upd:U8, vld:Bool) {
+  upd = a ^ 1
+  vld = a == 3
+}
+pub comb top(a:U8) -> (o:U8, v:Bool) {
+  const (cu, cv) = core(a=a) // locate_error_here
+  o = cu
+  v = cv
+}

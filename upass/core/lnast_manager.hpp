@@ -183,6 +183,23 @@ public:
   // from an unbound-param template walk (where nils are placeholders).
   bool in_inline_frame() const { return !active_tag_.empty(); }
 
+  // The callee body of the innermost CONCRETE inline frame (the tree whose
+  // names carry the rename tag), looking through scratch emits / iteration
+  // re-walks stacked on top of it; nullptr outside any inline frame. Its top
+  // module name is the lexical scope a bare call inside that body resolves in
+  // — the callee's own file, never the caller's.
+  const Lnast* inline_frame_lnast() const {
+    if (!active_tag_.empty()) {
+      return lnast.get();
+    }
+    for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
+      if (!it->tag.empty()) {
+        return it->tree.get();
+      }
+    }
+    return nullptr;
+  }
+
   // The source spelling of a variable `name` (diagnostics): an inlined
   // callee's `<tag>o` is the user's `o`, both inside its frame and from the
   // caller's side of the splice (the prologue binding `inl3_b`, an output read

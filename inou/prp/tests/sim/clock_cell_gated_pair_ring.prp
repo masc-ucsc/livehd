@@ -1,0 +1,61 @@
+/*
+:name: clock_cell_gated_pair_ring
+:type: simulation
+*/
+
+// Reduced from Minion's `intpipe_mul_div_ctl` phase pairs behind a `prim_clk_gate`.
+// The pair runs on a GATED clock (a Clock_cell), and the gate's enable reads the
+// pair's own high latch: gated clock -> latch enables -> latch Q -> clock-gate
+// enable. An ICG samples its enable at the reference edge, and a gated clock is
+// low whenever its reference is, so this is a legal feedback loop, not a
+// same-phase combinational ring through the Clock_cell. The scheduler used to
+// refuse it (`color-plan-not-lowerable`) by chaining the enable straight to the
+// level it gates.
+pub mod phase_pair(clk_i:Clock, reset_i:U1, lo_en_i:U1, hi_en_i:U1, d_i:U1) -> (q_lo_o:U1@[], q_hi_o:U1@[]) {
+  reg lo_en_2p:U1:[initial=0, reset_pin=reset_i, async=true, enable=clk_i, latch=true]
+  reg hi_en_1p:U1:[initial=0, reset_pin=reset_i, async=true, enable=clk_i, enable_high=false, latch=true]
+  reg q_lo_reg:U1:[initial=0, reset_pin=reset_i, async=true, enable=clk_i, enable_high=false, latch=true]
+  reg q_hi_reg:U1:[initial=0, reset_pin=reset_i, async=true, enable=clk_i, latch=true]
+  lo_en_2p = lo_en_i
+  hi_en_1p = hi_en_i
+  if lo_en_2p != 0 {
+    q_lo_reg = d_i
+  }
+  if hi_en_1p != 0 {
+    q_hi_reg = q_lo_reg
+  }
+  q_lo_o = q_lo_reg
+  q_hi_o = q_hi_reg
+}
+
+pub mod gated_pair_ring(clk_i:Clock, reset_i:U1, run:U1) -> (hi:U1@[], sampled:U1@[]) {
+  wire hi_w:U1 = nil
+  const gclk = Clock(clock_pin=clk_i, enable=((run != 0) or (hi_w != 0)))
+  const pair = phase_pair(clk_i=gclk, reset_i=reset_i, lo_en_i=1, hi_en_i=1, d_i=U1(hi_w == 0) & run)
+  hi_w = pair.q_hi_o
+  // A reference-clock flop wires the testbench clock and observes the pair.
+  reg observer:U1:[clock_pin=clk_i] = 0
+  observer = hi_w
+  hi = hi_w
+  sampled = observer
+}
+
+test gated_pair_ring.toggles_while_enabled {
+  mut acc = gated_pair_ring
+  mut previous:U1 = 0
+  tick 12 {
+    const resetting = clock < 3
+    acc.reset_i = U1(resetting)
+    acc.run = 1
+    step
+    if resetting {
+      assert(acc.hi == 0, "reset holds the pair")
+    } else {
+      // Same sequence as the ungated pair (checked against Icarus on the
+      // original SystemVerilog primitive): hi toggles every enabled cycle.
+      assert(acc.hi == ((clock - 3) & 1), "the gated ring toggles once per cycle")
+    }
+    assert(acc.sampled == previous, "the reference-clock flop sees the previous hi")
+    previous = acc.hi
+  }
+}

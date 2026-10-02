@@ -28,7 +28,8 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
                               text=True, capture_output=True, timeout=30)
         assert proc.returncode in (0, 2), proc.stderr
         codes_all = {"likely-unrolled-loop", "repeated-code", "whole-tuple-copy", "flattened-bundle-arguments",
-                     "single-destination-conditional", "hardcoded-reset", "reset-port-type"}
+                     "single-destination-conditional", "hardcoded-reset", "reset-port-type",
+                     "narrow-scoped-mut", "compact-bit-packing"}
         codes = {"likely-unrolled-loop", "repeated-code"}
         if rule == "all":
             codes |= {"whole-tuple-copy", "flattened-bundle-arguments", "single-destination-conditional"}
@@ -475,6 +476,129 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     assert proc.returncode == 2, proc.stderr
     for message in ("matching field copies", "flattened named arguments", "exhaustive branches"):
         assert message in proc.stderr, proc.stderr
+
+    # Single-assignment temps can become const only inside their actual home
+    # scope, retaining explicit types and rejecting every escape/early read.
+    narrow_rule = "narrow-scoped-mut"
+    narrow = """comb f(a:U2, en:Bool) -> (out:U2) {
+  mut tmp:U2 = 0
+  if en {
+    tmp = if a == 0 { U2(1) } else { a }
+    out = tmp
+  }
+}
+"""
+    findings, _, _ = run(narrow, rule=narrow_rule)
+    assert len(findings) == 1, findings
+    assert findings[0]["span"]["start_line"] == 2, findings
+    assert findings[0]["attrs"]["variable"] == "tmp", findings
+    assert "const tmp:U2" in findings[0]["hint"], findings
+    assert findings[0]["notes"][0]["span"]["start_line"] == 4, findings
+    narrow_negatives = [
+        narrow.replace("    out = tmp", "    tmp = a\n    out = tmp"),  # two writes
+        narrow.replace("    out = tmp", "    tmp#[0] = a#[0]\n    out = tmp"),
+        narrow.replace("    out = tmp", "    tmp += 1\n    out = tmp"),
+        narrow.replace("    out = tmp", "    (tmp, other) = pair\n    out = tmp"),
+        narrow.replace("    tmp = if", "    out = tmp\n    tmp = if"),  # initializer read
+        narrow.replace("  }\n}", "  }\n  out = tmp\n}"),  # outside the branch
+        narrow.replace("    out = tmp", "    touch(ref tmp)\n    out = tmp"),
+        narrow.replace("    out = tmp", "    comb capture() -> (r) { r = tmp }\n    out = tmp"),
+        narrow.replace("    tmp = if", "    wrap tmp = if"),
+        narrow.replace("    tmp = if", "    wrap /* policy */ tmp = if"),
+        narrow.replace("mut tmp:U2 = 0", "mut tmp:U2:[foo=1] = 0"),
+        narrow.replace("mut tmp:U2 = 0", "mut tmp:U2@[0] = 0"),
+        narrow.replace("mut tmp:U2 = 0", "comptime mut tmp:U2 = 0"),
+        narrow.replace("mut tmp:U2 = 0", "reg tmp:U2 = 0"),
+        narrow.replace("mut tmp:U2 = 0", "mut tmp:U2 = initialize()"),
+        narrow.replace("mut tmp:U2 = 0", "mut tmp:Custom = 0"),
+        narrow.replace("    out = tmp", "    out = tmp.[bits]"),  # metadata needs elaboration
+        narrow.replace("    out = tmp", "    out = record.tmp"),  # field names are not local reads
+        narrow.replace("    out = tmp", "    out = child(tmp=a).r"),  # argument labels are not reads
+        narrow.replace("    out = tmp", "    out = a"),  # unused
+        narrow + "comb g() -> (r) { mut tmp = 0; r = tmp }\n",  # ambiguous binding
+        "comb f(a:U2) -> (out:U2) { mut tmp = 0; tmp = a; out = tmp }\n",
+    ]
+    for case_source, (findings, _, _) in zip(narrow_negatives, run_many(narrow_negatives, rule=narrow_rule)):
+        assert not findings, case_source
+    assert not run(narrow.replace("  mut tmp", "  // prp-style-allow narrow-scoped-mut\n  mut tmp"), rule=narrow_rule)[0]
+    assert not run(narrow + "const broken = (\n", rule=narrow_rule, partial=True)[0]
+
+    # Packing preserves declared lane widths and low-to-high order. Both array
+    # packing and explicitly sized expressions work below the loop threshold.
+    packing_rule = "compact-bit-packing"
+    array_pack = """comb f(a:[4]U16) -> (out:U64) {
+  mut packed = 0
+  packed#[0..<16] = a[0]
+  packed#[16..<32] = a[1]
+  packed#[0x20..<0x30] = a[2]
+  packed#[0x30..<0x40] = a[3]
+  out = packed
+}
+"""
+    findings, _, _ = run(array_pack, rule=packing_rule, min_repeats=None)
+    assert len(findings) == 1, findings
+    assert findings[0]["attrs"]["packing"] == "a#[..]", findings
+    assert findings[0]["attrs"]["bits"] == "64", findings
+    assert findings[0]["attrs"]["lane_count"] == "4", findings
+    assert "const packed:U64" in findings[0]["hint"], findings
+    assert findings[0]["span"]["start_line"] == 2 and findings[0]["span"]["end_line"] == 6, findings
+    typed_pack = array_pack.replace("mut packed = 0", "mut packed:U64 = 0")
+    assert "const packed:U64 = a#[..]" in run(typed_pack, rule=packing_rule)[0][0]["hint"]
+    tuple_pack = """comb f(a:Bool, b:Bool, initial:U2) -> (out:U2) {
+  mut packed = initial
+  packed#[0] = U1(a)
+  packed#[1..=1] = U1(b)
+  out = packed
+}
+"""
+    findings, _, _ = run(tuple_pack, rule=packing_rule)
+    assert len(findings) == 1 and findings[0]["attrs"]["packing"] == "(U1(a), U1(b))#[..]", findings
+    assert "const packed:U2" in findings[0]["hint"], findings
+    # Partial/reversed array order can still form a tuple, never the whole array.
+    reversed_pack = array_pack.replace("a[0]", "a[3]").replace("a[1]", "a[2]")
+    assert run(reversed_pack, rule=packing_rule)[0][0]["attrs"]["packing"].startswith("(a[3], a[2]"), reversed_pack
+    partial_array = array_pack.replace("a:[4]U16", "a:[5]U16")
+    assert run(partial_array, rule=packing_rule)[0][0]["attrs"]["packing"].startswith("(a[0],"), partial_array
+    mixed_widths = "comb f(a:U2,b:U3) -> (out:U5) { mut packed = 0; packed#[0..<2] = a; packed#[2..<5] = b; out = packed }\n"
+    assert run(mixed_widths, rule=packing_rule)[0][0]["attrs"]["packing"] == "(a, b)#[..]"
+    packing_negatives = [
+        array_pack.replace("0x20..<0x30", "0x40..<0x50").replace("0x30..<0x40", "0x50..<0x60"),  # gap
+        array_pack.replace("16..<32", "15..<31"),  # overlap
+        array_pack.replace("16..<32", "32..<16"),  # reversed
+        array_pack.replace("0..<16", "1..<17"),  # low bits retained
+        array_pack.replace("a:[4]U16", "a:[4]U8"),  # unequal widths
+        array_pack.replace("a:[4]U16", "a:[4]S16"),  # signed lanes
+        array_pack.replace("a:[4]U16", "a:[4]Custom"),
+        array_pack.replace("mut packed = 0", "mut packed:U65 = 0"),  # high bit retained
+        array_pack.replace("mut packed = 0", "mut packed = 1"),  # untyped unknown width
+        array_pack.replace("mut packed = 0", "mut packed = -1"),
+        array_pack.replace("mut packed = 0", "mut packed = initialize()"),
+        array_pack.replace("mut packed = 0", "reg packed:U64 = 0"),
+        array_pack.replace("mut packed = 0", "mut packed:U64:[foo=1] = 0"),
+        array_pack.replace("packed#[0..<16] =", "wrap packed#[0..<16] ="),
+        array_pack.replace("packed#[0..<16] =", "packed#sext[0..<16] ="),
+        array_pack.replace("a[0]", "packed#[0..<16]"),  # reads intermediate value
+        array_pack.replace("a[0]", "make_word()"),  # unknown width/side effects
+        array_pack.replace("a[0]", "U16(touch(ref a))"),
+        array_pack.replace("a[0]", "U16(make_word())"),
+        array_pack.replace("packed#[0..<16]", "packed#[i..<(i+16)]"),
+        array_pack.replace("  out = packed", "  packed#[0] = 0\n  out = packed"),  # later write
+        array_pack.replace("  out = packed", "  touch(ref packed)\n  out = packed"),
+        array_pack.replace("  out = packed", "  comb capture() -> (r) { r = packed }\n  out = packed"),
+        array_pack.replace("  packed#[16", "  out = packed\n  packed#[16"),  # intermediate read
+        array_pack.replace("  packed#[16", "  a[0] = a[1]\n  packed#[16"),  # source changes
+        array_pack.replace("  out = packed", "  out = packed.[bits]"),
+        array_pack.replace("a[0]", "U0x10(make_word())"),  # an ordinary function, never a sized cast
+        array_pack.replace("  out = packed", "  out = record.packed"),
+        array_pack.replace("  out = packed", "  out = child(packed=a).r"),
+        array_pack.replace("  out = packed", "  out = 0"),  # unused
+        tuple_pack.replace("initial:U2", "initial:U3"),  # initializer's high bit
+        mixed_widths.replace("b:U3", "b:U4"),
+    ]
+    for case_source, (findings, _, _) in zip(packing_negatives, run_many(packing_negatives, rule=packing_rule)):
+        assert not findings, case_source
+    assert not run(array_pack.replace("  mut packed", "  // prp-style-allow compact-bit-packing\n  mut packed"), rule=packing_rule)[0]
+    assert not run(array_pack + "const broken = (\n", rule=packing_rule, partial=True)[0]
 
     # Shared diagnostics output, pretty rendering, metadata, and failure paths.
     output = root / "style.jsonl"

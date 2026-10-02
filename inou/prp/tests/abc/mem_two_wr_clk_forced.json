@@ -1,0 +1,5 @@
+{
+  "source": "mem_two_wr_clk.sv",
+  "top": "mem_two_wr_clk",
+  "synth_set": "pass.abc.memory=true"
+}

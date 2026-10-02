@@ -1,0 +1,3 @@
+pub comb arb(upd:U4, req:U4) -> (grant:U4) {
+  grant = req
+}

@@ -1,0 +1,21 @@
+/*
+:name: imported_comb_dead_wire
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// suggestions7 item 5 (br_flow_mux_weighted_rr / br_flow_xbar_fixed shape,
+// after mod->comb): the imported comb `mid` forward-declares two wires and
+// feeds both into `arb`, which ignores `upd`. Once `arb` inlines, `upd` has no
+// reader; DCE swept its driver but kept the `wire` declaration, so lnast.tolg
+// reported "wire 'inl1_upd' is never driven" for a wire that IS driven.
+// `top` also drives a wire it never reads (the same sweep without inlining).
+const mid = import("imported_comb_dead_wire/mid.mid")
+pub mod top(a:U4, b:U4) -> (z:U4@[0], y:U4@[0]) {
+  wire spare:U4 = nil
+  const r = mid(a=a, b=b)
+  z = r.z
+  spare = a & b
+  y = b
+}

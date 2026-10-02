@@ -20,6 +20,35 @@ NATIVE_CHECK_TIMEOUT = 20
 # Budget for comparing emitted Verilog with its source using default LEC.
 # A fixture can override it with :verilog_check_timeout:; timeouts fail.
 VERILOG_CHECK_TIMEOUT = 20
+# Budget for the graphs-flow (lg+pyrope, DCE on) Pyrope vs the source Verilog.
+# Unlike the checks above, an UNKNOWN/timeout here passes; only REFUTED fails.
+GRAPHS_CHECK_TIMEOUT = 5
+
+
+def _same_emission(prps, gprps):
+    """True when both emission dirs hold the same file names with identical text."""
+    if [os.path.basename(p) for p in prps] != [os.path.basename(p) for p in gprps]:
+        return False
+    for a, b in zip(prps, gprps):
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            if fa.read() != fb.read():
+                return False
+    return True
+
+
+def _lenient_verdict(result):
+    """proven / inconclusive (UNKNOWN or timeout: pass) / failed (REFUTED, crash, refusal)."""
+    if verdict(result) == "proven":
+        return "proven"
+    text = result.stdout.decode("utf-8", "replace")
+    last = final_verdict(text)
+    if result.returncode == 10 or " REFUTED " in last:
+        return "failed"
+    if result.returncode == 124 and "LEC outer watchdog exceeded" in text:
+        return "inconclusive"
+    if result.returncode == 7 and " UNKNOWN " in last:
+        return "inconclusive"
+    return "failed"
 
 
 def _header(prp_path, key):
@@ -100,6 +129,56 @@ def main():
     if not prps:
         print("{} - v2prp2v - FAILED: no pyrope emitted in {}".format(name, prpdir))
         return 1
+
+    # 1a'. The same emission through the GRAPHS flow: an `lg:` sink next to the
+    # `pyrope:` one (the `lhd compile verilog --emit-dir lg: --emit-dir pyrope:`
+    # line lhdtrack seeds its trees with). Pyrope-only emission keeps parameter
+    # provenance, which turns off upass's named-store DCE, so 1a alone never
+    # exercises it. With the DCE on, an unread `<port>__bpr.<f>` readback wire
+    # (inou.slang's bundle-output reader view) used to lose its driver but keep
+    # its `wire` declaration, and the writer's self-check rejected the undriven
+    # wire (lhdtrack suggestions7 item 4: 44 of 119 designs). The compile must
+    # succeed, and -- since this DCE-on Pyrope is what lhdtrack seeds from --
+    # it must also stay equivalent to the source Verilog (step 1a'' below).
+    gdir = os.path.join(work, "prp_graphs")
+    comp = subprocess.run(
+        [lhd, "compile", v, "--emit-dir", "lg:" + os.path.join(work, "lg_graphs"),
+         "--emit-dir", "pyrope:" + gdir + "/",
+         "--set", "compile.slang.flat_top_io=true",
+         "--workdir", os.path.join(work, "w1g")],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if comp.returncode != 0:
+        print("{} - v2prp2v - FAILED: slang->lg+pyrope rc={}".format(name, comp.returncode))
+        print(comp.stdout.decode("utf-8", "ignore"))
+        return 1
+
+    # 1a''. LEC the graphs-flow Pyrope against the source Verilog. When the
+    # emission is byte-identical to 1a's, steps 1b/1c/2 already check that
+    # very text, so the extra LEC is spent only on a differing emission (the
+    # DCE actually removed something). Short budget: UNKNOWN or a timeout
+    # passes; only a REFUTED verdict or a crash/refusal fails.
+    gprps = sorted(glob.glob(os.path.join(gdir, "*.prp")))
+    if not gprps:
+        print("{} - v2prp2v - FAILED: no pyrope emitted in {}".format(name, gdir))
+        return 1
+    if not _same_emission(prps, gprps):
+        gemitted = os.path.join(gdir, vtop + ".prp")
+        if not os.path.exists(gemitted):
+            gemitted = gprps[0]
+        gimpl = "pyrope:" + gdir + "/" if len(gprps) > 1 else "pyrope:" + gemitted
+        graphs = run_lec(
+            [lhd, "lec", "--impl", gimpl, "--ref", "verilog:" + v,
+             "--impl-top", vtop, "--ref-top", vtop,
+             "--workdir", os.path.join(work, "w_graphs_check")],
+            timeout=GRAPHS_CHECK_TIMEOUT)
+        gout = graphs.stdout.decode("utf-8", "replace")
+        gstatus = _lenient_verdict(graphs)
+        if gstatus == "failed":
+            print("{} - v2prp2v - FAILED: graphs-flow Pyrope (lg+pyrope emission) "
+                  "is not equivalent to the source Verilog".format(name))
+            print(gout)
+            return 1
+        print("{} - v2prp2v - graphs-flow Pyrope check {}".format(name, gstatus))
 
     emitted = os.path.join(prpdir, vtop + ".prp")
     if not os.path.exists(emitted):

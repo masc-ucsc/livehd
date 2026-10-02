@@ -1,0 +1,57 @@
+/*
+:name: latch_reset_pin_pair_ring
+:type: simulation
+*/
+
+// Reduced from Minion's `prim_phase_pair_lo_hi` closed into a toggle ring. Every
+// latch carries an asynchronous `reset_pin` (the form the Verilog/Pyrope writers
+// emit), and the enable latches `lo_en_2p`/`hi_en_1p` gate the data latches with
+// the opposite clock phase. The low and high data windows never overlap, so the
+// ring q_hi -> d -> q_lo -> q_hi is NOT a combinational cycle, and a source
+// reset is masked by the destination's own (shared) reset. The scheduler must
+// still order it: a latch with a reset_pin used to refuse that proof and report
+// `color-plan-not-lowerable`.
+pub mod phase_pair_ring(clk_i:Clock, reset_i:U1, run:U1, lo_en_i:U1, hi_en_i:U1) -> (lo:U1@[], hi:U1@[], sampled:U1@[]) {
+  reg lo_en_2p:U1:[initial=0, reset_pin=reset_i, async=true, enable=clk_i, latch=true]
+  reg hi_en_1p:U1:[initial=0, reset_pin=reset_i, async=true, enable=clk_i, enable_high=false, latch=true]
+  reg q_lo_reg:U1:[initial=0, reset_pin=reset_i, async=true, enable=clk_i, enable_high=false, latch=true]
+  reg q_hi_reg:U1:[initial=0, reset_pin=reset_i, async=true, enable=clk_i, latch=true]
+  lo_en_2p = lo_en_i
+  hi_en_1p = hi_en_i
+  if lo_en_2p != 0 {
+    q_lo_reg = U1(q_hi_reg == 0) & run
+  }
+  if hi_en_1p != 0 {
+    q_hi_reg = q_lo_reg
+  }
+  // A reference-clock flop: a latch-only module has no clock root, so without
+  // it the testbench clock is never wired to `clk_i`.
+  reg observer:U1:[clock_pin=clk_i] = 0
+  observer = q_hi_reg
+  sampled = observer
+  lo = q_lo_reg
+  hi = q_hi_reg
+}
+
+test phase_pair_ring.toggles_after_reset {
+  mut acc = phase_pair_ring
+  tick 12 {
+    const resetting = clock < 3
+    acc.reset_i = U1(resetting)
+    acc.run = 1
+    acc.lo_en_i = 1
+    acc.hi_en_i = 1
+    step
+    if resetting {
+      assert(acc.hi == 0, "reset holds the high latch")
+      assert(acc.lo == 0, "reset holds the low latch")
+    } else {
+      // Cross-checked against an Icarus run of the original SystemVerilog
+      // pair: low loads ~hi in each low window, high copies it in the next
+      // high window, so hi toggles every cycle with lo as its complement.
+      const odd = (clock - 3) & 1
+      assert(acc.hi == odd, "the ring toggles once per cycle")
+      assert(acc.lo == 1 - odd, "the low latch holds the complement")
+    }
+  }
+}

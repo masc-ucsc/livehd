@@ -1,0 +1,6 @@
+pub comb apply(f, a:U8) -> (z:U8) {
+  z = f(a=a)
+}
+pub comb apply_g(g, a:U8) -> (z:U8) {
+  z = g(a=a)
+}

@@ -1,0 +1,5 @@
+const m = import("generic_lambda_nested_scope/lib.m")
+comb inc(v:U8) -> (o:U8) { o = v | 0x80 }
+pub mod mb(a:U8) -> (r:U8@[0]) {
+  r = m<inc>(a=a)
+}

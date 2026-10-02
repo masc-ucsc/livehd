@@ -4981,14 +4981,24 @@ void uPass_constprop::process_tuple_get() {
       for (const auto& o : on->second) {
         outs += outs.empty() ? o : ", " + o;
       }
+      // A compiler-temp handle is an unnamed call result (a destructure slot
+      // that matches no output): name the call and the `slot=field` rename.
+      const auto cit     = Lnast::is_tmp(src) ? st().call_result_callee.find(src) : st().call_result_callee.end();
+      const bool by_call = cit != st().call_result_callee.end();
       livehd::diag::sink().emit(livehd::diag::Diagnostic{
           .severity = livehd::diag::Severity::error,
           .code     = "unknown-field",
           .category = "type",
           .pass     = "upass.constprop",
-          .message  = std::format("unknown field `{}` on instance `{}`", first_seg, src_raw.empty() ? src : src_raw),
+          .message  = by_call ? std::format("unknown field `{}` on the result of `{}(…)`", first_seg, cit->second)
+                              : std::format("unknown field `{}` on instance `{}`", first_seg, src_raw.empty() ? src : src_raw),
           .span     = lm->current_span(),
-          .hint     = std::format("the instance's fields are its outputs: {}", outs),
+          .hint     = by_call ? std::format("the result of `{}(…)` has fields: {}. A destructure slot binds the same-named "
+                                            "field; rename it with `({}=<field>, …)` or read `.<field>` (no by-position binding)",
+                                        cit->second,
+                                        outs,
+                                        first_seg)
+                              : std::format("the instance's fields are its outputs: {}", outs),
       });
       store_trivial(dst, *Dlop::nil());
       return;
@@ -5092,19 +5102,55 @@ void uPass_constprop::process_tuple_get() {
     // in process_assign) — so a missing top-level named segment is genuinely
     // absent (the `mut c` shorthand stores a positional entry, so `x.c` on
     // `(a=1, b=(c=2), 10)` correctly errors; use `x.2`).
+    //
+    // A compiler-temp source names nobody: say what it holds instead. A temp
+    // recorded as a call result (`(y, x) = dox(a=3)` reads `%y_0.y`) names
+    // the call, lists the result's fields, and points at the `slot=field`
+    // rename (qa.md §8). Any other temp (`(p=a, q=3).r`) is an inline tuple
+    // expression — no call, no destructure — so no rename hint.
+    std::string message;
+    std::string hint;
+    if (Lnast::is_tmp(src)) {
+      std::string fields;
+      for (const auto& tl : src_bundle->top_levels()) {
+        if (tl.pos < 0 && !tl.name.empty()) {
+          absl::StrAppend(&fields, fields.empty() ? "" : ", ", tl.name);
+        }
+      }
+      if (fields.empty()) {
+        fields = "(none named)";
+      }
+      if (const auto cit = st().call_result_callee.find(src); cit != st().call_result_callee.end()) {
+        message = std::format("unknown field `{}` on the result of `{}(…)`", first_seg, cit->second);
+        hint    = std::format("the result of `{}(…)` has fields: {}. A destructure slot binds the same-named field; rename it "
+                                 "with `({}=<field>, …)` or read `.<field>` (no by-position binding)",
+                           cit->second,
+                           fields,
+                           first_seg);
+      } else {
+        message = std::format("unknown field `{}` on the tuple expression", first_seg);
+        hint    = std::format("the tuple expression has fields: {} — check existence with `<tuple> has '{}'` "
+                                 "(reading an absent field is a compile error)",
+                           fields,
+                           first_seg);
+      }
+    } else {
+      message = std::format("unknown field `{}` on tuple `{}`", first_seg, src);
+      hint    = std::format("`{}` has no field `{}` — check existence with `{} has '{}'` "
+                            "(reading an absent field is a compile error)",
+                         src,
+                         first_seg,
+                         src,
+                         first_seg);
+    }
     livehd::diag::sink().emit(livehd::diag::Diagnostic{
         .severity = livehd::diag::Severity::error,
         .code     = "unknown-field",
         .category = "type",
         .pass     = "upass.constprop",
-        .message  = std::format("unknown field `{}` on tuple `{}`", first_seg, src),
+        .message  = std::move(message),
         .span     = lm->current_span(),
-        .hint     = std::format("`{}` has no field `{}` — check existence with `{} has '{}'` "
-                                "(reading an absent field is a compile error)",
-                                src,
-                                first_seg,
-                                src,
-                                first_seg),
+        .hint     = std::move(hint),
     });
     store_trivial(dst, *Dlop::nil());
   } else if (st().has_trivial(src)) {

@@ -1,0 +1,9 @@
+// The library defines its OWN `inc` (a 4-bit mask); a caller's import alias
+// spelled `inc` must never dispatch here.
+comb inc(v:U8) -> (o:U8) { o = v & 0x0F }
+pub comb apply<F>(a:U8) -> (r:U8) {
+  r = F(v=a)
+}
+pub comb applyv(f, a:U8) -> (r:U8) {
+  r = f(v=a)
+}

@@ -2285,3 +2285,10 @@ sh_test(
     srcs = ["slang_plusargs_smoke.sh"],
     data = ["//lhd"],
 )
+
+sh_test(
+    name = "lhd_sim_pure_loop_test",
+    size = "large",
+    srcs = ["lhd_sim_pure_loop_test.sh"],
+    data = ["lhd_sim_pure_loop.prp", "//lhd"],
+)

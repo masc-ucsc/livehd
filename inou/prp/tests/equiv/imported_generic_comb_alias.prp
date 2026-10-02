@@ -1,0 +1,18 @@
+/*
+:name: imported_generic_comb_alias
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:set: compile.upass.inline=false
+*/
+
+// suggestions7 item 5 (br_flow_mux_weighted_rr shape): a GENERIC imported comb
+// always inlines, even with compile.upass.inline=false, so its body's call to
+// another generic comb through a renamed import alias (`core_t`) must resolve
+// inside the inline frame. It used to fail "call to undefined function
+// 'core.core'".
+const gmid_t = import("imported_generic_comb_alias/gmid.gmid")
+pub mod top(a:U8) -> (y:U8@[0]) {
+  const r = gmid_t(a=a)
+  y = r.z
+}

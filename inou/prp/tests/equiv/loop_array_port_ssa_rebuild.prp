@@ -1,0 +1,22 @@
+/*
+:name: loop_array_port_ssa_rebuild
+:type: equiv
+:verilog_top: loop_array_port_ssa_rebuild.top
+:pyrope_top: top
+*/
+// A rolled loop reading an ARRAY input port, in a unit whose accumulator is
+// re-initialized before the loop (`total = 0` after `mut total:U12 = 0`).
+// The repeated definition forces upass.ssa's full SSA rebuild, which re-emits
+// every io port as a flat prim_type_int (the array view survives only in
+// io_meta). The loop planner typed the lifted invariant `b` from that flat
+// io slot, so `top.__loop0` got a plain 32-bit `b` and lnast.tolg failed
+// "field/index read of 'b' could not be resolved". Dropping the re-init
+// compiled. (lhdtrack item 2: the Pyrope writer re-emitted exactly this.)
+pub mod top(b:[4]U8) -> (z:U12@[0]) {
+  mut total:U12 = 0
+  total = 0
+  for i in 0..=3 {
+    total = total + b[i]
+  }
+  z = total
+}

@@ -1,0 +1,31 @@
+/*
+:name: func_param_nested_scope
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A function-valued param `f` of an inlined comb is visible ONLY in that
+// comb's own body. The imported comb `inner` calls ITS file-scope alias `f`
+// (leaf.leaf); inlined from inside `outer`, whose param is also named `f`
+// (bound to `other`), it used to resolve to the outer param (raw-name
+// binding leaked into nested frames), so z = a ^ 0xFF instead of a & 0x0F.
+// `w`/`v` forward the param on to another higher-order comb, under the same
+// and under a different param name.
+const inner   = import("func_param_nested_scope/inner.inner")
+const other   = import("func_param_nested_scope/other.other")
+const apply   = import("func_param_nested_scope/apply.apply")
+const apply_g = import("func_param_nested_scope/apply.apply_g")
+comb outer(f, a:U8) -> (z:U8, y:U8, w:U8, v:U8) {
+  z = inner(a=a)
+  y = f(a=a)
+  w = apply(f=f, a=a)
+  v = apply_g(g=f, a=a)
+}
+pub mod top(a:U8) -> (z:U8@[0], y:U8@[0], w:U8@[0], v:U8@[0]) {
+  const r = outer(f=other, a=a)
+  z = r.z
+  y = r.y
+  w = r.w
+  v = r.v
+}

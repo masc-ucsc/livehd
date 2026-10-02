@@ -1,0 +1,19 @@
+/*
+:name: rolled_array_port_zero_reinit
+:type: compile
+*/
+// lhdtrack item 2, hand form (also equiv/loop_array_port_ssa_rebuild.prp). The
+// explicit `total = 0` re-init forces upass.ssa's full SSA rebuild, which
+// flattens the array port `b` to its packed integer slot (io_meta alone keeps
+// the `[4]U8` view). The source used to fail in lnast.tolg ("field/index read
+// of 'b' could not be resolved", the rolled loop typed its invariant from the
+// flat slot), and the writer printed that slot as `b:U32` plus two redundant
+// `total = 0` stores after `mut total:U12 = 0`.
+pub mod rolled_array_port_zero_reinit(b:[4]U8) -> (z:U12@[0]) {
+  mut total:U12 = 0
+  total = 0
+  for i in 0..=3 {
+    total = total + b[i]
+  }
+  z = total
+}

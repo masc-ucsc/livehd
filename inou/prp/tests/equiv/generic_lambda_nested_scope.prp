@@ -1,0 +1,44 @@
+/*
+:name: generic_lambda_nested_scope
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A LAMBDA-valued generic (`apply<inc>`) binds the `inc` visible at the CALL
+// SITE. The specialized clone writes the bound name into the generic's body,
+// where callee names resolve in the generic's own scope; a same-named helper
+// nested in the generic (`apply_n`'s `inc`) or defined by the generic's file
+// (lib.prp's `inc`) silently won, so z/x/w were `a & 0x0F` instead of
+// `a ^ 0xFF`. `y` is the value-param form (`applyp(f=inc)`), which already
+// bound lexically. `t`/`s`: two files each bind `m<inc>` to their own `inc`
+// and must get distinct specializations. `q`/`p`: an import ALIAS spelled like
+// lib.prp's own `dec` binds the alias TARGET (lib2's `hh`); the by-name lookup
+// of the raw spelling found lib.prp's `dec` from both scopes, so the clone kept
+// `dec` and ran the template file's mask.
+const apply  = import("generic_lambda_nested_scope/lib.apply")
+const m      = import("generic_lambda_nested_scope/lib.m")
+const ma     = import("generic_lambda_nested_scope/fa.ma")
+const mb     = import("generic_lambda_nested_scope/fb.mb")
+const applyv = import("generic_lambda_nested_scope/lib.applyv")
+const dec    = import("generic_lambda_nested_scope/lib2.hh")
+comb inc(v:U8) -> (o:U8) { o = v ^ 0xFF }
+comb apply_n<F>(a:U8) -> (r:U8) {
+  comb inc(v:U8) -> (o:U8) { o = v & 0x0F }
+  r = F(v=a)
+}
+comb applyp(f, a:U8) -> (r:U8) {
+  comb inc(v:U8) -> (o:U8) { o = v & 0x0F }
+  r = f(v=a)
+}
+pub mod top(a:U8) -> (z:U8@[0], y:U8@[0], x:U8@[0], w:U8@[0], u:U8@[0], t:U8@[0], s:U8@[0], q:U8@[0], p:U8@[0]) {
+  z = apply_n<inc>(a=a)
+  y = applyp(f=inc, a=a)
+  x = apply<inc>(a=a)
+  w = apply<F=inc>(a=a)
+  u = m<inc>(a=a)
+  t = ma(a=a)
+  s = mb(a=a)
+  q = apply<dec>(a=a)
+  p = applyv(f=dec, a=a)
+}

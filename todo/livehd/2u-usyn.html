@@ -1,0 +1,2589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2u — Register-rooted USYN redesign</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2u</strong> Register-rooted USYN redesign</h1>
+<p>Replace the whole-region LUT cover in <code>pass.usyn</code> with the
+register-rooted XAG algorithm in <a href="../../docs/synth_usyn.html">Register-Rooted
+Unate/DOMINO Synthesis, proposal v4</a>: mandatory endpoint selection, exact bounded
+functional analysis, whole-cone one/two-phase attempts followed by selective removal,
+reuse-aware local and two-endpoint optimization, then residual XAG optimization and mapping.</p>
+<p><strong>Confirmed architecture:</strong> USYN must build and run with zero ABC,
+including when ABC is removed. Only the optional technology-mapping step may depend
+on ABC. ABC remains in normal LiveHD builds as an alternative flow and benchmark
+comparator; USYN does not invoke it for synthesis, optimization, candidate selection
+or fallback. For now, selected DOMINO functions are logical gates that ABC/TMAP maps
+to the available library, as it maps the residual CMOS. Future per-gate Liberty
+descriptions feed an external cell-generation/characterization tool; that physical
+cell flow is outside this implementation. The CMOS tmap input is the whole selected
+network, with no DOMINO/non-DOMINO split. In the future DOMINO target, USYN already
+maps the DOMINO cells; tmap handles only the remaining CMOS.</p>
+<p><strong>Confirmed output semantics:</strong> when emitting a real endpoint
+DOMINO cell, remove the corresponding ordinary register because the cell already
+contains its latch. The first implementation instead technology-maps all selected
+logic through ABC/TMAP into plain CMOS and keeps the original registers and their
+behavior. This CMOS target is permanent, including after characterized DOMINO
+cells become available; it supports ordinary CMOS use and comparison with ABC.</p>
+<p><strong>Confirmed target restrictions:</strong> DOMINO synthesis rejects
+negative-edge clocks and transparent latches except those belonging to recognized
+integrated clock-gating (ICG) structures. Emit an error at the offending source
+line; do not silently preserve the offending state as CMOS. These restrictions
+do not apply to the generic-CMOS USYN target.</p>
+<p><strong>Confirmed register eligibility:</strong> all positive-edge registers
+outside memories, ICGs and opaque state are eligible for DominoLatch conversion.
+A future register <code>keep</code> attribute, settable from Pyrope and defaulting
+to false, may opt out individual registers. Implementing that attribute is
+deferred; current tests and benchmarks assume no kept registers. Memories and
+ICGs remain special structures outside DOMINO logic regardless of that attribute.</p>
+<p><strong>Confirmed rail model:</strong> every DOMINO cell, including
+DominoLatch, has two outputs Q and !Q. A gate may consume both polarities of
+the same signal, and either output of a DOMINO producer is available for free.
+Otherwise, insert a NOT ahead of the consuming DOMINO when residual
+logic is needed, with its cost and dependency recorded. With no residual logic,
+the preceding DOMINO already supplies both rails: resolve NOT(Q) to its !Q
+output. This is rail reuse, not a reason to reject the candidate or add a NOT.</p>
+<p><strong>Confirmed technology constraints:</strong> configurable maximum logical
+inputs (default 8), maximum series stack (default 4), and maximum parallel
+discharge branches (default 10). These are frequency/technology dependent.
+There is no maximum-transistor legality constraint; transistor count remains
+an optimization cost. Parallel branches mean factored network width: a literal
+has width 1, parallel composition sums widths, and series composition takes
+their maximum. Thus (a OR b) AND (c OR d) has width 2, not four enumerated paths.
+Cut/window analysis uses a separate, larger support limit.</p>
+<p><strong>Confirmed phase configuration:</strong> DOMINO construction uses a
+configurable one or two clock phases. All leftover CMOS logic supplies inputs
+before the first phase. In two-phase mode, phase 1 feeds phase 2. Each phase may
+contain any number of parallel cells, and a phase-1 cell may feed any number of
+phase-2 cells. The endpoint register is always replaced by the final-phase
+DominoLatch in DOMINO output; leftover logic never justifies keeping that register.
+There is no cone-wide cell-count or cross-phase fanout limit. Routing and fanout
+timing are separate physical problems, outside this implementation.</p>
+<p><strong>Confirmed LEC boundary:</strong> LEC is a separate problem and flow.
+USYN does not invoke a prover, gate publication on a verdict, or add LEC-specific
+analysis. Preserve original register/DominoLatch names and source-state
+correspondence as much as possible to make independent LEC easier and faster.</p>
+<p><strong>Confirmed search strategy:</strong> try the whole cone in one DOMINO,
+then exactly two cells when two clock phases are enabled, followed by bounded
+wider two-phase decompositions. For unresolved or expensive cones, search which
+subfunctions to leave in upstream CMOS while keeping useful shared-input
+dependencies inside. Admit every tier under explicit support/work limits;
+large cones start from bounded windows. Priority cuts and reconvergence-driven
+growth supply alternative boundaries to the same function evaluator, rather
+than fixing a shallow or deep input-selection order. Optimize residual logic
+natively after selection, then reconsider affected endpoints once before
+freezing. Algorithm ideas from
+mockturtle are inspiration only; introduce no mockturtle dependency or code links.</p>
+<p><strong>Implementation priority after the performance review (2026-09-27):</strong>
+Treat the proposed algorithms as suggestions to evaluate. Pause additional search
+tiers while establishing mapped QoR and fixing hot paths. Keep the native ABC-free
+Boolean core and the permanent CMOS/ABC-tmap comparison flow.</p>
+<ul>
+<li><strong>Adopt word operations now.</strong> Polarity/support analysis, formula
+simulation, care fills and monotone closure operate on 64 assignments at once.
+Charge word operations, including formula-node work, rather than individual truth
+bits. Independent scalar oracles cover widths 0 through 16 and cancellation.
+Kitty, inline small-table storage, divisor-image acceleration and a complete
+four-input rewrite database remain evaluations; they are not prerequisites or
+already implemented dependencies.</li>
+<li><strong>Remove full-ledger copies now.</strong> Endpoint pricing shares the
+immutable protected-cone ledger and accumulates only new gates and inverse-rail
+demands. Preserve outside consumers and charge a new inverse at an already
+protected node. This removes the per-candidate copy, but does not yet provide
+mutable XAG substitution, live graph reference counts or incremental MFFC pricing.
+Those are the next graph-level performance work, justified by profiling.</li>
+<li><strong>Keep validation independent of heuristic exhaustion.</strong> Initial,
+pair and feedback search charge their used work before bounded validation starts.
+Validation has its own cap and still consumes the regional budget; external
+resource cancellation remains sticky. The counter baseline exposed the old bug:
+a retained candidate could be rejected solely because its search used the last
+credit in the shared search/validation allowance.</li>
+<li><strong>Measure mapped results now.</strong> Use the same compiled/color snapshot,
+Liberty, constraints and resource limits for ABC and the three USYN ablations.
+Retain unsuccessful variants and continue other variants, with a failing overall
+exit status. Record every source unit and constraint digest, mapped area, timing
+completeness, runtime, memory and independent LEC. Do not infer silicon DOMINO
+QoR from CMOS tmap or synthetic transistor costs. Corpus inputs stay external
+and are passed explicitly; repository scripts/tests must not depend on sibling paths.</li>
+<li><strong>Experiment before replacing architecture.</strong> Compare one bounded
+preselection rewrite/resubstitution sweep against the current order, since
+structure can change admitted windows. Prototype priority cuts with a DOMINO
+match and area-flow/exact-area selection only after obtaining these baselines.
+Preserve whole-cone and correlated-input candidates and explicit phase/state
+semantics. A two-phase limit alone does not establish a correct multi-output,
+latch-integrating mapper. General mapper replacement, diagnostic/cache separation
+and removal of nested work slices remain pending, not mandatory redesigns.</li>
+</ul>
+<p><strong>Validation of the performance checkpoint:</strong> 13 focused opt targets
+pass, including native search, cache/writer integration, both mapped comparison
+smokes and SATOPT option handling. Six core debug targets pass (maximum 13.6 s);
+opt targets take at most 2.9 s. The ABC-disabled public CLI and option checks also
+pass (3.0/1.6 s). These checks include bounded joint recoding and the independent
+validation-budget regression. The full repository suite and physically removed-ABC
+fixture were not rerun for this increment.</p>
+<p><strong>Mapped baseline:</strong> the
+<a href="../../repros/usyn_qor_20260927/README.md">ten-design performance/QoR report</a>
+records 40 completed mappings: 34 independent LEC checks proven and six timed out
+(all four multiplier variants plus residual/full CRC32). No case was refuted.
+Residual optimization helps some mapped areas but worsens others, and feedback can
+increase mapped area despite lowering the native estimate. ABC matches or beats
+full-USYN mapped area on this sample; arbitration has the largest gap. Use these
+results to prioritize network optimization and target-cost calibration. Timing
+completeness flags and unproven rows remain explicit. Three standalone kernel
+samples show substantial word-operation gains; they are not full-flow speedups.</p>
+<p><strong>Optimization order:</strong></p>
+<ol>
+<li>Apply cheap structural hashing, constant folding and dead-logic cleanup.</li>
+<li>Try the admitted whole cone in one legal dual-rail cell. Accept a competitive
+result after checking shared cost; otherwise retain the function and failure
+information for the next attempt.</li>
+<li>When two clock phases are enabled, try exactly two cells: one first-phase
+producer feeding the endpoint DominoLatch. If that does not yield a competitive
+result, try wider parallel two-phase decompositions within the same bounded
+tier. Reuse the admitted function. Stop on a competitive full-cone result;
+further cost improvement uses a separate budget. Two cells is a fast path,
+not a topology restriction.</li>
+<li>For unresolved or expensive endpoints, search what to move into upstream
+CMOS. Preserve shared-input dependencies inside the selected function where
+profitable; compare bounded coordinated removals, asymmetric cuts and
+reconvergence-driven growth using the same evaluator. Removing a subfunction
+means exposing its computed value at the boundary, not deleting its behavior.
+Keep alternatives that expose a repeated input across multiple branches;
+neither fewer boundary inputs nor greater depth alone identifies the best cut.</li>
+<li>Perform target-cost local and two-endpoint optimization where needed, then
+derive the residual network from all live consumers.</li>
+<li>Optimize that shared residual once: cleanup → four-input rewriting → bounded
+resubstitution → cleanup. Start resubstitution with up to eight window inputs,
+approximately 32 divisors and at most two inserted nodes per replacement.
+Require positive estimated area gain with shared-node accounting and a depth
+guard. Reconsider affected endpoint boundaries and shared costs once, retain
+the better legal result, refresh the residual live set and clean up, then freeze.
+Do this before expanding selected functions for CMOS output, so that expansion
+does not trigger another generic optimization round over absorbed logic.</li>
+</ol>
+<p>Whole-cone search keeps repeated-input dependencies visible to functional
+simplification. Residual optimization improves what selection leaves outside,
+and its feedback can expose better inputs for the selected functions. Here
+“non-DOMINO” includes unate logic left outside the selected cells. It does not
+mean only binate functions. See <a href="#e">E</a> for boundary selection,
+<a href="#m">M</a> for residual optimization, and
+<a href="#search-scheduling">search scheduling</a> for budgets and measurements.</p>
+<p>The initial preprocessing stays cheap; there is no full rewrite/refactor/resub
+recipe ahead of endpoint selection. The optimization responsibilities are:</p>
+<table>
+<thead><tr><th>Scope</th><th>V1 optimization</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td>Endpoint input boundary (<a href="#e">E</a>)</td>
+<td>Whole-cone attempts, selective removal, and bounded coordinated cut growth.</td>
+<td>Choose which dependencies remain visible together; compare total affected cost.</td></tr>
+<tr><td>Selected cell function (<a href="#d">D</a>)</td>
+<td>Exact signed-cover simplification and series/parallel factoring.</td>
+<td>Simplify the absorbed function and check the configurable gate constraints.</td></tr>
+<tr><td>Shared residual network (<a href="#m">M</a>)</td>
+<td>Cleanup, rewrite4, bounded resubstitution (initially eight inputs,
+about 32 divisors and at most two inserted nodes), cleanup, then one
+affected-endpoint feedback round.</td>
+<td>Improve surviving logic and expose better endpoint boundaries without repeating
+the generic recipe over absorbed internals.</td></tr>
+</tbody>
+</table>
+<p>Dedicated residual refactoring and balancing remain later measured extensions.
+Boundary search complements network optimization; V1 does not add a separate
+ABC <code>fx</code>-style algebraic extraction pass.</p>
+<p><strong>Choosing the function inputs:</strong> optimize the boundary, rather
+than committing to an order in which primary inputs are absorbed. Start with
+the admitted cone and ask which subfunctions to leave outside. Keep several
+alternatives because removing one branch may hide a cancellation or a shared
+factor in another. Use coordinated growth to recover such dependencies when
+starting from a bounded window. For example, absorbing both <code>a | b</code>
+and <code>a | c</code> beneath an AND exposes <code>a | (b &amp; c)</code>.
+The final choice includes the cost of computing anything left outside and the
+cost of shared logic that other consumers still require. Full absorption avoids
+the boundary-choice problem within that cone; it does not prove minimum cost
+for the shared network.</p>
+<p><strong>Coverage-guided fast path:</strong> the reported observations—over
+10% of cones fitting one function and around 50% fitting two DOMINO—motivate
+trying full absorption before broad cut enumeration. They are a scheduling
+hypothesis to measure, not guaranteed coverage or a reason to enlarge search
+without bounds. Reuse the admitted function between attempts; spend boundary
+search effort on the remaining or expensive cones. Distinguish exactly two
+cells from the configurable two-phase network, which may contain more cells.
+The one-cell attempt precedes the bounded exactly-two-cell attempt; wider
+two-phase covers remain supported after that fast path. The default strategy is
+therefore whole-cone analysis first, selective removal
+second, and generic optimization of the surviving residual third. Cut enumeration
+remains a bounded source of alternative boundaries within that strategy.</p>
+<p><strong>Status: implementation in progress, 2026-09-27.</strong> Independent
+Boolean/XAG utilities, bounded endpoint selection, residual XAG optimization and
+logical CMOS expansion are connected by an independent logical-region pipeline
+with one affected-endpoint feedback round. A callable native CMOS design driver
+now connects private-copy preparation, partitioning and emission; focused library
+integration tests cover its emitted behavior. The public USYN CMOS entry now
+uses this native driver and optional mapping-only provider. Focused public tests
+cover logical output without Liberty, mapped output, preserved state, reports and
+option diagnostics. The ABC-removed CLI build/run gate has passed in an isolated
+source fixture. Typed region artifacts and logical cache replay are implemented
+below. Advanced search, DOMINO emission and QoR evaluation
+remain pending; these are not implied by the independence milestone.</p>
+<p><strong>Current SATOPT policy:</strong> <code>pass.satopt=false</code> by default
+for every command, including synthesis and LEC. Preserve explicit user settings;
+an explicit standalone <code>lhd pass satopt</code> remains an invocation of that
+pass. USYN must not enable SATOPT as an implicit prerequisite.</p>
+
+<h2>Depends on</h2>
+<ul>
+<li>The existing <a href="../../pass/synth/README.md">shared synthesis pipeline</a>:
+private copy, partitioning, bit blasting, resource admission, region cache and read-back.
+Extract the remaining common orchestration from <code>pass/abc</code> and extend its
+boundary interface without introducing ABC dependencies outside the optional adapter.</li>
+<li>The existing compile-time <a href="../../pass/satopt/README.md">SAT cleanup</a>.
+Consume its fraig_sweep-like cleanup result when explicitly enabled; do not add a generic ABC/FRAIG recipe
+before endpoint search. Native residual optimization follows initial endpoint selection.
+The remaining work in <a class="xref" href="2s-satopt.html">2s</a> is not a prerequisite.</li>
+<li><a class="xref" href="domino.html">domino</a> supplies existing gate-model code
+to evaluate for reuse. Its older physical backend plan must be reconciled with
+DominoLatch endpoints and the new rail policy; completing that old plan is not a
+prerequisite to functional search.</li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li id="a"><strong>A — Pin the new contract and migration boundary.</strong>
+  <ul>
+  <li>Resolve the decisions recorded below before implementing the affected interfaces.
+  Keep <code>synth.mapper=usyn</code> and <code>lhd pass usyn</code> as the public entry
+  points. The new proposal replaces the old algorithm; a permanent second legacy
+  mapper is not proposed.</li>
+  <li>Classify all positive-edge register bits outside memory, ICG and opaque
+  state as eligible. Do not infer architectural-state exclusions from names or
+  register use. A future Pyrope-settable register <code>keep</code> attribute
+  defaults false and can suppress conversion, but attribute plumbing is deferred
+  and is not a prerequisite for this task. Preserve logical state count, stage order,
+  clock, reset, enable, initialization, and observable interfaces. CMOS output
+  retains the original registers; future DOMINO output replaces each converted
+  register with exactly one integrated latch, never an additional state stage.</li>
+  <li>Make the synthesis target explicit and separate from whether tmap is enabled.
+  Apply strict clock/storage validation only for the DOMINO target: negative-edge
+  clocks are errors, and transparent latches are legal only as part of a recognized
+  ICG structure. Generic-CMOS USYN must continue to handle these constructs through
+  its existing semantics. The integrated latch inside a generated DominoLatch is
+  not an unsupported source-level transparent latch.</li>
+  <li>Separate the larger analysis-window support limit (initial implementation
+  through 16 independent variables) from configurable gate limits: logical inputs
+  (default 8), series stack (default 4) and parallel discharge branches (default 10).
+  Count a signal and its complement as one logical input. Do not impose a
+  transistor-count or separate rail-pin legality limit.
+  Define costs separately for Static, Domino and DominoLatch, including integrated
+  storage overhead. Existing <code>nonunate_penalty</code> is not a physical cost.</li>
+  <li>Document supported, deliberately excluded, search-exhausted and invalid cases.
+  Every eligible register becomes a final-phase DominoLatch in DOMINO output;
+  residual CMOS is upstream of the first phase. There is no ordinary-register
+  fallback for an eligible endpoint. Keep this policy independent of the old
+  whole-region <code>fallback</code> switch. Resolve how old options change or are rejected;
+  do not silently reinterpret the old depth objective as a stage constraint.</li>
+  <li>Gate: a precise endpoint/state table, abstract node semantics, cost model,
+  one/two-clock-phase rules and option migration table agreed before the corresponding
+  code changes.</li>
+  </ul>
+</li>
+<li id="b"><strong>B — Expose semantic endpoints and barriers to USYN.</strong>
+  <ul>
+  <li>Extend the hook context with a backend-neutral endpoint table derived from
+  <code>Region_blast</code>/<code>Seq_flop</code>: stable source state identity,
+  bit/stage, semantic Q and next-state D, clock domain/edge, enable/reset/init
+  behavior, source location, eligibility and barrier/error reason. <code>Lnet</code>
+  alone cannot reconstruct these facts. The shared snapshot, logical-state
+  translation and semantic adapter are now connected to the public CMOS entry;
+  whole-design DOMINO validation there remains pending.</li>
+  <li>Decouple endpoint enumeration from Liberty DFF selection, QN encoding and
+  <code>map_register</code>. Current latch creation depends on those mapping choices.
+  Normalize the search to semantic Q/D and preserve any backend phase conversion
+  in an explicit adapter. Do not allow the selected DFF library to change which
+  ordinary pipeline registers exist for USYN.</li>
+  <li>Validate source clocks/storage before lowering or native-boundary demotion
+  can hide them. In the DOMINO target, reject negative-edge clocks and source
+  transparent latches outside recognized ICG structures; recognition must follow
+  the structure/semantics, not an instance name. Reuse existing ICG analysis
+  independently of whether the selected Liberty contains an ICG cell. An ICG
+  latch is clock-control state, not an endpoint to absorb as a DominoLatch.</li>
+  <li>Carry the offending node's source span through private copies, partitioning
+  and state classification. Reuse the source-locator/diagnostic pattern of
+  <code>region_blast.cpp</code>'s <code>node_span</code> and
+  <code>diag::Builder::at</code>; issue a clean nonzero error with file/line and
+  related clock/ICG context when useful. Preserve available source maps when
+  loading graphs; generated or locationless inputs must never receive a fabricated
+  source line. A strict-target error is not a barrier skip or CMOS fallback.</li>
+  <li>Keep memory, opaque and ICG state as explicit barriers according to A;
+  eligibility must not depend on a module-name substring. Leave an explicit
+  extension point for future <code>keep=true</code> register exclusions without
+  implementing that attribute now. Current tests assume <code>keep=false</code>.
+  In generic-CMOS mode, preserve supported negative-edge state and transparent
+  latches using ordinary/native mapping paths without the DOMINO-only errors.
+  Preserve every boundary consumer, including primary outputs, memory ports,
+  reset and clock logic; these readers participate in deletion-cost accounting.</li>
+  <li>Start with the existing USYN coloring profile. Region inputs are real search
+  boundaries, not proofs of independent physical rails. Do not merge all colors
+  merely to recover sharing. Initially report opportunities blocked by region or
+  hierarchy boundaries; cross-region optimization requires a separate decision.</li>
+  <li>Gate: classify every source state bit exactly once; test folded synchronous
+  reset/enable priority, power-on initialization, multi-stage registers, native
+  barriers, QN-only libraries and multiple clocks without changing behavior.
+  Paired target tests must reject a negative-edge register and a non-ICG latch
+  with the correct source line in DOMINO mode, accept equivalent CMOS runs,
+  and accept a recognized ICG latch in DOMINO mode. Exercise direct and
+  hierarchy-contained occurrences so partitioning cannot hide the violation.</li>
+  </ul>
+</li>
+<li id="c"><strong>C — Build a bounded XAG and endpoint boundary-search engine.</strong>
+  <ul>
+  <li>Introduce a small USYN-owned XAG representation with AND/XOR nodes,
+  complemented edges, structural hashing, fanout information and stable endpoint
+  references. Reuse the normalization rules in <code>pass/synth/lnet.cpp</code>;
+  keep XORs regardless of whether a particular domino recipe admits XOR directly.
+  The source structure must not depend on the old cover's gate limits.</li>
+  <li>Collect whole-cone support from eligible register D roots under bounded
+  traversal and memory admission. Analyze the complete cone when affordable;
+  otherwise construct a large bounded window without allocating a whole-stage
+  truth table. Reconvergence-driven growth expands boundary nodes toward inputs,
+  favoring few newly introduced distinct signals. Retain useful intermediate
+  boundaries, not only the largest final window.</li>
+  <li>Keep priority cuts as alternative seeds, not an exhaustive first step for
+  every endpoint. Merge asymmetric deep/shallow boundaries and deduplicate shared
+  leaves. Retain a small deterministic set for legality, reuse, cost and boundary
+  diversity, plus a safe minimal boundary. Ranking/pruning can hide later
+  reconvergence benefits; neither priority enumeration nor greedy growth guarantees
+  optimal inputs. Bound coordinated branch expansions and alternative growth paths
+  rather than following every path to a primary input.</li>
+  <li>Preserve alternatives that expose repeated logical inputs across branches.
+  For example, absorbing both <code>a | b</code> and <code>a | c</code> under
+  an AND exposes <code>a | (b &amp; c)</code>; cutting at the two OR outputs
+  hides that factoring opportunity. Compare coordinated branch expansion with
+  asymmetric deep/shallow boundaries. Rank by distinct support and actual
+  affected cost, not raw leaf occurrences or depth alone. A structural support
+  count above the gate limit does not prove failure: bounded functional
+  simplification may remove irrelevant inputs.</li>
+  <li>Proposed initial analysis setting: <code>cut_inputs=16</code>, independently
+  configurable and larger than the default eight-input gate limit, with measured
+  cut/window/work budgets. Do not truncate optimization windows to gate support;
+  a larger function can expose divisors and decompositions into legal gates.
+  Larger exact-table limits require a separate resource evaluation. Compose exact tables only
+  for retained or actively evaluated cuts, cache by ordered leaves plus graph
+  generation, and discard tables when their window is released.</li>
+  <li>Bound both cut count and the number of visited nodes, divisor candidates,
+  table bytes and work units. A 16-input table is 8 KiB; twelve such tables at
+  two million nodes alone would be about 183 GiB. Raising the current array limit
+  everywhere is not a viable implementation.</li>
+  <li>Gate: independent truth-table checks for XOR/complement/reconvergence and
+  9–16-input cases; deterministic boundary selection and bounded memory on a large
+  synthetic cone. Cover shared-input reconvergence and asymmetric boundaries;
+  oversized whole cones must reach bounded-window search cheaply. A limit hit
+  reports exhaustion, never proven infeasibility.</li>
+  </ul>
+</li>
+<li id="d"><strong>D — Implement exact unate analysis and explicit legal networks.</strong>
+  <ul>
+  <li>Generalize dynamic truth tables in <code>unate.{hpp,cpp}</code> to the
+  admitted support. Compute support and positive/negative/binate phases by exact
+  cofactors; normalize a unate function to positive monotone form with a stable
+  input order and phase mask for the single-polarity fast path.</li>
+  <li>A function binate in its logical variables is not automatically illegal
+  as one DOMINO gate. Allow both signs of a variable as distinct rail inputs:
+  for example, XOR uses <code>a·!b + !a·b</code>. The transistor network is
+  positive in its rail inputs. Preserve the logical relation between a signal
+  and its complement when checking the composed function; do not treat these
+  rails as independent source variables.</li>
+  <li>Keep the exact minimal-true-point fast path for fully specified monotone
+  functions, and add bounded signed-cover/rail-aware completion candidates for
+  functions using both phases. Verify every cover against the original logical
+  truth table. Do not claim the minimal-point theorem makes mixed-polarity
+  minimum-transistor synthesis exact.</li>
+  <li>For a fully specified monotone function, enumerate minimal true points to
+  obtain its exact irredundant monotone cover. Do not send 16-variable functions
+  through the current generic prime/set-cover search, or describe the wider
+  <code>exact_form</code> fallback as exact minimum synthesis.</li>
+  <li>Produce actual series/parallel formula candidates, not just a factored
+  literal count. Re-evaluate each formula against the table and compute stack,
+  parallel-branch metric and transistor count from its structure. Check only
+  logical input count, stack and parallel branches for gate legality; minimize
+  transistor cost among legal candidates. For a literal, stack=width=1.
+  Series composition sums stacks and takes maximum width; parallel composition
+  takes maximum stack and sums widths. This is the existing
+  <code>Sp_formula::finalize</code> width metric, now an explicit configurable
+  legality constraint. Do not count expanded SOP terms or all discharge paths.</li>
+  <li>Replace the current factorer's transistor ceiling as a runtime guard with
+  explicit work, memo-state, memory and elapsed-time budgets. Removing a gate
+  transistor limit must not make search unbounded. An incumbent legal formula's
+  cost may prune more expensive alternatives, but an arbitrary transistor ceiling
+  must not become a hidden technology limit. Distinguish exhausted search from
+  proven constraint failure and retain a validated incumbent on exhaustion.</li>
+  <li>Evaluate reuse of <code>pass/domino/domino_gate.{hpp,cpp}</code>'s phase,
+  minimal-point and formula utilities. Its fixed eight-variable tables and
+  bounded heuristic search above four variables prevent a direct 16-input reuse.
+  Replace <code>Gate_limits::budget</code> and the transistor-budget fit reason
+  with the parallel-branch limit/reason; add that bound to factoring and memo
+  identity. A single cheapest stack-feasible formula may violate the branch
+  bound while another formula fits, so a post-filter of the old minimum alone
+  is insufficient. Keep bounded local alternatives as needed for these constraints.
+  Consolidate one shared implementation where practical; avoid two competing
+  definitions of legality.</li>
+  <li>Represent rail demand explicitly as (producer, polarity) references or
+  positive/negative masks that may overlap; a single input-phase mask is
+  insufficient. Every Domino and DominoLatch producer declares both Q and !Q;
+  selecting the opposite rail does not require a twin cell or another function
+  search. Track producer realization: DOMINO Q/!Q, an already available ordinary
+  signal phase, or an explicit residual NOT. Share
+  an inserted inverter where valid and charge it once. With no residual logic,
+  the preceding DOMINO already provides the needed opposite rail: canonicalize
+  NOT(Q) to !Q, never reject that valid candidate or insert a redundant inverter.
+  A missing opposite-rail entry for a DOMINO producer is an internal model error,
+  not a synthesis infeasibility. Do not reintroduce the older
+  charged internal-twin model for a DOMINO producer's free Q/!Q outputs.</li>
+  <li>For divisor care sets, first establish functional dependence on a common
+  bounded input basis. For a fixed phase assignment, a monotone completion exists
+  only when no required-one point is below a required-zero point. Use monotone
+  closure to construct and check a completion; bound phase/completion search.
+  The exact cover of the chosen completion is not a claim of globally minimum
+  cost across all completions. The 12–16-input analysis cap counts independent
+  logical variables, not duplicate complementary rails. Sixteen logical inputs
+  can expose 32 rail pins; avoid allocating a 2^32 rail truth table. Use signed
+  cubes or a separately bounded care-set representation for these cases and
+  distinguish logical support, rail-pin count and transistor cost in reports.
+  Only the configured logical-support, stack and branch bounds determine
+  technology legality; table/work limits determine search admission.</li>
+  <li>Gate: exhaustive small-function checks, threshold-function stress cases,
+  mixed input phases, constants, unused inputs, and care sets with both valid and
+  contradictory completions. Include XOR admitted with existing dual rails,
+  a free opposite output of a preceding DOMINO, a charged/shared residual NOT,
+  and direct rail reuse with no residual logic and no inserted NOT. Check
+  wide logical support without an exponential expansion in rail-pin count.
+  Include branch-limit boundary cases, a gate above sixteen transistors that is
+  legal under the three configured constraints, and a resource-limited factoring
+  run that reports exhaustion rather than transistor-budget infeasibility.
+  Pin <code>(a OR b) AND (c OR d)</code> at width 2 and stack 2, plus parallel
+  sums crossing the default width-10 limit.</li>
+  </ul>
+</li>
+<li id="e"><strong>E — Select mandatory register endpoints.</strong>
+  <ul>
+  <li>Introduce an endpoint candidate record: root identity, ordered cut leaves,
+  exact function, rail references/availability, selected cover/formula, static/divisor dependencies,
+  cost, legality and work status. Include selected first-phase dependencies in
+  endpoint search, before final phase assignment and freezing.</li>
+  <li>Use the updated search order: an admitted whole cone in one DOMINO; the
+  whole cone in two phases when configured; selective removal into upstream CMOS;
+  then alternative boundaries and targeted resubstitution for failed or expensive
+  candidates. Once a competitive one-cell result passes the sharing-aware cost
+  check, skip the two-phase and boundary-search tiers for that endpoint in the
+  fast path. A competitive two-phase result likewise skips selective removal.
+  Optional improvement work has a separate budget; finding a legal cover does
+  not establish that its input boundary or cost is globally optimal.
+  On oversized cones, apply these attempts to admitted bounded
+  windows and mark them as partial-cone candidates. Success means a legal
+  dual-rail implementation under input/stack/branch and phase limits, not merely
+  ordinary single-polarity unateness. A binate logical function can fit one cell.</li>
+  <li>Give the one-cell attempt cheap support screening and bounded functional
+  simplification/factoring. In two-phase search, try existing divisors, pairs,
+  and bounded synthesis of new shared subfunctions. Start with a bounded
+  exactly-two-cell attempt (one first-phase producer and the endpoint cell),
+  then consider wider parallel decompositions within the same tier budget.
+  This is a search ordering motivated by the reported two-DOMINO coverage,
+  not a limit on the supported topology. Allow multiple parallel
+  phase-1 cells feeding final-phase DominoLatch functions; two phases does not
+  mean two total cells. No residual CMOS may sit between those phases. Reuse
+  factors, divisor tables, failure reasons and legal incumbents between stages
+  rather than restarting search after each failure.</li>
+  <li>Selective removal changes the boundary: compute a chosen subfunction
+  outside the endpoint and replace its internal implementation with a boundary
+  signal. It never deletes behavior or fixes an input value. Evaluate individual
+  and bounded coordinated removals, favoring relief of legality/cost problems
+  while preserving useful shared dependencies inside. Retain several alternatives;
+  shrinking need not monotonically improve unateness, support or total cost.
+  Recompute the exact function on the new boundary, including justified care-set
+  relations, instead of labeling individual XORs or other gates as illegal.
+  Use the failed attempt's limiting input, stack or branch constraint to rank
+  removals; retain candidates that keep reconvergent uses of the same signal
+  together. A failed bounded factorization is search exhaustion, not proof that
+  a different boundary or legal implementation cannot work. Treat the choice
+  as a search over boundaries, not a fixed order of primary inputs: expanding
+  one branch can require expanding another to expose their common input.
+  Cache a removal's result by its complete ordered boundary and graph generation,
+  not merely by the subfunction moved outside.</li>
+  <li>Use shared-input dependence as a search heuristic, not a legality rule.
+  Rank coordinated moves by how much reconvergent support they keep visible,
+  relief of the failed gate constraint, and estimated total cost. Retain a small
+  diverse frontier so a cheap shallow cut does not discard every deeper candidate
+  exposing the same input on multiple branches. Exact function analysis decides
+  whether that visibility actually enables simplification; repeated occurrences
+  alone do not establish a gain. Keep the legal incumbent outside frontier
+  pruning so a later exhausted or unsuccessful search cannot lose it.</li>
+  <li>Implement removal as a bounded frontier of candidate boundaries, starting
+  from the admitted cone. Expand only a limited number of promising candidates
+  per round; retain distinct reconvergent and asymmetric alternatives alongside
+  the cheapest incumbent. Re-evaluate support, factoring, legality and total
+  affected cost after each change. A move that cuts one occurrence of a shared
+  subfunction must account for its other occurrences and consumers. Preserve
+  correlated boundary signals through an explicit care relation when using that
+  relation for simplification; otherwise evaluate them as independent inputs.
+  Feed priority-cut and growth candidates into the same evaluator and frontier,
+  rather than maintaining a second selection policy.</li>
+  <li>Use top-down removal and bottom-up cut growth as complementary ways to
+  propose boundaries for the same exact-function evaluator. A removal candidate
+  must form a valid graph cut: replace all internal occurrences of the selected
+  subfunction consistently and retain dependencies needed by other consumers.
+  Choosing which primary input to pursue first is a heuristic, not a permanent
+  ordering or a substitute for coordinated expansion/removal at reconvergence.
+  Include both wider boundaries and asymmetric deeper boundaries in the bounded
+  frontier: expand a promising reconvergent branch while leaving unrelated
+  branches at intermediate signals. Evaluate coordinated moves even when no
+  single intermediate move improves cost; charge their search work, and commit
+  only the resulting legal candidate after the shared-cost check. Do not limit
+  coordinated proposals to pairs: three or more reconvergent branches can expose
+  a small common support even when every proper subset exceeds the analysis
+  input limit. Propose a bounded number of structurally related groups rather
+  than enumerating all subsets. Normalize the resulting boundary before testing
+  its support; never build an over-limit truth table for an intermediate move.</li>
+  <li>Make shared-input visibility an explicit boundary-search objective. For
+  <code>x = a OR b</code>, <code>y = a OR c</code> and
+  <code>F = x AND y</code>, the boundary <code>{x, y}</code> hides the common
+  input; expanding both branches to <code>{a, b, c}</code> exposes
+  <code>F = a OR (b AND c)</code>. Try this coordinated expansion even when
+  expanding either branch alone is unattractive. Conversely, selective removal
+  should compare moving an unrelated expensive subcone outside while keeping
+  both shared-input branches inside. Compare the complete implementations:
+  smaller boundary cardinality alone is not a sufficient ranking, and surviving
+  external readers of <code>x</code> or <code>y</code> prevent deletion credit.</li>
+  <li>Score the whole affected implementation, including residual logic and
+  external consumers. Whole-cone absorption is not necessarily cheapest when
+  shared logic must remain elsewhere. A legal whole-cone result can stop the fast
+  search after a cheap sharing-aware cost check; additional improvement has its
+  own finite budget. Preserve the best legal incumbent on exhaustion. Keep the
+  mandatory endpoint DominoLatch even when little logic is absorbed into it.
+  Treat Boolean decomposition depth and DOMINO clock-phase assignment as separate
+  concepts until each dependency has a Static or Domino implementation and a
+  clock-phase assignment. Do not impose a total gate-count cap on a cone.</li>
+  <li>For proposed divisors D, enumerate their image over the common window and
+  reject any image value associated with both F=0 and F=1. Admit only topologically
+  available divisors; no endpoint output or transitive fanout may feed itself.
+  Preserve the relation that justifies unreachable top-input combinations.</li>
+  <li>Keep endpoint selection distinct from state realization: the selected
+  function feeds the original register in CMOS output, while a future physical
+  DominoLatch combines that function and storage. Constant and identity endpoint
+  functions must not delete or duplicate the source state through the old
+  aliases/constants accounting. Include a one-input identity DominoLatch after
+  the upstream residual function as the minimal absorption case, subject to the
+  same technology legality. Never substitute an ordinary register in DOMINO output.</li>
+  <li>Gate: every eligible endpoint has a legal selected implementation or an
+  explicit refusal. Include whole-cone one-cell, exactly-two-cell and wider
+  parallel two-phase successes as distinct cases,
+  a dual-rail binate endpoint, a reusable-divisor win, an invalid dependence pair,
+  selective removal preserving shared-input simplification, and budget exhaustion
+  with a previously valid candidate. Include the paired-OR example above with
+  and without external readers, and a cone where retaining its shared branches
+  requires cutting a different subcone. Exercise a boundary change that loses a
+  simplification; smaller regions must not be assumed automatically better.
+  Check that removal preserves the original function by composing the endpoint
+  with the subfunctions moved into upstream CMOS; checking only the new endpoint
+  truth table would miss a broken boundary substitution.</li>
+  </ul>
+</li>
+<li id="f"><strong>F — Add target-cost local resubstitution.</strong>
+  <ul>
+  <li>Build bounded reconvergent windows only for poor endpoints. Define “poor”
+  deterministically: no legal candidate, or a positive conservative gain estimate
+  over the current candidate. Collect divisors once per window and enumerate a
+  bounded solution forest, trying existing divisors before synthesizing new ones.
+  Reuse E's admitted windows and search evidence where valid; do not rerun the
+  whole-cone attempts for every local candidate.</li>
+  <li>Use one cost ledger for the old and new mixed network. Credit only nodes
+  whose final external reference disappears; shared live divisors cost zero to
+  reuse but never earn removal credit. Include newly required static logic,
+  DOMINO functions, integrated storage and explicit residual inverters. A
+  previous DOMINO's Q/!Q costs no extra cell; a NOT needed from an ordinary
+  producer has a real cost. Keep this DOMINO estimate separate from the CMOS
+  target's actual ABC mapping, where library cells determine inversion cost.</li>
+  <li>Use the complete window's exact truth tables to establish the replacement
+  function as part of candidate construction, then commit it atomically. This
+  is bounded Boolean synthesis, not a call to LEC or a separate proof stage.
+  Recompute affected fanouts, functions, cuts, eligibility and costs. Reject
+  cycles and stale candidates. Accept a move that establishes required legality,
+  otherwise require strictly lower cost; use stable ties and bounded sweeps.</li>
+  <li>Gate: a target-cost improvement that would be missed by XAG node count,
+  a shared divisor that earns no removal credit, a cycle-forming candidate, and
+  rollback after failed validation or resource admission.</li>
+  </ul>
+</li>
+<li id="g"><strong>G — Optimize shared logic for exactly two endpoints.</strong>
+  <ul>
+  <li>Propagate bounded endpoint reachability labels through the combinational
+  graph, saturating at “more than two.” Select shared nodes reaching exactly two
+  eligible register roots in the same admitted region/domain. Other consumers
+  remain protected even when they are not register roots.</li>
+  <li>Build a maximum-fanout-free window with explicit external outputs. Apply a
+  cheap conservative gain screen, then bounded joint node and edge resubstitution.
+  Each endpoint cut stays within its support cap; the union of two cuts is not
+  automatically a 16-input window. Cap the joint independent-input basis as well,
+  or skip the pair with a reason.</li>
+  <li>Validate both functions in the same snapshot, require both endpoints legal,
+  and require strict total cost reduction. Commit the pair and reference-count
+  changes together. Requeue only affected candidates under a finite work budget.</li>
+  <li>Gate: a fixture where neither single-root rewrite wins but the joint rewrite
+  does, plus third-reader protection, a greater-than-two-root skip, overlapping
+  windows, and a joint support/budget limit. No global choice network or MILP.</li>
+  </ul>
+</li>
+<li id="m"><strong>M — Optimize non-DOMINO residual XAG logic and reconsider affected endpoints.</strong>
+  <ul>
+  <li>After initial endpoint/local/shared selection, optimize the remaining
+  combinational XAG as one shared multiple-output network per admitted region.
+  Its protected outputs include selected DOMINO inputs, primary outputs and
+  inputs to special-state barriers. Preserve these boundary functions and all
+  sequential semantics. Apply this to both DOMINO and permanent CMOS targets;
+  skip the round when no residual logic remains. Keep cheap hashing, folding
+  and dead-logic removal available throughout synthesis. Derive this network
+  from live consumers after tentative endpoint selection: logic absorbed into
+  one endpoint remains residual if another output or boundary still needs it.
+  Optimize such shared logic once, rather than independently per endpoint.</li>
+  <li>V1 sequence: cleanup; one four-input rewriting sweep using precomputed
+  equivalent AND/XOR structures and existing-node reuse; bounded truth-table
+  resubstitution; cleanup. Initial residual resubstitution settings are up to
+  eight window inputs, approximately 32 divisors and at most two inserted nodes
+  per replacement. These budgets are separate from the larger endpoint-analysis
+  limit. Prioritize logic supplying DOMINO inputs. Cap visits and candidate work;
+  these are adjustable search budgets, not technology constraints.</li>
+  <li>Schedule residual work from the selected cover's live dependencies, before
+  expanding selected functions for CMOS output. A completely absorbed cone needs
+  no generic optimization of its absorbed internals, but shared consumers and
+  unrelated primary-output logic may still require a residual round. Use the
+  resulting changed-node set to admit feedback; do not rerun endpoint selection
+  for every register merely because some residual logic changed.</li>
+  <li>Build and reuse the small rewrite alternatives independently of individual
+  endpoint searches. Match input permutations and complemented edges, then score
+  the replacement in its actual shared network. In resubstitution, admit only
+  topologically available divisors outside the replaced node's transitive fanout;
+  reject cyclic replacements before constructing them. Charge inserted nodes
+  and credit deleted nodes after accounting for every protected reader.</li>
+  <li>Keep the roles of these optimizations explicit. Four-input rewriting
+  replaces a small function with a cheaper equivalent structure; resubstitution
+  reconstructs it using available shared divisors and a bounded amount of new
+  logic. Endpoint boundary search decides which larger function to absorb and
+  exposes repeated-input factoring opportunities. It complements these passes;
+  priority cuts alone do not provide a general algebraic extraction pass, and
+  V1 does not add a separate ABC <code>fx</code>-style extraction stage.</li>
+  <li>Keep per-function factoring distinct from network optimization. The
+  espresso-like signed-cover simplification and series/parallel factoring in D
+  optimize an admitted cell function. Residual rewriting and resubstitution
+  optimize the shared graph outside those cells, including reuse across several
+  endpoint inputs. A smaller cover for one cell is not evidence that the residual
+  graph has been optimized. Dedicated residual refactoring is deferred; its
+  absence must not be hidden by calling the cell factorer a general refactor pass.</li>
+  <li>Keep selected endpoint inputs as protected functional outputs during each
+  residual rewrite, but do not make their current structural cuts permanent.
+  Simplifying their implementations can reveal shared divisors, remove support
+  or free gate capacity when endpoint search revisits them. Carry changed-node
+  and boundary-consumer information into the single feedback round, including
+  consumers reached through shared residual logic. Run expensive synthesis after
+  initial selection; do not pay for a full generic pre-optimization pass on cones
+  that the endpoint function optimizer can already absorb. Here “residual” means
+  logic outside the selected cells, including unate logic that was not absorbed;
+  it is not a classification of individual gates as unate or non-unate. The
+  generic-CMOS target uses the same selected-function/residual distinction even
+  though all selected functions are later expanded into CMOS. Residual
+  optimization therefore operates on the shared XAG and its protected outputs
+  before that expansion; expanding selected functions must not cause the same
+  generic recipe to run over their internals again.</li>
+  <li>Keep the initial preprocessing inexpensive: structural hashing, constants
+  and dead-logic cleanup, plus any independently user-enabled
+  <code>fraig_sweep</code>-like cleanup. Do not schedule the residual rewrite or
+  resubstitution recipe over every cone before selection. The single feedback
+  round is the V1 mechanism for obtaining better endpoint inputs from generic
+  optimization without repeatedly optimizing logic that will be absorbed.</li>
+  <li>Use nonzero configurable static-CMOS weights for AND and XOR, with exact
+  reference accounting for nodes actually removed. Accept positive estimated
+  area gains subject to a configured depth guard; do not treat XOR as free or
+  claim this proxy predicts final library area. Use bounded exact functions for
+  construction and checking, with no solver/LEC or ABC optimization invocation.</li>
+  <li>Recompute affected cuts, dependencies and shared costs, and reconsider only
+  affected endpoints in one bounded feedback round before H freezes the result.
+  Preserve or restore the incumbent if the total mixed-network estimate worsens
+  or legality fails. Invalidate stale window/table data on graph mutation. Do not
+  iterate residual optimization and endpoint selection to convergence in V1.
+  Track structural changes as well as changed support: an equivalent rewrite
+  preserves the boundary's truth function but may expose a better endpoint cut.
+  Rebuild the residual live set after accepting endpoint changes and perform
+  final cleanup without starting another rewrite/resubstitution round. A
+  replacement may merge protected outputs or replace one with a constant or a
+  complemented signal; retain an explicit output-to-signal correspondence so
+  every endpoint, primary output and special-state consumer is rebound correctly.
+  Preserve the old legal selection until the replacement and feedback result
+  have passed the same shared-cost and legality checks.</li>
+  <li>Implement natively in USYN; mockturtle supplies algorithm inspiration only,
+  with no code links, library dependency or sibling-checkout build inputs.
+  Later, separately measured additions may refactor selected six- to eight-input
+  cones using bi-decomposition and SOP factoring while retaining XOR alternatives,
+  or balance long AND/XOR trees without estimated area growth and with sharing
+  accounted for. Defer zero-gain rewrites and repeated generic recipes.</li>
+  <li>Measure the residual round separately from endpoint selection: record live
+  residual AND/XOR counts and estimated shared cost before and after cleanup,
+  rewriting and resubstitution, work spent by each stage, and the additional
+  gain or rollback from endpoint feedback. Report completely skipped residual
+  rounds separately from attempted rounds with no accepted replacement. Compare
+  initial selection, selection plus residual optimization, and selection plus
+  residual optimization plus feedback on the same inputs and search settings.
+  Use these measurements to decide whether later refactoring or balancing earns
+  its runtime; do not infer their value solely from absorption coverage.</li>
+  <li>Gate: known residual rewrite/resubstitution wins, shared and third-reader
+  protection, preserved boundary functions, XOR cost, depth rejection, zero-residual
+  skip, bounded work, and one feedback round improving an affected endpoint.
+  Include an equivalent residual rewrite that exposes a better cut without
+  changing the boundary truth function, and a shared node absorbed by one
+  endpoint but retained for another reader. Include output-only CMOS logic and
+  rollback to a valid incumbent.</li>
+  </ul>
+</li>
+<li id="h"><strong>H — Freeze endpoints and emit the typed abstract netlist.</strong>
+  <ul>
+  <li>Introduce an ABC-independent representation (proposed
+  <code>pass/usyn/endpoint_netlist.{hpp,cpp}</code>) with Static, Domino and
+  DominoLatch kinds. Carry stable state identity, ordered rail inputs and
+  polarity-to-producer correspondence (including both phases of one signal), exact
+  function or canonical function reference, selected cover/formula,
+  technology-policy version, explicit DOMINO clock-phase assignment, legality and
+  cost. Store full clock/reset/init
+  semantics for state nodes. A DominoLatch candidate refers to the source state;
+  it does not add a second latch alongside the original register. Retain the
+  source register's name for the DominoLatch wherever possible, preserving
+  existing hierarchy, bit and stage naming conventions. Stable collision
+  disambiguation must retain source correspondence rather than replace names
+  with search-order IDs. The CMOS path likewise retains original register names.</li>
+  <li>Declare two output ports, Q and !Q, on every Domino and DominoLatch node.
+  Their functions are exact complements. DominoLatch holds one state bit with
+  two complementary views, not two independent state variables. Preserve both
+  port identities through serialization and future cell/Liberty emission even
+  when only one is used. CMOS expansion exposes the corresponding logical
+  signals; ABC may realize or absorb their inversions during whole-network tmap.</li>
+  <li>After E/F/G and M's single residual/endpoint feedback round, finalize and
+  freeze endpoint functions, selected dependencies and their phase assignments.
+  One-phase mode places the endpoint DominoLatch on the selected phase. Two-phase
+  mode includes the first-phase logic selected during endpoint/dependency search,
+  feeding endpoints on the second phase. Any optional first-phase extraction
+  must be costed and validated before freezing. Allow any number of
+  parallel cells in either phase and unrestricted phase-1-to-phase-2 fanout.
+  In both modes, all residual CMOS logic sits before the first clock phase;
+  do not insert residual CMOS between the DOMINO phases or after the endpoint
+  before an ordinary register. DOMINO output always replaces the original
+  eligible register; CMOS output retains it as already specified.</li>
+  <li>Validate the assigned clock-phase dependency graph, including endpoint
+  decomposition dependencies, rather than cap the number of cells in an endpoint
+  cone. Static logic cannot erase a phase dependency or justify an extra phase.
+  Do not derive clock phases from XAG depth or the old “pure domino chain” metric.
+  Implement the selected one/two-phase structure directly; no separate same-phase
+  cascading extension is part of this task.
+  Keep routing, fanout timing and detailed waveform validation in the later
+  physical flow; no routing-based fanout cutoff is added to this search.</li>
+  <li>Give the abstract result a versioned serializable artifact and a behavioral
+  expansion. Keep input permutations, complementary-rail relations and phase maps exact; unrestricted canonical
+  NPN search at 16 variables is not required. Reconstruct and independently check
+  the function of every selected formula and every endpoint.</li>
+  <li>Gate: artifact round trip, stable state names/correspondence, strict
+  one/two-clock-phase checking on reconvergent and shared paths, and independent
+  small-fixture functional tests of the behavioral expansion. Assert that CMOS expansion retains the original
+  register identities and no extra state; the future DOMINO realization must
+  replace each converted register rather than retain a register after the cell.
+  Test Q/!Q complementarity on both node kinds, mixed-polarity fanouts, one unused
+  rail and zero added cells/state for choosing the opposite DOMINO output.
+  Include many parallel cells, one first-phase cell feeding many second-phase
+  cells, and a candidate requiring a third phase that must not be selected.
+  Check both configurations with large upstream residual logic, minimal endpoint
+  absorption, no inter-phase CMOS and no retained ordinary endpoint register
+  in the DOMINO realization.</li>
+  </ul>
+</li>
+<li id="i"><strong>I — Add optional ABC technology mapping of the logical result.</strong>
+  <ul>
+  <li>Retain the typed logical netlist as USYN's standalone result. The first
+  mapped output is the permanent plain-CMOS target: hand all selected logic,
+  including proposed DOMINO functions and residual CMOS, to the optional ABC/TMAP
+  provider. Keep the original registers, with their names, clock/reset/enable/init
+  semantics and stage correspondence; do not emit physical DOMINO cells or add
+  latches. Ordinary technology mapping may realize those registers as equivalent
+  library DFFs using the existing read-back path.</li>
+  <li>Keep CMOS output available after the future DOMINO backend lands. In that
+  future backend, a converted endpoint register is removed and its state lives
+  in the DominoLatch cell. Record target mode in emitted artifacts and reports
+  so a CMOS mapping cannot be mistaken for a physical DOMINO realization.</li>
+  <li>A wide abstract function can be lowered into a small-fanin network for
+  that adapter. Keep the shared <code>Lnet</code> at eight fanins unless another
+  consumer has a demonstrated requirement to widen it. Avoid making every
+  ordinary blasted node carry a 16-variable table.</li>
+  <li>Technology-map the whole USYN-selected network together in the CMOS target,
+  without splitting proposed DOMINO functions from residual CMOS. ABC may choose
+  mapping cuts across those proposed function boundaries. Preserve the authoritative
+  USYN artifact and source-state correspondence separately; proposed DOMINO gates
+  need not survive in the mapped CMOS result. Reuse the existing whole-rewrite
+  <code>strash; &amp;get; &amp;nf</code> machinery through the optional provider,
+  without adding a generic ABC optimization flow or per-gate mapping calls.</li>
+  <li>The future DOMINO target has a different handoff: USYN has already mapped
+  the DOMINO cells, so they are excluded from tmap. Preserve their instances and
+  port identities, technology-map only the residual CMOS across explicit ports,
+  and stitch it back to those cells. This future protected boundary requirement
+  must not constrain whole-network mapping in the permanent CMOS target.</li>
+  <li>Extend the rewrite/backend/read-back seam for typed artifacts and source
+  correspondence. Preserve function, pin order, both Q/!Q output ports, input
+  phases and SP description
+  for future per-gate Liberty generation and external cell characterization.
+  Physical integrated state-cell mapping is deferred; <code>Cell_netlist</code>'s
+  ordinary latches suffice only for the current functional expansion.</li>
+  <li>Gate: the existing ABC mapper remains valid; the new adapter preserves
+  source boundaries, state naming and initialization. Test the expansion and
+  CMOS mapped result for expected behavior, unchanged register count and latency.
+  No USYN success condition depends on an LEC verdict. Include a fixture whose proposed DOMINO boundary ABC can map across;
+  assert equivalent behavior rather than preserved gate counts. The same logical synthesis succeeds
+  when this provider is absent. A later physical provider needs its own
+  clocking/model/Liberty acceptance gate.</li>
+  </ul>
+</li>
+<li id="j"><strong>J — Migrate options, reports, cache and documentation.</strong>
+  <ul>
+  <li>Update <code>pass_usyn.cpp</code>, CLI metadata/options and consumers in
+  <code>lhd</code>. Separate window support, gate logical-input/stack/parallel-branch
+  limits and configurable <code>clock_phases=1|2</code> (proposed option spelling).
+  Remove the old maximum-literals/transistor legality option;
+  give it an explicit migration diagnostic rather than reinterpret its value.
+  Remove
+  or explicitly reject obsolete cover objectives and incompatible whole-network
+  optimization options after the replacement path passes its acceptance gates.</li>
+  <li>Version the USYN recipe and evidence schema. Include eligibility, rail and
+  cost policies, limits, search budgets, clock-phase mode, synthesis target, output mode and technology
+  data in logical cache identity. Include boundary-search order, residual pass
+  settings, static AND/XOR weights, depth guard and feedback budget. Store the
+  logical artifact independently of mapping; the optional tmap cache adds its
+  provider code salt, library and mapping
+  settings. Editing/removing ABC must not invalidate or prevent logical USYN
+  reuse. Both caches follow the existing single <code>lhd.incremental</code> switch;
+  missing/corrupt/incompatible artifacts force regeneration at their own stage.</li>
+  <li>A CMOS cache hit must not bypass DOMINO target validation. Validate the
+  target contract before result reuse and preserve source attribution for errors
+  on loaded graphs as well as freshly compiled sources.</li>
+  <li>Report endpoint totals and exclusions, cells by clock phase, one/two-phase
+  endpoint counts, cross-phase connectivity, support
+  histograms, cost before/after, local/pair attempts and wins, static residual
+  cost, search-limit reasons, runtime and peak memory. Report whole-cone versus
+  bounded-window admission, one-cell/two-phase attempts and successes, selective
+  removals, candidate source, and per-stage work/time. Separate full-cone coverage
+  from partial absorption and report denominators and cumulative phase coverage.
+  Include residual rewrite/resubstitution gains and endpoint feedback outcomes.
+  Record exactly-two-cell coverage separately from arbitrary-width two-phase
+  coverage. For each search tier, distinguish candidates found from candidates
+  actually selected after sharing costs, and successful work from unsuccessful
+  work. Record estimated mixed-network cost after initial selection, after
+  residual optimization, and after feedback so their benefits are separable.
+  Separate estimated
+  transistor cost, static mapped QoR and physical validation. Do not add an
+  LEC verdict or proof status to the USYN result/cache protocol.
+  Warm-cache reports must retain endpoint decisions, not only mapped cells.</li>
+  <li>Preserve provenance and serial resource admission. Do not restart an
+  expensive full-ABC fallback after a process-memory refusal. A deliberately
+  selected CMOS residual implementation differs from abandoning the entire
+  endpoint algorithm after exhaustion.</li>
+  <li>Update <code>pass/usyn/README.md</code> and reconcile overlapping items in
+  <a href="synth-unate.html">synth-unate</a> and <a href="domino.html">domino</a>.
+  Retain unrelated pending work in those pages. Their old coverage percentages,
+  depth objectives and twin-rail policy are not acceptance thresholds for v4.</li>
+  <li>Gate: cold/warm/changed-policy/corrupt-artifact tests, complete report replay,
+  option diagnostics and provenance checks. Measure the second warm run after a
+  rebuild, without rebuilding inside the measurement sweep.</li>
+  </ul>
+</li>
+<li id="k"><strong>K — Validate correctness, bounded work and measured benefit.</strong>
+  <ul>
+  <li>Keep algorithm checks small and independent of the implementation: explicit
+  truth-table oracles, exhaustive small functions, independently evaluated SP
+  formulas, and known counterexamples to dependence/monotonic completion. Cover
+  care-set assumptions by checking the composed original-input function, not by
+  treating dependent divisor ports as arbitrary independent inputs.</li>
+  <li>Add integrated fixtures for plain pipeline state, synchronous reset/enable,
+  supported initialization, classified asynchronous/gated state, paired CMOS
+  acceptance and source-located DOMINO rejection for negative edges/non-ICG latches,
+  multiple clocks, memory/black-box barriers, shared endpoint logic, output-only
+  designs and hierarchy. Existing contract-named files remain immutable.</li>
+  <li>Test preservation of register/DominoLatch names across bit expansion,
+  hierarchy, multi-stage state, duplicate-name disambiguation and cache reuse.
+  LEC remains external to this task: do not add solver calls, proof budgets,
+  publication gates or LEC engine work to USYN. Existing independent regression
+  harnesses may continue to invoke <code>lhd lec</code>; that is not part of the
+  synthesis algorithm or its result contract. Keep correctness tests focused on
+  exact bounded functions and source-state semantics.</li>
+  <li>Run focused tests in opt and dbg, keeping each below 20/60 seconds. New
+  <code>foo_test.cpp</code> files require a matching implementation; standalone
+  integration checks use smoke names. Default tests require no external event
+  simulators or Ninja; optional simulator legs follow <code>LHD_EXTERNAL_SIM</code>.</li>
+  <li>Evaluate area/reuse estimates, absorbed endpoint logic, optional first-phase
+  coverage and bounded work against the current USYN baseline and ABC on the same
+  inputs and settings. Compare priority-only selection with whole-cone-first
+  selection and selective removal, and measure residual optimization separately.
+  Record per-stage success, runtime, memory and final estimated/mapped cost;
+  coverage alone is not a quality result. Separately measure the incremental
+  benefit of residual optimization with endpoint feedback disabled and enabled,
+  so cheaper residual logic and better endpoint boundaries are distinguishable.
+  Use three comparable configurations: endpoint selection alone, selection plus
+  the residual round, and selection plus residual optimization and one feedback
+  round. Keep endpoint settings, cost weights and overall resource caps fixed;
+  record actual work as well as final cost to expose the feedback overhead.
+  Include focused scheduling checks: a competitive one-cell result skips the
+  expensive tiers; a competitive exactly-two-cell result skips wider
+  decompositions; disabled two-phase mode performs no two-phase search; and a
+  failed two-phase attempt leaves the reserved removal budget available. Check
+  that successful bounded-window candidates are recorded as partial-cone
+  absorption, never as whole-cone fast-path successes. Check
+  that complete absorption skips residual work only when no external reader
+  still needs that logic. Use work counters rather than wall-clock thresholds
+  for these deterministic checks.
+  Include a fully absorbed endpoint alongside an unrelated output-only residual
+  cone: skipping work for the former must not skip optimization of the latter.
+  Check that the single feedback round can improve a previously accepted
+  whole-cone endpoint when a shared dependency changes; fast-path acceptance
+  skips initial search tiers, but does not freeze an endpoint before feedback.
+  Compare bounded top-down removal, priority/growth-only boundaries, and their
+  combination under the same total work and memory caps. Include asymmetric
+  boundaries and coordinated moves that expose a repeated input only after
+  expanding two branches, plus a three-or-more-branch case where no proper
+  subset fits the analysis support limit. Include a removal that loses a useful
+  cancellation, so smaller support is not mistaken for guaranteed improvement.
+  Record both the selected cost and failed-search work;
+  merely finding more candidate cuts is not an optimization win.
+  Keep large experiments in benchmark
+  repositories, with no LiveHD script/BUILD dependency on sibling checkouts. Serialize synthesis
+  process trees and monitor memory.</li>
+  <li>Gate: the new behavior is correct on the focused suite, resource limits have
+  explicit outcomes, and measured wins/failures are reported without inventing
+  a QoR threshold before a baseline exists. Physical timing claims require the
+  separate physical backend and timing contract.</li>
+  </ul>
+</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
+<li id="l"><strong>L — Make USYN independently buildable and runnable without ABC.</strong>
+  <span class="status landed">landed</span>
+  <ul>
+  <li>The public pass owns its native options and calls shared private-copy
+  preparation, partitioning, logical selection and emission directly. It has no
+  <code>Pass_abc</code> or ABC mapping-options dependency. Public and legacy utility
+  tests no longer link ABC. The USYN salt includes shared synthesis sources,
+  independently of the optional ABC provider.</li>
+  <li>The complete logical CMOS result preserves original register semantics and
+  names and needs no Liberty, DFF pick or OpenTimer. Reports distinguish logical
+  selection from mapped QoR; explicit STA on logical-only output is rejected.</li>
+  <li>The ABC-free <code>pass/synth/tmap.hpp</code> capability accepts the complete
+  selected logical design and returns owned mapped output with validated port
+  correspondence. Its optional ABC provider stays under <code>pass/abc</code> and
+  performs mapping only. An unavailable tmap request produces a directed error.</li>
+  <li><code>bazel build --define=livehd_abc=false //lhd</code> builds the real CLI
+  without the ABC mapper/provider, ABC-backed Liberty model generation, or Yosys
+  integration. Native Slang/Pyrope and CVC5 remain available. The optional LEC
+  cone accelerator returns Unsupported and leaves every obligation with CVC5;
+  its independent digest code is unchanged. The default build retains ABC.</li>
+  <li><a href="../../scripts/check_usyn_noabc.py">check_usyn_noabc.py</a> copies
+  current sources to a disposable directory, removes <code>pass/abc</code>, ABC's
+  package files and repository declaration, audits the configured dependency
+  closure (including source salts), then builds and runs the actual CLI.
+  This opt gate passed on 2026-09-27. The user's checkout was not stripped of ABC.</li>
+  <li><code>lhd_usyn_noabc_smoke</code> checks stateful logical output without
+  Liberty, register count/name, no implicit SATOPT, standalone USYN, unavailable
+  tmap, and independent CVC5 proof/refutation. It passes in opt/debug (1.0/7.2 s);
+  the clean removed-package fixture test passes in 1.2 s. The unavailable-cone
+  test and six USYN utility targets also pass in both modes. Normal ABC-enabled
+  cone/query, optional-tmap, USYN smoke, options and SATOPT regressions also pass
+  in opt/debug; this does not claim the full synthesis suite has passed.</li>
+  </ul>
+</li>
+</ul>
+
+<h3>Partial implementation</h3>
+<ul>
+<li><strong>B source-state metadata:</strong>
+<a href="../../pass/synth/source_state.hpp">source_state</a> snapshots source/control
+identities, spans, effective width and whether width was known, pipeline stages,
+reset/enable/init semantics and structural memory/ICG barriers. Every source
+register remains classified even if the current mapper keeps it native. Crossed
+bits carry source bit/stage correspondence and semantic Q/D references that undo
+QN-only D encoding. <code>Region_ctx</code> exposes this owned snapshot to hooks
+without graph access while the graph lock is released. The shared
+<a href="../../pass/synth/clock_gates.hpp">clock-gate recognizer</a> is independent
+of Liberty and mapping choices; a missing ICG cell cannot erase classification.
+A callable whole-design validator checks reachable source definitions before
+partitioning and emits source-located DOMINO-only clock/latch errors.
+The blaster's <code>logical_state</code> mode now crosses ordinary registers
+independently of Liberty, <code>map_register</code> and QN choices. Nonconstant
+clock, asynchronous-reset and initialization functions remain protected output
+indices; constant values retain unknown bits. Native ICG/memory/opaque structures
+remain barriers. Admission checks bound state expansion before allocation.
+The public CMOS entry uses logical translation. Wiring whole-design DOMINO
+validation into a public DOMINO target remains pending.</li>
+<li><strong>L shared infrastructure:</strong> <code>pass/formal:formal</code>
+now depends on the separate <code>pass/lec:lec_encode</code> library and shared
+property types, without the relational/ABC query engine. Dependency queries
+show no path from <code>//pass/synth</code> to ABC. The new
+<a href="../../pass/synth/design_prepare.hpp">private design preparation</a>
+service owns the copied definition/opaque-interface closure, preserves root
+ordering and prepares compact loops; both ABC and the native USYN driver call it.
+Optional-provider injection and the ABC-free public CLI configuration are
+implemented. Native USYN now supplies optional shared preparation admission:
+source nodes are counted once per copied definition, ports/pins/edges and
+traversal are charged before copies, and zero-work checkpoints force process/time
+samples around bulk copies, opaque cloning and loop operations. Refusal stays
+sticky and destroys the private result, including at the final completion check.
+Unexpanded compact loops skip the no-op cleanup traversal. Native USYN also
+supplies partition admission during definition ordering, collection, naming and
+reconstruction, with immediate checks around builder callbacks and commits.
+Refusal stops further construction and the native driver discards its private
+output, including refusal at partition completion. Internal flattening now
+charges each instance and its connectivity; forward and producer signature
+walks charge node/pin/edge visits. Individual HHDS/helper allocation bounds and
+admission within bulk operations remain pending; these checks are not a strict
+peak-byte bound.</li>
+<li><strong>C/L foundation:</strong> <code>//pass/usyn:usyn_logic</code> contains
+the ABC-independent <a href="../../pass/usyn/xag.hpp">XAG</a>, structural
+hashing with retained XORs, whole-cone collection, reconvergence-driven bounded
+growth and exact window simulation through 16 inputs. Simulation uses one
+64-bit value per window node per batch, not a full truth table per graph node.
+The public CMOS entry uses this pipeline; broader priority alternatives remain pending.</li>
+<li><strong>D foundation:</strong> <a href="../../pass/usyn/function.hpp">function analysis</a>
+implements exact support/polarity and minimal-true-point analysis, bounded signed
+cover/SP candidates, physical stack/branch metrics without transistor ceilings,
+exact divisor-image dependence, and exact monotone completion for a specified
+phase mask. Mixed-polarity factoring is heuristic; no global optimality claim.
+Signed covers now receive bounded redundant-cube removal before factoring;
+refusal retains the valid original cover and reserves work for factoring.
+Bounded care completion is integrated for newly generated divisor-code images
+and existing structural cut boundaries. Single/pair non-cut divisor sets now
+use the same evaluator. Larger divisor combinations and
+integration with joint endpoint costs remain pending.</li>
+<li><strong>E foundation:</strong> <a href="../../pass/usyn/endpoint.hpp">endpoint search</a>
+tries whole-cone one-cell implementations, functional/existing-divisor parallel two-phase
+implementations and bounded selective removal. It preserves a named mandatory
+identity endpoint as the minimal case, retains shared-reader costs and charges
+explicit static inversions separately from free DOMINO rails. Candidate and tier
+budgets preserve work for later search, with bounded boundary/cache memory and
+exact function/phase validation. The public CMOS entry uses this search.
+<a href="../../pass/usyn/decomposition.hpp">New divisor generation</a> groups
+assignments to one bound-variable set by their cofactors over the remaining
+inputs. Binary class codes supply one or more parallel first-phase functions;
+every proposed gate must meet the configured constraints, and the composition
+is checked against the original endpoint function before cost selection.
+<code>divisor_partitions=32</code> bounds partition candidates (0 disables,
+maximum 4096), with separate work reservations and explicit exhaustion reporting.
+Partition discovery uses deterministic mask order and one encoding. Functional
+search realizes single-divisor candidates first and defers wider candidates,
+retaining their already computed tables and care relations. Discovery and
+single-divisor realization use at most half the functional tier's remaining
+work; the rest remains available to queued parallel candidates. A competitive
+two-cell fast result skips their factoring. The original per-candidate work cap
+covers both generation and deferred realization. Existing-divisor two-cell
+candidates run before the queued wider functional candidates, followed by an
+unrestricted structural sweep. All four stages share the two-phase work cap,
+with work reserved for selective removal. Care-based candidates are limited by
+their surviving producers after completion/support reduction, not raw boundary
+size. The deferred queue uses at most half the boundary-memory allowance;
+concurrent boundary enumeration uses its unoccupied remainder. The queue is
+released before unrestricted structural trials. Storage refusal retains the
+incumbent; the two-cell stage is search ordering, not a topology limit. Reports separate single/parallel realization attempts
+and peak deferred bytes. The version-8 selection-cache envelope preserves these
+counters and both ranking rounds; the standalone region-artifact version is unchanged. The decomposition records
+the reachable divisor-code image, tries zero fill first, then compares one fill
+and least/greatest signed-monotone completions under bounded input-polarity
+search. <code>care_phases=16</code> controls those trials (0 disables, maximum
+64); it is unrelated to the clock-phase count. Every completed top gate is
+validated by composition on the original independent basis and scored with
+the complete mixed network. Separate work reservations retain legal incumbents.
+Exact tables and gate results share a bounded cache
+keyed by root and ordered leaves for one immutable endpoint search. Factoring
+refusal retains the table without suppressing a later gate attempt. Functional
+single-divisor search precedes boundary enumeration; a competitive two-cell
+full-cone result with no outside sharing skips boundary work entirely. Wider
+functional candidates wait for the existing-divisor two-cell pass. Functional and
+structural attempts share the two-phase cap, with work reserved for selective
+removal. The outside-sharing scan is charged once to admission and reused for
+later fast-path decisions. Reports include search table builds/hits, retained cache bytes and
+boundary work; standalone composition validation still computes its own
+reference. Feedback starts a new search after graph mutation. Boundary search
+now retains a bounded frontier ranked by exact legal single-endpoint plus
+residual cost and bounded multi-cell realizations, with alternate reconvergence
+and asymmetric-depth priorities. Full and mixed two-cell ranking prices the
+producer, endpoint and remaining static inputs before pruning; wider realizations
+still wait for the two-cell search. A second round then ranks wider full and
+mixed structural realizations, unless fast acceptance has already completed
+the endpoint. Each round's joint work is a reported subset of boundary work and
+consumes at most one eighth of the shared phase-search cap.
+The admitted window and an unexpanded root seed remain anchors. Later cuts can
+replace earlier ones; legal improvements remain incumbents independently of
+frontier pruning. Each direction admits at most four times the retained-boundary
+limit in the original round, then twice that limit in the wider round, plus one
+root-seed trial per round. The two rounds share the boundary-tier work cap and
+phase-ranking cap; the original frontier is released before the second is
+admitted. Contraction retains its half-work reservation. Duplicate and failed moves
+count, and frontier/history/active-expansion payloads share the boundary-memory
+allowance with deferred functional decompositions. Single, paired and wider
+coordinated expansions expose dependencies beyond the original bounded window
+and can cross support limits that block every proper subset. Group proposals
+use direct-input sharing, trying connected components and bounded connected
+prefixes; contraction applies the same heuristic to at most 16 non-root interior
+nodes. Reachability normalization precedes support admission and table building.
+Exact tables/gates are shared with later tiers. Mixed structural and existing
+care-based realizations select producer subsets by total shared cost, using
+bounded forward-addition and backward-removal sweeps from all-static and
+all-available-producer seeds. Care-derived subsets restore demoted native
+identities, retain their independent basis and pass exact composition checks.
+Care-set completions now participate in frontier ranking before pruning;
+static, full two-phase and mixed candidates share the existing cost and budget
+checks. Broader group discovery and QoR
+tuning remain pending. Alternative
+encodings, multiple independent bound groups and
+joint endpoint optimization remain pending.</li>
+<li><strong>F local-divisor foundation:</strong> a bounded pool of existing
+signals supplies singleton and witness-guided larger sets that need not form structural cuts. Exact
+dependence on the admitted independent basis is required before factoring.
+Already-paid shared gates rank ahead of sources; fanout, depth and stable order
+break ties. Static and mixed first-phase implementations share the care evaluator
+and commit only strict total-cost improvements, retaining all external readers.
+<code>local_divisors=32</code> bounds the pool (1–256), and
+<code>local_candidates=64</code> bounds sets tried (0 disables, maximum 4096).
+<code>fast_accept=true</code> preserves early full-cone acceptance; false permits
+the remaining bounded improvement tiers. Reports expose policy, local attempts,
+wins and work. A separate shared cache for projected divisor tables and exact
+images is bounded by 64 entries and 8 MiB; exhausted attempts are never retained
+as dependence failures. Feedback creates a fresh search after graph mutation.
+Failed dependence attempts retain a conflicting assignment pair. A bounded
+forest extends each set only with a divisor separating that witness, up to the
+analysis support limit. It retains at most 16 seeds and 16 stack levels in
+fixed-size storage and reserves candidate trials beyond singletons. Wider reconvergent windows, gain-based poor-endpoint
+screening and joint endpoint optimization remain pending.</li>
+<li><strong>G coordinated-pair foundation:</strong>
+<a href="../../pass/usyn/endpoint_pairs.hpp">endpoint_pairs</a> propagates live
+residual endpoint reachability labels, saturating at more than two. Shared gates
+with exactly two endpoint readers and a known common clock domain seed trials;
+other readers remain protected by complete-network cost accounting. The semantic
+adapter uses the actual event signal/edge, not a shared root-clock name, and
+unknown domains cannot establish compatibility. Each trial admits both cones
+under a separate joint support/node bound, reselects and validates both functions
+on one snapshot, and commits both only for strict total-cost gain. Exhaustion
+retains the complete incumbent. Each existing endpoint implementation remains
+an alternative: price the three nonempty replacement combinations together and
+retain the cheapest strict improvement before committing. Oversized full cones can instead use a shared
+bounded structural window, with both endpoint searches pinned to that boundary
+and all upstream/outside-reader costs retained. Defaults are <code>pair_candidates=32</code>
+(0 disables, maximum 4096), <code>pair_inputs=16</code> (1–16) and
+<code>pair_work=16000000</code>, with at most one quarter of remaining regional
+work spent on this tier. Each commit refreshes sharing and requeues affected
+trials, including overlapping pairs. Invalidation follows paid gates and demanded
+inverse rails in the changed old/new static cones; common positive sources alone
+do not invalidate otherwise unrelated candidates. Unchanged failed trials stay
+skipped, pending work survives unrelated commits, and absent pairs are removed
+from the queue. <code>pair_trials=64</code> (1–4096) caps total visited candidates,
+including retries and support-admission failures. Reports separate pair
+costs/work/gains, trials, refreshes, requeues and stale/domain/support/window/gain skips;
+discovery counts are cumulative across sharing snapshots. Refresh currently
+recomputes discovery under the regional work cap. A conservative gain screen
+prices unchanged outside readers and a lower bound on the two mandatory
+endpoints before launching reselection. It retains inconclusive trials.
+Larger maximum-fanout-free windows, joint node/edge solution forests,
+cross-endpoint first-phase cell sharing, tighter gain bounds and incremental
+discovery remain pending; G is not complete.</li>
+<li><strong>G conservative pair gain screen:</strong> before the existing
+same-snapshot pair reselection, compute the cost of all unchanged endpoints and
+protected residual readers, retaining their demanded inverters. Add the two
+mandatory latch overheads and a conservative logic lower bound. Sixty-four
+bit-parallel assignments over each admitted independent source basis can witness
+nonconstancy and justify at least one transistor for that endpoint; uniform
+samples are inconclusive and justify no additional cost. Skip only if this
+optimistic total cannot improve the incumbent. This bound is specific to
+reselection with unchanged outside implementations; future joint rewrites of
+those implementations need a corresponding ledger. All work uses the existing
+pair budget; <code>gain_skips</code> distinguishes proven unprofitable trials
+from support refusal and actual searches. Selection-cache version 6 retains
+this evidence and rejects checksum-valid version-5 records; standalone region
+artifacts remain unchanged. Tests cover protected shared XOR/NOT costs, a
+profitable pair after those readers are removed, and complementary seven-input
+minterms showing that missed sample variation remains inconclusive. Replay is
+deterministic. Late cancellation retains the complete incumbent; it exposed and
+fixed a redundant process-admission call during regional slice unwinding, and
+the returned report now marks that refusal. Seven focused logical-region, pair,
+artifact, logical-cache, native-design, public-USYN and CLI targets pass in opt
+and dbg (one opt target reused an identical cached action); unit targets take
+at most 0.6 s and the CLI takes 2.6/31.9 s. Seven ABC-disabled opt targets also
+pass (six reuse identical cached actions); the fresh CLI takes 1.1 s and checks
+no implicit SATOPT. Formatting and HTML structure checks pass. The physically
+removed-package fixture, full repository suite and broad QoR sweep were not
+rerun for this increment. Larger joint windows and node/edge resubstitution
+remain pending.</li>
+<li><strong>G bounded common windows:</strong> failed full-cone pair admission
+now tries a common structural boundary grown from both roots. Moves prefer
+fewer exposed signals, then stable reverse-topological order; each candidate
+checks both endpoint supports and the joint support/interior-node bounds.
+Unused boundary signals are removed. Growth consumes at most half the remaining
+pair work and the endpoint candidate cap; soft exhaustion retains a complete
+admitted window. A new optional endpoint-search boundary pins both searches to
+that window, allowing contraction and existing local optimization while
+preventing expansion of its leaves. The common basis may include inputs unused
+by one root. Internal boundary signals are independent formal variables for
+conservative construction, even if their source implementations are correlated;
+they cannot supply the gain screen's nonconstancy witness. Upstream logic and
+outside readers retain their full-graph cost, and both endpoint replacements
+still commit atomically only for a strict regional gain. Reports count
+<code>bounded_windows</code> separately from failed full-cone admission.
+Selection-cache version 7 retains that count and rejects checksum-valid
+version-6 records. A regression with five-source endpoint cones and a four-input
+analysis cap absorbs their shared XOR using the common boundary while leaving
+two upstream ANDs in CMOS. A third reader suppresses that deletion gain.
+Focused tests also cover pinned-boundary containment, unused common inputs,
+invalid boundary IDs, per-root/joint/node caps, retained windows on budget
+refusal, deterministic replay and cancellation without extra guard calls.
+Eight endpoint, pair, logical-region, artifact, logical-cache, native-design,
+public-USYN and CLI targets pass in opt and dbg; unit targets take at most
+0.6 s and CLI takes 2.6/31.9 s. Eight ABC-disabled opt targets pass (seven reuse
+identical cached actions); the fresh CLI takes 1.1 s and checks no implicit
+SATOPT. Formatting and HTML checks pass. The physically removed-package fixture,
+full repository suite and broad QoR sweep were not rerun for this increment.
+Maximum-fanout-free-window construction, joint node/edge solution forests and
+cross-endpoint first-phase sharing remain pending.</li>
+<li><strong>G fanout-free pair windows:</strong> after the existing greedy and
+interface-choice sweeps, remaining pair work tries a maximal private joint cone
+relative to unchanged outside implementations. Trace live primary outputs,
+unselected state inputs and other endpoints' actual static inputs; stop at their
+cones and retain the encountered signals as explicit outside boundary ports.
+Private logic shared by both endpoints remains inside. Historical fanout counts
+from dead append-only alternatives do not create barriers. A directly observed
+root is protected as an identity window. Graph storage, joint/per-endpoint
+support, combined nodes and traversal work are bounded; failed admission
+publishes no partial boundary. Skip windows with no internal outside ports.
+Endpoint searches are pinned to the admitted basis, and full regional pricing
+protects every outside implementation and demanded inverter. Reuse the existing
+validated interface pools, atomic strict-cost acceptance and shared pair
+trial/work caps. <code>pair_choices=0</code> disables these additional sweeps.
+Reports/cache retain <code>fanout_windows</code>, <code>fanout_ports</code>,
+<code>fanout_skips</code> and <code>fanout_wins</code>; the selection envelope is
+now version 12, while standalone region artifacts remain version 1.
+Focused tests cover transitive and complemented outside readers, a directly
+observed pair root, dead fanouts, distinct joint/per-root limits, and refusal
+without partial windows. A permanent generated regression improves estimated
+mixed cost from 87 to 86 after both prior pair sweeps, with the outside consumer
+tested as a primary output and as unselected state. Exhaustive source assignments,
+typed freeze/expansion, deterministic work/report replay and late cancellation
+preserve behavior and the validated incumbent. Cache tests retain the new
+counters and reject checksum-valid version-11 envelopes. Nine focused targets
+pass in opt and dbg; unit targets take at most 1.5/7.6 s and the normal CLI takes
+3.9/49.2 s. Nine ABC-disabled opt targets pass, with eight identical unit actions
+reused from cache and a fresh 1.7 s CLI check of no implicit SATOPT. Formatting,
+whitespace and HTML checks pass. The physically removed-ABC fixture, full
+repository suite and broad mapped-QoR sweep were not rerun for this increment.
+This implements private-window reselection; G's joint node/edge synthesis of
+new shared divisors and rewrites of protected shared implementations remains
+pending.</li>
+<li><strong>G joint functional-divisor generation:</strong>
+<a href="../../pass/usyn/joint_endpoint.hpp">joint_endpoint</a> now constructs
+common first-phase code functions for both endpoint roots. After the earlier
+pair trajectories, a two-phase-only sweep discovers sharing in complete selected
+functions, including fully absorbed logic. Two distinct sources shared by exactly
+the same pair can also seed this tier when factoring leaves no common internal
+node. Source-pair and candidate storage are bounded; clock compatibility and
+greater-than-two-endpoint saturation remain mandatory.
+Enumerate bounded partitions of inputs common to both cuts, classify bound
+assignments by the complete pair of free-variable cofactors, and synthesize the
+resulting shared code bits once. Each endpoint receives a separately compacted
+top and keeps its own analysis-support cap. Discard unused local producers and
+independently validate both compositions before pricing; at least one new
+producer must be consumed by both endpoints. Full joint pricing retains all
+outside implementations and rails, charges identical phase-one cells once, and
+compares replacing both endpoints or either one with the original partner.
+Only a strict regional improvement commits. A mandatory nonconstant producer's
+minimum cost strengthens the gain screen unless an unchanged same-domain cell
+could already provide it. Existing pair trial/work caps, per-candidate work,
+partition counts and boundary-memory limits bound construction; a later refusal
+cannot discard an already priced winner. Selection-cache version 13 retains
+the new joint source/window/partition/candidate/divisor/combination/win counters;
+standalone artifact version 1 is unchanged.
+Regressions exhaustively compose pairs of small functions and distinguish
+cofactor classes that only one root observes. Construction tests cover private
+free inputs with separate per-root caps, shared producer identity, invalid
+dependence, and refusal before partial publication. A 16-input case checks
+preflight admission for both tops, their care table, divisor tables and class
+representatives. Two deterministic regional cases improve estimated mixed cost
+from 55 to 49 and 54 to 47; the first has no residual static logic before the
+joint tier, while the second retains a small residual cone. All source
+assignments, typed freeze/expansion with one frozen cell per shared producer,
+deterministic work/report replay and late cancellation are checked. Separate
+tests retain the entire cost of an outside reader and skip unprofitable
+construction using the mandatory-producer bound. One-phase mode performs no
+joint two-phase search. Cache tests round-trip the counters and reject
+checksum-valid version-12 records.
+Thirteen focused targets pass in dbg and ABC-disabled opt, including explicit
+SATOPT defaults/overrides; the latest unit tests take at most 8.3/1.9 s and the
+CLIs take 49.3/1.6 s. Normal opt integration also passed during this increment.
+Formatting, whitespace and HTML checks pass. The physically removed-ABC fixture,
+full repository suite and broad mapped-QoR sweep were not rerun; the stated
+cost gains are synthetic model results, not mapped-area measurements.
+This initial generator uses fixed binary class encodings and zero-filled
+unreachable codes. The following increments add care completion and bounded invertible code changes;
+mixed static/DOMINO code bits and the general node/edge solution forest remain pending.</li>
+<li><strong>G joint care completion:</strong> a final bounded pair sweep follows
+the complete zero-completion trajectory. For each admitted shared encoding,
+retain legal zero-filled tops plus up to <code>pair_choices</code> alternatives
+per endpoint, using one fill and bounded signed-monotone completions of the
+reachable-code relation. <code>care_phases=0</code> disables this sweep; full
+code images skip completion. Each candidate is independently composed on its
+original cut, compacted, and stripped of unused producers before checking
+producer availability. A completed top can drop all proposed first-phase cells,
+so this tier uses the conservative gain bound without charging a mandatory
+new producer. Price cross-combinations and each candidate with its unchanged
+partner; at least one changed care completion must participate. Commit only
+a strict improvement of the complete regional ledger, including outside readers.
+The original pair work/trial caps, per-candidate work and boundary-memory
+admission bound the sweep. Retained validated pool entries and already priced
+winners survive later refusal. Memory reporting includes admitted completion
+scratch and retained payload estimates; it is not process RSS.
+Selection-cache version 14 and native reports retain care windows, partitions,
+phase trials, realization attempts, retained candidates, peak estimated bytes,
+priced combinations and wins; standalone artifact version 1 is unchanged.
+Directed checks cover a three-class code whose zero-filled tops violate the
+stack/branch limits, legal completions that drop a producer, full-image skips,
+choice/work/storage limits and late cancellation. A separate case preserves
+a valid endpoint after its completion drops an unrealizable producer, leaving
+the other endpoint for the original-partner comparison. Two regional regressions
+improve estimated cost from 40 to 37 and 63 to 48 after the preceding pair
+trajectory; the latter changes only one endpoint. Both preserve an outside
+output and check every source assignment, typed freeze/expansion, deterministic
+replay and cancellation. These are synthetic cost-model improvements, not
+mapped-area measurements. Thirteen focused targets pass in normal opt, dbg and
+ABC-disabled opt, including public CLI coverage and explicit SATOPT
+defaults/overrides. Unit-test times are at most 2.2/12.6 s in opt/dbg; normal
+CLI times are 3.9/49.8 s and the ABC-disabled opt CLI takes 1.6 s. The added
+unrealizable-producer case also passes in dbg and ABC-disabled opt. Formatting,
+whitespace and HTML checks pass. The physically removed-ABC fixture, full
+repository suite and broad mapped-QoR sweep were not rerun for this increment.</li>
+<li><strong>G bounded alternate joint codes:</strong> after joint care completion,
+try invertible code changes of the form <code>code[target] ^= code[source]</code>,
+up to <code>pair_choices</code> per partition. Permute both top functions and their
+care image consistently. Full images and <code>care_phases=0</code> still admit
+zero-filled recoded tops. Validate composition independently, remove unused
+producers, and compare both-new and one-new/one-old combinations with the full
+regional ledger. Release a previous pool before admitting the next workspace.
+Selection-cache version 15 retains the recoding evidence; standalone artifacts
+remain version 1. Directed cases cover involution, partial/full images, unavailable
+code bits, storage limits and cancellation. Regional synthetic examples improve
+33 to 32, 83 to 50 and 46 to 44; these are not mapped-area claims. Further search
+tiers are deferred in favor of the performance/QoR priorities above.</li>
+<li><strong>G existing/new pair combinations:</strong> retain each endpoint's
+existing legal implementation alongside its same-snapshot reselection. Price
+at most three nonempty replacements: both endpoints, only the first, or only
+the second. The complete regional ledger accounts for retained static logic,
+outside readers and demanded inversions in every combination. Publish the
+cheapest strict improvement atomically; stable ties preserve the original
+both-first trial order. A later copy, expansion or cost refusal retains the best
+fully priced candidate already found. A valid replacement can also be evaluated
+with its original partner when only one reselection completes. The
+<code>combinations</code> counter is bounded by three times pair
+<code>attempts</code>, under the unchanged pair work/trial limits. Selection-cache
+version 8 retains this evidence and rejects checksum-valid version-7 records;
+standalone region artifacts are unchanged. A 192-network deterministic synthetic
+comparison found eight estimated-cost improvements and no regressions; this is
+not mapped-area or benchmark QoR evidence. Focused regressions retain improvements
+from 46 to 44 and 55 to 51, including one atomic win that deliberately preserves
+one endpoint's old implementation. Independent composition, deterministic
+report/work replay and cancellation inside the third combination are checked;
+the latter retains the already priced pair improvement. This is a bounded
+combination step, not a complete joint node/edge resubstitution forest. Seven
+focused logical-region, pair, artifact, logical-cache, native-design,
+public-USYN and CLI targets pass in opt and dbg (the unchanged pair-discovery
+target reuses its cached action). Unit targets take at most 2.0 s and the CLI
+takes 2.6/31.8 s. Seven ABC-disabled opt targets pass (six reuse identical
+cached actions); the fresh CLI takes 1.1 s and checks no implicit SATOPT.
+Formatting and HTML checks pass. The physically removed-package fixture, full
+repository suite and broad QoR sweep were not rerun for this increment.</li>
+<li><strong>G bounded joint interface choices:</strong> after the original
+best/old pair trajectory finishes, a second bounded sweep retains different
+static-input interfaces from each endpoint's boundary and local-divisor searches.
+The pool includes individually losing candidates; an identical demanded input
+and inversion interface keeps only the cheapest DOMINO implementation. Distinct
+interfaces compete for slots by individual estimated cost, so retention is
+heuristic, not exhaustive. <code>pair_choices=4</code> is configurable from zero
+(disabled) to eight. Each endpoint's pool has a separate
+<code>boundary_bytes</code>-sized payload cap; retention and independent
+composition validation consume the existing work budget. The original selected
+winner survives pool eviction or refusal. Every combination is priced on the
+same snapshot with all outside readers protected; only the best strict gain
+commits atomically. Both sweeps share the existing pair trial/work caps.
+<code>choices</code> counts validated extra pool entries and
+<code>choice_combinations</code> counts their admitted combination trials,
+separately from the original three best/old trials. Cache envelope version 10
+retains this evidence and includes the setting in identity; standalone artifact
+version 1 is unchanged. Running the wider choices first exposed a regression
+where a greedy cost-61 result hid a later cost-51 path. The original trajectory
+now runs first, and the additional choices improve that fixture to 50. A
+192-network deterministic survey found 15 estimated-cost improvements and no
+regressions. Focused fixtures cover 51→50, 82→76 and 73→67, including an outside
+reader, independent composition, deterministic replay and cancellation after a
+completed gain. This extends the joint search beyond one independently selected
+replacement per endpoint; joint generation of new shared divisors, maximum-
+fanout-free windows and cross-endpoint cell sharing remain pending. Seven focused
+endpoint, logical-region, artifact/cache, native-design, public-entry and CLI
+targets pass in opt and dbg; unit tests take at most 0.7/3.1 s and the CLI
+2.7/31.9 s. Seven ABC-disabled opt checks pass, including a fresh 1.1 s CLI run.
+Choice-pool tests cover both clock-phase configurations, independent composition
+of retained multi-cell solutions, count and memory refusal, and invalid limits.
+The public CLI checks explicit option forwarding and independent LEC; cache
+tests check option identity, retained evidence and rejection of version-9
+envelopes. Formatting and HTML checks pass. The physically removed-ABC fixture,
+full repository suite and broad mapped-QoR evaluation were not rerun.</li>
+<li><strong>G/H shared first-phase implementations:</strong> the regional cost
+ledger now charges an identical selected phase-one cell once within a known
+clock domain, including during pair trials, residual repricing and endpoint
+feedback. Freezing uses the same exact implementation identity and maps local
+producer indices to shared global cell references. Opposite output polarities
+select the representative's Q/!Q rail without a static inverter. Every endpoint
+retains a distinct DominoLatch and source-state name. Different clock domains
+stay separate; unknown domains permit sharing only within one state owner.
+Static outside readers retain their logic and any required NOT, without using a
+same-cycle DOMINO rail. The identity includes ordered native inputs, formula
+representation and phase; general equivalence between differently represented
+cells and joint creation of new shared divisors remain pending. The focused
+pair fixture selects one first-phase cell and two latches, with estimated DOMINO
+cost 27 instead of independently charging 34. Adding a static reader makes the
+selector retain that logic instead of claiming deletion credit. Opposite-rail,
+different/unknown-domain, budget-refusal and exact behavioral-expansion checks
+pass. Standalone artifacts and selection-cache reconstruction preserve the shared
+references and separate state owners. Cache envelope version 11 rejects records
+predating this cost/freezing policy; standalone artifact version 1 is unchanged.
+Reports retain <code>selected_cells</code> as per-endpoint uses and add
+<code>frozen_cells</code> and <code>shared_phase_one_uses</code> for unique model
+cells and eliminated duplicate uses. The public CLI fixture reports four uses,
+three unique cells, two original CMOS registers and independent LEC success.
+Eight focused logical-region, netlist, artifact/cache, semantic/native-design,
+public-entry and CLI targets pass in opt and dbg; the normal CLI takes 2.8/33.6 s.
+Eight ABC-disabled opt checks pass (three reuse unchanged actions), including a
+fresh 1.6 s CLI run that synthesizes and independently proves the shared-cell
+fixture without implicit SATOPT. Unit tests cover either output polarity as the
+first representative, distinct storage owners and no partial result on refusal.
+Formatting, shell syntax and HTML checks pass. The physically removed-ABC
+fixture, full repository suite and broad mapped-QoR sweep were not rerun.</li>
+<li><strong>J/K native comparison migration:</strong> the guarded comparison and
+measurement smokes still passed removed whole-cover options; the comparison
+failed before native synthesis. They now use native gate/window options and
+schema-5 reports. The driver compiles once, colors with the USYN profile and
+provides identical private snapshots to each serial, monitored flow. Optional
+<code>--residual-ablation</code> compares selection alone, residual optimization,
+and residual plus feedback with identical endpoint settings and process/work
+caps, followed by ABC. Schema-2 comparison reports retain source/Liberty digests,
+exact overrides, native cost stages/coverage/available work counters, guarded
+invocation runtime and sampled memory, and separate mapped STA metrics with
+completeness flags. The native mapping report now exposes the applied region
+delay budget, so standalone/fused option tests check actual provider evidence.
+Source-state and endpoint names are checked in a separate sequential smoke;
+independent CVC5 checks remain in this comparison harness, outside synthesis.
+The small sequential fixture produces area 21 and six cells for ABC and all
+three USYN configurations; its native estimated cost is 25 with no residual or
+feedback win. This is an observed tie, not a broad QoR result. The comparison,
+sequential comparison, measurement and public-entry tests pass in opt; the
+ABC-disabled public-entry and CLI checks also pass. Scheduling comparisons and
+larger benchmark evaluation remain pending.</li>
+<li><strong>J/M disjoint logical-stage work accounting:</strong> native reports
+and comparison summaries now separate admission, initial selection, pair search,
+residual optimization, endpoint feedback and final cleanup. Their sum accounts
+for all logical-region budget charges, including failed and rolled-back trials;
+initial expansion/pricing belongs to selection and residual rebinding/pricing
+belongs to residual work. Endpoint and pair detail counters are nested, not
+additional charges. A child endpoint budget is charged before returning a
+refused result. Cache envelope version 9 preserves this evidence and rejects
+version-8 records; warm reports describe the original search, not work repeated
+on the cache hit. Translation, freezing, cache I/O and tmap are outside this
+scope. Finer rewrite/resubstitution counters, per-stage timing and scheduling
+comparisons remain pending. Five focused logical-region, artifact, cache,
+public-entry and sequential-comparison tests pass in opt and dbg (unit tests at
+most 0.5/1.9 s; comparison 1.8/16.2 s). Five ABC-disabled opt checks pass,
+including a fresh 1.1 s CLI run; four unchanged actions reuse cached results.
+Regression coverage includes a nonzero caller budget offset, exhausted child
+searches, resource refusal, disabled stages, successful feedback/cleanup, and
+warm-cache evidence replay. The small sequential comparison reports 12,177
+logical work units for selection and 1,877 additional residual units with no
+estimated-cost gain; no endpoint feedback is needed on that fixture. Formatting,
+Python/shell syntax and HTML checks pass. The physically removed-ABC fixture,
+full repository suite and broad QoR evaluation were not rerun.</li>
+<li><strong>M foundation:</strong> <a href="../../pass/usyn/residual.hpp">residual optimization</a>
+implements cleanup, a four-input rewrite sweep using native equivalent
+AND/XOR templates, bounded common-basis resubstitution with up to two inserted
+nodes, and cleanup. It preserves shared output functions and source identities,
+prioritizes DOMINO-input cones, and uses incremental reference accounting to
+protect readers not yet rebuilt. Strict positive weighted gains, local and
+whole-result depth guards, memory/work bounds and rollback to a complete
+incumbent are implemented. The rewrite library is heuristic, not a complete
+optimal four-input synthesizer.</li>
+<li><strong>E/M logical-region integration:</strong>
+<a href="../../pass/usyn/logical_region.hpp">logical_region</a> selects caller-classified
+endpoints, applies bounded coordinated pair trials when clock domains are known,
+optimizes their live shared residual and performs one bounded
+affected-endpoint feedback round. Separate cell formulas and native-input bindings
+survive residual replacement by a constant, shared signal or opposite polarity.
+The complete CMOS expansion retains original state names, initialization and
+interfaces; first-phase cells add no state. Acceptance compares the total mixed
+network, including static inversions, and retains a complete incumbent on resource
+refusal. Residuals are derived from all live consumers, so absorption never deletes
+logic still needed by another reader. Final cleanup refreshes the live residual
+without another rewrite sweep. Shared-reference-ledger reuse across endpoint
+searches remains pending; persistent artifacts and logical cache integration are
+recorded below.</li>
+<li><strong>Region adapter:</strong> <code>//pass/usyn:usyn_lnet</code> imports
+Lnet LUTs and boundaries into XAGs, retaining state names, Q/D correspondence and
+initialization. Its export path preserves boundary order and prunes dead logic;
+<a href="../../pass/usyn/endpoint_lnet.hpp">CMOS expansion</a> lowers selected
+formulas into one small-fanin logical network, retaining original registers and
+adding no first-phase state. Invalid state correspondence or budget refusal
+publishes no partial network. The small <code>//pass/synth:lnet</code> library separates this
+representation from the shared driver's formal/LEC dependency closure.</li>
+<li><strong>B/E semantic integration:</strong>
+<a href="../../pass/usyn/semantic_region.hpp">semantic_region</a> connects the RAW
+Lnet and source snapshot to the logical pipeline. It validates target restrictions,
+normalizes backend D polarity, derives eligibility from state role and clock edge,
+and preserves owned source/control metadata and explicit bit/stage correspondence
+through endpoint selection and CMOS expansion. Incomplete ordinary-register
+translation is refused rather than silently excluding state. Special native
+barriers stay in the metadata. Source names are retained, with source-identity
+suffixes for collisions; original names remain in provenance. Snapshot Lid values
+refer only to the source RAW network, while current Q/D comes from the selected
+logical state. Protected control-output indices survive optimization/export.
+The public CMOS entry now uses this adapter; DOMINO output remains pending.</li>
+<li><strong>H frozen in-memory netlist:</strong>
+<a href="../../pass/usyn/endpoint_netlist.hpp">endpoint_netlist</a> records Static
+residual logic, Domino cells and single DominoLatch storage owners after final
+selection. Cells retain exact truth tables/formulas, ordered logical inputs,
+explicit rail demands, both Q/!Q ports, phase, legality metrics and source-state
+correspondence. The owning semantic wrapper retains full clock/reset/init and
+source-location metadata. Validation recomputes formula functions and mixed cost,
+checks storage ownership and phase/domain dependencies, and reconstructs each
+canonical next-state expression. Native static edges cannot reference same-cycle
+cells. Global cell references permit shared first-phase producers, including
+mixed-polarity fanout to same-domain endpoints; selection of such cross-endpoint
+sharing remains pending. The public stateful path now freezes this representation
+and the CMOS writer validates/expands it without adding state or falling back to
+a stale expanded graph. The versioned codec and artifact round trips are
+implemented below; logical cache replay is recorded separately below, while
+physical DOMINO emission remains pending. Validation: nine focused opt/dbg targets pass
+(endpoint netlist, logical region, semantic region, logical writer, design,
+region emission, public pass, CLI smoke and options). The CLI smoke takes
+2.0 s opt / 23.3 s dbg. Six new netlist tests cover one/two phases, shared
+producers with opposite rails, multiword truth tables, constants/ordinary state,
+malformed metadata and resource refusal. Generated reconvergent-region tests
+also freeze and independently evaluate every small source/state assignment;
+writer tests retain clock/reset/source semantics and reject corrupt frozen
+ports without fallback. Five ABC-disabled opt targets pass, including the
+native CLI smoke at 1.2 s; unchanged independent targets may reuse Bazel results.
+This turn did not rerun the separate physically removed-package fixture.</li>
+<li><strong>H/J region artifact persistence:</strong>
+<a href="../../pass/usyn/artifact.hpp">artifact</a> encodes the frozen netlist
+and full semantic wrapper in a version-1 binary format. Canonical XAG
+reconstruction preserves ordered sources, complements and function bindings;
+source/control data retains wide unknown constants, complete spans, clock-gate
+metadata and bit/stage correspondence. Reads check integrity and bounded
+fields before allocation, then validate the netlist, controls, source eligibility
+and clock domains. The current requested target is checked independently of the
+stored target, so loading a CMOS artifact cannot bypass DOMINO restrictions.
+Both directions bound bytes, aggregate objects/decoded storage, nodes, strings,
+formula size and work; invalid or exhausted operations publish no partial object.
+Public synthesis writes content-addressed <code>.usyn</code> artifacts separately
+from optional tmap, links them from each report region, and preserves them in
+<code>--emit-dir report:</code> output. Per-file atomic writes preserve existing
+artifacts and reports. The native writer can reconstruct CMOS from a loaded
+region without ABC or redoing endpoint selection. Reconnecting hierarchy and
+native barriers remains the design owner's job. Logical cache lookup/replay is
+implemented below; optional mapped-region reuse is recorded separately below. Validation at the
+artifact milestone: the seven artifact tests pass in opt/dbg,
+covering full metadata/function round trips, parallel phase-one dependencies,
+empty/output-only regions, every truncation and single-byte corruption of a
+fixture, malformed fields with recomputed checksums, source-located rejection
+of a CMOS artifact under DOMINO restrictions, and allocation/work limits.
+The writer's existing clock/reset/initialization checks now exercise serialized
+replay. Seven focused integration targets pass in opt/dbg; final focused reruns
+cover deterministic public artifact names and copied report sidecars (CLI
+2.1 s opt / 23.3 s dbg). Four ABC-disabled opt targets pass, including artifact
+round trips, native writer/public entry and the CLI/export smoke at 1.0 s.
+The physically removed-package fixture was not rerun for this increment.</li>
+<li><strong>J logical region cache:</strong>
+<a href="../../pass/usyn/logical_cache.hpp">logical_cache</a> now stores validated
+frozen regions together with endpoint decisions and complete search evidence.
+The key includes the raw logical network, source/control metadata (spans and
+graph provenance excluded), native producer salt, logical options and resource
+policy. Per the user's naming ruling (2026-09-27) it excludes intermediate
+names -- definition/module names, internal wires and region-boundary nets --
+while register/latch/memory/clock-gate names and top-level design IO stay in
+it; a hit with different intermediate names is rebound to the current names
+and fresh provenance. It excludes search credits (credit-floor ruling below)
+and ABC, Liberty and mapping settings. Each hit revalidates the
+artifact and decision bindings, then emits against the freshly translated native
+region so hierarchy and special-state barriers reconnect through the current
+design. Corrupt or incompatible entries regenerate; atomic writes preserve
+existing valid entries on failed stores.</li>
+<li><strong>J cache admission and reporting:</strong> the existing named-workdir
+and <code>lhd.incremental</code> gate controls reads and writes. Cache I/O uses a
+separate bounded work allowance with the invocation's process/time admission;
+process refusal stops publication, while cache-local exhaustion permits native
+recomputation. Credit accounting (user ruling 2026-09-27, credit floor
+tracking): structural work (preparation, partition, region admission,
+translation, each region's mandatory import/identity-baseline/freeze steps and
+emission) draws on its own allowance; region searches share a search-only
+remainder, so region i's credits are the limit minus earlier regions' search
+work. Every budget records the minimal credits that reproduce its run (floor)
+and whether it depended exactly on its credits (bound); a record hits only when
+its floor reproduces it under the current credits, and replays its search and
+structural work so warm equals cold. A starved region publishes its minimal
+identity selection instead of failing the design. Search counters on a hit
+retain decision evidence; cache I/O work, replayed credits, credit misses and
+per-region credit floors are reported separately. Reports expose
+enabled/reused/miss/invalid/refused/store counters and per-region keys. See
+<a href="../../pass/usyn/README.md">pass/usyn/README.md</a> (Work accounting,
+Logical region cache). The independent mapped-region cache is
+recorded below.</li>
+<li><strong>J cache validation:</strong> focused artifact, cache, design-driver
+and public-entry tests pass in opt and dbg. They cover decision/evidence round
+trips, identity changes, corrupted entries, resource refusal, atomic-store
+failure, disabled caching and multi-region cold/warm budget equivalence.
+The regular CLI smoke verifies cold, warm, disabled and re-enabled runs with
+unchanged decisions and artifacts (2.2 s opt / 25.9 s dbg). The SATOPT policy
+regression passes in dbg (29.8 s). Five ABC-disabled opt targets pass, including
+the same CLI cache sequence without Liberty (1.1 s); unchanged targets may reuse
+Bazel test results. The physically removed-ABC fixture also passes its configured
+dependency audit and native CLI smoke (1.3 s), including cold/warm/disabled cache
+runs, preserved state, independent CVC5 proof/refutation and unavailable-tmap
+diagnostics. Evidence is retained in the disposable fixture
+<code>livehd-noabc-jk4_s3tr</code>.</li>
+<li><strong>I/J optional mapping cache:</strong>
+<p>The ABC technology-mapping
+provider now reuses the shared region cache independently of native USYN
+selection. Identity includes the provider salt, Liberty content, resolved
+state-cell choices, mapping recipe and structurally compared mapped input.
+Logical and mapping reuse share the named-workdir/<code>lhd.incremental</code>
+gate; changing the library or mapping target does not invalidate native endpoint
+decisions. The technology-map report exposes its own enablement, hits/misses,
+invalid-snapshot and failed-store counters, including disabled operation.</p>
+<p><a href="../../pass/synth/tmap_cache.hpp">tmap_cache</a> checks the complete
+mapped/pre-mapping snapshot before HHDS loads its bodies, with byte, file-count,
+metadata and process/time admission. New snapshots are immutable generations
+published by an atomic pointer change after successful mapping. Invalid data
+regenerates; failed writes and late refusals preserve the previous pointer.
+Old generations remain in the user workdir for concurrent readers; automatic
+generation garbage collection is not implemented. No ABC optimization or solver
+call is added to native selection or cache validation.</p>
+<p>Provider tests check warm reuse without ABC commands, independently evaluate
+the restored state function, and cover library/timing invalidation, same-size
+graph-body corruption, disabled reuse, I/O failure and early/late process refusal.
+The CLI checks both tiers and verifies that library-only edits retain native hits.
+Five focused debug targets pass (optional tmap, shared region cache, public USYN
+entry and CLI); the CLI takes 30.4 s. The final five-target opt run passes
+(provider 0.8 s / CLI 2.4 s), including separate snapshot-admission tests for
+malformed/oversized pointers, byte limits, symlinks and disabled/cancelled I/O.
+Those snapshot-admission tests also pass in dbg (0.5 s).
+Four ABC-disabled opt targets also pass, including the native CLI smoke (1.1 s).
+The physically removed-package fixture was not rerun for this increment.</p>
+</li>
+<li><strong>H/I logical CMOS graph emission:</strong>
+<a href="../../pass/usyn/logical_writer.hpp">logical_writer</a> emits an owned
+bit-level graph module from the selected behavioral expansion, with native
+registers preserving source names/locations and bit/stage identity. Clock polarity,
+full-width asynchronous reset controls, dynamic reset/power-on values and unknown
+constant initial bits survive emission. Synchronous reset/enable remain folded
+into D; first-phase cells add no state. The input/output interface preserves
+logical boundary order, including protected controls, and late resource refusal
+publishes no partial module. No Liberty or ABC is required.</li>
+<li><strong>H/I native region and design emission:</strong>
+<a href="../../pass/usyn/region_emit.hpp">region_emit</a> reconnects packed ports,
+native memory/ICG/opaque structures and compact-loop descriptors/carry edges.
+It preserves registered native attributes, requires concrete child definitions
+to exist before their callers, and retains wide native wiring without bit
+expansion. Sparse high-bit extraction uses a small shift constant and explicit
+one-bit mask. Eight region tests cover these boundaries and refusal cases.
+<a href="../../pass/usyn/design_synth.hpp">design_synth</a> connects private-copy
+preparation, children-first partitioning, logical selection and native emission
+for the permanent CMOS target. It owns the output library and region selection
+records, preserves hierarchy/compact loops, and publishes no partial design on
+refusal. Integration tests cover emitted next-state/clock behavior, negative
+edges, colored regions, opaque definitions, cancellation and refusal/retry.
+Neither callable path invokes ABC, SATOPT or a prover. Private preparation now
+uses the invocation's work/process admission and source-node limit. Individual
+bulk preparation/helper allocation bounds and typed DOMINO emission/serialization
+remain pending. The public CMOS entry now uses this driver. The design, region-emission,
+logical-writer, semantic-region, logical-region and source-state test targets
+pass in opt and dbg (all below one second). The configured dependency closure
+of <code>//pass/usyn:design_synth_test</code> contains no ABC targets. This
+verifies the callable CMOS path; the separate public no-ABC build/run gate is
+recorded under L below.</li>
+<li><strong>L/I optional technology-mapping capability:</strong>
+<a href="../../pass/synth/tmap.hpp">tmap</a> registers optional providers behind
+an ABC-free graph/settings interface. It distinguishes unavailable, invalid and
+refused requests, validates output-library ownership and top port correspondence,
+and discards partial failed results. <code>pass/abc/abc_tmap.cpp</code> supplies
+the optional ABC provider using the complete logical network and the existing
+mapping-only handoff. Every mapped region uses that handoff; there is no generic
+ABC synthesis, ware competition, SATOPT or sequential optimization. Original
+logical artifacts stay separate from mapped output. Time/memory/caller admission
+now surrounds each tmap command. Tests cover provider absence/invalid output,
+native USYN through tmap with exhaustive small next-state/clock checks, and
+deterministic refusal before <code>&amp;nf</code> and after <code>&amp;put</code>,
+including retry and an embedded flow that must not override mapping-only behavior.
+The interface/native-design dependency closures contain no ABC targets.
+Public CMOS options and initial provenance/report integration are implemented.
+Typed artifact replay and logical caching are recorded separately above;
+mapped-region caching is also implemented above. Broader target validation
+remains pending.</li>
+<li><strong>L/J public CMOS entry:</strong> <code>pass_usyn.cpp</code> now calls
+<code>design_synth</code> directly, with <code>tmap=none|abc</code> and separate
+native options. The pass, its generated salt and public-entry test no longer
+link ABC. Logical-only CLI output needs no Liberty and skips OpenTimer; an explicit
+STA request is rejected. Optional mapping consumes the complete native result.
+Schema-5 reports retain endpoint formulas/bindings, costs, limits and provenance;
+counts are explicitly scoped to definition regions. Terminal output summarizes
+logical selection and optional mapping separately. Standalone reports survive
+without <code>--stats</code> or a work directory. Typed region artifacts and
+logical and mapped-region cache reuse are now available as recorded above. Focused smoke coverage includes stateful logical/mapped output, external
+LEC, report rendering and obsolete-option diagnostics. The actual ABC-removed
+<code>lhd</code> gate is now verified separately. Broad legacy-test migration,
+publication admission and the remaining J requirements are still pending. The public-entry, design-driver,
+optional-tmap, options, USYN smoke and SATOPT CLI targets pass in opt and dbg.
+The USYN smoke takes 1.6/15.3 seconds; SATOPT takes 0.9/29.8 seconds. The
+result-format CLI regression also passes in opt. Configured dependency queries
+for the public pass and public-entry test find no ABC targets.</li>
+<li><strong>E new-divisor verification:</strong> cofactor decomposition is checked
+on every three-input Boolean function and proper partition, a sixteen-input
+case, multiple code bits, insufficient interfaces and exhausted work. Endpoint
+tests create the absent <code>b | c</code> divisor for
+<code>(a &amp; b) | (a &amp; c)</code>, reducing the selected structure from three
+cells to two under the test's cost/technology settings. Another case creates two
+parallel first-phase divisors. Independent composition rejects a corrupted
+divisor even when its local formula and table agree; duplicated producer bindings
+are also rejected. Integration tests preserve state names, initialization,
+Q/!Q behavior and outside readers, and rebind synthetic inputs after residual
+logic collapses to a source, with and without endpoint feedback. The public CLI
+selects the new divisor and emits CMOS that passes external LEC. The decomposition,
+endpoint, endpoint/Lnet, logical-region, design-driver, public-entry, CLI smoke
+and SATOPT unit/CLI targets pass in opt and dbg; each native library target takes
+at most 0.5 seconds in these runs. These checks establish bounded construction
+and integration, not global search optimality or benchmark QoR. The updated
+core/adapter/public-entry tests and actual CLI smoke also pass in the opt
+<code>--define=livehd_abc=false</code> build; its CLI smoke takes 0.9 seconds.</li>
+<li><strong>E analysis reuse and scheduling:</strong> focused tests compare
+cached and uncached selection, check entry/byte-cap refusal without changing
+functions, and recover a full-cone result in a later tier after a bounded
+factoring refusal. Work counters verify that competitive one-cell and
+single-divisor functional results skip boundary enumeration, outside sharing still
+triggers broader search, and total two-phase work stays capped with selective
+removal work reserved. The public CLI report checks one search-table build and
+zero boundary work on its synthesized-divisor fixture. These are deterministic
+work checks, not benchmark runtime or QoR claims. Endpoint, endpoint/Lnet,
+logical-region, design-driver, public-entry and CLI smoke targets pass in opt
+and dbg after the final scheduling change. The CLI smoke takes 1.5/15.4 seconds;
+the five library targets each take at most 0.5 seconds.</li>
+<li><strong>L private-preparation admission:</strong> focused tests refuse
+source ports/nodes/pins/edges, before and after graph and opaque-interface copies,
+during loop scans, and at preparation completion. Refusal publishes no private
+design, remains sticky, preserves source connectivity/library identity and allows
+a fresh-budget retry. Duplicate roots consume the source-node allowance once;
+a shared opaque declaration is admitted once across eight instances. A zero-body-node
+feedthrough still charges its primary ports and edge. Native integration verifies
+that final preparation refusal is reported as search exhaustion, not an invalid
+design, and checks retry next-state/clock behavior. The shared-preparation,
+source-state, native-design, logical-cache, public-USYN, ABC mapper, ABC tmap and
+CLI smoke targets pass in opt and dbg. Native/shared unit targets take at most
+0.6 s; the ABC mapper takes 1.3/2.1 s, tmap 0.6/1.1 s and CLI 2.4/30.4 s.
+The ABC-disabled opt preparation, native-design, public-USYN and CLI checks also
+pass; its CLI takes 1.1 s and verifies SATOPT is not implicitly enabled.
+Bulk allocation prediction/interruption remains pending; partition traversal
+admission is covered by the subsequent gate below; this is a checkpoint/refusal gate, not a peak-memory proof or a full-suite
+result.</li>
+<li><strong>L partition traversal admission:</strong> the shared decomposition
+API now accepts optional work/process admission for definition ordering, region
+collection, port naming, pre-body construction and output reconstruction.
+Zero-work checkpoints bracket builders, commits and bulk flatten/signature
+operations. A refused callback immediately stops construction; native USYN also
+stops after a failed region builder and discards its private output library.
+Tests refuse collection/naming/emission/commit/completion, verify source
+connectivity and fresh retry, and exercise single-region, multi-region and
+batched builder cancellation. Caller exceptions still propagate. Native tests
+refuse the final partition checkpoint after all regions were emitted, for both
+hierarchical and flattened output, then exhaustively check retry next-state and
+clock behavior. The partition, native-design, logical-cache, public-USYN, ABC
+mapper, ABC tmap and CLI smoke targets pass in opt and dbg: native/shared units
+at most 0.7 s, ABC mapper 1.3/2.1 s, tmap 0.8/1.1 s and CLI 2.5/30.6 s.
+The ABC-disabled opt partition, native-design, public-USYN and CLI checks pass;
+the CLI takes 1.1 s and checks no implicit SATOPT. The physically removed-package
+fixture was not rerun for this increment. Subsequent internal flatten/signature
+admission is recorded below. Individual bulk allocation bounds remain pending;
+this is not a strict peak-memory proof or a full-suite result.</li>
+<li><strong>L internal flatten/signature admission:</strong> flattening now
+charges each occurrence's context, declared ports, node/pin/edge traversal,
+cross-module driver resolution and opaque-output completion. A new opaque
+interface is admitted once across repeated instances, with checks around its
+bulk clone. No callback means no additional opaque-interface pre-scan. Forward
+and producer boundary signatures charge reachable-set construction, ordering,
+edge visits and signature-fold walks. Native USYN supplies the same invocation
+budget throughout. Refused flattening stops decomposition before any further
+callback or builder; callback exceptions propagate unchanged.
+The new <code>flatten_test</code> rejects expansion, wiring, opaque-interface and
+completion checkpoints, preserves source connectivity and checks independent
+instance copies after retry. A five-level repeated hierarchy expands to 95
+cloned nodes when admitted; a budget capped during construction stops before
+full expansion. Partition tests reject both signature walks and verify that
+admission preserves names on a 650-node reconvergent graph. Native integration
+rejects an internal flatten checkpoint through both process and deterministic
+work admission, then exhaustively checks retry next-state/clock behavior.
+Eight focused targets pass in opt and dbg: shared/native units at most 0.6 s,
+ABC mapper 1.4/2.3 s, tmap 0.7/1.1 s and CLI 2.5/30.4 s. Six ABC-disabled opt
+targets pass; its CLI takes 1.1 s and verifies no implicit SATOPT. The physically
+removed-package fixture was not rerun. Individual allocations, sorting and
+value/string serialization remain bulk operations, so this is not a strict
+peak-byte bound or a full-suite result.</li>
+<li><strong>E ranked boundary frontier:</strong> the former fill-once queue is
+replaced by a retained frontier that compares legal single-endpoint plus static
+residual cost using the same sharing/inverter ledger as final selection.
+Reconvergence and asymmetric-depth priorities retain alternative intermediate
+cuts; an inconclusive factoring attempt does not establish illegality. The
+initial admitted window and an unexpanded root seed are anchors. New cuts can
+replace retained cuts, and constructed/priced legal improvements update the
+incumbent independently of pruning. Table/gate caching serves both ranking and
+later phase/residual trials. Each direction has at most
+<code>4 × boundaries</code> move attempts, plus one root-seed attempt; duplicates
+and failed moves count. Work and admitted frontier/history/active-expansion bytes
+remain bounded. Nested work slices transfer spent work and propagate process
+refusal without sampling the guard again while unwinding.
+Reports expose trials, replacements, wins and admitted peak boundary bytes; the
+selection-cache envelope became version 3 at this checkpoint, while standalone region artifacts retain
+their version. Round-trip tests retain nonzero evidence and reject checksum-valid
+version-2 envelopes. The reconvergence fixture now finds the desired
+<code>{a,b,c,other}</code> cut with four retained boundaries, checks external
+readers, trial/work/storage caps, deterministic reports and late cancellation
+with a legal incumbent. Independent composition checks remain in place.
+Endpoint, endpoint/Lnet, artifact, logical-region, native-design, logical-cache,
+public-USYN and CLI smoke targets pass in opt and dbg. Unit targets take at most
+0.7 s; CLI takes 2.5/30.3 s. Seven ABC-disabled opt targets pass (three reuse
+identical cached test actions); its CLI takes 1.1 s and checks no implicit SATOPT.
+The public normal CLI checks that fast full absorption performs no frontier
+trials, replacements or wins. The physically removed-package fixture and broad
+benchmark QoR sweep were not rerun. Wider coordinated moves and two-cell ranking
+are recorded separately below; wider multi-cell ranking and benchmark QoR tuning
+remain pending.</li>
+<li><strong>E coordinated boundary groups:</strong> expansion and contraction
+now accept bounded groups of related signals, using connected components of
+direct-input sharing followed by connected prefixes from each seed. Growth uses
+the current leaves; contraction considers at most 16 non-root interior nodes.
+Fixed-size scratch storage and charged scans avoid a powerset search. Group
+trials share the existing per-direction move cap, work reservations and candidate
+admission with single/pair moves. Both directions discover the reachable boundary
+before enforcing its support cap, and construct tables only for admitted cuts.
+Three- and four-branch cycle regressions independently establish that every
+proper subset expansion exceeds the support limit; both now select the shared
+source boundary and leave only the unrelated AND in CMOS. Those cases failed
+with pair-only growth. A contraction regression retains three related XOR
+divisors. Independent composition, deterministic work/report replay and bounded
+search exhaustion check the selected implementations and preserved incumbents.
+All eight focused endpoint, endpoint/Lnet, artifact, logical-region, native-design,
+logical-cache, public-USYN and CLI smoke targets pass in opt and dbg. Unit targets
+take at most 0.6 s; CLI takes 2.4/30.3 s. Seven ABC-disabled opt targets pass
+(six reuse identical cached test actions); its CLI runs in 1.1 s and checks no
+implicit SATOPT. The dedicated SATOPT opt-in/default-off CLI regression also
+passes in opt (2.0 s). The physically removed-package fixture and broad QoR sweep
+were not rerun for this increment. Wider multi-cell frontier ranking and
+benchmark QoR tuning remain pending; two-cell ranking is recorded below.</li>
+<li><strong>E joint two-cell boundary ranking:</strong> price a legal first-phase
+producer and its endpoint together before pruning a candidate boundary. The
+same external-reader and inverter ledger prices both cells and their remaining
+static inputs. A winning legal realization survives frontier eviction or later
+resource refusal. Ranking admits only two-cell realizations here; wider
+functional and structural candidates still follow the existing two-cell search.
+The reported <code>boundary_two_cell_work</code> is a subset of boundary work,
+limited to one eighth of the phase-search allowance. Its sum with
+<code>two_phase_work</code> remains within that shared cap; aggregate stage work
+does not count the subset twice. One-phase mode performs none of these trials.
+A competitive full-cone winner skips subsequent phase and residual tiers.
+The mux regression now needs only two retained boundaries; before this change
+it lost the two-cell candidate and selected a more expensive three-cell result.
+Independent composition, deterministic report/work replay, late process refusal
+and shared external readers cover the new ranking. With an external mux reader,
+the cheaper single endpoint reuses the static mux instead of claiming deletion
+credit. Low-budget cases check both the ranking reservation and combined cap.
+Selection-cache version 4 retains the work counter and rejects checksum-valid
+version-3 envelopes; standalone region-artifact formats remain unchanged.
+Eight focused endpoint, endpoint/Lnet, artifact, logical-region, native-design,
+logical-cache, public-USYN and CLI targets pass in opt and dbg; unit targets take
+at most 0.5 s, and CLI takes 2.4/30.4 s. Seven ABC-disabled opt targets pass
+(five reuse identical cached test actions); endpoint tests run in 0.3 s and its
+CLI runs in 1.1 s, including the no-implicit-SATOPT check. The physically
+removed-package fixture and broad QoR sweep were not rerun. Mixed two-cell
+selection is recorded below; wider multi-cell ranking and benchmark QoR tuning
+remain pending.</li>
+<li><strong>E mixed structural producer selection:</strong> mixed candidates no
+longer promote every legal boundary producer. Bounded greedy sweeps compare
+adding producers from an all-static seed and removing them from the
+all-available-producer seed, using the complete shared static/cell/inverter cost
+at each step. Each direction tries at most <code>n × (n + 1) / 2</code>
+neighbors plus its seed for at most 16 producers, under candidate/tier work caps.
+Producer indices are rebuilt after each subset choice. Priced legal improvements
+are preserved immediately so a later refusal cannot discard them; repeated
+pricing recomputes rather than accumulates the DOMINO estimate. Boundary ranking
+admits mixed two-cell realizations under its existing reservation, while residual
+search can select wider parallel subsets. The fully converted seed preserves
+opportunities that require releasing a shared static cone through several
+producers together. This is bounded greedy selection, not exhaustive subset
+optimization. Care-derived producer subsets are recorded in the next increment.
+A regression that failed under unconditional promotion now converts an expensive
+XOR and retains a cheap AND in CMOS. An external XOR reader removes that gain,
+and the result correctly reuses both static inputs. A second case converts two
+readers of a shared XOR together, releasing its static implementation while
+retaining an unrelated cheap AND. Independent composition, deterministic
+report/work replay, several process-refusal points and combined phase-budget
+checks cover these paths. Eight focused endpoint, endpoint/Lnet, artifact,
+logical-region, logical-cache, native-design, public-USYN and CLI targets pass
+in opt and dbg; unit targets take at most 0.5 s, and CLI takes 2.3/30.4 s.
+Seven ABC-disabled opt targets pass (six reuse identical cached test actions);
+the native CLI runs in 1.1 s and checks no implicit SATOPT. The physically
+removed-package fixture and broad QoR sweep were not rerun for this increment.
+Wider multi-cell frontier ranking and benchmark QoR tuning remain pending.</li>
+<li><strong>E care-based producer subsets:</strong> existing-divisor care and
+mixed local-divisor candidates now use the bounded shared-cost subset selector.
+Construction retains a native identity for each existing producer and carries
+it through support pruning. Demotion restores that native input in a private
+endpoint-function copy; retained produced slots remain zero and their bindings
+are renumbered. The completed top function and original independent basis remain
+unchanged. Each subset passes exact composition before costing or acceptance;
+no external prover is invoked. Fully covered attempts retain their coverage
+requirement, and new synthesized divisors without native counterparts are not
+demoted. Local candidates retain strict gain accounting and win reporting.
+Both static and converted seeds are evaluated before either greedy sweep can
+consume its remaining allowance. A regression uses mutually exclusive inputs
+to complete an XOR as an OR, converts the expensive producer and leaves the
+cheap producer in CMOS for its external reader. It beats the structural result
+with care search disabled. Both input orders check native identity restoration
+and producer renumbering; an intentionally incorrect restored ID fails exact
+composition. Deterministic report/work replay and mid/late process refusals
+check incumbent preservation. Eight focused endpoint, endpoint/Lnet, artifact,
+logical-region, logical-cache, native-design, public-USYN and CLI targets pass
+in opt and dbg; unit targets take at most 0.5 s and CLI takes 2.4/30.6 s. Seven
+ABC-disabled opt targets pass (five reuse identical cached test actions); endpoint
+tests run in 0.3 s and the CLI in 1.1 s, including its no-implicit-SATOPT check.
+The physically removed-package fixture and broad QoR sweep were not rerun.
+Wider multi-cell frontier ranking and benchmark QoR tuning remain pending.</li>
+<li><strong>F witness-guided local sets:</strong> failed exact dependence can
+return two independent-basis assignments with equal divisor values and opposite
+endpoint outputs. Optional witness recovery uses a charged rescan instead of an
+exponential assignment-index array. An incomplete recovery reports exhaustion
+and is not cached as a dependence failure. Local search retains at most 16 failed
+singleton seeds and extends a set only with a divisor separating its current
+witness. Fixed-size state holds selected IDs, the witness and excluded sibling
+choices; depth is bounded by the analysis input limit. An earlier non-separator
+remains eligible to separate a later witness. Sets are canonicalized for image
+reuse. Singleton trials reserve roughly half the candidate allowance for larger
+sets; each seed gets at most half the remaining trials, with the last seed allowed
+the remainder. Tiny one/two-divisor searches retain their previous ordering.
+Candidate, seed-storage and per-seed truncation have explicit reasons and retain
+the legal incumbent. Determining sets use the existing exact care/mixed-cost
+evaluator and strict local gain rule; this is not exhaustive set enumeration or
+a proof of globally optimal inputs. Tests check witnesses over all 256
+three-input functions, refusal during recovery, and three/four-divisor non-cut
+wins with protected external readers. Reversed source/divisor priority requires
+reusing an earlier non-separator after selecting a later-ranked divisor.
+Cache-disabled search, deterministic report/work replay, late process refusal
+and per-seed truncation preserve correct results. Ten focused function,
+decomposition, endpoint, endpoint/Lnet, artifact, logical-region, logical-cache,
+native-design, public-USYN and CLI targets pass in opt and dbg; unit targets
+take at most 0.6 s, and CLI takes 2.5/31.3 s. Nine ABC-disabled opt targets pass
+(eight reuse identical cached test actions); its CLI runs in 1.1 s and checks no
+implicit SATOPT. The physically removed-package fixture and broad QoR sweep
+were not rerun for this increment. Wider local windows,
+gain-based poor-endpoint screening, wider multi-cell frontier ranking and
+benchmark QoR tuning remain pending.</li>
+<li><strong>E wider structural frontier ranking:</strong> a second boundary
+round compares full and mixed wider two-phase implementations after the two-cell
+search and deferred parallel functional attempts. Competitive full-cone fast
+acceptance skips it. The original round keeps its four-times-boundary-limit
+proposal allowance per direction; the wider round adds twice that limit per
+direction. With one seed trial per round, the total cap is
+<code>12 × boundaries + 2</code> for two phases; one phase retains
+<code>8 × boundaries + 1</code>. Both rounds share the original boundary work cap.
+Each joint-ranking round consumes at most one eighth of the shared phase cap;
+the new <code>boundary_multi_cell_work</code> and existing
+<code>boundary_two_cell_work</code> are subsets of boundary work, not additional
+stage totals. Deferred parallel realization reserves half its remaining phase
+allowance for subsequent search. The first frontier is released before admitting
+the second; exact function/gate caches and legal incumbents remain available.
+Selection-cache version 5 retains wider-ranking evidence and rejects version-4
+records even with valid checksums; standalone region artifacts are unchanged.
+A deterministic 96-network synthetic comparison found eight estimated-cost
+improvements and no regressions with the final schedule. This is a small search
+check under artificial cost weights, not a benchmark or mapped-area result.
+Focused regressions retain a three-cell improvement (129 to 67 estimated cost)
+and two cases that protect the original two-cell search allowance. Independent
+composition, deterministic report/work replay, late process refusal, one-phase
+exclusion, fast acceptance and combined work/trial/storage caps are checked.
+Eight endpoint, endpoint/Lnet, artifact, logical-region, logical-cache,
+native-design, public-USYN and CLI targets pass in opt and dbg; unit targets take
+at most 0.5 s and CLI takes 2.5/31.1 s. Wider local windows, joint endpoint
+optimization and broad QoR evaluation remain pending.</li>
+<li><strong>E care-aware frontier ranking:</strong> correlated-input completions
+now influence boundary cost before pruning, including one-phase static inputs,
+full two-phase absorption and mixed static/phase-one producers. Exact composition
+and shared-network pricing precede both ranking and incumbent publication.
+Each legal improvement survives frontier eviction or later work refusal. The
+first phase-ranking round retains its two-cell limit after unused producers
+are removed; the wider round admits more parallel producers. Structural phase
+ranking reserves half its slice for care trials when enabled on a changed
+boundary; full and mixed care trials share the existing phase allowance.
+Static-input care uses bounded remaining ranking work within the boundary cap.
+No new search option, report field or artifact format is required; existing
+care/image counts and boundary wins include these trials. Turning off care
+search skips them. A two-entry-frontier regression for mutually exclusive
+<code>a &amp; b</code> and <code>!a &amp; c &amp; d</code> inputs previously retained
+the cost-90 identity endpoint. With the XOR completed as OR on reachable
+assignments, it now finds estimated cost 71 in one phase and 59 in two phases.
+These are proxy costs under test weights, not mapped-area claims. The regression
+checks independent composition, protected readers, image-cache refusal,
+deterministic work/report replay, late cancellation and aggregate work/storage
+bounds. Eight focused endpoint, endpoint/Lnet, artifact, logical-region,
+logical-cache, native-design, public-USYN and CLI targets pass in opt and dbg;
+unit targets take at most 0.5 s and the CLI takes 2.6/32.0 s. Seven ABC-disabled
+opt targets pass (six reuse identical cached test actions); the fresh CLI runs
+in 1.1 s and checks no implicit SATOPT. The physically removed-package fixture,
+full repository suite and broad QoR sweep were not rerun for this increment.
+Wider local windows, joint endpoint optimization and benchmark QoR
+tuning remain pending.</li>
+<li><strong>E unified two-cell priority:</strong> a regression whose earlier
+partition produces two first-phase functions now selects a later single-divisor
+partition, yielding two total cells with no parallel realization attempts.
+Restricting discovery to four partitions still realizes the retained parallel
+candidate with distinct producer bindings. A second regression retains that
+three-cell functional result but exposes an existing mux divisor: the existing
+two-cell implementation wins before any wider functional realization. Limiting
+the boundary search to its initial window still realizes the queued three-cell
+result. Both results are independently composed over all source assignments;
+the two-cell result costs less, shares the tier cap and leaves the parallel
+attempt counter at zero. Tiny deferred-storage admission
+refuses retention explicitly while preserving a legal endpoint. Independent
+composition checks cover both paths. Nonzero scheduling counters round-trip in
+the selection cache, and an old-version record with a valid checksum is rejected.
+The CLI checks the published single/parallel counters. Endpoint, logical-region,
+artifact, logical-cache, design-driver, public-entry and CLI smoke targets pass
+in opt and dbg after unifying the schedule; endpoint-pair tests also pass.
+Library targets take at most 0.6 s, and the CLI takes 2.5/30.4 s. The ABC-disabled opt endpoint,
+artifact, public-entry and CLI targets pass; its CLI takes 1.1 s and checks
+that SATOPT stays opt-in. These checks do not establish global decomposition
+optimality or benchmark QoR.</li>
+<li><strong>C/E alternative boundaries:</strong> two new endpoint regressions
+independently compose selected cells over every source assignment. One exposes
+repeated-input factoring beyond the initial bounded window, checks a lower total
+cost and verifies that an outside reader prevents false deletion credit. The
+other reaches a legal three-input boundary by jointly expanding two reconvergent
+branches when either intermediate expansion would require four inputs. It also
+checks deterministic search reports/work and the four-candidate cap. Endpoint,
+logical-region, artifact, logical-cache, design-driver, public-entry and CLI
+smoke targets pass in opt and dbg; endpoint-pair checks also pass. The library
+targets take at most 0.5 s, and the CLI smoke takes 2.4/30.4 s in opt/dbg.
+The ABC-disabled opt endpoint/public-entry/CLI targets pass; its CLI smoke takes
+1.1 s and checks that SATOPT is not implicitly enabled. These are focused
+correctness/integration checks, not a full-suite or benchmark QoR result.</li>
+<li><strong>D/E care-aware functional decomposition:</strong> the decomposition
+tests independently reconstruct the reachable top-input image, including unused
+binary codes. Completion tests cover all 81 two-input partial functions, check
+least/greatest positive-phase completions against enumerated total functions,
+exercise mixed input phases, full-care skips and budget-limited incumbents.
+A constrained endpoint case becomes fully absorbed only after completing its
+unreachable codes under the same three-input, stack-two, branch-two limits and
+bounded structural alternatives. A separate regression removes a redundant
+consensus cube that previously prevented a legal first-phase divisor. The public
+CLI selects the care-aware result and passes independent LEC on emitted CMOS.
+Function, decomposition, endpoint, endpoint/Lnet, logical-region, design-driver,
+public-entry, CLI smoke and option targets pass in opt and dbg. The smoke takes
+1.6/17.0 seconds; native library tests take at most 0.5 seconds. This covers
+generated divisor codes; existing-cut integration is recorded below, while
+alternative encodings and joint endpoint selection are still pending.</li>
+<li><strong>E care-aware existing cuts:</strong> each admitted cut derives its
+divisor image on the original independent basis, then uses the bounded
+completion evaluator and full mixed-network cost. Selection supports complete
+two-phase absorption, correlated static inputs in one-phase mode, and mixed
+static/produced inputs. Unused proposed cells are pruned after top support
+reduction; a needed unrealizable cell refuses that candidate. Validation
+rederives static interior functions and rejects outside-cone dependencies,
+including an equivalent endpoint fanout. Directed tests check all input
+assignments for each implementation form, behavioral corruption, common-basis
+ordering and admission refusal. Stateful integration preserves shared readers,
+names and initial values; the public CLI result passes independent LEC.
+XAG, endpoint, endpoint/Lnet, logical-region, design-driver, public-entry,
+CLI smoke and option targets pass in opt and dbg. The smoke takes 1.8/19.1
+seconds; each native library target takes at most 0.5 seconds.
+Image collection remains bounded per candidate. Reuse across implementation
+trials and local single/pair sets are now implemented as recorded under F;
+larger sets and joint endpoint optimization remain pending.</li>
+<li><strong>F local search and image-cache verification:</strong> cached and
+uncached trials select the same function/cost; entry and byte refusals bound
+retained memory without converting exhaustion into dependence failure.
+Directed singleton and pair cases use sets that are not structural cuts, check
+every original-input assignment, and retain the cost of shared readers. The
+pair case prevents highly connected primary inputs from displacing already-paid
+shared gates in a two-entry pool. A stateful fixture checks names, initialization,
+Q/!Q, shared outputs and Lnet round trips with feedback disabled and enabled.
+An early full-cone result can be improved by continuing bounded local search;
+the public CLI exercises <code>fast_accept=false</code>, reports a strict
+estimated-cost gain, and independently proves emitted CMOS equivalent.
+Endpoint, endpoint/Lnet, logical-region, design-driver, public-entry, CLI smoke
+and option targets pass in opt and dbg. The CLI smoke takes 2.0/20.7 seconds;
+native targets take at most 0.6 seconds. The debug SATOPT default/override CLI
+test also passes (29.7 seconds). The opt ABC-disabled configuration passes
+endpoint, logical-region, public-entry and actual CLI smoke checks; the CLI
+smoke takes 1.0 second. This is focused functional/resource evidence, not a
+benchmark QoR result or completion of F/G.</li>
+<li><strong>G pair verification:</strong> discovery tests distinguish duplicate
+uses from distinct endpoints, saturate at three readers, reject mismatched or
+unknown clock domains, and bound candidate storage/traversal. Stateful tests
+demonstrate a joint gain unavailable to either single endpoint, with shared
+input inversions included in cost. They check every input/state assignment,
+names, initialization and Lnet round trips, protect a third output reader,
+reject a joint support larger than the configured limit, retain both old
+endpoints after mid-trial exhaustion, and refresh an overlapping pair after
+an atomic commit. Generated reconvergent cases exercise pair selection together
+with residual optimization/feedback. The semantic test distinguishes actual
+gated events sharing one root clock and preserves unknown-domain handling after
+metadata reordering. Queue tests cover affected retries, unchanged failures,
+stale-pair removal, pending work surviving unrelated commits, storage admission
+and the total-trial cap. Invalidation tests distinguish paid sharing/inverse
+rails from a common positive source. A three-register fixture gains twice by
+refreshing overlapping pairs; <code>pair_trials=1</code> retains the first valid
+commit and reports exhaustion. The public CLI exercises both budgets, preserves
+all three registers, and passes independent LEC on the fully optimized emitted
+CMOS. Pair discovery,
+logical-region, semantic-region, design-driver, public-entry, CLI smoke and
+option targets pass in opt/debug; the CLI smoke takes 2.0/23.3 seconds and native
+targets at most 0.5 seconds. Pair, logical-region, public-entry and actual CLI
+smoke checks also pass in the opt ABC-disabled configuration (CLI 1.0 second).
+This verifies coordinated pair reselection, not completion of G's broader
+joint node/edge optimization or benchmark QoR.</li>
+<li><strong>Verification:</strong> focused tests cover all three-input Boolean
+functions, all two-input partial functions and input phases, 16-input functions,
+shared/asymmetric cuts, resource exhaustion, formula structure and stateful Lnet
+import/export. Endpoint checks include independent composed-function evaluation,
+parallel cells, one-phase residual logic, protected readers and tier reservations.
+CMOS expansion checks exact next-state/output functions with preserved state
+identity, including nine-input functions lowered without widening Lnet.
+The ten previously verified focused targets pass in opt and dbg: endpoint, endpoint/Lnet expansion,
+function, XAG, XAG/Lnet, unate, legacy cover and region checks, plus SATOPT
+default/explicit-override unit and CLI tests. The new endpoint and expansion
+targets contain 17 tests and take at most 0.5 seconds each in these runs;
+the SATOPT CLI test takes 2.9 seconds in opt and 36.0 seconds in dbg.
+The residual target adds ten tests for rewrite/resubstitution wins, shared and
+third-reader protection, XOR costs, depth rejection, zero-residual skips,
+independent multi-output truth-table checks and bounded-work rollback; it passes
+in 0.3 seconds opt and 0.4 seconds dbg. The encoder split passes the existing
+formal prover, relational-query and ABC-cone tests in both modes.
+The logical-region integration target adds ten tests, including twelve
+deterministically generated reconvergent state/output networks checked on every
+input/state assignment. Directed cases cover a feedback win, shared-consumer
+invalidation, unselected state, parallel phase-1 cells without added storage,
+output-only optimization, static-inverter cost rollback and resource refusal.
+It passes in opt and dbg; the final debug run takes 0.5 seconds. The shared
+private-copy test passed in both modes. The earlier ABC/USYN sequential CLI
+checks passed before public-entry migration; their old option assumptions still
+need migration and revalidation against the native entry. The debug SATOPT default/override CLI check passes in 29.7 seconds.
+The shared source-state target now has seventeen tests for semantic controls,
+structural ICG recognition, source-located errors, pipeline-stage identity,
+mapping-independent logical translation, dynamic controls, admission and constant
+outputs. The semantic adapter adds nine
+tests for QN normalization, metadata ordering, role/edge eligibility, malformed
+or incomplete correspondence, budget refusal, name collisions, power-on state
+and output-only logic. Its graph-to-blaster-to-USYN-to-Lnet fixture checks all
+256 input/state assignments under both backend D encodings and 512 in logical
+mode, for synchronous and asynchronous active-low resets on a two-stage enabled
+register. Native graph emission adds five tests: all sixteen two-input Boolean
+functions, four clock/reset configurations with 1,024 input/state assignments
+each, dynamic and unknown initial values, source naming/locations, port-name
+collisions, empty/output-only modules and early/late refusal without a partial
+graph. The graph round trip exposed and fixed a constant-output width query
+that tried to create an ordinary driver on the constant node.
+The source-state, semantic, logical-region and writer targets pass in opt/dbg;
+the new writer takes 0.4/0.8 seconds. Earlier ABC/USYN sequential and async-reset
+CLI runs passed before public-entry migration; this does not validate those
+legacy scripts against the new public entry. SATOPT default/override CLI checks
+have been rerun successfully after that migration.
+Async-reset structural checks now explicitly use a flat region, retaining all
+pin/polarity assertions and independent positive/negative equivalence checks;
+their in-region inverter assumptions do not constrain synthesis partitioning.
+The two library cases and negative controls run serially. These async-reset
+tests take at most 3.9 seconds opt and 54.8 seconds dbg in this verification.
+The affected ICG regressions retain all four gate structures,
+both reset values and every negative control with a smaller two-bit arithmetic
+fixture; proof checks run in separate serialized tests with unchanged bounds.
+Before public-entry migration, all 24 ABC/USYN ICG cases passed, at most
+1.8 seconds opt and 17.6 seconds dbg; native-entry ICG revalidation is pending.
+The other fixture consumer, the gated-latch soundness regression, also passes
+in both modes (1.7 seconds opt, 17.1 seconds dbg).
+The independent core, Lnet adapter, semantic adapter and logical-writer test dependency queries
+have no ABC matches. The subsequent ABC-removed CLI gate also passed, as
+recorded under L.</li>
+</ul>
+
+<h2>Design notes</h2>
+<h3>Migration inventory</h3>
+<p>This inventory records the original cover path and its replacements. Current
+native integration and remaining gates are described under Partial implementation
+above; legacy helpers and test expectations still require migration.</p>
+<table>
+<thead><tr><th>Source reviewed</th><th>Current behavior</th><th>Disposition</th></tr></thead>
+<tbody>
+<tr><td><a href="../../pass/usyn/usyn_region.cpp">usyn_region.cpp</a></td>
+<td>RAW Lnet → STRASH → whole-region cover → ABC. XOR retention depends on the
+old gate recipe; memory bypass is detected by a module-name substring.</td>
+<td>Replace orchestration with endpoint-first stages; use structural barriers.</td></tr>
+<tr><td><a href="../../pass/usyn/lut_cover.cpp">lut_cover.cpp</a></td>
+<td>Eight-leaf cuts, fixed 256-bit tables, depth/area-flow/exact-area rounds;
+register D and ordinary outputs share the cover objective.</td>
+<td>Replace the search and objective. Reuse tested cut composition ideas and
+small-function oracles where their semantics still apply.</td></tr>
+<tr><td><a href="../../pass/usyn/unate.hpp">unate.hpp</a>,
+<a href="../../pass/usyn/unate.cpp">unate.cpp</a></td>
+<td>Dynamic tables now support 16 inputs; the legacy exact SOP search is limited
+to eight inputs, with generic cover fallback above that.</td>
+<td>Independent <code>function</code> utilities provide wider monotone/care
+analysis and explicit formulas; retire legacy search as integration lands.</td></tr>
+<tr><td><a href="../../pass/domino/domino_gate.hpp">domino_gate.hpp</a></td>
+<td>Eight-variable phase/prime analysis and explicit SP formulas; bounded
+factorer with exhaustive small-variable validation.</td>
+<td>Reuse/consolidate formula machinery; replace single-phase-only legality
+and charged-twin assumptions with explicit dual-rail availability, plus wider
+logical support, branch-constrained factoring and explicit resource budgets.
+Remove transistor-budget legality. Do not promise globally exact factoring.</td></tr>
+<tr><td><a href="../../pass/synth/region_blast.hpp">region_blast.hpp</a>,
+<a href="../../pass/synth/region_blast.cpp">region_blast.cpp</a></td>
+<td>Owned source-state snapshots classify native and crossed state, retain
+structural ICGs and normalize QN D polarity; crossing still depends on backend
+capabilities.</td>
+<td>The semantic adapter connects the snapshot to USYN; make logical register translation independent
+of Liberty and mapping choices.</td></tr>
+<tr><td><a href="../../pass/synth/lnet.hpp">lnet.hpp</a>,
+<a href="../../pass/synth/region_backend.hpp">region_backend.hpp</a></td>
+<td>Eight-fanin LUTs with optional SOP; hooks receive the source-state snapshot
+and return another Lnet over identical PI/PO/latch boundaries.</td>
+<td>Keep compact shared representation; introduce typed USYN artifact and adapter.</td></tr>
+<tr><td><a href="../../pass/abc/abc_backend.cpp">abc_backend.cpp</a>,
+<a href="../../pass/abc/abc_lnet.cpp">abc_lnet.cpp</a></td>
+<td>Tmap reconstructs an AIG and maps the full rewritten combinational network.</td>
+<td>Reuse for whole-network CMOS mapping, with no DOMINO/non-DOMINO split.
+Future DOMINO output excludes already mapped DOMINO cells and maps/stitches only
+residual CMOS behind their ports.</td></tr>
+<tr><td><a href="../../pass/synth/cell_netlist.hpp">cell_netlist.hpp</a>,
+<a href="../../pass/synth/region_writer.cpp">region_writer.cpp</a></td>
+<td>Technology cells plus ordinary latch records; source-state-aware read-back.</td>
+<td>Retain state attribution. Future physical DOMINO cells need two complementary
+outputs per cell and integrated state where applicable; the present single-output
+cell type and separate latch records do not express that contract.</td></tr>
+<tr><td><a href="../../pass/usyn/pass_usyn.cpp">pass_usyn.cpp</a>,
+<a href="../../pass/usyn/evidence.hpp">evidence.hpp</a></td>
+<td>Serial region hook, recipe v7, report schema 4/evidence schema 2, mapped-region reuse.</td>
+<td>Replace ABC-owned entry/orchestration; reuse admission/provenance/cache services,
+with separate logical and optional tmap identities.</td></tr>
+<tr><td><a href="../../pass/usyn/BUILD">pass/usyn/BUILD</a>,
+<a href="../../lhd/BUILD">lhd/BUILD</a>,
+<a href="../../lhd/lhd_kernel_synth.cpp">lhd_kernel_synth.cpp</a></td>
+<td>USYN links ABC, salts inherit ABC, unit tests depend on ABC; the CLI links
+ABC and requires Liberty before dispatching synthesis.</td>
+<td>Independent USYN dependency closure and real CLI execution without ABC;
+retain ABC as the separately selected mapper/tmap provider in normal builds.</td></tr>
+<tr><td><a href="../../lhd/tests/lhd_unate_smoke.sh">lhd_unate_smoke.sh</a>,
+<a href="../../pass/usyn/lut_cover_test.cpp">lut_cover_test.cpp</a></td>
+<td>Current whole-cover counts, XOR-as-one-gate assumptions, handoff modes,
+separate LEC and cache expectations.</td>
+<td>Preserve semantic regressions; migrate non-contract algorithm expectations
+when their replacement implementation lands.</td></tr>
+</tbody>
+</table>
+
+<h3>Confirmed decisions</h3>
+<p>The following decisions incorporate the user's clarifications and supersede
+conflicting wording in the proposal and older task pages. Proposed file/option
+names, analysis budgets and provisional cost coefficients remain implementation
+choices to measure; they are not additional technology constraints.</p>
+<ol>
+<li><strong>First delivery boundary — confirmed by the user.</strong> Fully
+independent USYN with zero ABC dependencies. Retain ABC in LiveHD for comparisons
+and the alternative flow; only an explicitly requested tmap step uses ABC, mapping
+logical DOMINO gates and residual CMOS to existing cells. Future per-gate Liberty
+descriptions are consumed by an external real-cell generation/characterization
+tool. Physical DOMINO cells and their characterization are deferred.</li>
+<li><strong>State realization and permanent CMOS target — confirmed by the user.</strong>
+Creating a physical DominoLatch replaces the original register because the cell
+contains the latch. In the first implementation, ABC/TMAP maps all selected logic
+to plain CMOS, no physical DOMINO gate is used, and the original register remains.
+This CMOS flow stays permanently for ordinary-library targets and benchmarking,
+including after the future cell-characterization flow exists. Retaining a register
+in this target is normal behavior, not a failed DOMINO synthesis fallback.</li>
+<li><strong>CMOS tmap granularity — confirmed by the user.</strong> ABC reads the
+whole selected network; do not split proposed DOMINO from non-DOMINO logic for
+this target. In the future DOMINO target, USYN has already mapped the DOMINO
+cells, so those cells do not pass through tmap; only residual CMOS does. Both
+targets retain the independent USYN synthesis result.</li>
+<li><strong>State eligibility and clock/latch restrictions — confirmed by the user.</strong>
+DOMINO mode cannot handle negative-edge clocks. Source transparent latches are
+allowed only for recognized ICG structures. Violations are errors pointing to
+the offending source line, not silent exclusions or CMOS fallback. Generic-CMOS
+USYN does not impose these restrictions. The generated DominoLatch's integrated
+storage is distinct from an unsupported source latch. All positive-edge registers
+outside memories, ICGs and opaque state are candidates. A future register
+<code>keep</code> attribute, settable from Pyrope and defaulting false, may exclude
+individual registers; defer its implementation and assume all current test/benchmark
+registers are not kept. Memories and ICGs are special non-DOMINO structures, not
+ordinary registers awaiting a keep flag. Preserve enable, reset and initialization
+semantics; their physical realization remains part of the future cell contract.
+Physical cell realization is deferred; it must preserve the selected state
+behavior while converting eligible ordinary registers into DominoLatch cells.</li>
+<li><strong>Dual rails and per-gate polarity — confirmed by the user.</strong>
+Both polarities of one signal may feed one DOMINO gate. Every DOMINO cell,
+including DominoLatch, has Q and !Q outputs for free; otherwise a NOT may be inserted before the consuming
+gate when residual logic is available. It cannot be inserted in the one-DOMINO
+case with no extra leftover logic because the previous DOMINO already supplies
+the needed !Q: reuse that rail rather than create NOT(Q). The user's follow-up
+clarifies that this case is not a candidate rejection; any missing opposite rail
+is an implementation/modeling error. Explicit residual NOTs remain relevant for
+ordinary producers without an already available opposite phase.
+This supersedes the older domino plan's charged-twin model for DOMINO producers.</li>
+<li><strong>Technology limits and branch metric — confirmed by the user.</strong>
+Configure logical inputs (default 8), maximum series stack (default 4), and
+maximum parallel discharge branches (default 10) for the chosen technology and
+frequency. Do not constrain maximum transistors. Optimization cuts are separately
+configurable and larger than gate support (proposed initial default 16).
+Constrain factored parallel width: a literal has width 1, parallel composition
+sums widths, and series composition takes their maximum. Thus
+<code>(a OR b) AND (c OR d)</code> counts as 2, matching the existing SP formula
+metric, not 4 discharge paths. Expose dual-output Domino/DominoLatch overhead
+as provisional cost-model coefficients and document their values during
+implementation; they do not add a technology-legality constraint or imply
+characterized cell area.</li>
+<li><strong>LEC separation — confirmed by the user.</strong> LEC is a totally
+separate problem. USYN's accommodation is preserving register/DominoLatch names
+as much as possible to simplify and accelerate independent LEC. Do not integrate
+LEC, proof gates, solver budgets or verdict caches. Exact truth-table dependence,
+completion and function construction remain Boolean synthesis operations, not
+a separate equivalence flow.</li>
+<li><strong>Clock-phase configuration — confirmed by the user.</strong> Select
+one or two clock phases. In the two-phase configuration, first-phase cells feed
+second-phase cells. Both phases permit
+arbitrarily many parallel cells, and each first-phase cell can feed arbitrarily
+many cells in the second phase. Do not limit total cells in a cone or impose
+a cross-phase fanout cap. Routing/fanout timing is a separate problem.</li>
+<li><strong>Residual logic and mandatory replacement — confirmed by the user.</strong>
+Whatever logic remains outside the selected one/two-phase DOMINO structure
+supplies its inputs before the first clock phase. The original endpoint register
+is always replaced in DOMINO output. No leftover-logic case changes that rule;
+keeping original registers belongs to the separate permanent CMOS target.</li>
+<li><strong>Whole-cone-first selection and selective removal — confirmed by the user.</strong>
+Attempt a legal dual-rail whole-cone implementation in one cell, then two phases
+when enabled, under strict admission/work bounds. For remaining cases, search
+which subfunctions to compute in upstream CMOS while retaining useful shared
+dependencies inside the endpoint. Use bounded windows when the whole cone is
+too large, with priority cuts and reconvergence-driven growth as alternative
+seeds. Reuse failed-attempt information and retain legal incumbents. Neither
+shrinking nor growing a boundary guarantees monotonic improvement or globally
+optimal inputs; evaluate exact candidate functions and total affected cost.</li>
+<li><strong>Residual optimization — confirmed by the user.</strong> Implement
+native XAG cleanup, four-input rewriting and bounded resubstitution after initial
+endpoint selection, followed by one affected-endpoint reconsideration round.
+Preserve shared residual outputs and state boundaries. Use nonzero AND/XOR cost
+weights and a depth guard. Mockturtle is algorithm inspiration only, not a
+dependency. Additional refactoring/balancing are later measured extensions.</li>
+</ol>
+
+<h3 id="search-scheduling">Search scheduling and coverage evidence</h3>
+<p>The user reports that over 10% of cones fit one function with Q/!Q available,
+and around 50% fit with two DOMINO. This motivates cheap whole-cone attempts
+before broad boundary exploration, with exactly-two-cell candidates tried before
+wider two-phase networks. Do not interpret the 50% figure as an additional 50
+percentage points without measured denominators. When collecting results,
+report cell count and phase count separately, with
+explicit denominators. Report one-cell fits, exactly-two-cell fits, wider
+two-phase fits, and partial-cone results separately; also report cumulative
+full-cone coverage after the one-cell and exactly-two-cell attempts over the
+same eligible population. This lets the measurements test the motivating
+observation without conflating two cells with two phases. The implementation
+permits parallel cells within the
+configured phase limit. These observations are not measurements of this
+implementation or acceptance thresholds. Configured one-phase mode never
+attempts a second phase.</p>
+<p>Record whether a reported fit means Boolean representability with the available
+Q/!Q rails or a legal implementation under the configured logical-input, stack
+and parallel-branch limits. Only the latter is an accepted fast-path result.
+Keep those limits identical in scheduling comparisons; the larger analysis
+support budget must not silently enlarge the gate limits.</p>
+<p>Use the observed coverage to order work, not to assign fixed fractions of the
+runtime budget. A one-cell attempt can be cheap enough to try on every admitted
+cone; two-phase decomposition needs its own tighter candidate/work budget because
+failed attempts may be expensive. Measure additional full-cone successes per
+unit of work for each tier before increasing its budget. Fully absorbed cones
+skip residual optimization only when no other live consumer still needs their
+internal logic.</p>
+<p>In particular, the coverage observations justify trying full absorption early;
+they do not show that two-phase search should receive half the runtime. Measure
+successful and unsuccessful attempts separately, including the cost of discovering
+support and constructing tables. Compare schedules under the same total work
+cap. Keep the initial schedule deterministic and tune its defaults from these
+measurements; runtime learning or an adaptive scheduler is not required for V1.</p>
+<p>The resulting V1 scheduling policy is an early-exit search with an incumbent:
+spend little on the one-cell fast path, give admitted two-phase decomposition
+a bounded opportunity, and reserve broader boundary exploration for unresolved
+or expensive endpoints. Prioritize reconvergence and the violated gate constraint
+within that final group. Do not infer that every remaining cone needs a large
+search: retain a legal minimal endpoint and cap unsuccessful work. A higher
+coverage percentage is useful only together with total affected cost and search
+effort; it does not override sharing or technology legality.</p>
+<p>Validate this scheduling choice against a bounded cut-first baseline using
+the same technology limits, cost model and total work cap. Include cones that
+fit one cell, cones requiring exactly two cells, wider two-phase covers, and
+cones needing upstream residual logic. Record both fast-path coverage and final
+mixed-network cost so early acceptance cannot conceal a systematic quality
+loss. Keep this as an algorithm comparison inside native USYN; ABC remains a
+separate flow for later mapped-result benchmarking.</p>
+<p>The reported coverage supports this order of attempts, but does not imply
+that full-cone analysis or two-cell decomposition is cheap. Charge cone discovery,
+truth-table construction and failed decomposition work as well as successful
+candidates. Keep a bounded-window route and a reserved selective-removal budget
+even when the observed absorption rate is high.</p>
+<p>Collect an admitted cone and its exact function once, then reuse that analysis
+across the one-cell, two-phase and removal tiers while the graph and boundary
+remain unchanged. Keep three decisions separate: whether analysis fits its
+resource budget, whether a candidate satisfies the technology constraints, and
+whether selecting it improves the shared implementation. A larger analysis
+window can simplify to a legal smaller-support gate; free Q/!Q availability
+alone does not establish input, stack or branch legality. Rank removal moves by
+the constraint or cost that actually blocked the preceding attempt, not simply
+by the presence of a binate operator.</p>
+<table>
+<thead><tr><th>Search tier</th><th>Work admitted</th><th>Next step</th></tr></thead>
+<tbody>
+<tr><td>Whole cone, one cell</td>
+<td>Bounded cone/support discovery, exact functional simplification and legal
+dual-rail factoring; avoid broad cut enumeration first.</td>
+<td>Accept a competitive legal result after checking external sharing; otherwise
+retain its function, factors and limiting constraints for later tiers.</td></tr>
+<tr><td>Whole cone, two phases</td>
+<td>Only when configured: reuse the admitted function and try bounded existing
+and newly synthesized divisors. Try exactly two cells first, then wider
+parallel first-phase decompositions within the reserved tier budget.</td>
+<td>Accept a competitive full-cover result, or retain useful partial
+decompositions and the best legal incumbent.</td></tr>
+<tr><td>Selective removal and alternative boundaries</td>
+<td>For unresolved or expensive cones, move selected subfunctions into upstream
+CMOS; compare a bounded set of reconvergence-aware boundaries and divisors.</td>
+<td>Choose by total affected cost, including shared logic that cannot be deleted.
+An oversized cone enters these tiers through a bounded window.</td></tr>
+<tr><td>Residual optimization and feedback</td>
+<td>One shared multiple-output round: cleanup, four-input rewriting, bounded
+resubstitution (initially eight inputs, about 32 divisors, at most two inserted
+nodes), then cleanup and one bounded reconsideration of affected endpoints.</td>
+<td>Keep the best legal mixed network and freeze its dependencies and phases.</td></tr>
+</tbody>
+</table>
+<p>Use separate deterministic work budgets for these tiers so an unsuccessful
+two-phase attempt cannot consume the entire removal/alternative-boundary budget.
+Do not spend the same failed search budget again after changing one boundary:
+reuse valid function/divisor data, and invalidate entries whose graph or ordered
+boundary changed. Keep separate outcomes for a legal candidate, a demonstrated
+constraint violation for a particular candidate, and an exhausted search.
+Report admission failures separately from unsuccessful admitted searches. Measure
+one-cell successes over all eligible endpoints, cumulative full-cone coverage
+after two phases over the same population, and conditional success among attempted
+cones. Within two-phase successes, report exactly-two-cell covers separately
+from covers using more parallel cells; this makes comparison with the reported
+two-DOMINO observation meaningful without restricting the supported topology.
+Also record time spent on unsuccessful attempts and final cost after
+residual optimization. These measurements guide budget tuning; the reported
+coverage estimates do not justify an unbounded whole-cone search.</p>
+<p>Classify why a tier stopped before deciding its next move. A particular
+formula violating stack or branch limits can guide selective removal; an
+exhausted factoring/decomposition budget only says that attempt was inconclusive.
+A legal candidate rejected for shared cost calls for reuse-aware alternatives,
+not relaxed technology limits. Admission failure routes directly to a bounded
+window. Preserve the legal incumbent in every case and report these outcomes
+separately.</p>
+<pre>build XAG and enumerate semantic endpoints
+apply cheap hashing, folding and dead-logic cleanup
+for each endpoint:
+    retain a legal minimal endpoint as the incumbent
+    admit whole cone, or select a bounded window
+    try one legal dual-rail DOMINO implementation
+    if competitive after sharing costs: finish this endpoint's fast search
+    if clock_phases == 2:
+        try a bounded exactly-two-cell decomposition of the admitted function
+        if not competitive: try bounded parallel first-phase decompositions
+    if competitive after sharing costs: finish this endpoint's fast search
+    search selective removals into upstream CMOS under a separate budget
+    compare reconvergent/asymmetric cuts and coordinated moves in the same frontier
+    retain best legal implementation and search evidence
+
+target-cost local and two-endpoint optimization for poor candidates only
+derive the shared residual network from all live consumers
+if residual logic exists:
+    cleanup → rewrite4 → bounded resubstitution → cleanup
+    // resub: up to 8 window inputs, about 32 divisors, at most 2 inserted nodes
+    // accept positive shared-area gain subject to the depth guard
+    reconsider affected endpoint cuts and total costs once
+    retain the better legal mixed network; refresh live residual logic and clean up
+freeze selected functions, dependencies and clock phases
+emit independent logical result; optionally tmap</pre>
+<p>For example, <code>((a | b) &amp; (a | c)) | (d ^ e)</code> can retain the
+shared <code>a</code> simplification while moving <code>d ^ e</code> into CMOS:
+the endpoint becomes <code>a | (b &amp; c) | x</code>. This is a candidate to
+cost, not mandatory XOR extraction: the original function may already fit a
+legal dual-rail cell. Conversely, cutting <code>x = a ^ b</code> out of
+<code>(a ^ b) ^ b = a</code> exposes <code>x ^ b</code> and loses the visible
+cancellation. Test candidate functions after each boundary change. Cheap
+structural admission must not label a cone mathematically infeasible merely
+because its raw support exceeds the analysis budget.</p>
+
+<h3>Output topology</h3>
+<pre>DOMINO target, one phase:
+  residual CMOS → phase-1 DominoLatch (replaces original register)
+
+DOMINO target, two phases:
+  residual CMOS → phase-1 DOMINO cells → phase-2 DominoLatch
+                 (parallelism and cross-phase fanout unrestricted)
+
+Permanent CMOS target:
+  whole USYN-selected logic → ABC/TMAP → CMOS logic + original registers
+
+Every DOMINO cell exposes Q and !Q. No LEC invocation is part of these flows.</pre>
+
+<h3>Implementation order and checkpoints</h3>
+<ol>
+<li><strong>Contract/representation checkpoint:</strong> A, L, B–D and the data-model
+portion of H. Confirm endpoint inventory, table memory bounds and formula legality
+before spending time on optimization quality.</li>
+<li><strong>First end-to-end checkpoint:</strong> E's one-cell and selective-removal
+paths, one-phase DOMINO/residual mapping,
+behavioral expansion/static adapter from H/I, and minimum J/K reports and naming tests.
+Every eligible endpoint is accounted for. This is an intermediate checkpoint,
+not completion of proposal v4.</li>
+<li><strong>V4 optimization checkpoint:</strong> E's bounded whole-cone two-phase
+search, F–G, M's residual optimization and feedback, optional first-phase DOMINO
+logic, and complete resource accounting.</li>
+<li><strong>Replacement checkpoint:</strong> finish I–K, measure both build modes,
+then remove the superseded cover path and stale options/docs. Confirm the
+ABC-free build/run gate and keep future physical work outside this task.</li>
+</ol>
+
+<h3>Scope limits</h3>
+<p>As in proposal v4, defer placement-driven retiming, register replication,
+global Pareto retention, whole-design choice networks, MILP/ILP selection and
+wire-delay-aware costing. Also defer the register <code>keep</code> attribute and
+its Pyrope plumbing; it must not block current tests/benchmarks. A bounded local candidate set is required for search;
+it is not a persistent global choice network. No default ABC-flow change,
+unbounded generic optimization recipe, or benchmark-derived coverage promise is
+implied by this redesign. M's bounded residual rewriting/resubstitution is part
+of V1; additional refactoring, balancing and zero-gain exploration remain deferred.</p>
+</main>
+<footer>LiveHD TODO · <a href="../index.html">index</a></footer>
+</body>
+</html>

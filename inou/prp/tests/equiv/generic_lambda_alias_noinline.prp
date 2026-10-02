@@ -1,0 +1,24 @@
+/*
+:name: generic_lambda_alias_noinline
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:set: compile.upass.inline=false
+*/
+
+// An IMPORT ALIAS named like the template file's own function (`const inc =
+// import("…/lib2.hh")` vs lib.prp's private `comb inc`) bound as a lambda
+// generic (`apply<inc>`, z) or a function-valued argument (`applyv(f=inc)`, x)
+// is the alias target `hh`. The bind looked the raw spelling up BY NAME, which
+// lands on lib.prp's `inc` from both scopes, so the clone kept `inc` and
+// silently used the 4-bit mask (x under inline=false, x and z inlined -- the
+// inlined form is covered by generic_lambda_nested_scope). `y` is the direct
+// call through the alias.
+const apply  = import("generic_lambda_alias_noinline/lib.apply")
+const applyv = import("generic_lambda_alias_noinline/lib.applyv")
+const inc    = import("generic_lambda_alias_noinline/lib2.hh")
+pub mod top(a:U8) -> (z:U8@[0], y:U8@[0], x:U8@[0]) {
+  z = apply<inc>(a=a)
+  y = inc(v=a)
+  x = applyv(f=inc, a=a)
+}

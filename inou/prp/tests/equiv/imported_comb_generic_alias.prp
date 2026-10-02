@@ -1,0 +1,18 @@
+/*
+:name: imported_comb_generic_alias
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// suggestions7 item 5: an IMPORTED `comb` (mid) whose body calls a GENERIC
+// comb through a file-scope import ALIAS whose name differs from the entity
+// (`lf`, `lf_p1` -> leaf.leaf), with explicit `<W=…>` binds. Inlining mid
+// into top must resolve the alias inside the inline frame; it used to fail
+// "call to undefined function 'leaf.leaf'" (or, with no --top, "names input
+// '__generic_arg'").
+const mid = import("imported_comb_generic_alias/mid.mid")
+pub mod top(a:U8) -> (y:U9@[0]) {
+  const r = mid(a=a)
+  y = r.z
+}

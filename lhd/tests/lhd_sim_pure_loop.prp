@@ -1,0 +1,45 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+pub comb pure_loop(x:U128, select:U4, signed_value:S8) -> (picked:U32, encoded:U2, matrix:U16, shifted:S16, prefix:U8) {
+  mut value:U32 = 0
+  mut index_bits:U2 = 0
+  for i in 0..<4 {
+    if select#[i] != 0 {
+      value |= x#[(i*32)..+32]
+      wrap index_bits |= i
+    }
+  }
+  picked = value
+  encoded = index_bits
+  matrix = 0
+  for row in 0..<4 {
+    for column in 0..<4 { matrix#[row*4 + column] = select#[column] }
+  }
+  shifted = signed_value << 3
+  mut before:U8 = 0
+  for k in 0..<4 {
+    if select#[k] == 1 { break }
+    wrap before += k + 1
+  }
+  prefix = before
+}
+
+test pure_loop.corners {
+  mut dut = pure_loop
+  dut.x = 0x00000008000000040000000200000001
+  dut.signed_value = -7
+  dut.select = 15
+  step
+  assert(dut.picked == 15 and dut.encoded == 3 and dut.matrix == 65535)
+  assert(dut.shifted == -56 and dut.prefix == 0)
+  dut.select = 0
+  step
+  assert(dut.picked == 0 and dut.encoded == 0 and dut.matrix == 0 and dut.prefix == 10)
+  dut.select = 8
+  step
+  assert(dut.picked == 8 and dut.encoded == 3 and dut.matrix == 34952 and dut.prefix == 6)
+  dut.select = 6
+  dut.signed_value = -128
+  step
+  assert(dut.picked == 6 and dut.encoded == 3 and dut.matrix == 26214 and dut.prefix == 1)
+  assert(dut.shifted == -1024)
+}

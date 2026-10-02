@@ -4,9 +4,12 @@
 #include <cvc5/cvc5.h>
 
 #include <chrono>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -313,15 +316,56 @@ std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& n
 std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Occurrence_node& node, int width, bool x_as_undefined = false);
 
 // Name of the graph clock INPUT driving a state cell's clock_pin, seen through
-// width wrappers; nullopt for a derived, constant or absent clock. The encoder
-// counts distinct names from this walk to decide multi-clock edge gating, and
-// prove_equal uses the same count for its reset-prologue power-on policy.
+// width wrappers or as the clk_ref of a recognized Clock_cell; nullopt for a
+// derived, constant or absent clock. The encoder counts distinct names from
+// this walk to decide multi-clock edge gating, and prove_equal uses the same
+// count for its reset-prologue power-on policy.
 std::optional<std::string> flop_clock_input(const hhds::Occurrence_node& node);
 
-// Distinct clock INPUT names (flop_clock_input) over every flop of `g`'s
-// instance tree, not descending a def in `collapse_defs` (a proven box models
-// its own state). The cross-design clock-identity check in prove_equal compares
-// these sets: see Encoder::set_force_multi_clock.
+// The BIT of a clock INPUT that `driver` carries, peeled through the same width
+// wrappers (Get_mask range, Sext, mask-shaped And / zero-pad Or) the encoder's
+// Clk_root keys a clock by. Returns the input's name and the bit, or nullopt
+// when the walk does not land on a graph input (a Not, a mux, a gate -- the
+// caller then cannot tell which bit it is and must not assume bit 0).
+// pass/lec/phase_sched keys its clock ROOTS with this so `clks[0]` and
+// `clks[1]` are two roots there exactly as they are two clocks here.
+std::optional<std::pair<std::string, int>> clock_input_bit(const hhds::Occurrence_pin& driver);
+// The same walk over a def body's (non-occurrence) pins: the design-wide CLOCK
+// FOREST (lhd_kernel_formal.cpp build_forest) keys an instance's clock port by
+// the bus BIT its parent drives, so `.a(clks[0]), .b(clks[1])` are two roots.
+std::optional<std::pair<std::string, int>> clock_input_bit(const hhds::Pin_class& driver);
+
+// The clock INPUT lanes of a Memory cell (an input through width wrappers, or
+// the clk_ref of a recognized Clock_cell on one). `lanes` is keyed by port
+// index; with `single` (one clock sink) the one lane clocks every port, else
+// port p is clocked by its own sink. `unresolved` = some non-constant clock lane
+// is none of the above (a derived clock, a mapped clock-buffer Sub): the
+// multi-clock encoder REFUSES such a memory rather than let it commit on every
+// step. `comb` = a type==2 array (no state, no clock). The memory clocks join
+// the flop clocks in design_clock_inputs and in the encoder's own census.
+// `tied_off` = the port blocks whose clock sink is driven ONLY by constants (a
+// yosys async read's `RD_CLK=x`, a `posedge 1'b0` write): such a port never
+// ticks. A port with NO clock sink at all is neither in `lanes` nor here; it
+// takes the memory's base clock (cgen's rule: the first port carrying one).
+struct Memory_clocks {
+  struct Lane {
+    std::string          name;  // the input name, `name[bit]` for a bit past 0
+    hhds::Occurrence_pin pin;   // the clock input pin itself
+    int                  bit = 0;  // which bit of `pin` is the clock
+  };
+  std::map<int, Lane> lanes;
+  std::set<int>       tied_off;
+  bool                single     = true;
+  bool                unresolved = false;
+  bool                comb       = false;
+};
+Memory_clocks memory_clocks(const hhds::Occurrence_node& node);
+
+// Distinct clock INPUT names (flop_clock_input / memory_clocks) over every
+// flop and non-combinational memory of `g`'s instance tree, not descending a
+// def in `collapse_defs` (a proven box models its own state). The cross-design
+// clock-identity check in prove_equal compares these sets: see
+// Encoder::set_force_multi_clock.
 absl::flat_hash_set<std::string> design_clock_inputs(hhds::Graph* g, const absl::flat_hash_map<std::string, bool>* collapse_defs);
 
 // Extend (sign/zero per v.is_signed) or truncate `v` to exactly `width` bits.

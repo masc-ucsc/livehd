@@ -1,0 +1,14 @@
+/*
+:name: style_compact_array_packing
+:type: style
+:style: compact-bit-packing
+:help: const packed:U64 = counters#\[\.\.\]
+*/
+comb f(counters:[4]U16) -> (out:U64) {
+  mut packed:U64 = 0  // locate_style_compact-bit-packing
+  packed#[0..<16] = counters[0]
+  packed#[16..<32] = counters[1]
+  packed#[0x20..<0x30] = counters[2]
+  packed#[0x30..<0x40] = counters[3]
+  out = packed
+}

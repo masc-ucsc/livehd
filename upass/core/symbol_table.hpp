@@ -206,6 +206,11 @@ public:
   // (`%y_0` for `a + cmp(a=a, b=b)`): `cmp(…).lt` (the runner's
   // stash_sub_instance_port_facts). Transient; cleared with the stash.
   absl::flat_hash_map<std::string, std::string>                                  call_result_label;
+  // The callee (as the call spelled it) whose INLINED result a compiler temp
+  // holds (`%y_0` for `(y, x) = dox(a=3)`), so an absent-field read on it --
+  // a destructure slot that matches no output -- names the call, not the
+  // temp. Transient; cleared with the stash.
+  absl::flat_hash_map<std::string, std::string>                                  call_result_callee;
   // Typed names written (upass.bitwidth) with a value whose range nothing
   // derived (a concat awaiting its lane widths, an opaque call result): the
   // overflow check could not judge that write, so the declared type is not a

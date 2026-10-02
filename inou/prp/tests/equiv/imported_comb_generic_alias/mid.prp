@@ -1,0 +1,7 @@
+const lf    = import("leaf.leaf")
+const lf_p1 = import("leaf.leaf")
+pub comb mid(a:U8) -> (z:U9) {
+  const t = lf<W=8>(a=a)
+  const u = lf_p1<W=9>(a=t.z)
+  z = u.z
+}

@@ -13,6 +13,7 @@
 #include "gtest/gtest.h"
 #include "node_util.hpp"
 #include "sim_color_plan.hpp"
+#include "sim_specialize.hpp"
 #include "sim_tune_vector.hpp"
 
 namespace {
@@ -510,3 +511,138 @@ TEST(CgenSim, TuneIdOnlyForExecutableRoots) {
   EXPECT_EQ(digests.find("\"tune_id_child.tune-id.cpp\""), std::string::npos) << digests;
 }
 }  // namespace
+
+TEST(CgenSim, ConstantSpecializationKeepsInstancesAndRolledCarriesSeparate) {
+  auto& library = livehd::Hhds_graph_library::instance("lgdb_sim_constant_instances");
+  auto  io      = library.create_io("constant_body");
+  io->add_input("seed", 0);
+  io->add_input("gate", 1);
+  io->add_output("result", 2);
+  for (auto field : {"seed", "gate", "result"}) {
+    io->set_bits(field, 8);
+    io->set_unsign(field, true);
+  }
+  auto body = io->create_graph();
+  auto mask = gu::create_typed_node(*body, Ntype_op::And);
+  body->get_input_pin("seed").connect_sink(mask.create_sink_pin(0));
+  body->get_input_pin("gate").connect_sink(mask.create_sink_pin(1));
+  auto output = mask.create_driver_pin(0);
+  gu::set_ubits(output, 8);
+  output.connect_sink(body->get_output_pin("result"));
+  auto top_io = library.create_io("constant_parent");
+  top_io->add_input("gate", 0);
+  top_io->set_bits("gate", 8);
+  top_io->set_unsign("gate", true);
+  for (int i = 0; i < 2; ++i) {
+    top_io->add_output("y" + std::to_string(i), i + 1);
+    top_io->set_bits("y" + std::to_string(i), 8);
+    top_io->set_unsign("y" + std::to_string(i), true);
+  }
+  auto                          parent = top_io->create_graph();
+  std::vector<hhds::Node_class> loops;
+  for (int i = 0; i < 2; ++i) {
+    auto               loop = gu::create_typed_node(*parent, Ntype_op::Sub);
+    hhds::Subnode_loop descriptor;
+    descriptor.count = 17;
+    descriptor.first = -2;
+    descriptor.step  = 3;
+    loop.set_subnode(io, descriptor);
+    gu::create_const(*parent, *Dlop::create_integer(255)).connect_sink(loop.create_sink_pin(0));
+    // 256 must truncate at the U8 instance input boundary, producing zero.
+    auto gate = i == 0 ? gu::create_const(*parent, *Dlop::create_integer(256)) : parent->get_input_pin("gate");
+    gate.connect_sink(loop.create_sink_pin(1));
+    auto result = loop.create_driver_pin(2);
+    gu::set_ubits(result, 8);
+    result.connect_sink(loop.create_sink_pin(0));
+    result.connect_sink(parent->get_output_pin("y" + std::to_string(i)));
+    loops.push_back(loop);
+  }
+  std::vector<std::shared_ptr<hhds::Graph>> graphs{body, parent};
+  livehd::sim::specialize_constants(graphs);
+  EXPECT_TRUE(parent->get_output_pin("y0").get_driver_pin().is_known_false());
+  EXPECT_FALSE(parent->get_output_pin("y1").get_driver_pin().is_const());
+  EXPECT_EQ(loops[0].subnode_loop()->count, 17u);
+  EXPECT_EQ(loops[0].subnode_loop()->first, -2);
+  EXPECT_EQ(loops[0].subnode_loop()->step, 3);
+  EXPECT_EQ(loops[1].get_subnode_graph(), body);
+  EXPECT_NE(loops[0].get_subnode_graph(), body);
+  EXPECT_FALSE(body->get_output_pin("result").get_driver_pin().is_const());
+}
+
+TEST(CgenSim, ZeroShiftSpecializationUsesTheLoopDomainAndPortBoundary) {
+  auto& library = livehd::Hhds_graph_library::instance("lgdb_sim_zero_index");
+  auto  io      = library.create_io("zero_shift_body");
+  io->add_input("index", 0);
+  io->set_bits("index", 3);
+  io->add_output("y", 1);
+  io->set_bits("y", 8);
+  io->set_unsign("y", true);
+  auto body  = io->create_graph();
+  auto shift = gu::create_typed_node(*body, Ntype_op::SRA);
+  gu::create_const(*body, *Dlop::create_integer(0)).connect_sink(gu::setup_sink_by_name(shift, "a"));
+  body->get_input_pin("index").connect_sink(gu::setup_sink_by_name(shift, "b"));
+  auto result = shift.create_driver_pin(0);
+  gu::set_ubits(result, 8);
+  result.connect_sink(body->get_output_pin("y"));
+  auto top_io = library.create_io("zero_shift_parent");
+  for (int i = 0; i < 3; ++i) {
+    top_io->add_output("y" + std::to_string(i), i);
+    top_io->set_bits("y" + std::to_string(i), 8);
+    top_io->set_unsign("y" + std::to_string(i), true);
+  }
+  auto                          graph = top_io->create_graph();
+  std::vector<hhds::Node_class> loops;
+  for (int i = 0; i < 3; ++i) {
+    auto               loop = gu::create_typed_node(*graph, Ntype_op::Sub);
+    hhds::Subnode_loop descriptor;
+    descriptor.index_input = 0;
+    descriptor.first       = i == 1 ? -1 : 0;
+    descriptor.step        = 1;
+    descriptor.count       = i == 2 ? 8 : 4;
+    loop.set_subnode(io, descriptor);
+    auto y = loop.create_driver_pin(1);
+    gu::set_ubits(y, 8);
+    y.connect_sink(graph->get_output_pin("y" + std::to_string(i)));
+    loops.push_back(loop);
+  }
+  std::vector<std::shared_ptr<hhds::Graph>> graphs{body, graph};
+  livehd::sim::specialize_constants(graphs);
+  EXPECT_TRUE(graph->get_output_pin("y0").get_driver_pin().is_known_false());
+  EXPECT_EQ(loops[0].subnode_loop()->count, 4u);
+  // A negative first index and an S3 index that wraps at 4 cannot use the proof.
+  EXPECT_EQ(loops[1].get_subnode_graph(), body);
+  EXPECT_EQ(loops[2].get_subnode_graph(), body);
+  EXPECT_FALSE(body->get_output_pin("y").get_driver_pin().is_const());
+}
+
+TEST(CgenSim, ZeroTripIdentityCarryKeepsTheSeedInputBoundary) {
+  auto& library = livehd::Hhds_graph_library::instance("lgdb_sim_zero_trip_seed");
+  auto  io      = library.create_io("seed_body");
+  io->add_input("seed", 0);
+  io->set_bits("seed", 8);
+  io->set_unsign("seed", true);
+  io->add_output("y", 1);
+  io->set_bits("y", 16);
+  io->set_unsign("y", true);
+  auto body = io->create_graph();
+  body->get_input_pin("seed").connect_sink(body->get_output_pin("y"));
+  auto top_io = library.create_io("seed_parent");
+  top_io->add_output("y", 0);
+  top_io->set_bits("y", 16);
+  top_io->set_unsign("y", true);
+  auto               graph = top_io->create_graph();
+  auto               loop  = gu::create_typed_node(*graph, Ntype_op::Sub);
+  hhds::Subnode_loop descriptor;
+  descriptor.count = 0;
+  loop.set_subnode(io, descriptor);
+  gu::create_const(*graph, *Dlop::create_integer(511)).connect_sink(loop.create_sink_pin(0));
+  auto y = loop.create_driver_pin(1);
+  gu::set_ubits(y, 16);
+  y.connect_sink(loop.create_sink_pin(0));
+  y.connect_sink(graph->get_output_pin("y"));
+  std::vector<std::shared_ptr<hhds::Graph>> graphs{body, graph};
+  livehd::sim::specialize_constants(graphs);
+  const auto output = graph->get_output_pin("y").get_driver_pin();
+  ASSERT_TRUE(output.is_const());
+  EXPECT_TRUE(gu::const_of(output).eq_op(Dlop::create_integer(255))->is_known_true());
+}

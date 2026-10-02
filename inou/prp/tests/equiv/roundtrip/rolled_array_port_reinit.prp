@@ -1,0 +1,20 @@
+/*
+:name: rolled_array_port_reinit
+:type: compile
+*/
+// lhdtrack item 2. The source compiles and proves; its Pyrope re-emission
+// printed `mut total:U12 = 0` followed by a redundant `total = 0`, and the
+// re-read failed in lnast.tolg ("unresolved reference '%total_0'" here,
+// "field/index read of 'b' could not be resolved" for a single loop): the
+// repeated definition forced upass.ssa's full SSA rebuild, which flattens the
+// array port `b` to a plain integer slot, and the rolled loop typed its
+// invariant `b` from that slot instead of the io_meta array view.
+pub mod rolled_array_port_reinit::[timecheck=false](a:[4]U8, b:[4]U8, c:U8) -> (z:U12@[0]) {
+  mut total:U12 = 0
+  for i in 0..<4 {
+    for j in 0..<2 {
+      total = total + (b[i] ^ c)
+    }
+  }
+  z = total
+}

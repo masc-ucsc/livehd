@@ -1,0 +1,15 @@
+/*
+:name: tuple_literal_absent_field
+:type: error
+:error: unknown field `r` on the tuple expression
+:help: tuple expression has fields: p, q.*has 'r'
+*/
+// A field read on an inline tuple literal whose name is absent is a compile
+// error (03-bundle.md). The source of the read is a compiler temp, but it is
+// NOT a call result: the diagnostic must not call it "the call result" nor
+// suggest a destructure `slot=field` rename (there is no call and no
+// destructure here). Only a temp recorded as a call result
+// (destructure_callee_slot_mismatch.prp) gets the call wording.
+pub mod tuple_literal_absent_field(a:U8) -> (z:U8@[0]) {
+  z = (const p = a, const q = 3).r  // locate_error_here
+}

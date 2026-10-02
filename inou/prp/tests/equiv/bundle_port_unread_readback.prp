@@ -1,0 +1,15 @@
+/*
+:name: bundle_port_unread_readback
+:type: equiv
+:verilog_top: bundle_port_unread_readback
+:pyrope_top: bundle_port_unread_readback
+*/
+
+// Hand-written twin of bundle_port_unread_readback.v (see the golden's header):
+// the swap child and the struct child, flattened. The pair's real claim rides
+// prp-v2prp2v-bundle_port_unread_readback, whose graphs-flow leg emits the
+// golden as LGraph + Pyrope and requires the writer self-check to pass.
+pub comb bundle_port_unread_readback(a:U2, b:U4) -> (o:U2, s:U4) {
+  o = (a#[0] << 1) | a#[1]
+  s = b ^ 5
+}

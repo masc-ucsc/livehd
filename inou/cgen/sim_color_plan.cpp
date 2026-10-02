@@ -1681,17 +1681,50 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     gate_formulas[original_positive][original] = result;
     return result;
   };
+  // A latch's asynchronous reset overrides its enable (the emitted update is
+  // `reset ? initial : enable ? din : Q`). It therefore matters twice:
+  //  - as a DESTINATION, its D is observed only while the reset is inactive;
+  //  - as a SOURCE, a reset can change a closed latch's Q, so persistent Q is
+  //    a faithful read only where that reset cannot be active either.
+  // Two-phase pairs share one reset between both legs, which makes the second
+  // condition follow from the first. A reset that cannot be expressed as a
+  // bounded formula stays opaque and only loses the proof.
   std::vector<Gate_formula> latch_open_terms(plan.sites_.size());
+  std::vector<Gate_formula> latch_demand_terms(plan.sites_.size());
+  std::vector<Gate_formula> latch_reset_terms(plan.sites_.size());
+  std::vector<bool>         latch_has_reset(plan.sites_.size(), false);
   for (size_t base = 0; base < plan.sites_.size(); ++base) {
-    if (latch_settle[base]) {
-      latch_open_terms[base] = gate_formula(lc::sink_driver_hier(plan.sites_[base].node, "enable"),
-                                            !lc::sink_driver_hier(plan.sites_[base].node, "posclk").is_known_false(),
-                                            0);
+    if (gu::type_op_of(plan.sites_[base].node) != Ntype_op::Latch) {
+      continue;
+    }
+    // Every latch gets its window: a clock-window latch is not a settle target
+    // itself, but it can still be a closed SOURCE for one (see closed_during).
+    const auto& node         = plan.sites_[base].node;
+    latch_open_terms[base]   = gate_formula(lc::sink_driver_hier(node, "enable"),
+                                          !lc::sink_driver_hier(node, "posclk").is_known_false(),
+                                          0);
+    latch_demand_terms[base] = latch_open_terms[base];
+    const auto reset         = lc::sink_driver_hier(node, "reset_pin");
+    if (!reset.is_invalid()) {
+      latch_has_reset[base]   = true;
+      const bool negreset     = lc::sink_driver_hier(node, "negreset").is_known_true();
+      latch_reset_terms[base] = gate_formula(reset, !negreset, 0);
+      // Not-in-reset conjunct; dropping it (on a bound overflow) only
+      // enlarges the demand, which can lose a proof but never fake one.
+      if (const auto observed = gate_and(latch_open_terms[base], gate_formula(reset, negreset, 0))) {
+        latch_demand_terms[base] = *observed;
+      }
     }
   }
   const auto closed_during = [&](size_t source, const Gate_formula& demand) {
-    if (!latch_settle[source] || !lc::sink_driver_hier(plan.sites_[source].node, "reset_pin").is_invalid()) {
-      return false;  // an independent reset may change even a closed source
+    if (gu::type_op_of(plan.sites_[source].node) != Ntype_op::Latch) {
+      return false;
+    }
+    if (latch_has_reset[source]) {
+      const auto reset_overlap = gate_and(latch_reset_terms[source], demand);
+      if (!reset_overlap || !reset_overlap->empty()) {
+        return false;  // an independent reset may change even a closed source
+      }
     }
     const auto overlap = gate_and(latch_open_terms[source], demand);
     return overlap && overlap->empty();
@@ -1768,7 +1801,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       const auto gate   = lc::control_root(enable);
       // With multiple input clocks the slot alone does not determine this
       // net's level; its secondary-clock protocol must retain the held read.
-      if (clocks.n_clock_inputs() == 1 && !gate.net.is_invalid() && gu::is_graph_input_pin(gate.net) && clocks.is_clock(gate.net)
+      if (!held_read && clocks.n_clock_inputs() == 1 && !gate.net.is_invalid() && gu::is_graph_input_pin(gate.net) && clocks.is_clock(gate.net)
           && gate.inverted == (version != State_version::post_rise)) {
         role = Version_role::data;
       }
@@ -1987,6 +2020,20 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         if (a && b) {
           result = *a == *b;
         }
+      } else if (op == Ntype_op::Clock_cell) {
+        // A gated clock cannot be high while its reference is low, whatever the
+        // enable is doing: `clk_o = clk_ref & sampled(en)`. The active-low
+        // flavour and dividers have other level laws; leave those unknown.
+        const auto invert = gu::get_driver_of_sink_name(node.base_node(), "invert");
+        const auto divide = gu::get_driver_of_sink_name(node.base_node(), "div");
+        const bool plain  = (invert.is_invalid() || invert.is_known_false())
+                           && (divide.is_invalid() || (divide.is_const() && gu::const_of(divide).is_just_i64()
+                                                       && gu::const_of(divide).to_just_i64() == 1));
+        if (plain) {
+          if (const auto reference = phase_boolean(lc::sink_driver_hier(node, "clk_ref"), high); reference && !*reference) {
+            result = false;
+          }
+        }
       } else if (op == Ntype_op::Ror && inputs.size() == 1) {
         result = value(0);
       } else if (op == Ntype_op::Not && gu::bits_of(pin) == 1 && inputs.size() == 1) {
@@ -2067,6 +2114,46 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // that pin's drivers, which is what the in-pin walks below hand over. A
   // two-driver carry-in therefore calls this once per driver, exactly as the
   // old per-edge callers did.
+  // A Clock_cell output that drives a state element's clock pin (or another
+  // cell's reference) is read as that element's COMMIT ACTIVATION: the cell's
+  // color supplies the enable sampled at the edge. Every other reader sees the
+  // gated clock LEVEL. In the phases where the reference is at its inactive
+  // level that level is constant 0, so a level reader never needs the cell's
+  // slot there; the slot is then free to carry the bare activation, which is
+  // what the commit guards read. (Keeping both in one slot silenced every
+  // commit on a gated clock whose enable cone the guard emitter cannot spell.)
+  const auto clock_cell_activation_sink = [&](const hhds::Occurrence_pin& sink) {
+    const auto op = gu::type_op_of(sink.get_master_node());
+    if (op == Ntype_op::Clock_cell) {
+      return true;
+    }
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory) {
+      return Ntype::get_sink_name(op, static_cast<int>(sink.get_port_id())).ends_with("clock_pin");
+    }
+    return false;
+  };
+  // Is this Clock_cell's gated level statically 0 in `version`'s phase?
+  const auto clock_cell_level_low = [&](const hhds::Occurrence_pin& driver, State_version version) {
+    if (driver.is_invalid() || driver.is_const() || gu::type_op_of(driver.get_master_node()) != Ntype_op::Clock_cell) {
+      return false;
+    }
+    const auto node   = driver.get_master_node();
+    const auto invert = gu::get_driver_of_sink_name(node.base_node(), "invert");
+    const auto divide = gu::get_driver_of_sink_name(node.base_node(), "div");
+    const bool plain  = (invert.is_invalid() || invert.is_known_false())
+                       && (divide.is_invalid()
+                           || (divide.is_const() && gu::const_of(divide).is_just_i64() && gu::const_of(divide).to_just_i64() == 1));
+    if (!plain) {
+      return false;
+    }
+    const auto cone = lc::clock_cell_cone(node.base_node(), clocks);
+    if (!cone) {
+      return false;
+    }
+    // Active phase of the reference: high after the rise for a plain clock, low
+    // (before the rise and after the fall) for an inverted one.
+    return (version == State_version::post_rise) == cone->clock_inverted;
+  };
   const auto add_value_use = [&](const hhds::Occurrence_pin& use_driver,
                                  const hhds::Occurrence_pin& use_sink,
                                  size_t                      consumer,
@@ -2088,7 +2175,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     const bool    phase_high = version == State_version::post_rise;
     if (unused_phase_input(use_sink.get_master_node(), use_sink.get_port_id(), phase_high)) {
       producer_literal = "0ub0";
-    } else if (const auto constant = phase_boolean(use_driver, phase_high)) {
+    } else if (!clock_cell_activation_sink(use_sink) && clock_cell_level_low(use_driver, version)) {
+      producer_literal = "0ub0";
+    } else if (const auto constant = clock_cell_activation_sink(use_sink) ? std::nullopt : phase_boolean(use_driver, phase_high)) {
       producer_literal = *constant ? "0ub1" : "0ub0";
     }
     int lo = -1;
@@ -2140,6 +2229,17 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         }
       }
     }
+    // The SRA hop and the packed walk below move the consumer's window [lo,hi)
+    // into the coordinates of whatever node they are tracing (`crossing`). The
+    // moved window is only meaningful together with a producer REBOUND to that
+    // node (or a literal cut from it). When no refinement lands, the producer
+    // is still `use_driver` and the pre-extract below must apply the
+    // consumer's ORIGINAL window to it -- e.g. a constant-lane replica's
+    // Get_mask(SRA(sel, k), 0, 1) must stay [0,1) of the SRA, not become
+    // [k, k+1) (plus any slice offset the walk composed) of the SRA's value.
+    const int orig_lo = lo;
+    const int orig_hi = hi;
+    bool      rebound = false;
     if (!top_input && library != nullptr) {
       bool                 position_in_whole = true;
       uint32_t             surface_shift     = 0;
@@ -2488,6 +2588,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         if (rebased && (position_in_whole || lo == 0) && !crossing.is_invalid() && !crossing.is_const()) {
           const auto terminal = index.find(crossing.get_master_node().get_occurrence_index());
           const auto bind     = [&] {
+            rebound        = true;
             producer_port  = crossing.get_port_id();
             producer_shift = position_in_whole ? surface_shift : 0;
             if (!position_in_whole) {
@@ -2576,6 +2677,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                 }
                 if (const auto leaf = find_body_site(child.get(), producer_path, slice.leaf.get_master_node());
                     leaf && plan.sites_[*leaf].live) {
+                  rebound         = true;
                   producer_base   = *leaf;
                   producer_port   = slice.leaf.get_port_id();
                   producer_shift  = position_in_whole ? surface_shift + (!slice.shifted ? slice.lo : 0) : 0;
@@ -2605,6 +2707,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           }
         }
       }
+    }
+    if (!rebound && producer_literal.empty()) {
+      lo = orig_lo;  // no refinement landed: the window stays on use_driver
+      hi = orig_hi;
     }
 
     // An ordinary Sub output is a hierarchy alias, not an executable value
@@ -3434,7 +3540,26 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           ++consumer_input;
           continue;
         }
-        add_value_use(edge_drv, edge_sink, consumer_version, consumer_input++, consumer_site.version);
+        // A Clock_cell samples its enable at the reference clock's ACTIVE edge
+        // (the contract its materialization asserts; a real ICG holds the enable
+        // in a latch that closes there). The cell's level after that edge is
+        // therefore a function of the enable as it stood BEFORE the edge, not of
+        // whatever the post-edge logic settles to. Reading the post-edge enable
+        // closes a false same-phase ring through every state element the gated
+        // clock enables whose Q feeds the enable -- the shape of an
+        // `intpipe_mul_div_ctl` phase pair behind its `prim_clk_gate`.
+        State_version producer_phase = consumer_site.version;
+        if (gu::type_op_of(base_site.node) == Ntype_op::Clock_cell
+            && edge_sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Clock_cell, "en")) {
+          if (const auto cone = lc::clock_cell_cone(base_site.node.base_node(), clocks)) {
+            if (!cone->clock_inverted && consumer_site.version == State_version::post_rise) {
+              producer_phase = State_version::pre_rise;  // sampled at the rise
+            } else if (cone->clock_inverted && consumer_site.version == State_version::post_fall) {
+              producer_phase = State_version::post_rise;  // sampled at the fall
+            }
+          }
+        }
+        add_value_use(edge_drv, edge_sink, consumer_version, consumer_input++, producer_phase);
       }
     }
   }
@@ -3494,7 +3619,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       std::function<size_t(size_t, const Gate_formula&, unsigned)> specialize;
       specialize = [&](size_t producer, const Gate_formula& demand, unsigned depth) -> size_t {
         const auto version = plan.version_sites_[producer];
-        if (version.latch_settle && closed_during(version.base_site, demand)) {
+        // A settle latch's transparent version, or the open-window data version
+        // of a clock-window latch: either reads held Q where its window cannot
+        // overlap the demand.
+        if ((version.latch_settle
+             || (version.role == Version_role::data && gu::type_op_of(plan.sites_[version.base_site].node) == Ntype_op::Latch
+                 && plan.sites_[version.base_site].kind == Site_kind::state))
+            && closed_during(version.base_site, demand)) {
           return ensure_version(version.base_site,
                                 version.version,
                                 Version_role::state_read,
@@ -3570,7 +3701,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             || use.producer_version == Color_plan::invalid_index || !use.literal.empty()) {
           continue;
         }
-        const size_t replacement  = specialize(use.producer_version, latch_open_terms[target_site.base_site], 0);
+        const size_t replacement  = specialize(use.producer_version, latch_demand_terms[target_site.base_site], 0);
         specialized_inputs       |= replacement != use.producer_version;
         plan.value_uses_[use_index].producer_version = replacement;
       }

@@ -1,0 +1,82 @@
+/*
+:name: sim_loop_ring_lane_slice
+:type: simulation
+:sim_sweep: sim.tune.backend=slop
+:sim_sweep: sim.vcd=true
+*/
+// A rolled one-hot mux whose select is a SLICE of a word that a sibling
+// instance computes from the mux's own result. The word-level ring
+// (loop -> dly.d -> dly.q -> loop.select) makes inou.cgen.sim materialize the
+// loop into constant-lane replicas (compact_loop_has_external_ring), so each
+// replica reads Get_mask(SRA(select, <const lane>), 0, 1). The color plan's
+// SRA hop must not move that read's window unless it also rebinds the
+// producer: lane k must test select bit k, not bit 2k (+ the slice offset).
+// Only the slop + sim.vcd=true leg runs (each leg is a host C++ compile, ~5 s;
+// the llvm and vcd=false legs added time but no extra regression power -- the
+// unfixed hop fails slop/vcd=true too). sim.vcd=true keeps observation on,
+// which disables sim constant specialization (sim_specialize), so the replica
+// path stays covered even if specialization later learns to fold
+// constant-lane replicas.
+comb onehot_or<n=2, width=1>(`in`:Unsigned(bits=n*width), select:Unsigned(bits=n)) -> (out:Unsigned(bits=width)) {
+  out = 0
+  for lane in 0..<n {
+    if select#[lane] != 0 {
+      out |= `in`#[(lane*width)..+width]
+    }
+  }
+}
+
+mod ring_dly(clk:Clock, d:U4) -> (q:U4@[]) {
+  reg r:U4 = 0
+  q = r
+  r = d
+}
+
+pub mod sim_loop_ring_lane_slice(clk:Clock, din:U10, x:U4) -> (o:U5@[]) {
+  wire sel:U4 = nil
+  const m = onehot_or<n=2, width=5>(select=sel#[2..=3], `in`=din)
+  const r = ring_dly(clk=clk, d=x ^ m#[0..=3])
+  sel = r.q
+  o = m
+}
+
+test sim_loop_ring_lane_slice.lanes {
+  mut d = sim_loop_ring_lane_slice
+  mut rq:U4 = 0   // the testbench's copy of ring_dly.r
+  mut seen = 0
+  mut bad = 0
+  mut lane1 = 0
+  tick 16 {
+    mut dv:U10 = (clock * 75 + 41) & 0x3FF
+    mut xv:U4 = (clock * 7 + 12) & 0xF
+    d.din = dv
+    d.x = xv
+    // the edge captures x ^ m, with m read through the PRE-edge select
+    mut mp:U5 = 0
+    if rq#[2] != 0 {
+      mp = mp | dv#[0..=4]
+    }
+    if rq#[3] != 0 {
+      mp = mp | dv#[5..=9]
+    }
+    rq = xv ^ mp#[0..=3]
+    step
+    // after the edge `o` is the same mux read through the NEW select
+    mut ev:U5 = 0
+    if rq#[2] != 0 {
+      ev = ev | dv#[0..=4]
+    }
+    if rq#[3] != 0 {
+      ev = ev | dv#[5..=9]
+      lane1 = lane1 + 1
+    }
+    seen = seen + 1
+    if d.o != ev {
+      puts("mismatch clock={clock} sel={rq} o={d.o} exp={ev}")
+      bad = bad + 1
+    }
+  }
+  assert(seen == 16, "the comparisons actually ran")
+  assert(lane1 > 0, "lane 1 was selected at least once (guards a vacuous lane-0-only pass)")
+  assert(bad == 0, "each constant-lane replica tests its own select bit")
+}

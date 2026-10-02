@@ -14,6 +14,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "attrs.hpp"
 #include "cell.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/source_locator.hpp"
@@ -96,20 +97,28 @@ static std::string diagnostic_node_name(hhds::Graph* g, const hhds::Occurrence_n
 // signal that this encoder cannot model the element's commit condition, since
 // its only gating branches are the ICG fold and the multi-clock detected edge.
 // File scope so the flop loop and the memory cut share ONE definition.
-// Peel WIDTH-ONLY wrappers off a clock driver so the shape dispatch below sees
-// the operator that actually derives the clock.
+// Depth-capped; the value operand of Get_mask/Sext is the lowest sink pid.
 //
-// Explicit casts and independently inferred hierarchy boundaries can leave a
-// width-only Get_mask wrapper between a derived clock expression and its
-// consumer. The wrapper changes representation, not the clock's SHAPE, so peel
-// it before recognizing an ICG cone. Measured on tests/equiv/mclk_derived,
-// which is the identical `<clock> & <enable>` cone the fold exists to handle.
+// BIT TRACKING. A clock is ONE bit of a net, and the peel follows that bit:
+// `bit` is the position, in the pin currently held, of the bit the consumer
+// detects its edge on (bit 0 of the clock_pin driver). A Get_mask moves it
+// (`v[hi:lo]` bit b is v's bit lo+b), And/Or keep it only when the constant
+// leaves THAT bit alone, and a Sext keeps it up to the sign position. This
+// used to take the `a` operand of every Get_mask without reading the range, so
+// `clks[0]` and `clks[1]` both peeled to the whole input `clks`: two clocks
+// became one, the design was encoded single-clock, and moving a memory write
+// or a flop from clks[0] to clks[1] was PROVEN. Measured on
+// tests/equiv/lec/clock_bus_bits and clock_bus_bit_flop. A select whose range
+// is not constant (`clks[sel]`) is not a width adjustment at all and stops the
+// walk, which every caller treats as a derived (refused) clock.
 //
-// Same peel set as resolve_clk_input, and the same lowest-port-id rule for
-// picking the value operand out of Get_mask/Set_mask/Sext -- these all take the
-// value on the low pid and the mask/amount above it. Depth-capped.
+// `keep_bit0`: stop BEFORE a hop that would move the tracked bit off bit 0.
+// The shape dispatch (ICG And, Clock_cell) reasons about bit 0 of the operator
+// it lands on, so it must never see one reached through a bit select.
 template <typename Pin>
-static Pin peel_clock_width(Pin p, int depth = 0) {
+static Pin peel_clock_bits(Pin p, int& bit, bool keep_bit0) {
+  bit       = 0;
+  int depth = 0;
   while (!p.is_invalid() && depth < 16) {
     ++depth;
     const auto op = gu::type_op_of(p.get_master_node());
@@ -117,7 +126,7 @@ static Pin peel_clock_width(Pin p, int depth = 0) {
     // spells a narrowing as `v & MASK` and a signed/width-preserving pad as
     // `$signed(0) | $signed(v)`. Exactly ONE non-constant operand distinguishes
     // these identities from a real clock gate (`clk & enable`) or derived clock
-    // logic. Constants must preserve bit 0: 1 for And, 0 for Or.
+    // logic. Constants must preserve the tracked bit: set for And, clear for Or.
     //
     // OPERAND WALK (the shape used throughout this file, and both halves are
     // load-bearing): inp_sorted_pins() yields the NODE-AS-PIN (port 0) first and
@@ -129,16 +138,21 @@ static Pin peel_clock_width(Pin p, int depth = 0) {
     // and the singular reader would drop the seed. One driver == one of the old
     // edges, so a per-edge count stays a per-driver count.
     if (op == Ntype_op::And || op == Ntype_op::Or) {
-      Pin  data;
-      int  data_ins = 0;
-      bool identity = true;
+      if (bit >= 62) {
+        break;
+      }
+      const auto bit_mask = Dlop::create_integer(int64_t{1} << bit);
+      Pin        data;
+      int        data_ins = 0;
+      bool       identity = true;
       for (const auto& sink : p.get_master_node().inp_sorted_pins()) {
         for (const auto& driver : sink.get_driver_pins()) {
           if (driver.is_const()) {
+            const bool off = gu::const_of(driver).and_op(*bit_mask)->is_known_false();
             if (op == Ntype_op::And) {
-              identity &= !gu::const_of(driver).and_op(*Dlop::create_integer(1))->is_known_false();
+              identity &= !off;
             } else {
-              identity &= gu::const_of(driver).is_known_zero();
+              identity &= off;
             }
             continue;
           }
@@ -155,12 +169,41 @@ static Pin peel_clock_width(Pin p, int depth = 0) {
     if (op != Ntype_op::Get_mask && op != Ntype_op::Sext) {
       break;
     }
-    // Take the `a` operand (sink pid 0); the mask / bit count is pid 2 resp. 1
-    // (graph/cell.cpp). Track the SINK pid explicitly: comparing against
-    // `a.get_port_id()` would read the held pin's DRIVER pid, which is 0 for any
-    // single-output node, so the test would be `sink_pid < 0` -- never true --
-    // and whichever edge iterated first would win. When that is the constant the
-    // walk lands on it and gives up, order-dependently.
+    // Where the tracked bit sits in the `a` operand.
+    int nbit = bit;
+    if (op == Ntype_op::Get_mask) {
+      // `a[hi-1:lo]` (graph/cell.cpp: pid 2 = lo, pid 3 = hi), zero-extended
+      // above the slice: a tracked bit past the slice is a constant 0.
+      const auto range = gu::bit_range(p.get_master_node());
+      if (!range || range->first + bit >= range->second) {
+        break;
+      }
+      nbit = range->first + bit;
+    } else if (bit != 0) {
+      // Sext(a, pos): bits [0, pos] pass, everything above copies bit pos.
+      // Bit 0 always passes; a higher bit needs the constant pos.
+      Pin pos;
+      for (const auto& sink : p.get_master_node().inp_sorted_pins()) {
+        if (sink.get_port_id() == 1) {
+          for (const auto& driver : sink.get_driver_pins()) {
+            pos = driver;
+            break;
+          }
+        }
+      }
+      if (!pos.is_const() || !gu::const_of(pos).is_just_i64() || gu::const_of(pos).to_just_i64() < 0) {
+        break;
+      }
+      nbit = static_cast<int>(std::min<int64_t>(bit, gu::const_of(pos).to_just_i64()));
+    }
+    if (keep_bit0 && nbit != 0) {
+      break;
+    }
+    // Take the `a` operand (sink pid 0). Track the SINK pid explicitly:
+    // comparing against `a.get_port_id()` would read the held pin's DRIVER pid,
+    // which is 0 for any single-output node, so the test would be `sink_pid <
+    // 0` -- never true -- and whichever edge iterated first would win. When that
+    // is the constant the walk lands on it and gives up, order-dependently.
     Pin           a;
     hhds::Port_id a_pid = hhds::Port_invalid;
     for (const auto& sink : p.get_master_node().inp_sorted_pins()) {
@@ -175,16 +218,50 @@ static Pin peel_clock_width(Pin p, int depth = 0) {
     if (a.is_invalid()) {
       break;
     }
-    p = a;
+    p   = a;
+    bit = nbit;
   }
   return p;
 }
 
+// Peel WIDTH-ONLY wrappers off a clock driver so the shape dispatch below sees
+// the operator that actually derives the clock.
+//
+// Explicit casts and independently inferred hierarchy boundaries can leave a
+// width-only Get_mask wrapper between a derived clock expression and its
+// consumer. The wrapper changes representation, not the clock's SHAPE, so peel
+// it before recognizing an ICG cone. Measured on tests/equiv/mclk_derived,
+// which is the identical `<clock> & <enable>` cone the fold exists to handle.
+// Only hops that keep the clock on bit 0 (see peel_clock_bits).
 template <typename Pin>
-static Pin resolve_clk_input(Pin p) {
+static Pin peel_clock_width(Pin p) {
+  int bit = 0;
+  return peel_clock_bits(p, bit, true);
+}
+
+// The clock INPUT a clock driver resolves to, and WHICH BIT of it. Every
+// consumer keys the clock by name() -- the bare input name for bit 0, so a
+// 1-bit clock keeps its historical key, and `name[bit]` otherwise -- and reads
+// its level from that bit alone (Encoder clock_level), never `input != 0`.
+template <typename Pin>
+struct Clk_root {
+  Pin  pin;  // the graph input; invalid when the clock is not an input bit
+  int  bit = 0;
+  [[nodiscard]] bool        is_invalid() const { return pin.is_invalid(); }
+  [[nodiscard]] std::string name() const {
+    std::string n{gu::pin_name_of(pin)};
+    if (bit != 0) {
+      n += "[" + std::to_string(bit) + "]";
+    }
+    return n;
+  }
+};
+
+template <typename Pin>
+static Clk_root<Pin> resolve_clk_input(Pin p) {
   // ONE definition of "width adjustment", shared with the shape dispatch: strip
-  // every wrapper that cannot change bit 0 (the only bit an edge is detected
-  // on), then ask whether what is left is a clock INPUT.
+  // every wrapper that cannot change the tracked bit (the only bit an edge is
+  // detected on), then ask whether what is left is a clock INPUT.
   //
   // This used to peel Get_mask only, and to compare `e.sink.get_port_id() <
   // a.get_port_id()` -- the candidate's SINK pid against the held pin's DRIVER
@@ -197,49 +274,15 @@ static Pin resolve_clk_input(Pin p) {
   // tests/equiv/mclk_derived, whose golden spells the same cone at native width
   // and always passed -- the asymmetry only shows on a Verilog round trip,
   // where cgen's extra magnitude bit forces the extension in.
-  const auto base = peel_clock_width(p);
-  return gu::is_graph_input_pin(base) ? base : Pin{};
-}
-
-std::optional<std::string> flop_clock_input(const hhds::Occurrence_node& node) {
-  for (const auto& sink : node.inp_sorted_pins()) {
-    if (sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")) {
-      continue;
-    }
-    for (const auto& driver : sink.get_driver_pins()) {
-      if (auto ci = resolve_clk_input(driver); !ci.is_invalid()) {
-        return std::string(gu::pin_name_of(ci));
-      }
-      break;  // first driver of the clock_pin sink == the first edge the old walk saw
-    }
-    break;  // that `break` left the WHOLE walk
+  int        bit  = 0;
+  const auto base = peel_clock_bits(p, bit, false);
+  if (!gu::is_graph_input_pin(base)) {
+    return {};
   }
-  return std::nullopt;
-}
-
-absl::flat_hash_set<std::string> design_clock_inputs(hhds::Graph* g, const absl::flat_hash_map<std::string, bool>* collapse_defs) {
-  ankerl::unordered_dense::set<hhds::Gid> opaque_subs;
-  if (collapse_defs != nullptr) {
-    for (auto sn : g->grouped_hierarchy().nodes()) {
-      if (gu::type_op_of(sn) != Ntype_op::Sub) {
-        continue;
-      }
-      auto sio = sn.get_subnode_io();
-      if (sio != nullptr && collapse_defs->count(std::string(sio->get_name())) > 0) {
-        opaque_subs.insert(sn.get_subnode_gid());
-      }
-    }
+  if (const int w = gu::real_width(base); bit != 0 && w > 0 && bit >= w) {
+    return {};  // a bit past the input: its extension, not a clock bit
   }
-  absl::flat_hash_set<std::string> names;
-  for (auto node : g->occurrences(opaque_subs.empty() ? nullptr : &opaque_subs).nodes(hhds::Node_order::forward)) {
-    if (gu::type_op_of(node) != Ntype_op::Flop) {
-      continue;
-    }
-    if (auto ci = flop_clock_input(node)) {
-      names.insert(std::move(*ci));
-    }
-  }
-  return names;
+  return Clk_root<Pin>{base, bit};
 }
 
 // 2f-latch M9 -- decode a clock_pin driver that is (or reaches, through the
@@ -389,6 +432,148 @@ static bool memory_clock_shape_ok(Pin p, int depth = 0) {
     }
   }
   return true;
+}
+
+// The clock INPUT a state element's clock_pin driver stands for: the input
+// itself (through width wrappers), or the `clk_ref` of a recognized Clock_cell
+// on one. Invalid for anything else (a derived clock, a constant, a mapped
+// clock-buffer Sub).
+//
+// The Clock_cell hop is what makes the CENSUS see a gated domain: a flop or
+// memory on `Clock_cell(clk_b, en)` beside plain flops on `clk_a` is a
+// two-clock design, and counting only bare inputs encoded it as single-clock
+// -- every step a commit of BOTH domains, clk_b conflated with clk_a.
+template <typename Pin>
+static Clk_root<Pin> clock_root_input(Pin d) {
+  if (auto ci = resolve_clk_input(d); !ci.is_invalid()) {
+    return ci;
+  }
+  if (auto cc = clock_cell_on(d); !cc.cell.is_invalid()) {
+    return resolve_clk_input(cc.clk_ref);
+  }
+  return {};
+}
+
+template <typename Pin>
+static std::optional<std::pair<std::string, int>> clock_input_bit_impl(const Pin& driver) {
+  if (driver.is_invalid()) {
+    return std::nullopt;
+  }
+  const auto ci = resolve_clk_input(driver);
+  if (ci.is_invalid()) {
+    return std::nullopt;
+  }
+  return std::make_pair(std::string{gu::pin_name_of(ci.pin)}, ci.bit);
+}
+
+std::optional<std::pair<std::string, int>> clock_input_bit(const hhds::Occurrence_pin& driver) {
+  return clock_input_bit_impl(driver);
+}
+
+std::optional<std::pair<std::string, int>> clock_input_bit(const hhds::Pin_class& driver) {
+  return clock_input_bit_impl(driver);
+}
+
+std::optional<std::string> flop_clock_input(const hhds::Occurrence_node& node) {
+  for (const auto& sink : node.inp_sorted_pins()) {
+    if (sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")) {
+      continue;
+    }
+    for (const auto& driver : sink.get_driver_pins()) {
+      if (auto ci = clock_root_input(driver); !ci.is_invalid()) {
+        return ci.name();
+      }
+      break;  // first driver of the clock_pin sink == the first edge the old walk saw
+    }
+    break;  // that `break` left the WHOLE walk
+  }
+  return std::nullopt;
+}
+
+// A Memory's clock lanes (see encode.hpp Memory_clocks). One clock sink
+// clocks EVERY port; with several, port `p` is clocked by sink
+// `p*Memory_port_stride + clock_pin` -- the same rule tolg's mem_clock_users
+// and cgen's per-port wrapper apply.
+Memory_clocks memory_clocks(const hhds::Occurrence_node& node) {
+  constexpr auto stride  = static_cast<int>(Ntype::Memory_port_stride);
+  const auto     ck_pid  = static_cast<int>(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin"));
+  const auto     typ_pid = static_cast<int>(Ntype::get_sink_pid(Ntype_op::Memory, "type"));
+  Memory_clocks  r;
+  int            n_sinks = 0;
+  for (const auto& sink : node.inp_sorted_pins()) {
+    const auto raw = static_cast<int>(sink.get_port_id());
+    if (raw == typ_pid) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        if (driver.is_const() && gu::const_of(driver).is_just_i64() && gu::const_of(driver).to_just_i64() == 2) {
+          r.comb = true;
+        }
+      }
+      continue;
+    }
+    if (raw % stride != ck_pid) {
+      continue;
+    }
+    ++n_sinks;
+    bool any_driver = false;
+    bool any_live   = false;
+    for (const auto& driver : sink.get_driver_pins()) {
+      if (driver.is_invalid()) {
+        continue;
+      }
+      any_driver = true;
+      if (driver.is_const()) {
+        continue;  // a tied-off (idle) port clock never ticks
+      }
+      any_live = true;
+      auto ci = clock_root_input(driver);
+      if (ci.is_invalid()) {
+        r.unresolved = true;
+        continue;
+      }
+      auto [it, fresh] = r.lanes.try_emplace(raw / stride, Memory_clocks::Lane{ci.name(), ci.pin, ci.bit});
+      if (!fresh && it->second.name != ci.name()) {
+        r.unresolved = true;  // two drivers on one clock sink naming different inputs
+      }
+    }
+    if (any_driver && !any_live) {
+      r.tied_off.insert(raw / stride);
+    }
+  }
+  r.single = n_sinks <= 1;
+  return r;
+}
+
+absl::flat_hash_set<std::string> design_clock_inputs(hhds::Graph* g, const absl::flat_hash_map<std::string, bool>* collapse_defs) {
+  ankerl::unordered_dense::set<hhds::Gid> opaque_subs;
+  if (collapse_defs != nullptr) {
+    for (auto sn : g->grouped_hierarchy().nodes()) {
+      if (gu::type_op_of(sn) != Ntype_op::Sub) {
+        continue;
+      }
+      auto sio = sn.get_subnode_io();
+      if (sio != nullptr && collapse_defs->count(std::string(sio->get_name())) > 0) {
+        opaque_subs.insert(sn.get_subnode_gid());
+      }
+    }
+  }
+  absl::flat_hash_set<std::string> names;
+  for (auto node : g->occurrences(opaque_subs.empty() ? nullptr : &opaque_subs).nodes(hhds::Node_order::forward)) {
+    const auto op = gu::type_op_of(node);
+    if (op == Ntype_op::Flop) {
+      if (auto ci = flop_clock_input(node)) {
+        names.insert(std::move(*ci));
+      }
+    } else if (op == Ntype_op::Memory && node.has_out_edges()) {
+      // The encoder's memory walk uses the same predicate (has_out_edges), so
+      // the census and the per-design multi-clock decision count the same set.
+      if (auto mcl = memory_clocks(node); !mcl.comb) {
+        for (const auto& [port, lane] : mcl.lanes) {
+          names.insert(lane.name);
+        }
+      }
+    }
+  }
+  return names;
 }
 
 // Stable 1:1 cut-point key for a state cell (Flop), used to put corresponding
@@ -1367,11 +1552,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     bool                              is_comb  = false;
     hhds::Occurrence_pin              ra_pin;    // async read_all driver pin (size*bits)
     cvc5::Term                        ra_fresh;  // deferred read_all symbol (tied in phase 2)
-    // 2f-latch M9: enable of the Clock_cell gating this memory's clock, or
-    // invalid when it is on a plain (or identity-celled) clock. Recorded as a
-    // PIN in phase 1 and resolved to a term in phase 2 -- the combinational
-    // fixpoint has not run yet when the clock scan happens.
-    hhds::Occurrence_pin              commit_en;
+    // 2f-latch M9: enable of the Clock_cell gating each CLOCK SINK, keyed like
+    // Memory_clocks::lanes (port block; 0 when `clocks.single`). Absent = a
+    // plain clock; an invalid pin = an identity cell (commits every step).
+    // PER SINK, not per memory: with per-port clocks, port 1 on a plain clk_b
+    // used to inherit port 0's gate enable -- `if (we0 && en)` on the clk_b
+    // port was PROVEN equal to `if (we0)`. Recorded as a PIN in phase 1 and
+    // resolved to a term in phase 2 -- the combinational fixpoint has not run
+    // yet when the clock scan happens.
+    std::map<size_t, hhds::Occurrence_pin> commit_en;
+    // Clock INPUT lanes (memory_clocks): consumed by phase 2 only when the
+    // design is multi-clock, to commit on a detected edge of the memory's OWN
+    // clock exactly like a flop on that clock.
+    Memory_clocks                     clocks;
+    std::vector<size_t>               rd_pid;  // per read port (rd_fresh order): its cell port index
     // formal.ignore_memory: the user EXCLUDED this memory from the comparison.
     // It is blackboxed -- every read dout becomes ONE SHARED free symbol per
     // (memory, port, cycle) across ref and impl, and no next-state array is
@@ -1406,17 +1600,34 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       mc.key         = mem_state_key(mc.sig, mem_occ[sg]++);
     }
     mc.ignored = mem_ignored(node);
+    mc.clocks  = memory_clocks(node);
     // ---- FAIL CLOSED on a memory clocked by anything but the reference clock.
-    // This encoder DISCARDS a Memory's clock_pin and posclk entirely: every
-    // write is modelled as landing once per step. That is right for a memory on
-    // the single reference clock and silently WRONG otherwise -- measured, a
+    // In a SINGLE-clock design this encoder abstracts a Memory's clock_pin and
+    // posclk: every write is modelled as landing once per step. (A MULTI-clock
+    // design gates every memory commit on a detected edge of the memory's own
+    // clock instead -- phase 2, `memory_clocks` -- and refuses a clock lane it
+    // cannot resolve to an input.) The once-per-step model is right for a
+    // memory on the single reference clock and silently WRONG otherwise -- measured, a
     // memory written on `negedge clk` came back PROVEN equal to the same memory
     // written on `posedge clk`, and a gated-clock write PROVEN equal to an
     // ungated one. (pass.single_edge does not cover this either: its trigger
     // scans Flop/Fflop/Latch, so a negedge MEMORY does not even fire it.)
+    //
+    // Match a clock sink by PID, never by name: with several clock sinks port
+    // `p` is clocked by pid `p*Memory_port_stride + clock_pin`, and
+    // Ntype::get_sink_name spells every pid >= Memory_port_stride as
+    // "<pid><name>" ("18clock_pin" for port 1). A `pn == "clock_pin"` test
+    // therefore saw ONLY port 0's lane: a gated or derived clock on port 1+
+    // skipped the Clock_cell decode, the div/invert refusals and
+    // memory_clock_shape_ok, and in a single-clock design was silently
+    // modelled as committing every step (false PROVEN -- see
+    // inou/prp/tests/equiv/lec/mem_clock_cell_port1.v).
+    constexpr auto mem_stride = static_cast<int>(Ntype::Memory_port_stride);
+    const auto     mem_ck_pid = static_cast<int>(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin"));
     for (const auto& sink : node.inp_sorted_pins()) {
-      const auto  raw = static_cast<int>(sink.get_port_id());
-      std::string pn  = Ntype::get_sink_name(Ntype_op::Memory, raw);
+      const auto  raw      = static_cast<int>(sink.get_port_id());
+      std::string pn       = Ntype::get_sink_name(Ntype_op::Memory, raw);
+      const bool  is_clock = raw % mem_stride == mem_ck_pid;
       for (const auto& driver : sink.get_driver_pins()) {
         if (pn == "posclk") {
           if (driver.is_known_false()) {
@@ -1435,7 +1646,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (auto error = mixed_memory_edge_error(node, ignore_memory_ ? *ignore_memory_ : no_ignored); !error.empty()) {
             return fail_unsupported(error);
           }
-        } else if (pn == "clock_pin") {
+        } else if (is_clock) {
           // DERIVED-BY-LOGIC only. A tech-mapped netlist routes the clock through
           // a BUFFER CELL (`.clk(g118_BUFx1_2)`), which is a `Sub` and resolves to
           // no input either -- but it is the same clock, and refusing it would
@@ -1470,7 +1681,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               return fail_unsupported("memory '" + gu::debug_name(node)
                                       + "' is clocked by a Clock_cell whose clk_ref is itself derived");
             }
-            mc.commit_en = cc.en;  // invalid => an identity cell: commits every step
+            // invalid => an identity cell: commits every step
+            mc.commit_en[mc.clocks.single ? 0 : static_cast<size_t>(raw) / Ntype::Memory_port_stride] = cc.en;
             continue;
           }
           if (!memory_clock_shape_ok(driver)) {
@@ -1509,7 +1721,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             mtype = static_cast<int>(gu::const_of(driver).to_just_i64());
           }
         } else if (pn == "bits" || pn == "size" || pn == "posclk" || ends_with(pn, "clock_pin")) {
-          // config / clock: abstracted out of the relational encoding
+          // config / clock: not part of the relational encoding itself; the
+          // clock lanes were decoded above (mc.clocks) for multi-clock gating
         } else {
           if (mc.ports.size() <= pid) {
             mc.ports.resize(pid + 1);
@@ -1698,6 +1911,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       mc.rd_addr.push_back(p.addr);
       mc.rd_enable.push_back(p.en);
       mc.rd_key.push_back(rk);
+      mc.rd_pid.push_back(static_cast<size_t>(&p - mc.ports.data()));
       ++n_rd_pos;
     }
     // Async read_all: registered reflects the CURRENT committed array (computable
@@ -2405,6 +2619,18 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
         auto ref_root = livehd::latch_contract::control_root(ref, /*stop_at_clock_cell=*/true);
         if (!ref_root.net.is_invalid() && gu::is_graph_input_pin(ref_root.net)) {
+          // control_root follows a bit select to the WHOLE input, so on a clock
+          // BUS the waveform below is the schedule root's only when the cell
+          // reads the SAME bit (a cell on clks[1] beside a root on clks[0] is
+          // another clock, not this waveform). Fail closed otherwise.
+          if (gu::bits_of(ref_root.net) > 1) {
+            const auto cb = clock_input_bit(ref);
+            if (!cb || cb->first != gu::pin_name_of(ref_root.net) || cb->second != phase_plan_->root_bus_bit) {
+              return fail_unsupported("Clock_cell '" + gu::debug_name(node)
+                                      + "' is read as data on a bit of a multi-bit clock input that is not the phase "
+                                        "schedule's root bit");
+            }
+          }
           bool high = microstep_ == static_cast<int>(Phase::Rise) || microstep_ == static_cast<int>(Phase::Close_high);
           high      = high != ref_root.inverted;
           ref_hot   = tm_.mkBoolean(high);
@@ -3763,14 +3989,68 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // M5. In a relational encoding that means encoding each step TWICE with the
   // posedge Qs re-seeded to their next-state — real work, and deliberately not
   // attempted here.
-  // Distinct clock INPUT nets across this design's flops.
+  // Distinct clock INPUT nets across this design's flops AND memories. A
+  // memory's clock is a clock of the design like any flop's: counting flops
+  // only left `memory on wr_clk + q on rd_clk` single-clock, so moving the
+  // memory's write clock was PROVEN (design_clock_inputs counts the same set).
   absl::flat_hash_set<std::string> clk_inputs;
   for (const auto& fn : flops) {
     if (auto ci = flop_clock_input(fn)) {
       clk_inputs.insert(std::move(*ci));
     }
   }
+  for (const auto& mc : mem_cuts) {
+    if (!mc.clocks.comb) {
+      for (const auto& [port, lane] : mc.clocks.lanes) {
+        clk_inputs.insert(lane.name);
+      }
+    }
+  }
   const bool multi_clock = clk_inputs.size() >= 2 || (force_multi_clock_ && !clk_inputs.empty());
+
+  // Detected edge of clock input `name` whose CURRENT level is `cur`. The
+  // previous level is ONE state per clock net, keyed "\x01clkprev:<name>" and
+  // SHARED by every endpoint on that net -- flops, memories, gated domains --
+  // and by both sides of the miter (clk_prev_): with a key per element kind
+  // the solver could pick different previous levels for a memory and the
+  // flops blasted out of it and refute equivalent designs. The next level is
+  // emitted once (first writer wins unless `overwrite`, which keeps the flop
+  // path's historical last-writer behaviour; the terms are equal anyway).
+  auto clock_edge = [&](const std::string& name, const Val& cur, bool posedge, bool overwrite) -> Term {
+    const Term        cur_hot = tm_.mkTerm(Kind::DISTINCT, {cur.term, bv_const(tm_, cur.width, 0)});
+    const std::string pkey    = std::string("\x01clkprev:") + name;
+    const std::string ckey    = frame_tag(prefix) + pkey;
+    auto              pit     = clk_prev_.find(ckey);
+    if (pit == clk_prev_.end()) {
+      pit = clk_prev_.emplace(ckey, seed_state(pkey, 1, false)).first;
+    }
+    const Term prev_hot = tm_.mkTerm(Kind::DISTINCT, {pit->second.term, bv_const(tm_, 1, 0)});
+    const auto nkey     = std::string("\x01nxt:") + pkey;
+    if (overwrite || !out.outputs.contains(nkey)) {
+      out.outputs[nkey] = Val{tm_.mkTerm(Kind::ITE, {cur_hot, bv_const(tm_, 1, 1), bv_const(tm_, 1, 0)}), 1, false};
+    }
+    return posedge ? tm_.mkTerm(Kind::AND, {tm_.mkTerm(Kind::NOT, {prev_hot}), cur_hot})
+                   : tm_.mkTerm(Kind::AND, {prev_hot, tm_.mkTerm(Kind::NOT, {cur_hot})});
+  };
+  // CURRENT LEVEL of a resolved clock: its ONE bit of the input, never the
+  // whole input (`clks != 0` would rise on either bit) and never the consumer's
+  // own driver. Every endpoint keyed on `root.name()` -- flops, gates, memory
+  // lanes -- then writes the SAME next-level term into the shared clkprev
+  // state, whichever of them writes it first or last.
+  auto clock_level = [&](const Clk_root<hhds::Occurrence_pin>& root, bool& lok) -> Val {
+    Val v = driver_val(root.pin, lok);
+    if (!lok || v.term.isNull()) {
+      return v;
+    }
+    if (root.bit == 0 && v.width == 1) {
+      return Val{v.term, 1, false};
+    }
+    if (root.bit >= v.width) {
+      lok = false;
+      return Val{};
+    }
+    return Val{bv_extract(tm_, v.term, root.bit, root.bit), 1, false};
+  };
 
   for (size_t fi = 0; fi < flops.size(); ++fi) {
     const auto& node  = flops[fi];
@@ -4075,6 +4355,21 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // case.
           commits = tm_.mkTerm(Kind::DISTINCT, {gv.term, bv_const(tm_, gv.width, 0)});
         }
+        // MULTI-CLOCK: "en held at this step" is relative to the REFERENCE
+        // clock, which is only the whole story when one step IS one reference
+        // period. With two or more clocks the cell's reference must also
+        // RISE this step, or the gated flop commits on the other domain's edges.
+        if (multi_clock) {
+          const auto ref_in = resolve_clk_input(ref_d);
+          bool       rok    = true;
+          Val        rv     = clock_level(ref_in, rok);
+          if (!rok || rv.term.isNull()) {
+            return fail_unsupported("flop '" + gu::debug_name(node)
+                                    + "' is clocked by a Clock_cell whose reference clock has no encodable driver");
+          }
+          const Term rise = clock_edge(ref_in.name(), rv, true, false);
+          commits         = commits.isNull() ? rise : tm_.mkTerm(Kind::AND, {rise, commits});
+        }
       } else if (cop == Ntype_op::And && clk_in.is_invalid()) {
         // ICG: `<clock-input> & <enables>` -> commit iff every non-clock
         // operand is true. Requires one operand to BE a clock input, or this is
@@ -4104,7 +4399,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (ci.is_invalid()) {
             return false;
           }
-          const std::string input_name{gu::pin_name_of(ci)};
+          const std::string input_name = ci.name();
           return clk_inputs.count(input_name) > 0 || livehd::latch_contract::Design_clocks::name_looks_like_clock(input_name);
         };
         // AMBIGUITY IS A REFUSAL, not a coin flip: if two operands both look
@@ -4118,7 +4413,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           }
         }
         bool                 saw_clock = n_clockish != 1;  // !=1 -> never fold below
-        hhds::Occurrence_pin gate_ref;                     // the gate's reference clock input
+        Clk_root<hhds::Occurrence_pin> gate_ref;           // the gate's reference clock input (bit)
         std::vector<Term>    guards;
         bool                 gok = n_clockish == 1;
         for (const auto& sink : cn.inp_sorted_pins()) {
@@ -4154,26 +4449,22 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           // to stop. Combine it with a DETECTED EDGE of the gate's own
           // reference, the same model the multi-clock path uses, so the flop
           // commits only on clk_b's rise AND with the enable true.
+          //
+          // The same holds for a gate on ONE OF SEVERAL clocks the census did
+          // count: in a multi-clock design no net is "the" reference, so the
+          // enables alone would commit on every step whatever the gate's own
+          // clock did. Both cases share the per-net previous level with the
+          // flops and memories on that net (clock_edge).
           if (!gate_ref.is_invalid()) {
-            const std::string rnm{gu::pin_name_of(gate_ref)};
-            if (!clk_inputs.empty() && clk_inputs.count(rnm) == 0) {
+            const std::string rnm = gate_ref.name();
+            if (multi_clock || (!clk_inputs.empty() && clk_inputs.count(rnm) == 0)) {
               bool rok = true;
-              Val  rv  = driver_val(gate_ref, rok);
+              Val  rv  = clock_level(gate_ref, rok);
               if (!rok || rv.term.isNull()) {
                 return fail_unsupported("flop '" + gu::debug_name(node)
                                         + "' is gated by a clock whose reference has no encodable driver");
               }
-              const std::string ckey = frame_tag(prefix) + std::string("\x01clk:") + rnm;
-              auto              pit  = clk_prev_.find(ckey);
-              if (pit == clk_prev_.end()) {
-                pit = clk_prev_.emplace(ckey, seed_state(std::string("\x01clk:") + rnm, 1, false)).first;
-              }
-              const Term prev_hot = tm_.mkTerm(Kind::DISTINCT, {pit->second.term, bv_const(tm_, 1, 0)});
-              const Term cur_hot  = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
-              const Term rise     = tm_.mkTerm(Kind::AND, {tm_.mkTerm(Kind::NOT, {prev_hot}), cur_hot});
-              commits             = tm_.mkTerm(Kind::AND, {rise, commits});
-              out.outputs[std::string("\x01nxt:\x01clk:") + rnm]
-                  = Val{tm_.mkTerm(Kind::ITE, {cur_hot, bv_const(tm_, 1, 1), bv_const(tm_, 1, 0)}), 1, false};
+              commits = tm_.mkTerm(Kind::AND, {clock_edge(rnm, rv, true, false), commits});
             }
           }
         }
@@ -4183,24 +4474,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // sides of the miter (clk_prev_) — without that the solver simply picks
         // opposite initial levels and refutes equivalent designs.
         bool cok = true;
-        Val  cv  = driver_val(clk_d, cok);
+        Val  cv  = clock_level(clk_in, cok);
         if (cok && !cv.term.isNull()) {
-          const Term        cur_hot = tm_.mkTerm(Kind::DISTINCT, {cv.term, bv_const(tm_, cv.width, 0)});
-          const std::string pkey    = std::string("\x01clkprev:") + std::string(gu::pin_name_of(clk_in));
-          const std::string ckey    = frame_tag(prefix) + pkey;
-          auto              pit     = clk_prev_.find(ckey);
-          if (pit == clk_prev_.end()) {
-            pit = clk_prev_.emplace(ckey, seed_state(pkey, 1, false)).first;
-          }
-          const Term prev_hot = tm_.mkTerm(Kind::DISTINCT, {pit->second.term, bv_const(tm_, 1, 0)});
-          bool       posedge  = true;
+          bool posedge = true;
           if (auto pc = hier_sink_driver(node, "posclk"); pc.is_const()) {
             posedge = !gu::const_of(pc).is_known_false();
           }
-          commits = posedge ? tm_.mkTerm(Kind::AND, {tm_.mkTerm(Kind::NOT, {prev_hot}), cur_hot})
-                            : tm_.mkTerm(Kind::AND, {prev_hot, tm_.mkTerm(Kind::NOT, {cur_hot})});
-          out.outputs[std::string("\x01nxt:") + pkey]
-              = Val{tm_.mkTerm(Kind::ITE, {cur_hot, bv_const(tm_, 1, 1), bv_const(tm_, 1, 0)}), 1, false};
+          commits = clock_edge(clk_in.name(), cv, posedge, true);
         }
       }
       // ---- FAIL CLOSED on a clock this encoder does not model ---------------
@@ -4414,9 +4694,25 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // sync-read register. Missing any one of them re-registers or re-writes on
     // a step the clock never ticked -- the "commits every step" mis-model this
     // whole guard exists to remove, just moved somewhere less obvious.
-    Term mem_commit;
-    if (!mc.commit_en.is_invalid()) {
-      Val cv = driver_val(mc.commit_en, ok);
+    //
+    // The gate is a property of each CLOCK SINK (mc.commit_en), so with per-port
+    // clocks every port commits on its OWN sink's enable. `mem_commit` is the
+    // gate of sink 0 -- the one the whole array and the phase schedule
+    // (sink_driver_hier "clock_pin") use; `gates_uniform` says every sink agrees.
+    auto sink_en_pin = [&](size_t k) -> hhds::Occurrence_pin {
+      auto it = mc.commit_en.find(k);
+      return it == mc.commit_en.end() ? hhds::Occurrence_pin{} : it->second;
+    };
+    auto same_gate = [](const hhds::Occurrence_pin& a, const hhds::Occurrence_pin& b) {
+      return a.is_invalid() ? b.is_invalid() : (!b.is_invalid() && a == b);
+    };
+    auto sink_of = [&](size_t pid) -> size_t { return mc.clocks.single ? 0 : pid; };
+    std::map<size_t, Term> sink_gate;  // only sinks with a non-identity Clock_cell
+    for (const auto& [k, en] : mc.commit_en) {
+      if (en.is_invalid()) {
+        continue;
+      }
+      Val cv = driver_val(en, ok);
       if (!ok || cv.term.isNull()) {
         return fail_unsupported("memory '" + gu::debug_name(mc.node)
                                 + "' is clocked by a Clock_cell whose enable cone has no encodable driver");
@@ -4424,8 +4720,28 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // See the flop path's note on X: the enable's don't-care plane is
       // deliberately NOT refused here, for consistency with the And-ICG fold
       // and with `formal.lec.gold_x`.
-      mem_commit = tm_.mkTerm(Kind::DISTINCT, {cv.term, bv_const(tm_, cv.width, 0)});
+      sink_gate[k] = tm_.mkTerm(Kind::DISTINCT, {cv.term, bv_const(tm_, cv.width, 0)});
     }
+    auto gate_of_sink = [&](size_t k) -> Term {
+      auto it = sink_gate.find(k);
+      return it == sink_gate.end() ? Term{} : it->second;
+    };
+    bool gates_uniform = true;
+    {
+      const auto ref_pin = sink_en_pin(0);
+      for (const auto& [k, lane] : mc.clocks.lanes) {
+        gates_uniform = gates_uniform && same_gate(ref_pin, sink_en_pin(static_cast<size_t>(k)));
+      }
+      for (const auto& [k, en] : mc.commit_en) {
+        gates_uniform = gates_uniform && same_gate(ref_pin, en);
+      }
+    }
+    Term mem_commit = gate_of_sink(0);
+    // A port whose sink gate DIFFERS from sink 0's under the phase schedule:
+    // the schedule's guard belongs to sink 0, so such a port takes only the
+    // microstep gate (`phase_off`), never sink 0's guard.
+    bool phase_off = false;
+    bool phase_on  = false;  // the phase schedule owns this memory's commit
     // PHASE SCHEDULE (M10): a memory is scheduled like any other endpoint. On a
     // microstep that is not its own it commits NOTHING -- the same three points
     // (whole-array update, per-port write mask, sync-read register) all hold --
@@ -4445,12 +4761,37 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // is why it hid behind a register-file shape. See
     // lhd/tests/mem_partsel_write_test.sh.
     if (phased && !phase_plan_->multi_root() && !mc.is_comb) {
+      phase_on = true;
+      // The schedule saw ONLY sink 0's clock (one endpoint per memory). A port
+      // on another root, or behind a DIFFERENT Clock_cell, has no guard or
+      // microstep of its own here: refuse instead of letting it borrow sink 0's.
+      if (!mc.clocks.single) {
+        const Memory_clocks::Lane* ref_lane = nullptr;
+        if (auto it = mc.clocks.lanes.find(0); it != mc.clocks.lanes.end()) {
+          ref_lane = &it->second;
+        }
+        for (const auto& [k, lane] : mc.clocks.lanes) {
+          if (ref_lane == nullptr || lane.name != ref_lane->name) {
+            return fail_unsupported("memory '" + gu::debug_name(mc.node) + "' port " + std::to_string(k) + " runs on clock '"
+                                    + lane.name
+                                    + "', not the clock the formal phase schedule assigned to the memory; refusing "
+                                      "rather than commit it on the wrong clock");
+          }
+          const auto en = sink_en_pin(static_cast<size_t>(k));
+          if (!en.is_invalid() && !same_gate(en, sink_en_pin(0))) {
+            return fail_unsupported("memory '" + gu::debug_name(mc.node) + "' port " + std::to_string(k)
+                                    + " is clocked through a different Clock_cell than port 0; the formal phase "
+                                      "schedule models one gate per memory");
+          }
+        }
+      }
       const Phase_endpoint* mpe = nullptr;
       if (auto pit = phase_plan_->ep.find(box_node_key(mc.node)); pit != phase_plan_->ep.end()) {
         mpe = &pit->second;
       }
       const int my_ms = mpe != nullptr ? static_cast<int>(mpe->phase) : static_cast<int>(Phase::Rise);
       if (!single_step() && my_ms != microstep_) {
+        phase_off  = true;
         mem_commit = tm_.mkBoolean(false);
       } else if (mpe != nullptr && !mpe->guard_key.empty()) {
         if (single_step()) {
@@ -4465,6 +4806,169 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
       }
     }
+
+    // MULTI-CLOCK (see the flop path's CLOCK AWARENESS note): no net is "the"
+    // clock, so every flop commits on a detected edge of its own clock -- and a
+    // memory must too. It used to commit on EVERY step whatever its clock did:
+    // a memory written on wr_clk was falsely REFUTED against its own mapped
+    // netlist (whose blasted flops do commit on wr_clk's edge), and moving the
+    // write to another clock was falsely PROVEN. The edge is folded into the
+    // same commit points the Clock_cell gate uses: the whole-array update and
+    // the sync reset take the memory's (single) clock, each write port and each
+    // sync-read register its OWN port clock. With the formal phase schedule
+    // owning endpoints (single root), the schedule is the clock model instead,
+    // exactly as for flops.
+    std::vector<Term> port_edge(mc.ports.size());  // per cell port; null = commits every step
+    Term              mem_edge;                    // whole-array update / reset
+    if (multi_clock && !mc.is_comb && !(phased && !phase_plan_->multi_root())) {
+      if (mc.clocks.unresolved) {
+        return fail_unsupported("memory '" + gu::debug_name(mc.node)
+                                + "' is in a multi-clock design but its clock does not resolve to a clock input (or a "
+                                  "Clock_cell on one); refusing rather than encode it as committing every step");
+      }
+      absl::flat_hash_map<std::string, Term> edge_by_name;
+      auto edge_of = [&](const Memory_clocks::Lane& lane) -> Term {
+        if (auto it = edge_by_name.find(lane.name); it != edge_by_name.end()) {
+          return it->second;
+        }
+        bool cok = true;
+        Val  cv  = clock_level(Clk_root<hhds::Occurrence_pin>{lane.pin, lane.bit}, cok);
+        if (!cok || cv.term.isNull()) {
+          return Term{};
+        }
+        // posedge: phase 1 already refused a falling-edge or mixed-edge memory
+        // and an inverted Clock_cell, so every memory reaching here is rising.
+        Term e                  = clock_edge(lane.name, cv, true, false);
+        edge_by_name[lane.name] = e;
+        return e;
+      };
+      const Memory_clocks::Lane* global = nullptr;  // the lane the whole array commits on
+      bool                       mixed  = false;
+      for (const auto& [port, lane] : mc.clocks.lanes) {
+        if (global == nullptr) {
+          global = &lane;
+        } else if (global->name != lane.name) {
+          mixed = true;
+        }
+      }
+      // A port's clock lane, or nullptr when it NEVER ticks. Own sink first
+      // (per-port clocks); a port with no clock sink of its own takes the
+      // memory's BASE clock -- the first port block carrying one, live or
+      // tied off -- the rule cgen's memory wrapper applies; a constant there,
+      // or no clock anywhere, never ticks (memory_clocks treats a tied-off
+      // clock as idle, and the census leaves it out of the clock count).
+      auto lane_of = [&](size_t pid) -> const Memory_clocks::Lane* {
+        if (mc.clocks.single) {
+          return global;
+        }
+        const int p = static_cast<int>(pid);
+        if (auto it = mc.clocks.lanes.find(p); it != mc.clocks.lanes.end()) {
+          return &it->second;
+        }
+        if (mc.clocks.tied_off.contains(p)) {
+          return nullptr;
+        }
+        const auto lit = mc.clocks.lanes.begin();
+        const auto tit = mc.clocks.tied_off.begin();
+        if (lit != mc.clocks.lanes.end() && (tit == mc.clocks.tied_off.end() || lit->first < *tit)) {
+          return &lit->second;
+        }
+        return nullptr;
+      };
+      // An enable that is provably the constant 0 (every lane, no unknown bit).
+      auto const_off = [&](const hhds::Occurrence_pin& en) -> bool {
+        if (en.is_invalid()) {
+          return false;  // no enable pin == always enabled
+        }
+        bool eok = true;
+        Val  ev  = driver_val(en, eok);
+        if (!eok || ev.term.isNull() || !ev.term.isBitVectorValue()) {
+          return false;
+        }
+        if (!ev.x_mask.isNull()
+            && (!ev.x_mask.isBitVectorValue() || ev.x_mask.getBitVectorValue(2).find('1') != std::string::npos)) {
+          return false;
+        }
+        return ev.term.getBitVectorValue(2).find('1') == std::string::npos;
+      };
+      for (size_t pid = 0; pid < mc.ports.size(); ++pid) {
+        const Memory_clocks::Lane* lane = lane_of(pid);
+        if (lane == nullptr) {
+          // A DEAD port clock (tied to a constant, or no clock at all): the port
+          // never commits. It used to be left null here, and `with_edge` then
+          // fell back to the bare gate -- the port committed on EVERY step,
+          // while the census (memory_clocks) counts the same clock as never
+          // ticking. A write port that still WRITES (a live enable), or a
+          // registered read port that still reads, is a design whose dead
+          // clock is almost certainly a front-end artifact: refuse rather
+          // than guess which clock the author meant.
+          const auto& p      = mc.ports[pid];
+          const bool  writes = !p.rd && !p.din.is_invalid();
+          const bool  sreads = p.rd && mc.mtype == 1 && !p.addr.is_invalid();
+          if ((writes || sreads) && !const_off(p.en)) {
+            return fail_unsupported("memory '" + gu::debug_name(mc.node) + "' " + (writes ? "write" : "sync-read") + " port "
+                                    + std::to_string(pid)
+                                    + " is clocked by a CONSTANT (or has no clock) in a multi-clock design, but its "
+                                      "enable is live; a constant clock never ticks, so the port would never commit -- "
+                                      "refusing rather than guess its clock");
+          }
+          port_edge[pid] = tm_.mkBoolean(false);
+          continue;
+        }
+        port_edge[pid] = edge_of(*lane);
+        if (port_edge[pid].isNull()) {
+          return fail_unsupported("memory '" + gu::debug_name(mc.node) + "' port " + std::to_string(pid) + " clock '"
+                                  + lane->name + "' has no encodable driver");
+        }
+      }
+      if (global != nullptr && (mc.is_whole || !mc.reset.is_invalid())) {
+        if (mixed) {
+          return fail_unsupported("memory '" + gu::debug_name(mc.node)
+                                  + "' has a whole-array update or reset but its ports run on DIFFERENT clocks; the "
+                                    "encoder cannot tell which clock commits the whole array");
+        }
+        mem_edge = edge_of(*global);
+        if (mem_edge.isNull()) {
+          return fail_unsupported("memory '" + gu::debug_name(mc.node) + "' clock '" + global->name
+                                  + "' has no encodable driver");
+        }
+      } else if (global == nullptr && !mc.clocks.tied_off.empty() && (mc.is_whole || !mc.reset.is_invalid())) {
+        // The memory's only clock is a constant: the whole array never commits
+        // and a sync reset never lands (an async one still overrides). A live
+        // bulk update is refused like a live port on a dead clock.
+        if (mc.is_whole && !const_off(mc.update_enable)) {
+          return fail_unsupported("memory '" + gu::debug_name(mc.node)
+                                  + "' has a whole-array update clocked by a CONSTANT in a multi-clock design; a "
+                                    "constant clock never ticks -- refusing rather than guess its clock");
+        }
+        mem_edge = tm_.mkBoolean(false);
+      }
+    }
+    // The gate of cell port `pid`: its own clock sink's Clock_cell enable. Under
+    // the phase schedule a port sharing sink 0's gate takes the schedule's
+    // commit (`mem_commit`), an ungated port only the microstep gate.
+    auto gate_of_port = [&](size_t pid) -> Term {
+      const size_t k = sink_of(pid);
+      if (phase_on) {
+        if (same_gate(sink_en_pin(k), sink_en_pin(0))) {
+          return mem_commit;
+        }
+        return phase_off ? tm_.mkBoolean(false) : Term{};
+      }
+      return gate_of_sink(k);
+    };
+    auto with_edge = [&](const Term& gate, const Term& edge) -> Term {
+      if (edge.isNull()) {
+        return gate;
+      }
+      return gate.isNull() ? edge : tm_.mkTerm(Kind::AND, {gate, edge});
+    };
+    if (mc.is_whole && !gates_uniform) {
+      return fail_unsupported("memory '" + gu::debug_name(mc.node)
+                              + "' has a whole-array update but its port clocks are gated by DIFFERENT Clock_cells; "
+                                "the encoder cannot tell which gate commits the whole array");
+    }
+    const Term whole_commit = with_edge(mem_commit, mem_edge);
 
     // Whole-array bulk `update` is the BASE next-state (lowest priority); per-port
     // writes below STORE on top of it (per-port wins). update_enable gates the
@@ -4499,9 +5003,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           whole.exact = false;
         }
       }
-      if (!mem_commit.isNull()) {
-        a_upd      = tm_.mkTerm(Kind::ITE, {mem_commit, a_upd, mc.a_cur});  // gated clock did not tick: HOLD
-        whole.cond = whole.cond.isNull() ? mem_commit : tm_.mkTerm(Kind::AND, {whole.cond, mem_commit});
+      if (!whole_commit.isNull()) {
+        a_upd      = tm_.mkTerm(Kind::ITE, {whole_commit, a_upd, mc.a_cur});  // gated clock did not tick: HOLD
+        whole.cond = whole.cond.isNull() ? whole_commit : tm_.mkTerm(Kind::AND, {whole.cond, whole_commit});
       }
       if (whole.cond.isNull()) {
         whole.cond = tm_.mkTrue();
@@ -4556,10 +5060,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     std::vector<std::pair<Term, Term>> wr_am;
     a_after.emplace_back(a_next);
     x_after.emplace_back(x_next);
-    for (auto& p : mc.ports) {
+    for (size_t pid = 0; pid < mc.ports.size(); ++pid) {
+      auto& p = mc.ports[pid];
       if (p.rd) {
         continue;
       }
+      const Term port_commit = with_edge(gate_of_port(pid), port_edge[pid]);
       applied_upto.emplace_back(a_after.size() - 1);
       if (p.din.is_invalid()) {
         wr_am.emplace_back(Term{}, Term{});
@@ -4642,8 +5148,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // route (equal inputs => equal write chains, decided without the array
       // theory). Gating only the array term would leave the two routes
       // disagreeing about whether this step wrote at all.
-      if (!mem_commit.isNull()) {
-        wmask = tm_.mkTerm(Kind::ITE, {mem_commit, wmask, bv_const(tm_, mc.sig.bits, 0)});
+      if (!port_commit.isNull()) {
+        wmask = tm_.mkTerm(Kind::ITE, {port_commit, wmask, bv_const(tm_, mc.sig.bits, 0)});
       }
       // Record AFTER the commit gate so the X-plane inherits the enable, the
       // per-bit wensize mask and the gated clock for free.
@@ -4668,8 +5174,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
                                  {tm_.mkTerm(Kind::BITVECTOR_AND, {tm_.mkTerm(Kind::BITVECTOR_NOT, {wmask}), old_x}),
                                   tm_.mkTerm(Kind::BITVECTOR_AND, {wmask, data_x})});
         if (!enable_x.isNull()) {
-          if (!mem_commit.isNull()) {
-            enable_x = tm_.mkTerm(Kind::ITE, {mem_commit, enable_x, zero});
+          if (!port_commit.isNull()) {
+            enable_x = tm_.mkTerm(Kind::ITE, {port_commit, enable_x, zero});
           }
           auto either = tm_.mkTerm(Kind::BITVECTOR_OR,
                                    {tm_.mkTerm(Kind::BITVECTOR_OR, {old_x, data_x}), tm_.mkTerm(Kind::BITVECTOR_XOR, {old, din})});
@@ -4711,6 +5217,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       Val rv = driver_val(mc.reset, ok);
       if (ok) {
         Term rst_hot = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
+        // A SYNC reset is part of the transition: in a multi-clock design it
+        // lands only on the memory clock's edge, like a flop's sync reset
+        // inside its commit gate. An ASYNC one (memory_async_reset) overrides
+        // regardless of the clock.
+        const auto async_attr = mc.node.base_node().attr(livehd::attrs::memory_async_reset);
+        if (!mem_edge.isNull() && !(async_attr.has() && async_attr.get() != 0)) {
+          rst_hot = tm_.mkTerm(Kind::AND, {mem_edge, rst_hot});
+        }
         Term init_bus;
         if (!mc.init.is_invalid()) {
           Val iv   = driver_val(mc.init, ok);
@@ -4876,7 +5390,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // step the gate suppressed must HOLD it. This is the third commit point
         // and the easiest to miss: writes look correctly gated while the read
         // port quietly re-registers every step.
-        Val nv{mem_commit.isNull() ? real : tm_.mkTerm(Kind::ITE, {mem_commit, real, mc.rd_fresh[k]}), mc.sig.bits, false};
+        const Term rd_commit = k < mc.rd_pid.size() ? with_edge(gate_of_port(mc.rd_pid[k]), port_edge[mc.rd_pid[k]])
+                                                    : with_edge(mem_commit, Term{});
+        Val        nv{rd_commit.isNull() ? real : tm_.mkTerm(Kind::ITE, {rd_commit, real, mc.rd_fresh[k]}), mc.sig.bits, false};
         // ordering="none": the dout REGISTER captures this cycle's X plane along
         // with the value, so a gate-suppressed step must hold BOTH — otherwise
         // the plane would appear a cycle early or vanish. `is_signed` stays false:
@@ -4884,7 +5400,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // from the dout pin.
         if (k < mc.rd_xmask.size() && !mc.rd_xmask[k].isNull()) {
           Term held = (k < mc.rd_xcur.size() && !mc.rd_xcur[k].isNull()) ? mc.rd_xcur[k] : bv_const(tm_, mc.sig.bits, 0);
-          nv.x_mask = mem_commit.isNull() ? mc.rd_xmask[k] : tm_.mkTerm(Kind::ITE, {mem_commit, mc.rd_xmask[k], held});
+          nv.x_mask = rd_commit.isNull() ? mc.rd_xmask[k] : tm_.mkTerm(Kind::ITE, {rd_commit, mc.rd_xmask[k], held});
         }
         out.next_read[mc.rd_key[k]] = nv;
       } else {

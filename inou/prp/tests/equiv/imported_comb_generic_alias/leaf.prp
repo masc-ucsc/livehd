@@ -1,0 +1,3 @@
+pub comb leaf<W=4>(a:Unsigned(bits=W)) -> (z:Unsigned(bits=W)) {
+  z = ~a
+}

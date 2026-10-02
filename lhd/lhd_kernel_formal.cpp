@@ -1059,10 +1059,36 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
       if (gu::is_graph_input_pin(cr.net)) {
         const std::string port{gu::pin_name_of(cr.net)};
+        std::string       base;
         if (auto* r = forest.find(canon(cr.net.get_graph()->get_name()), port)) {
-          return *r;
+          base = *r;
+        } else if (pname == canonical_top_name) {
+          base = port;  // a top port IS a root
         }
-        return pname == canonical_top_name ? port : std::string{};  // a top port IS a root
+        if (base.empty() || gu::bits_of(cr.net) <= 1) {
+          return base;
+        }
+        // A BIT of a clock BUS. control_root follows the bit select to the
+        // WHOLE input, so without this `.a(clks[0]), .b(clks[1])` gave both
+        // ports root `clks`, both sides' phase plans keyed `clks`, and the
+        // root-agreement check had nothing to tell apart (a child whose flops
+        // moved from `a` to `b` was PROVEN, equiv/lec/clock_phase_root_clash_
+        // hier_bus). Key the bit the way encode.cpp's Clk_root and the phase
+        // schedule's root_key do: bare name for bit 0, `name[k]` otherwise.
+        const auto cb = livehd::lec::clock_input_bit(d);
+        if (!cb || cb->first != port) {
+          return "";  // the walk cannot tell which bit: leave the port unmapped
+        }
+        if (cb->second == 0) {
+          // Bit 0, or the bus forwarded from its LSB (a multi-bit port): the
+          // port's bit k is the root's bit k, which the phase schedule appends.
+          // A root that already names a bit cannot absorb another one.
+          return gu::bits_of(d) > 1 && base.back() == ']' ? std::string{} : base;
+        }
+        if (gu::bits_of(d) > 1 || base.back() == ']') {
+          return "";  // an offset multi-bit slice, or a bit of a bit: unmapped
+        }
+        return base + "[" + std::to_string(cb->second) + "]";
       }
       if (cr.net.is_const()) {
         return "";
@@ -1136,7 +1162,20 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
               if (port.empty() || cr.net.is_invalid()) {
                 continue;
               }
-              by_net[std::to_string(static_cast<uint64_t>(cr.net.get_class_index().value))].push_back(port);
+              // Keyed by (net, BIT): control_root follows a bit select to the
+              // whole net, so `.a(clks[0]), .b(clks[1])` would union two
+              // distinct clocks into one root. A bus bit the walk cannot name
+              // keys on its own driver, so it unions only with itself.
+              std::string key = std::to_string(static_cast<uint64_t>(cr.net.get_class_index().value));
+              if (gu::bits_of(cr.net) > 1) {
+                const auto cb = gu::is_graph_input_pin(cr.net) ? livehd::lec::clock_input_bit(drv) : std::nullopt;
+                if (cb && cb->first == gu::pin_name_of(cr.net)) {
+                  key += (gu::bits_of(drv) > 1 ? "[*" : "[") + std::to_string(cb->second) + "]";
+                } else {
+                  key = "\x02" + std::to_string(static_cast<uint64_t>(drv.get_class_index().value));
+                }
+              }
+              by_net[key].push_back(port);
             }
           }
           if (!seen_site) {
@@ -1206,6 +1245,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
       return x;
     };
+    // Top clock roots that are multi-bit inputs: each BIT is its own clock (see
+    // root_of), so such a root is never "the one top clock" the single-root
+    // closure below may hand to every unbound clock port.
+    absl::flat_hash_set<std::string> bus_roots;
     {
       auto& row = forest.port_root[canonical_top_name];
       for (auto node : top_g->grouped_hierarchy().nodes()) {
@@ -1213,13 +1256,40 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Memory && op != Ntype_op::Latch) {
           continue;
         }
-        auto       ctrl = livehd::latch_contract::sink_driver_hier(node, op == Ntype_op::Latch ? "enable" : "clock_pin");
-        const auto cr   = livehd::latch_contract::control_root(ctrl);
-        if (cr.net.is_invalid() || !gu::is_graph_input_pin(cr.net) || cr.net.get_graph() != top_g) {
-          continue;
+        auto seed = [&](const auto& ctrl) {
+          const auto cr = livehd::latch_contract::control_root(ctrl);
+          if (cr.net.is_invalid() || !gu::is_graph_input_pin(cr.net) || cr.net.get_graph() != top_g) {
+            return;
+          }
+          const std::string port{gu::pin_name_of(cr.net)};
+          row[port] = rep(port);
+          if (gu::bits_of(cr.net) > 1) {
+            bus_roots.insert(row[port]);
+          }
+        };
+        seed(livehd::latch_contract::sink_driver_hier(node, op == Ntype_op::Latch ? "enable" : "clock_pin"));
+        // A Memory's PER-PORT clock lanes (`p*Memory_port_stride + clock_pin`,
+        // the rule encode.cpp's memory_clocks applies) are roots too. Seeding
+        // only sink 0 left a top whose second clock reaches nothing but a memory
+        // port with ONE seeded root, and the single-root closure below then
+        // mapped that independent clock input onto it (`clk_b -> clk_a`), so the
+        // phase plan scheduled the clk_b port on clk_a (false PROVEN,
+        // equiv/lec/mem_clock_cell_planroot*).
+        if (op == Ntype_op::Memory) {
+          constexpr auto stride = static_cast<int>(Ntype::Memory_port_stride);
+          const auto     ck_pid = static_cast<int>(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin"));
+          for (const auto& sink : node.inp_sorted_pins()) {
+            const auto raw = static_cast<int>(sink.get_port_id());
+            if (raw == ck_pid || raw % stride != ck_pid) {
+              continue;
+            }
+            for (const auto& drv : sink.get_driver_pins()) {
+              if (!drv.is_invalid() && !drv.is_const()) {
+                seed(drv);
+              }
+            }
+          }
         }
-        const std::string port{gu::pin_name_of(cr.net)};
-        row[port] = rep(port);
       }
       // THE IMPLICIT-CLOCK PORT. tolg gives a module whose body holds a
       // `reg x = 0` an input port named `clock` — the module's own clock — and
@@ -1380,7 +1450,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           }
         }
       }
-      if (one && !only_root.empty()) {
+      if (one && !only_root.empty() && !bus_roots.contains(only_root)) {
         for (const auto& dname : order) {
           auto dit = by_name.find(dname);
           if (dit == by_name.end() || dit->second == nullptr) {
@@ -1450,6 +1520,21 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     std::call_once(forest_once, [&]() {
       ref_forest  = build_forest(ref_by_name, canon_ref, ref_top_g);
       impl_forest = build_forest(impl_by_name, canon_impl, impl_top_g);
+      // Forest roots are TOP input names: record the ones both tops declare so
+      // the per-def root-agreement check can tell two top clocks apart
+      // (Clock_forest::top_inputs_both).
+      if (ref_top_io && impl_top_io) {
+        absl::flat_hash_set<std::string> ref_in;
+        for (const auto& d : ref_top_io->get_input_pin_decls()) {
+          ref_in.insert(std::string(d.name));
+        }
+        for (const auto& d : impl_top_io->get_input_pin_decls()) {
+          if (ref_in.contains(std::string(d.name))) {
+            ref_forest.top_inputs_both.insert(std::string(d.name));
+          }
+        }
+        impl_forest.top_inputs_both = ref_forest.top_inputs_both;
+      }
       dump_forest("ref", ref_forest);
       dump_forest("impl", impl_forest);
     });
@@ -2262,7 +2347,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // and the debug build shipped the collapsed UNKNOWN (exit 7) for a def the
     // flat retry proves.
     const bool      cheap_unknown          = r.solve_ms < cheap_ms;
-    const bool      unknown_under_collapse = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused
+    // A WALL-KILLED Unknown (a forked prover SIGKILLed at its deadline) reports
+    // solve_ms 0, so it would read as "cheap" -- but it spent its whole wall
+    // budget, and the bigger flat miter would only run out again: no retry.
+    const bool      unknown_under_collapse = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused && !r.wall_killed
                                              && (!force_flat[def_ix].empty() || cheap_unknown || netlist_cmp);
     //    (c) ABSORBING a known refutation and coming back PROVEN. This is the one
     //        place a wrong PROVEN silently converts a DEFINITE counterexample into
@@ -6034,6 +6122,7 @@ static void emit_formal_report(const std::string& path, const std::string& desig
     if (!env_assume && p.verdict != livehd::lec::Verdict::Proven && p.verdict != livehd::lec::Verdict::Refuted) {
       const bool scope_vacuous = std::find(r.vacuous_scopes.begin(), r.vacuous_scopes.end(), p.scope) != r.vacuous_scopes.end();
       why = p.refuted_at >= 0   ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
+            : !p.unknown_why.empty() ? p.unknown_why
             : p.unknown_at >= 0 ? std::format("solver gave up at cycle {}", p.unknown_at)
             : scope_vacuous     ? (p.scope.empty() ? std::string{"design assume set contradictory"}
                                                    : std::format("assume set of block '{}' contradictory", p.scope))
@@ -7473,6 +7562,7 @@ void formal_verify_command(Options& opts, Result& res) {
         // it, so the message names the block to fix instead of blaming the run.
         const bool  scope_vacuous = std::find(r.vacuous_scopes.begin(), r.vacuous_scopes.end(), p.scope) != r.vacuous_scopes.end();
         std::string why = p.refuted_at >= 0   ? std::format("violation at cycle {} may be a blackbox artifact", p.refuted_at)
+                          : !p.unknown_why.empty() ? p.unknown_why  // carries its own remediation hint
                           : p.unknown_at >= 0 ? std::format("solver gave up at cycle {} (raise --set formal.timeout)", p.unknown_at)
                           : scope_vacuous ? (p.scope.empty() ? std::string{"the design's own assume set is contradictory"}
                                                              : std::format("assume set of block '{}' is contradictory", p.scope))

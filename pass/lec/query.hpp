@@ -101,6 +101,22 @@ struct Query_result {
   bool packed_scalar_step_proven = false;
   bool packed_scalar_base_proven = false;
 
+  // The PARENT SIGKILLed a forked RACER at its wall deadline (the ind|bmc
+  // race deadline, race_deadline_ms): the verdict is a witness-free Unknown
+  // that already spent its whole wall budget. A driver must not answer it
+  // with a further re-solve (flat retry, int-blast retry) -- a query that ran
+  // out of TIME only runs out again, and every retry would add another full
+  // deadline to the run. (The isolated worker's hard_timeout_mult backstop
+  // keeps its own, pre-existing retry policy.) Parent-side only: never set
+  // inside a child, so not on the wire.
+  bool wall_killed = false;
+  // Narrower: the IND racer itself was wall-killed (make_inconclusive keeps
+  // wall_killed = either leg). The int-blast retry exists to turn an ind
+  // SOLVER give-up into a proof, so it gates on this one: a bmc-only wall kill
+  // leaves ind's give-up genuine, and the retry's own race trusts an ind
+  // Proven at once (a stuck bmc there is bounded by the retry's deadline).
+  bool ind_wall_killed = false;
+
   // The INDUCTION-STEP counterexample (inputs, then `| state: ...`) that kept a
   // weaker-than-unbounded verdict from being an unbounded proof: the auto
   // portfolio fell back to a bounded PASS or INCONCLUSIVE while the ind leg
@@ -315,6 +331,9 @@ struct Lec_options {
   // the only place a runaway can actually be stopped. Killing a worker can only
   // LOSE information, so the degrade is a witness-free Unknown, never a
   // verdict: sound by construction, and it SAYS the backstop fired.
+  //
+  // 0 also disables the forked-RACE wall deadline (race_deadline_ms): the auto
+  // ind|bmc race, the verify strategy race and the case-split cube workers.
   int         hard_timeout_mult   = 3;
   // Independent budget (seconds, 0 = off) for the SPECULATIVE post-run phase:
   // the hier straggler list, the cvc5 timeout-CORE diagnosis (which subset of
@@ -765,6 +784,32 @@ std::string frame_blob(std::string_view payload);
 // that is not byte-exact is no result at all.
 bool unframe_blob(std::string_view b, std::string_view& payload);
 
+// Wall deadline (ms, 0 = none) the parent enforces on a forked racer set (the
+// auto ind|bmc race, the verify strategy race, the case-split cube workers).
+// cvc5's tlimit-per bounds one checkSat but not its preprocessing (push /
+// NonClausalSimp) nor a single eager CaDiCaL solve, so without this a stuck
+// racer made `formal.timeout` advisory (formal.timeout=60 ran 15+ minutes).
+// Each racer runs ONE leg under one formal.timeout allowance, may draw one
+// formal.min_timeout floor once it is spent, and also encodes (which
+// formal.timeout deliberately excludes), so the deadline is
+//   formal.timeout + formal.min_timeout + grace,
+//   grace = clamp(formal.timeout / 4, 10 s, 60 s).
+// 0 when formal.timeout == 0 (unbounded / the deterministic rlimit tier) or
+// formal.hard_timeout_mult == 0 (the documented "disable the wall backstops"
+// setting). A killed racer is a witness-free Unknown, never a verdict.
+long long race_deadline_ms(const Lec_options& opts);
+
+// The verify STRATEGY race's wall deadline (engine=auto). Unlike one
+// equivalence leg, a verify strategy may legitimately overshoot formal.timeout
+// by one formal.min_timeout floor PER unsettled obligation
+// (Lec_options::min_timeout), so the deadline scales with `n_units` (an upper
+// bound on the obligation count):
+//   (formal.timeout + max(1, n_units) x formal.min_timeout) [x2 for phase=full]
+//   + grace,
+// never under formal.timeout x hard_timeout_mult. 0 exactly when
+// race_deadline_ms is 0.
+long long verify_race_deadline_ms(const Lec_options& opts, int n_units);
+
 // Run one proof in a fork-isolated worker. Used by the Taskflow hierarchy DAG:
 // one task owns one child process, so the solver-process count is bounded by
 // formal.jobs and cvc5 instances never execute concurrently in threads.
@@ -860,6 +905,11 @@ struct Prop_result {
   int           refuted_at    = -1;  // first cycle with a reachable violation (SAT)
   int           unknown_at    = -1;  // first cycle where the solver gave up (timeout/unknown);
                                      // later cycles were not attempted for this property
+  // Why an Unknown is open when it is NOT a solver giving up at `unknown_at`
+  // ("" = the solver gave up there). Set when the engine=auto race demotes a
+  // shallow ind-first bounded proof because bmc-first produced no result: no
+  // solver timed out at that cycle, so the reports must not say it did.
+  std::string   unknown_why;
   // Cumulative cvc5 time spent on THIS obligation's checks (BMC per-cycle checks
   // + its induction-rung candidate checks; cache hits cost ~0). P2 agent-report
   // signal — the report ranks stragglers by it. Serialized by the wire codec.

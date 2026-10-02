@@ -1,0 +1,63 @@
+/*
+:name: sim_fused_loop_prerise
+:type: simulation
+:sim_sweep: sim.vcd=false,true
+*/
+// Two independent rolled one-hot muxes in one module are fused into one
+// __sim_fused_loop body by inou/cgen/sim_loop_fusion.cpp. Their results reach
+// only a register D, so the fused body is advanced (pre-rise) and never
+// published: the pre-rise output must come from each part's __last_out.
+// Each part's `__valid` input makes emit_sub_call wrap the part in a runtime
+// guard; the staged (pre-rise) binding must retarget the `part_K__o` pointer
+// declared outside that guard rather than shadow it inside the block.
+// sim.vcd=true is the leg that reaches that scheduled fused body: without
+// observation a stateless loop lowers to the `__pure_eval` path instead.
+comb onehot_or<n=2, width=1>(`in`:Unsigned(bits=n*width), select:Unsigned(bits=n)) -> (out:Unsigned(bits=width)) {
+  out = 0
+  for lane in 0..<n {
+    if select#[lane] != 0 {
+      out |= `in`#[(lane*width)..+width]
+    }
+  }
+}
+
+pub mod sim_fused_loop_prerise(clk:Clock, sel:U2, a:U10, b:U16) -> (qa:U5@[1], qb:U8@[1]) {
+  reg ra:U5 = 0
+  reg rb:U8 = 0
+  qa = ra
+  qb = rb
+  ra = onehot_or<n=2, width=5>(select=sel, `in`=a)
+  rb = onehot_or<n=2, width=8>(select=sel, `in`=b)
+}
+
+test sim_fused_loop_prerise.regs {
+  mut d = sim_fused_loop_prerise
+  mut seen = 0
+  mut bad = 0
+  tick 8 {
+    mut sv:U2 = clock & 3
+    mut av:U10 = (clock * 37 + 5) & 0x3FF
+    mut bv:U16 = (clock * 4097 + 3) & 0xFFFF
+    d.sel = sv
+    d.a = av
+    d.b = bv
+    step
+    mut ea:U5 = 0
+    mut eb:U8 = 0
+    if sv#[0] != 0 {
+      ea = ea | av#[0..=4]
+      eb = eb | bv#[0..=7]
+    }
+    if sv#[1] != 0 {
+      ea = ea | av#[5..=9]
+      eb = eb | bv#[8..=15]
+    }
+    seen = seen + 1
+    if d.qa != ea or d.qb != eb {
+      puts("mismatch clock={clock} sel={sv} qa={d.qa} exp={ea} qb={d.qb} exp={eb}")
+      bad = bad + 1
+    }
+  }
+  assert(seen == 8, "the comparisons actually ran")
+  assert(bad == 0, "registered fused one-hot mux results match the per-lane OR")
+}

@@ -1,0 +1,18 @@
+/*
+:name: imported_comb_helper_scope
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// The imported comb `mid` calls its file-private `helper`; this caller ALSO
+// defines a `comb helper`. Inlining mid must resolve the bare call in mid's
+// own lexical scope, never in the caller's (it used to inline THIS file's
+// helper, so z = a ^ 0xFF instead of a & 0x0F).
+const mid = import("imported_comb_helper_scope/mid.mid")
+comb helper(a:U8) -> (z:U8) { z = a ^ 0xFF }
+pub mod top(a:U8) -> (z:U8@[0], w:U8@[0]) {
+  const r = mid(a=a)
+  z = r.z
+  w = helper(a=a)
+}

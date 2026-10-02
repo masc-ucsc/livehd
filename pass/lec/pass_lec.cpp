@@ -73,13 +73,15 @@ void Pass_lec::setup() {
                        "spends it as wall clock (defs run concurrently under formal.jobs, so a summed budget would "
                        "drain jobs-times faster than real time); the verify engine spends it as total solver time. "
                        "Accounting is on iff timeout>0 and formal.rlimit==0. NB engine=auto races ind+bmc as two "
-                       "processes, each self-bounded to timeout",
+                       "processes; the parent SIGKILLs a racer still running at the wall deadline timeout + "
+                       "min_timeout + clamp(timeout/4, 10s, 60s) and reports it UNKNOWN (cvc5 preprocessing is not "
+                       "covered by its own time limit)",
                        "120");
   m.add_label_optional("hard_timeout_mult",
                        "hard wall backstop multiplier for an isolated proof worker: formal.timeout * this value "
                        "(default 3). cvc5's soft limit cannot preempt every underlying SAT call; 0 disables the "
-                       "backstop. This bounds diagnostics only — a killed worker reports UNKNOWN, never PROVEN or "
-                       "REFUTED",
+                       "backstop (and the forked-race wall deadline). This bounds diagnostics only — a killed worker "
+                       "reports UNKNOWN, never PROVEN or REFUTED",
                        "3");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted (and gate simfail/simfail_run)", "true");
   m.add_label_optional("simfail",

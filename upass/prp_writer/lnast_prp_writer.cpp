@@ -2973,6 +2973,41 @@ void Lnast_prp_writer::drop_redundant_bundle_zeros(Lnast_nid body_nid, const std
   process(body_nid);
 }
 
+// An `a:[N]T` port after upass.ssa's full rebuild (forced by any repeated
+// definition in the unit): the rebuild re-emits the io slot as the flat packed
+// prim_type_int, and only io_meta keeps the array view. Printing the slot gave
+// `b:U32`, so the re-read `b[i]` indexed a plain integer instead of the array.
+// Spell the view (`[N]...[M]T`) back; empty when the port is not such a port.
+std::string Lnast_prp_writer::io_array_view_type(Lnast_nid type_nid, std::string_view raw_name, bool is_output) const {
+  if (type_nid.is_invalid() || lnast->get_type(type_nid) != Lnast_ntype::Lnast_ntype_prim_type_int) {
+    return {};
+  }
+  const auto& entries = is_output ? lnast->io_meta().outputs : lnast->io_meta().inputs;
+  const auto  it      = std::ranges::find_if(entries, [&](const Lnast_io_entry& e) { return e.name == raw_name; });
+  if (it == entries.end() || it->array_size <= 0 || it->elem_bits <= 0 || it->bits != it->array_size * it->elem_bits) {
+    return {};
+  }
+  int64_t lanes = 1;
+  for (const auto d : it->inner_dims) {
+    if (d <= 0) {
+      return {};
+    }
+    lanes *= d;
+  }
+  if (it->elem_bits % lanes != 0) {
+    return {};
+  }
+  const auto  leaf_bits = it->elem_bits / lanes;
+  std::string out       = std::format("[{}]", it->array_size);
+  for (const auto d : it->inner_dims) {
+    out += std::format("[{}]", d);
+  }
+  if (it->elem_bool && leaf_bits == 1) {
+    return out + "Bool";
+  }
+  return out + std::format("{}{}", it->elem_signed ? "S" : "U", leaf_bits);
+}
+
 // Emit `(in0:T0, in1:T1, …) -> (out0:T0, …)` from the io node.  The io node has
 // two `tuple_add` children: the first groups input ports, the second outputs.
 // Each port is `store(ref(name), const(init|nil), type, [stages])`.
@@ -3041,7 +3076,10 @@ void Lnast_prp_writer::emit_port_group(Lnast_nid tup_nid, bool is_output, bool i
         const auto pb = port_bits_.find(std::string(pname));
         note_emitted_type(pname, ait->second, pb == port_bits_.end() ? 0 : pb->second);  // the signature states its width
       } else if (!type_nid.is_invalid()) {
-        auto t = render_type_at(type_nid);
+        auto t = io_array_view_type(type_nid, lnast->get_name(name_nid), is_output);
+        if (t.empty()) {
+          t = render_type_at(type_nid);
+        }
         if (!t.empty()) {
           print(":");
           print(t);
@@ -4821,8 +4859,68 @@ void Lnast_prp_writer::write_declare() {
     // emit the bare `wire X:T` and let the body store be its sole driver.
     const bool is_bool = type_suffix == "Bool" || (type_suffix.empty() && bool_names_.contains(std::string(lhs)));
     print(is_bool ? " = false" : " = 0");
+    drop_redundant_zero_seed(decl_nid, lhs);
   }
   move_to_parent();
+}
+
+// The `= 0` default just printed for a value-less declare already IS the value a
+// leading `X = 0` store writes: uPass splits `mut total:U12 = 0` into a bare
+// declare plus `store(total, 0)`, and when the name has other defs (a loop
+// accumulator) the writer cannot fold that store back, so it re-emitted
+//
+//   mut total:U12 = 0
+//   total = 0          <- a no-op: nothing has written `total` yet
+//
+// Drop that store when it is the FIRST def of the name in body order (no
+// earlier top-level or nested write, so the value it overwrites is the seed's
+// 0) and the declare sits in the body itself (declares are emitted ahead of
+// every other statement, so the seed runs first).
+void Lnast_prp_writer::drop_redundant_zero_seed(Lnast_nid decl_nid, std::string_view lhs) {
+  const auto stmts = body_stmts_nid();
+  if (stmts.is_invalid() || lnast->get_parent(decl_nid) != stmts) {
+    return;
+  }
+  const auto defines = [&](auto&& self, Lnast_nid n) -> bool {
+    const auto t = lnast->get_type(n);
+    if (const auto v = lnast->get_child(n); !v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v)) && defines_child0(t)
+                                            && !Lnast_ntype::is_declare(t) && strip_prefix(lnast->get_name(v)) == lhs) {
+      return true;
+    }
+    for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      if (self(self, c)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  for (auto c = lnast->get_child(stmts); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+    if (Lnast_ntype::is_declare(lnast->get_type(c))) {
+      continue;
+    }
+    if (!defines(defines, c)) {
+      continue;
+    }
+    // The first def of `lhs`: only a plain scalar `lhs = 0` at the top level is
+    // the no-op seed. Anything else (an indexed store, a nested write, a
+    // non-zero value) keeps that store and every later one.
+    if (!Lnast_ntype::is_store(lnast->get_type(c))) {
+      return;
+    }
+    const auto v   = lnast->get_child(c);
+    const auto val = v.is_invalid() ? v : lnast->get_sibling_next(v);
+    if (val.is_invalid() || !lnast->is_last_child(val) || strip_prefix(lnast->get_name(v)) != lhs
+        || lnast->get_type(val) != Lnast_ntype::Lnast_ntype_const) {
+      return;
+    }
+    const auto txt = lnast->get_name(val);
+    if (txt != "0" && txt != "false") {
+      return;
+    }
+    // Still the seed's 0: this store, and any further `lhs = 0` before a real
+    // write (the source's own `total = 0` re-init), writes nothing new.
+    dead_init_stmts_.insert(c.get_class_index().value);
+  }
 }
 
 bool Lnast_prp_writer::unit_reads_name(std::string_view name, Lnast_nid except) const {

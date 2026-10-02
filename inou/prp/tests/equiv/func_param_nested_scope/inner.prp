@@ -1,0 +1,4 @@
+const f = import("leaf.leaf")
+pub comb inner(a:U8) -> (z:U8) {
+  z = f(a=a)
+}

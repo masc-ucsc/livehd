@@ -1,0 +1,9 @@
+const arb_t = import("arb.arb")
+pub comb mid(a:U4, b:U4) -> (z:U4) {
+  wire req:U4 = nil
+  wire upd:U4 = nil
+  const g = arb_t(upd=upd, req=req)
+  req = a ^ b
+  upd = a | b
+  z = g
+}

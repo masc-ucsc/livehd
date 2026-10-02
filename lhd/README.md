@@ -195,8 +195,27 @@ The additional rules are enabled by default and do not use `--min-repeats`:
   `struct_top_port_1.prp` (`reset_pin`, `U1`) only this one, and
   `struct_top_port_2.prp` (`Reset`) neither.
 
+- **`narrow-scoped-mut`** finds a local `mut` initialized with a literal, assigned
+  once in a narrower scope, and read only after that assignment within the same
+  scope and lambda. It suggests deleting the outer declaration and declaring a
+  `const` at the assignment, retaining an explicit unsigned type. Early/outside
+  reads, additional or partial writes, ref escapes, captures, modifiers, custom
+  types, and attributes are excluded.
+- **`compact-bit-packing`** finds a local `mut` followed by consecutive bit writes
+  covering its entire value from bit zero, with each source's known unsigned
+  width matching its destination window. It suggests `const dst:U<N> = array#[..]`
+  for all lanes of one fixed-size array in order, otherwise
+  `const dst:U<N> = (low_lane, ..., high_lane)#[..]`. Explicit destination types are
+  retained; untyped destinations get the total packed width (`U<N>`), as required
+  by the compiler. Gaps, overlaps, retained high bits, unknown/signed widths, dynamic
+  slices, side effects, intermediate reads and later writes/ref escapes are
+  excluded. Both new rules skip files with parse errors and ambiguous bindings;
+  missed suggestions are preferred to uncertain rewrites.
+
 New findings include `score` plus `destination`/`source`/`field_count`,
 `bundle`/`argument_count`, `destination`/`branch_count`, `reset`/`registers`/`polarity`/`value`/`port_type`, or `port`/`declared_type`/`reset_uses`, respectively.
+The new rules additionally expose `variable`/`assignment_line` or
+`destination`/`lane_count`/`bits`/`packing`.
 Related locations are capped at eight per finding; counts include all matches.
 Existing repetition findings retain their template/count/progression attributes.
 

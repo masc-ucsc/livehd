@@ -112,6 +112,81 @@ run_lec() {  # $1=name $2=formal.timeout secs $3=outer kill secs
   if [ "$RC" -ge 128 ] && [ "$ELAPSED" -ge "$outer" ]; then HUNG=1; fi
 }
 
+# --- wall deadline on the forked ind|bmc race (fork_race) ---
+# cvc5's tlimit-per does not cover its own preprocessing (push/NonClausalSimp),
+# so a racer stuck there used to hold `lhd lec` FOREVER (formal.timeout=60 ran
+# 15+ minutes on a netlist LEC). LIVEHD_LEC_RACER_STALL_S makes every racer
+# sleep before solving -- the stand-in for that stuck child. With
+# formal.timeout=1 and min_timeout=1 the race deadline is 1 + 1 + 10 s grace =
+# 12 s: the run must come back UNKNOWN naming the deadline well inside the 25 s
+# watchdog, never PROVEN, never hang, and leave no racer process behind (each
+# racer is a fork of this lhd, so its argv carries the unique workdir). Runs in
+# the BACKGROUND, concurrently with the freeze cases below, to keep the test short.
+cat > "$WORK/stall_ref.v" <<'EOF2'
+module foo(input clk, input reset, input en, output reg [3:0] q);
+  always @(posedge clk) if (reset) q <= 4'd0; else if (en) q <= q + 4'd1;
+endmodule
+EOF2
+cat > "$WORK/stall_impl.v" <<'EOF2'
+module foo(input clk, input reset, input en, output reg [3:0] q);
+  always @(posedge clk) if (reset) q <= 4'd0; else q <= q + {3'd0, en};
+endmodule
+EOF2
+(
+  s0=$(date +%s)
+  LIVEHD_LEC_RACER_STALL_S=60 "$LHD" lec --ref "$WORK/stall_ref.v" --impl "$WORK/stall_impl.v" --top foo \
+    --set formal.lec.hier=false --set formal.lec.decompose=false --set formal.timeout=1 --set formal.min_timeout=1 \
+    --workdir "$WORK/w_stall_race" > "$WORK/out_stall.txt" 2>&1 &
+  spid=$!
+  ( for ((i = 0; i < 25; i++)); do
+      sleep 1
+      kill -0 "$spid" 2>/dev/null || exit 0
+    done
+    kill -9 "$spid" 2>/dev/null ) >/dev/null 2>&1 &
+  swd=$!
+  wait "$spid"; src=$?
+  kill -9 "$swd" 2>/dev/null; wait "$swd" 2>/dev/null
+  echo "$src $(( $(date +%s) - s0 ))" > "$WORK/stall_rc.txt"
+) &
+stall_bg=$!
+
+# --- a wall-killed BMC racer must not cancel the int-blast retry of a genuine ind give-up ---
+# A registered multiply reassociation: bit-blasted ind gives up at formal.timeout
+# (cvc5's own time limit -- a genuine give-up), and int_blast=auto's retry proves
+# it as unbounded integers in well under a second. LIVEHD_LEC_RACER_STALL_ONLY=1
+# stalls just the bmc racer (the stand-in for a bmc stuck in one eager CaDiCaL
+# solve), so the race deadline kills bmc ONLY. The retry exists for the IND leg's
+# give-up, so it must still run: the verdict must stay PROVEN via the int-blast
+# retry. (It used to be gated on EITHER leg being wall-killed -> UNKNOWN, exit 7.)
+# Runs in the background alongside the other stall case.
+cat > "$WORK/ibstall_ref.v" <<'EOF2'
+module foo(input clk, input [15:0] a, input [15:0] b, input [15:0] c, output reg [15:0] z);
+  always @(posedge clk) z <= (a * b) * c;
+endmodule
+EOF2
+cat > "$WORK/ibstall_impl.v" <<'EOF2'
+module foo(input clk, input [15:0] a, input [15:0] b, input [15:0] c, output reg [15:0] z);
+  always @(posedge clk) z <= a * (b * c);
+endmodule
+EOF2
+(
+  s0=$(date +%s)
+  LIVEHD_LEC_RACER_STALL_ONLY=1 LIVEHD_LEC_RACER_STALL_S=60 "$LHD" lec --ref "$WORK/ibstall_ref.v" --impl "$WORK/ibstall_impl.v" \
+    --top foo --set formal.lec.hier=false --set formal.lec.decompose=false --set formal.timeout=1 --set formal.min_timeout=1 \
+    --workdir "$WORK/w_ibstall" > "$WORK/out_ibstall.txt" 2>&1 &
+  ipid=$!
+  ( for ((i = 0; i < 25; i++)); do
+      sleep 1
+      kill -0 "$ipid" 2>/dev/null || exit 0
+    done
+    kill -9 "$ipid" 2>/dev/null ) >/dev/null 2>&1 &
+  iwd=$!
+  wait "$ipid"; irc=$?
+  kill -9 "$iwd" 2>/dev/null; wait "$iwd" 2>/dev/null
+  echo "$irc $(( $(date +%s) - s0 ))" > "$WORK/ibstall_rc.txt"
+) &
+ibstall_bg=$!
+
 # Each hard case: formal.timeout=2s, outer watchdog 25s. Must (a) NOT trip the
 # watchdog -- proving the bound actually fires -- and (b) report UNKNOWN.
 for c in reassoc distrib poly; do
@@ -133,6 +208,45 @@ if [ "$v" != "PROVEN equivalent" ]; then
   echo "FAIL: easy control -> verdict '$v' (want PROVEN equivalent); rc=$RC"; fail=1
 else
   echo "ok: easy control -> PROVEN equivalent in ${ELAPSED}s"
+fi
+
+wait "$stall_bg"
+read -r SRC SEL < "$WORK/stall_rc.txt"
+SOUT=$(cat "$WORK/out_stall.txt")
+sv=$(echo "$SOUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1)
+if [ "$SRC" -ge 128 ] && [ "$SEL" -ge 25 ]; then
+  echo "FAIL: stalled race HUNG past the 25s watchdog -> the fork_race wall deadline was NOT enforced"; fail=1
+elif [ "$sv" != "UNKNOWN" ]; then
+  echo "FAIL: stalled race -> verdict '$sv' (want UNKNOWN); rc=$SRC elapsed=${SEL}s"; echo "$SOUT" | tail -5; fail=1
+elif ! echo "$SOUT" | grep -q "racer exceeded formal.timeout"; then
+  echo "FAIL: stalled race UNKNOWN does not name the wall deadline ('racer exceeded formal.timeout')"; fail=1
+elif [ "$SEL" -gt 20 ]; then
+  echo "FAIL: stalled race took ${SEL}s (deadline 12s): a retry re-spent the wall budget"; fail=1
+elif pgrep -f "$WORK/w_stall_race" >/dev/null 2>&1; then
+  echo "FAIL: a killed racer outlived lhd lec (orphan process still running)"; fail=1
+else
+  echo "ok: stalled race -> UNKNOWN (racer exceeded formal.timeout) in ${SEL}s, no orphan racer"
+fi
+
+wait "$ibstall_bg"
+read -r IRC IEL < "$WORK/ibstall_rc.txt"
+IOUT=$(cat "$WORK/out_ibstall.txt")
+iv=$(echo "$IOUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1)
+if [ "$IRC" -ge 128 ] && [ "$IEL" -ge 25 ]; then
+  echo "FAIL: bmc-only stall HUNG past the 25s watchdog"; fail=1
+elif [ "$iv" = "REFUTED (not equivalent)" ]; then
+  echo "FAIL: bmc-only stall -> REFUTED on an equivalent pair; rc=$IRC"; echo "$IOUT" | tail -5; fail=1
+elif ! echo "$IOUT" | grep -q "ind=Unknown.*hit formal.timeout" && [ "$iv" != "PROVEN equivalent" ]; then
+  # ind did not give up the way this case needs (e.g. a much faster machine
+  # proved it under BV, or a slower one wall-killed it too): not this bug.
+  echo "ok: bmc-only stall -> '$iv' without a genuine ind give-up (precondition not met; skipped)"
+elif [ "$iv" != "PROVEN equivalent" ]; then
+  echo "FAIL: bmc-only stall -> verdict '$iv' (want PROVEN via the int-blast retry): a wall-killed BMC racer suppressed the retry of ind's genuine give-up; rc=$IRC"
+  echo "$IOUT" | grep -i "inconclusive\|int-blast" | head -3; fail=1
+elif pgrep -f "$WORK/w_ibstall" >/dev/null 2>&1; then
+  echo "FAIL: a killed bmc racer outlived lhd lec (orphan process still running)"; fail=1
+else
+  echo "ok: bmc-only stall -> PROVEN (int-blast retry of ind's give-up still ran) in ${IEL}s"
 fi
 
 if [ $fail -ne 0 ]; then echo "lec_timeout_test: FAILED"; exit 1; fi

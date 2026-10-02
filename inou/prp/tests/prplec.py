@@ -29,7 +29,12 @@
 #                  `lg:` library first (one `--set` cannot say two things).
 #   :lec_set: k=v … extra `--set` for `lhd lec` (base = shared, variant = adds)
 #   :lec_sweep: k=v1,v2   run the pair once per value (repeatable: cartesian)
-#   :lec_expect: proven|refuted   what the run must report (default proven)
+#   :lec_expect: proven|refuted|unknown|refused   what the run must report
+#                  (default proven); `unknown` = a sound REFUSAL reported as an
+#                  UNKNOWN verdict (rc 7); `refused` = rc 7 with NO verdict at
+#                  all (a front-end refusal, e.g. edge normalization declined
+#                  under formal.phase_sched=false) -- pair it with a :lec_grep:
+#                  naming the reason, or any rc-7 error would satisfy it
 #   :lec_grep: REGEX      must appear in the lec output (repeatable); when the two
 #                         sides compile with different flags, the IMPL side's own
 #                         `lhd compile` output is part of that text too (the ref
@@ -59,6 +64,7 @@ _VARIANT_RE = re.compile(r'^(.+)_(\d+)$')
 # as proven exactly as run_equiv treats it.
 _PROVEN_RE  = re.compile(r'(?m)^lec: .* (?:PROVEN|PASS\(\d+\)) equivalent')
 _REFUTED_RE = re.compile(r'(?m)^lec: .* REFUTED')
+_UNKNOWN_RE = re.compile(r'(?m)^lec: .* UNKNOWN')
 
 
 def variant_of(prp_file):
@@ -213,8 +219,14 @@ def _check(out, rc, expect, base_test, var_test):
     elif expect == 'proven':
         if rc != 0 or not _PROVEN_RE.search(final):
             return 'expected PROVEN, got rc={}'.format(rc)
+    elif expect == 'unknown':
+        if rc != 7 or not _UNKNOWN_RE.search(final):
+            return 'expected UNKNOWN (a refusal), got rc={}'.format(rc)
+    elif expect == 'refused':
+        if rc != 7 or _PROVEN_RE.search(final) or _REFUTED_RE.search(final):
+            return 'expected a REFUSAL (rc 7, no verdict), got rc={}'.format(rc)
     else:
-        return ':lec_expect: {} is not one of proven|refuted'.format(expect)
+        return ':lec_expect: {} is not one of proven|refuted|unknown|refused'.format(expect)
 
     for pat in _tags(base_test, 'lec_grep') + _tags(var_test, 'lec_grep'):
         if not re.search(pat, out):

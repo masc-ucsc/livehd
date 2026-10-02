@@ -1,0 +1,3 @@
+pub comb leaf(a:U8) -> (z:U8) {
+  z = a & 0x0F
+}

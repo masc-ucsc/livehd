@@ -1,0 +1,29 @@
+/*
+:name: rolled_inline_stream_ssa
+:type: compile
+*/
+// lhdtrack suggestions7 item 2 (br_ram_data_rd_pipe / br_ram_flops). The source
+// compiles correctly; its Pyrope re-emission did not. The writer inlines
+// `sel_or` into the `::[timecheck=false]` mod as `mut inl1_in = 0` ...
+// `inl1_in = a` (a repeated straight-line definition -> STREAMING SSA), and
+// the arm-local `mut data` makes it wrap the loop in `if true { }`, so the
+// carried `inl1_data` is not repeated in straight-line code (which would have
+// forced the full SSA rebuild). The re-read rolled the loop and bound its
+// invariant `inl1_in` by RAW name -> the declaration-time 0, not `a`.
+comb sel_or<Lanes=2>(`in`:Unsigned(bits=Lanes*4), select:Unsigned(bits=Lanes)) -> (out:U4) {
+  if Lanes == 1 {
+    out = `in`
+  } else {
+    mut data:U4 = 0
+    for lane in 0..<Lanes {
+      if select#[lane] != 0 {
+        data |= `in`#[(lane*4)..+4]
+      }
+    }
+    out = data
+  }
+}
+
+pub mod rolled_inline_stream_ssa::[timecheck=false](a:U8, s:U2) -> (o:U4@[0]) {
+  o = sel_or<Lanes=2>(`in`=a, select=s)
+}

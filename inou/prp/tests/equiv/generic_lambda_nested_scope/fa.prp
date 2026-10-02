@@ -1,0 +1,8 @@
+// Two files bind the SAME spelling `m<inc>` to their OWN `inc`: each call site
+// needs its own specialization (the clone was keyed by the raw name, so both
+// shared lib.prp's mask body).
+const m = import("generic_lambda_nested_scope/lib.m")
+comb inc(v:U8) -> (o:U8) { o = v ^ 0xFF }
+pub mod ma(a:U8) -> (r:U8@[0]) {
+  r = m<inc>(a=a)
+}

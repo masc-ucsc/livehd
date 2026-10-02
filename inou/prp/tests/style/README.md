@@ -31,11 +31,15 @@ source-only style hints: every `*.prp` here auto-generates a `prp-style-<name>`
 
 One fixture per rule (`repeated-code`, `likely-unrolled-loop`, `whole-tuple-copy`,
 `flattened-bundle-arguments`, `single-destination-conditional`, `hardcoded-reset`,
-`reset-port-type`), the `match` form of `single-destination-conditional`
+`reset-port-type`, `narrow-scoped-mut`, `compact-bit-packing`), the `match` form of `single-destination-conditional`
 (`single_destination_match`, `single_destination_match_clean`), plus the reset negatives (`reset_clean`, `reset_used_as_data`,
 `reset_not_a_priority_clear`), the active-low hint, the "all three hints" shape
 (`reset_hand_written_u1`, the twin of `tests/equiv/struct_top_port.prp`), and the
 `prp-style-allow` scoping rules (`allow_scope`, `allow_file_scope`).
+
+The const/packing rules also have clean near-misses and a complete-array fixture;
+the CLI regressions cover def/use escapes, retained bits, widths, ordering, side
+effects, silencing and partial parses.
 
 To add a rule: add a positive fixture, a near-miss `none` fixture, and extend
 `lhd/tests/lhd_style_test.py` for the detailed corner cases.

@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2s-satopt — standalone, bounded logic simplification</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2s-satopt</strong> Standalone, bounded logic simplification</h1>
+<p>Make <code>pass.satopt</code> rewrite the current LGraph to help subsequent
+synthesis, simulation, and LEC. Use stronger simulation signatures to nominate
+constant, equal, and complementary values for proof, followed by shallow local
+observability don't-care (ODC) replacement by constants and bounded SAT-assisted
+Hotmux collapse. Split the optimizer into selectable stages with shared,
+demand-created analysis services; add bounded simulation-guided resubstitution
+after measuring the initial sweep and Hotmux stages.</p>
+
+<h2>Depends on</h2>
+<p>None beyond the existing compiler and proof infrastructure. Run after cprop
+and bitwidth inference; synthesis coloring or technology mapping is not a
+prerequisite.</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>A — Rewrite the current graph as a standalone pass.</strong>
+  <ul>
+  <li>Replace the current scratch-copy/proof-preparation behavior with committed
+  rewrites of the graph passed to satopt. The optimized graph must be consumed by
+  subsequent compile emits, simulation, LEC, and synthesis without requiring ABC
+  mapping. Wire standalone <code>lhd pass satopt</code> graph output and update
+  help, describe metadata, and integration coverage.</li>
+  <li>Reuse the same safe transformation engine when synthesis requests satopt;
+  avoid repeating work when the same graph and semantic context were already
+  processed. Use one public switch, <code>pass.satopt</code>: default false for
+  every command, including LEC and synthesis. Explicit user settings override
+  the default. When enabled, synthesis maps the optimized compile output
+  without a duplicate mapper-local run; LEC handles both source and loaded
+  graph inputs. SAT is opt-in because measured area/delay effects depend on
+  design, frontend, and mapping policy.</li>
+  <li>Apply within graph definitions with unconstrained definition inputs; a fact
+  discovered under one instance's context must not specialize every instance of
+  that definition. Preserve hierarchy and state identity.</li>
+  <li>Perform bounded cleanup and width recomputation after rewrites. Keep
+  arithmetic and word operations intact whenever possible; graph mutation,
+  attributes, graph outputs, and persistent-cache invalidation must agree.</li>
+  </ul>
+</li>
+<li><strong>B — Preserve observable checks and behavior.</strong>
+  <ul>
+  <li>Treat <code>unique if</code>/Hotmux exclusivity obligations, assertions, and
+  other runtime/formal checks as observable, even when their data outputs have no
+  consumers. Keep their triggering conditions and required diagnostic identity,
+  or discharge them through the existing sound proof mechanism. Do not use
+  synthesis-only dead-Hotmux deletion in the shared pass.</li>
+  <li>Preserve primary outputs, state updates, clock/reset/enable behavior,
+  memory behavior, and opaque interfaces. Stop combinational reasoning at state
+  outputs and unsupported boundaries; do not assume that arbitrary state is
+  reachable or that an unproved exclusivity obligation holds.</li>
+  <li>Respect finite widths, signed extension, truncation, and unknown-value
+  semantics. Unknown constants, missing width information, unsupported cones,
+  solver failure, or exhausted budgets yield no rewrite.</li>
+  <li>Keep unconditional equivalence facts distinct from contextual ODC facts.
+  A contextual rewrite is not an unconditional internal equality or an LEC
+  cutpoint. Compare full designs or complete proof windows, not isolated regions
+  stripped of the relation that justified the rewrite.</li>
+  </ul>
+</li>
+<li><strong>C — Strengthen simulation runs and signatures.</strong>
+  <ul>
+  <li>Replace the fixed eight-sample filter with bounded, reproducible batches:
+  random patterns plus inexpensive corner patterns (zero, ones, alternating
+  bits, and selected boundary/carry cases). Choose the sample budget by measured
+  rejection rate and cost; 256 patterns is an experimental starting point, not
+  a required default or 256 independent graph traversals.</li>
+  <li><strong>Evaluate LGraph operations at word level; index signatures per
+  bit.</strong> For sample <code>j</code>, compute the complete value of a driver
+  pin once, then append bit <code>b</code> to that pin/bit's signature. Signature
+  granularity does not require bit-level graph evaluation or an AIG. Reuse
+  evaluations across candidates and only update affected values after edits.</li>
+  <li>Feed concrete SAT/SMT counterexamples back into signatures and candidate
+  buckets under a bounded refinement budget. A timeout/Unknown supplies neither
+  a proof nor a counterexample. Independent state/opaque symbols remain
+  independent in both simulation and proof.</li>
+  <li>Signatures and hashes only nominate candidates. Confirm signature contents
+  after hash collisions, and prove every semantic replacement; even an all-zero
+  signature is not a constant proof.</li>
+  </ul>
+</li>
+<li><strong>D — Add a signature-indexed constant/equivalence sweep.</strong>
+  <ul>
+  <li>Use a hash map from bit signature to a representative
+  <code>std::pair&lt;dpin, bit&gt;</code>. Index existing values once, then use
+  lookups instead of comparing every pair of graph bits. A bounded alternative
+  representative list is permissible when one representative cannot be proved
+  equivalent; never enumerate an unbounded bucket.</li>
+  <li>Give the all-zero and all-one signatures explicit constant candidates and
+  try them first. Do not compare all members of these large buckets to one
+  another. Canonicalize a signature with its complement and retain a polarity
+  bit so one lookup can nominate <code>a</code> or <code>~a</code>.</li>
+  <li>Select stable, available representatives in topological order. Exclude
+  self-replacements and transitive-fanout replacements that could create cycles;
+  update or invalidate representatives when their defining graph changes.</li>
+  <li>Bound indexed bits, bucket alternatives, proof attempts, and signature
+  memory. Share encoded cones within an unchanged graph generation. Group
+  compatible bit claims into word/range queries rather than eagerly creating
+  one extracted SMT term and solver invocation per bit.</li>
+  </ul>
+</li>
+<li><strong>E — Exploit proven zero/one bits to reduce operation widths.</strong>
+  <ul>
+  <li>Prioritize contiguous lower and upper constant runs, including all-zero
+  or all-one words. Make those facts available to cprop/bitwidth and to operand
+  simplification, so downstream operations can lose unnecessary computation.</li>
+  <li>Reconstruct constants and live slices as maximal runs. Narrow only when
+  extension, carry, truncation, and value semantics are preserved: upper ones
+  are removable only when the retained signed value extends correctly; lower
+  constant bits may require an explicit shift/offset or other exact rewrite.</li>
+  <li>Count the actual logic made dead and the cost of introduced masks,
+  slices, concatenations, and complements. Do not split a cheap wide operation
+  into many expensive bit operations merely to report more proven bits.</li>
+  </ul>
+</li>
+<li><strong>F — Restrict same/complement replacement to operation cells.</strong>
+  <ul>
+  <li>Target cells that perform computation with a reviewed operation allowlist.
+  Do not spend the same/complement sweep budget targeting <code>Get_mask</code>
+  or <code>Set_mask</code>; canonical wiring simplification belongs to cprop.</li>
+  <li>Resolve wiring to its source bit when building signatures. Wiring, inputs,
+  and state outputs may supply replacement values without becoming rewrite
+  targets themselves. This avoids duplicate candidates for aliases.</li>
+  <li>Prefer whole-word and contiguous-range equality/complement replacements
+  where widths and extension rules match. Limit scattered bit replacements to
+  cases with a concrete cost reduction; include the cost of computing the
+  complement and preserve sharing for other consumers.</li>
+  </ul>
+</li>
+<li><strong>G — Add one-/two-level ODC replacement by constants.</strong>
+  <ul>
+  <li>After unconditional sweeping, try replacing a bit or compatible bit range
+  with zero or one under a sound local observability condition. Begin with one
+  level and use two for promising candidates. Existing mux-arm selection proofs
+  are a starting point; include nearby muxes, masks, and logic gating.</li>
+  <li>For a bit, prove <code>(v XOR constant) AND observable(v, k)</code>
+  unsatisfiable, or prove all exits of an original-versus-rewritten window
+  equal. Include every affected consumer and every observable check. An edge
+  rewrite justified at one consumer must not replace a shared driver globally.</li>
+  <li>Bound fanout nodes/edges as well as depth, and separately bound fanin
+  encoding. Treat truncated window exits as observable. Handle reconvergence
+  with a conservative proof condition or an exact window miter; a simulation
+  observability mask is not proof.</li>
+  <li>Apply contextual rewrites one at a time with affected signatures,
+  observability, and proof state invalidated, or prove a complete batch jointly.
+  Independent proofs on the old graph do not authorize arbitrary combinations.</li>
+  </ul>
+</li>
+<li><strong>H — Bound total effort and validate all downstream uses.</strong>
+  <ul>
+  <li>Provide deterministic work limits for simulation, graph walks, encoding,
+  candidate trials, and solver resources, plus a total pass memory/time backstop.
+  On exhaustion retain completed, proven rewrites and leave the rest unchanged.
+  Local ODC depth and per-query solver limits alone do not bound total cost.</li>
+  <li>Cache only against the graph, widths, semantic context, proof version,
+  options, and every descended definition that the proof depends on. Include
+  fanout/observability dependencies for ODC facts. Never reuse stale solver
+  encodings or treat an exhausted partial search as an exhaustive result.</li>
+  <li>Add focused coverage for constant high/low bits, equal/complement words,
+  hash/signature collisions, rare counterexamples, shared consumers, reconvergent
+  ODCs, cycles, signed extension, unknowns, and budget exhaustion. Verify that
+  unused failing <code>unique if</code>/assertion checks still fail after satopt.</li>
+  <li>Check standalone emitted graphs, original-versus-optimized whole-design
+  LEC, simulator outputs and checks, idempotence, and cache behavior on cold,
+  repeated, comment-only, and semantic-edit runs. Contract tests are immutable;
+  ordinary tests must remain under 20 seconds in opt and 60 seconds in dbg.</li>
+  <li>Report separate stage costs, candidates/rejections/proofs, applied rewrites,
+  operation/bit reductions, and budget skips. Measure simulator generation and
+  runtime, LEC time/verdicts, and downstream synthesis area/delay alongside satopt
+  time and peak memory. Serialize synthesis measurements. Smaller node count is
+  not evidence of a downstream speedup.</li>
+  </ul>
+</li>
+<li><strong>I — Collapse Hotmux regions with bounded SAT assistance.</strong>
+  <ul>
+  <li>Operate on Hotmuxes and two-arm Muxes represented as Hotmuxes. Normalize
+  <code>mux(index, A, B)</code> to <code>hotmux(index, B, A)</code>: zero selects
+  <code>A</code>, nonzero selects <code>B</code>, and <code>A</code> is the
+  trailing default. This is a direct conversion for a 0/1 index and preserves
+  LGraph's existing zero/nonzero semantics for wider two-arm controls. No SAT
+  query is needed for this normalization, and a single explicit control has no
+  pairwise exclusivity obligation.</li>
+  <li><strong>Multi-entry indexed Muxes are outside the collapse scope.</strong>
+  Treat them as region boundaries; do not expand them to Hotmuxes, combine their
+  indices, or synthesize a new index/priority encoder. The resulting collapsed
+  selection remains a Hotmux.</li>
+  <li>Build on the region collection, activation-predicate sharing, and terminal
+  grouping in <a href="../../pass/cprop/cprop_mux.cpp"><code>cprop_mux.cpp</code></a>.
+  Keep inexpensive structural simplification in cprop. In satopt, collect small
+  bounded regions, initially with single-consumer interiors, and represent
+  alternatives as shared activation expressions plus word-valued data leaves.
+  Bound both region size and predicate construction; avoid unrestricted path
+  enumeration or duplication of shared child muxes.</li>
+  <li>Flatten nested Hotmux choices by composing outer and inner activation
+  conditions. An inner default is selected only when none of its explicit
+  controls is active; preserve that condition and the outer default. For example,
+  <code>hotmux(p, hotmux(q, A, B), C)</code> can be represented as
+  <code>hotmux(p AND q, A, p AND NOT q, B, C)</code>, with controls interpreted
+  as Boolean nonzero predicates.</li>
+  <li>Use signatures to nominate and bounded SAT/SMT queries to prove impossible
+  activation conditions, implication, and exclusivity. Delete unreachable arms
+  and remove redundant guards only after proof. Group identical terminal values;
+  extend grouping to different word expressions only when each changed arm's
+  activation implies equality with its proposed representative. OR the grouped
+  activation conditions while retaining correct default coverage.</li>
+  <li>Use J's MUX selector-scoring heuristic to discover alternatives that
+  structural flattening misses: rank existing data leaves by agreement with the
+  target samples, then rank existing predicates by how well they separate the
+  remaining mismatches. For a candidate <code>hotmux(g, A, B)</code>, prove
+  <code>g implies target == A</code> and
+  <code>NOT g implies target == B</code>, with widths and context preserved.
+  Coalesce compatible bits into word/range candidates sharing one selector;
+  do not independently rebuild every data bit. Bound branch refinement and
+  retain the full replacement/check validation described below.</li>
+  <li>Keep word data opaque for control-only proofs; demand-encode its computation
+  only for conditional data-equivalence queries. Preserve relationships among
+  controls by encoding their relevant fanin rather than assuming unrelated free
+  control variables. Validate the complete replacement and its obligations under
+  the same context; Unknown leaves the candidate unchanged.</li>
+  <li>Before absorbing an existing Hotmux, prove its original exclusivity
+  obligation globally, retain that check independently with its original trigger,
+  or decline absorption. An inner overlap may remain observable even when the
+  parent does not select its data; parent-gating the inner controls must not hide
+  that violation. Prove exclusivity of the newly constructed controls as well.</li>
+  <li>Accept collapse based on removed private word selections, introduced
+  predicate logic, remaining sharing, depth, and simulation cost. A larger Hotmux
+  alone is not a gain; allow partial collapse or retain the original region.
+  Add H's validation for conversion polarity, wide nonzero controls, nested
+  defaults, unreachable arms, shared children, preserved overlap failures,
+  indexed-mux boundaries, and solver-budget exhaustion.</li>
+  </ul>
+</li>
+<li><strong>J — Add bounded simulation-guided resubstitution.</strong>
+  <ul>
+  <li>Separate candidate generation, semantic proof, profitability, and graph
+  mutation. Keep constants and exact/complement signature lookup as cheap
+  first choices when enabled. A separate heuristic builder may nominate a
+  small combination of existing signals even when no individual signature
+  matches, for example AND, XOR, or a selection between existing values.</li>
+  <li>Initially target small control cones and I's Hotmux regions, with one or
+  two introduced operations and bounded available replacement inputs
+  (divisors). Collect them from a bounded local window, excluding the target's
+  transitive fanout and logic that would be deleted by the rewrite. Global
+  simulation preserves signal correlations; it does not authorize an all-pairs
+  global candidate search or unconstrained wide-datapath resynthesis.</li>
+  <li>Generate candidates from concrete signatures and, where enabled, sampled
+  care masks; prove each replacement before committing. Refutation adds a
+  concrete counterexample and permits a bounded retry. Unknown or timeout
+  leaves that candidate unchanged. Reuse C's evaluation/signatures, update
+  needed signatures lazily, and batch new-pattern evaluation when profitable
+  for the word-level evaluator. Do not copy bit-network batch sizes blindly.</li>
+  <li>Unconditional resubstitution must work with ODC disabled. Contextual
+  resubstitution requires the ODC option and G's complete proof window and
+  invalidation rules. Sampled care masks never substitute for proof, and source
+  unknowns are not free choices. Invalidate affected graph references and
+  encodings even for unconditional substitutions; ODC changes additionally
+  invalidate dependent internal functions and observability facts.</li>
+  <li>Judge gain by removable private logic, retained sharing, operation widths,
+  depth, predicates, and reconstruction costs. Preserve word operations and
+  include masks/complements introduced by replacement. Reject candidates with
+  no justified benefit; a reduced bit-gate count alone is insufficient.</li>
+  <li>Measure the baseline sweep and Hotmux stages before enabling broader
+  resubstitution by default. Bound divisors, window walks, inserted operations,
+  trials, signature growth, encoding, and proof work under H's total limits.
+  Include initial simulation, pattern generation, refinements, cleanup, and
+  proof time in end-to-end measurements. Validate rare counterexamples,
+  shared divisors, cycles, partial matches, retained obligations, and budgets.</li>
+  </ul>
+</li>
+<li><strong>K — Split satopt into independently selectable stages.</strong>
+  <ul>
+  <li>Keep one coordinator and callable stage implementations. Separate
+  constant sweeping, equality, complement equivalence, shallow ODC, Hotmux
+  optimization, memory optimization, and bounded resubstitution. Map existing
+  unconditional selector-constant proofs to constant sweeping and conditional
+  mux-arm proofs to Hotmux optimization. Expose the same options through the
+  internal API and CLI; retain A's pass-level enable defaults.</li>
+  <li>Use an explicit stage set, with proposed CLI spelling
+  <code>pass.satopt.stages</code>. It replaces the default set when supplied;
+  <code>none</code> performs no optimization. Reject unknown names. Keep a
+  deterministic execution order rather than interpreting list order as a
+  recipe. Decide default stage membership from safety audits and measurements;
+  new experimental resubstitution must not become enabled merely by adding it.</li>
+  <li>Options select optimization searches, never disable correctness checks
+  needed by an enabled rewrite. B remains mandatory: preserve observable
+  obligations, unknown semantics, proof validity, and graph legality. Turning
+  memory optimization off still requires sound memory boundaries; turning
+  Hotmux optimization off still requires preservation of Hotmux checks.</li>
+  <li>Create simulation, signature indices, candidate windows, solver state,
+  and specialized memory analysis only when an enabled stage needs them.
+  Share services across enabled stages and invalidate by graph generation and
+  semantic dependencies. Enabling resubstitution alone may require simulation
+  and indexing, but must not silently run constant/equivalence sweep stages.
+  Reuse a bounded node classification or existing graph metadata to skip
+  inapplicable stages without a separate whole-graph scan for each stage.</li>
+  <li>Use per-stage effort limits beneath one shared pass budget. Report
+  disabled, inapplicable, exhausted, and completed stages separately, together
+  with their costs. Track stage coverage and options in reuse metadata: a
+  previous equality-only run must not suppress a later Hotmux or memory run.
+  Proven facts may be reused only when their graph and semantic dependencies
+  still match; partial work must not be marked as a completed full pass.</li>
+  <li>Prepare a small separation between network-specific evaluation, proof
+  encoding, mutation/cost operations, and reusable search/refinement policy.
+  Implement against LGraph first. Defer the exact Lnet adapter/API and LUT
+  resynthesis algorithm until Lnet's interfaces are stable; do not build a
+  speculative universal network abstraction or require Lnet for this task.</li>
+  <li>For the planned combinational LUT-only Lnet, later reuse applicable
+  constants/equality/complement/resubstitution stages with LUT evaluation and
+  LUT-specific encoding, replacement, and cost. Memory and explicit Hotmux
+  stages are inapplicable and must allocate no specialized analysis state.
+  Respect LUT input limits, sharing, depth, and replacement legality; an LGraph
+  MUX candidate must not introduce an unsupported MUX node into Lnet. Define
+  boundary/observable-output contracts before contextual optimization; absent
+  a proven surrounding relation, boundary inputs are independent symbols.</li>
+  <li>Test each stage in isolation and representative combinations, including
+  all stages disabled, resubstitution without ODC, and an equality/complement
+  run followed by a broader run. Check that disabled stages make no rewrites
+  or specialized solver calls, shared setup runs only when needed, and every
+  combination retains required observable checks. Add LUT-network coverage
+  when Lnet integration is implemented.</li>
+  </ul>
+</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet. This page records the agreed scope; existing implementation pieces
+below are starting points, not completion of these subtasks.</p>
+
+<h2>Design notes</h2>
+<p><strong>Implementation order:</strong> A and B establish the shared semantic
+contract, with K's stage separation established early; C–F add stronger discovery
+and unconditional sweeping; G adds local ODC constants; I adds bounded Hotmux
+collapse using the same proof infrastructure. J supplies the refinement
+architecture and Hotmux discovery hints, then adds limited expression
+resubstitution after baseline measurements. Apply H throughout. Unrestricted
+resubstitution, multi-LUT decomposition, and multi-entry indexed-mux collapse
+remain outside the initial implementation. Lnet integration is deferred.</p>
+
+<h3>Control-only Boolean resynthesis (simp_ctrl)</h3>
+<p><strong>Implemented, opt-in:</strong> <code>pass.satopt.stages=simp_ctrl</code>
+derives a function over up to three existing one-bit signals for mux selects,
+Flop enables, and memory port/bulk-update enables. It can remove or substitute
+inputs instead of trying only a fixed list of two-input gates. Word-level
+simulation supplies per-bit truth-table samples; conflicting samples reject a
+support set, and SAT counterexamples refine incomplete tables. Every committed
+replacement is proven exactly equivalent and must remove more cells than it
+adds. Hotmux exclusivity checks remain observable; no ODC or one-hot assumption
+is used.</p>
+<p>Wide selectors, write masks and data readers are excluded. Boolean cones may
+reuse comparison/reduction outputs without resynthesizing their wide datapaths.
+Search bounds: 12 divisors, four Boolean levels, three replacement inputs,
+320 support attempts, 16 proof queries per control, eight refinements per
+support, a 48-cell gain estimate, and a 512-pin proof-cone cap, all under the
+shared budget. Neighboring divisors must be independent of the target. Proof
+state is lazy. Persistent proof-cache replay and contextual resynthesis remain
+future work for this stage. To combine it with the default stages, explicitly
+select <code>constants,hotmux,memory,simp_ctrl</code>.</p>
+
+<h3>Stage selection and future Lnet reuse</h3>
+<p><strong>Implemented stage selection:</strong> an explicit
+stage list is sufficient initially; avoid overlapping presets and individual
+booleans with ambiguous precedence. For example,
+<code>--set pass.satopt.stages=equiv,complement,resub</code> requests only those
+searches plus the analysis services and correctness validation they require.
+The names <code>constants</code>, <code>equiv</code>, <code>complement</code>,
+<code>odc</code>, <code>hotmux</code>, <code>memory</code>, <code>resub</code>,
+and <code>simp_ctrl</code> are stage identifiers. Here complement means <code>A == ~B</code> at
+the same finite width. With <code>odc</code> absent, resubstitution must preserve
+the target function on all inputs; it cannot rely on downstream unobservability.
+Hotmux arm proofs may still use their selection conditions, provided the entire
+replacement preserves the region's output and checks on all inputs.</p>
+<p>Separate algorithm selection from network capabilities. The future Lnet
+backend should declare what it can evaluate, prove, and rewrite; callers choose
+which supported searches to run. An unsupported stage should be reported as
+inapplicable, not force a conversion back to LGraph. Combinational LUT networks
+can still benefit from shallow ODCs, but there is no need to enable ODC for
+ordinary equality/complement or unconditional resubstitution. Representation,
+proof boundary, and cost decisions for LUTs remain an explicit later review.</p>
+
+<h3>Follow-up review: simulation-guided resubstitution</h3>
+<p><a href="https://si2.epfl.ch/demichel/publications/archive/2023/resyn.pdf">Heuristic
+Logic Resynthesis Algorithms at the Core of Peephole Optimization</a> motivates
+J and I's selector ranking. The inspected mockturtle code at
+<code>../mockturtle/include/mockturtle/algorithms/sim_resub.hpp</code> separates
+simulation-guided candidate generation from SAT validation and counterexample
+feedback. Its default divisor collector bounds local windows; global simulation
+captures correlations without requiring global all-pairs search. The binary
+single-bit MUX heuristic is in <code>resyn_engines/mux_resyn.hpp</code>, separate
+from the public AIG/XAG/MIG resubstitution entry point. Adapt its scoring to
+shared selectors and word/range data, rather than treating it as a drop-in
+LGraph Hotmux optimizer. These paths are review references, not new build or
+test dependencies on the sibling checkout.</p>
+<p>The paper's largest MUX example spends about 1% of runtime constructing
+replacements; validation dominates. Its 20.24% average MUX reduction starts from
+AND networks mechanically converted into MUXes, not existing LGraph Hotmuxes.
+Neither figure predicts LiveHD performance. The inspected framework also
+subtracts pattern-generation time from its reported total, so H/J must measure
+complete invocation cost independently.</p>
+
+<h3>Follow-up review: word-level sweeping</h3>
+<p><a href="https://arxiv.org/html/2507.02008v2">FORWORD: Accelerating Formal
+Datapath Verification via Word-Level Sweeping</a> (v2, reviewed 2026-09-23)
+groups word expressions by simulation signature, proves candidate equivalences
+with SMT, and refines signatures with counterexamples. It also bounds and ranks
+candidate searches. These ideas fit C–F; its verification-specific assumptions
+must not become implicit assumptions of the standalone optimizer.</p>
+
+<p><strong>Recommended LiveHD adaptation, to validate during C–F:</strong></p>
+<ul>
+<li>The main candidate index is D's per-bit signature map, populated from C's
+word-level evaluations. Coalesce matching adjacent bits into whole-word/range
+proofs and rewrites when profitable. A whole-word hash is an optional accelerator,
+not a prerequisite or a first stage that suppresses partial-bit discovery.
+Preserve signed interpretation at uses and finite-width complement semantics.</li>
+<li>For fully concrete samples, derive candidate constant masks directly:
+<code>M0 = ~OR(samples)</code> and <code>M1 = AND(samples)</code>, clipped to the
+declared width. With <code>M = M0 | M1</code>, prove
+<code>(value &amp; M) != M1</code> unsatisfiable. For aligned equal/complement runs,
+prove <code>((a XOR b) &amp; M) != C</code> unsatisfiable, where
+<code>C = 0</code> or <code>M</code>. These are proposals for grouped proof APIs,
+not operations already exposed by <code>formal::Prover</code>.</li>
+<li>If a grouped claim is refuted, remove bits falsified by the concrete model
+and recheck the remainder under a retry budget; Unknown proves no part of the
+group. Return structured counterexample values with width and instance scope
+instead of parsing <code>Query_out::witness</code>'s diagnostic string.</li>
+<li>Reuse <code>Seeds</code>' existing word-level evaluation and the cvc5 encoder.
+The current prover memoizes terms but creates a fresh solver per query; grouped
+queries are a first step. Measure before adding persistent solver sessions, and
+never keep encodings across invalidating mutations. SMT may still bit-blast
+internally, so width/encoding and solver budgets remain necessary.</li>
+<li>Rank by constants first, removable operation cost, existing fanout, and
+bounded structural metadata. Do not add repeated full-cone similarity walks.
+The paper's fivefold AST-size rejection rule is unsuitable for our constant
+priority: a large cone simplifying to a constant is valuable, not disqualified
+by its size difference.</li>
+<li>Keep constraint-guided sampling and array shortcuts out of the initial
+implementation. Sampled agreement of memories is not semantic equality, and
+verification-environment constraints cannot justify a general graph rewrite.
+The reviewed paper measures verification runtime; its speedups do not establish
+LiveHD synthesis or simulator gains.</li>
+</ul>
+
+<h3>Brainstorm: use unknowns as an analysis abstraction</h3>
+<p><strong>Experimental suggestions, not additional implementation commitments.</strong>
+An analysis <code>?</code> denotes either 0 or 1, so a ternary word represents a
+set of concrete words. This is different from granting permission to choose a
+value for an unknown literal in the source. Keep source unknown semantics,
+independent state identities, and observable obligations intact.</p>
+<ul>
+<li><strong>Known-bit discovery.</strong> Evaluate with free inputs/state bits
+unknown and preserve any bits that remain known, for example
+<code>???? AND 0000 = 0000</code>. A known result from a sound over-approximation
+holds for every represented assignment. An all-free-input evaluation can expose
+global constants; a partially fixed input cube gives only conditional facts.
+Reuse cprop/bitwidth information first and measure additional discoveries before
+adding another whole-graph sweep. Initially send candidates through the existing
+proof gate; bypassing SMT requires validated abstract transfer semantics.</li>
+<li><strong>Local ODC discovery by injecting unknowns.</strong> Starting from a
+concrete sample, override one candidate bit with <code>?</code> and reevaluate its
+bounded fanout using word operations. If every affected window exit and check
+stays known and equal to the original sample, changing that bit is unobservable
+for this sample. This supplies a conservative ODC mask for G; an unknown exit is
+inconclusive, and sampled unobservability is not a global replacement proof.
+Include all affected fanouts and treat truncated exits as observable. Limit
+candidate injections and reevaluation work; do not run a full-design experiment
+for every bit.</li>
+<li><strong>Generalize and pack counterexamples.</strong> Start with a concrete
+witness that rejects a proposed replacement. Under a small trial budget, replace
+groups of input/state bits with <code>?</code> only while the rejection predicate
+remains definitely true (including any required context). The resulting cube
+describes many witnesses. Compatible cubes can share a concrete sample by
+combining their nonconflicting fixed bits and filling the remaining unknowns;
+recheck the intended rejections before adding that sample. This can make C's
+bounded sample set more informative. Related pattern compression appears in
+<a href="https://people.eecs.berkeley.edu/~alanmi/publications/2021/tcad21_sim.pdf">A
+Simulation-Guided Paradigm for Logic Synthesis and Verification</a>, section V-C;
+using Dlop ternary evaluation to generalize cubes is our proposed adaptation.</li>
+<li><strong>Keep unknown evidence separate from concrete hashing.</strong> For
+ternary signatures store a known mask <code>K</code> and values <code>V</code>.
+Two signals are definitely different on a sample only where
+<code>(Va XOR Vb) AND Ka AND Kb</code> is nonzero. Matching unknowns prove nothing:
+two independent bits both evaluating to <code>?</code> need not be equal.
+Wildcard compatibility is nontransitive and cannot replace equality in a hash
+map. Keep concrete signatures as the primary index; ternary evidence supplements
+discovery and filtering. The constant-mask formulas above apply to concrete
+samples; ternary processing must explicitly use known-zero/known-one masks.</li>
+<li><strong>Audit the evaluator before using this abstraction.</strong> Current
+satopt <code>Seeds</code> rejects unknown values and selects mux arms with
+<code>!is_known_zero()</code>, which is only valid for its concrete inputs.
+A ternary path must merge possible outcomes instead of treating unknown controls
+as true. Audit Hotmux separately: the inspected HLOP helper can use one-hot
+semantics to resolve other unknown controls, which cannot silently discharge an
+unproved exclusivity check. Propagate uncertainty in both data and obligations;
+unsupported/invalid evaluation never authorizes a rewrite. Plain ternary values
+also lose correlation, so identities such as <code>x XOR x = 0</code> can be
+missed when both operands are represented by <code>?</code>; retain structural
+reasoning and SAT/SMT for these cases.</li>
+</ul>
+<p><strong>Suggested experiment order:</strong> bounded ODC injection and
+counterexample generalization, with known-bit discovery measured against what
+cprop already provides. Compare saved solver calls and sample evaluations with
+the extra ternary simulation cost.</p>
+
+<p><strong>Current implementation, inspected 2026-09-23:</strong>
+<a href="../../pass/abc/pass_satopt.cpp"><code>pass_satopt.cpp</code></a> analyzes
+scratch copies and caches facts for synthesis. The selector and mux proof,
+signature, and rewrite machinery is in
+<a href="../../pass/synth/satopt.cpp"><code>pass/synth/satopt.cpp</code></a> and
+<a href="../../pass/abc/satopt_mux.cpp"><code>pass/abc/satopt_mux.cpp</code></a>;
+<a href="../../pass/synth/satopt_memory.cpp"><code>satopt_memory.cpp</code></a> holds
+memory rewrites. Audit all reused rewrites for B before exposing them to sim/LEC.
+The standalone CLI currently returns after proof preparation in
+<a href="../../lhd/lhd_kernel_passes.cpp"><code>lhd_kernel_passes.cpp</code></a>.
+The existing word-level proof API is
+<a href="../../pass/formal/prove.hpp"><code>formal::Prover</code></a>.</p>
+
+<p><strong>Paper basis:</strong>
+<a href="https://doi.org/10.1145/1146909.1146970">SAT Sweeping with Local
+Observability Don't-Cares</a> motivates shallow ODCs and distinguishes candidate
+filtering from sound reconvergence-aware proofs.
+<a href="https://people.eecs.berkeley.edu/~alanmi/publications/2024/iwls24_resyn_lut.pdf">Information
+Graph-Based Resubstitution For Networks of Look-Up Tables</a> motivates stronger
+simulation-guided discovery; its general support selection and LUT decomposition
+are deferred. Paper results are not LiveHD performance measurements.</p>
+</main>
+<footer>LiveHD TODO · 2s-satopt</footer>
+</body>
+</html>

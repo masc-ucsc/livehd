@@ -16,6 +16,7 @@
 #include "perf_tracing.hpp"
 #include "sim_color_plan.hpp"
 #include "sim_loop_fusion.hpp"
+#include "sim_specialize.hpp"
 #include "sim_tune_vector.hpp"  // the shared sim.tune.* knob grammar and defaults
 #include "split_selfref.hpp"
 
@@ -267,6 +268,10 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     if (auto g = sim_library.get_graph(gid)) {
       sim_graphs.push_back(std::move(g));
     }
+  }
+
+  if (!observe_on && vcd_out.empty()) {
+    livehd::sim::specialize_constants(sim_graphs);
   }
 
   // Run every STRUCTURAL rewrite the emitter makes, over the WHOLE library,

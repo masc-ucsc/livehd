@@ -1,0 +1,27 @@
+/*
+:name: generic_lambda_in_generic
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A LAMBDA generic bound to a plain registry function from INSIDE another
+// generic's clone (`e<inc>` in `g<N>`). The clone is inlined, so the bind
+// argument arrives frame-tagged (`inl1_inc`): it matched neither the frame's
+// function-param bindings nor the registry, fell through to a TYPE bind, and
+// the body's `F(v=a)` became a call to an undefined `inl2_inl1_inc`.
+// `v`: positional bind, `u`: named bind, `t`: a generic function param
+// forwarded (`g<G>` -> `e<G>`), `w`: the same call from a NON-generic comb.
+comb inc(v:U8) -> (o:U8) { o = v & 0x0F }
+comb other(v:U8) -> (o:U8) { o = v ^ 0xFF }
+comb e<F>(a:U8) -> (r:U8) { r = F(v=a) }
+comb g<N>(a:U8) -> (r:U8) { r = e<inc>(a=a) ^ N }
+comb gn<N>(a:U8) -> (r:U8) { r = e<F=other>(a=a) }
+comb gf<G>(a:U8) -> (r:U8) { r = e<G>(a=a) }
+comb h(a:U8) -> (r:U8) { r = e<other>(a=a) }
+pub mod top(a:U8) -> (v:U8@[0], u:U8@[0], t:U8@[0], w:U8@[0]) {
+  v = g<N=1>(a=a)
+  u = gn<N=2>(a=a)
+  t = gf<inc>(a=a)
+  w = h(a=a)
+}

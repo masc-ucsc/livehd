@@ -1,0 +1,5 @@
+comb helper(a:U8) -> (z:U8) { z = a & 0x0F }
+pub comb mid(a:U8) -> (z:U8) {
+  const u = helper(a=a)
+  z = u.z
+}

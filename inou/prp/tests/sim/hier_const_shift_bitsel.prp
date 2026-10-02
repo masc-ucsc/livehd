@@ -1,0 +1,47 @@
+/*
+:name: hier_const_shift_bitsel
+:type: simulation
+:sim_sweep: sim.tune.backend=slop
+:sim_sweep: sim.vcd=true
+*/
+// A child's shift amount is a PORT the parent ties to a literal, so the shift
+// `x >> k` is only constant at the occurrence. The color plan's SRA hop moved
+// the bit-select window [0,1) by k into the shifted value's coordinates but
+// kept the SRA itself as the producer, so the emitted code shifted twice:
+// get_mask(sra(x,1), 1, 2) == bit 2, not bit 1.
+// sim.vcd=true is the leg that reaches that SRA hop: without observation
+// inou.cgen.sim specializes each occurrence's tied `k` into a constant child
+// (sim_specialize), cprop folds the shift, and the hop is never taken. So only
+// the slop + sim.vcd=true leg runs (each leg is a host C++ compile; the
+// vcd=false legs pass even unfixed, and slop alone pins the hop).
+mod hier_const_shift_pick(x:U4, k:U2) -> (o:U1@[0]) {
+  o = (x >> k)#[0]
+}
+
+pub mod hier_const_shift_bitsel(clk:Clock, x:U4) -> (q:U1@[1], q2:U1@[1]) {
+  reg r:U1 = 0
+  reg r2:U1 = 0
+  q  = r
+  q2 = r2
+  r  = hier_const_shift_pick(x=x, k=1)
+  r2 = hier_const_shift_pick(x=x, k=2)
+}
+
+test hier_const_shift_bitsel.bits {
+  mut dut = hier_const_shift_bitsel
+  mut seen = 0
+  mut ones = 0
+  tick 16 {
+    mut xv:U4 = (clock * 5 + 3) & 15
+    dut.x = xv
+    step
+    const e1 = (xv >> 1) & 1
+    const e2 = (xv >> 2) & 1
+    seen = seen + 1
+    ones = ones + e1
+    assert(dut.q == e1, "(x >> 1)#[0] through a child whose k is tied to 1")
+    assert(dut.q2 == e2, "(x >> 2)#[0] through a child whose k is tied to 2")
+  }
+  assert(seen == 16, "the comparisons actually ran")
+  assert(ones > 0, "bit 1 was set at least once (guards a vacuous all-zero pass)")
+}

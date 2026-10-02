@@ -28,7 +28,9 @@ enum class Rule {
   FlattenedBundleArguments,
   SingleDestinationConditional,
   HardcodedReset,
-  ResetPortType
+  ResetPortType,
+  NarrowScopedMut,
+  CompactBitPacking
 };
 
 std::string_view rule_name(Rule rule);

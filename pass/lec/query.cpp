@@ -33,6 +33,7 @@
 #include "cone_abc.hpp"
 #include "cprop.hpp"
 #include "encode.hpp"
+#include "fork_race.hpp"
 #include "hash_util.hpp"
 #include "host_mem.hpp"
 #include "inline_sub.hpp"
@@ -464,8 +465,10 @@ namespace {
 //   BMC bounded-Proven (no CEX <= bound)               -> NOT a full PASS;
 //   neither trustworthy                                -> inconclusive.
 // cvc5 cross-instance thread-safety is unverified, so we race separate PROCESSES
-// (fork two workers) — free timeout/kill, no threading landmine — and the
-// per-query formal.timeout already bounds each child's checkSat so it self-limits.
+// (fork two workers) — free timeout/kill, no threading landmine. formal.timeout
+// bounds each child's checkSat, but NOT cvc5 preprocessing (push/NonClausalSimp)
+// or one eager CaDiCaL solve, so the parent also enforces a WALL deadline on the
+// race (race_deadline_ms) and SIGKILLs a racer that outlives it -> Unknown.
 
 void put_u32(std::string& b, uint32_t v) { b.append(reinterpret_cast<const char*>(&v), sizeof v); }
 // Native-endian POD i64, the same scheme the inlined elapsed_ms / solve_ms
@@ -952,6 +955,7 @@ std::string serialize_verify(const Verify_result& v) {
     // strategy-race path and the parent sees the default.
     b.push_back(static_cast<char>(p.guarded ? 1 : 0));
     b.push_back(static_cast<char>(p.vacuous_guard ? 1 : 0));
+    put_str(b, p.unknown_why);
     put_str(b, p.witness);
     put_trace(b, p.trace);
   }
@@ -1095,7 +1099,7 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
     b.remove_prefix(1);
     p.vacuous_guard = b.front() != 0;
     b.remove_prefix(1);
-    if (!get_str(b, p.witness) || !get_trace(b, p.trace)) {
+    if (!get_str(b, p.unknown_why) || !get_str(b, p.witness) || !get_trace(b, p.trace)) {
       return false;
     }
     v.props.push_back(std::move(p));
@@ -1251,7 +1255,45 @@ bool unframe_blob(std::string_view b, std::string_view& payload) {
   return true;
 }
 
+long long race_deadline_ms(const Lec_options& opts) {
+  if (opts.timeout <= 0 || opts.hard_timeout_mult <= 0) {
+    return 0;
+  }
+  const long long t_ms     = static_cast<long long>(opts.timeout) * 1000;
+  const long long floor_ms = static_cast<long long>(std::max(0, opts.min_timeout)) * 1000;
+  const long long grace    = std::clamp<long long>(t_ms / 4, 10'000, 60'000);
+  return t_ms + floor_ms + grace;
+}
+
+long long verify_race_deadline_ms(const Lec_options& opts, int n_units) {
+  const long long base = race_deadline_ms(opts);
+  if (base <= 0) {
+    return 0;
+  }
+  const long long t_ms     = static_cast<long long>(opts.timeout) * 1000;
+  const long long floor_ms = static_cast<long long>(std::max(0, opts.min_timeout)) * 1000;
+  const long long grace    = base - t_ms - floor_ms;  // race_deadline_ms's clamp(timeout/4, 10 s, 60 s)
+  // One strategy's documented bound: timeout + (unsettled units x min_timeout),
+  // with at least one floor (race_deadline_ms) for a unit-free design.
+  long long legit = t_ms + static_cast<long long>(std::max(1, n_units)) * floor_ms;
+  if (opts.phase == "full") {
+    legit *= 2;  // just_reset then after_reset, back to back, each self-budgeted
+  }
+  return std::max<long long>(legit + grace, t_ms * opts.hard_timeout_mult);
+}
+
 namespace {
+
+// Tag every racer the wall deadline killed: a witness-free Unknown that SAYS the
+// deadline fired (never a verdict).
+template <class R>
+std::string race_timeout_note(const Race_result<R>& race, const Lec_options& opts) {
+  return std::format(
+      "racer exceeded formal.timeout: killed at the {:.1f}s wall deadline (formal.timeout={}s + formal.min_timeout floor(s) + grace; "
+      "cvc5's tlimit-per cannot preempt its preprocessing or one eager CaDiCaL solve)",
+      static_cast<double>(race.deadline_ms) / 1000.0,
+      opts.timeout);
+}
 
 long long now_ms(std::chrono::steady_clock::time_point t0) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
@@ -1259,177 +1301,8 @@ long long now_ms(std::chrono::steady_clock::time_point t0) {
 
 const char* vname(Verdict v) { return v == Verdict::Proven ? "Proven" : (v == Verdict::Refuted ? "Refuted" : "Unknown"); }
 
-// ── Generic fork-per-method race harness (F3, 2f-fcore) ─────────────────────
-// The shared parallel-proof primitive extracted from run_auto_portfolio's
-// ind|bmc fork race so BOTH lec (Query_result method ladder) and verify
-// (Verify_result strategy race) run over the same battle-tested fork/pipe/poll/
-// reap loop. Forks one child process per method; each runs its method closure,
-// serializes its result over a pipe, and _exit()s (no atexit/dtors). The parent
-// polls; the FIRST result that satisfies `trust` cancels (SIGKILL) the remaining
-// children. If no result is trustworthy, every child runs to completion and all
-// results are collected for the caller to merge / post-process.
-//
-// cvc5 cross-instance thread-safety is unverified, so methods race as PROCESSES
-// (never threads) — the free timeout/hard-kill we rely on for early cancellation
-// and the per-query formal.timeout bounds each child's checkSat, so children
-// self-limit and the parent needs no watchdog. Children fork from a clean state
-// (no cvc5 TermManager in the parent yet), so each builds its own solver — the
-// CALLER MUST invoke this before constructing any cvc5 object in the parent
-// (the reason prove_equal / prove_properties dispatch to the portfolio first).
-//
-// R must be default-constructible. `run_method(i)` runs method i and returns R
-// (called ONLY in the forked child). `ser`/`deser` are the wire codec (a
-// truncated / short blob deserializes best-effort, like serialize_result).
-// `trust(i, r)` decides whether result i is a definitive winner. Returns
-// forked=false when fork/pipe is unavailable so the caller runs its own
-// in-process sequential fallback. A child that dies without a valid result
-// leaves results[i] == R{} with done[i] == true (the caller tags it).
-template <class R>
-struct Race_result {
-  bool              forked = true;  // false => run the sequential fallback
-  int               winner = -1;    // first trustworthy method index, or -1
-  std::vector<R>    results;        // per-method result (default R{} if a child died)
-  std::vector<bool> done;           // whether method i produced any result
-};
-
-template <class R>
-Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, const std::function<std::string(const R&)>& ser,
-                         const std::function<bool(std::string_view, R&)>& deser, const std::function<bool(int, const R&)>& trust) {
-  Race_result<R> out;
-  out.results.assign(static_cast<size_t>(nmethods), R{});
-  out.done.assign(static_cast<size_t>(nmethods), false);
-
-  std::vector<int>   rfd(nmethods, -1), wfd(nmethods, -1);
-  std::vector<pid_t> pid(nmethods, -1);
-  bool               fork_ok = true;
-  for (int i = 0; i < nmethods; ++i) {
-    int p[2];
-    if (::pipe(p) != 0) {
-      fork_ok = false;
-      break;
-    }
-    rfd[i]  = p[0];
-    wfd[i]  = p[1];
-    pid_t c = ::fork();
-    if (c < 0) {
-      fork_ok = false;
-      break;
-    }
-    if (c == 0) {
-      // child i: keep only its own write fd (the parent already closed every
-      // earlier child's write end), run its method, serialize, _exit.
-      for (int j = 0; j <= i; ++j) {
-        if (rfd[j] >= 0) {
-          ::close(rfd[j]);
-        }
-        if (j != i && wfd[j] >= 0) {
-          ::close(wfd[j]);
-        }
-      }
-      // Take only a 1/nmethods share of the process memory budget. RLIMIT_AS is
-      // per-process and inherited, so without this every racer may allocate the
-      // WHOLE budget and the tree totals nmethods x budget -- the host-killing
-      // case the backstop exists to prevent. A child that outgrows its share dies
-      // and reports no result, which the parent already tags as Unknown (never a
-      // false verdict). Must happen before run_method builds any cvc5 object.
-      if (const uint64_t share = livehd::cost::arm_child_share(nmethods);
-          share != 0 && std::getenv("LIVEHD_MEMORY_DEBUG") != nullptr) {
-        std::fprintf(stderr,
-                     "lec: racer %d/%d capped (RLIMIT_AS = %llu MiB)\n",
-                     i,
-                     nmethods,
-                     static_cast<unsigned long long>(share >> 20));
-      }
-      R           r    = run_method(i);
-      std::string blob = frame_blob(ser(r));
-      write_all(wfd[i], blob.data(), blob.size());
-      ::close(wfd[i]);
-      ::_exit(0);
-    }
-    pid[i] = c;
-    ::close(wfd[i]);  // parent never writes
-    wfd[i] = -1;
-  }
-
-  if (!fork_ok) {
-    for (int j = 0; j < nmethods; ++j) {
-      if (rfd[j] >= 0) {
-        ::close(rfd[j]);
-      }
-      if (wfd[j] >= 0) {
-        ::close(wfd[j]);
-      }
-      if (pid[j] > 0) {
-        ::kill(pid[j], SIGKILL);
-        int st = 0;
-        ::waitpid(pid[j], &st, 0);
-      }
-    }
-    out.forked = false;
-    return out;
-  }
-
-  std::vector<std::string> bufs(nmethods);
-  int                      remaining = nmethods;
-  while (remaining > 0 && out.winner < 0) {
-    std::vector<struct pollfd> pfds;
-    std::vector<int>           map;
-    for (int i = 0; i < nmethods; ++i) {
-      if (!out.done[i]) {
-        struct pollfd pf;
-        pf.fd      = rfd[i];
-        pf.events  = POLLIN;
-        pf.revents = 0;
-        pfds.push_back(pf);
-        map.push_back(i);
-      }
-    }
-    int pr = ::poll(pfds.data(), static_cast<nfds_t>(pfds.size()), -1);
-    if (pr < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      break;
-    }
-    for (size_t k = 0; k < pfds.size() && out.winner < 0; ++k) {
-      if (pfds[k].revents == 0) {
-        continue;
-      }
-      int     i = map[k];
-      char    tmp[8192];
-      ssize_t n = ::read(rfd[i], tmp, sizeof tmp);
-      if (n > 0) {
-        bufs[i].append(tmp, static_cast<size_t>(n));
-        continue;  // worker may still be writing; EOF (n==0) marks done
-      }
-      out.done[i] = true;
-      --remaining;
-      std::string_view payload;
-      if (!unframe_blob(bufs[i], payload) || !deser(payload, out.results[i])) {
-        out.results[i] = R{};  // truncated/absent frame: no result, never a partial verdict
-      }
-      if (trust(i, out.results[i])) {
-        out.winner = i;
-      }
-    }
-  }
-  // Reap: kill any worker still running (the losers), wait on all (no zombies).
-  for (int i = 0; i < nmethods; ++i) {
-    if (!out.done[i] && pid[i] > 0) {
-      ::kill(pid[i], SIGKILL);
-    }
-    if (rfd[i] >= 0) {
-      ::close(rfd[i]);
-    }
-  }
-  for (int i = 0; i < nmethods; ++i) {
-    if (pid[i] > 0) {
-      int st = 0;
-      ::waitpid(pid[i], &st, 0);
-    }
-  }
-  return out;
-}
+// The fork-per-method race harness (Race_result / fork_race) lives in
+// fork_race.hpp so its wall-deadline path has a direct unit test.
 
 // Build the inconclusive verdict from two completed engine results. Neither was
 // trustworthy here (no BMC-Refuted, no inductive-Proven).
@@ -1467,6 +1340,11 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   // DESIGN PAIR, not of an engine. Require both legs to agree: if either one
   // found a comparison to run, the miter was not empty.
   r.nothing_compared = ind.nothing_compared && bmc.nothing_compared;
+  // Either leg killed at the race's wall deadline: the run already spent its
+  // wall budget, so drivers must not re-solve it (Query_result::wall_killed).
+  r.wall_killed      = ind.wall_killed || bmc.wall_killed;
+  // The int-blast retry re-solves ind's give-up, so it keys on the ind leg only.
+  r.ind_wall_killed  = ind.wall_killed || ind.ind_wall_killed;
   // A sub-millisecond-to-low-ms Unknown is almost never the solver genuinely
   // giving up — it's usually a structural encode failure (unsupported op, an
   // unresolved combinational-cycle-looking operand) or a now-caught engine
@@ -1974,7 +1852,22 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   std::vector<Query_result> got(nworkers);
   int                       remaining = nworkers;
   int                       refuter   = -1;
+  // Same wall deadline as fork_race (race_deadline_ms): a cube worker stuck in
+  // cvc5 preprocessing must not hold the parent past formal.timeout. A worker
+  // the deadline kills reports no result, which the merge below already treats
+  // as not-proven (inconclusive -> monolithic fallback), never a verdict.
+  const long long           deadline_ms  = race_deadline_ms(opts);
+  bool                      deadline_hit = false;
   while (remaining > 0 && refuter < 0) {
+    int wait_ms = -1;
+    if (deadline_ms > 0) {
+      const long long left = deadline_ms - now_ms(t0);
+      if (left <= 0) {
+        deadline_hit = true;
+        break;
+      }
+      wait_ms = static_cast<int>(std::min<long long>(left, 1000));
+    }
     std::vector<struct pollfd> pfds;
     std::vector<int>           map;
     for (int i = 0; i < nworkers; ++i) {
@@ -1987,7 +1880,10 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
         map.push_back(i);
       }
     }
-    int pr = ::poll(pfds.data(), static_cast<nfds_t>(pfds.size()), -1);
+    int pr = ::poll(pfds.data(), static_cast<nfds_t>(pfds.size()), wait_ms);
+    if (pr == 0) {
+      continue;  // nothing yet; the loop head re-checks the deadline
+    }
     if (pr < 0) {
       if (errno == EINTR) {
         continue;
@@ -2028,7 +1924,8 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   for (int i = 0; i < nworkers; ++i) {
     if (pid[i] > 0) {
       int st = 0;
-      ::waitpid(pid[i], &st, 0);
+      while (::waitpid(pid[i], &st, 0) < 0 && errno == EINTR) {
+      }
     }
   }
 
@@ -2088,6 +1985,10 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
     out.verdict = Verdict::Unknown;  // inconclusive: caller falls back to monolithic ind
     out.detail  = "auto: case-split " + tag + " inconclusive (" + std::to_string(proven) + " workers proven, "
                   + std::to_string(unknown) + " not)";
+    if (deadline_hit) {
+      out.detail += std::format("; worker racer exceeded formal.timeout: killed at the {:.1f}s wall deadline",
+                                static_cast<double>(deadline_ms) / 1000.0);
+    }
   }
   return out;
 }
@@ -2239,7 +2140,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     return (i == 0 && r.verdict == Verdict::Proven && (!r.packed_scalar_step_proven || r.packed_scalar_base_proven))
            || (i == 1 && r.verdict == Verdict::Refuted);
   };
-  auto race = fork_race<Query_result>(2, run_engine, serialize_result, deserialize_result, trust);
+  auto race = fork_race<Query_result>(2, run_engine, serialize_result, deserialize_result, trust, race_deadline_ms(opts));
   if (!race.forked) {
     // No child ran, so the race total below is empty; the sequential ladder
     // accounts for its own two legs. MERGE (never assign) or that would be wiped.
@@ -2249,8 +2150,17 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   }
   // A child that died without a serialized result surfaces as the default
   // Query_result (empty engine): tag it, exactly as the old inline poll loop did.
+  // A racer the WALL deadline killed carries no result either: tag it as a
+  // witness-free Unknown that names the deadline (never a verdict).
   for (int i = 0; i < 2; ++i) {
-    if (race.done[i] && race.results[i].engine.empty()) {
+    if (race.timed_out[i]) {
+      race.results[i]             = Query_result{};
+      race.results[i].verdict     = Verdict::Unknown;
+      race.results[i].engine      = engines[i];
+      race.results[i].elapsed_ms  = race.elapsed_ms;
+      race.results[i].wall_killed = true;
+      race.results[i].detail      = std::string(engines[i]) + " " + race_timeout_note(race, opts);
+    } else if (race.done[i] && race.results[i].engine.empty()) {
       race.results[i].verdict = Verdict::Unknown;
       race.results[i].engine  = engines[i];
       race.results[i].detail  = std::string(engines[i]) + " worker terminated without a result";
@@ -3370,23 +3280,79 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // single clock spelled `clk` on one side and `clock` on the other stays one
   // clock. The port's TYPE (Clock/Reset vs U1) plays no part: it is the net.
   bool force_multi_clock = false;
+  auto in_names          = [](hhds::Graph* g) {
+    absl::flat_hash_set<std::string> names;
+    for (const auto& d : g->get_io()->get_input_pin_decls()) {
+      names.insert(std::string(d.name));
+    }
+    return names;
+  };
+  const auto clk_ref_in  = in_names(ref);
+  const auto clk_impl_in = in_names(impl);
+  // A clock on bit k>0 of a bus input is named `bus[k]` (encode.cpp Clk_root,
+  // and a phase-schedule root): the INPUT it must exist on is `bus`.
+  auto input_of = [](const std::string& n) -> std::string {
+    if (n.empty() || n.back() != ']') {
+      return n;
+    }
+    const auto lb = n.rfind('[');
+    if (lb == std::string::npos || lb + 2 > n.size() - 1
+        || !std::all_of(n.begin() + static_cast<std::ptrdiff_t>(lb) + 1, n.end() - 1, [](char c) { return c >= '0' && c <= '9'; })) {
+      return n;
+    }
+    return n.substr(0, lb);
+  };
+  // PHASE-SCHEDULE ROOT AGREEMENT. A single-root plan OWNS its flops and commits
+  // them on the schedule, never reading the clock's value, so the two sides
+  // share one time base by construction. That is right only when they are
+  // clocked by the SAME root: ref on `clk` and impl on `clkx` (both inputs on
+  // both sides), or on `clks` vs `clks[1]`, are two different clocks, and
+  // scheduling both on one microstep sequence PROVED a design whose every flop
+  // moved to another clock. Same identity rule as force_multi_clock: a root
+  // counts only when its input exists on BOTH sides, so one clock spelled `clk`
+  // here and `clock` there stays one clock. Returns the refusal text, or "".
+  auto plan_root_clash = [&](const Phase_plan& rp, const Phase_plan& ip) -> std::string {
+    if (rp.multi_root() || ip.multi_root() || rp.root_clock.empty() || ip.root_clock.empty()
+        || rp.root_clock == ip.root_clock) {
+      return {};
+    }
+    // Two namespaces. A root that is an input of THIS side's def is the def's
+    // own port (no forest row, or the def is the top): it counts when that
+    // input exists on both defs. Otherwise a CLOCK FOREST named it, and a forest
+    // root is an input of that side's selected TOP, never of the child being
+    // proven per def (hierarchical LEC): it counts when both TOPS declare it.
+    // Testing a forest root against the child's ports found nothing, so a child
+    // clocked from top `c0` (port `a`) on one side and `c1` (port `b`) on the
+    // other was scheduled as one clock and PROVEN. A mixed pair (one side's own
+    // port, the other a forest root) names two namespaces and asserts nothing.
+    const auto rin       = input_of(rp.root_clock);
+    const auto iin       = input_of(ip.root_clock);
+    const bool ref_local = clk_ref_in.contains(rin);
+    const bool imp_local = clk_impl_in.contains(iin);
+    bool       clash     = false;
+    if (ref_local && imp_local) {
+      clash = clk_impl_in.contains(rin) && clk_ref_in.contains(iin);
+    } else if (!ref_local && !imp_local) {
+      const auto& tops = opts.clock_forest.top_inputs_both;
+      clash            = tops.contains(rin) && tops.contains(iin);
+    }
+    if (!clash) {
+      return {};
+    }
+    return "the ref side is scheduled on clock `" + rp.root_clock + "` but the impl side on `" + ip.root_clock
+           + "`; both are inputs of both designs, so they are two different clocks and one microstep sequence "
+             "cannot order them";
+  };
   {
-    auto in_names = [](hhds::Graph* g) {
-      absl::flat_hash_set<std::string> names;
-      for (const auto& d : g->get_io()->get_input_pin_decls()) {
-        names.insert(std::string(d.name));
-      }
-      return names;
-    };
-    const auto ref_in  = in_names(ref);
-    const auto impl_in = in_names(impl);
-    const auto ref_ck  = design_clock_inputs(ref, collapse_ptr);
-    const auto impl_ck = design_clock_inputs(impl, collapse_ptr);
+    const auto& ref_in  = clk_ref_in;
+    const auto& impl_in = clk_impl_in;
+    const auto  ref_ck  = design_clock_inputs(ref, collapse_ptr);
+    const auto  impl_ck = design_clock_inputs(impl, collapse_ptr);
     if (ref_ck != impl_ck) {
       absl::flat_hash_set<std::string> common;
       for (const auto* ck : {&ref_ck, &impl_ck}) {
         for (const auto& n : *ck) {
-          if (ref_in.contains(n) && impl_in.contains(n)) {
+          if (ref_in.contains(input_of(n)) && impl_in.contains(input_of(n))) {
             common.insert(n);
           }
         }
@@ -4721,6 +4687,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       res.unsupported  = true;
       res.detail      += "; phase schedule refused: " + (ref_plan.ok ? impl_plan.error : ref_plan.error);
       return res;
+    }
+    if (use_plan) {
+      if (auto clash = plan_root_clash(ref_plan, impl_plan); !clash.empty()) {
+        res.verdict      = Verdict::Unknown;
+        res.unsupported  = true;
+        res.detail      += "; phase schedule refused: " + clash;
+        return res;
+      }
     }
     // ACTIVE MICROSTEPS. The two latch-close microsteps exist only for
     // CLOCK-ROLE latches; with none, microstep 0 has the same state and the same
@@ -6607,6 +6581,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       res.unsupported  = true;
       res.detail      += "; phase schedule refused: " + (ind_ref_plan.ok ? ind_impl_plan.error : ind_ref_plan.error);
       return res;
+    }
+    if (ind_use_plan) {
+      if (auto clash = plan_root_clash(ind_ref_plan, ind_impl_plan); !clash.empty()) {
+        res.verdict      = Verdict::Unknown;
+        res.unsupported  = true;
+        res.detail      += "; phase schedule refused: " + clash;
+        return res;
+      }
     }
   }
 
@@ -11134,8 +11116,14 @@ Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_opti
   // Only a SOLVER give-up earns the retry: unsupported/oversize/nothing-compared
   // decided nothing and no re-solve can change them (same encoder, same design),
   // so re-spending min_timeout there would be pure waste.
+  // Nor does an Unknown whose IND leg was WALL-KILLED: it already spent its whole
+  // wall deadline (Query_result::ind_wall_killed), and a re-solve would add
+  // another one. A bmc-only wall kill does NOT block it: ind's Unknown was then a
+  // genuine solver give-up -- exactly what this retry exists for -- and the
+  // retry's race trusts an ind Proven at once, so a stuck bmc cannot hold it past
+  // the retry's own (min_timeout-sized) deadline.
   if (opts.int_blast != "auto" || first.verdict != Verdict::Unknown || first.oversize_refused || first.unsupported
-      || first.nothing_compared) {
+      || first.nothing_compared || first.ind_wall_killed) {
     return first;
   }
   // The min_timeout floor is the retry's WHOLE budget (the user's soft total is
@@ -11327,14 +11315,54 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     // The fork race gives parallelism + early cancel, but each child accumulates
     // its verdict-cache entries in copy-on-write process memory that is lost on
     // exit. So when a verdict cache is active, run the two strategies SEQUENTIALLY
-    // IN-PROCESS (bmc-first, then ind-first only if bmc-first left something open)
-    // — the cache stores land in the caller's store; otherwise race them as forked
-    // children (cvc5 instances never run concurrently in threads).
+    // (bmc-first, then ind-first only if bmc-first left something open), each in
+    // its own wall-bounded forked worker that ships its cache traffic back so it
+    // lands in the caller's store; otherwise race them as forked children (cvc5
+    // instances never run concurrently in threads).
     const bool    cache_active = static_cast<bool>(opts.verify_cache_store) || static_cast<bool>(opts.verify_cache_lookup);
     Verify_result A, B;  // A = bmc-first, B = ind-first
     int           winner = -1;
+    std::string   timeout_note;            // non-empty when the wall deadline killed one strategy
+    bool          race_bmc_killed = false;  // the wall deadline killed bmc-first (vs a crash)
+    // A verify strategy may legitimately overshoot formal.timeout by one
+    // min_timeout floor PER unsettled obligation (Lec_options::min_timeout),
+    // so its wall deadline scales with the obligation count
+    // (verify_race_deadline_ms) and is never tighter than the isolated
+    // worker's timeout x hard_timeout_mult backstop. Still a hard wall: a
+    // strategy stuck in cvc5 preprocessing can no longer hold the run forever.
+    // The unit count is an UPPER bound (every fproperty occurrence of the
+    // design and of each monitor, assumes included -- a checked assume is an
+    // obligation too); over-counting only loosens a backstop, while
+    // under-counting killed ind-first mid-ladder and threw away its
+    // unbounded induction proofs. The deadline bounds ONE strategy: the race
+    // runs both under it concurrently, the cache-active path back to back.
+    int           n_units = 0;
+    if (race_deadline_ms(opts) > 0) {
+      auto count_props = [](hhds::Graph* gg) {
+        int n = 0;
+        for (auto node : gg->grouped_hierarchy().nodes()) {  // a count: order-free
+          if (graph_util::type_op_of(node) != Ntype_op::Sub) {
+            continue;
+          }
+          auto sio = node.get_subnode_io();
+          if (sio != nullptr && sio->get_name() == graph_util::fproperty_module_name) {
+            ++n;
+          }
+        }
+        return n;
+      };
+      n_units = count_props(design);
+      if (monitors != nullptr) {
+        for (const auto& m : *monitors) {
+          if (m.graph != nullptr) {
+            n_units += count_props(m.graph);
+          }
+        }
+      }
+    }
+    const long long verify_deadline = verify_race_deadline_ms(opts, n_units);
     if (!cache_active) {
-      auto race = fork_race<Verify_result>(2, run_strategy, serialize_verify, deserialize_verify, trust);
+      auto race = fork_race<Verify_result>(2, run_strategy, serialize_verify, deserialize_verify, trust, verify_deadline);
       if (!race.forked) {
         // fork unavailable: run bmc-first only (== today's single-strategy ladder).
         Lec_options o   = opts;
@@ -11346,15 +11374,145 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       winner = race.winner;
       A      = std::move(race.results[0]);
       B      = std::move(race.results[1]);
+      // The wall deadline killed a strategy: it has no result. Both killed ->
+      // a witness-free Unknown that names the deadline (never a verdict); one
+      // killed -> the crashed-strategy fallback below uses the other one.
+      if (race.timed_out[0] && race.timed_out[1]) {
+        res.verdict    = Verdict::Unknown;
+        res.detail     = "auto verify: both strategies " + race_timeout_note(race, opts);
+        res.elapsed_ms = now_ms(t0);
+        return res;
+      }
+      if (race.timed_out[0] || race.timed_out[1]) {
+        timeout_note = std::string(race.timed_out[0] ? "bmc-first" : "ind-first") + " " + race_timeout_note(race, opts) + "; ";
+      }
+      race_bmc_killed = race.timed_out[0];
     } else {
-      A = run_strategy(0);  // bmc-first, in-process
+      // Sequential, but each strategy still runs in its OWN forked, wall-bounded
+      // worker (a one-racer fork_race under the same per-strategy deadline):
+      // in-process, a cvc5 preprocessing step or one eager CaDiCaL solve held
+      // every `--workdir` run (the verdict cache is on by default there) past
+      // formal.timeout without bound, and the same command got a different wall
+      // guarantee -- and verdict -- than without a workdir. The worker records
+      // its verify_cache_store keys instead of storing them (a child's stores
+      // die with its copy-on-write memory) and the keys its lookups HIT (the
+      // cache's hit tally lives in the parent too), and ships both back with its
+      // result; the parent replays them into the real cache BEFORE forking
+      // ind-first, so ind-first still hits bmc-first's proofs. A killed worker
+      // ships nothing: its proofs are only cache misses next run, never a verdict.
+      struct Cached_run {
+        Verify_result            r;
+        std::vector<std::string> hits;    // keys verify_cache_lookup answered true
+        std::vector<std::string> stores;  // keys passed to verify_cache_store
+      };
+      const std::function<std::string(const Cached_run&)> ser_cached = [](const Cached_run& c) {
+        std::string out;
+        for (const auto* keys : {&c.hits, &c.stores}) {
+          out += std::to_string(keys->size()) + "\n";
+          for (const auto& k : *keys) {
+            out += std::to_string(k.size()) + "\n";
+            out += k;
+          }
+        }
+        out += serialize_verify(c.r);
+        return out;
+      };
+      const std::function<bool(std::string_view, Cached_run&)> deser_cached = [](std::string_view b, Cached_run& c) {
+        auto take_num = [&b](size_t& v) -> bool {
+          const auto nl = b.find('\n');
+          if (nl == std::string_view::npos || nl == 0) {
+            return false;
+          }
+          v = 0;
+          for (char ch : b.substr(0, nl)) {
+            if (ch < '0' || ch > '9') {
+              return false;
+            }
+            v = v * 10 + static_cast<size_t>(ch - '0');
+          }
+          b.remove_prefix(nl + 1);
+          return true;
+        };
+        for (auto* keys : {&c.hits, &c.stores}) {
+          size_t nkeys = 0;
+          if (!take_num(nkeys)) {
+            return false;
+          }
+          keys->clear();
+          for (size_t k = 0; k < nkeys; ++k) {
+            size_t len = 0;
+            if (!take_num(len) || len > b.size()) {
+              return false;
+            }
+            keys->emplace_back(b.substr(0, len));
+            b.remove_prefix(len);
+          }
+        }
+        return deserialize_verify(b, c.r);
+      };
+      const std::function<bool(int, const Cached_run&)> no_sibling   = [](int, const Cached_run&) { return false; };
+      bool                                              timed_out[2] = {false, false};
+      auto                                              run_cached   = [&](int i) -> Verify_result {
+        const std::function<Cached_run(int)> work = [&](int) {
+          Cached_run  c;
+          Lec_options o = opts;
+          o.engine      = "bmc";
+          if (i == 1 && o.bound > kIndFirstBound) {
+            o.bound = kIndFirstBound;  // ind-first: shallow base case (== run_strategy)
+          }
+          if (opts.verify_cache_lookup) {
+            o.verify_cache_lookup = [&c, &opts](std::string_view key) {
+              const bool hit = opts.verify_cache_lookup(key);
+              if (hit) {
+                c.hits.emplace_back(key);
+              }
+              return hit;
+            };
+          }
+          if (opts.verify_cache_store) {
+            o.verify_cache_store = [&c](std::string key) { c.stores.push_back(std::move(key)); };
+          }
+          c.r = prove_properties(design, o, sub_lib, monitors);
+          return c;
+        };
+        // racer_id_base = i: the stall test hook names bmc-first 0 / ind-first 1,
+        // exactly as on the two-racer path.
+        auto race = fork_race<Cached_run>(1, work, ser_cached, deser_cached, no_sibling, verify_deadline, i);
+        if (!race.forked) {
+          return run_strategy(i);  // fork unavailable: in-process (no wall bound), as before
+        }
+        if (race.timed_out[0]) {
+          timed_out[i]  = true;
+          timeout_note += std::string(i == 0 ? "bmc-first" : "ind-first") + " " + race_timeout_note(race, opts) + "; ";
+          return Verify_result{};
+        }
+        if (opts.verify_cache_lookup) {
+          for (const auto& k : race.results[0].hits) {
+            (void)opts.verify_cache_lookup(k);  // re-count the worker's hit in the parent's tally
+          }
+        }
+        if (opts.verify_cache_store) {
+          for (auto& k : race.results[0].stores) {
+            opts.verify_cache_store(std::move(k));
+          }
+        }
+        return std::move(race.results[0].r);  // a crashed worker = default result (tagged below)
+      };
+      A = run_cached(0);  // bmc-first
       if (trust(0, A)) {
         winner = 0;
       } else {
-        B = run_strategy(1);  // ind-first, in-process
+        B = run_cached(1);  // ind-first
         if (trust(1, B)) {
           winner = 1;
         }
+      }
+      race_bmc_killed = timed_out[0];
+      if (timed_out[0] && timed_out[1]) {
+        res.verdict    = Verdict::Unknown;
+        res.detail     = "auto verify (sequential, verdict cache active): both strategies killed; " + timeout_note;
+        res.elapsed_ms = now_ms(t0);
+        return res;
       }
     }
     if (winner >= 0) {
@@ -11383,14 +11541,86 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       // B.cvc5 are the default-constructed empty struct.
       return res;
     }
+    // Aggregate verdict recomputed from per-obligation verdicts (same rule as
+    // the tail of the single-strategy run): Refuted dominates; anything
+    // unresolved -> Unknown; a design with no assert obligation at all is
+    // Unknown, not a PASS.
+    auto recompute_verdict = [](Verify_result& v) {
+      v.n_assumes      = 0;
+      bool any_refuted = false, any_unknown = false, all_proven = true;
+      int  n_asserts   = 0;
+      for (const auto& pr : v.props) {
+        if (pr.kind == "assume") {
+          ++v.n_assumes;
+          if (!is_unchecked_assume_class(pr.aclass) && pr.verdict == Verdict::Refuted) {
+            any_refuted = true;  // a refuted checked assume is a hard error (P1)
+          }
+          continue;
+        }
+        ++n_asserts;
+        if (pr.verdict == Verdict::Refuted) {
+          any_refuted = true;
+        } else if (pr.verdict != Verdict::Proven) {
+          any_unknown = true;
+        }
+        if (pr.verdict != Verdict::Proven) {
+          all_proven = false;
+        }
+      }
+      if (any_refuted) {
+        v.verdict = Verdict::Refuted;  // incl. a refuted internal assume with zero asserts
+      } else if (n_asserts == 0) {
+        v.verdict = Verdict::Unknown;
+      } else if (any_unknown || v.vacuous || !all_proven) {
+        v.verdict = Verdict::Unknown;
+      } else {
+        v.verdict = Verdict::Proven;
+      }
+    };
     if (!a_ran || !b_ran || A.props.size() != B.props.size()) {
-      // One strategy crashed, or the two disagree on the obligation count (an
-      // encode/monitor error hit one at a different point): fall back to the
-      // more complete single run rather than misalign obligations by index.
+      // One strategy crashed (or the wall deadline killed it), or the two
+      // disagree on the obligation count (an encode/monitor error hit one at a
+      // different point): fall back to the more complete single run rather than
+      // misalign obligations by index.
       const bool    a_wins  = !b_ran || (a_ran && A.props.size() >= B.props.size());
       Verify_result r       = a_wins ? A : B;
-      r.detail              = "auto verify: using " + std::string(a_wins ? "bmc-first" : "ind-first")
-                              + " (the other strategy crashed or produced a differing obligation count); " + r.detail;
+      // Adopting ind-first ALONE: it ran at the shallow kIndFirstBound, so its
+      // bounded-Proven covers only a couple of cycles of the requested bound --
+      // adopting it verbatim turned a deep reachable bug (or a bmc-first
+      // Unknown) into a PASS. Keep only what ind-first SETTLED (a reachable
+      // refute, an unbounded induction proof) and demote every other proof to
+      // Unknown, the same "shallow bounded-Proven never masks bmc-first"
+      // rule the per-obligation merge below applies.
+      int               n_demoted = 0;
+      // Per-obligation reason: no solver gave up at `unknown_at` (bmc-first has
+      // no result; ind-first was never asked past its shallow bound), so the
+      // reports must not say "solver gave up at cycle N".
+      const std::string why_dead  = !a_ran ? (race_bmc_killed ? "bmc-first strategy wall-killed (raise --set formal.timeout)"
+                                                              : "bmc-first strategy crashed")
+                                           : "bmc-first strategy produced a differing obligation count";
+      if (!a_wins && opts.bound > kIndFirstBound) {
+        for (auto& p : r.props) {
+          if (p.verdict != Verdict::Proven || p.unbounded || (p.kind == "assume" && is_unchecked_assume_class(p.aclass))) {
+            continue;
+          }
+          p.verdict = Verdict::Unknown;
+          if (p.unknown_at < 0) {
+            p.unknown_at = p.proven_to + 1;  // first cycle no surviving strategy checked
+          }
+          p.unknown_why = std::format("not checked past cycle {}: {}", p.proven_to, why_dead);
+          ++n_demoted;
+        }
+        recompute_verdict(r);
+      }
+      r.detail = "auto verify: using " + std::string(a_wins ? "bmc-first" : "ind-first")
+                 + " (the other strategy crashed or produced a differing obligation count); " + timeout_note
+                 + (n_demoted > 0 ? std::format("{} shallow bounded proof(s) of ind-first (bound={}) demoted to UNKNOWN "
+                                                "(bmc-first produced no result at bound={}); ",
+                                                n_demoted,
+                                                kIndFirstBound,
+                                                opts.bound)
+                                  : std::string{})
+                 + r.detail;
       r.elapsed_ms          = now_ms(t0);
       r.cvc5                = A.cvc5;  // assign then merge: whichever side `r` is, this
       r.cvc5               += B.cvc5;  // rebuilds the pair exactly once (a crashed side is empty)
@@ -11447,40 +11677,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     // Mined invariants: both strategies mine independently; prefer the deeper
     // bmc-first harvest (its base proof covers more cycles), else ind-first's.
     m.mined          = !A.mined.empty() ? A.mined : B.mined;
-    // Aggregate verdict recomputed from the merged props (same rule as the tail
-    // of the single-strategy run): Refuted dominates; anything unresolved ->
-    // Unknown; a design with no assert obligation at all is Unknown, not a PASS.
-    m.n_assumes      = 0;
-    bool any_refuted = false, any_unknown = false, all_proven = true;
-    int  n_asserts = 0;
-    for (const auto& pr : m.props) {
-      if (pr.kind == "assume") {
-        ++m.n_assumes;
-        if (!is_unchecked_assume_class(pr.aclass) && pr.verdict == Verdict::Refuted) {
-          any_refuted = true;  // a refuted checked assume is a hard error (P1)
-        }
-        continue;
-      }
-      ++n_asserts;
-      if (pr.verdict == Verdict::Refuted) {
-        any_refuted = true;
-      } else if (pr.verdict != Verdict::Proven) {
-        any_unknown = true;
-      }
-      if (pr.verdict != Verdict::Proven) {
-        all_proven = false;
-      }
-    }
-    if (any_refuted) {
-      m.verdict = Verdict::Refuted;  // incl. a refuted internal assume with zero asserts
-    } else if (n_asserts == 0) {
-      m.verdict = Verdict::Unknown;
-    } else if (any_unknown || m.vacuous || !all_proven) {
-      m.verdict = Verdict::Unknown;
-    } else {
-      m.verdict = Verdict::Proven;
-    }
-    m.detail      = "auto verify: raced bmc-first(bound=" + std::to_string(A.checked_steps)
+    recompute_verdict(m);
+    m.detail      = "auto verify: " + std::string(cache_active ? "ran" : "raced") + " bmc-first(bound=" + std::to_string(A.checked_steps)
                     + ") | ind-first(bound=" + std::to_string(B.checked_steps) + "), " + std::to_string(n_ind_unbounded)
                     + " obligation(s) proven unbounded by induction-first; bmc-first: " + A.detail + " || ind-first: " + B.detail;
     m.unsupported = A.unsupported || B.unsupported;  // shared encoder (2f-latch M0)
@@ -11514,8 +11712,9 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           a = b;  // a during-reset violation dominates
         } else if (b.verdict == Verdict::Unknown && a.verdict == Verdict::Proven
                    && (a.kind != "assume" || !is_unchecked_assume_class(a.aclass))) {
-          a.verdict    = Verdict::Unknown;
-          a.unknown_at = b.unknown_at;
+          a.verdict     = Verdict::Unknown;
+          a.unknown_at  = b.unknown_at;
+          a.unknown_why = b.unknown_why;
         }
       }
     }

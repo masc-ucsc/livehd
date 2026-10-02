@@ -16,6 +16,7 @@ filegroup(
         "cone_digest.cpp",
         "encode.cpp",
         "encode.hpp",
+        "fork_race.hpp",
         "lib_cell_prep.cpp",
         "lib_cell_prep.hpp",
         "observe.cpp",
@@ -71,6 +72,7 @@ cc_library(
     }),
     hdrs = [
         "cone_abc.hpp",
+        "fork_race.hpp",
         "observe.hpp",
         "query.hpp",
         "solve_stats.hpp",
@@ -139,6 +141,20 @@ cc_test(
         "//pass/single_edge:pass_single_edge",  # proof_prep: the kernel's absent-hierarchy inline
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
+    ],
+)
+
+# fork_race wall deadline: a racer stuck past formal.timeout (cvc5 preprocessing
+# is not covered by tlimit-per) is SIGKILLed, reaped and reported with no
+# result; a normal race and the trusted-winner early cancel are unchanged.
+cc_test(
+    name = "fork_race_test",
+    size = "small",  # ~8 s: three 1.5-2 s deadline cases + two orphan checks
+    srcs = ["tests/fork_race_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":lec_query",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -225,6 +241,17 @@ sh_test(
     srcs = ["tests/lec_mem_test.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],  # compiles RTL + runs the in-process cvc5 array engine
+)
+
+# Multi-clock: a memory port clocked by a CONSTANT never commits; with a live
+# enable the encoder refuses (UNKNOWN) instead of committing it every step.
+# Reached through the yosys readers (slang refuses a constant clock).
+sh_test(
+    name = "lec_mem_dead_clock_test",
+    size = "small",
+    srcs = ["tests/lec_mem_dead_clock_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # yosys reader + in-process cvc5
 )
 
 # A collapsed STATELESS child must not blind the ABC cone pass. It used to: the

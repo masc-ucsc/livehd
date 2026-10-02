@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <format>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -203,6 +204,137 @@ Chain_refusal chain_refusal(hhds::Pin_class cell_out) {
   return Chain_refusal::Unbounded;
 }
 
+// WHICH BIT of a clock root a control cone reads. `control_root` follows every
+// Get_mask to the WHOLE input (tolg relies on that), so `clks[0]` and `clks[1]`
+// share one commit class keyed `clks`. This walks the same hops while tracking
+// the bit the consumer's edge is detected on (bit 0 of the driver), the way
+// pass/lec/encode.cpp's Clk_root does, and returns it once the walk lands on
+// `root`. nullopt = the bit is not decidable here (a non-constant select, a
+// boolean of a multi-bit value, an ambiguous gate): every caller fails closed.
+//
+// A two-operand And is a clock GATE (`clk & en`, the shape `resolve_icg`
+// folds): bit-wise, so the clock bit is the bit of whichever operand reaches
+// `root`. Both operands reaching it (`clks[0] & clks[1]`) is ambiguous.
+std::optional<int> clock_bit_on(hhds::Pin_class p, const hhds::Pin_class& root, int bit, int depth) {
+  for (int hops = 0; hops < 64 && depth < 8; ++hops) {
+    if (p.is_invalid() || p.is_const()) {
+      return std::nullopt;
+    }
+    if (gu::is_graph_input_pin(p)) {
+      if (p.get_class_index() != root.get_class_index()) {
+        return std::nullopt;
+      }
+      if (const int w = gu::bits_of(p); w > 0 && bit >= w) {
+        return std::nullopt;  // a bit past the input: its extension, not a clock bit
+      }
+      return bit;
+    }
+    const auto n  = p.get_master_node();
+    const auto op = gu::type_op_of(n);
+    // A BOOLEAN of the value (`c ? 1 : 0`, `c == 0/1`): only bit 0 of the
+    // result carries it, and it is a single bit of `c` only when `c` is 1 bit.
+    auto follow_bool = [&](const hhds::Pin_class& c) -> bool {
+      if (bit != 0 || c.is_invalid() || gu::bits_of(c) != 1) {
+        return false;
+      }
+      p = c;
+      return true;
+    };
+    if (op == Ntype_op::Mux) {
+      hhds::Pin_class sel, arm0, arm1;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        const auto pid = in.get_port_id();
+        (pid == 0 ? sel : pid == 1 ? arm0 : arm1) = in.driver;
+      }
+      const bool a0 = arm0.is_const() && gu::const_of(arm0).is_just_i64() && gu::const_of(arm0).to_just_i64() == 0;
+      const bool a1 = arm1.is_const() && gu::const_of(arm1).is_just_i64() && gu::const_of(arm1).to_just_i64() == 0;
+      if (arm0.is_invalid() || arm1.is_invalid() || a0 == a1 || !follow_bool(sel)) {
+        return std::nullopt;
+      }
+      continue;
+    }
+    if (op == Ntype_op::EQ || op == Ntype_op::Xor) {
+      hhds::Pin_class val;
+      int             live = 0;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        if (!in.driver.is_const()) {
+          val = in.driver;
+          ++live;
+        }
+      }
+      if (live != 1 || !follow_bool(val)) {
+        return std::nullopt;
+      }
+      continue;
+    }
+    if (op == Ntype_op::Not) {
+      p = gu::first_value_driver(n);  // bit-wise: the bit stays put
+      continue;
+    }
+    if (op == Ntype_op::And || op == Ntype_op::Or) {
+      std::vector<hhds::Pin_class> live;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        if (in.driver.is_const()) {
+          // A constant must leave the tracked bit alone (set for And, clear for
+          // Or); otherwise the bit is a constant, not a clock.
+          const auto& c = gu::const_of(in.driver);
+          if (!c.is_just_i64() || bit >= 62) {
+            return std::nullopt;
+          }
+          const bool set = ((c.to_just_i64() >> bit) & 1) != 0;
+          if (set != (op == Ntype_op::And)) {
+            return std::nullopt;
+          }
+          continue;
+        }
+        live.push_back(in.driver);
+      }
+      if (live.size() == 1) {
+        p = live.front();
+        continue;
+      }
+      if (op != Ntype_op::And || live.empty()) {
+        return std::nullopt;
+      }
+      std::optional<int> found;
+      for (const auto& l : live) {
+        if (auto b = clock_bit_on(l, root, bit, depth + 1)) {
+          if (found && *found != *b) {
+            return std::nullopt;
+          }
+          found = b;
+        }
+      }
+      return found;
+    }
+    if (op == Ntype_op::Get_mask) {
+      const auto range = gu::bit_range(n);
+      if (!range || range->first + bit >= range->second) {
+        return std::nullopt;
+      }
+      bit += range->first;
+      p = gu::first_value_driver(n);
+      continue;
+    }
+    if (op == Ntype_op::Sext) {
+      if (bit != 0) {
+        return std::nullopt;  // only bit 0 is position-independent of the sign point
+      }
+      p = gu::first_value_driver(n);
+      continue;
+    }
+    if (op == Ntype_op::Clock_cell) {
+      if (bit != 0) {
+        return std::nullopt;
+      }
+      p = gu::get_driver_of_sink_name(n, "clk_ref");
+      continue;
+    }
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
 // ---------------------------------------------------------------------------
 
 struct Plan {
@@ -214,6 +346,15 @@ struct Plan {
   std::string                           why;          // failure reason when !ok
   std::string                           code;         // diagnostic code when !ok
   hhds::Pin_class                       ref_clk_pin;  // the reference clock net (may be invalid = implicit)
+  // The BIT of `ref_clk_pin` the reference edge is on, when that net is a
+  // multi-bit input (-1 = the net itself). The rewrite rebinds every clock_pin
+  // to the reference, and a bare multi-bit input reads as its bit 0, so a bit
+  // k>0 gets its own select there.
+  int                                   ref_clk_bit = -1;
+  // The reference clock's name for the cross-side agreement check: `ref_net`,
+  // plus `[k]` for a bit k>0 of a bus (encode.cpp's Clk_root spelling), so a
+  // side on clks[0] and one on clks[1] are two different time bases.
+  std::string                           ref_clock_name;
 };
 
 Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
@@ -221,6 +362,10 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
 
   // 1. Collect every state element with its commit class.
   absl::flat_hash_map<std::string, int> per_net;  // net_key -> #elements on it (clock role only)
+  // Multi-bit clock inputs: net_key -> the distinct bits used ("?<elem>" = not
+  // decidable), and the bit itself when decided.
+  absl::flat_hash_map<std::string, std::set<std::string>> bus_bits;
+  absl::flat_hash_map<std::string, int>                   bus_bit_of;
   for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Memory) {
@@ -350,6 +495,43 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     plan.elems.push_back(e);
     if (cc->role == lc::Net_role::Clock) {
       ++per_net[cc->net_key()];
+      // A clock that is ONE BIT of a multi-bit input: record WHICH bit. The
+      // commit class is keyed by the whole input (control_root follows every
+      // Get_mask to it), so clks[0] and clks[1] would otherwise share one slot
+      // and one reference edge -- a flop moved between the bits normalized to
+      // the identical graph. Only a DATA-role latch is exempt: its enable is
+      // not a clock, it keeps that enable through the rewrite, and its slot
+      // comes from the state the enable reads, never from this key.
+      if (!cc->implicit_clock && !cc->net.is_invalid() && gu::is_graph_input_pin(cc->net) && gu::bits_of(cc->net) > 1) {
+        const auto bit = clock_bit_on(control, cc->net, 0, 0);
+        bus_bits[cc->net_key()].insert(bit ? std::to_string(*bit) : "?" + label_of(n));
+        if (bit) {
+          bus_bit_of[cc->net_key()] = *bit;
+        }
+      }
+    }
+  }
+  // Decline only when the bits are AMBIGUOUS: two different bits of one input
+  // (or a bit this walk cannot decide) clock the design. One bit, used alone,
+  // is a single clock and normalizes like any other (the reference rebind below
+  // selects that bit). Sorted for a deterministic diagnostic.
+  {
+    std::vector<std::string> keys;
+    for (const auto& [k, bits] : bus_bits) {
+      if (bits.size() > 1 || !bus_bit_of.contains(k)) {
+        keys.push_back(k);
+      }
+    }
+    std::sort(keys.begin(), keys.end());
+    if (!keys.empty()) {
+      std::string list;
+      for (const auto& b : bus_bits[keys.front()]) {
+        list += (list.empty() ? "" : ", ") + (b.front() == '?' ? "an undecidable bit (`" + b.substr(1) + "`)" : "bit " + b);
+      }
+      plan.code = "clock-bus-bit";
+      plan.why  = "the multi-bit input `" + keys.front() + "` clocks state on " + list
+                 + "; edge normalization keys a clock by its input net and cannot tell the bits of one bus apart";
+      return plan;
     }
   }
   if (plan.elems.empty()) {
@@ -382,8 +564,15 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
   // width mask (`always @(posedge ~clk)` arrives as `And(Not(Get_mask(clk)),1)`)
   // -- and the root is what every normalized element gets rebound to below, so
   // taking the raw driver would propagate the derived cone into the output.
-  plan.ref_net     = ref_net;
-  plan.ref_clk_pin = {};
+  plan.ref_net        = ref_net;
+  plan.ref_clock_name = ref_net;
+  plan.ref_clk_pin    = {};
+  if (auto it = bus_bit_of.find(ref_net); it != bus_bit_of.end()) {
+    plan.ref_clk_bit = it->second;
+    if (it->second != 0) {
+      plan.ref_clock_name += "[" + std::to_string(it->second) + "]";
+    }
+  }
   for (const auto& e : plan.elems) {
     // A LATCH counts as a candidate too, as long as its role is Clock -- then its
     // `net` IS the clock root (a data-gated latch is Net_role::Data and is
@@ -845,12 +1034,21 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // rewrite WOULD do so a miter can pick one shared time base first.
     r.applied   = plan.slots > 1 || r.latches_retyped > 0 || need.n_latches > 0 || need.n_negedge_flops > 0;
     r.slots     = plan.slots;
-    r.ref_clock = plan.ref_net;
+    r.ref_clock = plan.ref_clock_name;
     r.reason    = std::format("plan: P={} slots ({})", plan.slots, need.why.empty() ? "forced" : need.why);
     return r;
   }
 
   // ---- the rewrite -------------------------------------------------------
+  if (plan.ref_clk_bit > 0 && !plan.ref_clk_pin.is_invalid()) {
+    // The reference edge is on bit k>0 of a bus input. Every rebound clock_pin
+    // reads its edge on bit 0 of its driver, so binding the bare bus would move
+    // the whole design onto clks[0]. Select the bit once and rebind to that.
+    auto sel = gu::create_get_mask(*g, plan.ref_clk_pin, plan.ref_clk_bit).create_driver_pin(0);
+    gu::set_bits(sel, 1);
+    gu::set_unsign(sel);
+    plan.ref_clk_pin = sel;
+  }
   hhds::Pin_class slot_pred[2];
   if (plan.slots > 1) {
     // Phase divider off the design's OWN clock: one free-running clock and a
@@ -1247,7 +1445,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
 
   r.applied   = true;
   r.slots     = plan.slots;
-  r.ref_clock = plan.ref_net;
+  r.ref_clock = plan.ref_clock_name;
   r.reason    = std::format(
       "P={} slots, {} latch(es) retyped, {} gated clock(s) folded into an enable, {} element(s) "
       "slotted ({})",

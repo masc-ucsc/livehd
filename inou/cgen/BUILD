@@ -87,6 +87,8 @@ cc_library(
         "//core:file_name",
         "//graph",
         "//pass/common:pass",
+        "//pass/cprop:pass_cprop",
+        "//pass/bitwidth:pass_bitwidth",
         "@llvm-project//llvm:BitReader",
         "@llvm-project//llvm:BitWriter",
         "@llvm-project//llvm:CodeGen",

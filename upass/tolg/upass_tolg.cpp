@@ -263,27 +263,28 @@ struct Val {
 // "<module>.<name>" suffix match.
 [[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view                           name,
                                                           const std::vector<std::shared_ptr<Lnast>>& registry,
-                                                          std::string_view                           caller_unit = {}) {
+                                                          std::string_view caller_unit = {}, bool want_template = false) {
   // Escaped Verilog module references retain LNAST backticks until tolg;
   // registry keys carry the literal module name.
   if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
     name = name.substr(1, name.size() - 2);
   }
+  // A TEMPLATE is never the answer to a lowering lookup: it mints no GraphIO
+  // (register_io) and lowers to nothing (run), so any call that survived to
+  // tolg is served by a specialization. It also SHARES its name with an
+  // IDENTITY specialization (maybe_specialize_template_call), which would
+  // otherwise make that name look ambiguous to the suffix scan below and
+  // resolve to nothing at all. `want_template` inverts the filter, ONLY for
+  // the diagnostic of a call that reached tolg still naming a generic callee
+  // (the runner never specialized it) — the same scan, so the two answers
+  // cannot drift apart.
+  const auto candidate = [want_template](const std::shared_ptr<Lnast>& ln) { return ln && ln->is_template() == want_template; };
   std::shared_ptr<Lnast> exact;
   std::shared_ptr<Lnast> suffix_hit;
   int                    suffix_matches = 0;
   const std::string      suffix         = "." + std::string(name);
   for (const auto& ln : registry) {
-    if (!ln) {
-      continue;
-    }
-    // A TEMPLATE is never the answer here: it mints no GraphIO (register_io)
-    // and lowers to nothing (run), so any call that survived to tolg is served
-    // by a specialization. It also SHARES its name with an IDENTITY
-    // specialization (maybe_specialize_template_call), which would otherwise
-    // make that name look ambiguous to the suffix scan below and resolve to
-    // nothing at all.
-    if (ln->is_template()) {
+    if (!candidate(ln)) {
       continue;
     }
     auto n = ln->get_top_module_name();
@@ -304,7 +305,7 @@ struct Val {
       scoped.push_back('.');
       scoped.append(name);
       for (const auto& ln : registry) {
-        if (ln && ln->get_top_module_name() == scoped) {
+        if (candidate(ln) && ln->get_top_module_name() == scoped) {
           return ln;
         }
       }
@@ -8128,6 +8129,19 @@ private:
               "built-in cast `{}(...)` has no scalar operand to convert — the operand is a multi-output "
               "instance, a tuple value, or a signed instance output; cast one field or output (`x.o`) instead",
               callee_name);
+        } else if (const auto tmpl
+                   = (!callee && registry_ != nullptr)
+                         ? resolve_callee_lnast(callee_name, *registry_, lnast_->get_top_module_name(), /*want_template=*/true)
+                         : nullptr) {
+          // The name DOES match a definition, but only its generic template:
+          // the call reached lowering unspecialized. Saying "undefined" here
+          // sent users hunting for a missing import that is present.
+          error_here(
+              "call to generic {} '{}' reached lowering unspecialized — upass never resolved this call site to "
+              "a specialization (e.g. the callee is spelled through an import alias that did not resolve inside "
+              "an inlined body)",
+              tmpl->get_lambda_kind().empty() ? std::string_view{"function"} : tmpl->get_lambda_kind(),
+              callee_name);
         } else {
           error_here(
               "call to undefined function '{}' — no such pipe/mod/comb "
@@ -8296,6 +8310,18 @@ private:
         // don't count toward arity).
         if (pname == "__inst_name" || pname == "__inst_suffix") {
           continue;
+        }
+        // An explicit generic binding (`f<W=8>(…)`) is consumed by the runner
+        // when it specializes the call. One still here means the call was
+        // lowered against an unspecialized (identity/default) definition —
+        // the binding would be silently dropped, so never treat it as a port.
+        if (pname == "__generic_arg") {
+          error_here(
+              "upass.tolg: the explicit generic binding on the call to '{}' was not consumed — upass never "
+              "specialized this call site (e.g. the callee is spelled through an import alias that did not "
+              "resolve inside an inlined body)",
+              callee_full);
+          return;
         }
       } else {
         if (pos >= cio.inputs.size()) {

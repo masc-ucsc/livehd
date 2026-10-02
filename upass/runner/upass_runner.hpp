@@ -954,7 +954,8 @@ protected:
     std::optional<Dlop>            decl_max     = {};
     std::optional<Dlop>            decl_min     = {};
     // A LAMBDA-valued generic (`f<inc>`): the bound callee name, registered in
-    // func_param_bindings_ so a body call `F(v)` dispatches to it (todo 3g A).
+    // func_param_bindings_ (frame-tagged) so a body call `F(v)` dispatches to
+    // it (todo 3g A).
     std::string                    func_name    = {};
     // This bind came from the DECLARATION DEFAULT (`<N=8>`), not from an
     // explicit `<…>` argument and not from inference. A call that defaults
@@ -1395,6 +1396,28 @@ protected:
   // Resolves a (possibly unqualified) callee name to a registry body. Tries
   // the bare name, then the unique "<module>.<name>" suffix match.
   std::shared_ptr<Lnast> lookup_callee(std::string_view name) const;
+  // The lexical scope lookup_callee resolves in: the innermost inline frame's
+  // callee unit, else the root unit.
+  std::string_view lexical_unit() const;
+  // A function-valued binding (`apply(f=helper)`, `f<F=helper>`) about to be
+  // read inside `callee_unit`'s body: its raw name, or its full registry name
+  // when that body's scope would resolve the raw name to a different function.
+  std::string frame_portable_func_name(const std::string& name, std::string_view callee_unit) const;
+  // A Sub call re-emitted from inside an inline frame (emit_named_instance_call)
+  // is re-walked, and lowered by tolg, OUTSIDE that frame, where a bare name
+  // resolves in the ROOT unit's scope: the spelled name when it still lands on
+  // `callee` there (by registry lookup AND through any caller-scope value
+  // binding of that name, e.g. an import alias), else `callee`'s full registry
+  // name. Non-const: the value-binding check folds the name (try_fold_ref).
+  std::string frame_portable_callee_name(const std::string& name, const std::shared_ptr<Lnast>& callee);
+  // A function-valued actual spelled `var` (frame-tagged; `raw` is its source
+  // spelling) whose CURRENT-scope value binding (an import / lambda-ref alias,
+  // `const inc = import("lib2.hh")`) names a DIFFERENT registry body than the
+  // by-name lookup of `raw`: that body's full registry name, else empty. The
+  // alias shadows the by-name hit exactly as it does for a direct call
+  // (try_inline_call); capturing the raw spelling instead let a template file's
+  // own same-named function win. Non-const: folds `var` (try_fold_ref).
+  std::string value_bound_func_name(std::string_view var, std::string_view raw);
 
   // Dispatches uPass::flush_deferred to every pass — used by the inliner to
   // drain deferred/parked emits (coalescer) before each source-swap so their
@@ -1627,17 +1650,21 @@ protected:
   // (The recursion / inlinable / placeholder / sub-convertible sets these used
   // to sit beside now live in the shared uPass_function_registry — see reg().)
   bool                                          inlining_enabled_ = true;
-  // Higher-order / closure support: maps a function-valued param's RAW name
-  // (as read in the callee body, e.g. `f` in `r = f(x)`) to the registry
-  // function it is bound to at this call site (e.g. `step_up`). Saved/restored
-  // around each body walk so nested frames don't clobber each other. Consulted
-  // by try_inline_func_call when a callee name isn't itself a registry entry.
+  // Higher-order / closure support: maps a function-valued param's (or lambda
+  // generic's) FRAME-TAGGED name (`inl<N>_f`, what the callee body's `f` reads
+  // as inside its inline frame) to the registry function it is bound to at
+  // this call site (e.g. `step_up`). The tag scopes the binding to that one
+  // frame: a callee inlined from inside the body tags its own `f` differently,
+  // so it never sees the outer param. Saved/restored around each body walk.
+  // Consulted by try_inline_func_call (callee) and gather_actuals (forwarding
+  // `g(f=f)`).
   absl::flat_hash_map<std::string, std::string> func_param_bindings_;
   // Type-valued generic used as a constructor/cast in the body (`T(a)` with T
-  // bound to `u8`): maps the generic's RAW name (as read in the body) to the
-  // concrete cast token (`u8`/`s4`/`bool`) so try_lower_typecast reclassifies
-  // `T(a)` as that scalar cast (todo 3g A). Saved/restored around each body
-  // walk, like func_param_bindings_.
+  // bound to `u8`): maps the generic's FRAME-TAGGED name (`inl<N>_T`, as read
+  // in the body) to the concrete cast token (`u8`/`s4`/`bool`) so
+  // try_lower_typecast reclassifies `T(a)` as that scalar cast (todo 3g A).
+  // Frame-scoped and saved/restored around each body walk, like
+  // func_param_bindings_.
   absl::flat_hash_map<std::string, std::string> generic_cast_binds_;
   // Phase D recursion fuel. Per-callee depth is capped at kInlineMaxDepth
   // (active frames of the same callee); inline_budget_ is a per-run total

@@ -635,6 +635,40 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   mem.del_node();
   return child;
 }
+
+// Distinct runtime clocks among `mem`'s WRITE ports. A port block without its
+// own `clock_pin` shares the cell-global one (block 0's). A constant clock is a
+// clockless write port (yosys `memory_map` folds a constant-address one into a
+// static entry), so it does not count as a clock.
+size_t write_clock_count(const hhds::Node_class& mem) {
+  std::map<int, bool>            read;
+  std::map<int, hhds::Pin_class> clocks;
+  for (const auto& in_pin : mem.inp_sorted_pins()) {
+    const int pid = in_pin.get_port_id(), off = pid % Ntype::Memory_port_stride;
+    if (off == 10) {
+      read[pid / Ntype::Memory_port_stride] = !gu::const_of(in_pin.get_driver_pin()).is_known_zero();
+    } else if (off == 2) {
+      clocks[pid / Ntype::Memory_port_stride] = in_pin.get_driver_pin();
+    }
+  }
+  std::vector<hhds::Pin_class> distinct;
+  for (const auto& [port, rd] : read) {
+    if (rd) {
+      continue;
+    }
+    auto it = clocks.find(port);
+    if (it == clocks.end()) {
+      it = clocks.find(0);
+    }
+    if (it == clocks.end() || it->second.is_invalid() || it->second.is_const()) {
+      continue;
+    }
+    if (std::ranges::find(distinct, it->second) == distinct.end()) {
+      distinct.push_back(it->second);
+    }
+  }
+  return distinct.size();
+}
 }  // namespace
 
 std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
@@ -697,6 +731,32 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
         if (out_pin.get_port_id() == Ntype::Memory_readall_pid) {
           inline_array = true;
         }
+      }
+      // Bit-blasting maps every entry to ONE storage flop, and a flop has one
+      // clock: an entry two write clocks can update has no flop realization.
+      // yosys `memory_map` refuses such a memory ("write clock N is
+      // incompatible with other clocks") and leaves bare $memrd/$memwr cells,
+      // which the lowered module used to drop SILENTLY -- an empty `_blasted`
+      // body with every read output undriven, rc=0. Keep the native
+      // (cgen_memory_multiclock_*) instance instead, in every fold mode; a
+      // forced memory=true is warned that it was overridden.
+      const size_t wr_clocks = write_clock_count(mem);
+      if (wr_clocks > 1) {
+        if (mode != Memory_fold::Never) {
+          auto note = mode == Memory_fold::Always ? diag::warn("pass.abc", "memory-multiclock", "unsupported")
+                                                  : diag::info("pass.abc", "memory-multiclock", "unsupported");
+          note.msg(
+                  "memory '{}': its write ports use {} different clocks, so it has no single-clock flop realization; "
+                  "keeping its native instance instead of bit-blasting it",
+                  gu::default_instance_name(mem),
+                  wr_clocks)
+              .emit();
+        }
+        if (!inline_array) {
+          continue;
+        }
+        modules.push_back(enclose(*graph, mem, false, fs::path{}, rtl));
+        continue;
       }
       // The division form never overflows; an unknown `bits` is not oversized.
       const bool oversized  = max_bits && bits && size > max_bits / bits;

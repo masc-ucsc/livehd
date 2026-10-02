@@ -1,0 +1,19 @@
+/*
+:name: imported_comb_entity_alias_scope
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// The imported comb `mid` calls `leaf` through an entity-name import alias
+// (`const leaf = import("leaf.leaf")`, the form the v2prp writer emits); this
+// caller ALSO defines a `comb leaf`. Inlining mid must resolve the call in
+// mid's own scope, never pick up the caller's same-named comb (it used to, so
+// z = a ^ 0xFF instead of a & 0x0F).
+const mid = import("imported_comb_entity_alias_scope/mid.mid")
+comb leaf(a:U8) -> (z:U8) { z = a ^ 0xFF }
+pub mod top(a:U8) -> (z:U8@[0], w:U8@[0]) {
+  const r = mid(a=a)
+  z = r.z
+  w = leaf(a=a)
+}

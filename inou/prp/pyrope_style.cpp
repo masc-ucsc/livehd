@@ -1090,6 +1090,367 @@ class Detector {
     }
   }
 
+  // These rules need complete def/use evidence. Ambiguous bindings (including
+  // names repeated in separate lambdas) are intentionally left alone.
+  struct LocalValue {
+    TSNode              declaration{}, id{}, cast{};
+    size_t              bindings = 0;
+    std::vector<TSNode> uses;
+  };
+  std::unordered_map<std::string_view, LocalValue> local_values;
+
+  static bool contains(TSNode outer, TSNode inner) {
+    return !ts_node_is_null(outer) && !ts_node_is_null(inner) && ts_node_start_byte(outer) <= ts_node_start_byte(inner)
+           && ts_node_end_byte(inner) <= ts_node_end_byte(outer);
+  }
+
+  static TSNode enclosing(TSNode node, std::string_view kind) {
+    for (auto p = ts_node_parent(node); !ts_node_is_null(p); p = ts_node_parent(p)) {
+      if (kind_of(p) == kind) {
+        return p;
+      }
+    }
+    return {};
+  }
+
+  void index_values(TSNode root) {
+    descend(root, [&](TSNode n) {
+      if (kind_of(n) == "identifier") {
+        const auto parent = ts_node_parent(n);
+        const auto pk     = kind_of(parent);
+        // Field names and named-argument labels are not reads of a local.
+        const bool label  = (pk == "dot_expression" && !contains(field(parent, "item"), n))
+                            || ((pk == "arg_assignment" || pk == "attribute_assignment" || pk == "generic_assignment")
+                                && contains(field(parent, "lvalue"), n));
+        if (!label) {
+          local_values[text(n)].uses.push_back(n);
+        }
+      }
+      TSNode id{}, cast{}, declaration{};
+      if (kind_of(n) == "assignment" && !ts_node_is_null(field(n, "decl"))) {
+        declaration = n;
+        id          = field(n, "lvalue");
+        cast        = field(n, "type");
+        if (kind_of(id) == "typed_identifier") {
+          cast = field(id, "type");
+          id   = field(id, "identifier");
+        }
+      } else if (kind_of(n) == "typed_identifier" && !ts_node_is_null(enclosing(n, "function_definition_decl"))) {
+        id   = field(n, "identifier");
+        cast = field(n, "type");
+      }
+      if (kind_of(id) == "identifier") {
+        auto& v = local_values[text(id)];
+        ++v.bindings;
+        v.declaration = declaration;
+        v.id          = id;
+        v.cast        = cast;
+      }
+      return true;
+    });
+  }
+
+  const LocalValue* value(TSNode id) const {
+    if (kind_of(id) != "identifier") {
+      return nullptr;
+    }
+    const auto it = local_values.find(text(id));
+    if (it == local_values.end() || it->second.bindings != 1) {
+      return nullptr;
+    }
+    const auto& v     = it->second;
+    const auto  scope = enclosing(v.id, ts_node_is_null(v.declaration) ? "lambda" : "scope_statement");
+    // Do not infer a type from a later or out-of-scope declaration.
+    if (ts_node_start_byte(v.id) > ts_node_start_byte(id) || !contains(scope, id)) {
+      return nullptr;
+    }
+    return &v;
+  }
+
+  std::optional<int64_t> unsigned_width(TSNode type) const {
+    if (kind_of(type) != "uint_type" && kind_of(type) != "identifier") {
+      return std::nullopt;
+    }
+    auto s = text(type);
+    if (s.size() < 2 || !s.starts_with('U') || !std::all_of(s.begin() + 1, s.end(), digit)) {
+      return std::nullopt;
+    }
+    const auto bits = number(s.substr(1));
+    return bits && *bits > 0 ? bits : std::nullopt;
+  }
+
+  // Only literal indices and increasing literal ranges; no masks, strides,
+  // reductions, extensions, open endpoints, or dynamic offsets.
+  std::optional<std::pair<int64_t, int64_t>> bit_window(TSNode node) const {
+    if (kind_of(node) != "bit_selection" || !ts_node_is_null(field(node, "reduction"))
+        || !ts_node_is_null(field(node, "extension"))) {
+      return std::nullopt;
+    }
+    TSNode select{};
+    children(node, [&](TSNode c, const char*) {
+      if (kind_of(c) == "select") {
+        select = c;
+      }
+    });
+    const auto index = field(select, "index");
+    if (ts_node_is_null(index)) {
+      return std::nullopt;
+    }
+    std::vector<TSNode> parts;
+    children(index, [&](TSNode c, const char*) {
+      if (kind_of(c) != "comment" && ts_node_is_named(c)) {
+        parts.push_back(c);
+      }
+    });
+    if (kind_of(index) == "constant") {
+      const auto bit = number(text(index));
+      if (bit && *bit >= 0) {
+        return std::pair{*bit, *bit + 1};
+      }
+    } else if (kind_of(index) == "expression_item" && parts.size() == 3) {
+      const auto lo = number(text(parts[0])), hi = number(text(parts[2]));
+      const auto op = text(parts[1]);
+      if (lo && hi && *lo >= 0 && (op == "..<" || op == "..=")) {
+        const auto end = *hi + (op == "..=" ? 1 : 0);
+        if (end > *lo) {
+          return std::pair{*lo, end};
+        }
+      }
+    }
+    return std::nullopt;
+  }
+
+  struct ArrayLane {
+    TSNode  array;
+    int64_t index, count, width;
+  };
+
+  std::optional<ArrayLane> array_lane(TSNode node) const {
+    if (kind_of(node) != "member_selection") {
+      return std::nullopt;
+    }
+    const auto array = field(node, "argument"), select = field(node, "select");
+    const auto v     = value(array);
+    const auto index = number(text(field(select, "index")));
+    if (!v || !index) {
+      return std::nullopt;
+    }
+    const auto type  = field(v->cast, "type");
+    const auto width = unsigned_width(field(type, "base"));
+    const auto count = number(text(field(field(type, "length"), "index")));
+    if (kind_of(type) != "array_type" || !width || !count || *count <= 0 || *index < 0 || *index >= *count) {
+      return std::nullopt;
+    }
+    // Exactly one selector, rather than e.g. a[0][1].
+    size_t selectors = 0;
+    children(node, [&](TSNode c, const char*) { selectors += kind_of(c) == "select"; });
+    return selectors == 1 ? std::optional<ArrayLane>{{array, *index, *count, *width}} : std::nullopt;
+  }
+
+  std::optional<int64_t> expression_width(TSNode node) const {
+    if (kind_of(node) == "identifier") {
+      if (const auto v = value(node)) {
+        return unsigned_width(field(v->cast, "type"));
+      }
+    } else if (const auto lane = array_lane(node)) {
+      return lane->width;
+    } else if (const auto window = bit_window(node)) {
+      return window->second - window->first;
+    } else if (kind_of(node) == "function_call_expression") {
+      return unsigned_width(field(node, "function"));
+    }
+    return std::nullopt;
+  }
+
+  // Casts are pure, but arbitrary calls/ref arguments/statement expressions
+  // may mutate values between lanes and must never be collapsed.
+  bool packing_value(TSNode node) const {
+    const auto kind = kind_of(node);
+    if (kind == "function_call_expression" && !unsigned_width(field(node, "function"))) {
+      return false;
+    }
+    if (kind == "assignment" || kind == "arg_assignment" || kind == "ref_identifier" || kind == "scope_statement"
+        || kind == "lambda" || kind == "if_expression" || kind == "match_expression" || kind == "attribute_set") {
+      return false;
+    }
+    bool ok = true;
+    children(node, [&](TSNode c, const char*) { ok = packing_value(c) && ok; });
+    return ok;
+  }
+
+  bool simple_mut(const LocalValue& v) const {
+    const auto decl = field(v.declaration, "decl");
+    if (v.bindings != 1 || ts_node_is_null(decl) || text(decl) != "mut"
+        || kind_of(ts_node_parent(v.declaration)) != "scope_statement") {
+      return false;
+    }
+    // Preserve ordinary unsigned annotations. Custom constructors, attributes,
+    // timing annotations and signed types require elaboration to reason about.
+    return ts_node_is_null(v.cast)
+           || (unsigned_width(field(v.cast, "type")) && text(v.cast) == ":" + std::string(text(field(v.cast, "type"))));
+  }
+
+  // Prove every occurrence is either a known LHS or a later read in this scope
+  // and lambda. Any other assignment target, ref escape, capture or early read
+  // disqualifies the recommendation (also covers destructuring/partial writes).
+  bool later_reads(const LocalValue& v, TSNode scope, TSNode after, const std::vector<TSNode>& writes) const {
+    size_t reads = 0;
+    for (auto use : v.uses) {
+      if (ts_node_eq(use, v.id)) {
+        continue;
+      }
+      bool lhs = false;
+      for (auto write : writes) {
+        lhs = lhs || contains(field(write, "lvalue"), use);
+      }
+      if (lhs) {
+        continue;
+      }
+      if (!contains(scope, use) || ts_node_start_byte(use) < ts_node_end_byte(after)
+          || !ts_node_eq(enclosing(use, "lambda"), enclosing(v.id, "lambda"))) {
+        return false;
+      }
+      for (auto p = ts_node_parent(use); !ts_node_is_null(p); p = ts_node_parent(p)) {
+        const auto kind = kind_of(p);
+        if (kind == "ref_identifier" || kind == "attribute_read" || (kind == "assignment" && contains(field(p, "lvalue"), use))) {
+          return false;
+        }
+        if (ts_node_eq(p, scope)) {
+          break;
+        }
+      }
+      ++reads;
+    }
+    return reads > 0;
+  }
+
+  void narrow_mut() {
+    for (const auto& [name, v] : local_values) {
+      if (!simple_mut(v) || kind_of(field(v.declaration, "rvalue")) != "constant") {
+        continue;
+      }
+      TSNode write{};
+      for (auto use : v.uses) {
+        const auto parent = ts_node_parent(use);
+        Path       dst;
+        if (plain_assignment(parent, dst) && dst.size() == 1 && dst.front() == name && ts_node_eq(field(parent, "lvalue"), use)) {
+          if (!ts_node_is_null(write)) {
+            write = {};
+            break;
+          }
+          write = parent;
+        }
+      }
+      if (ts_node_is_null(write) || kind_of(ts_node_parent(write)) != "scope_statement") {
+        continue;
+      }
+      const auto scope = ts_node_parent(write), outer = ts_node_parent(v.declaration);
+      if (ts_node_eq(scope, outer) || !contains(outer, scope) || ts_node_start_byte(write) < ts_node_end_byte(v.declaration)
+          || !later_reads(v, scope, write, {write})) {
+        continue;
+      }
+      // Prefix modifiers sit beside assignments, so check the preceding token.
+      auto previous = ts_node_prev_sibling(write);
+      while (kind_of(previous) == "comment") {
+        previous = ts_node_prev_sibling(previous);
+      }
+      if (kind_of(previous) == "wrap" || kind_of(previous) == "sat") {
+        continue;
+      }
+      Finding f{};
+      f.rule    = Rule::NarrowScopedMut;
+      f.range   = range(v.declaration, v.declaration);
+      f.message = std::format("'{}' is assigned once and read only later in a narrower scope", name);
+      f.hint    = std::format(
+          "remove the outer declaration and replace the inner assignment with 'const {}{} = ...', preserving its value and type",
+          name,
+          ts_node_is_null(v.cast) ? std::string_view{} : text(v.cast));
+      f.score      = tokens(v.declaration) + 1;
+      f.attributes = {
+          {       "variable",                                  std::string(name)},
+          {"assignment_line", std::to_string(ts_node_start_point(write).row + 1)}
+      };
+      related(f, write, "single assignment; declare the const here");
+      candidates.push_back(std::move(f));
+    }
+  }
+
+  void bit_packing(const std::vector<Statement>& stmts) {
+    for (size_t i = 0; i + 2 < stmts.size(); ++i) {
+      const auto declaration = stmts[i].node;
+      auto       id          = field(declaration, "lvalue");
+      if (kind_of(id) == "typed_identifier") {
+        id = field(id, "identifier");
+      }
+      const auto v = value(id);
+      if (!v || !ts_node_eq(v->declaration, declaration) || !simple_mut(*v) || !ts_node_eq(stmts[i].start_node, declaration)) {
+        continue;
+      }
+      std::vector<TSNode> writes;
+      std::string         packed, array;
+      bool                full_array = true;
+      int64_t             end = 0, array_count = 0;
+      size_t              j = i + 1;
+      for (; j < stmts.size(); ++j) {
+        const auto write = stmts[j].node, lhs = field(write, "lvalue"), rhs = field(write, "rvalue");
+        const auto window = bit_window(lhs);
+        const auto width  = expression_width(rhs);
+        if (kind_of(write) != "assignment" || !ts_node_eq(write, stmts[j].start_node) || !ts_node_is_null(field(write, "decl"))
+            || !ts_node_is_null(field(write, "type")) || text(field(write, "operator")) != "=" || !window
+            || text(field(lhs, "argument")) != text(id) || window->first != end || !width || *width != window->second - end
+            || !packing_value(rhs)) {
+          break;
+        }
+        const auto lane = array_lane(rhs);
+        if (!lane || lane->index != static_cast<int64_t>(writes.size()) || (!array.empty() && text(lane->array) != array)) {
+          full_array = false;
+        } else {
+          array       = text(lane->array);
+          array_count = lane->count;
+        }
+        packed += (packed.empty() ? "" : ", ");
+        packed += text(rhs);
+        writes.push_back(write);
+        end = window->second;
+      }
+      if (writes.size() < 2) {
+        continue;
+      }
+      const auto init           = field(declaration, "rvalue");
+      const auto declared_width = unsigned_width(field(v->cast, "type"));
+      const auto init_width     = expression_width(init);
+      // Untyped zero has no preserved high bits; otherwise prove the complete
+      // initialized/declared width is overwritten, including signedness.
+      if ((declared_width && *declared_width != end)
+          || (!declared_width && !(kind_of(init) == "constant" && number(text(init)) == 0) && init_width != end)
+          || !packing_value(init) || !later_reads(*v, ts_node_parent(declaration), writes.back(), writes)) {
+        continue;
+      }
+      const auto expression
+          = full_array && array_count == static_cast<int64_t>(writes.size()) ? array + "#[..]" : "(" + packed + ")#[..]";
+      Finding f{};
+      f.rule       = Rule::CompactBitPacking;
+      f.range      = range(declaration, writes.back());
+      f.message    = std::format("'{}' is assembled by {} contiguous writes covering all {} bits", text(id), writes.size(), end);
+      f.hint       = std::format("replace the declaration and bit writes with 'const {}{} = {}' (entry 0 occupies the low bits)",
+                                 text(id),
+                                 ts_node_is_null(v->cast) ? std::format(":U{}", end) : std::string(text(v->cast)),
+                                 expression);
+      f.score      = writes.size() * 5;
+      f.attributes = {
+          {"destination",         std::string(text(id))},
+          { "lane_count", std::to_string(writes.size())},
+          {       "bits",           std::to_string(end)},
+          {    "packing",                    expression}
+      };
+      for (auto write : writes) {
+        related(f, write, "contiguous, width-matched lane");
+      }
+      candidates.push_back(std::move(f));
+      i = j - 1;
+    }
+  }
+
   void visit(TSNode node) {
     std::string_view kind = ts_node_type(node);
     if (kind == "ERROR" || ts_node_is_missing(node)) {
@@ -1125,6 +1486,7 @@ class Detector {
         if (ts_node_has_error(c) || ts_node_is_missing(c) || ck == "ERROR" || (field && std::string_view(field) == "attributes")) {
           sequence(stmts);
           tuple_copies(stmts);
+          bit_packing(stmts);
           stmts.clear();
           prefix.clear();
           prefix_node = {};
@@ -1145,6 +1507,7 @@ class Detector {
       });
       sequence(stmts);
       tuple_copies(stmts);
+      bit_packing(stmts);
     }
     children(node, [&](TSNode c, const char*) {
       if (!ts_node_is_named(c) && !ts_node_is_missing(c)) {
@@ -1164,6 +1527,10 @@ public:
   Report run(TSNode root) {
     std::unordered_map<std::string_view, size_t> io_names;
     track_ios(root, io_names);
+    if (!ts_node_has_error(root)) {
+      index_values(root);
+      narrow_mut();
+    }
     visit(root);
     if (!allows.empty()) {
       std::erase_if(candidates, [&](const Finding& f) {
@@ -1218,8 +1585,10 @@ std::string_view rule_name(Rule rule) {
     case Rule::WholeTupleCopy              : return "whole-tuple-copy";
     case Rule::FlattenedBundleArguments    : return "flattened-bundle-arguments";
     case Rule::SingleDestinationConditional: return "single-destination-conditional";
-    case Rule::HardcodedReset               : return "hardcoded-reset";
-    case Rule::ResetPortType                : return "reset-port-type";
+    case Rule::HardcodedReset              : return "hardcoded-reset";
+    case Rule::ResetPortType               : return "reset-port-type";
+    case Rule::NarrowScopedMut             : return "narrow-scoped-mut";
+    case Rule::CompactBitPacking           : return "compact-bit-packing";
   }
   throw std::invalid_argument("unknown style rule");
 }
