@@ -626,26 +626,31 @@ uint64_t wmask(int bits) {
 
 uint64_t trunc_to(uint64_t v, int bits) { return v & wmask(bits); }
 
+// Arithmetic right shift of a `bits`-wide two's-complement value, built from
+// unsigned masks only -- no host signed shift, whose fill comes from bit 63 and
+// whose behaviour on a negative left operand is not something to rely on. The
+// answer is sign-extended to 64 so the caller can truncate it to whatever width
+// carries it.
 uint64_t sra_bits(uint64_t v, int bits, int sh) {
   if (bits <= 0 || bits > 64 || sh < 0) {
     return v;
   }
   const uint64_t x    = v & wmask(bits);
   const bool     negv = ((x >> (bits - 1)) & 1u) != 0;
-  const int      keep = (sh >= bits) ? 0 : (bits - sh);
-  uint64_t       r    = (sh >= bits) ? uint64_t{0} : (x >> sh);
+  // SHIFTED OUT ENTIRELY: the result is all sign, and it must be written that
+  // way rather than falling out of the mask arithmetic below. `wmask(0)` is
+  // ~0 (the helper reads bits <= 0 as "full width"), so `~wmask(0)` is 0 and
+  // the negative case silently returned 0 instead of all ones.
+  if (sh >= bits) {
+    return negv ? ~uint64_t{0} : uint64_t{0};
+  }
+  const int keep = bits - sh;
+  uint64_t  r    = x >> sh;
   if (negv) {
     r |= ~wmask(keep);  // ones from bit `keep` upwards: the replicated sign
   }
   return r;
 }
-
-// Arithmetic right shift of a `bits`-wide two's-complement value, built from
-// unsigned masks only -- no host signed shift, whose fill comes from bit 63 and
-// whose behaviour on a negative left operand is not something to rely on.
-// Handles sh >= bits (the result is all sign). The answer is sign-extended to
-// 64 so the caller can truncate it to whatever width carries it.
-uint64_t sra_bits(uint64_t v, int bits, int sh);
 
 // Interpret `v`'s low `bits` as two's complement and sign-extend to 64.
 uint64_t sext_from(uint64_t v, int bits) {
@@ -850,6 +855,31 @@ uint64_t golden_disjoint(uint64_t x, int n, int kA, int pA, int kB, int pB, int 
 }
 
 }  // namespace
+
+// The oracle's own arithmetic, tested directly. These are the cases the graph
+// fixtures do not reach -- a shift at and past the operand's width -- and the
+// place a quiet wrong answer would make the whole gate agree with a wrong
+// rewrite.
+TEST(SplitSelfrefSemantics, ArithmeticShiftAtAndPastTheOperandWidth) {
+  constexpr int bits = 8;
+  const uint64_t pos = 0x7Fu;  // +127
+  const uint64_t neg = 0x80u;  // -128
+
+  EXPECT_EQ(sra_bits(pos, bits, bits - 1), 0u) << "+127 >>> 7 is 0";
+  EXPECT_EQ(sra_bits(pos, bits, bits), 0u) << "+127 shifted out is 0";
+  EXPECT_EQ(sra_bits(pos, bits, bits + 1), 0u) << "+127 shifted past the end is 0";
+
+  // -128 >>> 7 is -1, and shifting a negative value out leaves all sign.
+  EXPECT_EQ(sra_bits(neg, bits, bits - 1), ~uint64_t{0}) << "-128 >>> 7 is -1";
+  EXPECT_EQ(sra_bits(neg, bits, bits), ~uint64_t{0})
+      << "a negative operand shifted out is all sign, not zero";
+  EXPECT_EQ(sra_bits(neg, bits, bits + 1), ~uint64_t{0})
+      << "a negative operand shifted past the end is all sign, not zero";
+
+  // ...and an ordinary in-range shift, so the above are not the only coverage.
+  EXPECT_EQ(sra_bits(0xF0u, bits, 4), ~uint64_t{0}) << "-16 >>> 4 is -1";
+  EXPECT_EQ(sra_bits(0x40u, bits, 4), 0x04u) << "+64 >>> 4 is +4";
+}
 
 // THE GATE. Same graph, evaluated before and after the rewrite, over every
 // input, and both compared against the closed-form golden.

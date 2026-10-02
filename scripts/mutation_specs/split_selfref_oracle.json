@@ -1,0 +1,27 @@
+{
+  "_what": "The semantic ORACLE's own arithmetic. A quiet wrong answer here would make the gate agree with a wrong rewrite, so the helper is mutated too -- it is test code, but it is test code the verdict rests on.",
+  "target": "//graph:split_selfref_test",
+  "file": "graph/split_selfref_test.cpp",
+  "bazel": [
+    "--repo_env=CC=/usr/bin/gcc-15",
+    "--repo_env=CXX=/usr/bin/g++-15"
+  ],
+  "rebuild": [],
+  "mutants": [
+    {
+      "name": "O1 shift-out of a negative operand returns zero",
+      "old": "  if (sh >= bits) {\n    return negv ? ~uint64_t{0} : uint64_t{0};\n  }\n  const int keep = bits - sh;",
+      "new": "  const int keep = (sh >= bits) ? 0 : (bits - sh);\n  if (sh >= bits) {\n    return negv ? ~wmask(keep) : uint64_t{0};\n  }"
+    },
+    {
+      "name": "O2 arithmetic fill dropped entirely",
+      "old": "  if (negv) {\n    r |= ~wmask(keep);  // ones from bit `keep` upwards: the replicated sign\n  }",
+      "new": "  if (false) {\n    r |= ~wmask(keep);\n  }"
+    },
+    {
+      "name": "O3 results not truncated to the node width",
+      "old": "uint64_t trunc_to(uint64_t v, int bits) { return v & wmask(bits); }",
+      "new": "uint64_t trunc_to(uint64_t v, int bits) { (void)bits; return v; }"
+    }
+  ]
+}
