@@ -75,6 +75,27 @@ theorem srcAgreeMem_push {env base : SlotEnv} (v : CertVal)
   rw [refMem_push_lt env v j (Nat.lt_of_lt_of_le hj hsz)]
   exact h j hj
 
+/-- How a SOURCE slot reads out of the INITIAL environment.
+
+The base case of the walk, and the one lemma this file was missing.  Everything
+else here moves a fact ACROSS a push; nothing discharged the read at the bottom
+of the chain, and that is exactly where `sourceEnvArr`'s `Array.map` blocks the
+kernel -- `Array.map` is well-founded recursion, so `refBV (sourceEnvArr ...) j`
+will not reduce by `rfl` however small the design.
+
+Without this, a generated walk can carry source agreement all the way down in
+O(1) per step and then fail to cash it in. -/
+theorem refBV_sourceEnv (srcs : Array SourceDesc) (i : RuntimeInput) (s : RuntimeState)
+    (j : Nat) (h : j < srcs.size) :
+    refBV (sourceEnvArr srcs i s) j = (sourceValue i s srcs[j]).asBV := by
+  simp [refBV, denoteRef, sourceEnvArr, h]
+
+/-- The memory-image counterpart of `refBV_sourceEnv`. -/
+theorem refMem_sourceEnv (srcs : Array SourceDesc) (i : RuntimeInput) (s : RuntimeState)
+    (j : Nat) (h : j < srcs.size) :
+    refMem (sourceEnvArr srcs i s) j = (sourceValue i s srcs[j]).asMem := by
+  simp [refMem, denoteRef, sourceEnvArr, h]
+
 /-- Slots already written stay written, also in O(1).  Together with
 `srcAgree_push` this covers every read a binding can make: an operand is either
 a source (handled above) or an earlier binding (handled here). -/
