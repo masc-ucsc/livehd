@@ -27,6 +27,8 @@ import LeanSemanticPrimitives.Projection.ProjectionCorrect
 -- Phase 5: the residual-fragment checker and the simulator bundle
 import LeanSemanticPrimitives.Projection.ResidualFragment
 import LeanSemanticPrimitives.Projection.ProjectedStep
+-- Phase 6: the DCERT1 loader and the per-field support report
+import LeanSemanticPrimitives.Projection.CertLoad
 
 namespace Projection
 
@@ -389,5 +391,10 @@ namespace Projection
 #print axioms Hw.FixtureStep.seq_one_cycle
 #print axioms Hw.FixtureStep.tiny_two_cycles
 #print axioms Hw.FixtureStep.seq_two_cycles
+
+-- Phase 6: the support report is FAITHFUL -- all six booleans true really does
+-- give `SupportedByProjection`.  The parser itself stays trusted.
+#print axioms CertLoad.slotsInRange_of_bool
+#print axioms CertLoad.supported_of_report
 
 end Projection
