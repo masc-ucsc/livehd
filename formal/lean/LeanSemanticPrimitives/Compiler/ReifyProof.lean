@@ -385,12 +385,10 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
       match compileDesign cert with
       | .error e => throwError "prove_reified_incr: compileDesign refused {d}"
       | .ok R    => pure R
-    if !R.flopUpdates.isEmpty || !R.memoryUpdates.isEmpty then
-      throwError "prove_reified_incr: {d} has {R.flopUpdates.size} flop update(s) and \
-        {R.memoryUpdates.size} memory update(s). The incremental walk covers the \
-        COMBINATIONAL result only: `denoteResidual` folds `flopNext` over the flop \
-        updates and nothing here proves anything about it. Refusing rather than \
-        emitting a theorem whose statement looks complete."
+    if !R.memoryUpdates.isEmpty then
+      throwError "prove_reified_incr: {d} has {R.memoryUpdates.size} memory update(s). \
+        Flops are supported; memory NEXT-IMAGES are not. Refusing rather than emitting \
+        a theorem whose statement looks complete."
     let nsrc  := R.sources.size
     let nb    := R.bindings.size
     let base  := f.getId
@@ -411,10 +409,31 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
     let outs : Array Term ← R.outputs.mapM fun o => do
       let v ← liftTermElabM (ReifyProof.valRefAt base nsrc o.slot envT)
       `(bv_resize $(quote o.width) $v)
+    -- Flop results go through the SAME `flopNextV` the source semantics uses, so
+    -- reset priority, polarity and the enable-false fallback are not restated
+    -- here where they could disagree.  Only the operand READS differ: named
+    -- values instead of environment lookups.
+    let flops : Array Term ← (Array.ofFn (n := R.flopUpdates.size) (fun j => j.val)).mapM
+      fun j => do
+        let fu := R.flopUpdates[j]!
+        let din ← liftTermElabM (ReifyProof.valRefAt base nsrc fu.din envT)
+        let en ← liftTermElabM (match fu.enable with
+          | none   => `(none)
+          | some e => do `(some $(← ReifyProof.valRefAt base nsrc e envT)))
+        let rp ← liftTermElabM (match fu.resetPin with
+          | none   => `(none)
+          | some r => do `(some $(← ReifyProof.valRefAt base nsrc r envT)))
+        let rvq ← liftTermElabM (if fu.resetValue < 0
+          then `(-(Int.ofNat $(quote fu.resetValue.natAbs)))
+          else `(Int.ofNat $(quote fu.resetValue.toNat)))
+        let ral := if fu.resetActiveLow then mkIdent ``true else mkIdent ``false
+        `(Compiler.flopNextV $(quote fu.width) $din $en $rp $rvq $ral
+            (($stId).flops[$(quote j)]?))
     elabCommand (← `(command|
       def $f ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState) :
           Compiler.RuntimeResult :=
-        { outputs := #[$outs,*], nextState := { flops := #[], mems := #[] } }))
+        { outputs := #[$outs,*],
+          nextState := { flops := #[$flops,*], mems := #[] } }))
     -- ---- the residual, and its shape, as named facts -----------------------
     let rNm := mkIdent (base ++ `R)
     elabCommand (← `(command|
@@ -439,16 +458,25 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
     let agmN  := fun (k : Nat) => mkIdent (Name.mkSimple s!"hagm{k}")
     let bFact := fun (k sl : Nat) => mkIdent (Name.mkSimple s!"hb{k}_{sl}")
     let valN  := fun (k : Nat) => mkIdent (base ++ Name.mkSimple s!"val{k}")
-    let termSlots := (R.outputs.map (fun o => o.slot)).toList.eraseDups
+    -- Terminal slots are no longer just the outputs: a flop's din, enable and
+    -- resetPin are read by nothing later in the binding list, so without them the
+    -- walk would drop exactly the facts the flop result needs.  `terminalRefs`
+    -- already computes this for `liveAfter`; the conclusion uses the same source.
+    let termRefs := (ReifyProof.terminalRefs R).toList.eraseDups
+    let termSlots := termRefs
     -- the promised conclusion, one conjunct per distinct output slot
     -- The STATEMENT must name the actual source environment, not the proof's
     -- local `e0`: `e0` is introduced by `set` inside the proof and is not bound
     -- where the theorem is stated. `set` then folds these occurrences into `e0`,
     -- so the walk's facts match without any further rewriting.
-    let mkFact : Nat → Nat → TermElabM Term := fun k sl =>
+    let mkFact : Nat → (Nat × Bool) → TermElabM Term := fun k p =>
+      let (sl, isMem) := p
       if sl < nsrc then
-        `(Compiler.refBV $(envN k) $(quote sl) = Compiler.refBV $envT $(quote sl))
-      else `(Compiler.refBV $(envN k) $(quote sl) = $(valN (sl - nsrc)) $envT)
+        (if isMem then `(Compiler.refMem $(envN k) $(quote sl) = Compiler.refMem $envT $(quote sl))
+         else `(Compiler.refBV $(envN k) $(quote sl) = Compiler.refBV $envT $(quote sl)))
+      else
+        (if isMem then `(Compiler.refMem $(envN k) $(quote sl) = $(valN (sl - nsrc)) $envT)
+         else `(Compiler.refBV $(envN k) $(quote sl) = $(valN (sl - nsrc)) $envT))
     let walkNm := mkIdent (base ++ `walk)
     let mut tacs : Array (TSyntax `tactic) := #[]
     let he0 := mkIdent (Name.mkSimple "he0")
@@ -530,8 +558,11 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
       tacs := tacs.push (← `(tactic|
         generalize (($(envN k)).push $pushV) = $(envN (k+1)):ident at $[$locs:ident]* ⊢))
     -- close
-    let anonCtor : Array Term ← termSlots.toArray.mapM fun sl =>
-      if sl < nsrc then `($(agN nb) $(quote sl) (by simp only [$(szN 0):ident]; omega))
+    let anonCtor : Array Term ← termSlots.toArray.mapM fun p =>
+      let (sl, isMem) := p
+      if sl < nsrc then
+        (if isMem then `($(agmN nb) $(quote sl) (by simp only [$(szN 0):ident]; omega))
+         else `($(agN nb) $(quote sl) (by simp only [$(szN 0):ident]; omega)))
       else `($(bFact nb sl))
     let trivTerm ← liftTermElabM `(trivial)
     let closing : Array Term := if anonCtor.isEmpty then #[trivTerm] else anonCtor
@@ -575,7 +606,19 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
     -- `rfl` projections of the certificate, so the final `simp` never has to
     -- unfold the whole `DesignCert` literal to see that there are no flops.
     let dfNm := mkIdent (base ++ `D_flops)
-    elabCommand (← `(command| theorem $dfNm : ($d).flops = #[] := rfl))
+    let flopsLit ← liftTermElabM do
+      let fs ← R.flopUpdates.mapM fun fu => do
+        let enq ← (match fu.enable with
+          | none => `(none) | some e => do `(some $(quote e)))
+        let rpq ← (match fu.resetPin with
+          | none => `(none) | some r => do `(some $(quote r)))
+        let rvq ← (if fu.resetValue < 0 then `(-(Int.ofNat $(quote fu.resetValue.natAbs)))
+                   else `(Int.ofNat $(quote fu.resetValue.toNat)))
+        let ral := if fu.resetActiveLow then mkIdent ``true else mkIdent ``false
+        `({ width := $(quote fu.width), din := $(quote fu.din), enable := $enq,
+            resetPin := $rpq, resetValue := $rvq, resetActiveLow := $ral })
+      `(#[$fs,*])
+    elabCommand (← `(command| theorem $dfNm : ($d).flops = $flopsLit := rfl))
     let dmNm := mkIdent (base ++ `D_mems)
     elabCommand (← `(command| theorem $dmNm : ($d).memories = #[] := rfl))
     let doNm := mkIdent (base ++ `D_outputs)
@@ -597,8 +640,8 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
                    $sNm:ident, $btlNm:ident]
         rw [$hEq:ident]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
-        simp [$f:ident, Compiler.compileOutput, $dfNm:ident, $dmNm:ident,
-              $doNm:ident, $hSimp,*]))
+        simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
+              Compiler.flopNext_eq, $dfNm:ident, $dmNm:ident, $doNm:ident, $hSimp,*]))
     let corNm := mkIdent (base ++ `correct)
     elabCommand (← `(command|
       theorem $corNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
