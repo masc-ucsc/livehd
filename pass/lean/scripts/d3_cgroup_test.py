@@ -201,7 +201,7 @@ def main() -> int:
         check("sidecar_records_cgroup_enforcement",
               meta["scheduling"]["rss_enforcement"] == "cgroup-memory-max"
               and meta["scheduling"]["rss_killed_max_rss_source"]
-                  == "cgroup-memory-peak-exact"
+                  == "cgroup-memory-peak-exact-accounted"
               and meta["scheduling"]["cgroup_base"],
               "the sidecar records that the KERNEL enforced the limit and that a "
               "killed row's RSS would be an exact memory.peak",
@@ -219,9 +219,10 @@ def main() -> int:
         check("cgroup_killed_row_exact_peak",
               killed and killed[0]["max_rss_kb"].isdigit()
               and int(killed[0]["max_rss_kb"]) > 0
-              and "EXACT peak" in killed[0]["detail"],
-              "and carries memory.peak as max_rss_kb, labelled an EXACT peak rather "
-              "than a sampled lower bound",
+              and "cgroup-ACCOUNTED" in killed[0]["detail"],
+              "and carries memory.peak as max_rss_kb, labelled an EXACT "
+              "cgroup-ACCOUNTED peak -- a different quantity from /usr/bin/time's "
+              "max RSS, which the legacy column name would otherwise imply",
               str(killed[0] if killed else {})[:300])
         check("cgroup_killed_row_zero_credit",
               killed and killed[0]["verdict"] == "rss_killed"
@@ -306,6 +307,83 @@ def main() -> int:
               "--enforce sampled keeps the advisory label, arms the sampled killer, "
               "and declares its RSS provenance as a lower bound",
               str(m_samp["scheduling"])[:300])
+
+        # ---- join-denied: mkdir works, migration does not --------------------
+        # The live defect this replaces: detection proved only mkdir/rmdir, so a
+        # sandboxed context that creates and configures a child perfectly but
+        # denies every write to cgroup.procs was reported AVAILABLE. The sidecar
+        # then said cgroup-memory-max while every probe died before doing any
+        # work. Simulated here with a directory that looks like a cgroup and
+        # whose cgroup.procs cannot be written.
+        fake = tmp / "fakecg"
+        (fake / "sub").mkdir(parents=True)
+        for f, v in (("cgroup.controllers", "cpu memory pids"),
+                     ("cgroup.subtree_control", "cpu memory pids")):
+            (fake / f).write_text(v)
+        joiner = tmp / "join.py"
+        joiner.write_text(sweep._JOIN_PROBE)
+        procs = fake / "sub" / "cgroup.procs"
+        procs.write_text("")
+        procs.chmod(0o444)                      # readable, NOT writable
+        rj = subprocess.run([sys.executable, str(joiner), str(fake / "sub")],
+                            capture_output=True, text=True, timeout=30)
+        check("join_probe_detects_denied_migration",
+              rj.returncode != 0 and "Permission" in (rj.stderr or ""),
+              "the join probe FAILS when cgroup.procs cannot be written -- the "
+              "exact condition that was previously reported as available",
+              (rj.stderr or "")[-200:])
+
+        # and detection built on that probe must reject such a candidate
+        check("detection_requires_real_join",
+              "_JOIN_PROBE" in (HERE / "d3_sweep.py").read_text()
+              and "cgroup.procs" in sweep._JOIN_PROBE
+              and "mkdir()" in (HERE / "d3_sweep.py").read_text(),
+              "cgroup_base() runs that probe and creates children EXCLUSIVELY, so "
+              "mkdir success alone can no longer imply availability")
+
+        # ---- strict refusal and auto fallback, actually exercised -------------
+        # Forced by pointing detection at a base where migration is impossible.
+        FORCE = ("import importlib.util,sys\n"
+                 "s=importlib.util.spec_from_file_location('sw',%r)\n"
+                 "m=importlib.util.module_from_spec(s); s.loader.exec_module(m)\n"
+                 "m.cgroup_base=lambda: None\n"
+                 "sys.argv=['d3_sweep.py']+sys.argv[1:]\n"
+                 "sys.exit(m.main())\n") % str(SWEEP)
+        forced = tmp / "force_unavail.py"
+        forced.write_text(FORCE)
+
+        def run_forced(extra, out, env_extra=None):
+            env = dict(os.environ, LAKE=str(stub), TMPDIR=str(tmp))
+            env.update(env_extra or {})
+            return subprocess.run(
+                [sys.executable, str(forced), "--certs", str(cdir),
+                 "--out", str(tmp / out), "--jobs", "1", "--timeout", "120", *extra],
+                cwd=ROOT, env=env, capture_output=True, text=True, timeout=180)
+
+        rs = run_forced(["--enforce", "cgroup", "--kill-over-rss-kb", "400000"],
+                        "strict.tsv")
+        check("strict_refuses_when_unavailable",
+              rs.returncode == 2 and "false guarantee" in rs.stderr,
+              "--enforce cgroup REFUSES where migration is impossible, rather than "
+              "running under the weaker sampled limit while claiming the stronger "
+              "one", rs.stderr[-300:])
+
+        ra = run_forced(["--enforce", "auto", "--kill-over-rss-kb", "400000"],
+                        "autofb.tsv", env_extra={"ALLOC_MB": "16"})
+        ma = json.loads((tmp / "autofb.tsv.meta.json").read_text()) \
+            if (tmp / "autofb.tsv.meta.json").is_file() else {}
+        check("auto_falls_back_and_records_actual",
+              ra.returncode == 0
+              and ma.get("scheduling", {}).get("rss_enforcement_requested") == "auto"
+              and ma.get("scheduling", {}).get("rss_enforcement") == "sampled-advisory"
+              and ma.get("scheduling", {}).get("sampled_kill_armed") is True,
+              "--enforce auto falls back and records sampled-advisory as the ACTUAL "
+              "enforcement, with the sampled killer re-armed",
+              (ra.stderr[-300:] + str(ma.get("scheduling"))[:200]))
+        check("auto_fallback_is_announced",
+              "falling back to the SAMPLED advisory limit" in ra.stderr,
+              "and says so on stderr rather than degrading silently",
+              ra.stderr[-300:])
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

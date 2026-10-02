@@ -43,6 +43,7 @@ import os
 import pathlib
 import re
 import shutil
+import uuid
 import signal
 import subprocess
 import sys
@@ -347,12 +348,39 @@ def _aggregate_rss_kb() -> int:
 # the host: another machine may mount cgroup v2 without granting the memory
 # controller to a user slice, and a sweep must still run there.
 # ---------------------------------------------------------------------------
-def cgroup_base() -> "pathlib.Path | None":
-    """The delegated cgroup directory this process may create children under.
+# A child that joins a cgroup and then becomes /bin/true.  Detection runs this
+# for real, because the only way to know a process can MIGRATE into a candidate
+# is to migrate one.
+_JOIN_PROBE = (
+    "import os,sys\n"
+    "open(sys.argv[1] + '/cgroup.procs', 'w').write(str(os.getpid()))\n"
+    "os.execv('/bin/true', ['/bin/true'])\n"
+)
 
-    Returns None unless cgroup v2 is mounted, the `memory` controller is
-    delegated AND enabled for subtrees, and a child is actually creatable --
-    all four checked by doing it, not by inferring it from the mount table.
+
+def cgroup_base() -> "pathlib.Path | None":
+    """The delegated cgroup directory probes can actually be confined in.
+
+    Every requirement is checked BY DOING IT, never inferred:
+
+      * cgroup v2 (a unified `0::` hierarchy)
+      * the `memory` controller delegated AND enabled for subtrees
+      * a child directory creatable EXCLUSIVELY (no `exist_ok`: reusing a
+        directory somebody else made would mix two probes' accounting)
+      * `memory.max` and `memory.oom.group` writable -- the group kill is part
+        of the correctness claim, so a host that cannot set it is not a host
+        where this mechanism applies
+      * A REAL PROCESS MIGRATING IN, by running a child that writes its own pid
+        to `cgroup.procs` and then execs
+      * `memory.peak` readable afterwards
+      * the child directory removable
+
+    The join check is the one that matters most, and its absence was a live
+    defect: a sandboxed context created and configured a child perfectly while
+    every write to `cgroup.procs` raised PermissionError.  Detection reported
+    availability, the sidecar recorded `cgroup-memory-max`, and every probe died
+    before doing any work -- a false guarantee, which is worse than a known-weak
+    one.
     """
     try:
         own = pathlib.Path("/proc/self/cgroup").read_text().strip()
@@ -363,18 +391,38 @@ def cgroup_base() -> "pathlib.Path | None":
     for cand in (pathlib.Path("/sys/fs/cgroup") / own[3:].lstrip("/"),
                  pathlib.Path(f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice"
                               f"/user@{os.getuid()}.service")):
+        probe = None
         try:
             if "memory" not in (cand / "cgroup.controllers").read_text().split():
                 continue
             if "memory" not in (cand / "cgroup.subtree_control").read_text().split():
                 continue
-            probe = cand / f".d3probe{os.getpid()}"
-            probe.mkdir(exist_ok=True)
-            probe.rmdir()
+            probe = cand / f".d3detect-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+            probe.mkdir()                       # EXCLUSIVE: no exist_ok
+            (probe / "memory.max").write_text(str(64 * 1024 * 1024))
+            (probe / "memory.oom.group").write_text("1")
+            r = subprocess.run([sys.executable, "-c", _JOIN_PROBE, str(probe)],
+                               capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                continue                        # cannot migrate in -> unusable
+            int((probe / "memory.peak").read_text().strip())
             return cand
-        except (OSError, PermissionError):
+        except (OSError, ValueError, subprocess.SubprocessError):
             continue
-    return None
+        finally:
+            if probe is not None:
+                try:
+                    (probe / "cgroup.kill").write_text("1")
+                except OSError:
+                    pass
+                for _ in range(20):
+                    try:
+                        probe.rmdir()
+                        break
+                    except FileNotFoundError:
+                        break
+                    except OSError:
+                        time.sleep(0.05)
 
 
 # The probe joins its cgroup in a tiny wrapper process, NOT in a `preexec_fn`.
@@ -399,45 +447,74 @@ class Cgroup:
     def __init__(self, base: pathlib.Path, name: str, max_kb: int):
         # Hashed: a module name can carry characters a cgroup path must not, and
         # a collision would merge two probes' accounting into one.
+        # EXCLUSIVE creation, with a unique suffix. `exist_ok=True` would let a
+        # probe reuse a directory somebody else made, mixing two probes' memory
+        # accounting into one `memory.peak`.
         safe = hashlib.sha256(name.encode()).hexdigest()[:32]
-        self.path = base / f"d3-{safe}"
-        self.path.mkdir(exist_ok=True)
+        self.path = base / f"d3-{safe}-{uuid.uuid4().hex[:8]}"
+        self.path.mkdir()
         try:
             if max_kb:
                 (self.path / "memory.max").write_text(str(max_kb * 1024))
-            for f, v in (("memory.swap.max", "0"),      # no swap escape hatch
-                         ("memory.oom.group", "1")):    # kill the probe as a UNIT
-                try:
-                    (self.path / f).write_text(v)
-                except OSError:
-                    pass
-            # The baseline for the DELTA.  An absolute count would misread a
+            try:
+                (self.path / "memory.swap.max").write_text("0")   # no swap escape
+            except OSError:
+                pass            # optional: swap may be off host-wide already
+            # REQUIRED, not best-effort: the claim "a multi-process probe is
+            # killed as a unit" rests on it, so a host that cannot set it is a
+            # host where this mechanism does not apply. Swallowing the failure
+            # would keep the claim while losing the property.
+            (self.path / "memory.oom.group").write_text("1")
+            # The baseline for the DELTA. An absolute count would misread a
             # pre-existing event, and exit 137 alone proves nothing: any SIGKILL
             # produces it, including our own teardown and an external `kill`.
             self.oom_before = self._oom_count()
+            if self.oom_before is None:
+                raise OSError("memory.events is unreadable, so an OOM could not "
+                              "be distinguished from any other kill")
         except Exception:
             self.destroy()          # never leave a partially configured child
             raise
 
-    def _oom_count(self) -> int:
+    def _oom_count(self):
+        """The kernel's oom_kill counter, or None if it cannot be read.
+
+        None is NOT zero. Returning 0 on a read error would report "no OOM
+        happened" when the truth is "nothing is known", and that difference
+        decides whether a row is `rss_killed` or a design result.
+        """
         try:
             ev = dict(l.split() for l in
                       (self.path / "memory.events").read_text().splitlines() if l)
             return int(ev.get("oom_kill", 0))
         except (OSError, ValueError):
-            return 0
+            return None
 
-    def peak_kb(self) -> int:
+    def peak_kb(self):
+        """cgroup-accounted peak memory in kB, or None if unreadable.
+
+        NOT the same quantity as `/usr/bin/time`'s max RSS: this is the cgroup's
+        own accounting of the whole subtree, including page cache charged to it.
+        The results column is called `max_rss_kb` for schema compatibility, so
+        the sidecar records which quantity actually filled it.
+        """
         for f in ("memory.peak", "memory.max_usage_in_bytes"):
             try:
                 return int((self.path / f).read_text().strip()) // 1024
             except (OSError, ValueError):
                 continue
-        return 0
+        return None
 
-    def oom_killed(self) -> bool:
-        """A DELTA in the kernel's own counter -- the only sound evidence."""
-        return self._oom_count() > self.oom_before
+    def oom_killed(self):
+        """True / False / None(unknown) from a DELTA in the kernel's counter.
+
+        A delta is the only sound evidence: exit 137 is produced by ANY SIGKILL,
+        and an absolute count could be inherited from an earlier event.
+        """
+        now = self._oom_count()
+        if now is None:
+            return None
+        return now > self.oom_before
 
     def destroy(self) -> bool:
         """Kill anything left, remove the cgroup, and SAY whether it worked.
@@ -1204,13 +1281,27 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         print(f"d3_sweep: WARNING: could not remove the cgroup for {m}; it still "
               f"holds a memory charge", file=sys.stderr)
 
+    if cg is not None and (cg_oom is None or cg_peak is None):
+        # The kernel's own accounting could not be read, so whether this probe
+        # was OOM-killed is UNKNOWN. Guessing either way would be worse than
+        # saying so: "not OOM" would turn a memory kill into a design result.
+        row["run_status"], row["verdict"] = "error", "runner_error"
+        row["detail"] = (f"cgroup accounting unreadable "
+                         f"(oom={'unknown' if cg_oom is None else cg_oom}, "
+                         f"peak={'unknown' if cg_peak is None else cg_peak}); "
+                         f"cannot distinguish a memory kill from a design result")
+        row["wall_s"] = f"{time.time() - t0:.2f}"
+        return row
+
     if cg is not None and cg_oom:
         # The KERNEL killed it at memory.max.  Continuous enforcement, and
         # `memory.peak` is a TRUE peak rather than a sampled lower bound.
         r = deferred_row(target, samples,
                          f"terminated by the kernel at the cgroup memory.max of "
-                         f"{CGROUP_MAX_KB} kB (max_rss_kb is cgroup memory.peak, an "
-                         f"EXACT peak, not a sampled bound)")
+                         f"{CGROUP_MAX_KB} kB (max_rss_kb holds cgroup memory.peak: "
+                         f"an EXACT cgroup-ACCOUNTED memory peak for the whole "
+                         f"subtree, which is NOT the same quantity as "
+                         f"/usr/bin/time's max RSS)")
         r["run_status"], r["verdict"] = "rss_killed", "rss_killed"
         r["launched"], r["wall_s"] = "1", f"{time.time() - t0:.2f}"
         r["max_rss_kb"] = str(cg_peak)
@@ -1672,6 +1763,11 @@ def main() -> int:
     if a.enforce in ("cgroup", "auto"):
         CGROUP_BASE = cgroup_base()
         CGROUP_MAX_KB = a.kill_over_rss_kb
+        if CGROUP_BASE is None and a.enforce == "auto":
+            print("d3_sweep: --enforce auto: cgroup v2 memory delegation is not "
+                  "usable here (a child could not be migrated into a test cgroup), "
+                  "falling back to the SAMPLED advisory limit. The sidecar records "
+                  "sampled-advisory as the actual enforcement.", file=sys.stderr)
         if CGROUP_BASE is None and a.enforce == "cgroup":
             print("REFUSING: --enforce cgroup was requested but cgroup v2 memory "
                   "delegation is not available here. Running under the sampled "
@@ -1732,7 +1828,7 @@ def main() -> int:
         "rss_sample_seconds_effective": a.rss_sample_seconds,
         # Machine-readable provenance for `max_rss_kb` on an rss_killed row.
         # `detail` says the same thing in prose, but prose is not checkable.
-        "rss_killed_max_rss_source": ("cgroup-memory-peak-exact"
+        "rss_killed_max_rss_source": ("cgroup-memory-peak-exact-accounted"
                                       if CGROUP_BASE is not None
                                       else "sampled-aggregate-lower-bound"),
         # Both caps are SAMPLED: they bound sustained memory, not instantaneous
