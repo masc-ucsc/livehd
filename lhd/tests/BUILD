@@ -836,6 +836,20 @@ sh_test(
     ],
 )
 
+# A parameterized CORE-ET top (txfma_adder: `parameter int unsigned Width = 0`)
+# must be elaborated with its tracked parameters, and BOTH reads must get them
+# -- the implementation and the LEC reference. Giving them to only one compares
+# two different designs and refutes them against each other.
+sh_test(
+    name = "module_params_test",
+    size = "small",
+    srcs = ["module_params_test.sh"],
+    data = [
+        "//pass/lean:census_data",
+        "//scripts:cycle_provenance_tools",
+    ],
+)
+
 # A sweep TIMEOUT must leave nothing running. `subprocess.run(timeout=...)`
 # killed the `/usr/bin/time` wrapper and left `lean` reparented to init, burning
 # 100% CPU and ~8 GB RSS through the rest of the sweep. The test is about

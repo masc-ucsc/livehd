@@ -93,6 +93,30 @@ n_src="$(grep -c '\.sv$' "$FILELIST" || true)"
 
 printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n' > "$ANCHOR"
 
+# ---------------------------------------------------------------------------
+# Per-module elaboration parameters (pass/lean/MODULE_PARAMS.tsv).
+#
+# A parameterized module elaborated as a TOP has no parameters, and for
+# `txfma_adder` -- `parameter int unsigned Width = 0` -- that means `logic
+# [-1:0]` ports and a slang refusal.  The assignment is tracked rather than
+# passed on a command line so the certificate's claim ("this MEMBER of the
+# family") is checkable afterwards.
+#
+# These flags reach BOTH reads below, the implementation AND the LEC reference.
+# Giving them to only one would elaborate two different designs and refute them
+# against each other with nothing wrong in the tool.
+# ---------------------------------------------------------------------------
+PARAMS_TSV="${COREET_PARAMS_TSV:-$LIVEHD_ROOT/pass/lean/MODULE_PARAMS.tsv}"
+declare -a MODULE_PARAMS=()
+if [[ -r "$PARAMS_TSV" ]]; then
+  while IFS=$'\t' read -r _m _flags _why; do
+    [[ "$_m" == "$TOP" ]] || continue
+    # shellcheck disable=SC2206  # the flags are deliberately word-split
+    MODULE_PARAMS=($_flags)
+    echo "module params: $TOP $_flags  ($_why)"
+  done < <(grep -v '^#' "$PARAMS_TSV" | grep -v '^[[:space:]]*$')
+fi
+
 {
   echo "COREET_ROOT=$COREET_ROOT"; echo "TOP=$TOP"; echo "FILELIST=$FILELIST ($n_src files)"
   echo "OUT=$OUT"; echo "RUN_LEC_GATE=$RUN_LEC_GATE"; echo "RUN_LEAN=$RUN_LEAN"
@@ -134,6 +158,7 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
   ${YOSYS_SCRIPT:+--set yosys.script="$YOSYS_SCRIPT"} \
   ${YOSYS_MEMORY_MODE:+--set yosys.memory_mode="$YOSYS_MEMORY_MODE"} \
   -- --ignore-assertions --relax-enum-conversions --allow-use-before-declare \
+  ${MODULE_PARAMS[@]+"${MODULE_PARAMS[@]}"} \
   > "$LOG_DIR/lhd_compile.log" 2>&1
 status=$?
 echo "compile exit=$status"
@@ -178,6 +203,8 @@ if [[ "$RUN_LEC_GATE" == "true" ]]; then
   cat "${ref_srcs[@]}" > "$REF_SV"
   # Concatenation drops the incdir, so re-supply it for intpipe_csr_file's .svh set.
   declare -a ref_slang=(--ignore-assertions --relax-enum-conversions)
+  # THE SAME parameters as the implementation read. See MODULE_PARAMS above.
+  ref_slang+=(${MODULE_PARAMS[@]+"${MODULE_PARAMS[@]}"})
   if grep -q '+incdir+' "$FILELIST"; then
     ref_slang+=(-I "$(grep -m1 '^+incdir+' "$FILELIST" | sed 's/^+incdir+//')")
   fi

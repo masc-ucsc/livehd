@@ -1,0 +1,22 @@
+# Per-module elaboration parameters for CORE-ET tops.
+#
+# WHY THIS FILE EXISTS.  A PARAMETERIZED module has no single semantics: it
+# denotes a family, one member per parameter assignment.  Elaborating such a
+# module as a TOP therefore needs the parameters supplied from outside, and the
+# certificate that results is a certificate for THAT MEMBER -- never for the
+# family.  Recording the assignment here is what makes the claim checkable
+# instead of implicit in someone's command line.
+#
+# `txfma_adder` declares `parameter int unsigned Width = 0` and is correct when
+# INSTANTIATED; standalone it elaborates to `logic [-1:0]` ports and slang
+# refuses it, which is the whole of its "compile-failed" census row.  Width 10
+# is `TXFMA_EXP_SEXT_PS_SZ` (vpu_defs_pkg.sv:855), the value 10 of its 10
+# in-tree instantiations use -- txfma_e5's three adders among them.
+#
+# The flags go to BOTH elaborations: the implementation read AND the LEC
+# reference read.  Giving only one of them the parameters would have the two
+# sides elaborate different designs, and the LEC would compare a 10-bit adder
+# against a degenerate one -- a mismatch with nothing wrong in the tool.
+#
+# module<TAB>slang_flags<TAB>why
+txfma_adder	-G Width=10	parameterized leaf; Width 10 = TXFMA_EXP_SEXT_PS_SZ, used by 10 of 10 in-tree instantiations

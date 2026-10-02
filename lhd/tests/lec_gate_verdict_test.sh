@@ -35,6 +35,27 @@ mk_json refuted  refuted
 mk_json unknown  unknown
 : > "$TMP/empty.json"
 printf 'lec: no verdict was reached; the run died early\n' > "$TMP/noverdict.log"
+
+# A REAL run's shape, copied from generated/core-et/txfma_adder/logs/lec_gate.*
+# rather than from the documented taxonomy. The result JSON carries NO verdict
+# field; the log's per-block diagnostic says "pass"; the proof is stated by the
+# hierarchical summary. The fixtures used to assert the documented shape only,
+# so the gate and its test agreed with each other and both were wrong: strict
+# mode rejected this exact run.
+printf '{"schema_version":1,"tool":"lhd","command":"lec","status":"pass","exit_code":0}\n' \
+  > "$TMP/realproof.json"
+{
+  printf '{"severity":"info","code":"lec-block-proven","pass":"pass.lec","message":"lec block %s pass","verdict":"pass"}\n' "'txfma_adder'"
+  printf "lec[hier]: 'txfma_adder' PROVEN (0 child collapses)\n"
+  printf 'lec[hier]: 1/1 def(s) proven top-down (0 via cache, 0 via semdiff, 1 via solver)\n'
+} > "$TMP/realproof.log"
+
+# ...and the same shape with a definition NOT discharged. A block-level "pass"
+# says nothing about the other blocks, so this must not pass strict mode.
+{
+  printf '{"severity":"info","code":"lec-block-proven","pass":"pass.lec","message":"lec block a pass","verdict":"pass"}\n'
+  printf 'lec[hier]: 1/3 def(s) proven top-down (0 via cache, 0 via semdiff, 1 via solver)\n'
+} > "$TMP/partial.log"
 : > "$TMP/empty.log"
 
 # <desc> <expected-exit> <status> <json> <log> <strict>
@@ -56,11 +77,16 @@ check "strict + UNKNOWN that exited 0 is fatal"    5  0  "$TMP/unknown.json"   "
 check "strict + MISSING verdict is fatal"          5  0  "$TMP/empty.json"     "$TMP/noverdict.log" true
 check "strict + no json at all is fatal"           5  0  ""                    ""                   true
 check "strict + proven but nonzero exit is fatal"  5  3  "$TMP/proven.json"    "$TMP/empty.log"     true
+check "strict + a REAL proof (no verdict field, block says pass, 1/1 defs proven)" \
+                                                  0  0  "$TMP/realproof.json" "$TMP/realproof.log" true
+check "strict + block pass but only 1/3 defs proven is fatal" \
+                                                  5  0  "$TMP/realproof.json" "$TMP/partial.log"   true
 
 echo "--- non-strict: historical behaviour, only a refutation is fatal ---"
 check "non-strict + proven passes"                 0  0  "$TMP/proven.json"    "$TMP/empty.log"     false
 check "non-strict + UNKNOWN continues"             0  1  "$TMP/unknown.json"   "$TMP/empty.log"     false
 check "non-strict + MISSING verdict continues"     0  0  "$TMP/empty.json"     "$TMP/noverdict.log" false
+check "non-strict + a REAL proof passes"           0  0  "$TMP/realproof.json" "$TMP/realproof.log" false
 check "non-strict + REFUTED is STILL fatal (4)"    4  10 "$TMP/refuted.json"   "$TMP/empty.log"     false
 
 echo "--- a refutation is caught from the log even with no json ---"

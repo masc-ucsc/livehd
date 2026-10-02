@@ -1,0 +1,27 @@
+{
+  "_what": "The CORE-ET LEC gate must recognise a real proof. `lhd lec` emits no top-level `verdict` field and its per-block diagnostic says \"pass\", so the gate read \"pass\", rejected it in strict mode, and its fixtures (written from the documented taxonomy) agreed with it.",
+  "target": "//lhd/tests:lec_gate_verdict_test",
+  "file": "scripts/lec_gate_verdict.sh",
+  "bazel": [
+    "--repo_env=CC=/usr/bin/gcc-15",
+    "--repo_env=CXX=/usr/bin/g++-15"
+  ],
+  "rebuild": [],
+  "mutants": [
+    {
+      "name": "L1 only a literal proven counts",
+      "old": "if [[ \"$verdict\" == \"proven\" || \"$all_defs_proven\" == \"true\" ]]; then",
+      "new": "if [[ \"$verdict\" == \"proven\" ]]; then"
+    },
+    {
+      "name": "L2 any defs line counts as proof",
+      "old": "    [[ \"$_k\" == \"$_n\" && \"$_k\" -gt 0 ]] && all_defs_proven=true",
+      "new": "    [[ \"$_k\" -ge 0 ]] && all_defs_proven=true"
+    },
+    {
+      "name": "L3 strict ignores the proof test",
+      "old": "  if [[ \"$status\" -ne 0 || \"$proven\" != \"true\" ]]; then\n    echo \"FATAL: LEC_STRICT=true requires a PROVEN result AND exit 0\" >&2",
+      "new": "  if [[ \"$status\" -ne 0 ]]; then\n    echo \"FATAL: LEC_STRICT=true requires a PROVEN result AND exit 0\" >&2"
+    }
+  ]
+}

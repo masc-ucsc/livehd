@@ -6,7 +6,7 @@ copied forward is the thing this file exists to stop.
 
 ## CORE-ET
 
-**108 of 122 accepted** (base 105, upgraded by later targeted runs 3).
+**109 of 122 accepted** (base 105, upgraded by later targeted runs 4).
 
 * base: `pass/lean/CENSUS_D2_122.tsv` -- one run over the whole corpus
 * corpus: `pass/lean/COREET_MODULES.txt`
@@ -19,6 +19,7 @@ copied forward is the thing this file exists to stop.
 | `minion_dcache_top` | ACCEPTED | - | 56878 | 4261.6 | - | `generated/census_d2/205bb908c_20261001-112611_2485582_31840/logs/direct_sweep.log` | progress-log |
 | `minion_frontend` | ACCEPTED | 4 | 76871 | 7412.0 | 12193620 | `generated/census_d2/34fac25b5_20261001-154122_2876382_29371/direct_sweep.tsv` | tsv-row |
 | `minion_frontend_thread_buffer` | ACCEPTED | - | 18840 | 372.9 | - | `generated/census_d2/205bb908c_20261001-102931_2205102_13944/logs/direct_sweep.log` | progress-log |
+| `txfma_adder` | ACCEPTED | 4 | 19 | 0.5 | 495836 | `generated/census_d2/e292add9f_20261001-220602_3277308_13522/direct_sweep.tsv` | tsv-row |
 
 `progress-log` strength means the run was stopped before its table was
 written, so the verdict is real but the timing columns do not exist: `minion_dcache_top`, `minion_frontend_thread_buffer`.
@@ -31,7 +32,6 @@ written, so the verdict is real but the timing columns do not exist: `minion_dca
 | `intpipe_csr_file` | lean-emit-failed | [ERROR] pass.lean: COMBINATIONAL CYCLE: node n_147760 (shl_147760) reads n_5080 (sext_5080), which is still be |
 | `intpipe_top` | single_edge-failed | latch `latch_27604` and state element `flop_70160:$driver$rf.u_rf.wr_data_del_q` commit at the SAME edge, and  |
 | `minion_top` | timeout | timed out (SIGTERM from `timeout`) |
-| `txfma_adder` | compile-failed | cmd:read_slang --top txfma_adder --no-proc --ignore-assertions --relax-enum-conversions --allow-use-before-dec |
 | `txfma_top` | lean-emit-failed | [ERROR] pass.lean: COMBINATIONAL CYCLE: node n_179896 (mux_179896) reads n_179900 (mux_179900), which is still |
 | `txfma_top_fake` | compile-failed | ERROR: Feature unimplemented at external/+http_archive+yosys_slang/src/slang_frontend.cc:1254, see AST and cod |
 | `txfmaexp_top` | blocked | RTL differential mismatch (7/2980) under BOTH lowerings; pre-existing, unresolved |
