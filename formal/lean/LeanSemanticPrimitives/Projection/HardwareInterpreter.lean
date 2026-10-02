@@ -887,12 +887,19 @@ CERTIFICATE alone and is decided once; `RuntimeSized` is about the three vectors
 a particular step is handed.  Mixing them would make a design-level fact look
 like a per-cycle obligation, and vice versa.
 
-NEITHER IS "PROJECTABLE".  `SupportedByProjection D` says every feature of `D`
-has an implementation -- the same thing the operator census measures statically.
-It does NOT say `projectDesign D` succeeds: that additionally needs the
-specializer's fuel to suffice, which is a property of the run and not of the
-design, and which the theorems below therefore take as a separate hypothesis
-rather than fold in. -/
+NEITHER IS "PROJECTABLE", and NEITHER IS WHAT THE CENSUS MEASURES.
+
+The CORE-ET census discharges exactly ONE field, `ops`, and only over the READY
+population: it says every node operator appearing in those certificates has an
+`applyOp` case.  It says nothing about `wf`, `memFree`, `sources` or
+`flopClocks` -- it never looks at dependency ordering, slot ranges, memories,
+source forms or clock ordinals.  So "65/65" is not evidence that 65 designs are
+supported; it is evidence about one conjunct.
+
+And `SupportedByProjection D` does not say `projectDesign D` succeeds either:
+that additionally needs the specializer's fuel to suffice, which is a property
+of the RUN and not of the design, and which the theorems below therefore take
+as a separate hypothesis rather than fold in. -/
 
 /-- The source forms `srcVal` evaluates.
 
@@ -913,10 +920,21 @@ def SourceSupported : Compiler.SourceDesc → Bool
 /-- The node operators `applyOp` dispatches on: the seventeen the CORE-ET
 census finds, and no others.  `Op_Const` is absent because a constant is a
 SOURCE, never a node op -- which is why the census finds it in zero node
-positions.  Everything else falls through to `applyOp`'s catch-all, which
-answers `mk_bv w 0`; that agrees with `eval_op`'s own catch-all, so the two do
-not DISAGREE, but neither refuses, which is exactly why this predicate has to
-be a hypothesis rather than an afterthought. -/
+positions.
+
+THIS EXCLUSION IS SEMANTICALLY LOAD-BEARING, not refusal hygiene.  An earlier
+version of this comment claimed the unsupported fallback agrees with
+`eval_op`'s own catch-all.  That is FALSE for every excluded operator that
+`eval_op` actually implements.  `applyOp` answers `mk_bv w 0`, while at width 4
+
+    eval_op .Op_UDiv 4 [6, 2] = 3
+    eval_op .Op_Sub  4 [6, 2] = 4
+    eval_op .Op_Mult 4 [3, 2] = 6
+
+so an unsupported node does not merely go unrefused -- `I_hw` returns a
+DIFFERENT ANSWER from the reference.  Only operators `eval_op` itself leaves to
+its catch-all coincide.  Hence this field is a genuine hypothesis of adequacy,
+without which the theorem is false rather than merely unproven. -/
 def OpSupported : LGraphOp → Bool
   | .Op_And     | .Op_Or   | .Op_Xor  | .Op_Not  | .Op_Sum _ => true
   | .Op_EQ      | .Op_Ror  | .Op_MuxBool | .Op_MuxN         => true
@@ -995,6 +1013,54 @@ structure RuntimeSized (D : Compiler.DesignCert) (e : Compiler.ClockEdges)
 theorem RuntimeSized_allEdges_edges {D : Compiler.DesignCert} :
     D.clocks.size ≤ (Compiler.allEdges D).size := by
   simp [Compiler.allEdges_size]
+
+/-! ### The shared state-shape contract, and the operational inequality
+
+`Compiler.RuntimeWF` is the SHARED contract and says the state array has
+EXACTLY the design's shape.  `RuntimeSized.flopsSized` is weaker on purpose --
+an inequality is all the slot reads need -- but the weaker form is an INTERNAL
+operational convenience and must not quietly become the public contract.  The
+bridge below is how the public theorem's `RuntimeWF` reaches it. -/
+
+theorem RuntimeSized.flopsSized_of_runtimeWF {D : Compiler.DesignCert}
+    {i : Compiler.RuntimeInput} {s : Compiler.RuntimeState}
+    (h : Compiler.RuntimeWF D i s) : D.flops.size ≤ s.flops.size :=
+  Nat.le_of_eq h.flopsSized.symm
+
+theorem RuntimeSized.of_runtimeWF {D : Compiler.DesignCert} {e : Compiler.ClockEdges}
+    {i : Compiler.RuntimeInput} {s : Compiler.RuntimeState}
+    (hwf : Compiler.RuntimeWF D i s)
+    (hedges : D.clocks.size ≤ e.size)
+    (hin : ∀ sd ∈ D.sources.toList, SourceInputBound sd i.size)
+    (hst : ∀ sd ∈ D.sources.toList, SourceFlopBound sd s.flops.size) :
+    RuntimeSized D e i s :=
+  ⟨hedges, hin, hst, RuntimeSized.flopsSized_of_runtimeWF hwf⟩
+
+/-! ### Milestone 2 item 2: THE TARGET, stated exactly
+
+A DEFINITION, not a theorem.  Nothing below assumes it; it is written out so
+the goal the helper lemmas are aiming at is visible, typechecked, and cannot
+drift while they are built.  The public form takes the SHARED `RuntimeWF`, not
+the internal inequality.
+
+What it says: running the object interpreter on the ENCODED design, edge
+vector, input and state yields exactly the encodings of what the shared
+reference semantics computes -- `iff`, so neither direction is assumed, and
+over `Eval` rather than `evalFuel`, so no fuel appears in the statement. -/
+def IHwAdequate (D : Compiler.DesignCert) (e : Compiler.ClockEdges)
+    (i : Compiler.RuntimeInput) (s : Compiler.RuntimeState) : Prop :=
+  ∀ r : Val,
+    Eval hwP []
+      (.call hwP.entry
+        [.lit (encDesign D), .lit (encEdges e), .lit (encInput i), .lit (encState s)]) r
+    ↔ ResultRel r (Compiler.interpretDesign D e i s)
+
+/-- The shape the proved theorem will take, once the helpers exist. -/
+def IHwAdequacyGoal : Prop :=
+  ∀ (D : Compiler.DesignCert) (e : Compiler.ClockEdges)
+    (i : Compiler.RuntimeInput) (s : Compiler.RuntimeState),
+    SupportedByProjection D → Compiler.RuntimeWF D i s → RuntimeSized D e i s →
+    IHwAdequate D e i s
 
 /-- A supported design's clock ordinals are in range, so `interpretDesign`'s
 conservativity hypotheses are discharged by support alone. -/
