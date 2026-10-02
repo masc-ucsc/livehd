@@ -21,6 +21,7 @@ import LeanSemanticPrimitives.Projection.OperatorBridge
 import LeanSemanticPrimitives.Projection.HardwareInterpreter
 -- Phase 4 (reordered from Phase 8): the generic surface-semantics layer
 import LeanSemanticPrimitives.Projection.SurfaceSemantics
+import LeanSemanticPrimitives.Projection.HardwareAdequacy
 
 namespace Projection
 
@@ -229,5 +230,31 @@ namespace Projection
 #print axioms Surface.SEval_call2
 #print axioms Surface.SEval_call3
 #print axioms Surface.SEval_call4
+#print axioms Surface.resolveProgram_entry
+#print axioms Surface.resolveList_lits
+#print axioms Surface.SEvalList_lits
+#print axioms Surface.SEval_entry
+
+-- Canonicality: an encoded value is the ONLY value its decoder accepts.  This
+-- is strictly stronger than the round trip and strictly stronger than
+-- functionality, and it is what makes `IHwAdequate` statable as an `iff`.
+#print axioms canonical_listG
+#print axioms canonical_arr
+#print axioms field1_canonical
+#print axioms field2_canonical
+#print axioms canonical_BV
+#print axioms canonical_BVs
+#print axioms InputRel_canonical
+#print axioms StateRel_canonical
+#print axioms ResultRel_canonical
+
+-- The concrete hardware bridge.
+#print axioms Hw.hwResolved_isOk
+#print axioms Hw.hwResolved_ok
+#print axioms Hw.hwP_resolves
+#print axioms Hw.hw_transfer
+#print axioms Hw.hw_entry
+#print axioms Hw.resultRel_iff_eq
+#print axioms Hw.resultRel_interpret_iff
 
 end Projection

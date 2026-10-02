@@ -255,6 +255,107 @@ theorem ResultRel_functional {v : Val} {r q : RuntimeResult}
     (h₁ : ResultRel v r) (h₂ : ResultRel v q) : r = q :=
   Option.some.inj (h₁ ▸ h₂)
 
+/-! ## Canonicality
+
+`ResultRel v r` says `v` DENOTES `r`.  The adequacy `iff` needs more: that `v`
+IS `encResult r`.  `ResultRel_functional` does not give that -- it compares two
+denotations of one value, never two values of one denotation.
+
+It is true here, and it is true for a structural reason rather than by luck:
+every decoder in this file rejects outright every `Val` shape outside its
+encoder's image.  `asBV` accepts only a two-field `bvTag` record with a
+non-negative width; `decListG` accepts only `nil` and `cons`; `field1`/`field2`
+accept only a record of exactly the right tag and arity.  So the chain of
+canonicality lemmas below is each decoder's rejection clause read forwards.
+
+Had any decoder been lenient -- a width clamped rather than refused, a surplus
+field ignored -- this would be FALSE and `IHwAdequate` would be unprovable as
+an `iff`, since the object could return a second value denoting the same
+result. -/
+
+theorem field1_canonical {tg : Nat} {v a : Val} (h : field1 tg v = some a) :
+    v = .ctor tg [a] := by
+  unfold field1 at h
+  split at h
+  · rename_i t x
+    split at h
+    · rename_i ht; subst ht; simp only [Option.some.injEq] at h; subst h; rfl
+    · exact absurd h (by simp)
+  · exact absurd h (by simp)
+
+theorem field2_canonical {tg : Nat} {v : Val} {ab : Val × Val}
+    (h : field2 tg v = some ab) : v = .ctor tg [ab.1, ab.2] := by
+  unfold field2 at h
+  split at h
+  · rename_i t x y
+    split at h
+    · rename_i ht; subst ht; simp only [Option.some.injEq] at h; subst h; rfl
+    · exact absurd h (by simp)
+  · exact absurd h (by simp)
+
+/-- A negative width is REFUSED by `asBV`, not clamped, which is exactly what
+makes the accepted value unique: `Int.ofNat w.toNat = w` needs `0 ≤ w`. -/
+theorem canonical_BV : Canonical encBV decBV := by
+  intro w b h
+  simp only [decBV, asBV] at h
+  split at h
+  · rename_i t wd vl
+    split at h
+    · rename_i ht
+      split at h
+      · rename_i hw
+        simp only [Option.some.injEq] at h
+        subst h
+        subst ht
+        have hwd : Int.ofNat wd.toNat = wd := Int.toNat_of_nonneg hw
+        simp only [encBV, ofBV, mkBV, hwd]
+      · exact absurd h (by simp)
+    · exact absurd h (by simp)
+  · exact absurd h (by simp)
+
+theorem canonical_BVs : Canonical encBVs decBVs := canonical_arr canonical_BV
+
+theorem InputRel_canonical {v : Val} {i : RuntimeInput} (h : InputRel v i) :
+    v = encInput i := canonical_BVs h
+
+theorem StateRel_canonical {v : Val} {s : RuntimeState} (h : StateRel v s) :
+    v = encState s := by
+  simp only [StateRel, decState] at h
+  cases hf : field1 tagState v with
+  | none   => rw [hf] at h; exact absurd h (by simp)
+  | some fv =>
+      rw [hf] at h
+      simp only [Option.bind_some] at h
+      cases hb : decBVs fv with
+      | none    => rw [hb] at h; exact absurd h (by simp)
+      | some fs =>
+          rw [hb] at h
+          simp only [Option.map_some, Option.some.injEq] at h
+          subst h
+          rw [field1_canonical hf, encState, ← canonical_BVs hb]
+
+theorem ResultRel_canonical {v : Val} {r : RuntimeResult} (h : ResultRel v r) :
+    v = encResult r := by
+  simp only [ResultRel, decResult] at h
+  cases hp : field2 tagResult v with
+  | none    => rw [hp] at h; exact absurd h (by simp)
+  | some so =>
+      rw [hp] at h
+      simp only [Option.bind_some] at h
+      cases hs : decState so.1 with
+      | none    => rw [hs] at h; exact absurd h (by simp)
+      | some s' =>
+          rw [hs] at h
+          simp only [Option.bind_some] at h
+          cases ho : decBVs so.2 with
+          | none    => rw [ho] at h; exact absurd h (by simp)
+          | some o' =>
+              rw [ho] at h
+              simp only [Option.map_some, Option.some.injEq] at h
+              subst h
+              rw [field2_canonical hp, encResult,
+                  ← StateRel_canonical hs, ← canonical_BVs ho]
+
 /-- A design with no memories produces states this encoding can represent, for
 every input and every starting state.
 

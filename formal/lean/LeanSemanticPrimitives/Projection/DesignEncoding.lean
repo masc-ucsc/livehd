@@ -61,6 +61,42 @@ theorem decListG_encListG {α : Type} {e : α → Val} {d : Val → Option α}
   | []      => rfl
   | x :: xs => by simp [encListG, decListG, h x, decListG_encListG h xs]
 
+/-! ### Canonicality
+
+Round tripping says `dec (enc x) = some x`.  The CONVERSE -- that `enc x` is the
+only value `dec` accepts for `x` -- is a separate and strictly stronger fact,
+and it is the one an adequacy `iff` needs: `ResultRel v rr` must pin `v` itself,
+not merely pin what `v` denotes.  `ResultRel_functional` is not enough, because
+it compares two DENOTATIONS of one value and says nothing about two values. -/
+
+/-- `d` accepts nothing but `e`'s image, and accepts each point only there. -/
+def Canonical {α : Type} (e : α → Val) (d : Val → Option α) : Prop :=
+  ∀ {w : Val} {x : α}, d w = some x → w = e x
+
+/-- Canonicality lifts through a cons chain.  Structural recursion on the VALUE,
+mirroring `decListG`: every `Val` shape that is neither `nil` nor `cons` decodes
+to `none`, so the chain's own shape is forced too. -/
+theorem canonical_listG_aux {α : Type} {e : α → Val} {d : Val → Option α}
+    (h : Canonical e d) :
+    ∀ (v : Val) (xs : List α), decListG d v = some xs → v = encListG e xs
+  | .nil,      _,  hv => by
+      simp only [decListG, Option.some.injEq] at hv; subst hv; rfl
+  | .cons a b, _,  hv => by
+      simp only [decListG] at hv
+      split at hv
+      · rename_i x ys ha hb
+        simp only [Option.some.injEq] at hv
+        subst hv
+        rw [encListG, ← h ha, ← canonical_listG_aux h b ys hb]
+      · exact absurd hv (by simp)
+  | .int _,    _,  hv => by simp [decListG] at hv
+  | .bool _,   _,  hv => by simp [decListG] at hv
+  | .ctor _ _, _,  hv => by simp [decListG] at hv
+
+theorem canonical_listG {α : Type} {e : α → Val} {d : Val → Option α}
+    (h : Canonical e d) : Canonical (encListG e) (decListG d) :=
+  fun hv => canonical_listG_aux h _ _ hv
+
 /-- `Array` is what `DesignCert` actually uses; `List` is what a cons chain
 decodes to.  Bridging once here keeps every concrete encoder below free of
 `Array`/`List` conversion noise. -/
@@ -72,6 +108,18 @@ def decArr {α : Type} (d : Val → Option α) (v : Val) : Option (Array α) :=
 theorem decArr_encArr {α : Type} {e : α → Val} {d : Val → Option α}
     (h : ∀ x, d (e x) = some x) (xs : Array α) : decArr d (encArr e xs) = some xs := by
   simp [decArr, encArr, decListG_encListG h]
+
+theorem canonical_arr {α : Type} {e : α → Val} {d : Val → Option α}
+    (h : Canonical e d) : Canonical (encArr e) (decArr d) := by
+  intro v xs hv
+  simp only [decArr] at hv
+  cases hl : decListG d v with
+  | none    => rw [hl] at hv; exact absurd hv (by simp)
+  | some ys =>
+      rw [hl] at hv
+      simp only [Option.map_some, Option.some.injEq] at hv
+      subst hv
+      simpa [encArr] using canonical_listG_aux h v ys hl
 
 /-! ## Scalars
 

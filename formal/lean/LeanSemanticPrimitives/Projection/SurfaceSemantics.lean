@@ -190,6 +190,35 @@ theorem resolveProgram_funs {P : SProgram} {Pr : Program} {inl : List Bool}
       subst h1
       rfl
 
+/-- The entry INDEX is the position of the entry name, so a named entry call
+crosses to the resolved program's own `entry` without anyone computing it. -/
+theorem resolveProgram_entry {P : SProgram} {Pr : Program} {inl : List Bool}
+    (h : resolveProgram P = .ok (Pr, inl)) :
+    idxOf (funNames P) P.entry = some Pr.entry := by
+  cases hfuns : resolveProgram.resolveFuns (funNames P) P.funs with
+  | error m => simp [resolveProgram, bind, Except.bind, hfuns] at h
+  | ok funs =>
+    cases he : idxOf (funNames P) P.entry with
+    | none => simp [resolveProgram, bind, Except.bind, hfuns, he] at h
+    | some e0 =>
+      simp [resolveProgram, bind, Except.bind, hfuns, he] at h
+      obtain ⟨h1, -⟩ := h
+      subst h1
+      rfl
+
+/-- A list of literals resolves to itself; no scope is consulted. -/
+theorem resolveList_lits {fns scope : List String} :
+    ∀ (vs : List Val), resolveList fns scope (vs.map SExp.lit) = .ok (vs.map Term.lit)
+  | []      => rfl
+  | v :: vs => by
+      simp only [List.map_cons, resolveList, resolve, bind, Except.bind,
+                 resolveList_lits vs]
+
+theorem SEvalList_lits {P : SProgram} {σ : SEnv} :
+    ∀ (vs : List Val), SEvalList P σ (vs.map SExp.lit) vs
+  | []      => .nil
+  | _ :: vs => .cons .lit (SEvalList_lits vs)
+
 /-! ## The bridge
 
 The ONLY place the named world meets the resolved one.  Everything a program
@@ -467,6 +496,19 @@ theorem SEval_call4 {P : SProgram} {σ : SEnv} {f : String} {e₁ e₂ e₃ e₄
     (hb : SEval P (fd.params.zip [a, b, c, d]) fd.body v) :
     SEval P σ (.call f [e₁, e₂, e₃, e₄]) v :=
   .call (.cons h₁ (.cons h₂ (.cons h₃ (.cons h₄ .nil)))) hf (by simpa using hp) hb
+
+/-- The shape every whole-program adequacy proof needs: a named entry call on
+literal arguments, crossed once.  `Pr.entry` is never computed. -/
+theorem SEval_entry {P : SProgram} {Pr : Program} {inl : List Bool}
+    (hres : resolveProgram P = .ok (Pr, inl)) {vs : List Val} {v : Val}
+    (h : SEval P [] (.call P.entry (vs.map SExp.lit)) v) :
+    Eval Pr [] (.call Pr.entry (vs.map Term.lit)) v := by
+  have hr : resolve (funNames P) [] (.call P.entry (vs.map SExp.lit))
+      = .ok (.call Pr.entry (vs.map Term.lit)) := by
+    simp only [resolve, bind, Except.bind, resolveList_lits,
+               resolveProgram_entry hres]
+  have hE := SEval_sound hres [] _ v _ h hr
+  simpa using hE
 
 end Surface
 end Projection
