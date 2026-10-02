@@ -342,7 +342,10 @@ was actually specialized for, and check the runtime shape, before evaluating.
 file assumes it. -/
 
 inductive SimError where
-  | designMismatch
+  -- NOTE: there is deliberately no `designMismatch`.  `Step`'s design argument
+  -- is redundant for an already-specialized simulator, and comparing a whole
+  -- `DesignCert` every cycle would be O(|D|) of pure overhead.  `stepOf`
+  -- IGNORES it and `StepCorrect` is stated for `sim.design` alone.
   | runtimeShape
   | boundExceeded
   | residualTypeError (msg : String)

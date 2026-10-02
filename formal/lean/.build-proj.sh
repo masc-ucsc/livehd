@@ -45,6 +45,7 @@ MODULES=(
   Projection/HardwareAdequacy
   Projection/ProjectionCorrect
   Projection/ResidualFragment
+  Projection/ProjectedStep
   Projection/Scaling
   Projection/Audit
 )

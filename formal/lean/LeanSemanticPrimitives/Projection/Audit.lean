@@ -26,6 +26,7 @@ import LeanSemanticPrimitives.Projection.HardwareAdequacy
 import LeanSemanticPrimitives.Projection.ProjectionCorrect
 -- Phase 5: the residual-fragment checker and the simulator bundle
 import LeanSemanticPrimitives.Projection.ResidualFragment
+import LeanSemanticPrimitives.Projection.ProjectedStep
 
 namespace Projection
 
@@ -372,5 +373,21 @@ namespace Projection
 #print axioms Hw.checkResidual_sound
 #print axioms Hw.mkSim_proj_chk
 #print axioms Hw.runProjected_never_boundExceeded
+
+-- Phase 5 increment 2: the runtime check, both halves of `runProjected`, and
+-- the first `StepCorrect` instance on this branch.
+#print axioms Hw.runtimeOK_sound
+#print axioms Hw.fragB_evalFuel
+#print axioms Hw.fragListB_evalFuel
+#print axioms Hw.checkResidual_complete
+#print axioms Hw.runProjected_correct
+#print axioms Hw.runProjected_success
+#print axioms Hw.stepOf_correct
+#print axioms Hw.stepOf_succeeds
+#print axioms Hw.stepTrace_projected
+#print axioms Hw.FixtureStep.tiny_one_cycle
+#print axioms Hw.FixtureStep.seq_one_cycle
+#print axioms Hw.FixtureStep.tiny_two_cycles
+#print axioms Hw.FixtureStep.seq_two_cycles
 
 end Projection
