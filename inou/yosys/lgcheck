@@ -588,6 +588,11 @@ run_equiv_yosys() {
     bmc=1
     shift
   fi
+  # A focused bounded-oracle check can bypass correspondence heuristics. This
+  # still returns inconclusive when BMC finds no counterexample, never proven.
+  if [ "${LGCHECK_BMC_ONLY:-0}" = 1 ] && [ "$bmc" -eq 0 ]; then
+    return 125
+  fi
   if [ "$LGCHECK_EQUIV_TIMEOUT" -eq 0 ]; then
     "$YOSYS" "$@"
     return
@@ -1284,9 +1289,29 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # An all-X start is not an option: with a reset it manufactures X-pessimism
   # refutes (above), without one it leaves e.g. a resetless LFSR undefined
   # forever and the gold X mask hides every difference.
+  bmc_init="-set-init-zero"
+  bmc_defined_outputs=""
+  if [ "${RESET_STMT}" = "" ]; then
+    # A power-on initializer may refine an unspecified reference state. Giving
+    # the reference zeros instead manufactures a mismatch against that valid
+    # refinement (spec_memory_initial_poweron_only, after heuristics exhaust
+    # a short budget). Preserve X only for this case, and require defined gate
+    # outputs at the checked step so X pessimism cannot become a refutation.
+    if ! bmc_defined_outputs=$(python3 "$power_on_tool" bmc-init lgcheck_clock_domains.json); then
+      echo "INCONCLUSIVE: could not determine a safe bounded initialization policy."
+      exit 2
+    fi
+    if [ -n "$bmc_defined_outputs" ]; then
+      bmc_init="-set-init-undef -enable_undef"
+    fi
+  fi
   bmc_sat_cmds=""
   for ((t = bmc_start; t < bmc_start + LGCHECK_BMC_STEPS; t++)); do
-    bmc_sat_cmds+="sat -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter; "
+    bmc_defined=""
+    while IFS= read -r output; do
+      [ -z "$output" ] || bmc_defined+=" -set-def-at ${t} ${output}"
+    done <<< "$bmc_defined_outputs"
+    bmc_sat_cmds+="sat -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 ${bmc_init} ${bmc_defined} -set-def-inputs -show-ports miter; "
   done
 
   bmc_save_model=""
@@ -1341,7 +1366,7 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # INCONCLUSIVE result; only the structural/inductive engines above may exit 0.
   if [ "$(grep -c 'no model found: SUCCESS' lgcheck_bmc.log)" -eq "${LGCHECK_BMC_STEPS}" ]; then
     echo "BMC: found no counterexample within ${LGCHECK_BMC_STEPS} steps top:${fm_top}; this bounded result is not a proof."
-    if [ "$LGCHECK_INDUCT_AFTER_BMC" = 1 ]; then
+    if [ "$LGCHECK_INDUCT_AFTER_BMC" = 1 ] && [ -z "$bmc_defined_outputs" ]; then
       # Use the SAME global-clock model, defined inputs, initialization, and
       # reset window as BMC. No guessed internal correspondence cuts survive
       # into this whole-miter induction query. A failed induction hypothesis

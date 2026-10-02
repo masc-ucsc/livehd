@@ -15,6 +15,11 @@ set -u
 LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/lhd_sim_obs_$$}"
 mkdir -p "$W"
+part="${1:-all}"
+case "$part" in
+  all | structural | runtime | query | selection) ;;
+  *) echo "FAIL: unknown observability group $part" >&2; exit 1 ;;
+esac
 
 fail() {
   echo "FAIL: $*" >&2
@@ -45,6 +50,7 @@ test top.run {
 }
 EOF
 
+if [ "$part" = all ] || [ "$part" = structural ]; then
 # ---- structural: observation is compile-time instrumentation -----------------
 # A plain fast setup must not publish every child boundary in its hot colors.
 lhd_sim "$W/obs.prp" --setup-only --workdir "$W/fast" -q >/dev/null 2>&1 || fail "plain setup-only failed"
@@ -76,6 +82,9 @@ grep -q '"--probe"'          "$DRV"    || fail "driver does not accept --probe"
 
 # lhd locates its declared simulator runtime files; a failed build must fail.
 
+fi
+
+if [ "$part" = all ] || [ "$part" = runtime ]; then
 # (1) --list-signals: the hierarchical flop names are present
 lhd_sim "$W/obs.prp" --list-signals --result-json "$W/ls.json" --workdir "$W/run" -q >/dev/null 2>&1 \
   || fail "--list-signals run failed"
@@ -104,6 +113,9 @@ assert all("acc.u_sub_sout_0.c" in r for r in p["rows"]), "sub signal not probed
 print("  probe OK (acc.acc = %s)" % accs)
 PY
 
+fi
+
+if [ "$part" = all ] || [ "$part" = query ]; then
 # The occurrence-wide path bypasses child cycle() calls. Its name registry must
 # nevertheless preserve both sides of that removed module boundary: the child
 # output is the pre-rise/during-period value and the child input is the settled
@@ -124,6 +136,9 @@ assert r["child_in"]["value"]["sampled"] == "settled", r["child_in"]
 print("  direct hierarchy observation OK")
 PY
 
+fi
+
+if [ "$part" = all ] || [ "$part" = runtime ]; then
 # (3) --break-when: first cycle acc.acc > 15
 lhd_sim "$W/obs.prp" --break-when "acc.acc > 15" --result-json "$W/bw.json" --workdir "$W/run" \
   --diag-fmt pretty > "$W/bw.out" 2>&1 || fail "--break-when run failed"
@@ -172,6 +187,9 @@ assert "acc.acc" in row and "acc.u_sub_sout_0.c" in row, row
 print("  probe comma-space OK")
 PY
 
+fi
+
+if [ "$part" = all ] || [ "$part" = selection ]; then
 # observability needs a single test; a 2-test file without --test is rejected
 cat > "$W/two.prp" <<'EOF'
 /*
@@ -188,5 +206,7 @@ lhd_sim "$W/two.prp" --list-signals --workdir "$W/two" -q 2>&1 | grep -q "single
 lhd_sim "$W/two.prp" a.x --list-signals --result-json "$W/two.json" --workdir "$W/two" -q >/dev/null 2>&1 \
   || fail "single-test --list-signals failed"
 python3 -c 'import json,sys; assert json.load(open("'"$W"'/two.json"))["debug"]["signals"]' || fail "no signals for the selected test"
+
+fi
 
 echo "PASS: lhd sim observability (list-signals, probe trajectory, break-when + edge cases)"

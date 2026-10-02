@@ -231,7 +231,7 @@ private:
   static std::string          pure_argument(std::string expression, const hhds::GraphIO::DeclaredIoPin& port);
   std::optional<Native_value> native_expression(const hhds::Node_class& node);
   static void                 compact_pure_temps(std::string& body);
-  void                        emit_pure_eval(File_output& out, hhds::Graph* graph);
+  void                        emit_pure_eval(File_output& out, hhds::Graph* graph, std::string_view mod);
 
   std::string vcd_file;            // --set compile.sim.vcd=FILE ("" = no VCD)
   std::string top;                 // --top: only this module bakes the VCD path (avoids file collisions)

@@ -74,10 +74,12 @@ module m(input clk, input rst_n, input [7:0] d, output [7:0] q);
 endmodule
 EOF
 
+# This checks proof/refutation polarity; witness replay has separate tests.
+# Avoid compiling a witness simulator for every deliberately broken twin.
 # verdict <ref.v> <impl kind:path> -> proven | refuted | <other>
 verdict() {
   $LHD lec --ref "verilog:$WORK/$1" --ref-top m --impl "$2" --impl-top m \
-       --set formal.timeout=30 --workdir "$WORK/q_$$_$RANDOM" 2>&1 \
+       --set formal.timeout=30 --set formal.simfail_run=false --workdir "$WORK/q_$$_$RANDOM" 2>&1 \
     | grep -oE '"verdict":"(proven|refuted|unknown)"' | head -1 | sed -E 's/"verdict":"([a-z]+)"/\1/'
 }
 expect() {  # $1=label $2=got $3=want

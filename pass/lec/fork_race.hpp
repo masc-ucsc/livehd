@@ -144,7 +144,9 @@ inline void watch_parent(pid_t parent) {
     return;
   }
   ::pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-  ::pthread_attr_setstacksize(&attr, 64 * 1024);  // counts against the racer's RLIMIT_AS share
+  // Keep the platform default stack: linked libraries' static TLS can exceed
+  // 64 KiB, in which case pthread_create rejects a smaller stack with EINVAL
+  // and no parent-death watchdog runs. It still counts against RLIMIT_AS.
   auto*     w = new Parent_watch{parent, own_group};
   pthread_t t;
   if (::pthread_create(&t, &attr, parent_watch_main, w) != 0) {

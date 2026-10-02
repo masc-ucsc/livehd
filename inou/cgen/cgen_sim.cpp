@@ -6088,7 +6088,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         entry_args += pure_argument(absl::StrCat("__in.", cpp_port_path(d.name)), d);
       }
-      hout->append("  void __compact_publish() {\n");
+    hout->append("  void __compact_publish() {\n");
       emit_loop_gate("publish", "");
       hout->append("    const auto value = __pure_eval(", entry_args, ");\n");
       for (const auto& d : sio->get_output_pin_decls()) {
@@ -6101,7 +6101,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       emit_loop_done("advance");
       hout->append("    return __last_out;\n  }\n");
     } else {
-    hout->append("  void __compact_publish() {\n");
+      hout->append("  void __compact_publish() {\n");
       emit_loop_gate("publish", "");
       hout->append("    __compact_bind_invariants();\n");
       emit_carry_decls();
@@ -7434,7 +7434,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append("  };\n  struct Out {\n");
   emit_io_block(false);
   hout->append("  };\n");
-  emit_pure_eval(*hout, g);
+  if (pure_graph(g)) {
+    hout->append("  static Out __pure_eval(", pure_parameters(*g->get_io()), ");\n");
+  }
 
   // Persistent input latch. The testbench writes inputs through a ref
   // (`acc.x = v` -> __in.x) and advances with `step()`; internal registers are
@@ -7760,6 +7762,16 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append("  void observe_signals(const std::string& _p, std::map<std::string, std::string>& _m) const;\n");
   hout->append("  bool observe_mem(const std::string& _n, long _i, std::string& _o) const;\n");
   hout->append("};\n");
+
+  // Pure evaluator bodies stay visible for inlining, but live separately from
+  // the storage interface so a body edit does not rewrite that interface.
+  if (pure_graph(g)) {
+    const auto name = absl::StrCat(fstem, ".pure.inc");
+    auto       pure = open_out(name);
+    pure->append("// Generated pure evaluator. Do not edit.\n#pragma once\n");
+    emit_pure_eval(*pure, g, mod);
+    hout->append("#include \"", name, "\"\n");
+  }
 
   // ---- Dirty bitset ------------------------------------------------------
   // Color activation flags start in execution order, 64 per word, not one

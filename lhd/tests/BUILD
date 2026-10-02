@@ -493,11 +493,17 @@ sh_test(
 # result envelope's "debug" member carries --list-signals (the observable signal
 # set), --probe (a per-cycle JSON trajectory), and --break-when (the first cycle a
 # SIG OP V condition holds). Runtime checks use declared dependencies.
-sh_test(
-    name = "lhd_sim_observe_test",
+[sh_test(
+    name = "lhd_sim_observe_test" + suffix,
+    args = [group],
     srcs = ["lhd_sim_observe_test.sh"],
     data = ["//lhd"],
-)
+) for suffix, group in [
+    ("", "structural"),
+    ("_runtime", "runtime"),
+    ("_query", "query"),
+    ("_selection", "selection"),
+]]
 
 # Native compact-loop cgen_sim: COUNT only sizes a std::array and runtime loop;
 # warm digests include the descriptor, and every occurrence-facing surface uses
@@ -2251,12 +2257,18 @@ sh_test(
 # live_words=1 the ICG latch and the flop whose commit guard reads its `_din`
 # land in different colors; the latch kept a guarded `_din` store and the flop
 # read it stale (SILENT miscompile, 2026-09-18). Inline fixture: just //lhd.
-sh_test(
-    name = "sim_live_words_invariance_test",
+[sh_test(
+    name = "sim_live_words_invariance_test" + suffix,
+    args = [budget],
     size = "large",
     srcs = ["sim_live_words_invariance_test.sh"],
     data = ["//lhd"],
-)
+) for suffix, budget in [
+    ("", "1"),
+    ("_lw2", "2"),
+    ("_dirty1", "1_dirty"),
+    ("_dirty256", "256_dirty"),
+]]
 
 sh_test(
     name = "readmem_clockless_smoke",
@@ -2267,10 +2279,25 @@ sh_test(
 sh_test(
     name = "readmem_smoke",
     srcs = ["readmem_smoke.sh"],
+    args = ["native"],
     data = [
         "//lhd",
         "//inou/prp:abc_tests",
     ],
+)
+
+sh_test(
+    name = "readmem_imports_smoke",
+    srcs = ["readmem_smoke.sh"],
+    args = ["imports"],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "readmem_slang_smoke",
+    srcs = ["readmem_smoke.sh"],
+    args = ["slang"],
+    data = ["//lhd"],
 )
 
 # Runtime simulation arguments and typed signature defaults share one parser.
@@ -2288,7 +2315,23 @@ sh_test(
 
 sh_test(
     name = "lhd_sim_pure_loop_test",
-    size = "large",
+    size = "small",
     srcs = ["lhd_sim_pure_loop_test.sh"],
+    data = ["lhd_sim_pure_loop.prp", "//lhd"],
+)
+
+sh_test(
+    name = "lhd_sim_pure_loop_test_observed",
+    size = "small",
+    srcs = ["lhd_sim_pure_loop_test.sh"],
+    args = ["observed"],
+    data = ["lhd_sim_pure_loop.prp", "//lhd"],
+)
+
+sh_test(
+    name = "lhd_sim_pure_loop_test_legacy",
+    size = "small",
+    srcs = ["lhd_sim_pure_loop_test.sh"],
+    args = ["legacy"],
     data = ["lhd_sim_pure_loop.prp", "//lhd"],
 )

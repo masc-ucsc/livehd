@@ -86,6 +86,9 @@ build:prof --linkopt -pg
 #build:prof --linkopt -ftest-coverage
 
 test --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
+# Simulator tests launch host compilers themselves. Cap concurrent tests so
+# their compiler subprocesses do not inflate per-test latency on large hosts.
+test --local_test_jobs=16
 # benchmark tests are timing contracts; instrumented binaries can't meet them
 coverage --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme,-benchmark"
 coverage --cache_test_results=no

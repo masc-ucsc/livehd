@@ -2146,8 +2146,9 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       }
       if (member.kind == slang::ast::SymbolKind::ProceduralBlock
           && member.as<slang::ast::ProceduralBlockSymbol>().procedureKind == slang::ast::ProceduralBlockKind::Initial) {
-        if (!plusarg_blocks_.contains(&member.as<slang::ast::ProceduralBlockSymbol>()))
+        if (!plusarg_blocks_.contains(&member.as<slang::ast::ProceduralBlockSymbol>())) {
           collect_initial_values(member.as<slang::ast::ProceduralBlockSymbol>().getBody());
+        }
       }
     }
   };
@@ -3307,7 +3308,9 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
 }
 
 void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, bool force_reg) {
-  if (plusarg_vars_.contains(&sym)) return;
+  if (plusarg_vars_.contains(&sym)) {
+    return;
+  }
   if (force_reg || reg_syms_.contains(&sym)) {
     declare_reg(sym);
     return;
@@ -7110,8 +7113,13 @@ bool Slang_context::lower_latch_process(const slang::ast::Statement& body) {
         if (b.op != slang::ast::BinaryOperator::Equality && b.op != slang::ast::BinaryOperator::Inequality) {
           return std::nullopt;
         }
-        const auto value = try_eval_int(b.right());
-        if (!value || (*value != 0 && *value != 1) || b.left().type->getBitWidth() != 1) {
+        const auto  value = try_eval_int(b.right());
+        const auto* lhs   = &b.left();
+        while (lhs->kind == ExpressionKind::Conversion) {
+          lhs = &lhs->as<slang::ast::ConversionExpression>().operand();
+        }
+        if (!value || (*value != 0 && *value != 1) || lhs->type->getBitWidth() != 1
+            || (*value == 1 && b.left().type->getBitWidth() != 1 && tinfo(*lhs->type).is_signed)) {
           return std::nullopt;
         }
         if ((b.op == slang::ast::BinaryOperator::Equality) == (*value == 0)) {

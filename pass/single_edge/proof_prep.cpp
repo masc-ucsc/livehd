@@ -44,6 +44,248 @@ int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds::Graph*
 
 namespace {
 
+// Mapping into a library without reset latches folds an asynchronous reset
+// into D and the transparency control. Recover that pin only after checking
+// both cofactors: reset opens the latch and forces a constant, while releasing
+// it leaves a plain clock window. This preserves reset priority and lets both
+// sides use the same closing-edge schedule.
+void recover_latch_resets(hhds::Graph* graph) {
+  namespace gu = livehd::graph_util;
+  struct Value {
+    hhds::Pin_class     pin;
+    std::optional<bool> constant;
+    bool                inverted = false;
+  };
+  const auto negate = [](Value value) {
+    if (value.constant) {
+      value.constant = !*value.constant;
+    } else {
+      value.inverted = !value.inverted;
+    }
+    return value;
+  };
+  const livehd::latch_contract::Design_clocks clocks(graph);
+  std::vector<hhds::Pin_class>                resets;
+  for (const auto& input : graph->get_io()->get_input_pin_decls()) {
+    if (input.bits == 1 && str_tools::is_reset_like_name(input.name)) {
+      resets.push_back(graph->get_input_pin(input.name));
+    }
+  }
+  std::vector<hhds::Node_class> latches;
+  for (auto node : graph->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Latch) {
+      latches.push_back(node);
+    }
+  }
+  for (auto latch : latches) {
+    if (gu::type_op_of(latch) != Ntype_op::Latch || gu::bits_of(latch.get_driver_pin(0)) != 1
+        || !gu::get_driver_of_sink_name(latch, "reset_pin").is_invalid()
+        || !gu::get_driver_of_sink_name(latch, "initial").is_invalid()) {
+      continue;
+    }
+    const auto en  = gu::get_driver_of_sink_name(latch, "enable");
+    const auto din = gu::get_driver_of_sink_name(latch, "din");
+    const auto pos = gu::get_driver_of_sink_name(latch, "posclk");
+    if (en.is_invalid() || din.is_invalid() || (!pos.is_invalid() && !pos.is_const())) {
+      continue;
+    }
+    for (auto reset : resets) {
+      for (const bool high : {false, true}) {
+        absl::flat_hash_map<hhds::Class_index, Value>   memo;
+        bool                                            reset_level = high;
+        std::function<Value(hhds::Pin_class, unsigned)> eval        = [&](hhds::Pin_class pin, unsigned depth) -> Value {
+          Value opaque{pin, std::nullopt, false};
+          if (pin.is_invalid() || depth > 128) {
+            return opaque;
+          }
+          if (pin == reset) {
+            return {{}, reset_level, false};
+          }
+          if (pin.is_const()) {
+            const auto& value = gu::const_of(pin);
+            if (!value.has_unknowns() && value.is_just_i64() && (value.to_just_i64() == 0 || value.to_just_i64() == 1)) {
+              return {{}, value.to_just_i64() != 0, false};
+            }
+            return opaque;
+          }
+          if (auto it = memo.find(pin.get_class_index()); it != memo.end()) {
+            return it->second;
+          }
+          memo.emplace(pin.get_class_index(), opaque);
+          if (gu::is_graph_input_pin(pin) || gu::bits_of(pin) != 1) {
+            return opaque;
+          }
+          auto       node = pin.get_master_node();
+          const auto op   = gu::type_op_of(node);
+          if (op != Ntype_op::Not && op != Ntype_op::Get_mask && op != Ntype_op::Sext && op != Ntype_op::Mux && op != Ntype_op::And
+              && op != Ntype_op::Or && op != Ntype_op::EQ) {
+            return opaque;
+          }
+          std::vector<Value> inputs;
+          for (auto sink : node.inp_sorted_pins()) {
+            for (auto driver : sink.get_driver_pins()) {
+              inputs.push_back(eval(driver, depth + 1));
+            }
+          }
+          Value result = opaque;
+          if (op == Ntype_op::Not && inputs.size() == 1) {
+            result = negate(inputs.front());
+          } else if ((op == Ntype_op::Get_mask || op == Ntype_op::Sext) && inputs.size() >= 1) {
+            auto source = gu::first_value_driver(node);
+            if (gu::bits_of(source) == 1 && (op == Ntype_op::Sext || gu::bit_range(node) == std::make_optional(std::pair{0, 1}))) {
+              result = eval(source, depth + 1);
+            }
+          } else if (op == Ntype_op::Mux && inputs.size() == 3 && inputs[0].constant) {
+            result = inputs[*inputs[0].constant ? 2 : 1];
+          } else if (op == Ntype_op::And || op == Ntype_op::Or) {
+            const bool identity = op == Ntype_op::And;
+            result              = {{}, identity, false};
+            unsigned unknown    = 0;
+            for (const auto& input : inputs) {
+              if (input.constant) {
+                if (*input.constant != identity) {
+                  result  = {{}, !identity, false};
+                  unknown = 0;
+                  break;
+                }
+              } else if (++unknown == 1) {
+                result = input;
+              } else {
+                result = opaque;
+              }
+            }
+          } else if (op == Ntype_op::EQ && inputs.size() == 2 && std::ranges::all_of(inputs, [](const auto& input) {
+                       return input.constant.has_value() || gu::bits_of(input.pin) == 1;
+                     })) {
+            if (inputs[0].constant && (!*inputs[0].constant || inputs[1].constant || gu::is_unsign(inputs[1].pin))) {
+              result = *inputs[0].constant ? inputs[1] : negate(inputs[1]);
+            } else if (inputs[1].constant && (!*inputs[1].constant || inputs[0].constant || gu::is_unsign(inputs[0].pin))) {
+              result = *inputs[1].constant ? inputs[0] : negate(inputs[0]);
+            }
+          }
+          memo[pin.get_class_index()] = result;
+          return result;
+        };
+        auto active = eval(en, 0);
+        if (pos.is_known_false()) {
+          active = negate(active);
+        }
+        const auto data = eval(din, 0);
+        if (!active.constant || !*active.constant || !data.constant) {
+          continue;
+        }
+        reset_level = !high;
+        memo.clear();
+        auto inactive = eval(en, 0);
+        if (pos.is_known_false()) {
+          inactive = negate(inactive);
+        }
+        if (inactive.constant || inactive.pin.is_invalid() || gu::bits_of(inactive.pin) != 1 || !clocks.is_clock(inactive.pin)) {
+          continue;
+        }
+        gu::find_sink_pin(latch, "enable").del_sink();
+        inactive.pin.connect_sink(gu::setup_sink_by_name(latch, "enable"));
+        if (!pos.is_invalid()) {
+          gu::find_sink_pin(latch, "posclk").del_sink();
+        }
+        gu::create_const(*graph, *Dlop::create_integer(inactive.inverted ? 0 : 1))
+            .connect_sink(gu::setup_sink_by_name(latch, "posclk"));
+        reset.connect_sink(gu::setup_sink_by_name(latch, "reset_pin"));
+        gu::create_const(*graph, *Dlop::create_integer(high ? 0 : 1)).connect_sink(gu::setup_sink_by_name(latch, "negreset"));
+        gu::create_const(*graph, *Dlop::create_integer(*data.constant ? 1 : 0))
+            .connect_sink(gu::setup_sink_by_name(latch, "initial"));
+        break;
+      }
+      if (!gu::get_driver_of_sink_name(latch, "reset_pin").is_invalid()) {
+        break;
+      }
+    }
+  }
+}
+
+// An exported gated-clock waveform must retain its enable sampling state.
+// Edge normalization can fold gates used only as clocks, but cannot encode an
+// observable Clock_cell as ordinary data in its one-step time base. Expose the
+// same latch and Boolean gate that cgen emits before planning that rewrite.
+void expose_clock_outputs(hhds::Graph* graph) {
+  namespace gu = livehd::graph_util;
+  std::vector<hhds::Node_class> cells;
+  for (auto node : graph->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Clock_cell) {
+      cells.push_back(node);
+    }
+  }
+  for (auto cell : cells) {
+    auto                                   q = cell.get_driver_pin(0);
+    std::vector<hhds::Pin_class>           work{q};
+    absl::flat_hash_set<hhds::Class_index> seen;
+    bool                                   observable = false;
+    while (!work.empty() && !observable) {
+      auto pin = work.back();
+      work.pop_back();
+      if (!seen.insert(pin.get_class_index()).second) {
+        continue;
+      }
+      for (const auto& out : pin.out_edges()) {
+        if (gu::is_graph_output_pin(out.sink)) {
+          observable = true;
+          break;
+        }
+        auto       consumer = out.sink.get_master_node();
+        const auto op       = gu::type_op_of(consumer);
+        if (gu::is_type_register(consumer) || op == Ntype_op::Memory || op == Ntype_op::Sub) {
+          continue;
+        }
+        for (auto output : consumer.out_pins()) {
+          work.push_back(output);
+        }
+      }
+    }
+    if (!observable) {
+      continue;
+    }
+    auto clk = gu::get_driver_of_sink_name(cell, "clk_ref");
+    auto div = gu::get_driver_of_sink_name(cell, "div");
+    auto inv = gu::get_driver_of_sink_name(cell, "invert");
+    if (clk.is_invalid()
+        || (!div.is_invalid() && (!div.is_const() || !gu::const_of(div).is_just_i64() || gu::const_of(div).to_just_i64() != 1))
+        || (!inv.is_invalid() && !inv.is_const())) {
+      continue;  // unsupported flavours remain fail-closed in the encoder
+    }
+    const bool inverted = !inv.is_invalid() && !gu::const_of(inv).is_known_false();
+    auto       en       = gu::get_driver_of_sink_name(cell, "en");
+    if (en.is_invalid()) {
+      en = gu::create_const(*graph, *Dlop::create_integer(1));
+    }
+    auto latch = gu::create_typed_node(*graph, Ntype_op::Latch);
+    clk.connect_sink(gu::setup_sink_by_name(latch, "enable"));
+    en.connect_sink(gu::setup_sink_by_name(latch, "din"));
+    gu::create_const(*graph, *Dlop::create_integer(inverted ? 1 : 0)).connect_sink(gu::setup_sink_by_name(latch, "posclk"));
+    auto held = latch.create_driver_pin(0);
+    gu::set_bits(held, 1);
+    gu::set_unsign(held);
+    if (inverted) {
+      auto neg = gu::create_typed_node(*graph, Ntype_op::Not);
+      held.connect_sink(gu::setup_sink_pid(neg, 0));
+      held = neg.create_driver_pin(0);
+      gu::set_bits(held, 1);
+      gu::set_unsign(held);
+    }
+    auto gate = gu::create_typed_node(*graph, inverted ? Ntype_op::Or : Ntype_op::And);
+    clk.connect_sink(gu::setup_sink_pid(gate, 0));
+    held.connect_sink(gu::setup_sink_pid(gate, 0));
+    auto output = gate.create_driver_pin(0);
+    gu::set_bits(output, 1);
+    gu::set_unsign(output);
+    const auto         edges = q.out_edges();
+    const gu::Edge_vec consumers(edges.begin(), edges.end());
+    for (const auto& out : consumers) {
+      output.connect_sink(out.sink);
+    }
+    cell.del_node();
+  }
+}
+
 // Where one instance of a `--lib` cell is spliced from.
 //
 // An instance whose definition the design's OWN library holds is spliced from
@@ -193,12 +435,23 @@ std::string inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Gr
   };
   std::vector<hhds::Pin_class> pending;
   std::vector<hhds::Pin_class> latch_enables;
+  const bool                   has_reset_input = std::ranges::any_of(graph->get_io()->get_input_pin_decls(), [](const auto& input) {
+    return input.bits == 1 && str_tools::is_reset_like_name(input.name);
+  });
   for (auto node : graph->body().nodes()) {
     const auto op = livehd::graph_util::type_op_of(node);
     if (op == Ntype_op::Memory) {
       livehd::graph_util::for_each_memory_clock_driver(node, [&](auto pin) { pending.push_back(pin); });
     } else if (op == Ntype_op::Latch) {
-      latch_enables.push_back(livehd::graph_util::get_driver_of_sink_name(node, "enable"));
+      const auto enable = livehd::graph_util::get_driver_of_sink_name(node, "enable");
+      if (has_reset_input) {
+        // Expose both halves of a folded reset so recover_latch_resets can
+        // check its priority and constant value before assigning a clock slot.
+        pending.push_back(enable);
+        pending.push_back(livehd::graph_util::get_driver_of_sink_name(node, "din"));
+      } else {
+        latch_enables.push_back(enable);
+      }
     } else if (livehd::graph_util::is_type_register(node)) {
       pending.push_back(livehd::graph_util::get_driver_of_sink_name(node, "clock_pin"));
     }
@@ -790,6 +1043,21 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
   }
   note_gates("ref", inline_clock_gates_and_fold(ref, ref_defs, &unfolded, is_boxed));
   note_gates("impl", inline_clock_gates_and_fold(impl, impl_defs, &unfolded, is_boxed));
+  absl::flat_hash_set<hhds::Graph*> exposed;
+  for (auto* top : {ref, impl}) {
+    if (exposed.insert(top).second) {
+      expose_clock_outputs(top);
+      recover_latch_resets(top);
+    }
+  }
+  for (const auto* defs : {&ref_defs, &impl_defs}) {
+    for (auto* def : *defs) {
+      if (def != nullptr && (!is_boxed || !is_boxed(def)) && exposed.insert(def).second) {
+        expose_clock_outputs(def);
+        recover_latch_resets(def);
+      }
+    }
+  }
   if (!unfolded.empty()) {
     auto drop = [&unfolded](std::vector<hhds::Graph*>& v) {
       std::erase_if(v, [&unfolded](hhds::Graph* d) { return unfolded.contains(d); });

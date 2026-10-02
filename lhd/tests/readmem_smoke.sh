@@ -4,6 +4,11 @@ set -euo pipefail
 LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/livehd_readmem_$$}"
 mkdir -p "$W/cwd"
+part="${1:-all}"
+case "$part" in
+  all | native | imports | slang) ;;
+  *) echo "unknown readmem part: $part" >&2; exit 1 ;;
+esac
 LIB="$(pwd)/inou/prp/tests/abc/test.lib"
 LHD="$(cd "$(dirname "$LHD")" && pwd)/$(basename "$LHD")"
 cat > "$W/image.hex" <<'IMAGE'
@@ -38,6 +43,7 @@ test preload(expected:U8=0x12) {
 PRP
 # Run from another directory: relative image paths belong to the source file.
 cd "$W/cwd"
+if [ "$part" = all ] || [ "$part" = native ]; then
 "$LHD" sim "$W/load.prp" --workdir "$W/run" --set sim.init_zero=true --set sim.unknown_zero=true --result-json "$W/result.json"
 python3 - "$W/result.json" <<'PY'
 import json,sys
@@ -56,9 +62,13 @@ for image in missing malformed; do
   grep -q 'readmem:.*image.hex:' "$W/error.log"
 done
 printf '12 34 @2 ab\n' > "$W/image.hex"
+fi
+if [ "$part" = all ] || [ "$part" = native ] || [ "$part" = imports ]; then
 "$LHD" compile "$W/load.prp" --top load --workdir "$W/export" --emit verilog:"$W/load.v" --emit-dir lg:"$W/lg" --emit-dir ln:"$W/ln"
 grep -q 'blackbox, keep' "$W/load.v"
 grep -q 'INIT_FILE' "$W/load.v"
+fi
+if [ "$part" = all ] || [ "$part" = native ]; then
 # The inline image wrapper's body depends on forwarding, so an `old` and a
 # `program` image memory of ONE shape must not share a module name (the first
 # emitted used to decide whether the `.FWD(1)` instance forwarded at all).
@@ -77,12 +87,16 @@ fwd_mod=$(sed -nE 's/^(cgen_memory_[a-z0-9_]+) #\(.*\.FWD\(1\).*/\1/p' "$W/two.v
 [ -n "$fwd_mod" ] || { echo 'no forwarding image memory instance' >&2; exit 1; }
 awk -v m="$fwd_mod" '$1 == "module" && $2 == m {on=1} on && /^endmodule/ {exit} on' "$W/two.v" | grep -q 'd0_fwd' \
   || { echo "image wrapper $fwd_mod for .FWD(1) lost its forwarding" >&2; exit 1; }
+fi
 # Both serialized IR forms retain startup loading and normal runtime writes.
+if [ "$part" = all ] || [ "$part" = imports ]; then
 for kind in ln lg; do
   { printf 'const load = import("%s:load.load")\n' "$kind"; sed -n '/^test preload/,$p' "$W/load.prp"; } > "$W/imported.prp"
-  "$LHD" sim "$W/imported.prp" "$kind:$W/$kind" --workdir "$W/$kind-run" --set sim.init_zero=true --set sim.unknown_zero=true --result-json "$W/$kind.json"
+  "$LHD" sim "$W/imported.prp" "$kind:$W/$kind" --workdir "$W/imported-run" --set sim.init_zero=true --set sim.unknown_zero=true --result-json "$W/$kind.json"
 done
+fi
 # Slang imports both system tasks into the same startup representation.
+if [ "$part" = all ] || [ "$part" = slang ]; then
 cat > "$W/slang.sv" <<'SV'
 module load(input clk, rst, input [1:0] addr, input wen, input [7:0] din,
             output [7:0] data, binary);
@@ -114,7 +128,9 @@ for shape in bounds conditional mixed; do
   fi
   grep -q 'readmem-' "$W/bad.jsonl"
 done
+fi
 # Even an all-zero image and no RTL writer must remain externally loadable.
+if [ "$part" = all ] || [ "$part" = native ]; then
 printf '00 00 00 00\n' > "$W/zero.hex"
 printf '01 02 03 04\n' > "$W/other.hex"
 cat > "$W/state.prp" <<'PRP'
@@ -159,4 +175,5 @@ CPP
   verilator --cc --exe --build --top-module load --Mdir "$W/obj" "$W/load.v" "$W/oracle.cpp" > "$W/verilator.log" 2>&1
   "$W/obj/Vload" > "$W/verilator-run.log"
 fi
-echo 'PASS readmem smoke'
+fi
+echo "PASS readmem smoke ($part)"

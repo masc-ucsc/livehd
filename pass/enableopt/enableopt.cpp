@@ -742,6 +742,23 @@ void State_optimizer::canonicalize_latch_hold(const hhds::Node_class& latch) {
   auto din    = livehd::graph_util::get_driver_of_sink_name(latch, "din");
   auto enable = livehd::graph_util::get_driver_of_sink_name(latch, "enable");
 
+  // An unwritten declaration can survive as a private Q-to-D self edge.
+  // It has no observable state, but the self edge prevents ordinary dead-node
+  // cleanup and leaves an unmatched state element after a Verilog round trip.
+  if (!q.is_invalid() && same_pin(q, din)) {
+    bool private_hold = true;
+    for (const auto& out : q.out_edges()) {
+      if (out.sink.get_master_node() != latch) {
+        private_hold = false;
+        break;
+      }
+    }
+    if (private_hold) {
+      latch.del_node();
+      return;
+    }
+  }
+
   // An always-active latch has no opaque/holding phase and therefore no
   // state: Q follows D combinationally. Pyrope now wires explicit enable=1
   // for this case; keep accepting a missing enable as the historical/default

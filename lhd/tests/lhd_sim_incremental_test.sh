@@ -280,7 +280,7 @@ identity_run() {
   local tag=$1 wd=$2 expected=$3
   shift 3
   "$LHD" sim "$IW/tb.prp" --workdir "$wd" "+expected=$expected" \
-    --set sim.ninja=false --set sim.tune.profile=off --result-json "$IW/$tag.json" "$@" >"$IW/$tag.log" 2>&1 \
+    --set sim.ninja=false --set sim.jobs=4 --set sim.tune.profile=off --result-json "$IW/$tag.json" "$@" >"$IW/$tag.log" 2>&1 \
     || { cat "$IW/$tag.log" >&2; fail "default-specialization simulation failed ($tag)"; }
 }
 identity_run cold "$IW/w" 3

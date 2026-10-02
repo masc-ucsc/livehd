@@ -20,9 +20,9 @@ fail() {
 # pass/cprop collapses the source SRA + low mask into one ranged Get_mask.
 # HLOP's mixed-width get_mask_op recognizes its contiguous mask and extracts
 # only the selected words. The unrelated source-level runtime shift must remain
-# an SRA in each of the generated evaluator paths.
+# an SRA in each of the two scheduled evaluator paths and the pure evaluator.
 grep -Rq '::get_mask_op_opt(' "$W/sim" || fail "cprop did not produce a ranged get_mask_op_opt"
-[ "$(grep -Roh 'sra_op(' "$W/sim" | wc -l | tr -d ' ')" -eq 2 ] \
-  || fail "constant Get_mask range manufactured an SRA (expected only the runtime source shift in both evaluator paths)"
+[ "$(grep -Roh 'sra_op(' "$W/sim" | wc -l | tr -d ' ')" -eq 3 ] \
+  || fail "constant Get_mask range manufactured an SRA (expected only the runtime source shift in all three evaluator paths)"
 
 echo "PASS: cprop collapses SRA/Get_mask to direct HLOP range extraction and true runtime shift remains"

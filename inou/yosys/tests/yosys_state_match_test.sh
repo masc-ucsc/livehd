@@ -7,7 +7,16 @@ W="${TEST_TMPDIR:-/tmp/lgcheck_state_$$}"
 mkdir -p "$W"
 YOSYS=inou/yosys/yosys2
 fail() { echo "FAIL: $*" >&2; exit 1; }
+part="${1:-all}"
+case "$part" in
+  all | temporary | packed | encoding | memory | rtl | bank | loop | init_names | poweron | budget) ;;
+  *) fail "unknown state correspondence group: $part" ;;
+esac
+LGCHECK="$PWD/inou/yosys/lgcheck"
+YOSYS_ABS="$PWD/$YOSYS"
+LGCHECK_BUDGET="${LGCHECK_BUDGET:-300}"
 
+if [ "$part" = all ] || [ "$part" = temporary ]; then
 # A generated temporary can have the same name but a different expression in
 # independently lowered graphs. Keep register/port correspondence, hide the
 # combinational cutpoints, and prove every observable output. Also check that
@@ -27,11 +36,6 @@ module temp_names(input clk, input [3:0] a, b, output reg [3:0] q);
 endmodule
 V
 sed 's/mux_528 \^ mux_524/mux_528 | mux_524/' "$W/temp_names_impl.v" >"$W/temp_names_bad.v"
-LGCHECK="$PWD/inou/yosys/lgcheck"
-YOSYS_ABS="$PWD/$YOSYS"
-# Keep enough headroom for slow debug builders, while requiring a definitive
-# verdict. The scheduling regression below supplies its own small budget.
-LGCHECK_BUDGET="${LGCHECK_BUDGET:-300}"
 # The proof and the refutation are independent yosys runs; start both, then
 # read their verdicts in order.
 for variant in impl bad; do
@@ -55,6 +59,9 @@ for variant in impl bad; do
 done
 echo "PASS: temporary names do not constrain combinational equivalence"
 
+fi
+
+if [ "$part" = all ] || [ "$part" = packed ]; then
 # Packed state and mapped scalar bits must carry the same induction relation.
 # A one-bit observation of a 32-bit recurrence does not expose all state in the
 # four-cycle induction window. A changed feedback bit must still be refuted.
@@ -105,6 +112,9 @@ for variant in impl bad; do
 done
 echo "PASS: packed/scalar state correspondence proves, changed feedback refutes"
 
+fi
+
+if [ "$part" = all ] || [ "$part" = encoding ]; then
 # A register name can survive an encoding change without preserving its value.
 # Keep useful recurrence matches, discard the inverted internal match, and
 # reprove all outputs. A real output inversion must still produce a refutation.
@@ -149,6 +159,9 @@ for variant in impl bad; do
 done
 echo "PASS: changed internal state encoding proves, changed output refutes"
 
+fi
+
+if [ "$part" = all ] || [ "$part" = memory ]; then
 # The reversible cgen wrapper name and mapped memory-bank names must propose
 # the same word/bit states. Four byte-wide words retain dynamic addressing
 # and multiple word/bit matches. Every proposed pair must prove its transition.
@@ -201,6 +214,9 @@ for variant in impl bad; do
 done
 echo "PASS: memory word/bit correspondence proves, corrupted write refutes"
 
+fi
+
+if [[ "$part" = all || "$part" = rtl || "$part" = bank || "$part" = loop || "$part" = init_names ]]; then
 # A golden RTL array is `mem[<word>][<bit>]` after `memory`, while cgen keeps
 # the same memory as the reversible wrapper `__lhdmem_h<hex>_e.data` or, for an
 # inline packed memory, one `__lhdmem_h<hex>_e_data` bus. A rolled loop replica
@@ -307,8 +323,14 @@ endmodule
 """)
 PYRTL_NAMES
 # Two cases at a time, like the blocks above (each is one lgcheck/yosys run).
-set -- rtl_names:wrap rtl_names:inline rtl_names:bad bank_names:wrap bank_names:bad loop_names:impl loop_names:bad \
-  init_names:inline init_names:bad
+case "$part" in
+  rtl) set -- rtl_names:wrap rtl_names:inline rtl_names:bad ;;
+  bank) set -- bank_names:wrap bank_names:bad ;;
+  loop) set -- loop_names:impl loop_names:bad ;;
+  init_names) set -- init_names:inline init_names:bad ;;
+  *) set -- rtl_names:wrap rtl_names:inline rtl_names:bad bank_names:wrap bank_names:bad loop_names:impl loop_names:bad \
+       init_names:inline init_names:bad ;;
+esac
 while [ "$#" -gt 0 ]; do
   batch="$1 ${2:-}"
   shift
@@ -338,6 +360,9 @@ while [ "$#" -gt 0 ]; do
 done
 echo "PASS: RTL array, flop bank, cgen wrapper/inline memory and rolled-loop replica names pair; corrupted updates and power-on values refute"
 
+fi
+
+if [ "$part" = all ] || [ "$part" = poweron ]; then
 # Stages 1..1c and 4 pair state by NAME (equiv_make) or by STRUCTURE
 # (equiv_struct) and prove it with induction-only engines, which ASSUME every
 # pair equal at power-on and unroll through unpaired state as if a clock edge
@@ -421,6 +446,9 @@ while [ "$#" -gt 0 ]; do
 done
 echo "PASS: same-named, structurally merged and renamed state starting at different power-on values refutes; equal values prove"
 
+fi
+
+if [ "$part" = all ] || [ "$part" = budget ]; then
 # An expensive correspondence guess must leave time for another strategy.
 # The fake solver isolates scheduling: the first attempt would outlast the
 # whole four-second budget; the next attempt returns an explicit proof. The
@@ -444,15 +472,22 @@ exit 0
 SHSTRATEGY
 chmod +x "$W/strategy_budget_yosys"
 mkdir -p "$W/strategy_budget"
+cat >"$W/strategy_ref.v" <<'RTL'
+module strategy(input d, output q);
+  assign q = d;
+endmodule
+RTL
 (cd "$W/strategy_budget" && LGCHECK_EQUIV_TIMEOUT=4 LGCHECK_HEURISTIC_TIMEOUT=1 \
-  "$LGCHECK" --yosys "$W/strategy_budget_yosys" --top packed_state \
-  --reference "$W/packed_state_ref.v" --implementation "$W/packed_state_impl.v") \
+  "$LGCHECK" --yosys "$W/strategy_budget_yosys" --top strategy \
+  --reference "$W/strategy_ref.v" --implementation "$W/strategy_ref.v") \
   >"$W/strategy_budget.log" 2>&1
 rc=$?
+
 if [ "$rc" -eq 2 ]; then
   echo "PASS: strategy budget timed out on this machine (INCONCLUSIVE is not a failure)"
 else
   [ "$rc" -eq 0 ] || { cat "$W/strategy_budget.log"; fail "strategy budget case gave a wrong verdict (exit $rc)"; }
   grep -q '^1n.Successfully matched' "$W/strategy_budget.log" || fail "later proof strategy did not run"
   echo "PASS: expensive matching attempt leaves budget for a later proof strategy"
+fi
 fi

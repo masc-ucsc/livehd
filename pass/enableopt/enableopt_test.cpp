@@ -8,6 +8,32 @@
 namespace {
 namespace gu = livehd::graph_util;
 
+TEST(Enableopt, RemovesUnobservedHoldAndKeepsObservableState) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_enableopt_unwritten_latch");
+  auto  io  = lib.create_io("unwritten_latch");
+  io->add_input("en", 1);
+  io->add_output("q", 2);
+  auto graph = io->create_graph();
+  auto hold  = [&] {
+    auto latch = gu::create_typed_node(*graph, Ntype_op::Latch);
+    auto q     = latch.create_driver_pin(0);
+    gu::set_bits(q, 1);
+    gu::set_unsign(q);
+    q.connect_sink(gu::setup_sink_by_name(latch, "din"));
+    graph->get_input_pin("en").connect_sink(gu::setup_sink_by_name(latch, "enable"));
+    return latch;
+  };
+  auto unused   = hold();
+  auto observed = hold();
+  auto q        = observed.get_driver_pin(0);
+  q.connect_sink(graph->get_output_pin("q"));
+  Enableopt{}.do_trans(graph);
+  EXPECT_TRUE(unused.is_invalid());
+  ASSERT_FALSE(observed.is_invalid());
+  EXPECT_EQ(graph->get_output_pin("q").get_driver_pin(), q);
+  EXPECT_EQ(gu::get_driver_of_sink_name(observed, "din"), q);
+}
+
 TEST(Enableopt, ConsumesDeepPrivateHoldChain) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_enableopt_deep_hold");
   auto  io  = lib.create_io("deep_hold");
