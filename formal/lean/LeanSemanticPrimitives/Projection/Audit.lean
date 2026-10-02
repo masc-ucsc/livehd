@@ -306,5 +306,9 @@ namespace Projection
 #print axioms Hw.opUGT_agree
 #print axioms Hw.opSLT_agree
 #print axioms Hw.opSGT_agree
+#print axioms Hw.list_len_one
+#print axioms Hw.list_len_two
+#print axioms Hw.list_len_three
+#print axioms Hw.applyOp_agree
 
 end Projection

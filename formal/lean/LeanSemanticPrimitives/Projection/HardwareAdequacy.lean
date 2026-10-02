@@ -1059,5 +1059,295 @@ theorem opSGT_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals ar
   have h := opCmp_agree hsv hb0 hb1 hw hdv henv hlen hs hsw
   simpa [cmpBool, evalOp_SGT] using h
 
+/-! ### The dispatch
+
+`applyOp`'s seventeen-deep `ite` chain tests a STATIC opcode, so each case is
+`k` false tests and one true test, all by `rfl`.  (That staticness is also the
+Gate 0 property: none of this chain survives into the residual.)
+
+`ArityOK` is a HYPOTHESIS here, deliberately, and is NOT a field of
+`SupportedByProjection`.  The nine fixed-arity operators genuinely need it --
+see the commit message for the `Op_Not`-with-two-deps counterexample and for
+the census measurement -- but adding it to the shared support predicate changes
+the public theorem, which is not this commit's call to make. -/
+
+/-- The dep-list shape each supported operator needs for the object and the
+pinned model to agree.  Variable-arity operators impose nothing. -/
+def ArityOK : LGraphOp → List Nat → Prop
+  | .Op_Not,     ds => ds.length = 1
+  | .Op_SRA,     ds => ds.length = 2
+  | .Op_GetMask, ds => ds.length = 2
+  | .Op_MuxBool, ds => ds.length = 3
+  | .Op_Sext,    ds => ds.length = 2
+  | .Op_ULT,     ds => ds.length = 2
+  | .Op_UGT,     ds => ds.length = 2
+  | .Op_SLT,     ds => ds.length = 2
+  | .Op_SGT,     ds => ds.length = 2
+  | _,           _  => True
+
+instance : ∀ op ds, Decidable (ArityOK op ds)
+  | .Op_Not,     _ => inferInstanceAs (Decidable (_ = _))
+  | .Op_SRA,     _ => inferInstanceAs (Decidable (_ = _))
+  | .Op_GetMask, _ => inferInstanceAs (Decidable (_ = _))
+  | .Op_MuxBool, _ => inferInstanceAs (Decidable (_ = _))
+  | .Op_Sext,    _ => inferInstanceAs (Decidable (_ = _))
+  | .Op_ULT,     _ => inferInstanceAs (Decidable (_ = _))
+  | .Op_UGT,     _ => inferInstanceAs (Decidable (_ = _))
+  | .Op_SLT,     _ => inferInstanceAs (Decidable (_ = _))
+  | .Op_SGT,     _ => inferInstanceAs (Decidable (_ = _))
+  | .Op_Const _, _ => inferInstanceAs (Decidable True)
+  | .Op_Sum _,   _ => inferInstanceAs (Decidable True)
+  | .Op_Sub,     _ => inferInstanceAs (Decidable True)
+  | .Op_Mult,    _ => inferInstanceAs (Decidable True)
+  | .Op_Div,     _ => inferInstanceAs (Decidable True)
+  | .Op_UDiv,    _ => inferInstanceAs (Decidable True)
+  | .Op_SDiv,    _ => inferInstanceAs (Decidable True)
+  | .Op_And,     _ => inferInstanceAs (Decidable True)
+  | .Op_Or,      _ => inferInstanceAs (Decidable True)
+  | .Op_Xor,     _ => inferInstanceAs (Decidable True)
+  | .Op_Ror,     _ => inferInstanceAs (Decidable True)
+  | .Op_LT,      _ => inferInstanceAs (Decidable True)
+  | .Op_GT,      _ => inferInstanceAs (Decidable True)
+  | .Op_EQ,      _ => inferInstanceAs (Decidable True)
+  | .Op_SHL,     _ => inferInstanceAs (Decidable True)
+  | .Op_MuxN,    _ => inferInstanceAs (Decidable True)
+  | .Op_SetMask, _ => inferInstanceAs (Decidable True)
+  | .Op_MemRead, _ => inferInstanceAs (Decidable True)
+  | .Op_MemWrite, _ => inferInstanceAs (Decidable True)
+  | .Op_MemWriteBE _, _ => inferInstanceAs (Decidable True)
+
+theorem list_len_one {α : Type} : ∀ {l : List α}, l.length = 1 → ∃ a, l = [a]
+  | [a], _ => ⟨a, rfl⟩
+
+theorem list_len_two {α : Type} : ∀ {l : List α}, l.length = 2 → ∃ a b, l = [a, b]
+  | [a, b], _ => ⟨a, b, rfl⟩
+
+theorem list_len_three {α : Type} :
+    ∀ {l : List α}, l.length = 3 → ∃ a b c, l = [a, b, c]
+  | [a, b, c], _ => ⟨a, b, c, rfl⟩
+
+theorem applyOp_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {op : LGraphOp} {w : Nat} {deps : List Nat} {σ : SEnv} {eo ew ed ee en : SExp}
+    (hsup : OpSupported op = true) (harity : ArityOK op deps)
+    (hb : ∀ d ∈ deps, d < vals.length)
+    (hop : SEval hwS σ eo (encOp op))
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat deps))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "applyOp" [eo, ew, ed, ee, en])
+      (encBV (eval_op op w (deps.map arg))) := by
+  refine SEval_call5 hop hw hdv henv hlen rfl rfl ?_
+  refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+  cases op with
+  | Op_And =>
+      exact SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opAnd_agree hsv hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))
+  | Op_Or =>
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opOr_agree hsv hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)))
+  | Op_SRA =>
+      obtain ⟨d0, d1, rfl⟩ := list_len_two harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opSra_agree hsv (hb d0 (by simp)) (hb d1 (by simp)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))))
+  | Op_GetMask =>
+      obtain ⟨d0, d1, rfl⟩ := list_len_two harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opGetMask_agree hsv (hb d0 (by simp)) (hb d1 (by simp)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)))))
+  | Op_Xor =>
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opXor_agree hsv hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))))))
+  | Op_Not =>
+      obtain ⟨d0, rfl⟩ := list_len_one harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opNot_agree hsv (hb d0 (by simp)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)))))))
+  | Op_Sum nAdd =>
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opSum_agree hsv hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))))))))
+  | Op_EQ =>
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opEq_agree hsv hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)))))))))
+  | Op_Ror =>
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opRor_agree hsv hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))))))))))
+  | Op_MuxBool =>
+      obtain ⟨d0, d1, d2, rfl⟩ := list_len_three harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opMuxBool_agree hsv (hb d0 (by simp)) (hb d1 (by simp)) (hb d2 (by simp)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)))))))))))
+  | Op_MuxN =>
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opMuxN_agree hsv hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))))))))))))
+  | Op_ULT =>
+      obtain ⟨d0, d1, rfl⟩ := list_len_two harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opULT_agree hsv (hb d0 (by simp)) (hb d1 (by simp)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl) .lit .lit))))))))))))
+  | Op_UGT =>
+      obtain ⟨d0, d1, rfl⟩ := list_len_two harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opUGT_agree hsv (hb d0 (by simp)) (hb d1 (by simp)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl) .lit .lit)))))))))))))
+  | Op_SLT =>
+      obtain ⟨d0, d1, rfl⟩ := list_len_two harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opSLT_agree hsv (hb d0 (by simp)) (hb d1 (by simp)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl) .lit .lit))))))))))))))
+  | Op_SGT =>
+      obtain ⟨d0, d1, rfl⟩ := list_len_two harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opSGT_agree hsv (hb d0 (by simp)) (hb d1 (by simp)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl) .lit .lit)))))))))))))))
+  | Op_Sext =>
+      obtain ⟨d0, d1, rfl⟩ := list_len_two harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opSext_agree hsv (hb d0 (by simp)) (hb d1 (by simp)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)))))))))))))))))
+  | Op_SHL =>
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opShl_agree hsv hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))))))))))))))))))
+  | Op_Const c => exact absurd hsup (by simp [OpSupported])
+  | Op_Sub => exact absurd hsup (by simp [OpSupported])
+  | Op_Mult => exact absurd hsup (by simp [OpSupported])
+  | Op_Div => exact absurd hsup (by simp [OpSupported])
+  | Op_UDiv => exact absurd hsup (by simp [OpSupported])
+  | Op_SDiv => exact absurd hsup (by simp [OpSupported])
+  | Op_LT => exact absurd hsup (by simp [OpSupported])
+  | Op_GT => exact absurd hsup (by simp [OpSupported])
+  | Op_SetMask => exact absurd hsup (by simp [OpSupported])
+  | Op_MemRead => exact absurd hsup (by simp [OpSupported])
+  | Op_MemWrite => exact absurd hsup (by simp [OpSupported])
+  | Op_MemWriteBE b => exact absurd hsup (by simp [OpSupported])
+
 end Hw
 end Projection
