@@ -806,7 +806,20 @@ def d3_residual : ResidualProgram :=
 # proved are the same definition. Emitting a model separately in each stage is
 # how a proof comes to be about something other than what ran.
 PROBE_TAIL_NAMED = """
+-- PHASE MARKERS, each FLUSHED.  A probe killed by `--timeout` is SIGKILLed, so
+-- `/usr/bin/time -v` never writes its report and Lean's stdout buffer is lost:
+-- the log comes back empty and says nothing about which phase was in flight.
+-- An explicit flush after each phase survives the kill, so the last marker in
+-- the log names the last phase that COMPLETED.
+#eval show IO Unit from do
+  IO.println "D3PHASE cert_elaborated"
+  (← IO.getStdout).flush
+
 reify_design_named {m}_designCert as d3_fast
+
+#eval show IO Unit from do
+  IO.println "D3PHASE reified"
+  (← IO.getStdout).flush
 
 def d3_residual : ResidualProgram :=
   match compileDesign {m}_designCert with
