@@ -942,6 +942,53 @@ def OpSupported : LGraphOp → Bool
   | .Op_ULT     | .Op_UGT  | .Op_SLT   | .Op_SGT            => true
   | _                                                       => false
 
+/-! ### Operand counts
+
+`OpSupported` is about WHICH operator; this is about HOW MANY operands it is
+given, and it is a second genuine hypothesis for the same reason.
+
+Nine of the seventeen are FIXED-ARITY: the pinned `eval_op` matches on an exact
+operand shape and falls through to its catch-all `mk_bv w 0` at every other
+length, while `applyOp` reads positionally -- it ERRORS below the arity (`hd
+nil` has no value at all) and IGNORES surplus operands above it.  So the two
+disagree off the pinned shape, and the disagreement is not conservative:
+`Op_Not` with two deps gives `mk_bv w 0` on the shared side and `bv_not w a` on
+the object side (`SupportCheck.not_arity_bites` below exhibits the numbers).
+
+Nothing else in the branch rules this out -- `DenseNodeCert.deps` is an
+unconstrained `Array Nat`, and `DesignCertWF` constrains only `DepsBounded` and
+`SlotsInRange` -- so it is a field of `SupportedByProjection`.
+
+`RequiredArity` is the SINGLE SOURCE OF TRUTH for the mapping.  `ArityOK` reads
+it, the census script parses it out of this file (as it already does the
+operator codes), and no second table exists to drift. -/
+def RequiredArity : LGraphOp → Option Nat
+  | .Op_Not     => some 1
+  | .Op_SRA     => some 2
+  | .Op_GetMask => some 2
+  | .Op_MuxBool => some 3
+  | .Op_Sext    => some 2
+  | .Op_ULT     => some 2
+  | .Op_UGT     => some 2
+  | .Op_SLT     => some 2
+  | .Op_SGT     => some 2
+  -- Op_And, Op_Or, Op_Xor, Op_Ror, Op_EQ, Op_SHL, Op_Sum, Op_MuxN fold over
+  -- however many operands they are given, on BOTH sides, so they impose
+  -- nothing.  Everything `OpSupported` rejects is irrelevant here.
+  | _           => none
+
+/-- The dep list has the length its operator requires, if its operator requires
+one at all. -/
+def ArityOK (op : LGraphOp) (ds : List Nat) : Prop :=
+  match RequiredArity op with
+  | none   => True
+  | some k => ds.length = k
+
+instance : ∀ (op : LGraphOp) (ds : List Nat), Decidable (ArityOK op ds) := by
+  intro op ds
+  unfold ArityOK
+  split <;> infer_instance
+
 /-- Everything about the CERTIFICATE that `I_hw` relies on.
 
 `wf` is the SHARED well-formedness predicate, not a local restatement:
@@ -958,6 +1005,9 @@ structure SupportedByProjection (D : Compiler.DesignCert) : Prop where
   sources    : ∀ sd ∈ D.sources.toList, SourceSupported sd = true
   /-- every node operator has an `applyOp` case -/
   ops        : ∀ c ∈ D.nodes.toList, OpSupported c.op = true
+  /-- …and is given the operand count the pinned model matches on.  A STATIC
+  certificate-shape requirement, like `ops`, not a per-cycle assumption. -/
+  arities    : ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList
   /-- every flop commits on a DECLARED clock, so `fires` is not reading past
   the edge vector.  The memory analogue is vacuous under `memFree`. -/
   flopClocks : ∀ f ∈ D.flops, f.clock < D.clocks.size
@@ -1087,6 +1137,7 @@ theorem tiny_supported : SupportedByProjection tinyD where
   memFree := rfl
   sources := by decide
   ops := by decide
+  arities := by decide
   flopClocks := by decide
 
 theorem seq_supported : SupportedByProjection seqD where
@@ -1096,6 +1147,7 @@ theorem seq_supported : SupportedByProjection seqD where
   memFree := rfl
   sources := by decide
   ops := by decide
+  arities := by decide
   flopClocks := by decide
 
 -- NEGATIVE CONTROL 1: a ROM source.  `D.memories` is still empty, so
@@ -1111,6 +1163,22 @@ private def divD : DesignCert :=
   { tinyD with nodes := #[{ op := .Op_UDiv, width := 4, deps := #[0, 1] }] }
 
 example : ¬ (∀ c ∈ divD.nodes.toList, OpSupported c.op = true) := by decide
+
+-- NEGATIVE CONTROL 3: an operator that IS supported, given the WRONG number of
+-- operands.  `ops` does not catch it -- `arities` is what does.
+private def notD : DesignCert :=
+  { tinyD with nodes := #[{ op := .Op_Not, width := 4, deps := #[0, 1] }] }
+
+example : ∀ c ∈ (notD : DesignCert).nodes.toList, OpSupported c.op = true := by decide
+example : ¬ (∀ c ∈ (notD : DesignCert).nodes.toList,
+    ArityOK c.op c.deps.toList) := by decide
+
+/-- …and the two semantics really disagree on it, so `arities` carries weight
+rather than being conservative hygiene.  The pinned model falls to its
+catch-all and answers 0; `applyOp` reads the first operand and answers
+`bv_not`, which at width 4 on zero is 15. -/
+theorem not_arity_bites :
+    eval_op .Op_Not 4 [mk_bv 4 0, mk_bv 4 0] ≠ bv_not 4 (mk_bv 4 0) := by decide
 
 -- …and the supported operators really are the seventeen, no more
 example : OpSupported .Op_GetMask = true := by decide

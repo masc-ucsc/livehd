@@ -1065,56 +1065,10 @@ theorem opSGT_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals ar
 `k` false tests and one true test, all by `rfl`.  (That staticness is also the
 Gate 0 property: none of this chain survives into the residual.)
 
-`ArityOK` is a HYPOTHESIS here, deliberately, and is NOT a field of
-`SupportedByProjection`.  The nine fixed-arity operators genuinely need it --
-see the commit message for the `Op_Not`-with-two-deps counterexample and for
-the census measurement -- but adding it to the shared support predicate changes
-the public theorem, which is not this commit's call to make. -/
-
-/-- The dep-list shape each supported operator needs for the object and the
-pinned model to agree.  Variable-arity operators impose nothing. -/
-def ArityOK : LGraphOp → List Nat → Prop
-  | .Op_Not,     ds => ds.length = 1
-  | .Op_SRA,     ds => ds.length = 2
-  | .Op_GetMask, ds => ds.length = 2
-  | .Op_MuxBool, ds => ds.length = 3
-  | .Op_Sext,    ds => ds.length = 2
-  | .Op_ULT,     ds => ds.length = 2
-  | .Op_UGT,     ds => ds.length = 2
-  | .Op_SLT,     ds => ds.length = 2
-  | .Op_SGT,     ds => ds.length = 2
-  | _,           _  => True
-
-instance : ∀ op ds, Decidable (ArityOK op ds)
-  | .Op_Not,     _ => inferInstanceAs (Decidable (_ = _))
-  | .Op_SRA,     _ => inferInstanceAs (Decidable (_ = _))
-  | .Op_GetMask, _ => inferInstanceAs (Decidable (_ = _))
-  | .Op_MuxBool, _ => inferInstanceAs (Decidable (_ = _))
-  | .Op_Sext,    _ => inferInstanceAs (Decidable (_ = _))
-  | .Op_ULT,     _ => inferInstanceAs (Decidable (_ = _))
-  | .Op_UGT,     _ => inferInstanceAs (Decidable (_ = _))
-  | .Op_SLT,     _ => inferInstanceAs (Decidable (_ = _))
-  | .Op_SGT,     _ => inferInstanceAs (Decidable (_ = _))
-  | .Op_Const _, _ => inferInstanceAs (Decidable True)
-  | .Op_Sum _,   _ => inferInstanceAs (Decidable True)
-  | .Op_Sub,     _ => inferInstanceAs (Decidable True)
-  | .Op_Mult,    _ => inferInstanceAs (Decidable True)
-  | .Op_Div,     _ => inferInstanceAs (Decidable True)
-  | .Op_UDiv,    _ => inferInstanceAs (Decidable True)
-  | .Op_SDiv,    _ => inferInstanceAs (Decidable True)
-  | .Op_And,     _ => inferInstanceAs (Decidable True)
-  | .Op_Or,      _ => inferInstanceAs (Decidable True)
-  | .Op_Xor,     _ => inferInstanceAs (Decidable True)
-  | .Op_Ror,     _ => inferInstanceAs (Decidable True)
-  | .Op_LT,      _ => inferInstanceAs (Decidable True)
-  | .Op_GT,      _ => inferInstanceAs (Decidable True)
-  | .Op_EQ,      _ => inferInstanceAs (Decidable True)
-  | .Op_SHL,     _ => inferInstanceAs (Decidable True)
-  | .Op_MuxN,    _ => inferInstanceAs (Decidable True)
-  | .Op_SetMask, _ => inferInstanceAs (Decidable True)
-  | .Op_MemRead, _ => inferInstanceAs (Decidable True)
-  | .Op_MemWrite, _ => inferInstanceAs (Decidable True)
-  | .Op_MemWriteBE _, _ => inferInstanceAs (Decidable True)
+`ArityOK` and its single source of truth `RequiredArity` live beside
+`OpSupported` in `HardwareInterpreter.lean`, and `SupportedByProjection.arities`
+is where a design discharges it -- by `decide`, exactly as it discharges `ops`.
+Each fixed-arity case below turns that into a dep list AS A LITERAL. -/
 
 theorem list_len_one {α : Type} : ∀ {l : List α}, l.length = 1 → ∃ a, l = [a]
   | [a], _ => ⟨a, rfl⟩
@@ -1831,9 +1785,7 @@ theorem flopNextsFrom_mapIdx (rho : Nat → CertVal) (e : ClockEdges) (st : Runt
     simp
 
 theorem main_agree {D : DesignCert} {e : ClockEdges} {i : RuntimeInput} {s : RuntimeState}
-    (hsup : SupportedByProjection D)
-    (harity : ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList)
-    (hrs : RuntimeSized D e i s) :
+    (hsup : SupportedByProjection D) (hrs : RuntimeSized D e i s) :
     SEval hwS []
       (.call "main" [.lit (encDesign D), .lit (encEdges e), .lit (encInput i),
                      .lit (encState s)])
@@ -1893,7 +1845,7 @@ theorem main_agree {D : DesignCert} {e : ClockEdges} {i : RuntimeInput} {s : Run
           (fun sd hsd => hrs.stateReads sd hsd)
           (.ref rfl) (.ref rfl) (.ref rfl) .lit) ?_
   refine SEval.letN
-    (evalNodes_agree hsup.wf hsup.ops harity D.nodes.size 0 (by omega) _ _ _ _
+    (evalNodes_agree hsup.wf hsup.ops hsup.arities D.nodes.size 0 (by omega) _ _ _ _
       (.ref rfl) (.ref rfl) (.ref rfl)) ?_
   refine SEval.letN (mkOutputs_agree hsv D.outputs.toList _ _ _ _ hbout (.ref rfl)
     (.ref rfl) (by rw [hlenVA]; exact .ref rfl)) ?_
@@ -1924,10 +1876,7 @@ direction appeals to `evalFuel`, to a fixture, to `projectDesign`, to
 `mixDriver`, or to the verified compiler. -/
 
 theorem IHwAdequate_proved {D : DesignCert} {e : ClockEdges} {i : RuntimeInput}
-    {s : RuntimeState}
-    (hsup : SupportedByProjection D)
-    (harity : ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList)
-    (hrs : RuntimeSized D e i s) :
+    {s : RuntimeState} (hsup : SupportedByProjection D) (hrs : RuntimeSized D e i s) :
     IHwAdequate D e i s := by
   have hmf : MemFree (interpretDesign D e i s).nextState :=
     interpretDesign_memFree hsup.memFree e i s
@@ -1936,7 +1885,7 @@ theorem IHwAdequate_proved {D : DesignCert} {e : ClockEdges} {i : RuntimeInput}
                         .lit (encState s)])
       (encResult (interpretDesign D e i s)) :=
     hw_entry (vs := [encDesign D, encEdges e, encInput i, encState s])
-      (main_agree hsup harity hrs)
+      (main_agree hsup hrs)
   intro r
   constructor
   · intro hr
@@ -1949,64 +1898,27 @@ theorem IHwAdequate_proved {D : DesignCert} {e : ClockEdges} {i : RuntimeInput}
 
 /-! ### The public form
 
-`IHwAdequacyGoal` as `HardwareInterpreter.lean` DEFINES it is **not** proved
-here, and must not be claimed: it assumes only `SupportedByProjection`, which
-does not contain the arity condition, and the condition is not derivable --
-`Op_Not` with two deps is a counterexample (see the group-3 commit, and the
-census measurement that no emitted certificate is one today).
+`IHwAdequacyGoal` exactly as `HardwareInterpreter.lean` defines it.  The arity
+condition reaches it through `SupportedByProjection.arities`, so the statement
+assumes nothing this file invented, and it carries the SHARED
+`Compiler.RuntimeWF` rather than the internal operational inequality. -/
 
-The form below is the honest one.  It carries the SHARED `Compiler.RuntimeWF`
-rather than the internal operational inequality, exactly as required, and
-reaches `RuntimeSized` through the bridge `RuntimeSized.of_runtimeWF` together
-with the three bounds the object's unchecked reads need.  `ArityOK` appears as
-one further explicit hypothesis.
+theorem IHwAdequacyGoal_proved : IHwAdequacyGoal :=
+  fun _ _ _ _ hsup _hwf hrs => IHwAdequate_proved hsup hrs
 
-If `ArityOK` is added to `SupportedByProjection` as a field, `IHwAdequacyGoal`
-itself follows from this theorem immediately and nothing below changes. -/
-def IHwAdequacyGoalWithArity : Prop :=
-  ∀ (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState),
-    SupportedByProjection D →
-    (∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList) →
-    Compiler.RuntimeWF D i s →
-    D.clocks.size ≤ e.size →
-    (∀ sd ∈ D.sources.toList, SourceInputBound sd i.size) →
-    (∀ sd ∈ D.sources.toList, SourceFlopBound sd s.flops.size) →
-    IHwAdequate D e i s
-
-theorem IHwAdequacyGoal_with_arity : IHwAdequacyGoalWithArity :=
-  fun _ _ _ _ hsup harity hwf hed hin hst =>
-    IHwAdequate_proved hsup harity (RuntimeSized.of_runtimeWF hwf hed hin hst)
-
-/-! ### The arity condition is neither vacuous nor universal
-
-Positive controls: both shared fixtures satisfy it.  Negative control: a design
-whose operator IS supported and whose arity is NOT, together with the concrete
-disagreement it produces.  Without the negative control an arity predicate like
-this could be accidentally universal and nobody would notice. -/
-
-namespace ArityCheck
-open Compiler Projection.Acceptance
-
-theorem tiny_arity : ∀ c ∈ (tinyD : DesignCert).nodes.toList,
-    ArityOK c.op c.deps.toList := by decide
-theorem seq_arity : ∀ c ∈ (seqD : DesignCert).nodes.toList,
-    ArityOK c.op c.deps.toList := by decide
-
-/-- `Op_Not` with TWO operands: supported, and arity-wrong. -/
-private def notD : DesignCert :=
-  { tinyD with nodes := #[{ op := .Op_Not, width := 4, deps := #[0, 1] }] }
-
-example : ∀ c ∈ (notD : DesignCert).nodes.toList, OpSupported c.op = true := by decide
-example : ¬ (∀ c ∈ (notD : DesignCert).nodes.toList,
-    ArityOK c.op c.deps.toList) := by decide
-
-/-- …and the two semantics really disagree on it, so the condition is carrying
-weight rather than being conservative hygiene.  The pinned model falls to its
-catch-all and answers 0; the object reads the first operand and answers
-`bv_not`, which at width 4 on zero is 15. -/
-example : eval_op .Op_Not 4 [mk_bv 4 0, mk_bv 4 0] ≠ bv_not 4 (mk_bv 4 0) := by decide
-
-end ArityCheck
+/-- Secondary, and only a convenience: `RuntimeSized` reconstructed from the
+shared `RuntimeWF` plus the three bounds the object's unchecked reads need.
+`RuntimeSized.flopsSized` is an inequality where `RuntimeWF.flopsSized` is an
+equation, and this is the bridge between them -- the weaker form stays internal
+and never becomes the contract. -/
+theorem IHwAdequate_of_runtimeWF {D : DesignCert} {e : ClockEdges}
+    {i : RuntimeInput} {s : RuntimeState}
+    (hsup : SupportedByProjection D) (hwf : Compiler.RuntimeWF D i s)
+    (hed : D.clocks.size ≤ e.size)
+    (hin : ∀ sd ∈ D.sources.toList, SourceInputBound sd i.size)
+    (hst : ∀ sd ∈ D.sources.toList, SourceFlopBound sd s.flops.size) :
+    IHwAdequate D e i s :=
+  IHwAdequate_proved hsup (RuntimeSized.of_runtimeWF hwf hed hin hst)
 
 end Hw
 end Projection

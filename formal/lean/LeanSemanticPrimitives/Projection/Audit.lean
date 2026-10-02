@@ -337,8 +337,8 @@ namespace Projection
 #print axioms Hw.flopNextsFrom_mapIdx
 #print axioms Hw.main_agree
 #print axioms Hw.IHwAdequate_proved
-#print axioms Hw.IHwAdequacyGoal_with_arity
-#print axioms Hw.ArityCheck.tiny_arity
-#print axioms Hw.ArityCheck.seq_arity
+#print axioms Hw.IHwAdequacyGoal_proved
+#print axioms Hw.IHwAdequate_of_runtimeWF
+#print axioms Hw.SupportCheck.not_arity_bites
 
 end Projection
