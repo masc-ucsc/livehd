@@ -7490,6 +7490,63 @@ void formal_verify_command(Options& opts, Result& res) {
     vacuity_note();
   }
 
+  // One-screen tally of the run, in the shape yosys/Jasper print.
+  {
+    int asserts = 0, covers = 0;
+    int proven_unb = 0, proven_bnd = 0, refuted = 0, undet = 0, vacuous = 0;
+    int as_unchecked = 0, as_proven = 0, as_refuted = 0, as_unproven = 0;
+    for (const auto& p : r.props) {
+      if (p.kind == "cover") {
+        ++covers;
+        continue;
+      }
+      if (p.kind == "assume") {
+        if (livehd::lec::is_unchecked_assume_class(p.aclass)) {
+          ++as_unchecked;
+        } else if (p.verdict == livehd::lec::Verdict::Proven) {
+          ++as_proven;
+        } else if (p.verdict == livehd::lec::Verdict::Refuted) {
+          ++as_refuted;
+        } else {
+          ++as_unproven;
+        }
+        continue;
+      }
+      ++asserts;
+      if (p.vacuous_guard) {
+        ++vacuous;  // true but never exercised; still counted by verdict below
+      }
+      if (p.verdict == livehd::lec::Verdict::Proven) {
+        p.unbounded ? ++proven_unb : ++proven_bnd;
+      } else if (p.verdict == livehd::lec::Verdict::Refuted) {
+        ++refuted;
+      } else {
+        ++undet;
+      }
+    }
+    const int assumes = as_unchecked + as_proven + as_refuted + as_unproven;
+    std::print("\nformal summary: '{}'\n", g->get_name());
+    std::print("  properties    {:4}  ({} assert, {} assume, {} cover)\n", asserts + assumes + covers, asserts, assumes, covers);
+    std::print("  proven        {:4}  ({} unbounded, {} bounded)\n", proven_unb + proven_bnd, proven_unb, proven_bnd);
+    std::print("  failed (cex)  {:4}\n", refuted);
+    std::print("  undetermined  {:4}\n", undet);
+    std::print("  vacuous       {:4}  (guard never true; proof checked nothing)\n", vacuous);
+    std::print("  assumes       {:4}  ({} unchecked, {} proven, {} refuted, {} unproven)\n",
+               assumes,
+               as_unchecked,
+               as_proven,
+               as_refuted,
+               as_unproven);
+    if (!r.vacuous_scopes.empty()) {
+      std::print("  CONTRADICTORY assume set in {} scope(s) — proofs there are unsound\n", r.vacuous_scopes.size());
+    }
+    std::print("  depth         {:4}  checked steps after {} reset cycle(s)\n", r.checked_steps, r.reset_hold);
+    if (covers == 0) {
+      std::print("  note: cover is not an obligation in lhd yet, so no reachability was measured\n");
+    }
+    std::print("  note: per-property cone (COI) size is not tracked yet\n");
+  }
+
   // lhd.stats: the cvc5 solve-insight report for the whole verify run (one
   // solver per strategy, every obligation), printed under the obligation table.
   if (o.stats) {

@@ -626,6 +626,14 @@ sh_test(
 # LNAST cassert -> fproperty path a Pyrope `assert` takes). These used to be
 # dropped silently, so a design whose properties are all immediate asserts
 # verified as "no obligations found" -- proving nothing at exit 0.
+# The end-of-run tally: counts by kind and by verdict.
+sh_test(
+    name = "lhd_formal_summary_test",
+    size = "large",
+    srcs = ["lhd_formal_summary_test.sh"],
+    data = ["//lhd"],
+)
+
 # `disable iff (d)` discharges the property while d holds, so the obligation is
 # `d || prop`. It used to be lowered as `!d || prop` -- the inverse -- which
 # checked a property ONLY during its disable window: loud false refutations one
