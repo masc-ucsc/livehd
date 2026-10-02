@@ -333,4 +333,12 @@ namespace Projection
 #print axioms Hw.flopNextsFrom_getElem
 #print axioms Hw.flopNexts_agree
 
+-- Adequacy helper group 7: one cycle, and GROUP 8: the adequacy `iff` itself.
+#print axioms Hw.flopNextsFrom_mapIdx
+#print axioms Hw.main_agree
+#print axioms Hw.IHwAdequate_proved
+#print axioms Hw.IHwAdequacyGoal_with_arity
+#print axioms Hw.ArityCheck.tiny_arity
+#print axioms Hw.ArityCheck.seq_arity
+
 end Projection

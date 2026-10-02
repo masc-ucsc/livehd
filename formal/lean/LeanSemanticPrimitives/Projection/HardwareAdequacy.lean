@@ -1810,5 +1810,203 @@ theorem flopNexts_agree {vals : List Val} {rho : Nat → CertVal}
           (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)
           (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim] <;> omega)))
 
+/-! ## Group 7: one cycle
+
+`main` binds the six certificate fields and the state, builds the source
+environment, folds the nodes over it, reads the outputs and computes the flop
+vector, and packages the two into a result record.  Every piece is one of the
+lemmas above; this is where they are composed and where the bounds are
+discharged from `SupportedByProjection` and `RuntimeSized` rather than carried
+further. -/
+
+theorem flopNextsFrom_mapIdx (rho : Nat → CertVal) (e : ClockEdges) (st : RuntimeState)
+    (fl : Array FlopDesc) :
+    flopNextsFrom rho e st 0 fl.toList
+      = (fl.mapIdx (fun idx f => srcFlopNext rho e st idx f)).toList := by
+  apply List.ext_getElem
+  · simp
+  · intro k h1 h2
+    have hk : k < fl.toList.length := by simpa using h1
+    rw [flopNextsFrom_getElem rho e st 0 fl.toList k hk]
+    simp
+
+theorem main_agree {D : DesignCert} {e : ClockEdges} {i : RuntimeInput} {s : RuntimeState}
+    (hsup : SupportedByProjection D)
+    (harity : ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList)
+    (hrs : RuntimeSized D e i s) :
+    SEval hwS []
+      (.call "main" [.lit (encDesign D), .lit (encEdges e), .lit (encInput i),
+                     .lit (encState s)])
+      (encResult (interpretDesign D e i s)) := by
+  have hlenVA : (prefixVals D i s (D.sources.size + D.nodes.size)).length
+      = D.sources.size + D.nodes.size := prefixVals_length _ _ _ _
+  have hsv : SlotVals (prefixVals D i s (D.sources.size + D.nodes.size)) (slotVal D i s) :=
+    prefixVals_slotVals _ _ _ _
+  -- the outputs and flop vector, as the shared semantics computes them
+  have hout : (interpretDesign D e i s).outputs.toList
+      = D.outputs.toList.map (fun o => bv_resize o.width (slotVal D i s o.slot)) := by
+    simp [interpretDesign, slotVal]
+  have hflops : (interpretDesign D e i s).nextState.flops.toList
+      = flopNextsFrom (evalGraphG D.toGraphCert.topo D.toGraphCert (srcEnv D i s))
+          e s 0 D.flops.toList := by
+    rw [flopNextsFrom_mapIdx]
+    simp [interpretDesign]
+  have hmems : (interpretDesign D e i s).nextState.mems = #[] := by
+    simp [interpretDesign, hsup.memFree]
+  -- the bounds
+  have hbout : ∀ o ∈ D.outputs.toList,
+      o.slot < (prefixVals D i s (D.sources.size + D.nodes.size)).length := by
+    intro o ho
+    rw [hlenVA]
+    exact hsup.wf.slotsInRange.1 o ho
+  have hbflop : ∀ f ∈ D.flops.toList,
+      f.clock < e.size ∧ f.din < (prefixVals D i s (D.sources.size + D.nodes.size)).length ∧
+      (∀ x, f.enable = some x → x < (prefixVals D i s (D.sources.size + D.nodes.size)).length) ∧
+      (∀ r, f.resetPin = some r →
+        r < (prefixVals D i s (D.sources.size + D.nodes.size)).length) := by
+    intro f hf
+    have hfl : f ∈ D.flops := by simpa using hf
+    obtain ⟨hd, he, hr⟩ := hsup.wf.slotsInRange.2.1 f hf
+    rw [hlenVA]
+    exact ⟨Nat.lt_of_lt_of_le (hsup.flopClocks f hfl) hrs.edges, hd, he, hr⟩
+  have hfsize : 0 + D.flops.toList.length ≤ s.flops.size := by
+    simpa using hrs.flopsSized
+  -- the object
+  refine SEval_call4 .lit .lit .lit .lit rfl rfl ?_
+  refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+  refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+  refine SEval.letN (lenL_agree D.sources.toList _ _ (.ref rfl)) ?_
+  refine SEval.letN (lenL_agree D.nodes.toList _ _ (.ref rfl)) ?_
+  have hcast : Int.ofNat D.sources.size + Int.ofNat D.nodes.size
+      = Int.ofNat (D.sources.size + D.nodes.size) := by
+    simp only [Int.ofNat_eq_natCast]; omega
+  refine SEval.letN
+    (SEval_prim2 (a := Val.int (Int.ofNat D.sources.size))
+      (b := Val.int (Int.ofNat D.nodes.size))
+      (v := Val.int (Int.ofNat (D.sources.size + D.nodes.size)))
+      (.ref rfl) (.ref rfl) (by simp only [evalPrim]; rw [hcast])) ?_
+  refine SEval.letN (d := objEnv (prefixVals D i s D.sources.size))
+    (by rw [prefixVals_sources D i s]
+        exact mkSources_agree D.sources.toList [] _ _ _ _ _
+          (fun sd hsd => hsup.sources sd hsd)
+          (fun sd hsd => hrs.inputs sd hsd)
+          (fun sd hsd => hrs.stateReads sd hsd)
+          (.ref rfl) (.ref rfl) (.ref rfl) .lit) ?_
+  refine SEval.letN
+    (evalNodes_agree hsup.wf hsup.ops harity D.nodes.size 0 (by omega) _ _ _ _
+      (.ref rfl) (.ref rfl) (.ref rfl)) ?_
+  refine SEval.letN (mkOutputs_agree hsv D.outputs.toList _ _ _ _ hbout (.ref rfl)
+    (.ref rfl) (by rw [hlenVA]; exact .ref rfl)) ?_
+  refine SEval.letN (flopNexts_agree hsv D.flops.toList 0 _ _ _ _ _ _ _ hbflop hfsize
+    (.ref rfl) (.ref rfl) (.ref rfl) (by rw [hlenVA]; exact .ref rfl) (.ref rfl) .lit) ?_
+  -- the result record
+  have hres : encResult (interpretDesign D e i s)
+      = Val.ctor tagResult
+          [Val.ctor tagState
+            [encListG encBV (flopNextsFrom
+              (evalGraphG D.toGraphCert.topo D.toGraphCert (srcEnv D i s)) e s 0
+              D.flops.toList)],
+           encListG encBV
+             (D.outputs.toList.map (fun o => bv_resize o.width (slotVal D i s o.slot)))] := by
+    simp only [encResult, encState, encBVs, encArr, hout, hflops]
+  rw [hres]
+  exact SEval.mk (.cons (SEval.mk (.cons (.ref rfl) .nil)) (.cons (.ref rfl) .nil))
+
+/-! ## Group 8: `I_hw` adequacy
+
+The `iff` the plan asks for, over `Eval` and with no fuel in the statement.
+
+Both directions come from ONE evaluation.  `main_agree` plus the generic
+`SEval_entry` gives `Eval hwP [] … (encResult …)`; `Eval_det` turns that into
+"and nothing else", which is the forward direction; `ResultRel_canonical` turns
+`ResultRel r …` back into `r = encResult …`, which is the converse.  Neither
+direction appeals to `evalFuel`, to a fixture, to `projectDesign`, to
+`mixDriver`, or to the verified compiler. -/
+
+theorem IHwAdequate_proved {D : DesignCert} {e : ClockEdges} {i : RuntimeInput}
+    {s : RuntimeState}
+    (hsup : SupportedByProjection D)
+    (harity : ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList)
+    (hrs : RuntimeSized D e i s) :
+    IHwAdequate D e i s := by
+  have hmf : MemFree (interpretDesign D e i s).nextState :=
+    interpretDesign_memFree hsup.memFree e i s
+  have hobj : Eval hwP []
+      (.call hwP.entry [.lit (encDesign D), .lit (encEdges e), .lit (encInput i),
+                        .lit (encState s)])
+      (encResult (interpretDesign D e i s)) :=
+    hw_entry (vs := [encDesign D, encEdges e, encInput i, encState s])
+      (main_agree hsup harity hrs)
+  intro r
+  constructor
+  · intro hr
+    have : r = encResult (interpretDesign D e i s) := Surface.Eval_det hr hobj
+    rw [this]
+    exact ResultRel_encResult hmf
+  · intro hr
+    rw [ResultRel_canonical hr]
+    exact hobj
+
+/-! ### The public form
+
+`IHwAdequacyGoal` as `HardwareInterpreter.lean` DEFINES it is **not** proved
+here, and must not be claimed: it assumes only `SupportedByProjection`, which
+does not contain the arity condition, and the condition is not derivable --
+`Op_Not` with two deps is a counterexample (see the group-3 commit, and the
+census measurement that no emitted certificate is one today).
+
+The form below is the honest one.  It carries the SHARED `Compiler.RuntimeWF`
+rather than the internal operational inequality, exactly as required, and
+reaches `RuntimeSized` through the bridge `RuntimeSized.of_runtimeWF` together
+with the three bounds the object's unchecked reads need.  `ArityOK` appears as
+one further explicit hypothesis.
+
+If `ArityOK` is added to `SupportedByProjection` as a field, `IHwAdequacyGoal`
+itself follows from this theorem immediately and nothing below changes. -/
+def IHwAdequacyGoalWithArity : Prop :=
+  ∀ (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState),
+    SupportedByProjection D →
+    (∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList) →
+    Compiler.RuntimeWF D i s →
+    D.clocks.size ≤ e.size →
+    (∀ sd ∈ D.sources.toList, SourceInputBound sd i.size) →
+    (∀ sd ∈ D.sources.toList, SourceFlopBound sd s.flops.size) →
+    IHwAdequate D e i s
+
+theorem IHwAdequacyGoal_with_arity : IHwAdequacyGoalWithArity :=
+  fun _ _ _ _ hsup harity hwf hed hin hst =>
+    IHwAdequate_proved hsup harity (RuntimeSized.of_runtimeWF hwf hed hin hst)
+
+/-! ### The arity condition is neither vacuous nor universal
+
+Positive controls: both shared fixtures satisfy it.  Negative control: a design
+whose operator IS supported and whose arity is NOT, together with the concrete
+disagreement it produces.  Without the negative control an arity predicate like
+this could be accidentally universal and nobody would notice. -/
+
+namespace ArityCheck
+open Compiler Projection.Acceptance
+
+theorem tiny_arity : ∀ c ∈ (tinyD : DesignCert).nodes.toList,
+    ArityOK c.op c.deps.toList := by decide
+theorem seq_arity : ∀ c ∈ (seqD : DesignCert).nodes.toList,
+    ArityOK c.op c.deps.toList := by decide
+
+/-- `Op_Not` with TWO operands: supported, and arity-wrong. -/
+private def notD : DesignCert :=
+  { tinyD with nodes := #[{ op := .Op_Not, width := 4, deps := #[0, 1] }] }
+
+example : ∀ c ∈ (notD : DesignCert).nodes.toList, OpSupported c.op = true := by decide
+example : ¬ (∀ c ∈ (notD : DesignCert).nodes.toList,
+    ArityOK c.op c.deps.toList) := by decide
+
+/-- …and the two semantics really disagree on it, so the condition is carrying
+weight rather than being conservative hygiene.  The pinned model falls to its
+catch-all and answers 0; the object reads the first operand and answers
+`bv_not`, which at width 4 on zero is 15. -/
+example : eval_op .Op_Not 4 [mk_bv 4 0, mk_bv 4 0] ≠ bv_not 4 (mk_bv 4 0) := by decide
+
+end ArityCheck
+
 end Hw
 end Projection
