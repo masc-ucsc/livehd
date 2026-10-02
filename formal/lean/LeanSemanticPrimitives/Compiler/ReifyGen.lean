@@ -140,17 +140,30 @@ private def valSyntax (base : Name) (nsrc : Nat) : ResidualExpr → MetaM Term
          $(← valRef base nsrc false d) $(← valRef base nsrc false be) $(quote bw))
 
 /-- How a slot is written in terms of the named values, at an EXPLICIT
-environment rather than the `e0` the value definitions bind.
+environment rather than the `e0` the value definitions bind, with the same
+`isMem` discipline `valRef` uses for binding operands.
 
 The definitions are parameterised over `e0`; a theorem statement about a
 particular `i`/`st` has to apply them to that design's actual source
-environment, or the term mentions a variable the statement never bound. -/
-def valRefAt (base : Name) (nsrc : Nat) (r : ResidualRef) (env : Term) : MetaM Term :=
-  if r < nsrc then `(refBV $env $(quote r))
+environment, or the term mentions a variable the statement never bound.
+
+A produced slot carries its type in its named value -- a memory-valued binding's
+`val` is already `Int → BV` -- so the produced case needs no flag. A SOURCE slot
+does: `valRefAt` always reads one with `refBV`, which is right for a data or
+control operand and WRONG for a memory next-image that names an unchanged source
+image. That certificate is legal (a design may declare a memory it never writes)
+and would have produced a `BV` field where `Int → BV` is required. -/
+def valRefAtTyped (base : Name) (nsrc : Nat) (isMem : Bool) (r : ResidualRef)
+    (env : Term) : MetaM Term :=
+  if r < nsrc then
+    (if isMem then `(refMem $env $(quote r)) else `(refBV $env $(quote r)))
   else
     let nm := mkIdent (base ++ Name.mkSimple s!"val{r - nsrc}")
     `($nm $env)
 
+/-- The bit-vector case: outputs and flop operands, which are never memory. -/
+def valRefAt (base : Name) (nsrc : Nat) (r : ResidualRef) (env : Term) : MetaM Term :=
+  valRefAtTyped base nsrc false r env
 
 end NamedModel
 
@@ -160,8 +173,7 @@ open NamedModel in
 Emits `<F>.val0 .. <F>.valN`, one per binding, and `<F>` built from them.
 Opt-in: `reify_design` is unchanged and remains the default everywhere.
 
-Refuses flops/memories only where it cannot express them -- the function covers
-outputs and flop next-state, and memory next-images are refused. -/
+Covers outputs, flop next-state and memory next-images. -/
 syntax (name := reifyDesignNamed) "reify_design_named " ident " as " ident : command
 
 @[command_elab reifyDesignNamed]
@@ -174,9 +186,6 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
       match compileDesign cert with
       | .error _ => throwError "reify_design_named: compileDesign refused {d}"
       | .ok R    => pure R
-    if !R.memoryUpdates.isEmpty then
-      throwError "reify_design_named: {d} has {R.memoryUpdates.size} memory \
-        update(s); the named model covers outputs and flop next-state only."
     let nsrc := R.sources.size
     let base := f.getId
     let e0   := mkIdent (Name.mkSimple "e0")
@@ -209,11 +218,16 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
         let ral := if fu.resetActiveLow then mkIdent ``true else mkIdent ``false
         `(Compiler.flopNextV $(quote fu.width) $din $en $rp $rvq $ral
             (($stId).flops[$(quote j)]?))
+    -- A memory next-image is just the value at the update's `nextImg` slot, and
+    -- that slot's named value already has type `Int → BV` because the binding
+    -- that produced it is memory-valued. No separate machinery is needed here.
+    let mems : Array Term ← R.memoryUpdates.mapM fun mu =>
+      liftTermElabM (NamedModel.valRefAtTyped base nsrc true mu.nextImg envT)
     elabCommand (← `(command|
       def $f ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState) :
           Compiler.RuntimeResult :=
         { outputs := #[$outs,*],
-          nextState := { flops := #[$flops,*], mems := #[] } }))
+          nextState := { flops := #[$flops,*], mems := #[$mems,*] } }))
     -- EXACTLY the shape `reify_design` reports: the sweep's gate parser reads
     -- this line for the `compile` and `reify` gates and cross-checks the two
     -- counts against the probe's own shape line. A different wording here reads

@@ -449,13 +449,33 @@ def main() -> int:
             [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
              "--out", str(kill_out), "--jobs", "1", "--timeout", "60", "--allow-dirty"],
             cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Kill only at a CONSISTENT checkpoint: `checkpoint()` writes the table
+        # atomically and then writes its sidecar, so a kill between the two
+        # leaves a table whose bytes its sidecar does not vouch for. `--resume`
+        # REFUSES that pair, and correctly -- the binding is what stops an edited
+        # table being extended. Waiting for `results_sha256` to match the table
+        # is therefore the test's job, not a reason to weaken the check.
+        #
+        # Measured before the fix: 1 failure in 3 runs, the kill landing inside
+        # that window.
+        #
+        # SCOPE, stated so the row is not read as more than it is: this proves
+        # resume from a COMPLETED checkpoint. It does NOT prove recovery from an
+        # arbitrary mid-checkpoint crash; that would need a journal or a
+        # versioned snapshot, and neither exists.
+        side_k = pathlib.Path(str(kill_out) + ".meta.json")
         deadline = time.time() + 60
         while time.time() < deadline:
-            if kill_out.is_file() and len(rows_of(kill_out)) >= 2:
-                break
+            if kill_out.is_file() and side_k.is_file() and len(rows_of(kill_out)) >= 2:
+                try:
+                    want = json.loads(side_k.read_text()).get("results_sha256")
+                    if want and want == hashlib.sha256(kill_out.read_bytes()).hexdigest():
+                        break
+                except (OSError, ValueError):
+                    pass
             if proc.poll() is not None:
                 break
-            time.sleep(0.5)
+            time.sleep(0.2)
         partial = len(rows_of(kill_out)) if kill_out.is_file() else 0
         proc.send_signal(signal.SIGKILL)
         proc.wait(timeout=30)

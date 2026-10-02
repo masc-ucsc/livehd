@@ -333,10 +333,6 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
       match compileDesign cert with
       | .error e => throwError "prove_reified_incr: compileDesign refused {d}"
       | .ok R    => pure R
-    if !R.memoryUpdates.isEmpty then
-      throwError "prove_reified_incr: {d} has {R.memoryUpdates.size} memory update(s). \
-        Flops are supported; memory NEXT-IMAGES are not. Refusing rather than emitting \
-        a theorem whose statement looks complete."
     let nsrc  := R.sources.size
     let nb    := R.bindings.size
     let base  := f.getId
@@ -548,7 +544,11 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
       `(#[$fs,*])
     elabCommand (← `(command| theorem $dfNm : ($d).flops = $flopsLit := rfl))
     let dmNm := mkIdent (base ++ `D_mems)
-    elabCommand (← `(command| theorem $dmNm : ($d).memories = #[] := rfl))
+    let memsLit ← liftTermElabM do
+      let ms ← R.memoryUpdates.mapM fun mu =>
+        `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg) })
+      `(#[$ms,*])
+    elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
     let doNm := mkIdent (base ++ `D_outputs)
     let outsLit ← liftTermElabM do
       let os ← R.outputs.mapM fun o =>
@@ -569,7 +569,8 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
         rw [$hEq:ident]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
         simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.flopNext_eq, $dfNm:ident, $dmNm:ident, $doNm:ident, $hSimp,*]))
+              Compiler.compileMemory, Compiler.flopNext_eq,
+              $dfNm:ident, $dmNm:ident, $doNm:ident, $hSimp,*]))
     let corNm := mkIdent (base ++ `correct)
     elabCommand (← `(command|
       theorem $corNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
