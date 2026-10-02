@@ -890,6 +890,36 @@ def main() -> int:
               srow is not None and srow["verdict"] == "hash_mismatch" and srow["agree"] == "0",
               "a stale result is recorded and uncreditable", f, str(srow))
 
+        # 15. what survives a --timeout kill, and where the phase markers must go.
+        #
+        # A probe killed by --timeout is SIGKILLed, so `/usr/bin/time -v` writes
+        # nothing. The question these two checks settle is whether the RUNNER
+        # also loses the child's output -- because an earlier revision concluded
+        # it did and "fixed" it by flushing stdout from inside `#eval`, which
+        # does not work: `#eval` output is captured by Lean's elaborator and
+        # emitted as a message only when the command COMPLETES, so the flush
+        # flushed the captured stream, not the process stdout. The markers
+        # therefore reached the log only on a normal exit.
+        #
+        # run_group is NOT the lossy part, which is what the first check pins.
+        # The second pins the property the markers now rely on.
+        kid = tmp / "flushchild.py"
+        fmark = tmp / "flushchild.marker"
+        kid.write_text(
+            "import sys, time, pathlib\n"
+            f"pathlib.Path({str(fmark)!r}).write_text('written\\n')\n"
+            "sys.stdout.write('FLUSHED-STDOUT\\n'); sys.stdout.flush()\n"
+            "time.sleep(600)\n", encoding="utf-8")
+        gout, grc = sweep_mod.run_group([sys.executable, str(kid)], None, timeout=3)
+        check("run_group_keeps_flushed_stdout_on_timeout",
+              grc == 124 and "FLUSHED-STDOUT" in gout,
+              "run_group's timeout path drains the pipe, so a child's flushed "
+              "stdout is NOT lost by the runner", f, f"rc={grc} out={gout[:120]!r}")
+        check("file_write_survives_timeout_kill",
+              fmark.is_file() and fmark.read_text().strip() == "written",
+              "and a closed file write survives the kill, which is why the phase "
+              "markers write to a file rather than to stdout", f)
+
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -786,6 +786,15 @@ PROBE_HEAD = """import LeanSemanticPrimitives.Compiler.ReifyGen
 import LeanSemanticPrimitives.Compiler.D3Harness
 """
 
+# Emitted immediately after the imports and BEFORE the certificate body, so that
+# an empty `.phase` means "did not finish starting up / loading oleans / parsing"
+# rather than being ambiguous between that and certificate elaboration. It needs
+# no `open` and no `set_option`, so it is safe this early.
+IMPORTS_MARKER = """
+#eval show IO Unit from
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn "imports_ready"
+"""
+
 PROBE_TAIL = """
 reify_design {m}_designCert as d3_fast
 
@@ -806,20 +815,25 @@ def d3_residual : ResidualProgram :=
 # proved are the same definition. Emitting a model separately in each stage is
 # how a proof comes to be about something other than what ran.
 PROBE_TAIL_NAMED = """
--- PHASE MARKERS, each FLUSHED.  A probe killed by `--timeout` is SIGKILLed, so
--- `/usr/bin/time -v` never writes its report and Lean's stdout buffer is lost:
--- the log comes back empty and says nothing about which phase was in flight.
--- An explicit flush after each phase survives the kill, so the last marker in
--- the log names the last phase that COMPLETED.
-#eval show IO Unit from do
-  IO.println "D3PHASE cert_elaborated"
-  (← IO.getStdout).flush
+-- PHASE MARKERS, written to a FILE, not to stdout.
+--
+-- An earlier revision printed these and flushed `IO.getStdout`.  A forced-kill
+-- regression showed that does not work: `#eval` output is CAPTURED by the
+-- elaborator and emitted as a message when the command finishes, so the flush
+-- flushes the captured stream, not the process's real stdout.  The markers
+-- therefore reached the log only on a normal exit -- exactly never in the case
+-- they exist for.  `/usr/bin/time -v` likewise writes nothing when SIGKILLed.
+--
+-- A file write is not captured, and `withFile` CLOSES the handle, so the bytes
+-- are with the OS before the next phase starts and survive the kill.  The last
+-- line of the `.phase` file names the last phase that COMPLETED.
+#eval show IO Unit from
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn "cert_elaborated"
 
 reify_design_named {m}_designCert as d3_fast
 
-#eval show IO Unit from do
-  IO.println "D3PHASE reified"
-  (← IO.getStdout).flush
+#eval show IO Unit from
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn "reified"
 
 def d3_residual : ResidualProgram :=
   match compileDesign {m}_designCert with
@@ -1182,7 +1196,8 @@ def module_of(path: pathlib.Path) -> str:
     return path.name[: -len("_Lgraph.lean")] if path.name.endswith("_Lgraph.lean") else path.stem
 
 
-def make_probe(cert: pathlib.Path, m: str, samples: int, reifier: str = "legacy") -> str:
+def make_probe(cert: pathlib.Path, m: str, samples: int, reifier: str = "legacy",
+               phase_file: str = "") -> str:
     """Certificate body + reify + gate report.
 
     The certificate's own `theorem` block is DROPPED: `<m>_compiles` is a
@@ -1192,8 +1207,19 @@ def make_probe(cert: pathlib.Path, m: str, samples: int, reifier: str = "legacy"
     drops `<m>_step_correct` and the trailing `<m>_residual`/`#print axioms`,
     all of which this probe replaces or does not need.
     """
-    tail = PROBE_TAIL_NAMED if reifier == "named" else PROBE_TAIL
-    return _cert_body(cert, PROBE_HEAD) + tail.format(m=m, samples=samples)
+    if reifier == "named":
+        # A Lean string literal for the marker path. `json.dumps` escapes exactly
+        # the characters Lean's string syntax also escapes, and an empty path
+        # would make `withFile` throw, so the markers are emitted only when the
+        # caller supplied one.
+        if not phase_file:
+            raise ValueError("make_probe(reifier='named') needs phase_file: the "
+                             "phase markers write to it, and a probe without one "
+                             "would report nothing when the target is killed")
+        head = PROBE_HEAD + IMPORTS_MARKER.format(phase=json.dumps(phase_file))
+        return _cert_body(cert, head) + PROBE_TAIL_NAMED.format(
+            m=m, samples=samples, phase=json.dumps(phase_file))
+    return _cert_body(cert, PROBE_HEAD) + PROBE_TAIL.format(m=m, samples=samples)
 
 
 def _cert_body(cert: pathlib.Path, head: str) -> str:
@@ -1537,7 +1563,12 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         probe.write_text(text, encoding="utf-8")
     else:
         probe = probe_dir / f"{m}.lean"
-        probe.write_text(make_probe(cert, m, samples, reifier=REIFIER), encoding="utf-8")
+        phase_path = log_dir / f"{m}.phase"
+        # Stale markers from an earlier attempt would be read as this run's
+        # progress, so the file starts empty every launch.
+        phase_path.unlink(missing_ok=True)
+        probe.write_text(make_probe(cert, m, samples, reifier=REIFIER,
+                                    phase_file=str(phase_path)), encoding="utf-8")
 
     # /usr/bin/time -v, so job count and timeouts for the long tiers can be
     # chosen from MEASURED peak RSS rather than guessed.  Wrapping rather than
