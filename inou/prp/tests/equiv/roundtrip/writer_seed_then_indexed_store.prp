@@ -1,0 +1,17 @@
+/*
+:name: writer_seed_then_indexed_store
+:type: compile
+*/
+// The writer's dead-init scan counted the indexed store `o[s] = c` as a full
+// overwrite of `o` and dropped the whole-array seed before it. The emitted file
+// then failed to recompile (`lane 0 of output 'o' is never driven`), and a
+// non-zero seed's other lanes would have lost their value. An indexed store is
+// a read-modify-write of the lanes it does not select.
+pub mod writer_seed_then_indexed_store(b:[4]U8, s:U2, c:U8) -> (o:[4]U8@[0], p:[4]U8@[0], y:U8@[0]) {
+  o = 0
+  o[s] = c
+  p = 3
+  p[s] = c
+  p[0] = b[0] | 1
+  y = b[s] & 0xF0
+}

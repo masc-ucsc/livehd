@@ -1,0 +1,25 @@
+/*
+:name: writer_typed_acc_reinit_mux
+:type: compile
+*/
+// The writer folded the value-less `mut acc:U8` declare (and its type) into the
+// LATER `acc = if c {7} else {0}` mux, even though the loop above already used
+// acc. The first store then declared it untyped (`mut acc = 0`), so the loop's
+// `wrap(v = …, type = acc)` lowering had no typed target and the emitted file
+// failed to recompile (`call to undefined function 'wrap'`). A declare may only
+// fold into a mux that is the first statement to touch the variable.
+pub mod writer_typed_acc_reinit_mux(b:U32, c:Bool) -> (z:U8@[0], w:U8@[0]) {
+  mut acc:U8 = 0
+  for i in 0..=3 {
+    wrap acc = acc + b#[(i*8)..+8]
+  }
+  z = acc
+  acc = 0
+  if c {
+    acc = 7
+  }
+  for i in 0..=3 {
+    wrap acc = acc ^ b#[(i*8)..+8]
+  }
+  w = acc
+}

@@ -535,6 +535,9 @@ Memory_clocks memory_clocks(const hhds::Occurrence_node& node) {
         r.unresolved = true;  // two drivers on one clock sink naming different inputs
       }
     }
+    if (any_driver) {
+      r.sinks.insert(raw / stride);
+    }
     if (any_driver && !any_live) {
       r.tied_off.insert(raw / stride);
     }
@@ -4820,8 +4823,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // exactly as for flops.
     std::vector<Term> port_edge(mc.ports.size());  // per cell port; null = commits every step
     Term              mem_edge;                    // whole-array update / reset
-    if (multi_clock && !mc.is_comb && !(phased && !phase_plan_->multi_root())) {
-      if (mc.clocks.unresolved) {
+    // A DEAD port clock (tied to a constant) never ticks, in EVERY clock model
+    // -- not only the multi-clock one. The census (memory_clocks) leaves a
+    // tied-off clock out of the clock count, so `posedge 1'b0` next to a
+    // single live clock_a is a SINGLE-clock design (or, with a negedge flop, a
+    // single-root phase schedule): the dead-port rule used to live only under
+    // `multi_clock`, the port's edge stayed null and it committed on every
+    // clk_a step (PROVEN against the same port on clk_a, REFUTED against no
+    // port). See pass/lec/tests/lec_mem_dead_clock_test.sh.
+    if (!mc.is_comb) {
+      // Per-port clock edges: multi-clock, unless the phase schedule (single
+      // root) owns the endpoints. Otherwise a live port keeps a null edge
+      // (single clock: one step IS one period; phased: the schedule gates it).
+      const bool lane_edges = multi_clock && !(phased && !phase_plan_->multi_root());
+      if (lane_edges && mc.clocks.unresolved) {
         return fail_unsupported("memory '" + gu::debug_name(mc.node)
                                 + "' is in a multi-clock design but its clock does not resolve to a clock input (or a "
                                   "Clock_cell on one); refusing rather than encode it as committing every step");
@@ -4875,6 +4890,32 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
         return nullptr;
       };
+      // Does port `pid` never tick? Under per-port edges every port without a
+      // lane is dead (unresolved lanes were refused above). Outside them a
+      // port is dead only on POSITIVE evidence -- its own clock sink, or the
+      // base sink it falls back to, is driven only by constants -- since a
+      // live clock there need not resolve to an input (a single clock never
+      // had to), and a memory with no clock sink at all keeps the old model.
+      auto dead_of = [&](size_t pid) -> bool {
+        if (lane_edges) {
+          return lane_of(pid) == nullptr;
+        }
+        const auto& ck = mc.clocks;
+        if (ck.single) {
+          return ck.lanes.empty() && !ck.tied_off.empty() && !ck.unresolved;
+        }
+        const int p = static_cast<int>(pid);
+        if (ck.lanes.contains(p)) {
+          return false;
+        }
+        if (ck.tied_off.contains(p)) {
+          return true;
+        }
+        if (ck.sinks.contains(p) || ck.sinks.empty()) {
+          return false;  // a live (unresolved) clock of its own, or none anywhere
+        }
+        return ck.tied_off.contains(*ck.sinks.begin());
+      };
       // An enable that is provably the constant 0 (every lane, no unknown bit).
       auto const_off = [&](const hhds::Occurrence_pin& en) -> bool {
         if (en.is_invalid()) {
@@ -4892,36 +4933,40 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         return ev.term.getBitVectorValue(2).find('1') == std::string::npos;
       };
       for (size_t pid = 0; pid < mc.ports.size(); ++pid) {
-        const Memory_clocks::Lane* lane = lane_of(pid);
-        if (lane == nullptr) {
-          // A DEAD port clock (tied to a constant, or no clock at all): the port
-          // never commits. It used to be left null here, and `with_edge` then
-          // fell back to the bare gate -- the port committed on EVERY step,
-          // while the census (memory_clocks) counts the same clock as never
-          // ticking. A write port that still WRITES (a live enable), or a
-          // registered read port that still reads, is a design whose dead
-          // clock is almost certainly a front-end artifact: refuse rather
-          // than guess which clock the author meant.
+        if (dead_of(pid)) {
+          // A DEAD port clock (tied to a constant, or -- under per-port edges
+          // -- no clock at all): the port never commits. It used to be left
+          // null here, and `with_edge` then fell back to the bare gate -- the
+          // port committed on EVERY step, while the census (memory_clocks)
+          // counts the same clock as never ticking. A write port that still
+          // WRITES (a live enable), or a registered read port that still
+          // reads, is a design whose dead clock is almost certainly a
+          // front-end artifact: refuse rather than guess which clock the
+          // author meant.
           const auto& p      = mc.ports[pid];
           const bool  writes = !p.rd && !p.din.is_invalid();
           const bool  sreads = p.rd && mc.mtype == 1 && !p.addr.is_invalid();
           if ((writes || sreads) && !const_off(p.en)) {
             return fail_unsupported("memory '" + gu::debug_name(mc.node) + "' " + (writes ? "write" : "sync-read") + " port "
                                     + std::to_string(pid)
-                                    + " is clocked by a CONSTANT (or has no clock) in a multi-clock design, but its "
-                                      "enable is live; a constant clock never ticks, so the port would never commit -- "
-                                      "refusing rather than guess its clock");
+                                    + " is clocked by a CONSTANT (or has no clock), but its enable is live; a constant "
+                                      "clock never ticks, so the port would never commit -- refusing rather than guess "
+                                      "its clock");
           }
           port_edge[pid] = tm_.mkBoolean(false);
           continue;
         }
-        port_edge[pid] = edge_of(*lane);
+        if (!lane_edges) {
+          continue;  // live port: the single clock / phase schedule commits it
+        }
+        const Memory_clocks::Lane* lane = lane_of(pid);
+        port_edge[pid]                  = edge_of(*lane);
         if (port_edge[pid].isNull()) {
           return fail_unsupported("memory '" + gu::debug_name(mc.node) + "' port " + std::to_string(pid) + " clock '"
                                   + lane->name + "' has no encodable driver");
         }
       }
-      if (global != nullptr && (mc.is_whole || !mc.reset.is_invalid())) {
+      if (lane_edges && global != nullptr && (mc.is_whole || !mc.reset.is_invalid())) {
         if (mixed) {
           return fail_unsupported("memory '" + gu::debug_name(mc.node)
                                   + "' has a whole-array update or reset but its ports run on DIFFERENT clocks; the "
@@ -4932,14 +4977,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           return fail_unsupported("memory '" + gu::debug_name(mc.node) + "' clock '" + global->name
                                   + "' has no encodable driver");
         }
-      } else if (global == nullptr && !mc.clocks.tied_off.empty() && (mc.is_whole || !mc.reset.is_invalid())) {
+      } else if (global == nullptr && !mc.clocks.unresolved && !mc.clocks.tied_off.empty()
+                 && (mc.is_whole || !mc.reset.is_invalid())) {
         // The memory's only clock is a constant: the whole array never commits
         // and a sync reset never lands (an async one still overrides). A live
         // bulk update is refused like a live port on a dead clock.
         if (mc.is_whole && !const_off(mc.update_enable)) {
           return fail_unsupported("memory '" + gu::debug_name(mc.node)
-                                  + "' has a whole-array update clocked by a CONSTANT in a multi-clock design; a "
-                                    "constant clock never ticks -- refusing rather than guess its clock");
+                                  + "' has a whole-array update clocked by a CONSTANT; a constant clock never ticks "
+                                    "-- refusing rather than guess its clock");
         }
         mem_edge = tm_.mkBoolean(false);
       }

@@ -347,6 +347,9 @@ std::optional<std::pair<std::string, int>> clock_input_bit(const hhds::Pin_class
 // yosys async read's `RD_CLK=x`, a `posedge 1'b0` write): such a port never
 // ticks. A port with NO clock sink at all is neither in `lanes` nor here; it
 // takes the memory's base clock (cgen's rule: the first port carrying one).
+// `sinks` = every port block with a DRIVEN clock sink (live, unresolved or tied
+// off): a port in `sinks` but in neither `lanes` nor `tied_off` has a live,
+// unresolved clock, which is NOT evidence that it never ticks.
 struct Memory_clocks {
   struct Lane {
     std::string          name;  // the input name, `name[bit]` for a bit past 0
@@ -355,6 +358,7 @@ struct Memory_clocks {
   };
   std::map<int, Lane> lanes;
   std::set<int>       tied_off;
+  std::set<int>       sinks;
   bool                single     = true;
   bool                unresolved = false;
   bool                comb       = false;

@@ -46,6 +46,12 @@ def _lenient_verdict(result):
         return "failed"
     if result.returncode == 124 and "LEC outer watchdog exceeded" in text:
         return "inconclusive"
+    # An encoder REFUSAL (a cell the encoder does not model, or a top with no
+    # observable output) also exits 7 with a final UNKNOWN line, but it compared
+    # nothing: lhd lec reports it as a `lec REFUSED` error. That is a failure,
+    # not a solver give-up, so it must not pass as inconclusive.
+    if "lec REFUSED " in text:
+        return "failed"
     if result.returncode == 7 and " UNKNOWN " in last:
         return "inconclusive"
     return "failed"

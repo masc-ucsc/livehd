@@ -243,8 +243,9 @@ sh_test(
     tags = ["no-sandbox"],  # compiles RTL + runs the in-process cvc5 array engine
 )
 
-# Multi-clock: a memory port clocked by a CONSTANT never commits; with a live
-# enable the encoder refuses (UNKNOWN) instead of committing it every step.
+# A memory port clocked by a CONSTANT never commits (multi-clock, single-clock
+# and single-root phase schedule); with a live enable the encoder refuses
+# (UNKNOWN) instead of committing it every step.
 # Reached through the yosys readers (slang refuses a constant clock).
 sh_test(
     name = "lec_mem_dead_clock_test",

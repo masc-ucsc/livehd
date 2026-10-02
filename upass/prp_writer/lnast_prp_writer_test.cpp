@@ -514,6 +514,48 @@ TEST(LnastPrpWriter, RegisterAttrDoesNotKillConstantStore) {
   EXPECT_NE(output.find("rst_q = 1"), std::string::npos) << "register din store was dropped:\n" << output;
 }
 
+// An INDEXED store `o[s] = c` is a read-modify-write: every lane it does not
+// select keeps the value the earlier whole-array seed gave it. The dead-init
+// scan must not count it as a full overwrite of `o`; dropping `o = 3` leaves
+// the other lanes undriven (or, worse, silently changes their value).
+TEST(LnastPrpWriter, IndexedStoreDoesNotKillWholeSeed) {
+  auto ln = std::make_shared<Lnast>("indexed_after_seed");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto seed = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(seed, Lnast_node::create_ref("o"));
+  ln->add_child(seed, Lnast_node::create_const("3"));
+
+  auto lane = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(lane, Lnast_node::create_ref("o"));
+  ln->add_child(lane, Lnast_node::create_ref("s"));
+  ln->add_child(lane, Lnast_node::create_ref("c"));
+
+  const auto output = run_and_emit(ln, {"noop"});
+  EXPECT_NE(output.find("o = 3"), std::string::npos) << "whole-array seed before an indexed store was dropped:\n" << output;
+  EXPECT_NE(output.find("o[s] = c"), std::string::npos) << output;
+}
+
+// A plain whole-value redefinition still supersedes an unread constant seed.
+TEST(LnastPrpWriter, WholeStoreStillKillsUnreadSeed) {
+  auto ln = std::make_shared<Lnast>("whole_after_seed");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto seed = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(seed, Lnast_node::create_ref("o"));
+  ln->add_child(seed, Lnast_node::create_const("3"));
+
+  auto whole = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(whole, Lnast_node::create_ref("o"));
+  ln->add_child(whole, Lnast_node::create_ref("c"));
+
+  const auto output = run_and_emit(ln, {"noop"});
+  EXPECT_EQ(output.find("= 3"), std::string::npos) << "dead seed survived:\n" << output;
+  EXPECT_NE(output.find("o = c"), std::string::npos) << output;
+}
+
 // A concat lane is a fixed-width bit window, even when its source is signed or
 // its selected top bit is one. The writer must make each re-emitted lane
 // unsigned before the shift/OR pack; otherwise Pyrope sign-extends the low lane

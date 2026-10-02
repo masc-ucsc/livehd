@@ -136,6 +136,17 @@ void Lnast_prp_writer::scan_dead_init_stores() {
       continue;
     }
     const std::string nm(strip_prefix(lnast->get_name(v)));
+    // An indexed/field store `store(x, idx…, v)` is a read-modify-write: the
+    // lanes it does not select keep x's earlier value. It READS a pending seed
+    // (`o = 0; o[s] = c` — dropping the seed leaves the other lanes undriven)
+    // and is never a whole-value candidate itself.
+    if (t == Lnast_ntype::Lnast_ntype_store) {
+      auto val = lnast->get_sibling_next(v);
+      if (!val.is_invalid() && !lnast->is_last_child(val)) {
+        pending.erase(nm);
+        continue;
+      }
+    }
     // This def supersedes a pending one: that earlier store is dead.
     if (auto it = pending.find(nm); it != pending.end()) {
       if (nested_def_names_.count(nm) == 0) {
@@ -7438,6 +7449,62 @@ void Lnast_prp_writer::analyze_muxes(Lnast_nid stmts_nid) {
       top_decl_node.emplace(std::string(strip_prefix(lnast->get_name(v))), c);
     }
   }
+  // Per declared name, every node (pre-order, after its declare) with a direct
+  // `ref` child naming it. The declare may fold into a mux only when the first
+  // of these that survives (not itself folded away, e.g. the mux's seed store)
+  // lies INSIDE that mux: an earlier reader/writer would otherwise run before
+  // the declaration — a plain store re-declares x untyped (`mut x = 0`), and the
+  // mux then prints a bare `x = if …`, so `x:T` loses its type and a later
+  // `wrap(type = x)` lowering cannot resolve.
+  absl::flat_hash_map<std::string, std::vector<Lnast_nid>> decl_refs;
+  {
+    std::function<void(Lnast_nid)> scan = [&](Lnast_nid n) {
+      for (auto ch = lnast->get_child(n); !ch.is_invalid(); ch = lnast->get_sibling_next(ch)) {
+        if (Lnast_ntype::is_ref(lnast->get_type(ch))) {
+          if (auto it = decl_refs.find(strip_prefix(lnast->get_name(ch))); it != decl_refs.end()
+              && (it->second.empty() || it->second.back() != n)) {
+            it->second.push_back(n);
+          }
+        }
+        scan(ch);
+      }
+    };
+    for (auto c = lnast->get_child(stmts_nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+      if (lnast->get_type(c) == Lnast_ntype::Lnast_ntype_declare) {
+        auto v = lnast->get_child(c);
+        if (!v.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(v))) {
+          const std::string nm(strip_prefix(lnast->get_name(v)));
+          if (auto dit = top_decl_node.find(nm); dit != top_decl_node.end() && dit->second == c) {
+            decl_refs.try_emplace(nm);
+          }
+        }
+        continue;
+      }
+      scan(c);
+    }
+  }
+  auto first_use_inside = [&](const std::string& name, Lnast_nid mux) -> bool {
+    auto it = decl_refs.find(name);
+    if (it == decl_refs.end()) {
+      return false;
+    }
+    for (const auto& n : it->second) {
+      if (folded_node_.count(n.get_class_index().value)) {
+        continue;
+      }
+      // strictly inside: the if-node itself (a condition reading x) does not count
+      for (auto up = lnast->get_parent(n); !up.is_invalid(); up = lnast->get_parent(up)) {
+        if (up == mux) {
+          return true;
+        }
+        if (up == stmts_nid) {
+          break;
+        }
+      }
+      return false;
+    }
+    return false;
+  };
   absl::flat_hash_set<std::string> post_dead;  // signals orphaned by a suppressed default store
   std::function<void(Lnast_nid)>   rec = [&](Lnast_nid blk) {
     std::vector<Lnast_nid> kids;
@@ -7598,7 +7665,7 @@ void Lnast_prp_writer::analyze_muxes(Lnast_nid stmts_nid) {
           // is dead. Only a plain value-less `mut` declare with no reg/mem attrs.
           if (auto dit = top_decl_node.find(mi.lhs);
               dit != top_decl_node.end() && !folded_node_.count(dit->second.get_class_index().value) && !folded_attrs_.count(mi.lhs)
-              && find_stages_child(dit->second).is_invalid()) {
+              && find_stages_child(dit->second).is_invalid() && first_use_inside(mi.lhs, c)) {
             auto       d         = dit->second;
             auto       vr        = lnast->get_child(d);                                          // ref
             auto       ty        = vr.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(vr);  // type
