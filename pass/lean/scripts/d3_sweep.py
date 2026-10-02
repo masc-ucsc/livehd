@@ -527,6 +527,22 @@ class Cgroup:
         return False
 
 
+def _nonneg_int(text: str) -> int:
+    """A memory budget in kB.  Zero means "no limit"; negative means nothing.
+
+    Without this a negative value is TRUTHY, so it passed every `if limit:` guard
+    and would have reached `memory.max` as a nonsensical write.
+    """
+    try:
+        v = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an integer number of kB")
+    if v < 0:
+        raise argparse.ArgumentTypeError(
+            f"{v} is negative; a memory budget cannot be. Use 0 to disable.")
+    return v
+
+
 def _positive_finite(text: str) -> float:
     """A sample interval must be a finite positive number.
 
@@ -1609,7 +1625,7 @@ def main() -> int:
                          "(or that have no recorded RSS); they are written as "
                          "run_status=deferred and picked up by a later --resume. "
                          "Requires --order-by. Scheduling only.")
-    ap.add_argument("--kill-over-rss-kb", type=int, default=0,
+    ap.add_argument("--kill-over-rss-kb", type=_nonneg_int, default=0,
                     help="HARD limit, SAMPLED AND ADVISORY: terminate the running "
                          "probe(s) once a sample of this run's aggregate resident "
                          "total reaches it. 0 disables. Unlike "
@@ -1620,7 +1636,7 @@ def main() -> int:
                          "exceeded a 19,000,000 kB limit by 161,996 kB and was never "
                          "killed, while another was caught 20,996 kB over. Use "
                          "--rss-sample-seconds to trade overhead for tightness.")
-    ap.add_argument("--max-aggregate-rss-kb", type=int, default=20_000_000,
+    ap.add_argument("--max-aggregate-rss-kb", type=_nonneg_int, default=20_000_000,
                     help="SOFT cap, sampled: stop LAUNCHING new targets once a "
                          "sample of this run's aggregate resident total reaches it; "
                          "0 disables. A running target is never killed by this, so "
@@ -1645,6 +1661,17 @@ def main() -> int:
     ap.add_argument("--native", action="store_true",
                     help="run the UNMODIFIED certificate: compilesOk by native_decide + axioms")
     a = ap.parse_args()
+
+    # ARGUMENT VALIDATION FIRST: cheap, and the same answer on every host.
+    # Ordering host detection before this made the diagnostic for a plainly
+    # invalid command line vary by machine -- an unavailable host reported "not
+    # available" while an available one reported "needs --kill-over-rss-kb" for
+    # the identical argv. A bad command line is bad everywhere.
+    if a.enforce in ("cgroup", "auto") and a.kill_over_rss_kb <= 0:
+        print(f"REFUSING: --enforce {a.enforce} needs a POSITIVE "
+              f"--kill-over-rss-kb to set memory.max; got {a.kill_over_rss_kb}. "
+              f"Zero leaves the cgroup with no limit at all.", file=sys.stderr)
+        return 2
 
     if a.runner_selftest:
         os.environ["D3_RUNNER_SELFTEST"] = "1"
@@ -1767,11 +1794,6 @@ def main() -> int:
         if CGROUP_BASE is not None:
             CGEXEC_PATH.parent.mkdir(parents=True, exist_ok=True)
             CGEXEC_PATH.write_text(CGEXEC_SRC)
-        if CGROUP_BASE is not None and not a.kill_over_rss_kb:
-            print("REFUSING: --enforce cgroup/auto needs --kill-over-rss-kb to set "
-                  "memory.max; without it the cgroup would impose no limit.",
-                  file=sys.stderr)
-            return 2
 
     # Decided here, beside the enforcement choice, because the sidecar records it
     # long before the sampler thread starts. When the KERNEL enforces the limit

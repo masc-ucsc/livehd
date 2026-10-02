@@ -155,11 +155,42 @@ def main() -> int:
                  "--out", str(tmp / out), "--jobs", "1", "--timeout", "120", *extra],
                 cwd=ROOT, env=env, capture_output=True, text=True, timeout=180)
 
-        r = run(["--enforce", "cgroup"], out="refuse1.tsv")
-        check("refuse_cgroup_without_limit",
-              r.returncode == 2 and "needs --kill-over-rss-kb" in r.stderr,
-              "--enforce cgroup without --kill-over-rss-kb is refused: a cgroup with "
-              "no memory.max imposes no limit", r.stderr[-300:])
+        # The SAME answer on every host: argument validation runs before any host
+        # probing, so an available and an unavailable machine reject an invalid
+        # command line identically. Previously detection ran first, so an
+        # unavailable host said "not available" and an available one said "needs
+        # --kill-over-rss-kb" for the identical argv -- the diagnostic depended on
+        # the machine. Both runners are exercised here to pin that.
+        for label, runner in (("detected", run),
+                              ("forced-unavailable",
+                               lambda extra, out=None, env_extra=None, _f=run_forced:
+                                   _f(extra, "refuse1f.tsv"))):
+            for args, why in ((["--enforce", "cgroup"], "absent"),
+                              (["--enforce", "cgroup", "--kill-over-rss-kb", "0"],
+                               "zero"),
+                              (["--enforce", "auto", "--kill-over-rss-kb", "0"],
+                               "zero under auto")):
+                rr = runner(args, out="refuse1.tsv")
+                check(f"refuse_without_positive_limit_{why.split()[0]}_{label}",
+                      rr.returncode == 2
+                      and "needs a POSITIVE --kill-over-rss-kb" in rr.stderr,
+                      f"--kill-over-rss-kb {why} is refused on a {label} host: a "
+                      f"cgroup with no memory.max imposes no limit",
+                      rr.stderr[-200:])
+
+        # a negative budget never reaches memory.max: it is truthy, so it passed
+        # every `if limit:` guard before being rejected at the argument layer
+        rneg = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--out",
+             str(tmp / "neg.tsv"), "--enforce", "cgroup",
+             "--kill-over-rss-kb", "-5"],
+            cwd=ROOT, env=dict(os.environ, LAKE=str(stub), TMPDIR=str(tmp)),
+            capture_output=True, text=True, timeout=60)
+        check("reject_negative_budget",
+              rneg.returncode != 0 and "is negative" in rneg.stderr,
+              "a negative --kill-over-rss-kb is rejected at the argument layer, "
+              "before it can reach memory.max as a nonsensical write",
+              rneg.stderr[-200:])
 
         if base is None:
             r = run_forced(["--enforce", "cgroup", "--kill-over-rss-kb", "100000"],
