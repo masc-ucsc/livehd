@@ -214,6 +214,71 @@ owes a shift and every environment read owes a conversion.  Removing that needs
 a representation change (de Bruijn LEVELS, or a suspended shift), not a
 bookkeeping change.
 
+## 4. What the smallest representation change would buy, from the real counts
+
+The candidate, and the smallest one the evidence supports:
+
+> let `PRes` carry a PURE `PVal` directly, so `prepare` and `PVal.toPRes` on it
+> are O(1) instead of structurally rebuilding the spine.
+
+### Which traversals it removes
+
+The inner loop, as measured: each node does O(1) slot reads at depth Theta(n);
+each read unrolls `nthD` Theta(n) times; and EVERY unroll step calls `prepare`
+on the environment result, which for a spine of pure `dyn` leaves walks and
+REBUILDS the whole spine.
+
+  REMOVED
+    * `prepare` on a pure spine, Theta(n) structural copy  ->  O(1)
+    * `PVal.toPRes` on a pure spine, Theta(n) copy         ->  O(1)
+      (the `var` rule stops converting and hands the `PVal` over as-is)
+
+  NOT REMOVED
+    * `PVal.shift`: indices stay relative to binder depth, so entering a binder
+      still shifts.  That is the de Bruijn LEVELS change -- separate, larger.
+    * the Theta(n) unrolling of `nthD` per slot read.  The RESIDUAL is already
+      free of it (Phase 1); this is specialization-time cost only.
+
+A SUSPENDED SHIFT WOULD REMOVE NEITHER of the two that are removed above.  It
+targets `PVal.shift`, which is the 27% term, not the n^3 term.  That is why it
+is not the proposal.
+
+### The projected exponent, from measured counts
+
+At n = 128: `prepare` is entered 19,876 times (~1.2 n^2) and each entry walks
+~85 `PRes` nodes (~0.66 n).  So `prepare`'s own work is ~0.8 n^3 -- it IS the
+cubic term.  Everything else measured is quadratic or below: `PVal.shift` is
+~56 n^2 entries x ~3.8 steps, `mixTerm` ~11.9 n^2 steps.
+
+Making `prepare` and `toPRes` O(1) per entry leaves 1.2 n^2 entries x O(1), so
+the predicted result is
+
+    n^3  ->  n^2
+
+and, at the measured native constant, n = 1024 would fall from 417 s to the
+order of a second, with `rt_intpipe_alu`'s 5118 nodes landing in tens of
+seconds rather than the extrapolated ~14 hours.
+
+THIS IS A PROJECTION FROM CALL COUNTS, NOT A MEASUREMENT OF AN IMPLEMENTATION.
+`scripts/repr_prototype.lean` attempted to measure it directly and is
+INCONCLUSIVE: both sides report 0 us at every n while the level counts grow as
+1.5 n^2, i.e. the per-level calls are optimised away because the benchmark's
+results are structurally constant.  Two hardening rounds did not fix it.  A
+faithful end-to-end prototype needs the representation implemented in a forked
+copy of `PartialEvaluator.lean` and the real `projectDesign` run against it.
+
+### Cost of doing it for real
+
+`prepare` is named in `prepare_ok`, `prepare_sound`, `prepare_peel`,
+`prepare_cons_split`, `prepare_cons_join_left`, `prepare_cons_join_right`,
+`prepare_total_binds` and `prepare_hot_path`; `PRes` gains a constructor, so
+`PResOK`, `PResSound`, `PRes.total`, `PRes.toCode`, `primStruct` and the peel
+lemmas all gain a case.  The recommended shape is the one the audit asked for:
+keep the current specializer as the SEMANTIC REFERENCE and prove a
+representation/operation bridge to the optimized one, rather than weakening any
+existing theorem.  Guarded discards, binding order, scope and object-specializer
+agreement all have to be preserved across that bridge.
+
 ## 3. Status
 
 No optimization has been applied. The three candidate fixes differ sharply in
