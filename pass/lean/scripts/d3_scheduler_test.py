@@ -439,6 +439,72 @@ def main() -> int:
               jt and all(r["verdict"] == "timeout" for r in jt),
               "and records it as `timeout`, never as a design failure")
 
+        # ---- 8i. the soft cap logs ONCE, and records the FIRST crossing ------
+        # Before the latch this branch re-ran on every sample after the crossing:
+        # a real run emitted ~300 identical lines, and each pass overwrote
+        # `tripped_at_kb`, so the sidecar held the LAST crossing rather than the
+        # first. The scripted sequence crosses soft once and then stays above it,
+        # with values that keep RISING so a last-write-wins bug is visible.
+        out8i = tmp / "o8i.tsv"
+        d8i = run(tmp, cdir, out8i,
+                  ["--order-by", str(tbl), "--jobs", "1",
+                   "--max-aggregate-rss-kb", "1000", "--kill-over-rss-kb", "9000"],
+                  env_extra={"STUB_DELAY": "3", "D3_RSS_INTERVAL": "0.05",
+                             "D3_TEST_RSS_SEQ": "10,1500,2000,2500,3000"})
+        n_soft = sum(1 for l in d8i.stderr.splitlines() if "reached the cap" in l)
+        check("soft_cap_logs_once", d8i.returncode == 0 and n_soft == 1,
+              f"the soft cap logs exactly once, not once per sample (saw {n_soft})",
+              d8i.stderr[-500:])
+        m8i = json.loads((out8i.with_suffix(".tsv.meta.json")).read_text())
+        check("soft_cap_records_first_crossing",
+              m8i["aggregate_rss_tripped_kb"] == 1500,
+              f"and records the FIRST crossing (1500), not the last "
+              f"(got {m8i['aggregate_rss_tripped_kb']})")
+        check("soft_cap_latch_keeps_sampling",
+              m8i["aggregate_rss_peak_kb"] >= 3000,
+              f"while the sampler keeps running after the latch "
+              f"(peak {m8i['aggregate_rss_peak_kb']} >= 3000)")
+
+        # ---- 8j. an rss_killed row carries the sampled kill peak --------------
+        # The kill destroys its own measurement: /usr/bin/time writes at exit and
+        # never gets there under SIGKILL, so max_rss_kb/user_s/sys_s came back
+        # EMPTY on the one real rss_killed row. An empty cell reads as "not
+        # measured" when the truth is "measured by another instrument, as at
+        # least this much".
+        out8j = tmp / "o8j.tsv"
+        d8j = run(tmp, cdir, out8j,
+                  ["--order-by", str(tbl), "--jobs", "1",
+                   "--max-aggregate-rss-kb", "0", "--kill-over-rss-kb", "5000"],
+                  env_extra={"STUB_DELAY": "3", "D3_RSS_INTERVAL": "0.05",
+                             "D3_TEST_RSS_SEQ": "10,1000,7777"})
+        rows8j = {r["module"]: r for r in rt.rows_of(out8j)}
+        killed = {m for m, r in rows8j.items() if r["run_status"] == "rss_killed"}
+        m8j = json.loads((out8j.with_suffix(".tsv.meta.json")).read_text())
+        check("rss_killed_row_has_rss",
+              killed and all(rows8j[m]["max_rss_kb"] == str(m8j["aggregate_rss_killed_kb"])
+                             for m in killed),
+              f"an rss_killed row carries max_rss_kb = the sampled kill peak "
+              f"({m8j['aggregate_rss_killed_kb']}), not an empty cell",
+              str({m: rows8j[m]["max_rss_kb"] for m in killed}))
+        check("rss_killed_rss_provenance_stated",
+              killed and all("LOWER BOUND" in rows8j[m]["detail"]
+                             and "SAMPLED" in rows8j[m]["detail"] for m in killed),
+              "and its detail says the figure is a SAMPLED LOWER BOUND, so it "
+              "cannot be mistaken for a /usr/bin/time peak",
+              str({m: rows8j[m]["detail"][:120] for m in killed}))
+        check("rss_killed_times_stay_blank",
+              killed and all(rows8j[m]["user_s"] == "" and rows8j[m]["sys_s"] == ""
+                             for m in killed),
+              "while user_s/sys_s stay blank -- nothing measured them at all")
+
+        # ---- 8k. the sampler interval is configurable -------------------------
+        check("rss_sample_seconds_recorded",
+              m8j["scheduling"].get("rss_sample_seconds") == 5.0
+              and m8j["scheduling"].get("rss_enforcement") == "sampled-advisory",
+              "the sidecar records the sample interval and that enforcement is "
+              "SAMPLED-ADVISORY, not a guarantee",
+              str(m8j["scheduling"])[:300])
+
         # ---- 9. the descendant walk sees a grandchild the marker misses -------
         spec2 = importlib.util.spec_from_file_location("d3_sweep", SWEEP)
         sw = importlib.util.module_from_spec(spec2)

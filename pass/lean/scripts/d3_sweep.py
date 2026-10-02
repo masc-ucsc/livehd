@@ -325,6 +325,20 @@ def _aggregate_rss_kb() -> int:
 
 
 def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
+    """Sample the aggregate and act on the two caps.
+
+    BOTH CAPS ARE SAMPLED AND THEREFORE ADVISORY.  They bound SUSTAINED memory,
+    not instantaneous peaks: between two samples a probe can rise above the hard
+    limit and fall back, and nothing observes it.  Measured on real runs at a 5 s
+    interval and a 19,000,000 kB limit -- `frontend` peaked at 19,161,996 kB
+    (161,996 kB over) and was never killed, because the sampler's highest
+    observation was 18,977,904 kB; `issue_stage` was caught at 19,020,996 kB,
+    only 20,996 kB over.  Same limit, same interval, opposite outcomes, decided
+    purely by sampling phase.
+
+    A smaller interval narrows the window but cannot close it.  Only a kernel
+    mechanism (cgroup v2 `memory.max`) enforces continuously.
+    """
     interval = float(os.environ.get("D3_RSS_INTERVAL") or interval)
     while not _SHUTDOWN.is_set() and not _RSS_KILL.is_set():
         total = _aggregate_rss_kb()
@@ -356,12 +370,18 @@ def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
             # sampling after the executor drained, which is harmless but means
             # the sidecar's peak can keep moving after the last row is in.
             return
-        if cap_kb and total >= cap_kb:
+        if cap_kb and total >= cap_kb and not _RSS_STOP.is_set():
+            # LATCHED on `_RSS_STOP` being unset, so this fires exactly ONCE.
+            # Without the latch the branch re-ran on every sample after the
+            # crossing: one real run logged ~300 identical lines, and each pass
+            # overwrote `tripped_at_kb`, so the sidecar recorded the LAST
+            # crossing when the FIRST is the meaningful one.
             with _RSS_LOCK:
                 _RSS_PEAK["tripped_at_kb"] = total
             print(f"d3_sweep: AGGREGATE RSS {total} kB reached the cap {cap_kb} kB -- "
                   f"no further targets will be launched; the running one is left to "
-                  f"finish", file=sys.stderr)
+                  f"finish. (logged once; the sampler keeps watching)",
+                  file=sys.stderr)
             _RSS_STOP.set()
             # Deliberately NOT a return when a hard limit is armed: the probe
             # already running is the one that can still cross it, and it is
@@ -991,11 +1011,24 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         # Killed by the budget, not by anything the design did.  Recorded as a
         # nonterminal row so `--resume` picks it up, and never passed to
         # `classify`, which would read the SIGKILL as a compiler failure.
+        killed_at = _RSS_PEAK["killed_at_kb"]
         r = deferred_row(target, samples,
                          f"terminated by the hard aggregate RSS limit at "
-                         f"{_RSS_PEAK['killed_at_kb']} kB")
+                         f"{killed_at} kB (max_rss_kb is this SAMPLED aggregate, a "
+                         f"LOWER BOUND; /usr/bin/time was SIGKILLed and flushed "
+                         f"nothing, so no true per-process peak exists for this row)")
         r["run_status"], r["verdict"] = "rss_killed", "rss_killed"
         r["launched"], r["wall_s"] = "1", f"{time.time() - t0:.2f}"
+        # Populate from the sampled kill peak rather than leaving it blank.  The
+        # kill destroys its own measurement: `/usr/bin/time` writes its report at
+        # exit and never reaches that point under SIGKILL, so `max_rss_kb`,
+        # `user_s` and `sys_s` came back EMPTY on the one real rss_killed row.
+        # An empty cell is worse than a bounded one -- it reads as "not measured"
+        # when the truth is "measured, by a different instrument, as at least
+        # this much".  The provenance is spelled out in `detail` so the two
+        # sources can never be confused; `user_s`/`sys_s` stay blank because
+        # nothing measured them at all.
+        r["max_rss_kb"] = str(killed_at)
         return r
     row["wall_s"] = f"{time.time() - t0:.2f}"
     try:
@@ -1288,14 +1321,26 @@ def main() -> int:
                          "run_status=deferred and picked up by a later --resume. "
                          "Requires --order-by. Scheduling only.")
     ap.add_argument("--kill-over-rss-kb", type=int, default=0,
-                    help="HARD limit: terminate the running probe(s) once this "
-                         "run's aggregate resident total reaches it. 0 disables. "
-                         "Unlike --max-aggregate-rss-kb this stops a probe that is "
-                         "ALREADY RUNNING; the row becomes rss_killed and resumable.")
+                    help="HARD limit, SAMPLED AND ADVISORY: terminate the running "
+                         "probe(s) once a sample of this run's aggregate resident "
+                         "total reaches it. 0 disables. Unlike "
+                         "--max-aggregate-rss-kb this stops a probe that is ALREADY "
+                         "RUNNING; the row becomes rss_killed and resumable. It "
+                         "bounds SUSTAINED memory, NOT instantaneous peaks: a peak "
+                         "between samples passes unobserved. Measured: one run "
+                         "exceeded a 19,000,000 kB limit by 161,996 kB and was never "
+                         "killed, while another was caught 20,996 kB over. Use "
+                         "--rss-sample-seconds to trade overhead for tightness.")
     ap.add_argument("--max-aggregate-rss-kb", type=int, default=20_000_000,
-                    help="stop LAUNCHING new targets once this run's aggregate "
-                         "resident total reaches this; 0 disables. A running "
-                         "target is never killed by this.")
+                    help="SOFT cap, sampled: stop LAUNCHING new targets once a "
+                         "sample of this run's aggregate resident total reaches it; "
+                         "0 disables. A running target is never killed by this, so "
+                         "at --jobs 1 with one target it has no effect. Logged once, "
+                         "at the first crossing.")
+    ap.add_argument("--rss-sample-seconds", type=float, default=5.0,
+                    help="how often the aggregate RSS sampler runs. Smaller tightens "
+                         "the advisory hard limit at the cost of more /proc reads; it "
+                         "cannot make the limit exact.")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the selected targets IN RUN ORDER and exit, "
                          "writing nothing")
@@ -1434,6 +1479,10 @@ def main() -> int:
         "defer_over_rss_kb": a.defer_over_rss_kb,
         "max_aggregate_rss_kb": a.max_aggregate_rss_kb,
         "kill_over_rss_kb": a.kill_over_rss_kb,
+        "rss_sample_seconds": a.rss_sample_seconds,
+        # Both caps are SAMPLED: they bound sustained memory, not instantaneous
+        # peaks.  Recorded so a reader of these rows knows which guarantee applies.
+        "rss_enforcement": "sampled-advisory",
         "deferred": [{"module": t.module, "why": why} for t, why in deferred_targets],
     }
     cfg["tool_digest"] = tool_digest()
@@ -1744,7 +1793,8 @@ def main() -> int:
     _RSS_PEAK["kill_kb"] = a.kill_over_rss_kb
     if a.max_aggregate_rss_kb or a.kill_over_rss_kb:
         threading.Thread(target=_rss_monitor,
-                         args=(a.max_aggregate_rss_kb, 5.0, a.kill_over_rss_kb),
+                         args=(a.max_aggregate_rss_kb, a.rss_sample_seconds,
+                               a.kill_over_rss_kb),
                          daemon=True).start()
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as ex:
         futs = {ex.submit(run_one, t, a.samples, a.timeout, a.native, baseline_artifacts): t
