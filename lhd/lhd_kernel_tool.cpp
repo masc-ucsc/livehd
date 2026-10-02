@@ -316,6 +316,91 @@ std::string tool_node_consts(const hhds::Node_class& node) {
   return out;
 }
 
+// The WIDTH of every constant feeding a node's sink pins, positionally aligned
+// with `consts` -- same loop, same order, same labels.
+//
+// WHY A WIDTH IS NEEDED AT ALL.  `consts` prints a VALUE, and a value alone
+// does not determine what the design computes with it.  `Op_EQ` compares
+// `bv_uint` of each operand AT ITS OWN WIDTH
+// (Translation/LGraphModel.lean:176, `bv_uint x = x.value % 2^x.width`), and
+// pass.lean materializes an EQ's constant operand at
+// `dep_w = max(1, every operand's pin_width)` (pass_lean.cpp:1498).  So a `-1`
+// that lands at width 2 IS the value 3, and `eq(V,-1)` and `eq(V,3)` are the
+// SAME predicate on a 2-bit V.  A reader comparing the printed integers -1 and
+// 3 concludes they are different and can call a live ring dead.  A positive
+// literal wrapped by too narrow a pin aliases the same way.
+//
+// MIRRORS the const branch of pass/lean's `pin_width`
+// (pass/lean/pass_lean.cpp:177-214) and `intrinsic_const_width` (:165): a
+// declared width wins; an unsized constant takes its width from its value, and
+// a negative literal counts its sign bit.  Those live in pass.lean's anonymous
+// namespace and cannot be called from here, so this is a deliberate second
+// copy -- `lhd/tests/lhd_tool_test.sh` section 12 pins the agreement on the
+// cases that distinguish them.
+//
+// "?" means the dump cannot state the width exactly: unknown bits, or a
+// declared width too narrow for its own value (which pass.lean calls "a lie"
+// and refuses rather than guess).  A consumer MUST fail closed on "?".
+std::string tool_const_width_str(const hhds::Pin_class& pin) {
+  namespace gu = livehd::graph_util;
+  auto v = gu::hydrate_const(pin);
+  if (v.has_unknowns()) {
+    return "?";
+  }
+  auto minimal_unsigned = [](int64_t iv) -> uint32_t {
+    if (iv <= 0) {
+      return 1;
+    }
+    auto     uv   = static_cast<uint64_t>(iv);
+    uint32_t bits = 0;
+    while (uv != 0) {
+      ++bits;
+      uv >>= 1;
+    }
+    return std::max<uint32_t>(1, bits);
+  };
+  // `intrinsic_const_width` (pass_lean.cpp:165) for EVERY value shape, not
+  // only the i64 one: a value too wide for int64 takes `get_bits()`, and so
+  // does a negative literal (whose sign bit get_bits() already counts).
+  auto intrinsic = [&]() -> uint32_t {
+    if (!v.is_just_i64()) {
+      return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+    }
+    const int64_t iv = v.to_just_i64();
+    if (iv < 0) {
+      return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+    }
+    return minimal_unsigned(iv);
+  };
+  const int32_t declared = gu::bits_of(pin);
+  if (declared > 0) {
+    // The "declared width is a lie" refusal, with pin_width's own guard
+    // (`!has_unknowns && !is_negative && intrinsic > declared`) -- which is
+    // NOT restricted to i64, so a 200-bit positive value on a width-1 pin is
+    // "?" and not 1.
+    if (!v.is_negative() && intrinsic() > static_cast<uint32_t>(declared)) {
+      return "?";
+    }
+    return std::to_string(declared);
+  }
+  return std::to_string(intrinsic());
+}
+
+std::string tool_node_const_bits(const hhds::Node_class& node) {
+  namespace gu = livehd::graph_util;
+  std::string out;
+  for (const auto& e : node.inp_edges()) {
+    if (e.driver.is_invalid() || !gu::is_const_pin(e.driver)) {
+      continue;
+    }
+    if (!out.empty()) {
+      out += ",";
+    }
+    out += std::format("p{}={}", e.sink.get_port_id(), tool_const_width_str(e.driver));
+  }
+  return out;
+}
+
 Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
   namespace gu = livehd::graph_util;
   Tool_record r;
@@ -331,6 +416,8 @@ Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
   r.cols.emplace_back("partitionable", livehd::color::is_partitionable(node) ? "1" : "0");
   auto cs = tool_node_consts(node);
   r.cols.emplace_back("consts", cs.empty() ? std::string{"nil"} : cs);
+  auto cb = tool_node_const_bits(node);
+  r.cols.emplace_back("const_bits", cb.empty() ? std::string{"nil"} : cb);
   return r;
 }
 
@@ -433,10 +520,11 @@ std::vector<std::string> tool_display_cols(const Options& opts, Tool_target tgt)
     return tool_split_csv(opts.tool_attr);
   }
   switch (tgt) {
-    case Tool_target::node: return {"color", "match", "src", "consts"};
+    case Tool_target::node: return {"color", "match", "src", "consts", "const_bits"};
     case Tool_target::pin: return {"bits", "signed", "match"};
     case Tool_target::edge: return {"bits"};
-    default: return {"color", "match", "src", "consts", "bits", "signed"};  // target=all flat (grep)
+    default:
+      return {"color", "match", "src", "consts", "const_bits", "bits", "signed"};  // target=all flat (grep)
   }
 }
 

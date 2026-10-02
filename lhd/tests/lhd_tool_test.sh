@@ -205,4 +205,66 @@ for pi in sel a b c; do
 done
 grep -q '"to":"\$q"' "$W/sp.jsonl" || fail "the graph output \$q must still be an edge sink"
 
+# 12. CONSTANT WIDTHS.  `consts` prints a value; `const_bits` prints the width
+#     that value is compared AT.  Op_EQ compares `bv_uint` per operand at its
+#     own width (LGraphModel.lean:176) and pass.lean materialises an EQ's
+#     constant at `dep_w = max` over its operands (pass_lean.cpp:1498), so
+#     `-1` at width 2 IS 3 and a reader without the width cannot tell
+#     `eq(V,-1)` from `eq(V,3)`.
+#
+#     tool_const_width_str mirrors the const branch of pass.lean's `pin_width`
+#     (pass_lean.cpp:177).  The arms reachable from RTL are pinned here; the
+#     "?" arm -- a declared width too narrow for its own value, which pass.lean
+#     calls "a lie" -- is not constructible from a front end that sizes its own
+#     constants, and is covered where it matters, at the consumer boundary, by
+#     lhd/tests/mux_ring_census_test.sh case 8.
+"$LHD" compile verilog lhd/tests/tool_const_width.v --top tool_const_width \
+  --reader yosys-verilog --recipe O1 --emit-dir lg:"$W/clg" --workdir "$W/cw" \
+  -q --result-json "$W/cr.json" 2>/dev/null \
+  || fail "compile tool_const_width.v -> lg failed: $(cat "$W/cr.json")"
+J cat lg:"$W/clg" --top tool_const_width --target node --max 0 >"$W/cw.jsonl" \
+  || fail "tool cat tool_const_width (jsonl) nonzero"
+
+# 12a. every entry is a width or "?", and `consts`/`const_bits` agree entry for
+#      entry -- they are one loop in the emitter, and a silent misalignment
+#      would attach one constant's width to another's value.
+python3 - "$W/cw.jsonl" <<'PYEOF' || fail "consts/const_bits are not aligned"
+import json, sys
+n = 0
+for line in open(sys.argv[1]):
+    r = json.loads(line)
+    if r.get("t") != "node":
+        continue
+    cs, cb = r.get("consts"), r.get("const_bits")
+    if not cs:
+        assert cb is None, (cs, cb)
+        continue
+    v, b = cs.split(","), cb.split(",")
+    assert len(v) == len(b), (cs, cb)
+    for ve, be in zip(v, b):
+        assert ve.split("=")[0] == be.split("=")[0], (ve, be)
+        w = be.split("=", 1)[1]
+        assert w == "?" or (w.isdigit() and int(w) >= 1), be
+        n += 1
+assert n > 0, "fixture produced no constants"
+print(f"checked {n} constant operands")
+PYEOF
+
+# 12b. a >64-bit literal keeps its real width.  Nothing that measures a
+#      constant through an int64 can report this one.
+grep -q '"consts":"p0=0x1234567890abcdef12345","const_bits":"p0=82"' "$W/cw.jsonl" \
+  || fail "the 82-bit literal did not report const_bits=82: $(grep -o '"consts":"p0=0x[^"]*","const_bits":"[^"]*"' "$W/cw.jsonl")"
+
+# 12c. the unsized `-1` of LiveHD's zext idiom reports a width of 1 -- never
+#      nil, and never the value.
+grep -q '"consts":"p2=-1","const_bits":"p2=1"' "$W/cw.jsonl" \
+  || fail "the unsized -1 mask did not report const_bits=1"
+
+# 12d. a NEGATIVE literal on a declared-width pin reports that declared width,
+#      which is what decides the value it is compared as.  It survives
+#      constant folding in the section-11 fixture (the default arm of its
+#      mux), not in this one, so the assertion reads that dump.
+grep -q '"consts":"p1=-0x5b","const_bits":"p1=8"' "$W/sp.jsonl" \
+  || fail "the negative 8-bit mux-arm literal did not report const_bits=8: $(grep -o '"consts":"p1=-[^"]*","const_bits":"[^"]*"' "$W/sp.jsonl")"
+
 echo "PASS: lhd tool cat/grep/diff/tree (lg path)"

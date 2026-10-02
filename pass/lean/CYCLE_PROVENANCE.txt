@@ -493,9 +493,57 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 # A SECOND CANDIDATE, now that the shape is known: a narrow rule for a mux ring
 # whose selectors are a COMPLETE DECODE of one value -- collect the ring's
 # selectors, require each to be `eq(V, const)` or an Or of those over the SAME
-# V of width w, and check the constants cover all 2^w values. That is decidable
-# and cheap, needs no lowering change, and would dissolve all 39 here. It is
-# also strictly narrower than plain-proc escalation, which changes the
-# 4-state semantics of EVERY case in the module rather than only the ones it
-# can prove full. Neither is implemented; both need the exhaustiveness argument
-# made explicit and gated the way the signed reader was.
+# V, and ask whether any value of V lets every mux take its feedback arm. That
+# is decidable and cheap and needs no lowering change. It is also strictly
+# narrower than plain-proc escalation, which changes the 4-state semantics of
+# EVERY case in the module rather than only the ones it can prove full.
+#
+# MEASURED over all 39, not extrapolated from SCC #0 -- which is the whole
+# point, because "all 39 contain a mux" is not "all 39 are decodable mux
+# rings". The census is scripts/mux_ring_census.py; the dump it reads, with
+# the tool commit and both hashes, is
+#   generated/provenance/cycle_stages/txfmafrac_top/s2_singleedge.d49ff41c18458.manifest.txt
+# and the full per-SCC report is under
+#   generated/provenance/txfmafrac_mux_ring_census/.
+#
+#   ELIGIBLE 26 of 39
+#   13 x selectors_over_different_values
+#
+# So the rule dissolves 26, NOT all 39. All 39 pass the structural tests: each
+# is one simple ring, every feedback arm lands on a mux DATA pin, and every
+# non-feedback arm and selector is external. The entire split is the
+# shared-value test. In 26 rings every selector is an equality predicate over
+# one root; in the other 13 the selectors are predicates over TWO OR THREE
+# DIFFERENT roots -- typically `eq(X,0)` on one mux and `eq(X,1) | eq(Y,1)` on
+# the next.
+#
+# Widening the rule will not recover those 13. Treating every distinct root as
+# an INDEPENDENT free variable -- an over-approximation of what the design can
+# produce, so UNSAT would still have been a proof -- leaves all 13 REACHABLE.
+# SCC #9 is the shape: the ring needs X not in {0}, X not in {1} and Y != 1,
+# which X=2, Y=0 satisfies. Deciding them needs a CORRELATION between the
+# roots that this analysis cannot see, or a different mechanism.
+#
+# THE SEMANTICS ARE READ, NOT ASSUMED, and two of them bite:
+#   * Op_MuxN selects args[bv_uint sel], so a data pin pid is taken exactly
+#     when the selector equals pid-1. Polarity comes from the pin index.
+#   * Op_EQ compares bv_uint AT EACH OPERAND'S OWN WIDTH, and pass.lean
+#     materialises a constant operand at max over the EQ's operand widths. So
+#     `-1` is not a distinguished value: at width 2 it IS 3, and `eq(V,-1)`
+#     and `eq(V,3)` are one predicate. `lhd tool cat` now carries a
+#     `const_bits` column so the census can normalise exactly; a width it
+#     cannot state exactly is "?" and refuses the SCC.
+#   * Op_Sext at output width w > n subtracts 2^n from a value whose bit n-1
+#     is set, so "the amount equals the input width" does NOT make it the
+#     identity. Ring pass-throughs are accepted only at proven widths.
+#
+# THIS CORPUS CANNOT VALIDATE ANY OF THAT, which is worth recording. Every
+# ring here has predicates both exhaustive and mutually exclusive, so
+# inverting the mux polarity or the predicate still reports 26 of 39; none of
+# its 15562 negative constants feeds an EQ, so normalising is the identity on
+# every one of them; and its one ring sext has amount == input == output
+# width. The synthetic cases in lhd/tests/mux_ring_census_test.sh are what
+# make those guards load-bearing -- each kills a mutant the real design does
+# not.
+#
+# Neither candidate is implemented. Coverage is unchanged at 109/122.

@@ -863,6 +863,18 @@ sh_test(
     data = ["//scripts:cycle_provenance_tools"],
 )
 
+# scripts/mux_ring_census.py decides whether an SCC is a mux ring that can
+# never be taken -- a wrong YES would license deleting a live feedback path.
+# The POLARITY guards need synthetic fixtures: on txfmafrac_top every ring's
+# predicates are both exhaustive and mutually exclusive, so reading the mux
+# polarity or the predicate backwards leaves the measured 26/39 unchanged.
+sh_test(
+    name = "mux_ring_census_test",
+    size = "small",
+    srcs = ["mux_ring_census_test.sh"],
+    data = ["//scripts:cycle_provenance_tools"],
+)
+
 # LIVEHD_SIM_SPLIT_DEBUG=1 is what the unresolved-cycle warning tells the reader
 # to set, and its trace went to stdout -- which `lhd` owns for its structured
 # result -- so every run through the driver showed nothing. The assertion is
@@ -1464,6 +1476,7 @@ sh_test(
     srcs = ["lhd_tool_test.sh"],
     data = _FLOW_DATA + [
         "part_hier.v",
+        "tool_const_width.v",
         "tool_sink_pins.v",
         "tree_hier.prp",
     ],
