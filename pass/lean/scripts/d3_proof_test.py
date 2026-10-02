@@ -205,6 +205,35 @@ def main() -> int:
               and sweep.SRC_TIME != sweep.SRC_TIME_STAGES,
               "a two-stage max_rss_kb is labelled distinctly from a one-process peak")
 
+        # ---- 3c. the reifier mode drives BOTH stages from one setting ---------
+        # The hazard this pins: if the executable probe and the proof probe could
+        # pick different reifiers, the row would credit a theorem about a
+        # function other than the one that ran.
+        for mode, simtok, provetok in (("legacy", "reify_design ", "prove_reified "),
+                                       ("named", "reify_design_named ",
+                                        "prove_reified_incr ")):
+            simp = sweep.make_probe(CERT, "tima_adder", 32, reifier=mode)
+            prvp = sweep.make_proof_probe(CERT, "tima_adder", reifier=mode)
+            check(f"mode_{mode}_sim_stage",
+                  simtok in simp and (mode == "legacy") == ("reify_design_named" not in simp),
+                  f"the {mode} executable probe uses {simtok.strip()}")
+            check(f"mode_{mode}_proof_stage",
+                  provetok in prvp,
+                  f"and the {mode} proof probe uses {provetok.strip()}")
+            # the model each stage emits must be the SAME reifier
+            sim_named = "reify_design_named" in simp
+            prv_named = "reify_design_named" in prvp
+            check(f"mode_{mode}_stages_agree", sim_named == prv_named,
+                  f"and both stages emit the same model kind "
+                  f"(sim named={sim_named}, proof named={prv_named})")
+        # the marker the runner credits names exactly the generated theorem
+        check("marker_theorem_is_exact",
+              sweep.PROOF_THEOREM == "d3_fast.correct"
+              and "d3_proof_gate d3_fast.correct" in
+                  sweep.make_proof_probe(CERT, "tima_adder", reifier="named"),
+              "the gate in the named proof probe names exactly the theorem the "
+              "runner credits")
+
         # ---- 4. Lean: the audit must REFUSE sorryAx and ofReduceBool ----------
         if not CERT.is_file():
             check("lean_cases", False, f"certificate not found at {CERT}")

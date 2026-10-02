@@ -51,7 +51,7 @@ def base_cfg():
         "lake": "/bin/lake", "build_root": "/wt/.lake", "build_root_external": False,
         "worktree_head": "c" * 40, "worktree_dirty": False,
         "tier": "", "selection_digest": "", "runner_selftest": False,
-        "prove": False,
+        "prove": False, "reifier": "legacy",
     }
 
 

@@ -59,6 +59,8 @@ SEMANTIC_KEYS = [
     "runner_selftest",                      # must be identical AND false
     "prove",                                # a proof run and a plain one are
                                             # different experiments
+    "reifier",                              # named and legacy rows describe
+                                            # DIFFERENT emitted functions
 ]
 
 # Present only on a run that aborted on artifact drift.  Classified so the
@@ -95,6 +97,7 @@ PRESENCE_RULES = {
     "worktree_head": "nonempty", "worktree_dirty": "present",
     "runner_selftest": "present",
     "prove": "present",
+    "reifier": "nonempty",
 }
 
 

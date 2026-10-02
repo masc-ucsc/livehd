@@ -31,6 +31,7 @@ def dia : DesignCert :=
                  , { op := LGraphOp.Op_And, width := 8, deps := #[3, 0], origin := 3 } ]
     outputs  := #[ { slot := 5, width := 8 } ]
     flops := #[], memories := #[] }
+reify_design_named dia as dfi
 prove_reified_incr dia as dfi
 d3_proof_gate dfi.correct
 
@@ -68,6 +69,7 @@ def zeroCert : DesignCert :=
     nodes   := #[ { op := LGraphOp.Op_Not, width := 8, deps := #[0], origin := 0 } ]
     outputs := #[], flops := #[], memories := #[] }
 end Nested
+reify_design_named Nested.zeroCert as zeroOut
 prove_reified_incr Nested.zeroCert as zeroOut
 d3_proof_gate zeroOut.correct
 
@@ -75,6 +77,7 @@ d3_proof_gate zeroOut.correct
 -- which made it sensitive to how the certificate was named; it now works from
 -- generated projection lemmas only.
 abbrev AliasCert := Nested.zeroCert
+reify_design_named AliasCert as aliasOut
 prove_reified_incr AliasCert as aliasOut
 d3_proof_gate aliasOut.correct
 
@@ -89,6 +92,7 @@ def multiOut : DesignCert :=
     outputs := #[ { slot := 0, width := 8 }, { slot := 3, width := 8 },
                   { slot := 3, width := 4 } ]
     flops := #[], memories := #[] }
+reify_design_named multiOut as mo
 prove_reified_incr multiOut as mo
 d3_proof_gate mo.correct
 
@@ -118,7 +122,30 @@ def memR : ResidualProgram := match compileDesign memD with | .ok R => R | .erro
 #guard memR.bindings[0]!.ty == ValueType.mem 0 8
 #guard ((ReifyProof.liveAfter memR)[1]!).contains (4, true)
 #guard ((ReifyProof.liveAfter memR)[1]!).contains (4, false) == false
+reify_design_named memD as md
 prove_reified_incr memD as md
 d3_proof_gate md.correct
 
 #eval IO.println "D3INCRGEN OK"
+
+--------------------------------------------------------------------------------
+-- 5. MODE CONSISTENCY. `prove_reified_incr` PROVES a model that
+--    `reify_design_named` emitted; it does not emit one. Two misconfigurations
+--    must be refused rather than papered over, because both end with a theorem
+--    about a different function from the one that runs.
+--------------------------------------------------------------------------------
+-- (a) a LEGACY model, emitted by `reify_design`: the name exists but has no
+--     named values, so an incremental theorem must not be credited for it.
+def legacyD : DesignCert :=
+  { sources := #[ SourceDesc.input 0 8 ]
+    nodes   := #[ { op := LGraphOp.Op_Not, width := 8, deps := #[0], origin := 0 } ]
+    outputs := #[ { slot := 1, width := 8 } ], flops := #[], memories := #[] }
+reify_design legacyD as legacyFast
+/-- error: prove_reified_incr: `legacyFast` is in scope but its named values are not (1 of 1 missing). That is the signature of a LEGACY model emitted by `reify_design`: an incremental theorem must not be credited for it. -/
+#guard_msgs in
+prove_reified_incr legacyD as legacyFast
+
+-- (b) no model at all
+/-- error: prove_reified_incr: no model named `absentFast` is in scope. This command PROVES a model emitted by `reify_design_named legacyD as absentFast`; it does not emit one. Emitting a second model here is exactly how the proved function and the executed function come apart. -/
+#guard_msgs in
+prove_reified_incr legacyD as absentFast

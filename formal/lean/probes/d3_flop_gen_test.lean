@@ -42,6 +42,7 @@ def twoF : DesignCert :=
                     resetValue := 300, resetActiveLow := true } ]
     memories := #[] }
 
+reify_design_named twoF as tf
 prove_reified_incr twoF as tf
 d3_proof_gate tf.correct
 
@@ -100,6 +101,7 @@ def plainF : DesignCert :=
     flops   := #[ { width := 8, din := 2, enable := none, resetPin := none,
                     resetValue := 0, resetActiveLow := false } ]
     memories := #[] }
+reify_design_named plainF as pf
 prove_reified_incr plainF as pf
 d3_proof_gate pf.correct
 
@@ -113,6 +115,7 @@ def srcDinF : DesignCert :=
     flops   := #[ { width := 8, din := 0, enable := none, resetPin := none,
                     resetValue := 0, resetActiveLow := false } ]
     memories := #[] }
+reify_design_named srcDinF as sf
 prove_reified_incr srcDinF as sf
 d3_proof_gate sf.correct
 

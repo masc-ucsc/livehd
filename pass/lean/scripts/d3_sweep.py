@@ -102,6 +102,15 @@ FATAL_RUN_STATUSES = {"fatal_cleanup"}
 # passed one.
 PROVE = False
 
+# Which reifier BOTH stages use. `legacy` is `reify_design` + `prove_reified`,
+# unchanged and still the default. `named` is `reify_design_named` +
+# `prove_reified_incr`, where the executable and proof stages share one model.
+#
+# One setting drives both stages ON PURPOSE. Letting them differ would mean
+# simulating one function and proving another, and the row would credit a
+# theorem that says nothing about what ran.
+REIFIER = "legacy"
+
 # ---------------------------------------------------------------------------
 # Child lifetime.
 #
@@ -790,6 +799,28 @@ def d3_residual : ResidualProgram :=
 # `CompileDesign` because that is where `compileAndRun_correct` lives -- so a
 # proof probe costs ~6.9 GB where a sim probe costs ~1.5 GB.  That is the whole
 # reason this is a separate head rather than always-on.
+# NAMED mode. The SAME `reify_design_named` runs in the executable probe and in
+# the proof probe, so the function that is simulated and the function that is
+# proved are the same definition. Emitting a model separately in each stage is
+# how a proof comes to be about something other than what ran.
+PROBE_TAIL_NAMED = """
+reify_design_named {m}_designCert as d3_fast
+
+def d3_residual : ResidualProgram :=
+  match compileDesign {m}_designCert with
+  | .ok R    => R
+  | .error _ => default
+
+#eval Compiler.D3.report "{m}" {m}_designCert d3_fast d3_residual {samples}
+"""
+
+PROVE_TAIL_NAMED = """
+reify_design_named {m}_designCert as d3_fast
+
+prove_reified_incr {m}_designCert as d3_fast
+d3_proof_gate d3_fast.correct
+"""
+
 PROVE_HEAD = """import LeanSemanticPrimitives.Compiler.ReifyProof
 import LeanSemanticPrimitives.Compiler.D3Harness
 """
@@ -1132,7 +1163,7 @@ def module_of(path: pathlib.Path) -> str:
     return path.name[: -len("_Lgraph.lean")] if path.name.endswith("_Lgraph.lean") else path.stem
 
 
-def make_probe(cert: pathlib.Path, m: str, samples: int) -> str:
+def make_probe(cert: pathlib.Path, m: str, samples: int, reifier: str = "legacy") -> str:
     """Certificate body + reify + gate report.
 
     The certificate's own `theorem` block is DROPPED: `<m>_compiles` is a
@@ -1142,7 +1173,8 @@ def make_probe(cert: pathlib.Path, m: str, samples: int) -> str:
     drops `<m>_step_correct` and the trailing `<m>_residual`/`#print axioms`,
     all of which this probe replaces or does not need.
     """
-    return _cert_body(cert, PROBE_HEAD) + PROBE_TAIL.format(m=m, samples=samples)
+    tail = PROBE_TAIL_NAMED if reifier == "named" else PROBE_TAIL
+    return _cert_body(cert, PROBE_HEAD) + tail.format(m=m, samples=samples)
 
 
 def _cert_body(cert: pathlib.Path, head: str) -> str:
@@ -1184,7 +1216,7 @@ def _cert_body(cert: pathlib.Path, head: str) -> str:
     return head + "\n".join(body)
 
 
-def make_proof_probe(cert: pathlib.Path, m: str) -> str:
+def make_proof_probe(cert: pathlib.Path, m: str, reifier: str = "legacy") -> str:
     """The last-mile proof, in its OWN file and its OWN process.
 
     SEPARATE ON PURPOSE.  In one process a failed `prove_reified` or a failed
@@ -1194,7 +1226,8 @@ def make_proof_probe(cert: pathlib.Path, m: str) -> str:
     by a proof that did not work out.  `proof` is the LAST gate and must not be
     able to retract an earlier one.
     """
-    return _cert_body(cert, PROVE_HEAD) + PROVE_TAIL.format(m=m)
+    tail = PROVE_TAIL_NAMED if reifier == "named" else PROVE_TAIL
+    return _cert_body(cert, PROVE_HEAD) + tail.format(m=m)
 
 
 _TIME_PATS = (("max_rss_kb", r"Maximum resident set size \(kbytes\): (\d+)"),
@@ -1470,7 +1503,7 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         probe.write_text(text, encoding="utf-8")
     else:
         probe = probe_dir / f"{m}.lean"
-        probe.write_text(make_probe(cert, m, samples), encoding="utf-8")
+        probe.write_text(make_probe(cert, m, samples, reifier=REIFIER), encoding="utf-8")
 
     # /usr/bin/time -v, so job count and timeouts for the long tiers can be
     # chosen from MEASURED peak RSS rather than guessed.  Wrapping rather than
@@ -1569,7 +1602,7 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             # cap is protecting anyway.  Per-stage RSS lives in the two
             # `/usr/bin/time` reports instead.
             pprobe = probe_dir / f"{m}.proof.lean"
-            pprobe.write_text(make_proof_probe(cert, m), encoding="utf-8")
+            pprobe.write_text(make_proof_probe(cert, m, reifier=REIFIER), encoding="utf-8")
             ptv = log_dir / f"{m}.proof.time"
             pcmd = ([LEAN_BIN, str(pprobe)] if LEAN_BIN
                     else [LAKE, "env", "lean", str(pprobe)])
@@ -2181,6 +2214,14 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="print the selected targets IN RUN ORDER and exit, "
                          "writing nothing")
+    ap.add_argument("--reifier", choices=("legacy", "named"), default="legacy",
+                    help="which reifier BOTH stages use. `legacy` (default) is "
+                         "`reify_design` + `prove_reified`, unchanged. `named` is "
+                         "`reify_design_named` + `prove_reified_incr`, where the "
+                         "executable and proof stages share ONE emitted model. The "
+                         "setting drives both stages together: simulating one "
+                         "function while proving another would credit a theorem "
+                         "that says nothing about what ran.")
     ap.add_argument("--prove", action="store_true",
                     help="after a target reaches `agree`, run a SECOND probe that "
                          "generates and kernel-checks the last-mile theorem "
@@ -2498,12 +2539,16 @@ def main() -> int:
             return 2
 
     external, why = build_root_is_external()
-    global PROVE
+    global PROVE, REIFIER
     PROVE = bool(a.prove)
+    REIFIER = a.reifier
     cfg["runner_selftest"] = bool(a.runner_selftest)
     # SEMANTIC, not scheduling: a `--prove` run and a plain one are different
     # experiments, so they must not resume into or merge with one another.
     cfg["prove"] = bool(a.prove)
+    # SEMANTIC: a named-model row and a legacy row describe different emitted
+    # functions, so they must not resume into or merge with one another.
+    cfg["reifier"] = a.reifier
     if a.runner_selftest:
         # Branded in the metadata rather than forbidden: the drift regressions
         # must exercise the manifest path.  The brand is what stops the result

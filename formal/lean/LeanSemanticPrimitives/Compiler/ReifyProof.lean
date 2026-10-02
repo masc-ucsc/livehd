@@ -203,78 +203,25 @@ def qBindingsList (bs : Array ResidualBinding) : MetaM Term := do
   let xs ← bs.mapM qBinding
   `([$xs,*])
 
-/-- The VALUE-level right-hand side of a binding, written against named earlier
-values rather than an environment lookup.
-
-A source slot `j` becomes `refBV e0 j` (or `refMem e0 j`), and a produced slot
-becomes `<F>.val<k> e0` -- a NAME, not the value's expansion.  That is the whole
-point: inlining instead would duplicate a re-read binding at every consumer, so a
-diamond's value tree grows with the graph's reconvergence rather than its size.
-
-The positional memory/bit-vector split comes from `exprRefsTyped`'s rule, applied
-per constructor here. -/
-def valRef (base : Name) (nsrc : Nat) (isMem : Bool) (r : ResidualRef) : MetaM Term :=
-  if r < nsrc then
-    let e0 := mkIdent (Name.mkSimple "e0")
-    if isMem then `(refMem $e0 $(quote r)) else `(refBV $e0 $(quote r))
-  else
-    let nm := mkIdent (base ++ Name.mkSimple s!"val{r - nsrc}")
-    let e0 := mkIdent (Name.mkSimple "e0")
-    `($nm $e0)
-
-private def valRefs (base : Name) (nsrc : Nat) (rs : Array ResidualRef) : MetaM Term := do
-  let args ← rs.mapM (valRef base nsrc false)
-  `([$args,*])
-
-/-- Fail LOUDLY, by construction: this match is total over `ResidualExpr`, so a
-constructor added later is a compile error in this file rather than a silent gap
-inside a generated proof. -/
-private def valSyntax (base : Name) (nsrc : Nat) : ResidualExpr → MetaM Term
-  | .rsum w n a     => do `(Residual.rsumV $(quote w) $(quote n) $(← valRefs base nsrc a))
-  | .rmult w a      => do `(Residual.rmultV $(quote w) $(← valRefs base nsrc a))
-  | .rand w a       => do `(Residual.randV $(quote w) $(← valRefs base nsrc a))
-  | .rorBits w a    => do `(Residual.rorBitsV $(quote w) $(← valRefs base nsrc a))
-  | .rxor w a       => do `(Residual.rxorV $(quote w) $(← valRefs base nsrc a))
-  | .rredOr w a     => do `(Residual.rredOrV $(quote w) $(← valRefs base nsrc a))
-  | .req w a        => do `(Residual.reqV $(quote w) $(← valRefs base nsrc a))
-  | .rshl w a       => do `(Residual.rshlV $(quote w) $(← valRefs base nsrc a))
-  | .rmuxN w a      => do `(Residual.rmuxNV $(quote w) $(← valRefs base nsrc a))
-  | .rnot w a       => do `(Residual.rnotV $(quote w) $(← valRef base nsrc false a))
-  | .rult w a b     => do `(Residual.rultV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
-  | .rugt w a b     => do `(Residual.rugtV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
-  | .rslt w a b     => do `(Residual.rsltV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
-  | .rsgt w a b     => do `(Residual.rsgtV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
-  | .rsra w a b     => do `(Residual.rsraV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
-  | .rsext w a m    => do `(Residual.rsextV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false m))
-  | .rgetMask w a m => do `(Residual.rgetMaskV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false m))
-  | .rmux w s f t   => do
-      `(Residual.rmuxV $(quote w) $(← valRef base nsrc false s) $(← valRef base nsrc false f)
-         $(← valRef base nsrc false t))
-  | .rmemRead w m a e => do
-      `(Residual.rmemReadV $(quote w) $(← valRef base nsrc true m) $(← valRef base nsrc false a)
-         $(← valRef base nsrc false e))
-  | .rmemWrite m a d e => do
-      `(Residual.rmemWriteV $(← valRef base nsrc true m) $(← valRef base nsrc false a)
-         $(← valRef base nsrc false d) $(← valRef base nsrc false e))
-  | .rmemWriteBE w bw m a d be => do
-      `(Residual.rmemWriteBEV $(quote w) $(← valRef base nsrc true m) $(← valRef base nsrc false a)
-         $(← valRef base nsrc false d) $(← valRef base nsrc false be) $(quote bw))
-
-/-- How a slot is written in terms of the named values, at an EXPLICIT
-environment rather than the `e0` the value definitions bind.
-
-The definitions are parameterised over `e0`; a theorem statement about a
-particular `i`/`st` has to apply them to that design's actual source
-environment, or the term mentions a variable the statement never bound. -/
-def valRefAt (base : Name) (nsrc : Nat) (r : ResidualRef) (env : Term) : MetaM Term :=
-  if r < nsrc then `(refBV $env $(quote r))
-  else
-    let nm := mkIdent (base ++ Name.mkSimple s!"val{r - nsrc}")
-    `($nm $env)
-
 end ReifyProof
 
 open ReifyProof
+
+/-- Refuse to claim success for a theorem that did not close.
+
+Both emitters used to `logInfo "... proved"` unconditionally, because
+`elabCommand` reports a failed proof as an error and carries on rather than
+throwing. On a flop design `prove_reified` therefore announced "proved" for a
+theorem resting on `sorryAx`. The gate downstream caught it -- so nothing was
+ever credited -- but the log said the opposite of the truth, and a log that
+lies about the one thing it reports is worse than no log. -/
+def auditOrThrow (what : Name) (where_ : String) : CommandElabM Unit := do
+  let cs ← liftCoreM (collectAxioms what)
+  let bad := cs.filter fun a => !(d3AllowedAxioms.contains a)
+  if !bad.isEmpty then
+    throwError "{where_}: the generated `{what}` depends on DISALLOWED axiom(s) \
+      {bad.toList}; allowed: {d3AllowedAxioms}. The theorem did not close -- \
+      refusing to report success."
 
 /-- `prove_reified <designCert> as <reifiedDef>` -/
 syntax (name := proveReified) "prove_reified " ident " as " ident : command
@@ -340,6 +287,7 @@ def elabProveReified : CommandElab := fun stx => do
         intro i st
         rw [$eqNm:ident i st]
         exact Compiler.compileAndRun_correct $d $okNm i st))
+    auditOrThrow (nm ++ `correct) "prove_reified"
     logInfo m!"prove_reified: {corNm} proved, {R.bindings.size} bindings"
   | _ => throwUnsupportedSyntax
 
@@ -396,44 +344,24 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
     let iId   := mkIdent (Name.mkSimple "i")
     let stId  := mkIdent (Name.mkSimple "st")
     let live  := ReifyProof.liveAfter R
-    -- ---- values -----------------------------------------------------------
-    for k in [0 : nb] do
-      let b   := R.bindings[k]!
-      let nm  := mkIdent (base ++ Name.mkSimple s!"val{k}")
-      let rhs ← liftTermElabM (ReifyProof.valSyntax base nsrc b.rhs)
-      match b.ty with
-      | .bv _    => elabCommand (← `(command| def $nm ($e0 : Compiler.SlotEnv) : BV := $rhs))
-      | .mem _ _ => elabCommand (← `(command| def $nm ($e0 : Compiler.SlotEnv) : Int → BV := $rhs))
-    -- ---- the fast function, straight from the names -----------------------
+    -- The model is NOT emitted here. `reify_design_named` emits it, in the
+    -- Mathlib-free layer, and BOTH probes use that one reifier -- otherwise the
+    -- simulation probe would run one function and the proof probe would prove a
+    -- different one that happened to be built the same way.
+    let env ← getEnv
+    let valsMissing := (Array.ofFn (n := nb) (fun k => k.val)).filter fun k =>
+      !(env.contains (base ++ Name.mkSimple s!"val{k}"))
+    if !(env.contains base) then
+      throwError "prove_reified_incr: no model named `{base}` is in scope. This \
+        command PROVES a model emitted by `reify_design_named {d} as {f}`; it does \
+        not emit one. Emitting a second model here is exactly how the proved \
+        function and the executed function come apart."
+    if !valsMissing.isEmpty then
+      throwError "prove_reified_incr: `{base}` is in scope but its named values are \
+        not ({valsMissing.size} of {nb} missing). That is the signature of a LEGACY \
+        model emitted by `reify_design`: an incremental theorem must not be \
+        credited for it."
     let envT ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)
-    let outs : Array Term ← R.outputs.mapM fun o => do
-      let v ← liftTermElabM (ReifyProof.valRefAt base nsrc o.slot envT)
-      `(bv_resize $(quote o.width) $v)
-    -- Flop results go through the SAME `flopNextV` the source semantics uses, so
-    -- reset priority, polarity and the enable-false fallback are not restated
-    -- here where they could disagree.  Only the operand READS differ: named
-    -- values instead of environment lookups.
-    let flops : Array Term ← (Array.ofFn (n := R.flopUpdates.size) (fun j => j.val)).mapM
-      fun j => do
-        let fu := R.flopUpdates[j]!
-        let din ← liftTermElabM (ReifyProof.valRefAt base nsrc fu.din envT)
-        let en ← liftTermElabM (match fu.enable with
-          | none   => `(none)
-          | some e => do `(some $(← ReifyProof.valRefAt base nsrc e envT)))
-        let rp ← liftTermElabM (match fu.resetPin with
-          | none   => `(none)
-          | some r => do `(some $(← ReifyProof.valRefAt base nsrc r envT)))
-        let rvq ← liftTermElabM (if fu.resetValue < 0
-          then `(-(Int.ofNat $(quote fu.resetValue.natAbs)))
-          else `(Int.ofNat $(quote fu.resetValue.toNat)))
-        let ral := if fu.resetActiveLow then mkIdent ``true else mkIdent ``false
-        `(Compiler.flopNextV $(quote fu.width) $din $en $rp $rvq $ral
-            (($stId).flops[$(quote j)]?))
-    elabCommand (← `(command|
-      def $f ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState) :
-          Compiler.RuntimeResult :=
-        { outputs := #[$outs,*],
-          nextState := { flops := #[$flops,*], mems := #[] } }))
     -- ---- the residual, and its shape, as named facts -----------------------
     let rNm := mkIdent (base ++ `R)
     elabCommand (← `(command|
@@ -649,8 +577,10 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
         intro $iId:ident $stId:ident
         rw [$eqNm:ident $iId $stId]
         exact Compiler.compileAndRun_correct $d $okNm $iId $stId))
-    logInfo m!"prove_reified_incr: {nb} value(s), {f} emitted, {termSlots.length} \
-      terminal slot(s), max live cut {(live.map (fun a => a.size)).foldl max 0}"
+    auditOrThrow (base ++ `correct) "prove_reified_incr"
+    logInfo m!"prove_reified_incr: {corNm} proved over {nb} named value(s), \
+      {termSlots.length} terminal slot(s), max live cut \
+      {(live.map (fun a => a.size)).foldl max 0}"
   | _ => throwUnsupportedSyntax
 
 /-- `audit_axioms <thm>` — FAIL the build unless `<thm>`'s axiom set is within
