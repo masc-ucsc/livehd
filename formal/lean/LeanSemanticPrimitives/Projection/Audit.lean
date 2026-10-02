@@ -257,4 +257,20 @@ namespace Projection
 #print axioms Hw.resultRel_iff_eq
 #print axioms Hw.resultRel_interpret_iff
 
+-- Adequacy helper group 1: slot reads and source values.
+#print axioms Hw.nthD_agree
+#print axioms Hw.nthD_arr
+#print axioms Hw.nz_agree
+#print axioms Hw.srcVal_input
+#print axioms Hw.srcVal_const
+#print axioms Hw.srcVal_flopQ
+#print axioms Hw.srcVal_flopQAsync
+#print axioms Hw.srcVal_agree
+
+-- Adequacy helper group 2: the source environment.
+#print axioms Hw.lenL_agree
+#print axioms Hw.slot_agree
+#print axioms Hw.mkSources_agree
+#print axioms Hw.source_env_agree
+
 end Projection
