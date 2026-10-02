@@ -82,6 +82,71 @@ def d3AllowedAxioms : List Name := [``propext, ``Classical.choice, ``Quot.sound]
 
 namespace ReifyProof
 
+--------------------------------------------------------------------------------
+-- Liveness, for the incremental walk
+--
+-- The walk re-establishes one fact per LIVE produced slot at every step.  Keeping
+-- every earlier binding live makes that O(N) facts per step and O(N^2) overall --
+-- precisely what the walk exists to avoid -- so the generator has to know when a
+-- value is dead.
+--
+-- Complexity, stated honestly: the walk is O(N * live-cutwidth), where the
+-- cutwidth is the largest number of produced slots simultaneously live.  It is
+-- NOT universally subquadratic: a design where one early binding feeds every
+-- later one keeps that slot live throughout, and a design with a wide
+-- reconvergent front has a correspondingly wide cut.  What the analysis buys is
+-- that the cost tracks the DATAFLOW rather than the binding count.
+--------------------------------------------------------------------------------
+
+/-- Every slot an expression reads, paired with HOW it is read: `true` means as a
+memory image (`refMem`), `false` as a bit vector (`refBV`).
+
+The distinction is positional, not a property of the producing binding: a
+`rmemRead` reads its first operand as a memory and its address and enable as bit
+vectors.  Getting it from the producer's `ty` instead would be wrong for exactly
+those positions. -/
+def exprRefsTyped : ResidualExpr → Array (ResidualRef × Bool)
+  | .rsum _ _ a | .rmult _ a | .rand _ a | .rorBits _ a | .rxor _ a
+  | .rredOr _ a | .req _ a | .rshl _ a | .rmuxN _ a => a.map (fun r => (r, false))
+  | .rnot _ a => #[(a, false)]
+  | .rult _ a b | .rugt _ a b | .rslt _ a b | .rsgt _ a b
+  | .rsra _ a b | .rsext _ a b | .rgetMask _ a b => #[(a, false), (b, false)]
+  | .rmux _ s f t => #[(s, false), (f, false), (t, false)]
+  | .rmemRead _ m a e => #[(m, true), (a, false), (e, false)]
+  | .rmemWrite m a d e => #[(m, true), (a, false), (d, false), (e, false)]
+  | .rmemWriteBE _ _ m a d be => #[(m, true), (a, false), (d, false), (be, false)]
+
+/-- Slots read by something OTHER than a binding: the outputs, the flop update
+fields and the memory next-images.
+
+Missing these is the subtle half of the analysis.  A value whose only consumer is
+an output is read by no later binding at all, so a last-use computed from binding
+operands alone would call it dead at the step that produced it and drop the fact
+the final rewrite needs. -/
+def terminalRefs (R : ResidualProgram) : Array (ResidualRef × Bool) :=
+  (R.outputs.map (fun o => (o.slot, false)))
+    ++ (R.flopUpdates.flatMap (fun f =>
+          #[(f.din, false)]
+            ++ (match f.enable with | some e => #[(e, false)] | none => #[])
+            ++ (match f.resetPin with | some r => #[(r, false)] | none => #[])))
+    ++ (R.memoryUpdates.map (fun m => (m.nextImg, true)))
+
+/-- `liveAfter R` at index `k` lists the PRODUCED slots that must still be
+readable once step `k` has run: those a later binding reads, plus those any
+terminal consumer reads.  Source slots are absent on purpose -- they travel as
+one universal source-agreement fact, not one per slot. -/
+def liveAfter (R : ResidualProgram) : Array (Array (ResidualRef × Bool)) :=
+  let nsrc := R.sources.size
+  let n := R.bindings.size
+  Array.ofFn (n := n) fun k =>
+    let laterBindings : Array (ResidualRef × Bool) :=
+      (Array.ofFn (n := n) (fun j => j.val)).foldl (fun acc j =>
+        if j > k.val then acc ++ exprRefsTyped (R.bindings[j]!).rhs else acc) #[]
+    let all := laterBindings ++ terminalRefs R
+    -- produced slots only, still in range, de-duplicated
+    (all.filter (fun p => p.1 ≥ nsrc ∧ p.1 < nsrc + k.val + 1)).toList.eraseDups.toArray
+
+
 private def qNat (n : Nat) : Term := quote n
 
 private def qRefs (rs : Array ResidualRef) : MetaM Term := do
