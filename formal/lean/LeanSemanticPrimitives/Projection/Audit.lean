@@ -273,4 +273,38 @@ namespace Projection
 #print axioms Hw.mkSources_agree
 #print axioms Hw.source_env_agree
 
+-- Adequacy helper group 3: the operator layer.  One lemma per pinned operator,
+-- each quoting an `OperatorBridge` equation rather than re-deriving it.
+#print axioms Hw.slot_read
+#print axioms Hw.two_pow_pos
+#print axioms Hw.bv_uint_nonneg
+#print axioms Hw.foldAnd_agree
+#print axioms Hw.opAnd_agree
+#print axioms Hw.foldOr_agree
+#print axioms Hw.opOr_agree
+#print axioms Hw.foldXor_agree
+#print axioms Hw.opXor_agree
+#print axioms Hw.anyNz_agree
+#print axioms Hw.opRor_agree
+#print axioms Hw.eqAll_agree
+#print axioms Hw.opEq_agree
+#print axioms Hw.sumAdds_agree
+#print axioms Hw.sumSubs_agree
+#print axioms Hw.opSum_agree
+#print axioms Hw.foldShl_agree
+#print axioms Hw.opShl_agree
+#print axioms Hw.muxPick_agree
+#print axioms Hw.opMuxN_agree
+#print axioms Hw.opNot_agree
+#print axioms Hw.opSra_agree
+#print axioms Hw.opGetMask_agree
+#print axioms Hw.opMuxBool_agree
+#print axioms Hw.opSext_agree
+#print axioms Hw.cmpLt_agree
+#print axioms Hw.opCmp_agree
+#print axioms Hw.opULT_agree
+#print axioms Hw.opUGT_agree
+#print axioms Hw.opSLT_agree
+#print axioms Hw.opSGT_agree
+
 end Projection

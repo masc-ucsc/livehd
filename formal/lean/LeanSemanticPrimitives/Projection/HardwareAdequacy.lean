@@ -323,5 +323,741 @@ theorem source_env_agree {D : DesignCert} {i : RuntimeInput} {s : RuntimeState}
       = encBV (srcEnv D i s sl).asBV := by
   simp [srcEnv, Array.getElem?_eq_getElem h]
 
+/-! ## Group 3: the operator layer
+
+Every operator helper reads its operands through `slot`, so all of them share
+one hypothesis about the environment and differ only in the fold.  The shared
+part is `SlotVals` below; the per-operator part is `OperatorBridge`'s pinned
+equation, quoted and never re-derived. -/
+
+/-- The environment chain's entries ARE the encodings of the slot values `arg`
+names.  Carried separately from the two `SEval` facts about `env` and `n`,
+because those have to be re-established at every recursive call (where the
+environment arrives as `R "env"`) while this one does not mention `σ`. -/
+def SlotVals (vals : List Val) (arg : Nat → BV) : Prop :=
+  ∀ (k : Nat) (h : k < vals.length), vals[k]'h = encBV (arg k)
+
+theorem slot_read {σ : SEnv} {ee en es : SExp} {vals : List Val} {arg : Nat → BV}
+    (hsv : SlotVals vals arg) {d : Nat} (hd : d < vals.length)
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length)))
+    (hes : SEval hwS σ es (.int (Int.ofNat d))) :
+    SEval hwS σ (.call "slot" [ee, en, es]) (encBV (arg d)) := by
+  rw [← hsv d hd]
+  exact slot_agree hd henv hlen hes
+
+/-! ### Arithmetic facts the operand layer needs
+
+`bv_uint` is `value % 2^width`, so it is never negative -- which is what makes
+`Op_MuxN`'s integer selector comparison agree with the pinned model's
+`Int.toNat`.  Proved here rather than assumed: a negative selector would make
+the object answer zero where `eval_op` indexes operand 0. -/
+
+theorem two_pow_pos : ∀ w : Nat, (0 : Int) < 2 ^ w
+  | 0     => by decide
+  | n + 1 => by have h := two_pow_pos n; rw [Int.pow_succ]; omega
+
+theorem bv_uint_nonneg (x : BV) : 0 ≤ bv_uint x := by
+  unfold bv_uint
+  exact Int.emod_nonneg _ (Int.ne_of_gt (two_pow_pos x.width))
+
+theorem bv_uint_ofNat_toNat (x : BV) : Int.ofNat (bv_uint x).toNat = bv_uint x :=
+  Int.toNat_of_nonneg (bv_uint_nonneg x)
+
+/-! ### `Op_And`
+
+The first operand is resized to the node width and seeds the fold; the rest go
+in unchanged.  `Op_Or` and `Op_Xor` below do NOT share that shape, and the
+difference is transcribed from the pinned model rather than generalised. -/
+
+theorem foldAnd_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    (w : Nat) :
+    ∀ (deps : List Nat) (acc : BV) (σ : SEnv) (ed ee en ea ew : SExp),
+      (∀ d ∈ deps, d < vals.length) →
+      SEval hwS σ ed (encListG encNat deps) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ en (.int (Int.ofNat vals.length)) →
+      SEval hwS σ ea (encBV acc) →
+      SEval hwS σ ew (.int (Int.ofNat w)) →
+      SEval hwS σ (.call "foldAnd" [ed, ee, en, ea, ew])
+        (encBV ((deps.map arg).foldl (fun a b => bv_bitwise w (fun x y => x && y) a b) acc))
+  | [],      _, _, _, _, _, _, _, _,  hdv, henv, hlen, hacc, hw => by
+      refine SEval_call5 hdv henv hlen hacc hw rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) (.ref rfl)
+  | d :: ds, _, _, _, _, _, _, _, hb, hdv, henv, hlen, hacc, hw => by
+      refine SEval_call5 hdv henv hlen hacc hw rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      exact foldAnd_agree hsv w ds _ _ _ _ _ _ _
+        (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+        (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl)
+        (SEval_prim3 (.ref rfl) (.ref rfl)
+          (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+            (SEval_hd (.ref rfl))) rfl)
+        (.ref rfl)
+
+theorem opAnd_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {deps : List Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb : ∀ d ∈ deps, d < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat deps))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opAnd" [ew, ed, ee, en])
+      (encBV (eval_op .Op_And w (deps.map arg))) := by
+  cases deps with
+  | nil =>
+      refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) (SEval_prim2 (.ref rfl) .lit rfl)
+  | cons d ds =>
+      refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      exact foldAnd_agree hsv w ds _ _ _ _ _ _ _
+        (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+        (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl)
+        (SEval_prim2 (.ref rfl)
+          (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+            (SEval_hd (.ref rfl))) rfl)
+        (.ref rfl)
+
+/-! ### `Op_Or` and `Op_Xor`: zero-seeded, folding EVERY operand -/
+
+theorem foldOr_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    (w : Nat) :
+    ∀ (deps : List Nat) (acc : BV) (σ : SEnv) (ed ee en ea ew : SExp),
+      (∀ d ∈ deps, d < vals.length) →
+      SEval hwS σ ed (encListG encNat deps) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ en (.int (Int.ofNat vals.length)) →
+      SEval hwS σ ea (encBV acc) →
+      SEval hwS σ ew (.int (Int.ofNat w)) →
+      SEval hwS σ (.call "foldOr" [ed, ee, en, ea, ew])
+        (encBV ((deps.map arg).foldl (fun a b => bv_bitwise w (fun x y => x || y) a b) acc))
+  | [],      _, _, _, _, _, _, _, _,  hdv, henv, hlen, hacc, hw => by
+      refine SEval_call5 hdv henv hlen hacc hw rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) (.ref rfl)
+  | d :: ds, _, _, _, _, _, _, _, hb, hdv, henv, hlen, hacc, hw => by
+      refine SEval_call5 hdv henv hlen hacc hw rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      exact foldOr_agree hsv w ds _ _ _ _ _ _ _
+        (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+        (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl)
+        (SEval_prim3 (.ref rfl) (.ref rfl)
+          (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+            (SEval_hd (.ref rfl))) rfl)
+        (.ref rfl)
+
+theorem opOr_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {deps : List Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb : ∀ d ∈ deps, d < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat deps))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opOr" [ew, ed, ee, en])
+      (encBV (eval_op .Op_Or w (deps.map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  exact foldOr_agree hsv w deps _ _ _ _ _ _ _ hb (.ref rfl) (.ref rfl) (.ref rfl)
+    (SEval_prim2 (.ref rfl) .lit rfl) (.ref rfl)
+
+theorem foldXor_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    (w : Nat) :
+    ∀ (deps : List Nat) (acc : BV) (σ : SEnv) (ed ee en ea ew : SExp),
+      (∀ d ∈ deps, d < vals.length) →
+      SEval hwS σ ed (encListG encNat deps) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ en (.int (Int.ofNat vals.length)) →
+      SEval hwS σ ea (encBV acc) →
+      SEval hwS σ ew (.int (Int.ofNat w)) →
+      SEval hwS σ (.call "foldXor" [ed, ee, en, ea, ew])
+        (encBV ((deps.map arg).foldl (fun a b => bv_bitwise w (fun x y => xor x y) a b) acc))
+  | [],      _, _, _, _, _, _, _, _,  hdv, henv, hlen, hacc, hw => by
+      refine SEval_call5 hdv henv hlen hacc hw rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) (.ref rfl)
+  | d :: ds, _, _, _, _, _, _, _, hb, hdv, henv, hlen, hacc, hw => by
+      refine SEval_call5 hdv henv hlen hacc hw rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      exact foldXor_agree hsv w ds _ _ _ _ _ _ _
+        (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+        (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl)
+        (SEval_prim3 (.ref rfl) (.ref rfl)
+          (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+            (SEval_hd (.ref rfl))) rfl)
+        (.ref rfl)
+
+theorem opXor_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {deps : List Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb : ∀ d ∈ deps, d < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat deps))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opXor" [ew, ed, ee, en])
+      (encBV (eval_op .Op_Xor w (deps.map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  exact foldXor_agree hsv w deps _ _ _ _ _ _ _ hb (.ref rfl) (.ref rfl) (.ref rfl)
+    (SEval_prim2 (.ref rfl) .lit rfl) (.ref rfl)
+
+/-! ### `Op_Ror`: a REDUCTION, not a bitwise `Op_Or` -/
+
+theorem anyNz_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg) :
+    ∀ (deps : List Nat) (σ : SEnv) (ed ee en : SExp),
+      (∀ d ∈ deps, d < vals.length) →
+      SEval hwS σ ed (encListG encNat deps) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ en (.int (Int.ofNat vals.length)) →
+      SEval hwS σ (.call "anyNz" [ed, ee, en])
+        (.bool ((deps.map arg).any bv_nonzero))
+  | [],      _, _, _, _, _,  hdv, henv, hlen => by
+      refine SEval_call3 hdv henv hlen rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) .lit
+  | d :: ds, _, _, _, _, hb, hdv, henv, hlen => by
+      refine SEval_call3 hdv henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      exact SEval_prim2
+        (nz_agree (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+          (SEval_hd (.ref rfl))))
+        (anyNz_agree hsv ds _ _ _ _
+          (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+          (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl))
+        rfl
+
+theorem opRor_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {deps : List Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb : ∀ d ∈ deps, d < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat deps))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opRor" [ew, ed, ee, en])
+      (encBV (eval_op .Op_Ror w (deps.map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  rw [evalOp_Ror]
+  refine SEval_ite_of_bool (bb := (deps.map arg).any bv_nonzero)
+    (anyNz_agree hsv deps _ _ _ _ hb (.ref rfl) (.ref rfl) (.ref rfl)) ?_ ?_
+  · intro hT; simp only [hT, if_true]; exact SEval_prim2 (.ref rfl) .lit rfl
+  · intro hF
+    simp only [hF, Bool.false_eq_true, if_false]
+    exact SEval_prim2 (.ref rfl) .lit rfl
+
+/-! ### `Op_EQ`: every operand against the FIRST, and `[]` is 1 -/
+
+theorem eqAll_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    (a : Int) :
+    ∀ (deps : List Nat) (σ : SEnv) (ed ee en ea : SExp),
+      (∀ d ∈ deps, d < vals.length) →
+      SEval hwS σ ed (encListG encNat deps) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ en (.int (Int.ofNat vals.length)) →
+      SEval hwS σ ea (.int a) →
+      SEval hwS σ (.call "eqAll" [ed, ee, en, ea])
+        (.bool ((deps.map arg).all fun b => bv_uint b = a))
+  | [],      _, _, _, _, _, _,  hdv, henv, hlen, ha => by
+      refine SEval_call4 hdv henv hlen ha rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) .lit
+  | d :: ds, _, _, _, _, _, hb, hdv, henv, hlen, ha => by
+      refine SEval_call4 hdv henv hlen ha rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      exact SEval_prim2
+        (SEval_prim2
+          (SEval_prim1 (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+            (SEval_hd (.ref rfl))) rfl)
+          (.ref rfl) rfl)
+        (eqAll_agree hsv a ds _ _ _ _ _
+          (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+          (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl) (.ref rfl))
+        rfl
+
+theorem opEq_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {deps : List Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb : ∀ d ∈ deps, d < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat deps))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opEq" [ew, ed, ee, en])
+      (encBV (eval_op .Op_EQ w (deps.map arg))) := by
+  cases deps with
+  | nil =>
+      refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) (SEval_prim2 (.ref rfl) .lit rfl)
+  | cons d ds =>
+      refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      rw [List.map_cons, evalOp_EQ_cons]
+      refine SEval_ite_of_bool
+        (bb := (ds.map arg).all fun b => bv_uint b = bv_uint (arg d))
+        (eqAll_agree hsv (bv_uint (arg d)) ds _ _ _ _ _
+          (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+          (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl)
+          (SEval_prim1 (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+            (SEval_hd (.ref rfl))) rfl)) ?_ ?_
+      · intro hT; simp only [hT, if_true]; exact SEval_prim2 (.ref rfl) .lit rfl
+      · intro hF
+        simp only [hF, Bool.false_eq_true, if_false]
+        exact SEval_prim2 (.ref rfl) .lit rfl
+
+/-! ### `Op_Sum`: the payload splits the operand list
+
+`n_add` operands are ADDED and the rest SUBTRACTED, all through `bv_uint`, with
+the node width applied ONCE at the end -- so the truncation is of the sum, not
+of each term.  The two walks are `take` and `drop` of the same list. -/
+
+theorem sumAdds_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg) :
+    ∀ (deps : List Nat) (k : Nat) (σ : SEnv) (ek ed ee en : SExp),
+      (∀ d ∈ deps, d < vals.length) →
+      SEval hwS σ ek (.int (Int.ofNat k)) →
+      SEval hwS σ ed (encListG encNat deps) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ en (.int (Int.ofNat vals.length)) →
+      SEval hwS σ (.call "sumAdds" [ek, ed, ee, en])
+        (.int ((((deps.map arg).map bv_uint).take k).sum))
+  | [],      _,     _, _, _, _, _, _,  hk, hdv, henv, hlen => by
+      refine SEval_call4 hk hdv henv hlen rfl rfl ?_
+      refine SEval.iteT (SEval_prim1 (.ref rfl) rfl) ?_
+      simp only [List.map_nil, List.take_nil, List.sum_nil]
+      exact .lit
+  | _ :: _,  0,     _, _, _, _, _, _,  hk, hdv, henv, hlen => by
+      refine SEval_call4 hk hdv henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      refine SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl) ?_
+      simp only [List.take_zero, List.sum_nil]
+      exact .lit
+  | d :: ds, m + 1, _, _, _, _, _, hb, hk, hdv, henv, hlen => by
+      refine SEval_call4 hk hdv henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      refine SEval.iteF (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim]; omega)) ?_
+      exact SEval_prim2
+        (SEval_prim1 (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+          (SEval_hd (.ref rfl))) rfl)
+        (sumAdds_agree hsv ds m _ _ _ _ _
+          (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+          (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim]))
+          (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl))
+        rfl
+
+theorem sumSubs_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg) :
+    ∀ (deps : List Nat) (k : Nat) (σ : SEnv) (ek ed ee en : SExp),
+      (∀ d ∈ deps, d < vals.length) →
+      SEval hwS σ ek (.int (Int.ofNat k)) →
+      SEval hwS σ ed (encListG encNat deps) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ en (.int (Int.ofNat vals.length)) →
+      SEval hwS σ (.call "sumSubs" [ek, ed, ee, en])
+        (.int ((((deps.map arg).map bv_uint).drop k).sum))
+  | [],      _,     _, _, _, _, _, _,  hk, hdv, henv, hlen => by
+      refine SEval_call4 hk hdv henv hlen rfl rfl ?_
+      refine SEval.iteT (SEval_prim1 (.ref rfl) rfl) ?_
+      simp only [List.map_nil, List.drop_nil, List.sum_nil]
+      exact .lit
+  | d :: ds, 0,     _, _, _, _, _, hb, hk, hdv, henv, hlen => by
+      refine SEval_call4 hk hdv henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      refine SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl) ?_
+      exact SEval_prim2
+        (SEval_prim1 (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+          (SEval_hd (.ref rfl))) rfl)
+        (sumSubs_agree hsv ds 0 _ _ _ _ _
+          (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+          .lit (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl))
+        rfl
+  | d :: ds, m + 1, _, _, _, _, _, hb, hk, hdv, henv, hlen => by
+      refine SEval_call4 hk hdv henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      refine SEval.iteF (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim]; omega)) ?_
+      exact sumSubs_agree hsv ds m _ _ _ _ _
+        (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+        (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim]))
+        (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl)
+
+theorem opSum_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w nAdd : Nat} {deps : List Nat} {σ : SEnv} {ew ep ed ee en : SExp}
+    (hb : ∀ d ∈ deps, d < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hp : SEval hwS σ ep (.int (Int.ofNat nAdd)))
+    (hdv : SEval hwS σ ed (encListG encNat deps))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opSum" [ew, ep, ed, ee, en])
+      (encBV (eval_op (.Op_Sum nAdd) w (deps.map arg))) := by
+  refine SEval_call5 hw hp hdv henv hlen rfl rfl ?_
+  exact SEval_prim2 (.ref rfl)
+    (SEval_prim2
+      (sumAdds_agree hsv deps nAdd _ _ _ _ _ hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))
+      (sumSubs_agree hsv deps nAdd _ _ _ _ _ hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))
+      rfl)
+    rfl
+
+/-! ### `Op_SHL`: the first operand is shifted INDEPENDENTLY by each of the rest
+
+Not an accumulator shift: `a` is read once and never moves, and the shifted
+copies are XOR-folded into a ZERO seed, so a one-operand node is 0, not `a`. -/
+
+theorem foldShl_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    (w : Nat) (x : BV) :
+    ∀ (bs : List Nat) (acc : BV) (σ : SEnv) (eb ee en ea ex ew : SExp),
+      (∀ d ∈ bs, d < vals.length) →
+      SEval hwS σ eb (encListG encNat bs) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ en (.int (Int.ofNat vals.length)) →
+      SEval hwS σ ea (encBV acc) →
+      SEval hwS σ ex (encBV x) →
+      SEval hwS σ ew (.int (Int.ofNat w)) →
+      SEval hwS σ (.call "foldShl" [eb, ee, en, ea, ex, ew])
+        (encBV ((bs.map arg).foldl
+          (fun a b => bv_bitwise w (fun p q => xor p q) a (bv_shl_step w x b)) acc))
+  | [],      _, _, _, _, _, _, _, _, _,  hbv, henv, hlen, hacc, hx, hw => by
+      refine SEval_call6 hbv henv hlen hacc hx hw rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) (.ref rfl)
+  | d :: ds, _, _, _, _, _, _, _, _, hb, hbv, henv, hlen, hacc, hx, hw => by
+      refine SEval_call6 hbv henv hlen hacc hx hw rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      exact foldShl_agree hsv w x ds _ _ _ _ _ _ _ _
+        (fun y hy => hb y (List.mem_cons_of_mem _ hy))
+        (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl)
+        (SEval_prim3 (.ref rfl) (.ref rfl)
+          (SEval_prim3 (.ref rfl) (.ref rfl)
+            (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+              (SEval_hd (.ref rfl))) rfl) rfl)
+        (.ref rfl) (.ref rfl)
+
+theorem opShl_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {deps : List Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb : ∀ d ∈ deps, d < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat deps))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opShl" [ew, ed, ee, en])
+      (encBV (eval_op .Op_SHL w (deps.map arg))) := by
+  cases deps with
+  | nil =>
+      refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) (SEval_prim2 (.ref rfl) .lit rfl)
+  | cons d ds =>
+      refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      exact foldShl_agree hsv w (arg d) ds _ _ _ _ _ _ _ _
+        (fun y hy => hb y (List.mem_cons_of_mem _ hy))
+        (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl)
+        (SEval_prim2 (.ref rfl) .lit rfl)
+        (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+          (SEval_hd (.ref rfl)))
+        (.ref rfl)
+
+/-! ### `Op_MuxN`: a DIRECT selection, not a walked list
+
+The dep list and the index counter are both static, so this unrolls into a
+chain of `ite` on the selector.  Agreement with the pinned model needs
+`bv_uint` to be non-negative: the object compares the selector as an INTEGER
+against `0, 1, 2, …`, while `eval_op` indexes with `Int.toNat`, and a negative
+selector would make `toNat` pick operand 0 where the object picks none. -/
+
+/-- What a selection at index `j` yields; out of range is zero, as in the
+pinned model, rather than wrapping or erroring. -/
+def muxAt (w : Nat) (arg : Nat → BV) (args : List Nat) (j : Nat) : BV :=
+  ((args[j]?).map (fun d => bv_resize w (arg d))).getD (mk_bv w 0)
+
+theorem muxPick_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    (w : Nat) (sel : Nat) :
+    ∀ (args : List Nat) (k : Nat) (σ : SEnv) (ew ea ee en es ek : SExp),
+      (∀ d ∈ args, d < vals.length) →
+      SEval hwS σ ew (.int (Int.ofNat w)) →
+      SEval hwS σ ea (encListG encNat args) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ en (.int (Int.ofNat vals.length)) →
+      SEval hwS σ es (.int (Int.ofNat sel)) →
+      SEval hwS σ ek (.int (Int.ofNat k)) →
+      SEval hwS σ (.call "muxPick" [ew, ea, ee, en, es, ek])
+        (encBV (if k ≤ sel then muxAt w arg args (sel - k) else mk_bv w 0))
+  | [],      k, _, _, _, _, _, _, _, _,  hw, hav, henv, hlen, hs, hk => by
+      have hz : (if k ≤ sel then muxAt w arg [] (sel - k) else mk_bv w 0) = mk_bv w 0 := by
+        simp [muxAt]
+      rw [hz]
+      refine SEval_call6 hw hav henv hlen hs hk rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) (SEval_prim2 (.ref rfl) .lit rfl)
+  | a :: rest, k, _, _, _, _, _, _, _, hb, hw, hav, henv, hlen, hs, hk => by
+      by_cases hsk : sel = k
+      · subst hsk
+        have hz : (if sel ≤ sel then muxAt w arg (a :: rest) (sel - sel) else mk_bv w 0)
+            = bv_resize w (arg a) := by simp [muxAt]
+        rw [hz]
+        refine SEval_call6 hw hav henv hlen hs hk rfl rfl ?_
+        refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+        refine SEval.iteT (SEval_prim2 (.ref rfl) (.ref rfl) (by simp [evalPrim])) ?_
+        exact SEval_prim2 (.ref rfl)
+          (slot_read hsv (hb a List.mem_cons_self) (.ref rfl) (.ref rfl)
+            (SEval_hd (.ref rfl))) rfl
+      · have hstep : (if k ≤ sel then muxAt w arg (a :: rest) (sel - k) else mk_bv w 0)
+            = (if k + 1 ≤ sel then muxAt w arg rest (sel - (k + 1)) else mk_bv w 0) := by
+          by_cases h1 : k ≤ sel
+          · have h2 : k + 1 ≤ sel := by omega
+            have h3 : sel - k = (sel - (k + 1)) + 1 := by omega
+            simp [h1, h2, h3, muxAt]
+          · have h2 : ¬ (k + 1 ≤ sel) := by omega
+            simp [h1, h2]
+        rw [hstep]
+        refine SEval_call6 hw hav henv hlen hs hk rfl rfl ?_
+        refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+        refine SEval.iteF (SEval_prim2 (.ref rfl) (.ref rfl)
+          (by simp [evalPrim] <;> omega)) ?_
+        exact muxPick_agree hsv w sel rest (k + 1) _ _ _ _ _ _ _
+          (fun y hy => hb y (List.mem_cons_of_mem _ hy))
+          (.ref rfl) (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl) (.ref rfl)
+          (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim] <;> omega))
+
+theorem opMuxN_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {deps : List Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb : ∀ d ∈ deps, d < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat deps))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opMuxN" [ew, ed, ee, en])
+      (encBV (eval_op .Op_MuxN w (deps.map arg))) := by
+  cases deps with
+  | nil =>
+      refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+      exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) (SEval_prim2 (.ref rfl) .lit rfl)
+  | cons d ds =>
+      have hval : eval_op .Op_MuxN w ((d :: ds).map arg)
+          = muxAt w arg ds (bv_uint (arg d)).toNat := by
+        rw [List.map_cons, evalOp_MuxN_cons]
+        simp only [muxAt, List.length_map, List.getElem?_map]
+        by_cases hlt : (bv_uint (arg d)).toNat < ds.length
+        · rw [if_pos hlt, List.getElem?_eq_getElem hlt]; simp
+        · rw [if_neg hlt, List.getElem?_eq_none (Nat.le_of_not_lt hlt)]; simp
+      rw [hval]
+      refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      have hz : muxAt w arg ds (bv_uint (arg d)).toNat
+          = (if 0 ≤ (bv_uint (arg d)).toNat
+             then muxAt w arg ds ((bv_uint (arg d)).toNat - 0) else mk_bv w 0) := by
+        simp
+      rw [hz]
+      exact muxPick_agree hsv w (bv_uint (arg d)).toNat ds 0 _ _ _ _ _ _ _
+        (fun y hy => hb y (List.mem_cons_of_mem _ hy))
+        (.ref rfl) (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl)
+        (by rw [bv_uint_ofNat_toNat]
+            exact SEval_prim1 (slot_read hsv (hb d List.mem_cons_self) (.ref rfl)
+              (.ref rfl) (SEval_hd (.ref rfl))) rfl)
+        .lit
+
+/-! ### The fixed-arity operators
+
+`Op_Not`, `Op_SRA`, `Op_GetMask`, `Op_MuxBool`, `Op_Sext` and the four
+comparisons read a FIXED number of operands.  The pinned `eval_op` matches on
+that exact shape and falls through to `mk_bv w 0` at any other length, while
+the object reads positionally -- erroring below the arity and ignoring surplus
+operands above it.  So each lemma below carries the dep list AS A LITERAL,
+which is the exact and minimal hypothesis.  Nothing here weakens or widens
+`SupportedByProjection`; whether that hypothesis belongs there is a separate
+decision, recorded in the commit message. -/
+
+/-- A width that did not arrive as `Int.ofNat w`.  `Op_Sext` resizes by an
+operand VALUE, so the general form is needed exactly once. -/
+theorem prim_bvResize_int (v : Int) (a : BV) :
+    evalPrim .bvResize [.int v, encBV a] = .ok (encBV (bv_resize v.toNat a)) := rfl
+
+theorem opNot_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d : Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb : d < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opNot" [ew, ed, ee, en])
+      (encBV (eval_op .Op_Not w ([d].map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  exact SEval_prim2 (.ref rfl)
+    (slot_read hsv hb (.ref rfl) (.ref rfl) (SEval_hd (.ref rfl))) rfl
+
+theorem opSra_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 : Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opSra" [ew, ed, ee, en])
+      (encBV (eval_op .Op_SRA w ([d0, d1].map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  exact SEval_prim3 (.ref rfl)
+    (slot_read hsv hb0 (.ref rfl) (.ref rfl) (SEval_hd (.ref rfl)))
+    (slot_read hsv hb1 (.ref rfl) (.ref rfl) (SEval_hd (SEval_tl (.ref rfl)))) rfl
+
+theorem opGetMask_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 : Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opGetMask" [ew, ed, ee, en])
+      (encBV (eval_op .Op_GetMask w ([d0, d1].map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  exact SEval_prim3 (.ref rfl)
+    (slot_read hsv hb0 (.ref rfl) (.ref rfl) (SEval_hd (.ref rfl)))
+    (slot_read hsv hb1 (.ref rfl) (.ref rfl) (SEval_hd (SEval_tl (.ref rfl)))) rfl
+
+/-- Operands are `[sel, false_v, true_v]` IN THAT ORDER, so the nonzero branch
+takes the THIRD.  A polarity slip here is a silent swap. -/
+theorem opMuxBool_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 d2 : Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length) (hb2 : d2 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1, d2]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opMuxBool" [ew, ed, ee, en])
+      (encBV (eval_op .Op_MuxBool w ([d0, d1, d2].map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  rw [List.map_cons, List.map_cons, List.map_cons, List.map_nil, evalOp_MuxBool]
+  refine SEval_ite_of_bool (bb := bv_nonzero (arg d0))
+    (nz_agree (slot_read hsv hb0 (.ref rfl) (.ref rfl) (SEval_hd (.ref rfl)))) ?_ ?_
+  · intro hT
+    simp only [hT, if_true]
+    exact SEval_prim2 (.ref rfl)
+      (slot_read hsv hb2 (.ref rfl) (.ref rfl)
+        (SEval_hd (SEval_tl (SEval_tl (.ref rfl))))) rfl
+  · intro hF
+    simp only [hF, Bool.false_eq_true, if_false]
+    exact SEval_prim2 (.ref rfl)
+      (slot_read hsv hb1 (.ref rfl) (.ref rfl) (SEval_hd (SEval_tl (.ref rfl)))) rfl
+
+/-- Sign extension IS "truncate to the low `n` bits, then read them SIGNED".
+The pinned body spells that out as a power/mod/sign formula; nothing here
+re-derives it -- `OperatorBridge.evalOp_Sext` carries that obligation. -/
+theorem opSext_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 : Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opSext" [ew, ed, ee, en])
+      (encBV (eval_op .Op_Sext w ([d0, d1].map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  rw [List.map_cons, List.map_cons, List.map_nil, evalOp_Sext]
+  exact SEval_prim2 (.ref rfl)
+    (SEval_prim1
+      (SEval_prim2
+        (SEval_prim1 (slot_read hsv hb1 (.ref rfl) (.ref rfl)
+          (SEval_hd (SEval_tl (.ref rfl)))) rfl)
+        (slot_read hsv hb0 (.ref rfl) (.ref rfl) (SEval_hd (.ref rfl)))
+        (prim_bvResize_int _ _))
+      rfl)
+    rfl
+
+/-! ### The four comparisons
+
+They differ along exactly two STATIC axes: which reading of the bits
+(`signed`) and which way round (`swap`).  There is no "greater" primitive --
+GT is LT with the operands exchanged, which is how the pinned model writes it
+too. -/
+
+/-- The comparison the object computes, as a `Bool`, so that the two static
+axes stay visible and the `ite` below is a Bool test rather than a decidable
+proposition. -/
+def cmpBool (signed swap : Bool) (a b : BV) : Bool :=
+  if signed then (if swap then bv_sint b < bv_sint a else bv_sint a < bv_sint b)
+  else (if swap then bv_uint b < bv_uint a else bv_uint a < bv_uint b)
+
+theorem cmpLt_agree {σ : SEnv} {es esw ea eb : SExp} {signed swap : Bool} {a b : BV}
+    (hs : SEval hwS σ es (.bool signed)) (hsw : SEval hwS σ esw (.bool swap))
+    (ha : SEval hwS σ ea (encBV a)) (hb : SEval hwS σ eb (encBV b)) :
+    SEval hwS σ (.call "cmpLt" [es, esw, ea, eb]) (.bool (cmpBool signed swap a b)) := by
+  refine SEval_call4 hs hsw ha hb rfl rfl ?_
+  simp only [cmpBool]
+  cases signed with
+  | false =>
+      refine SEval.iteF (.ref rfl) ?_
+      cases swap with
+      | false =>
+          exact SEval.iteF (.ref rfl)
+            (SEval_prim2 (SEval_prim1 (.ref rfl) rfl) (SEval_prim1 (.ref rfl) rfl) rfl)
+      | true =>
+          exact SEval.iteT (.ref rfl)
+            (SEval_prim2 (SEval_prim1 (.ref rfl) rfl) (SEval_prim1 (.ref rfl) rfl) rfl)
+  | true =>
+      refine SEval.iteT (.ref rfl) ?_
+      cases swap with
+      | false =>
+          exact SEval.iteF (.ref rfl)
+            (SEval_prim2 (SEval_prim1 (.ref rfl) rfl) (SEval_prim1 (.ref rfl) rfl) rfl)
+      | true =>
+          exact SEval.iteT (.ref rfl)
+            (SEval_prim2 (SEval_prim1 (.ref rfl) rfl) (SEval_prim1 (.ref rfl) rfl) rfl)
+
+theorem opCmp_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 : Nat} {signed swap : Bool} {σ : SEnv}
+    {ew ed ee en es esw : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length)))
+    (hs : SEval hwS σ es (.bool signed)) (hsw : SEval hwS σ esw (.bool swap)) :
+    SEval hwS σ (.call "opCmp" [ew, ed, ee, en, es, esw])
+      (encBV (mk_bv w (if cmpBool signed swap (arg d0) (arg d1) then 1 else 0))) := by
+  refine SEval_call6 hw hdv henv hlen hs hsw rfl rfl ?_
+  refine SEval_ite_of_bool (bb := cmpBool signed swap (arg d0) (arg d1))
+    (cmpLt_agree (.ref rfl) (.ref rfl)
+      (slot_read hsv hb0 (.ref rfl) (.ref rfl) (SEval_hd (.ref rfl)))
+      (slot_read hsv hb1 (.ref rfl) (.ref rfl) (SEval_hd (SEval_tl (.ref rfl))))) ?_ ?_
+  · intro hT; rw [hT]; exact SEval_prim2 (.ref rfl) .lit rfl
+  · intro hF; rw [hF]; exact SEval_prim2 (.ref rfl) .lit rfl
+
+theorem opULT_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 : Nat} {σ : SEnv} {ew ed ee en es esw : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length)))
+    (hs : SEval hwS σ es (.bool false)) (hsw : SEval hwS σ esw (.bool false)) :
+    SEval hwS σ (.call "opCmp" [ew, ed, ee, en, es, esw])
+      (encBV (eval_op .Op_ULT w ([d0, d1].map arg))) := by
+  have h := opCmp_agree hsv hb0 hb1 hw hdv henv hlen hs hsw
+  simpa [cmpBool, evalOp_ULT] using h
+
+theorem opUGT_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 : Nat} {σ : SEnv} {ew ed ee en es esw : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length)))
+    (hs : SEval hwS σ es (.bool false)) (hsw : SEval hwS σ esw (.bool true)) :
+    SEval hwS σ (.call "opCmp" [ew, ed, ee, en, es, esw])
+      (encBV (eval_op .Op_UGT w ([d0, d1].map arg))) := by
+  have h := opCmp_agree hsv hb0 hb1 hw hdv henv hlen hs hsw
+  simpa [cmpBool, evalOp_UGT] using h
+
+theorem opSLT_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 : Nat} {σ : SEnv} {ew ed ee en es esw : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length)))
+    (hs : SEval hwS σ es (.bool true)) (hsw : SEval hwS σ esw (.bool false)) :
+    SEval hwS σ (.call "opCmp" [ew, ed, ee, en, es, esw])
+      (encBV (eval_op .Op_SLT w ([d0, d1].map arg))) := by
+  have h := opCmp_agree hsv hb0 hb1 hw hdv henv hlen hs hsw
+  simpa [cmpBool, evalOp_SLT] using h
+
+theorem opSGT_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 : Nat} {σ : SEnv} {ew ed ee en es esw : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length)))
+    (hs : SEval hwS σ es (.bool true)) (hsw : SEval hwS σ esw (.bool true)) :
+    SEval hwS σ (.call "opCmp" [ew, ed, ee, en, es, esw])
+      (encBV (eval_op .Op_SGT w ([d0, d1].map arg))) := by
+  have h := opCmp_agree hsv hb0 hb1 hw hdv henv hlen hs hsw
+  simpa [cmpBool, evalOp_SGT] using h
+
 end Hw
 end Projection

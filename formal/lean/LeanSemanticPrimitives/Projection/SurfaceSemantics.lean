@@ -497,6 +497,48 @@ theorem SEval_call4 {P : SProgram} {σ : SEnv} {f : String} {e₁ e₂ e₃ e₄
     SEval P σ (.call f [e₁, e₂, e₃, e₄]) v :=
   .call (.cons h₁ (.cons h₂ (.cons h₃ (.cons h₄ .nil)))) hf (by simpa using hp) hb
 
+theorem SEval_call5 {P : SProgram} {σ : SEnv} {f : String} {e₁ e₂ e₃ e₄ e₅ : SExp}
+    {a b c d g v : Val} {fd : SFun}
+    (h₁ : SEval P σ e₁ a) (h₂ : SEval P σ e₂ b) (h₃ : SEval P σ e₃ c)
+    (h₄ : SEval P σ e₄ d) (h₅ : SEval P σ e₅ g)
+    (hf : sFn P f = some fd) (hp : fd.params.length = 5)
+    (hb : SEval P (fd.params.zip [a, b, c, d, g]) fd.body v) :
+    SEval P σ (.call f [e₁, e₂, e₃, e₄, e₅]) v :=
+  .call (.cons h₁ (.cons h₂ (.cons h₃ (.cons h₄ (.cons h₅ .nil))))) hf (by simpa using hp) hb
+
+theorem SEval_call6 {P : SProgram} {σ : SEnv} {f : String} {e₁ e₂ e₃ e₄ e₅ e₆ : SExp}
+    {a b c d g k v : Val} {fd : SFun}
+    (h₁ : SEval P σ e₁ a) (h₂ : SEval P σ e₂ b) (h₃ : SEval P σ e₃ c)
+    (h₄ : SEval P σ e₄ d) (h₅ : SEval P σ e₅ g) (h₆ : SEval P σ e₆ k)
+    (hf : sFn P f = some fd) (hp : fd.params.length = 6)
+    (hb : SEval P (fd.params.zip [a, b, c, d, g, k]) fd.body v) :
+    SEval P σ (.call f [e₁, e₂, e₃, e₄, e₅, e₆]) v :=
+  .call (.cons h₁ (.cons h₂ (.cons h₃ (.cons h₄ (.cons h₅ (.cons h₆ .nil)))))) hf
+    (by simpa using hp) hb
+
+theorem SEval_call7 {P : SProgram} {σ : SEnv} {f : String} {e₁ e₂ e₃ e₄ e₅ e₆ e₇ : SExp}
+    {a b c d g k m v : Val} {fd : SFun}
+    (h₁ : SEval P σ e₁ a) (h₂ : SEval P σ e₂ b) (h₃ : SEval P σ e₃ c)
+    (h₄ : SEval P σ e₄ d) (h₅ : SEval P σ e₅ g) (h₆ : SEval P σ e₆ k)
+    (h₇ : SEval P σ e₇ m)
+    (hf : sFn P f = some fd) (hp : fd.params.length = 7)
+    (hb : SEval P (fd.params.zip [a, b, c, d, g, k, m]) fd.body v) :
+    SEval P σ (.call f [e₁, e₂, e₃, e₄, e₅, e₆, e₇]) v :=
+  .call (.cons h₁ (.cons h₂ (.cons h₃ (.cons h₄ (.cons h₅ (.cons h₆ (.cons h₇ .nil))))))) hf
+    (by simpa using hp) hb
+
+theorem SEval_call8 {P : SProgram} {σ : SEnv} {f : String}
+    {e₁ e₂ e₃ e₄ e₅ e₆ e₇ e₈ : SExp} {a b c d g k m q v : Val} {fd : SFun}
+    (h₁ : SEval P σ e₁ a) (h₂ : SEval P σ e₂ b) (h₃ : SEval P σ e₃ c)
+    (h₄ : SEval P σ e₄ d) (h₅ : SEval P σ e₅ g) (h₆ : SEval P σ e₆ k)
+    (h₇ : SEval P σ e₇ m) (h₈ : SEval P σ e₈ q)
+    (hf : sFn P f = some fd) (hp : fd.params.length = 8)
+    (hb : SEval P (fd.params.zip [a, b, c, d, g, k, m, q]) fd.body v) :
+    SEval P σ (.call f [e₁, e₂, e₃, e₄, e₅, e₆, e₇, e₈]) v :=
+  .call
+    (.cons h₁ (.cons h₂ (.cons h₃ (.cons h₄ (.cons h₅ (.cons h₆ (.cons h₇ (.cons h₈ .nil))))))))
+    hf (by simpa using hp) hb
+
 /-- The shape every whole-program adequacy proof needs: a named entry call on
 literal arguments, crossed once.  `Pr.entry` is never computed. -/
 theorem SEval_entry {P : SProgram} {Pr : Program} {inl : List Bool}
