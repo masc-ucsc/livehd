@@ -61,3 +61,4 @@ difftest_*/
 # plain-lean dev build output for LeanSemanticPrimitives/Projection
 formal/lean/.olean-dev/
 .runtime/
+formal/lean/.native-dev/
