@@ -21,6 +21,23 @@ import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 open Lean Elab Command Meta
 open Compiler.Residual
 
+/-- DIAGNOSTIC ONLY.  When set, the incremental walk emits, after every step, a
+`run_tac` that logs the size of the LOCAL CONTEXT and of the remaining goal.
+
+This exists to answer one question with a measurement rather than a reading of
+the generator: the per-step `generalize` lists only the NEW facts, so every
+stale `hv{j}`, `hsz{j}`, `hag{j}`, `hagm{j}` and dead `hb{j}_{slot}` stays in
+scope for the rest of the walk.  Whether that growth -- rather than the live set
+-- is what costs memory is not decidable by inspection.
+
+The tactics are emitted ONLY when the option is already true as the command
+elaborates, so a normal proof run carries no extra tactic and the measurement
+does not perturb the thing it measures. -/
+register_option d3.traceCtx : Bool := {
+  defValue := false
+  descr    := "D3: log local-context and goal size after each incremental walk step"
+}
+
 namespace Compiler
 
 /-- Slot `sl` names a source (`s<sl>`) or an earlier binding (`v<sl-nsrc>`). -/

@@ -402,6 +402,7 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
         (if isMem then `(Compiler.refMem $(envN k) $(quote sl) = $(valN (sl - nsrc)) $envT)
          else `(Compiler.refBV $(envN k) $(quote sl) = $(valN (sl - nsrc)) $envT))
     let walkNm := mkIdent (base ++ `walk)
+    let traceCtx := (← getOptions).getBool `d3.traceCtx false
     let mut tacs : Array (TSyntax `tactic) := #[]
     let he0 := mkIdent (Name.mkSimple "he0")
     tacs := tacs.push (← `(tactic| intro $iId:ident $stId:ident))
@@ -503,6 +504,16 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
       if k > 0 then
         dead := dead.push (envN k)
       tacs := tacs.push (← `(tactic| clear $[$dead:ident]*))
+      if traceCtx then
+        let kq := quote k
+        let nliveq := quote (live[k]!.size)
+        tacs := tacs.push (← `(tactic|
+          run_tac do
+            let g ← Lean.Elab.Tactic.getMainGoal
+            let lc := (← g.getDecl).lctx
+            let ndecl := lc.decls.toList.filterMap id |>.length
+            let gt ← Lean.instantiateMVars (← g.getType)
+            Lean.logInfo s!"D3CTX step={$kq} live={$nliveq} ctx={ndecl} goal={gt.approxDepth}"))
     -- close
     let anonCtor : Array Term ← termSlots.toArray.mapM fun p =>
       let (sl, isMem) := p
@@ -530,6 +541,12 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
             (Compiler.sourceEnvArr ($d).sources $iId $stId) = $eNm
           ∧ $conj := by
         $tacs*))
+    -- DIAGNOSTIC: the exact size of the GENERATED proof -- the number of tactics
+    -- the walk emits.  (The kernel's own proof-term size is a different figure
+    -- and is NOT measured here: reading it back from the environment races with
+    -- async elaboration of the theorem body.)
+    if traceCtx then
+      logInfo s!"D3SIZE walk tactics={tacs.size} bindings={nb}"
     -- ---- shape lemmas, then the two theorems -------------------------------
     let btlNm := mkIdent (base ++ `R_bindings_toList)
     elabCommand (← `(command| theorem $btlNm : ($rNm).bindings.toList = $bindsList := rfl))
