@@ -1209,6 +1209,8 @@ def order_by_rss(targets, path: pathlib.Path):
 # dirty bit is not enough: two different dirty states share both, and an
 # uncommitted edit to the reifier or the harness is exactly the kind of change
 # that makes old rows incomparable.
+SCRIPTS = pathlib.Path(__file__).resolve().parent
+
 TOOL_FILES = [
     pathlib.Path(__file__).resolve(),
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/D3Harness.lean",
@@ -1869,6 +1871,54 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
                              "could launch")
             print(f"d3_sweep: not launching the proof stage for {m}: "
                   f"{proof_refused}", file=sys.stderr)
+        elif want_proof and PROOF_BACKEND == "module":
+            # The MODULE backend. A separate driver builds this design's chunk
+            # facts as their own modules and composes them, because the
+            # in-process audit of a large design exceeds the guard however
+            # small its proof terms are made.
+            #
+            # It runs OUTSIDE this probe's cgroup, under its own, because it is
+            # many processes rather than one and each needs its own cap -- the
+            # group builds and the composition have very different budgets.
+            # `module_cgroup_peak_kb` therefore belongs to the composition, not
+            # to this row's `cgroup_peak_kb`.
+            mdir = log_dir / f"{m}.moduleproof"
+            nb = _pre.get("bindings") or row.get("bindings") or 0
+            mp = subprocess.run(
+                [sys.executable, str(SCRIPTS / "d3_module_proof.py"),
+                 "--cert", str(cert), "--module", m, "--bindings", str(nb),
+                 "--chunk-size", str(CHUNK_SIZE),
+                 "--out-dir", str(mdir)],
+                capture_output=True, text=True)
+            res = {}
+            try:
+                res = json.loads((mdir / "result.json").read_text())
+            except Exception as e:  # noqa: BLE001
+                row["detail"] = (row.get("detail", "") +
+                                 f" module-proof produced no result.json: {e}").strip()
+            # `status == "proved"` is the driver's own verdict: exact gate line,
+            # rc 0, allowed axioms, and no olean drift. Anything else is 0 and
+            # UNDECIDED -- it never raises `verdict`, which stays whatever the
+            # executable gates earned.
+            row["module_proof"] = 1 if res.get("status") == "proved" else 0
+            row["module_proof_rss_kb"] = res.get("final_max_rss_kb", "")
+            row["module_proof_wall_s"] = res.get("final_wall_s", "")
+            row["module_cgroup_peak_kb"] = res.get("final_cgroup_peak_kb", "")
+            row["module_groups"] = res.get("groups", "")
+            row["module_chunk_size"] = res.get("chunk_size", "")
+            row["module_chunks"] = res.get("chunks", "")
+            row["module_cert_sha256"] = res.get("cert_sha256", "")
+            row["module_runner_digest"] = res.get("tool_digest", "")
+            row["module_olean_digest"] = res.get("olean_digest", "")
+            row["module_log_dir"] = str(mdir)
+            if res.get("olean_drift"):
+                row["detail"] = (row.get("detail", "") +
+                                 " module-proof olean drift during composition").strip()
+            if mp.returncode != 0 and not row["module_proof"]:
+                tail = (mp.stderr or mp.stdout or "").strip().splitlines()
+                if tail:
+                    row["detail"] = (row.get("detail", "") +
+                                     f" module-proof: {tail[-1][:160]}").strip()
         elif want_proof:
             # Read the cgroup's OOM state BEFORE the proof stage, so a proof-stage
             # kill can be told apart from a sim-stage one.  Without this the two
