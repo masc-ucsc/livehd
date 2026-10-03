@@ -399,12 +399,12 @@ syntax (name := proveReifiedChunked) "prove_reified_chunked " ident " as " ident
 def elabProveReifiedChunked : CommandElab := fun stx => do
   match stx with
   | `(command| prove_reified_chunked $d:ident as $f:ident $[size $sz]?) => do
-    let R ← liftTermElabM do
+    let (cert, R) ← liftTermElabM do
       let dExpr ← Term.elabTerm d none
       let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
       match compileDesign cert with
       | .error _ => throwError "prove_reified_chunked: compileDesign refused {d}"
-      | .ok R    => pure R
+      | .ok R    => pure (cert, R)
     markPhase "prover_start"
     let csize := match sz with | some k => max 1 k.getNat | none => 32
     let nb    := R.bindings.size
@@ -494,20 +494,92 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         if j + 1 ≥ nseg then `($(segNm j))
         else do `($(segNm j) ++ $(← go (j+1)))
       go 0
-    -- DIAGNOSTIC SPLIT. `segs_eq` does two things at once: it forces the
-    -- compiler's output (evaluating `compileDesign` and building `toList` over
-    -- every binding) AND it performs 37 appends over literal segments. Which
-    -- half costs is the question that decides whether per-slice equalities can
-    -- work at all -- if forcing the output dominates, a slice equality per
-    -- chunk repeats it once per chunk and is strictly worse.
-    let bindsAll ← liftTermElabM (ReifyProof.qBindingsList R.bindings)
-    let blNm := mkIdent (base ++ `R_bindings_list)
+    -- THE BRIDGE. `R.bindings` is related to the generated segments through
+    -- the COMPILER, chunk by chunk, so no step evaluates `compileDesign` over
+    -- the whole design. The previous `R.bindings.toList = <literal> := rfl`
+    -- did exactly that and is gone: measured, it alone exceeded the 10 GB
+    -- guard on a 1,186-binding design.
+    --
+    -- Per chunk: one closed `rfl` lookup per node (kernel indexing is flat in
+    -- the index; `simp` reaching the node by unfolding the design is not), then
+    -- one fact about `compileFrom` over that chunk with the accumulator left
+    -- ABSTRACT. `compileFrom_step` chains them. Nothing here names the whole
+    -- residual.
+    let cfNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"cf{j}")
+    let lkNm : Nat → Nat → Ident := fun j k =>
+      mkIdent (base ++ Name.mkSimple s!"cf{j}_look{k}")
+    for j in [0 : nseg] do
+      let lo' := bnd j
+      let hi' := bnd (j+1)
+      for k in [lo' : hi'] do
+        match cert.nodes[k]? with
+        | none => throwError "prove_reified_chunked: no node {k}"
+        | some c =>
+          -- `Repr` text is NOT trusted: the literal it produces is checked by
+          -- `rfl` against the design, so a wrong round-trip fails here rather
+          -- than entering the proof.
+          let cq : Term ←
+            match Lean.Parser.runParserCategory (← getEnv) `term (toString (repr c)) with
+            | .ok stx  => pure (⟨stx⟩ : Term)
+            | .error e => throwError "prove_reified_chunked: node {k} Repr \
+                did not re-parse: {e}"
+          elabCommand (← `(command|
+            theorem $(lkNm j k) : ($d).nodes[$(quote k)]? = some $cq := rfl))
+      let accId := mkIdent (Name.mkSimple "acc")
+      let mut rhs : Term ← `($accId:ident)
+      for k in [lo' : hi'] do
+        let b := R.bindings[k]!
+        let tyQ ← liftTermElabM (match b.ty with
+          | .bv w    => `(Compiler.ValueType.bv $(quote w))
+          | .mem a w => `(Compiler.ValueType.mem $(quote a) $(quote w)))
+        let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
+        rhs ← `(($rhs).push { ty := $tyQ, rhs := $rhsQ })
+      let mut lks : Array (TSyntax `Lean.Parser.Tactic.simpLemma) := #[]
+      for k in [lo' : hi'] do
+        lks := lks.push (← `(Lean.Parser.Tactic.simpLemma| $(lkNm j k):ident))
+      elabCommand (← `(command|
+        theorem $(cfNm j) ($accId : Array Compiler.ResidualBinding) :
+            Compiler.compileFrom $d $(quote lo') $(quote (hi' - lo')) $accId
+              = .ok $rhs := by
+          simp [Compiler.compileFrom, Compiler.compileOp, Compiler.opValueType,
+                Compiler.DesignCert.slotOfNode, $lks,*]))
+      markPhase s!"compile_chunk {j}"
+    -- compose: compileGraph D = .ok <the push chain the chunks build>
+    let mut chainT : Term ← `((#[] : Array Compiler.ResidualBinding))
+    for k in [0 : nb] do
+      let b := R.bindings[k]!
+      let tyQ ← liftTermElabM (match b.ty with
+        | .bv w    => `(Compiler.ValueType.bv $(quote w))
+        | .mem a w => `(Compiler.ValueType.mem $(quote a) $(quote w)))
+      let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
+      chainT ← `(($chainT).push { ty := $tyQ, rhs := $rhsQ })
+    let mut ctacs : Array (TSyntax `tactic) := #[]
+    ctacs := ctacs.push (← `(tactic|
+      show Compiler.compileFrom $d 0 $(quote nb) (#[] : Array Compiler.ResidualBinding) = _))
+    for j in [0 : nseg] do
+      let lo' := bnd j
+      let len' := bnd (j+1) - lo'
+      let rem  := nb - bnd (j+1)
+      ctacs := ctacs.push (← `(tactic|
+        rw [show ($(quote (nb - lo')) : Nat) = $(quote len') + $(quote rem) from rfl,
+            Compiler.compileFrom_step $(quote lo') $(quote len') $(quote rem)
+              ($(cfNm j) _)]))
+    ctacs := ctacs.push (← `(tactic| rfl))
+    let cgNm := mkIdent (base ++ `compileGraph_eq)
     elabCommand (← `(command|
-      theorem $blNm : ($rNm).bindings.toList = $bindsAll := rfl))
-    markPhase "bindings_literal"
+      theorem $cgNm : Compiler.compileGraph $d = .ok $chainT := by $ctacs*))
+    markPhase "compileGraph_eq"
+    -- and therefore R.bindings IS that chain -- by injection, no evaluation
+    let rbNm := mkIdent (base ++ `R_bindings_eq)
+    elabCommand (← `(command|
+      theorem $rbNm : ($rNm).bindings = $chainT := by
+        have h := ($partsNm).2.1
+        rw [$cgNm:ident] at h
+        exact (Except.ok.inj h).symm))
+    markPhase "R_bindings_eq"
     elabCommand (← `(command|
       theorem $segsEq : ($rNm).bindings.toList = $appTerm := by
-        rw [$blNm:ident]; rfl))
+        rw [$rbNm:ident]; rfl))
     markPhase "segs_eq"
     -- 3. compose the chunks into ONE environment equality
     let srcEnv ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)

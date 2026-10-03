@@ -59,6 +59,18 @@ theorem compileFrom_add (D : DesignCert) (n₁ : Nat) :
         have harg : start + 1 + k = start + (k + 1) := by omega
         rw [ih (start + 1) n₂ _, harg]
 
+/-- Consume one chunk: given what compiling `n₁` nodes from `start` produced,
+compiling `n₁ + n₂` continues from there.
+
+The chaining form of `compileFrom_add`. A generated proof walks the chunks with
+this, supplying each chunk's own fact as `h`, and never has to WRITE the
+accumulator -- which after thirty-odd chunks is a term with a thousand pushes
+in it. -/
+theorem compileFrom_step {D : DesignCert} {acc acc' : Array ResidualBinding}
+    (start n₁ n₂ : Nat) (h : compileFrom D start n₁ acc = .ok acc') :
+    compileFrom D start (n₁ + n₂) acc = compileFrom D (start + n₁) n₂ acc' := by
+  rw [compileFrom_add, h]
+
 /-- Run a binding list in two pieces.
 
 `runBindings` is a fold that threads the environment, so splitting the list
