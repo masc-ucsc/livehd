@@ -346,7 +346,13 @@ void Slang_context::lower_immediate_assertion(const slang::ast::ImmediateAsserti
   if (stmt.assertionKind == AssertionKind::Assume) {
     // UNQUOTED sentinel, matching prp2lnast: a user message is always a string
     // const, so this can never collide with one.
-    builder_.add_child(idx, Lnast_node::create_const("__fkind__assume"));
+    //
+    // NOCHECK: a SystemVerilog `assume` is an environment constraint, and SV
+    // has no `assume_nocheck` spelling to opt into. Lowering it to a CHECKED
+    // assume refutes every constraint over a free input and then discards it,
+    // so the assert it was meant to support fails. Still disclosed as
+    // UNCHECKED in the verdict.
+    builder_.add_child(idx, Lnast_node::create_const("__fkind__assume_nocheck"));
   }
   clear_pending_loc();
 }
@@ -430,9 +436,10 @@ bool Slang_context::lower_concurrent_assertion(const slang::ast::ConcurrentAsser
   auto idx = builder_.add_child(Lnast_ntype::create_cassert());
   builder_.add_value_child_pub(idx, cond);
   if (stmt.assertionKind == AssertionKind::Assume || stmt.assertionKind == AssertionKind::Restrict) {
-    // `restrict` is an assume that only constrains formal (simulation ignores
-    // it). Both are hypotheses here, so both carry the assume sentinel.
-    builder_.add_child(idx, Lnast_node::create_const("__fkind__assume"));
+    // `restrict` only constrains formal; simulation ignores it. Both are
+    // environment constraints, and SV cannot spell `assume_nocheck`, so a
+    // CHECKED assume would refute over free inputs and be dropped.
+    builder_.add_child(idx, Lnast_node::create_const("__fkind__assume_nocheck"));
   }
   clear_pending_loc();
   return true;
