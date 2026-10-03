@@ -32,14 +32,21 @@ A sampled agreement and a kernel proof are different claims and must never be
 collapsed into one column.
 
   * `agree`            unchanged: sampled fast-vs-certificate agreement
-  * `samples`          unchanged
+  * `requested_samples` unchanged (the schema's name; there is no
+                       `samples` column)
   * `module_proof`     1 only when the gate line matched exactly, the final
                        command exited 0, and the parsed axioms were inside
                        {propext, Classical.choice, Quot.sound}
   * `module_proof_rss_kb`, `module_proof_wall_s`
   * `module_cgroup_peak_kb`   charge, NOT comparable with RSS
   * `module_groups`, `module_chunk_size`, `module_chunks`
-  * `module_cert_sha256`, `module_runner_digest`, `module_olean_digest`
+  * `module_cert_sha256`, `module_runner_digest`
+  * `module_olean_digest`     the BUILT artifacts imported: the compiled
+                       Compiler library plus this design's generated oleans,
+                       snapshotted BEFORE and AFTER the composition. A
+                       difference aborts the credit -- `.lake` is shared, so
+                       another worktree rebuilding it changes what an import
+                       means while every source digest stays put.
   * `module_log_dir`   where the per-group logs and transcript live
 
 A timed-out or killed row is `module_proof=0` and is UNDECIDED. It is never

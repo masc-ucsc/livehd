@@ -59,6 +59,23 @@ def runner_digest() -> str:
     return h.hexdigest()
 
 
+def olean_snapshot(ns: str) -> str:
+    """The BUILT artifacts the composition will import, not the sources.
+
+    Two halves, because either can change under an unchanged source digest:
+    `d3_sweep.artifact_digest()` covers the compiled Compiler library, and the
+    generated `Gen/<ns>` oleans cover this design's facts. `.lake` is shared,
+    so another worktree rebuilding the library would change what an import
+    MEANS while every source hash stayed put.
+    """
+    h = hashlib.sha256()
+    h.update(sweep.artifact_digest().encode())
+    odir = LEAN / ".lake/build/lib/lean/LeanSemanticPrimitives/Gen" / ns
+    for f in sorted(odir.glob("*.olean")) if odir.is_dir() else []:
+        h.update(f.name.encode() + b":" + hashlib.sha256(f.read_bytes()).digest())
+    return h.hexdigest()
+
+
 def run(cmd, log: pathlib.Path, cwd=None):
     t0 = time.time()
     with log.open("w", encoding="utf-8") as fh:
@@ -181,9 +198,14 @@ def main() -> int:
         f"prove_reified_chunked {a.module}_designCert as d3_fast "
         f"size {a.chunk_size} using {ns}\n"
         "d3_proof_gate d3_fast.correct\n", encoding="utf-8")
+    # Snapshot BEFORE and AFTER, and abort on drift. Recording it only at the
+    # end would name whatever the oleans became, not what was imported.
+    snap_before = olean_snapshot(ns)
     cmd = [sys.executable, gb, "--max-kb", str(a.final_max_kb), "--",
            "lake", "env", "lean", str(comp)]
     rc, rss, wall, txt = run(cmd, out / "composition.log", cwd=LEAN)
+    snap_after = olean_snapshot(ns)
+    drifted = snap_before != snap_after
     # A gate line is necessary and NOT sufficient: the command must also have
     # exited 0, the line must match exactly, and its axioms must lie inside the
     # allowed set. A substring test would credit a line inside an error message.
@@ -194,14 +216,28 @@ def main() -> int:
             gate = l.strip()
             axioms_ok = set(x.strip() for x in m.group(2).split(",") if x.strip()) <= ALLOWED
             break
-    proved = (rc == 0) and bool(gate) and axioms_ok
+    # Drift is disqualifying however the composition itself exited: if the
+    # oleans moved under it, the gate line describes an import that is no
+    # longer the one on disk.
+    proved = (rc == 0) and bool(gate) and axioms_ok and not drifted
+    if drifted:
+        print(f"REFUSING to credit: olean snapshot drifted during the "
+              f"composition ({snap_before[:16]} -> {snap_after[:16]}). A shared "
+              f".lake rebuild can change what an import means with every source "
+              f"digest unchanged.", file=sys.stderr)
     res = {"status": "proved" if proved else "not_proved",
            "gate_axioms_within_allowed": axioms_ok,
            "module": a.module, "cert": str(cert), "cert_sha256": csha,
            "tool_digest": tsha, "bindings": a.bindings,
            "chunk_size": a.chunk_size, "chunks": nchunk, "groups": ngroup,
            "group_max_kb": a.group_max_kb, "final_max_kb": a.final_max_kb,
+           "olean_digest": snap_before, "olean_digest_after": snap_after,
+           "olean_drift": drifted,
            "final_rc": rc, "final_max_rss_kb": rss, "final_wall_s": round(wall, 2),
+           "final_cgroup_peak_kb": next(
+               (int(x.split("peak=")[1].split()[0].replace(",", ""))
+                for x in txt.splitlines() if "d3_guarded_build:" in x
+                and "peak=" in x), 0),
            "gate_line": gate, "group_builds": rows,
            "command": " ".join(sys.argv)}
     (out / "result.json").write_text(json.dumps(res, indent=2) + "\n")
