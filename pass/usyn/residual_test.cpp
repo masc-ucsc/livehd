@@ -117,6 +117,46 @@ TEST(Residual, OutsideReadersPreventFalseDeletionCredit) {
   EXPECT_GT(result.report.cost_rejections, 0U);
 }
 
+TEST(Residual, EqualAreaRewriteBalancesAndAndXorChains) {
+  for (bool xor_gate : {false, true}) {
+    Xag              g;
+    const auto       a = g.input("a"), b = g.input("b"), c = g.input("c"), d = g.input("d");
+    const auto       operation = [&](Xsignal x, Xsignal y) { return xor_gate ? g.lxor(x, y) : g.land(x, y); };
+    const auto       root      = operation(operation(operation(a, b), c), d);
+    const std::array outputs{
+        Residual_output{root, false}
+    };
+    Residual_options o;
+    o.resubstitute = false;
+    Budget     work{10000000};
+    const auto result = optimize_residual(g, outputs, o, work);
+    check(g, outputs, result, o);
+    ASSERT_TRUE(result.network);
+    EXPECT_EQ(result.report.cost_before, result.report.cost_after);
+    EXPECT_EQ(result.network->graph.node(result.network->outputs[0].signal.id).level, 2U);
+    EXPECT_GT(result.report.rewrite_wins, 0U);
+  }
+}
+
+TEST(Residual, BalancingDoesNotDuplicateProtectedIntermediateLogic) {
+  Xag              g;
+  const auto       a = g.input("a"), b = g.input("b"), c = g.input("c"), d = g.input("d");
+  const auto       intermediate = g.land(g.land(a, b), c);
+  const auto       root         = g.land(intermediate, d);
+  const std::array outputs{
+      Residual_output{        root, false},
+      Residual_output{intermediate,  true}
+  };
+  Residual_options o;
+  o.resubstitute = false;
+  Budget     work{10000000};
+  const auto result = optimize_residual(g, outputs, o, work);
+  check(g, outputs, result, o);
+  ASSERT_TRUE(result.network);
+  EXPECT_EQ(result.report.cost_before, result.report.cost_after);
+  EXPECT_EQ(result.network->graph.node(result.network->outputs[0].signal.id).level, 3U);
+}
+
 TEST(Residual, XorHasRealConfigurableCost) {
   Xag              g;
   const auto       s = g.input("s"), a = g.input("a"), b = g.input("b");

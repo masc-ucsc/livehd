@@ -193,6 +193,8 @@ TEST_F(PassSynth, PublicSearchControlsReachNativeSelectionAndRejectInvalidSettin
   }
   for (const auto& [key, value] : {
            std::pair{     "fast_accept", "sometimes"},
+           std::pair{           "adder",       "bad"},
+           std::pair{     "adder_block",        "-1"},
            std::pair{  "local_divisors",         "0"},
            std::pair{"local_candidates",      "4097"},
            std::pair{ "pair_candidates",      "4097"},

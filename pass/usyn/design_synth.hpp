@@ -1,16 +1,20 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include "arith.hpp"
 #include "logical_cache.hpp"
 #include "region_emit.hpp"
 
 namespace livehd::usyn {
 
 struct Design_options {
-  Logical_options         logical;
-  uint64_t                max_source_nodes = 2000000;
-  partition::Flatten_mode flatten          = partition::Flatten_mode::automatic;
-  Logical_cache_options   cache{};
+  Logical_options          logical;
+  synth::arith::Adder_kind adder            = synth::arith::Adder_kind::rca;
+  bool                     auto_sum_adder   = true;
+  int                      adder_block      = 0;
+  uint64_t                 max_source_nodes = 2000000;
+  partition::Flatten_mode  flatten          = partition::Flatten_mode::automatic;
+  Logical_cache_options    cache{};
 };
 
 struct Design_region {

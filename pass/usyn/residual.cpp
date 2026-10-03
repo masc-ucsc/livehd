@@ -344,7 +344,10 @@ private:
       ledger.rollback();
       return false;
     }
-    if (ledger.cost >= before) {
+    // Equal-area rewrites can shorten a critical cone. Keep the live-reference
+    // price (including outside consumers), and require strictly lower depth
+    // when the area proxy ties so successive candidates cannot oscillate.
+    if (ledger.cost > before || (ledger.cost == before && g.node(candidate.id).level >= g.node(chosen.id).level)) {
       ++r.cost_rejections;
       ledger.rollback();
       return false;

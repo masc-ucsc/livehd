@@ -29,10 +29,9 @@ set -u
 # One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
 # and MAPPER=usyn runs `lhd pass usyn`; lhd/tests/BUILD generates the `_usyn`
 # twin from this same file. The mapped-hierarchy equivalence, the mapped divider
-# and the no---lib control hold for both. The non-default adder leg is ABC-only
-# (pass.abc.adder is an ABC-flow ware option that pass.usyn does not have); the
-# USYN leg instead proves its logical tmap=none output (no Liberty, no cells)
-# equivalent without --lib and checks that the removed option is refused.
+# and the no---lib control hold for both. The USYN leg proves its logical
+# tmap=none output with native CSKA lowering (no Liberty, no cells) equivalent
+# without --lib and checks that the ABC block_size spelling is refused.
 MAPPER="${MAPPER:-abc}"
 case "$MAPPER" in
   abc | usyn) ;;
@@ -94,7 +93,7 @@ else
   # Native logical CMOS output (tmap=none): the XAG expansion of mult/sra/div
   # has no Liberty cells, so it proves equivalent WITHOUT --lib.
   rm -rf "$W/net_none"
-  run pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_none" --set pass.usyn.tmap=none --workdir "$W/w6"
+  run pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_none" --set pass.usyn.tmap=none --set adder=cska --workdir "$W/w6"
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if (d["schema_version"],d["kind"],d["tmap"],d["output"])==(5,"usyn","none","logical-cmos") else 1)' \
     "$W/w6/qor.json" || fail "usyn tmap=none: qor.json is not the schema-5 logical-cmos decision report"
   divs="$("$LHD" tool grep kind=div lg:"$W/net_none" 2>/dev/null)"
@@ -102,12 +101,12 @@ else
   run lec --impl lg:"$W/net_none" --ref lg:"$W/re" --top "$TOP" --workdir "$W/wlec_none"
   grep -q '"verdict":"proven"' "$W/r.json" \
     || fail "usyn tmap=none LEC did not prove the logical hierarchy: $(cat "$W/r.json")"
-  # The ABC adder option is gone from pass.usyn: a usage error (exit 2).
+  # The ABC block_size spelling is absent from pass.usyn: a usage error (exit 2).
   rc=0
-  "$LHD" pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_cska" --set synth.liberty="$LIB" --set adder=cska \
+  "$LHD" pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_bad" --set synth.liberty="$LIB" --set block_size=4 \
     --workdir "$W/w7" -q --result-json "$W/rr.json" 2>/dev/null || rc=$?
-  [ "$rc" = 2 ] || fail "usyn: removed option --set adder=cska exited $rc (expected usage error 2)"
-  grep -q "unknown flag 'adder'" "$W/rr.json" || fail "usyn: --set adder=cska: no unknown-flag diagnostic: $(cat "$W/rr.json")"
+  [ "$rc" = 2 ] || fail "usyn: ABC option --set block_size=4 exited $rc (expected usage error 2)"
+  grep -q "unknown flag 'block_size'" "$W/rr.json" || fail "usyn: --set block_size=4: no unknown-flag diagnostic: $(cat "$W/rr.json")"
 fi
 
 # Negative control: the cell models are load-bearing. Without --lib the netlist's

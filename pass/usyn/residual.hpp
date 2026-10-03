@@ -67,7 +67,8 @@ struct Residual_result {
 // supplies every protected output: DOMINO inputs, POs and special-state ports.
 // All replacements preserve their functions on an exact common input basis.
 // Shared nodes earn deletion credit only after their final reference vanishes.
-// AND/XOR weights are positive area proxies; complemented edges are free in
+// Equal-cost replacements must strictly reduce depth. AND/XOR weights are
+// positive area proxies; complemented edges are free in
 // this proxy, not a promise about physical CMOS inversion cost. This operation
 // neither changes state nor invokes ABC, a solver, or endpoint search itself.
 // On an incomplete rebuild, no partial graph is returned; the input is intact.

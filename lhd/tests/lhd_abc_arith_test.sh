@@ -31,12 +31,11 @@ set -u
 # and MAPPER=usyn runs `lhd pass usyn`; lhd/tests/BUILD generates the `_usyn`
 # twin from this same file. The equivalence claims (every mapped region, the
 # no---lib control, the constant-operand multiply) hold for both. Adder
-# architecture selection (adder/block_size) is an ABC-flow ware option: native
-# USYN rebuilds the arithmetic as its own XAG and has no such knob, so the USYN
-# leg instead proves the arithmetic equivalent under its native optimizer
-# settings (default, residual round off) and its logical tmap=none output,
+# USYN rebuilds arithmetic as its own XAG; its adder/adder_block options select
+# native lowering. The USYN leg proves ripple and prefix arithmetic equivalent
+# under its native optimizer settings (default, residual round off) and its logical tmap=none output,
 # checks that a bare `--set` abbreviation resolves to pass.usyn, and that the
-# removed ABC options are refused as usage errors.
+# the ABC-only block_size spelling is refused as a usage error.
 MAPPER="${MAPPER:-abc}"
 case "$MAPPER" in
   abc | usyn) ;;
@@ -142,9 +141,11 @@ else
     run lec --impl lg:"$W/net_usyn_none" --ref lg:"$W/re" --top "$r" --workdir "$W/wlec_usyn_none"
   done
   echo "LEC PASS (lhd lec): usyn tmap=none logical output, no --lib"
-  # The ABC adder-architecture options are gone from pass.usyn: a usage error
+  map_and_lec usyn rca --set pass.usyn.adder=rca
+  map_and_lec usyn prefix --set adder=prefix
+  # The ABC block_size spelling remains absent from pass.usyn: a usage error
   # (exit 2) naming the flag, with no netlist emitted.
-  for opt in pass.usyn.adder=rca block_size=4; do
+  for opt in block_size=4; do
     rm -rf "$W/net_usyn_removed"
     rc=0
     "$LHD" pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_usyn_removed" --set synth.liberty="$LIB" \

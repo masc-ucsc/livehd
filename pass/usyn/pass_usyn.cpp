@@ -65,9 +65,16 @@ bool read_options(const Eprp_var& var, Options& options) {
     value           = text == "true" || text == "1" || text == "on";
     return value || text == "false" || text == "0" || text == "off";
   };
-  auto& logical           = options.design.logical;
-  auto& endpoint          = logical.endpoint;
-  auto& residual          = logical.residual;
+  auto&      logical            = options.design.logical;
+  auto&      endpoint           = logical.endpoint;
+  auto&      residual           = logical.residual;
+  const auto adder_text         = var.get_stage("adder", "auto");
+  options.design.auto_sum_adder = adder_text == "auto";
+  const auto adder              = livehd::synth::arith::parse_adder_kind(options.design.auto_sum_adder ? "rca" : adder_text);
+  if (!adder || !read("adder_block", "0", options.design.adder_block) || options.design.adder_block < 0) {
+    return false;
+  }
+  options.design.adder    = *adder;
   options.tmap            = var.get_stage("tmap", "abc");
   options.mapping.library = var.get_stage("library", "");
   const auto target       = var.get_stage("target", "cmos");
@@ -138,6 +145,8 @@ void Pass_usyn::setup() {
   Eprp_method m("pass.usyn", "Native register-rooted XAG synthesis with optional technology mapping", &Pass_usyn::work);
   m.add_label_optional("tmap", "Optional technology mapping: none (logical CMOS, no Liberty) or abc (mapping only)", "abc");
   m.add_label_optional("target", "Output target; currently cmos retains original state", "cmos");
+  m.add_label_optional("adder", "Native arithmetic lowering: auto (wide sums use prefix), rca, cska, cla or prefix", "auto");
+  m.add_label_optional("adder_block", "Native CSKA/CLA group width (0: derive from operating width)", "0");
   m.add_label_optional("logical_inputs", "Maximum logical inputs of one selected gate, counting Q/!Q once (1..16)", "8");
   m.add_label_optional("stack", "Maximum series stack of a selected gate", "4");
   m.add_label_optional("branches", "Maximum factored parallel discharge width of a selected gate", "10");
@@ -258,9 +267,8 @@ void Pass_usyn::work(Eprp_var& var) {
     std::error_code ec;
     fs::remove_all(provenance_staging.path, ec);
   }
-  const auto provenance = usyn::archive_provenance(provenance_staging.path,
-                                                   var.get("invocation_context", ""),
-                                                   std::to_string(usyn::kUsynSrcSalt));
+  const auto provenance
+      = usyn::archive_provenance(provenance_staging.path, var.get("invocation_context", ""), std::to_string(usyn::kUsynSrcSalt));
   const auto start   = std::chrono::steady_clock::now();
   const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); };
   usyn::Resource_budget resources;

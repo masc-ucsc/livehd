@@ -234,8 +234,9 @@ rewrite sweep using a small native template library, bounded truth-table
 resubstitution, and cleanup. Defaults are eight window inputs, 32 divisors
 and at most two inserted nodes. The library is heuristic, not complete optimal
 four-input synthesis. Incremental reference counts protect outside readers,
-including consumers not rebuilt yet; only strict weighted cost improvements
-pass, subject to a depth guard. Work/node limits retain the last complete
+including consumers not rebuilt yet; strict weighted cost improvements and
+equal-cost replacements with strictly lower depth pass, subject to a depth
+guard. Work/node limits retain the last complete
 network. Changed-output flags identify inputs for endpoint feedback.
 
 `//pass/usyn:usyn_lnet` uses the small `//pass/synth:lnet` library rather than
@@ -552,6 +553,8 @@ All options below use the `pass.usyn.` prefix.
 | Options | Defaults and purpose |
 |---|---|
 | `tmap`, `target` | `abc`, `cmos`; `tmap=none` emits logical CMOS |
+| `adder` | `auto`; prefix carry trees for Sum cells at least 16 bits wide, ripple elsewhere. Explicit `rca`, `cska`, `cla`, `prefix` apply throughout arithmetic |
+| `adder_block` | 0; derive CSKA/CLA group width from operating width |
 | `logical_inputs`, `stack`, `branches` | 8, 4, 10; gate legality |
 | `cut_inputs`, `window_nodes`, `boundaries` | 16, 100000, 32; analysis limits and retained frontier (at most 12×boundaries+2 move trials; one phase: 8×boundaries+1) |
 | `divisor_partitions` | 32; new functional-divisor partitions, 0 disables, maximum 4096 |
@@ -574,6 +577,12 @@ All options below use the `pass.usyn.` prefix.
 Old cover options such as `support`, `literals`, `series`, `domino_levels`,
 `abc`, and `fallback` produce migration diagnostics. They are not aliases for
 the new cost or phase policies. `synth.liberty` supplies the mapping library.
+
+The automatic arithmetic policy constructs wide carries in logarithmic depth
+before native selection. It keeps multiplier/divider internals and narrow sums
+compact. Prefix trees can increase area; `adder=rca` restores the previous
+lowering for an area comparison. The policy changes the imported Lnet, so its
+logical cache keys also change. It does not invoke ABC Boolean optimization.
 
 `<qor>.usyn.json` is the schema-5 endpoint/residual decision report. It includes
 selected cell formulas and bindings, search limits, new-divisor attempt counts, cost estimates, preserved

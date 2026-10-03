@@ -26,42 +26,44 @@ namespace blast_gu = livehd::graph_util;
 // The blaster's knobs (abc_cleanup.md section 5): the arithmetic
 // architectures, and how registers cross a region's translation.
 struct Blast_options {
-  arith::Adder_kind adder            = arith::Adder_kind::rca;
-  int               block_size       = 0;  // CSKA skip-block / CLA group width; 0 = auto from the operating width
-  arith::Mult_kind  multiplier       = arith::Mult_kind::array;
-  bool              reverse_barrel   = false;
+  arith::Adder_kind                adder = arith::Adder_kind::rca;
+  std::optional<arith::Adder_kind> sum_adder;
+  int                              sum_adder_min_width = 0;
+  int                              block_size          = 0;  // CSKA skip-block / CLA group width; 0 = auto from the operating width
+  arith::Mult_kind                 multiplier          = arith::Mult_kind::array;
+  bool                             reverse_barrel      = false;
   // Flops cross as latches (register mapping); false keeps every flop a native
   // boundary.
-  bool              map_register     = true;
+  bool                             map_register        = true;
   // A crossing latch without a power-on value stores ~next_state: the QN-only
   // DFF encoding, exact only under a flow that preserves the latches.
-  bool              qn_encode        = false;
+  bool                             qn_encode           = false;
   // Asynchronous-reset register cells for reset value v: -1 none, else that
   // cell's q_inverted (0/1). A register whose async reset the cells can
   // express crosses as a latch (reset left OUT of D, Seq_flop::async_reset);
   // otherwise it stays a native boundary.
-  int8_t            areset_cell[2]   = {-1, -1};
+  int8_t                           areset_cell[2]      = {-1, -1};
   // Whether that cell's reset pin asserts at 0 (Dff_cell::reset_low): the
   // level an internally computed reset crosses at (Seq_flop::arst_po).
-  bool              areset_low[2]    = {false, false};
+  bool                             areset_low[2]       = {false, false};
   // The flow keeps every latch as crossed (why an async cell may be absent:
   // reported precisely in the reset-native diagnostic).
-  bool              areset_flow_ok   = true;
+  bool                             areset_flow_ok      = true;
   // The Liberty has an integrated clock-gate cell (Dff_selection::icg_ladder)
   // and the flow keeps every latch as crossed: a register clocked by a
   // recognized latch+AND clock gate crosses as a latch clocked by an ICG cell
   // (Region_blast::icgs) instead of staying a native flop.
-  bool              icg              = false;
+  bool                             icg                 = false;
   // Why `icg` is off, for the derived-clock-native report: false = the flow may
   // reshape latches, true = the Liberty has no ICG cell (or no DFF cell).
-  bool              icg_flow_ok      = true;
+  bool                             icg_flow_ok         = true;
   // The Liberty's transparent data-latch cells (Dff_selection::latch_ladder),
   // [enable active-low][0 plain, 1 reset-to-0, 2 reset-to-1]: -1 none, else
   // that pick's q_inverted (0/1). A level-sensitive Latch whose shape a cell
   // covers is still a native boundary for ABC (a level-sensitive latch never
   // crosses as an ABC latch), but the read-back mints one cell per bit
   // (Bbox::latch_map) instead of rebuilding the native Latch.
-  int8_t            latch_cell[2][3] = {
+  int8_t                           latch_cell[2][3]    = {
       {-1, -1, -1},
       {-1, -1, -1}
   };
@@ -508,8 +510,9 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       }
       operands.push_back(std::move(operand));
     }
-    const int bs  = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(out_bits);
-    auto      acc = arith::build_sum(opts_.adder, bs, ops, operands, out_bits);
+    const int  bs   = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(out_bits);
+    const auto kind = opts_.sum_adder && out_bits >= opts_.sum_adder_min_width ? *opts_.sum_adder : opts_.adder;
+    auto       acc  = arith::build_sum(kind, bs, ops, operands, out_bits);
     for (int b = 0; b < out_bits; ++b) {
       slots[b] = acc[b];
     }

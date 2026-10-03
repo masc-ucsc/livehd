@@ -173,6 +173,15 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       return;
     }
     synth::Blast_options blast_options;
+    blast_options.adder      = options.adder;
+    blast_options.block_size = options.adder_block;
+    if (options.auto_sum_adder) {
+      // The native mapper has no subsequent Boolean restructuring to remove
+      // a ripple carry chain. Keep narrow arithmetic and multiplier/divider
+      // internals compact; seed only wide Sum cells with logarithmic carries.
+      blast_options.sum_adder           = synth::arith::Adder_kind::prefix;
+      blast_options.sum_adder_min_width = 16;
+    }
     blast_options.logical_state     = true;
     blast_options.state_target      = synth::State_target::cmos;
     blast_options.logical_max_nodes = options.logical.max_nodes;

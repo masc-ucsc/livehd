@@ -12,6 +12,7 @@
 
 #include "arith.hpp"
 
+#include <bit>
 #include <cstdint>
 #include <vector>
 
@@ -51,7 +52,7 @@ uint64_t from_bits(const std::vector<B>& v) {
   return r;
 }
 
-constexpr Adder_kind kKinds[]  = {Adder_kind::rca, Adder_kind::cska, Adder_kind::cla};
+constexpr Adder_kind kKinds[]  = {Adder_kind::rca, Adder_kind::cska, Adder_kind::cla, Adder_kind::prefix};
 constexpr int        kBlocks[] = {1, 2, 3, 4, 8};
 
 }  // namespace
@@ -60,6 +61,7 @@ TEST(abc_arith, parse_and_default_block_size) {
   EXPECT_EQ(parse_adder_kind("rca").value(), Adder_kind::rca);
   EXPECT_EQ(parse_adder_kind("cska").value(), Adder_kind::cska);
   EXPECT_EQ(parse_adder_kind("cla").value(), Adder_kind::cla);
+  EXPECT_EQ(parse_adder_kind("prefix").value(), Adder_kind::prefix);
   EXPECT_FALSE(parse_adder_kind("nope").has_value());
 
   EXPECT_EQ(parse_mult_kind("array").value(), Mult_kind::array);
@@ -98,6 +100,46 @@ TEST(abc_arith, add_all_architectures) {
           }
         }
       }
+    }
+  }
+}
+
+TEST(abc_arith, prefix_exhaustive_small_widths_and_empty) {
+  ByteOps ops;
+  EXPECT_EQ(prefix_add<B>(ops, {}, {}, ops.one()).carry_out, B{1});
+  for (int w = 1; w <= 6; ++w) {
+    const auto limit = uint64_t{1} << w;
+    for (uint64_t a = 0; a < limit; ++a) {
+      for (uint64_t b = 0; b < limit; ++b) {
+        for (B cin : {B{0}, B{1}}) {
+          const auto r = prefix_add(ops, to_bits(a, w), to_bits(b, w), cin);
+          EXPECT_EQ(from_bits(r.sum), (a + b + cin) & (limit - 1));
+          EXPECT_EQ(r.carry_out, static_cast<B>((a + b + cin) >> w));
+        }
+      }
+    }
+  }
+}
+
+TEST(abc_arith, prefix_carry_depth_is_logarithmic) {
+  struct Level {
+    uint32_t depth = 0;
+  };
+  struct Ops {
+    Level zero() { return {}; }
+    Level one() { return {}; }
+    Level inv(Level a) { return a; }
+    Level and_(Level a, Level b) { return {1 + std::max(a.depth, b.depth)}; }
+    Level or_(Level a, Level b) { return and_(a, b); }
+    Level xor_(Level a, Level b) { return and_(a, b); }
+  } ops;
+  for (uint32_t w : {1U, 3U, 7U, 16U, 31U, 64U, 127U}) {
+    const std::vector<Level> inputs(w);
+    const auto               prefix = prefix_add(ops, inputs, inputs, Level{});
+    const auto               ripple = rca_add(ops, inputs, inputs, Level{});
+    EXPECT_LE(prefix.carry_out.depth, 2 * std::bit_width(w - 1) + 3);
+    if (w >= 7) {
+      EXPECT_LT(prefix.carry_out.depth, ripple.carry_out.depth);
     }
   }
 }
@@ -268,9 +310,9 @@ TEST(abc_arith, affine_shift_right_prefix) {
 // An explicit per-index amount table, e.g. a wrapped `(index*8 + 8) mod 32`
 // (satopt's odc narrowing of the amount): index 3 selects amount 0.
 TEST(abc_arith, table_shift_right_prefix) {
-  ByteOps              ops;
-  const int            w      = 32;
-  const uint64_t       value  = 0xD6B79A5Cu;
+  ByteOps               ops;
+  const int             w       = 32;
+  const uint64_t        value   = 0xD6B79A5Cu;
   std::vector<uint64_t> amounts = {8, 16, 24, 0};
   for (int out_w = 1; out_w <= 8; ++out_w) {
     for (uint64_t index = 0; index < 4; ++index) {

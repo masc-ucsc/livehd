@@ -545,7 +545,7 @@ if [ "$MAPPER" = usyn ]; then
   spawn expect_fail usage "synth.liberty" "${USYN_SYNTH[@]}" --set pass.usyn.library="$LIB"
   spawn expect_fail missing_file "Liberty" "${USYN_SYNTH[@]}" --set synth.liberty="$W/no_such.lib"
   spawn expect_fail syntax "replaced whole-region cover" "${USYN_SYNTH[@]}" --set synth.liberty="$LIB" --set pass.usyn.support=4
-  spawn expect_fail usage "unknown flag 'adder'" "${USYN_SYNTH[@]}" --set synth.liberty="$LIB" --set pass.usyn.adder=rca
+  spawn expect_fail syntax "invalid native USYN" "${USYN_SYNTH[@]}" --set synth.liberty="$LIB" --set pass.usyn.adder=potato
   spawn expect_fail usage "pass.usyn.cache' was removed" "${USYN_SYNTH[@]}" --set synth.liberty="$LIB" --set usyn.cache=false
   spawn expect_fail usage "expects none|abc" "${USYN_SYNTH[@]}" --set synth.liberty="$LIB" --set pass.usyn.tmap=potato
   spawn expect_fail usage "cannot run OpenTimer" "${USYN_SYNTH[@]}" --set pass.usyn.tmap=none --set synth.opentimer=true

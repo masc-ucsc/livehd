@@ -28,7 +28,7 @@
 
 namespace livehd::synth::arith {
 
-enum class Adder_kind { rca, cska, cla };
+enum class Adder_kind { rca, cska, cla, prefix };
 
 inline std::optional<Adder_kind> parse_adder_kind(std::string_view s) {
   if (s == "rca") {
@@ -39,6 +39,9 @@ inline std::optional<Adder_kind> parse_adder_kind(std::string_view s) {
   }
   if (s == "cla") {
     return Adder_kind::cla;
+  }
+  if (s == "prefix") {
+    return Adder_kind::prefix;
   }
   return std::nullopt;
 }
@@ -184,15 +187,50 @@ inline Add_result<Bit> cla_add(Ops& ops, const std::vector<Bit>& a, const std::v
   return r;
 }
 
+// Parallel prefix: each doubling round combines disjoint generate/propagate
+// intervals from the previous round. Carries depend on O(log W) gate levels,
+// including non-power-of-two widths and a dynamic incoming carry. This is
+// Boolean construction only; it does not call an optimizer or mapper.
+template <class Bit, class Ops>
+inline Add_result<Bit> prefix_add(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b, Bit cin) {
+  const size_t    w = a.size();
+  Add_result<Bit> r;
+  r.sum.resize(w);
+  if (w == 0) {
+    r.carry_out = cin;
+    return r;
+  }
+  std::vector<Bit> p(w), g(w);
+  for (size_t i = 0; i < w; ++i) {
+    p[i] = ops.xor_(a[i], b[i]);
+    g[i] = ops.and_(a[i], b[i]);
+  }
+  const auto bit_p = p;
+  for (size_t distance = 1; distance < w; distance *= 2) {
+    const auto old_p = p, old_g = g;
+    for (size_t i = distance; i < w; ++i) {
+      g[i] = ops.or_(old_g[i], ops.and_(old_p[i], old_g[i - distance]));
+      p[i] = ops.and_(old_p[i], old_p[i - distance]);
+    }
+  }
+  for (size_t i = 0; i < w; ++i) {
+    const auto carry = i == 0 ? cin : ops.or_(g[i - 1], ops.and_(p[i - 1], cin));
+    r.sum[i]         = ops.xor_(bit_p[i], carry);
+  }
+  r.carry_out = ops.or_(g.back(), ops.and_(p.back(), cin));
+  return r;
+}
+
 // Dispatch on the selected architecture. `a`, `b` equal length; `cin` the
 // incoming carry (one() for the +1 of a two's-complement subtract).
 template <class Bit, class Ops>
 inline Add_result<Bit> build_add(Adder_kind kind, int block_size, Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b,
                                  Bit cin) {
   switch (kind) {
-    case Adder_kind::cska: return cska_add(ops, a, b, cin, block_size);
-    case Adder_kind::cla : return cla_add(ops, a, b, cin, block_size);
-    case Adder_kind::rca : break;
+    case Adder_kind::cska  : return cska_add(ops, a, b, cin, block_size);
+    case Adder_kind::cla   : return cla_add(ops, a, b, cin, block_size);
+    case Adder_kind::prefix: return prefix_add(ops, a, b, cin);
+    case Adder_kind::rca   : break;
   }
   return rca_add(ops, a, b, cin);
 }
