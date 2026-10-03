@@ -271,7 +271,16 @@ endgenerate
 generate
   if (LATENCY_0==1) begin:BLOCK1
     always @(posedge rd_clock_0) begin
-      rd_dout_0 <= d0_fwd;
+      // HOLD when the read is disabled. yosys $mem_v2 RD_EN on a SYNC read
+      // port is a clock enable on the output register, which is what
+      // pass.lean models (`sram_sync_read_reg_next ren raw cur =
+      // if ren then raw else cur`) and what pass.single_edge relies on when
+      // it folds a gated clock into this enable. Updating unconditionally
+      // made a disabled cycle load the DISABLED read value (x, so 0 under
+      // --x-assign 0) instead of holding.
+      if (rd_enable_0) begin
+        rd_dout_0 <= d0_fwd;
+      end
     end
   end else begin:BLOCK2
     assign rd_dout_0 = d0_fwd;

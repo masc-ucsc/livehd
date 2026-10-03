@@ -977,8 +977,18 @@ std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd,
     s += absl::StrCat("    d", k, "_mem[fwd_j", k, "*MASKSIZE +: MASKSIZE];\n");
     s += "end endgenerate\n";
     s += absl::StrCat("generate if (LATENCY_0==1) begin:BLOCK_RD_LAT_", k, "\n");
+    // HOLD when the read is disabled. yosys $mem_v2 RD_EN on a SYNC read port
+    // is a clock enable on the output register -- that is what the import maps
+    // it to (inou/yosys/lgyosys_tolg.cpp:2721), what pass.lean models
+    // (`sram_sync_read_reg_next ren raw cur = if ren then raw else cur`), and
+    // what pass.single_edge relies on when it folds a gated clock into this
+    // enable. Updating unconditionally made a disabled cycle load the DISABLED
+    // read value (x, hence 0 under --x-assign 0) instead of holding, which is
+    // a different function. Each read port is gated by its OWN enable.
     s += absl::StrCat("  always @(posedge ",
                       single_clock ? std::string("clk") : absl::StrCat("rd_clock_", k),
+                      ") if (rd_enable_",
+                      k,
                       ") rd_dout_",
                       k,
                       " <= d",

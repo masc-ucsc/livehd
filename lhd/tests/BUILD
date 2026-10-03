@@ -767,6 +767,24 @@ sh_test(
 # measured on txfmafrac_top after a clean certificate. //ware:cgen_memory_rtl
 # must be declared here: the script resolves ware/rtl relative to ITSELF, so
 # under bazel the models have to be in runfiles beside it.
+# yosys $mem_v2 RD_EN on a SYNC read port is a clock enable: a disabled cycle
+# HOLDS the output register. The import records it that way, pass.lean models
+# it that way, and pass.single_edge relies on it when it folds a gated clock
+# into that enable -- but the Verilog support models updated unconditionally
+# from an x-when-disabled read, so a disabled cycle loaded 0. Needs verilator
+# and the differential harness; without them it reports SKIPPED, not PASS.
+sh_test(
+    name = "mem_sync_read_hold_test",
+    size = "large",
+    srcs = ["mem_sync_read_hold_test.sh"],
+    data = [
+        "//lhd",
+        "//scripts:cycle_provenance_tools",
+        "//ware:cgen_memory_rtl",
+    ],
+    tags = ["no-sandbox"],  # invokes the host verilator
+)
+
 sh_test(
     name = "diffsim_memory_include_test",
     size = "medium",

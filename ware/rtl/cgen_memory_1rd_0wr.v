@@ -33,10 +33,10 @@ module cgen_memory_1rd_0wr
   generate
     if (LATENCY_0==1) begin:BLOCK_SYNC_RD
       always @(posedge clk) begin
+        // HOLD when disabled -- see the note in cgen_memory_1rd_1wr.v. Loading
+        // x on a disabled cycle is the same defect spelled out explicitly.
         if (rd_enable_0)
           rd_dout_0 <= data[rd_addr_0];
-        else
-          rd_dout_0 <= {BITS{1'bx}};
       end
     end else begin:BLOCK_ASYNC_RD
       always_comb begin
