@@ -269,7 +269,46 @@ tables, and no same-program rewriting lemma relates them automatically:
   `hwAVarT_ok`, `hwAPVarT_wf`, `hwAPVarT_erases` (via the generic `bta_erases`,
   not kernel reduction) and `hwAPVarT_entry`.
 
-  WHAT REMAINS: B3 only.  The facts above say the transform
+  **B3 IS CLOSED.**  `specialize_correct_of` is extracted in
+  `ProjectionCorrect.lean` with the interpreter as a PARAMETER -- entry shape,
+  erasure and adequacy as premises -- and the body otherwise unchanged, since
+  it only ever used `mixDriver_entry`, `mixDriver_iff`, `Eval_entry` and
+  `eraseProgram_fn`.  `specializeDesign_correct` is now its `hwAP` instance,
+  statement unchanged; `specializeDesign_varT_correct` is its `hwAPVarT` one.
+  The source/dynamic split is the generic lemma's, so the certificate stays the
+  single static argument and `[edges, input, state]` the three dynamic ones, in
+  that order, and correctness stays CONDITIONAL ON SUCCESS AT A BUDGET.
+
+  `seq_cycle_varT` instantiates the variant at the SEQUENTIAL fixture, over
+  every stimulus, so the flop-commit path is covered and not only the
+  combinational one.
+
+  Core audit went 307 -> 308 directives; the one addition is
+  `specialize_correct_of`.  No `sorryAx`, no `ofReduceBool`, 33 modules.
+
+  ### THE NEXT LINK, and it is not done
+
+  B1+B2+B3 give an `Eval` iff about the RESIDUAL.  They say nothing about
+  EXECUTION.  `SimWF`, `ProjectedSimulator`, `stepOf`, `runProjected` and the
+  `stepTrace` theorems are all written against `projectDesign`, which hardcodes
+  `hwAP`; none of them carries to `hwAPVarT` automatically.  So:
+
+  * residual `Eval` iff -- PROVED for the total variant;
+  * executable `evalFuel` / `runProjected` behaviour at a checker bound -- NOT
+    covered;
+  * multi-cycle trace correctness -- NOT covered.
+
+  Closing it means either a variant wrapper reusing the existing checker-bound
+  and trace premises, or generalising the simulator contract the same way
+  `specialize_correct_of` generalised the composition.
+
+  ### What B3 does NOT do
+
+  It does not retroactively change the two experimental counts.  Those runs
+  used `ProtoFast.mixDriver` and the OLD `hwAPVar` from the `partial`
+  `goInline`; the covered backend is `mixDriver` + `hwAPVarT`, which no real
+  design has been run on.  The first covered-backend experiment needs a FRESH
+  run with pre-launch capture, not a relabelling.  The facts above say the transform
   fired and which transform it was; they do not say the rewrite preserves
   `SEval`.  That is the lemma, and it is next.
 

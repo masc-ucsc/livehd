@@ -109,4 +109,17 @@ route `hwAP_erases` takes. -/
 #print axioms hwAPVarT_entry_params
 #print axioms hwAPVarT_entry
 
+/- B3: the residual theorem for the total variant.  `specialize_correct_of` is
+the composition with the interpreter as a PARAMETER, extracted in
+`ProjectionCorrect.lean`; `specializeDesign_correct` is its `hwAP` instance and
+`specializeDesign_varT_correct` its `hwAPVarT` one.  Plus a SEQUENTIAL fixture,
+so the flop-commit path is exercised and not only the combinational one.
+
+NOT COVERED by any of this: executable `evalFuel`/`runProjected` behaviour and
+multi-cycle trace correctness.  `SimWF`, `ProjectedSimulator` and `stepOf` are
+written against `projectDesign`, which hardcodes `hwAP`; their theorems do NOT
+automatically carry to `hwAPVarT`.  That is the next link, and it is not done. -/
+#print axioms specializeDesign_varT_correct
+#print axioms seq_cycle_varT
+
 end Projection.ProtoVar

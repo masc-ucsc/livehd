@@ -29,6 +29,7 @@ and `flopNexts` arrive as the existing lemmas.
 -/
 import LeanSemanticPrimitives.Projection.Proto.RewriteTotal
 import LeanSemanticPrimitives.Projection.HardwareAdequacy
+import LeanSemanticPrimitives.Projection.ProjectionCorrect
 
 namespace Projection
 namespace ProtoVar
@@ -226,6 +227,45 @@ theorem hwAPVarT_entry :
       rw [hfn] at h
       simp only [Option.map_some, Option.some.injEq] at h
       exact ⟨afd, rfl, h⟩
+
+/-! ## B3: the residual theorem for the total variant
+
+`specialize_correct_of` (`ProjectionCorrect.lean`) is the composition with the
+interpreter as a PARAMETER.  `specializeDesign_correct` is its `hwAP` instance;
+this is its `hwAPVarT` instance.  The source/dynamic split is the generic
+lemma's, so the certificate stays the single static argument and
+`[edges, input, state]` the three dynamic ones, in that order.
+
+Correctness is CONDITIONAL ON SUCCESS AT A BUDGET, exactly as before: `sf`/`wf`
+enter only through `hproj`. -/
+
+theorem specializeDesign_varT_correct {sf wf : Nat} {D : DesignCert} {R : Program}
+    (hproj : mixDriver sf wf hwAPVarT [encDesign D] = .ok R)
+    (hsup : SupportedByProjection D)
+    {e : ClockEdges} {i : RuntimeInput} {s : RuntimeState}
+    (hwf : Compiler.RuntimeWF D i s) (hrs : RuntimeSized D e i s) (r : Val) :
+    Eval R [] (.call R.entry
+        [.lit (encEdges e), .lit (encInput i), .lit (encState s)]) r
+      ↔ ResultRel r (interpretDesign D e i s) :=
+  specialize_correct_of hwAPVarT_entry hwAPVarT_erases
+    (fun D e i s hsup _hwf hrs r => IHwAdequate_varT hsup hrs r)
+    hproj hsup hwf hrs r
+
+/-! ## A sequential fixture, instantiated at the total variant
+
+`seqD` carries a flop, so this exercises the flop-commit path rather than only
+the combinational one.  Stated over every stimulus, not a chosen one. -/
+
+open Projection.Acceptance in
+theorem seq_cycle_varT (d en rst q : Int) (r : Val) :
+    Eval hwPVarT []
+      (.call hwPVarT.entry
+        [.lit (encDesign seqD), .lit (encEdges (allEdges seqD)),
+         .lit (encInput (seqIn d en rst)), .lit (encState (seqSt q))]) r
+      ↔ ResultRel r
+          (interpretDesign seqD (allEdges seqD) (seqIn d en rst) (seqSt q)) :=
+  IHwAdequate_varT SupportCheck.seq_supported
+    (GuardCorollary.seq_sized d en rst q) r
 
 end ProtoVar
 end Projection

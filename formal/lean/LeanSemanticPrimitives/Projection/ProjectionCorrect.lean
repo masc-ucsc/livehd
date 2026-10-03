@@ -97,23 +97,37 @@ theorem hwAP_entry :
 
 /-! ## The theorem -/
 
-/-- **The first Futamura projection, on hardware.**
+/-- The composition, with the INTERPRETER as a parameter.
 
-Specializing `I_hw` to a design yields a residual program that, run on the
-three dynamic arguments of one cycle, computes exactly what the shared
-reference semantics computes for that cycle — as an `iff`, over `Eval`, with no
-fuel in the conclusion.
+The previous version inlined this at `hwAP`, which made it fuel-parametric but
+NOT interpreter-parametric: the hypothesis named `hwAP` and the proof consumed
+`hwAP_entry`, `hwAP_erases` and `IHwAdequacyGoal_proved`.  Nothing in the body
+needs those to be about `hwAP` -- it uses only `mixDriver_entry`,
+`mixDriver_iff`, `Eval_entry` and `eraseProgram_fn` -- so the three interpreter
+facts are premises here and the body is otherwise unchanged.
 
-The specialization fuel enters only through `projectDesign D = .ok R`. -/
-theorem specializeDesign_correct {sf wf : Nat} {D : DesignCert} {R : Program}
-    (hproj : mixDriver sf wf hwAP [encDesign D] = .ok R)
+The source/dynamic argument SPLIT is preserved exactly: the certificate is the
+single static argument and `[edges, input, state]` the three dynamic ones, in
+that order, which is what `hentry`'s `[.stat, .dyn, .dyn, .dyn]` pins. -/
+theorem specialize_correct_of {A : AProgram} {P : Program}
+    (hentry : ∃ afd, A.fn A.entry = some afd ∧ afd.params = [.stat, .dyn, .dyn, .dyn])
+    (herase : eraseProgram A = P)
+    (hadq : ∀ (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState),
+              SupportedByProjection D → Compiler.RuntimeWF D i s → RuntimeSized D e i s →
+              ∀ r : Val,
+                Eval P [] (.call P.entry
+                  [.lit (encDesign D), .lit (encEdges e), .lit (encInput i),
+                   .lit (encState s)]) r
+                ↔ ResultRel r (interpretDesign D e i s))
+    {sf wf : Nat} {D : DesignCert} {R : Program}
+    (hproj : mixDriver sf wf A [encDesign D] = .ok R)
     (hsup : SupportedByProjection D)
     {e : ClockEdges} {i : RuntimeInput} {s : RuntimeState}
     (hwf : Compiler.RuntimeWF D i s) (hrs : RuntimeSized D e i s) (r : Val) :
     Eval R [] (.call R.entry
         [.lit (encEdges e), .lit (encInput i), .lit (encState s)]) r
       ↔ ResultRel r (interpretDesign D e i s) := by
-  obtain ⟨afd, hafd, hparams⟩ := hwAP_entry
+  obtain ⟨afd, hafd, hparams⟩ := hentry
   obtain ⟨fd, hpf, hfa⟩ := mixDriver_entry hproj hafd
   have hdyn : dynCount afd.params = 3 := by rw [hparams]; rfl
   -- the residual: body form and call form are the same thing
@@ -125,23 +139,47 @@ theorem specializeDesign_correct {sf wf : Nat} {D : DesignCert} {R : Program}
     rw [hparams]; simp [srcArgs]
   have hmix := mixDriver_iff hproj [encEdges e, encInput i, encState s]
     [encDesign D, encEdges e, encInput i, encState s] r fd afd hpf hafd hsa
-  rw [hwAP_erases] at hmix
+  rw [herase] at hmix
   -- the interpreter: body form and call form are the same thing
-  have hent : hwP.entry = hwAP.entry := by
-    rw [← hwAP_erases]; simp only [eraseProgram]
-  have hmfd : hwP.fn hwP.entry = some (eraseFunDef afd) := by
+  have hent : P.entry = A.entry := by
+    rw [← herase]; simp only [eraseProgram]
+  have hmfd : P.fn P.entry = some (eraseFunDef afd) := by
     have h := eraseProgram_fn hafd
-    rw [hwAP_erases] at h
+    rw [herase] at h
     rw [hent]; exact h
-  have hcallI := Eval_entry (P := hwP) (fd := eraseFunDef afd)
+  have hcallI := Eval_entry (P := P) (fd := eraseFunDef afd)
     (args := [encDesign D, encEdges e, encInput i, encState s]) (v := r) hmfd
     (by simp [eraseFunDef, hparams])
   -- and adequacy
-  have hadq := IHwAdequacyGoal_proved D e i s hsup hwf hrs r
-  refine Iff.trans ?_ hadq
+  have hadq' := hadq D e i s hsup hwf hrs r
+  refine Iff.trans ?_ hadq'
   refine Iff.trans hcallR.symm ?_
   refine Iff.trans hmix ?_
   simpa [eraseFunDef] using hcallI
+
+/-- **The first Futamura projection, on hardware.**
+
+Specializing `I_hw` to a design yields a residual program that, run on the
+three dynamic arguments of one cycle, computes exactly what the shared
+reference semantics computes for that cycle — as an `iff`, over `Eval`, with no
+fuel in the conclusion.
+
+The specialization fuel enters only through `projectDesign D = .ok R`.
+
+Now an INSTANCE of `specialize_correct_of` at `A := hwAP`.  The statement is
+unchanged; what changed is that the interpreter is no longer baked into the
+proof. -/
+theorem specializeDesign_correct {sf wf : Nat} {D : DesignCert} {R : Program}
+    (hproj : mixDriver sf wf hwAP [encDesign D] = .ok R)
+    (hsup : SupportedByProjection D)
+    {e : ClockEdges} {i : RuntimeInput} {s : RuntimeState}
+    (hwf : Compiler.RuntimeWF D i s) (hrs : RuntimeSized D e i s) (r : Val) :
+    Eval R [] (.call R.entry
+        [.lit (encEdges e), .lit (encInput i), .lit (encState s)]) r
+      ↔ ResultRel r (interpretDesign D e i s) :=
+  specialize_correct_of hwAP_entry hwAP_erases
+    (fun D e i s hsup hwf hrs r => IHwAdequacyGoal_proved D e i s hsup hwf hrs r)
+    hproj hsup hwf hrs r
 
 /-- The fuel `projectDesign` happens to fix.  It appears ONLY here, in the
 hypothesis; the conclusion is the same `iff`. -/

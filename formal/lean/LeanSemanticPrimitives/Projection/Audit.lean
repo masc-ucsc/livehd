@@ -354,6 +354,7 @@ namespace Projection
 #print axioms Hw.hwA_ok
 #print axioms Hw.hwAP_erases
 #print axioms Hw.hwAP_entry
+#print axioms Hw.specialize_correct_of
 #print axioms Hw.specializeDesign_correct
 #print axioms Hw.projectDesign_correct
 #print axioms Hw.projectDesign_correct_body
