@@ -1,5 +1,17 @@
 # The two obligations between the experiments and a theorem
 
+> **On `experiments.jsonl` itself.**  The manifest records three strengths of
+> evidence about what actually ran and never upgrades one to another:
+> `captured-pre-launch` (hashes taken before the process started -- the only
+> form that pins executed code without assumption), `captured-during-run`
+> (including `/proc/<pid>/exe`, which is evidence the running image is that
+> file), and `reconstructed-at-record-time` (hashes of the tree AFTER the run,
+> which describe the tree now and NOT what executed).  The two `rt_alu_gate`
+> rows are `reconstructed`: their binary is unrecorded and UNKNOWN.  Exit
+> status is read only from an explicit trailer and is otherwise `null` --
+> `--file-ab` prints `STAGE TIMES` even when a comparison disagreed and it
+> returns 1, so that line is not evidence of success.
+
 Every run recorded in `experiments.jsonl` is EXPERIMENTAL in a precise sense:
 it used `ProtoFast.mixDriver` and `ProtoVar.hwAPVar`, and neither is connected
 to the proved development.  The proved path is `mixDriver` + `hwAP`, and **no

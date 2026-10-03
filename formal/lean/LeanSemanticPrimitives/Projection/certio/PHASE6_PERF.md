@@ -1503,3 +1503,50 @@ tried, not a proven asymptotic bound.  One `--file-ab`-shaped run with
 `mixDriver` substituted for the fork would answer it; a negative result would
 make A load-bearing and change the order.  Not run, and not to be launched
 alongside another long run.
+
+### 14.3 The manifest records evidence STRENGTH, after getting it wrong once
+
+The first version of `record_experiment.py` had three defects that each made a
+record claim more than it knew.  All three are fixed and regression-tested
+(`record_experiment.py selftest`, 8 checks).
+
+**It invented success.**  `if exit_code is None: exit_code = 0 if 'STAGE TIMES'
+in t` read the presence of the stage-times line as a pass.  But `--file-ab`
+prints `STAGE TIMES` and *then* returns 1 when a comparison disagreed, so that
+line says nothing about the exit code.  Exit status is now read only from an
+explicit trailer; otherwise it is `null` with
+`exit_evidence: "MISSING -- the log carries no exit evidence"`.  Regressions
+cover a truncated log, a log with stage times and no trailer, and a mismatch
+run that printed stage times and exited 1.
+
+**It claimed to pin code it had not hashed.**  Both `rt_alu_gate` rows recorded
+`git_commit: 4f64d6aad` alongside `scripts/proto_probe.lean` sha
+`056ac894...`.  But `git show 4f64d6aad:...proto_probe.lean | sha256sum` is
+`1bf49b56...`; `056ac894...` is the CURRENT tree.  The hashes were taken at
+RECORD time, after the run, and described the tree then -- not what executed.
+`binary_sha256` was `null` throughout.
+
+The manifest now carries an explicit evidence level:
+
+| level | meaning |
+|---|---|
+| `captured-pre-launch` | hashed BEFORE the process started -- the only form that pins executed code without assumption |
+| `captured-during-run` | hashed while it ran, including `/proc/<pid>/exe` |
+| `reconstructed-at-record-time` | hashed AFTER; describes the tree now, NOT what ran |
+
+The two `rt_alu_gate` rows are `reconstructed`, and say so in full: their
+binary is **unknown**.  The current binary sha is NOT retrofitted onto them.
+
+For `rt_decoder_gate`, whose run was still in flight, identity was captured
+mid-run: `/proc/2795132/exe` hashes **identical** to
+`.native-dev/proto_probe` (`efbed80c2b4cda45...`), which is direct evidence the
+running image is that file; the tree was clean at `322029ec1`.  That is
+`captured-during-run`, not pre-launch, and the record says so.  Future runs
+capture before launch.
+
+**Its support check tested for the wrong thing.**  `'false' not in line` passes
+a TRUNCATED support line, which contains no `false` either.  It now requires
+all six named fields -- `wf`, `memFree`, `sources`, `ops`, `arities`,
+`flopClocks` -- to be present AND true, records each field separately, and
+flags any that is absent.  The record also keeps the raw log's sha256 and the
+control and trace lines verbatim.
