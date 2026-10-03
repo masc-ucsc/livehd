@@ -2822,15 +2822,38 @@ bool Cprop::indexed_get_mask(hhds::Node_class& node, hhds::Pin_class source, int
     return false;
   }
   // A window that still spans several lanes of a pack OTHER readers keep alive
-  // stays this one Get_mask of the shared pack. Re-assembling the lanes into a
-  // private Concat per reader multiplies the lane work by the reader count:
-  // the Pyrope writer's one-bit tuple ports turned every `in_internal#[0..=k]`
-  // of br_enc_priority_encoder into a Concat of up to 30 one-bit lanes, and the
+  // is re-packed only when the private Concat is no dearer than reading it. In
+  // 64-bit words the simulator moves: the shared pack exists either way, so the
+  // window costs its words twice (a shift and a mask), while a re-pack costs
+  // each lane's words plus its placement. Thirty one-bit lanes lose to one
+  // masked word -- the Pyrope writer's one-bit tuple ports made every
+  // `in_internal#[0..=k]` of br_enc_priority_encoder such a Concat, and the
   // simulator paid each lane per cycle (lhdtrack br_multi_xfer_distributor_rr,
-  // 8x slower than the same design read from Verilog). The pack is swept only
-  // when this node is its last reader, which is exactly when the Concat wins.
+  // 8x slower than the same design read from Verilog). A 68-bit field of a
+  // 272-bit record at a word-crossing offset wins as its two pieces, against
+  // a five-word shift (br_amba_axi_shrinker, 1.6x the other way). The pack is
+  // swept when this node was its last reader, where the Concat always wins.
+  //
+  // The pack must also be narrow in LANES to be worth keeping whole: the
+  // simulator's color planner budgets live VALUES and a one-bit lane is a
+  // word to it, so a 272-lane record kept as one node could not share a color
+  // with its producers and every lane became a boundary slot (921 slots, 389
+  // of them one bit, against 620/97 re-packed; br_amba_axi_shrinker 1.6x
+  // slower). One machine word of lanes is the ceiling; a wider pack is
+  // re-packed per reader as before. Only a Concat reports its lane count;
+  // any other pack spelling keeps the old behaviour.
   if (pieces->size() > 1 && !has_single_consumer(source)) {
-    return false;
+    constexpr size_t kKeepPackMaxLanes = 64;
+    const auto       words             = [](int64_t bits) { return (bits + 63) / 64; };
+    int64_t          repack            = 0;
+    for (const auto& piece : *pieces) {
+      repack += 1 + words(piece.hi - piece.lo);
+    }
+    const auto   pack  = source.get_master_node();
+    const size_t lanes = type_op_of(pack) == Ntype_op::Concat ? livehd::graph_util::concat_lanes(pack).size() : kKeepPackMaxLanes + 1;
+    if (repack > 2 * words(hi - lo) && lanes <= kKeepPackMaxLanes) {
+      return false;
+    }
   }
   // A lane source may already be a canonical Get_mask. Compose that ONE
   // explicit producer so constructors do not manufacture a new mask chain.

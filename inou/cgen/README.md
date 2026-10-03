@@ -16,7 +16,11 @@ still be a call each with a change-tested carry (br_arb_lru: 7950 sites and 201
 colors against 906 and 8). The expansion never changes a simulated value, an
 observation run (VCD, probe, query) keeps every loop rolled, and
 `:expect_instances:` fixtures count the compiled graph, not this private copy.
-Larger loops keep the shared body. Carry and independent work from one source loop
+Larger loops keep the shared body. Flattening grows a module's site count, so
+`sim.tune.fence` can newly fence a single-use module (br_flow_burst_mux_lru:
+2 to 7 colors, 1.38 s to 2.21 s; with `sim.tune.fence=none` the flat form runs
+1.21 s) -- the fence heuristic's documented cost on an always-toggling design,
+which the tuner resolves on a persistent workdir. Carry and independent work from one source loop
 execute in the same ordinal traversal. Independent sibling loops with equal
 start, step and count also fuse, regardless of source location. A topological
 ancestor check rejects dependent pairs; groups are bounded to eight loops,
