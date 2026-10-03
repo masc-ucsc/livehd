@@ -773,6 +773,19 @@ sh_test(
 # into that enable -- but the Verilog support models updated unconditionally
 # from an x-when-disabled read, so a disabled cycle loaded 0. Needs verilator
 # and the differential harness; without them it reports SKIPPED, not PASS.
+# The SHIPPED multi-read model, driven by a Verilog TB rather than through the
+# RTL frontend (which will not produce a single array with two sync read ports
+# -- yosys turns a small array into registers and a large one emits no
+# cgen_memory instance at all). This is where rd_enable_1 versus rd_enable_0
+# inside ONE model is checked, with exact per-port held/read values.
+sh_test(
+    name = "mem_multiread_hold_test",
+    size = "small",
+    srcs = ["mem_multiread_hold_test.sh"],
+    data = ["//ware:cgen_memory_rtl"],
+    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
+)
+
 sh_test(
     name = "mem_sync_read_hold_test",
     size = "large",
