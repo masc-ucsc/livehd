@@ -94,4 +94,31 @@ OUT="$W/kout"
 (cd "$W" && "$LHD" formal verify d.prp k.verify.prp --top cnt --set formal.bound=20) >"$OUT" 2>&1
 grep -qE '\[COI [0-9]+ node' "$OUT" || fail "a sidecar property must carry a cone: $(grep -i coi "$OUT")"
 
+# A window no deeper than the history a property reads never exercised it.
+# Under the default engine, ind-first can settle after ONE checked step, so a
+# `past(x, 1)` property reports PROVEN having checked nothing. Say so.
+cat >"$W/t.verify.prp" <<'EOF'
+const dut = import("d.cnt")
+
+formal cnt.temporal {
+  mut acc = dut
+  assert(past(acc.q, 1) <= acc.q, "q never decreases")
+}
+EOF
+OUT="$W/tout"
+(cd "$W" && "$LHD" formal verify d.prp t.verify.prp --top cnt --set formal.bound=20) >"$OUT" 2>&1
+grep -q 'SHALLOW:' "$OUT" || fail "a one-step window over a past() property must be disclosed: $(cat "$OUT")"
+
+# bmc walks the full bound, so the same property is genuinely checked.
+OUT="$W/tout2"
+(cd "$W" && "$LHD" formal verify d.prp t.verify.prp --top cnt --set formal.bound=20 \
+   --set formal.engine=bmc) >"$OUT" 2>&1
+grep -q 'SHALLOW:' "$OUT" && fail "bmc walks the full bound; no shallow warning expected: $(grep -i -A1 shallow "$OUT")"
+
+# A design with no temporal property proves inductively in one step, which is
+# unbounded and complete -- that must NOT be flagged.
+OUT="$W/tout3"
+(cd "$W" && "$LHD" formal verify d.prp d.verify.prp --top cnt --set formal.bound=20) >"$OUT" 2>&1
+grep -q 'SHALLOW:' "$OUT" && fail "a non-temporal one-step inductive proof is not shallow: $(grep -i -A1 shallow "$OUT")"
+
 echo "PASS: formal verify prints a verdict and kind tally"

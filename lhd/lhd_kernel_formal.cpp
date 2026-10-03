@@ -7653,6 +7653,13 @@ void formal_verify_command(Options& opts, Result& res) {
       std::print("  CONTRADICTORY assume set in {} scope(s) — proofs there are unsound\n", r.vacuous_scopes.size());
     }
     std::print("  depth         {:4}  checked steps after {} reset cycle(s)\n", r.checked_steps, r.reset_hold);
+    // A window no deeper than the history a property reads never exercised it.
+    if (r.max_history > 0 && r.checked_steps <= r.max_history) {
+      std::print("  SHALLOW: {} checked step(s) but a property reads {} cycle(s) back — it was never\n",
+                 r.checked_steps,
+                 r.max_history);
+      std::print("           exercised. Re-run with --set formal.engine=bmc for the full bound.\n");
+    }
     if (covers == 0) {
       std::print("  note: cover is not an obligation in lhd yet, so no reachability was measured\n");
     }
