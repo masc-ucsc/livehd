@@ -530,18 +530,39 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
               = .ok $rhs := by
           rfl))
       markPhase s!"compile_chunk {j}"
-    -- compose: compileGraph D = .ok <the push chain the chunks build>
-    let mut chainT : Term ← `((#[] : Array Compiler.ResidualBinding))
-    for k in [0 : nb] do
-      let b := R.bindings[k]!
-      let tyQ ← liftTermElabM (match b.ty with
-        | .bv w    => `(Compiler.ValueType.bv $(quote w))
-        | .mem a w => `(Compiler.ValueType.mem $(quote a) $(quote w)))
-      let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
-      chainT ← `(($chainT).push { ty := $tyQ, rhs := $rhsQ })
+    -- NAMED PREFIXES. Chaining the chunks directly made `compileGraph_eq`
+    -- rewrite 38 times through an ever-growing push chain, so its proof term
+    -- carried a copy of the accumulator at every step -- O(N^2) even though
+    -- each `cf_j` is `rfl`. Each `pre{j+1}` instead REFERENCES `pre{j}` and
+    -- adds only its own chunk, so every definition and every step statement is
+    -- O(chunk) and the whole chain is O(N).
+    let preNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"pre{j}")
+    elabCommand (← `(command|
+      def $(preNm 0) : Array Compiler.ResidualBinding := #[]))
+    for j in [0 : nseg] do
+      let mut body : Term ← `($(preNm j))
+      for k in [bnd j : bnd (j+1)] do
+        let b := R.bindings[k]!
+        let tyQ ← liftTermElabM (match b.ty with
+          | .bv w    => `(Compiler.ValueType.bv $(quote w))
+          | .mem a w => `(Compiler.ValueType.mem $(quote a) $(quote w)))
+        let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
+        body ← `(($body).push { ty := $tyQ, rhs := $rhsQ })
+      elabCommand (← `(command|
+        def $(preNm (j+1)) : Array Compiler.ResidualBinding := $body))
+    markPhase "prefixes"
+    -- each step is stated between two NAMES; the abstract-accumulator chunk
+    -- fact supplies the proof, and `pre{j+1}` is definitionally its result.
+    let stepNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"st{j}")
+    for j in [0 : nseg] do
+      elabCommand (← `(command|
+        theorem $(stepNm j) :
+            Compiler.compileFrom $d $(quote (bnd j)) $(quote (bnd (j+1) - bnd j))
+              $(preNm j) = .ok $(preNm (j+1)) := $(cfNm j) $(preNm j)))
+    markPhase "prefix_steps"
     let mut ctacs : Array (TSyntax `tactic) := #[]
     ctacs := ctacs.push (← `(tactic|
-      show Compiler.compileFrom $d 0 $(quote nb) (#[] : Array Compiler.ResidualBinding) = _))
+      show Compiler.compileFrom $d 0 $(quote nb) $(preNm 0) = _))
     for j in [0 : nseg] do
       let lo' := bnd j
       let len' := bnd (j+1) - lo'
@@ -549,16 +570,16 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
       ctacs := ctacs.push (← `(tactic|
         rw [show ($(quote (nb - lo')) : Nat) = $(quote len') + $(quote rem) from rfl,
             Compiler.compileFrom_step $(quote lo') $(quote len') $(quote rem)
-              ($(cfNm j) _)]))
+              $(stepNm j)]))
     ctacs := ctacs.push (← `(tactic| rfl))
     let cgNm := mkIdent (base ++ `compileGraph_eq)
     elabCommand (← `(command|
-      theorem $cgNm : Compiler.compileGraph $d = .ok $chainT := by $ctacs*))
+      theorem $cgNm : Compiler.compileGraph $d = .ok $(preNm nseg) := by $ctacs*))
     markPhase "compileGraph_eq"
     -- and therefore R.bindings IS that chain -- by injection, no evaluation
     let rbNm := mkIdent (base ++ `R_bindings_eq)
     elabCommand (← `(command|
-      theorem $rbNm : ($rNm).bindings = $chainT := by
+      theorem $rbNm : ($rNm).bindings = $(preNm nseg) := by
         have h := ($partsNm).2.1
         rw [$cgNm:ident] at h
         exact (Except.ok.inj h).symm))
