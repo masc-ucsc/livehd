@@ -1046,6 +1046,30 @@ prerequisite to functional search.</li>
   from mapped cell area. Runtime/RSS observations were collected with concurrent
   proof workers. Timing gaps remain in mixed arithmetic and some selection logic;
   this is a measured baseline and improvement, not a claim of universal superiority.</li>
+  <li><strong>lgcheck and sub-0.8 follow-up (2026-10-02).</strong>
+  Native multiplication now compresses partial products with carry-save rounds and
+  one final prefix addition. Automatic comparisons use balanced order trees at
+  widths of at least eight bits; narrower comparisons retain ripple lowering after
+  a FIFO timing regression exposed the tradeoff. The mapping-only backend now runs
+  the shared physical sizing ladder without Boolean remapping or area resynthesis.
+  Exhaustive signed/unsigned arithmetic, truncation, comparison, depth and
+  mapping-only sizing checks pass. Explicit <code>adder=rca multiplier=array</code>
+  restores the previous native arithmetic architecture.</li>
+  <li>The
+  <a href="https://github.com/masc-ucsc/lhdtrack/blob/main/data/usyn-followup-20261002-satsuma.json">retained follow-up matrix</a>
+  records all 195 final slots, independent lgcheck audits, additional recipes and
+  full critical paths for each of the 42 previously measured ratios below 0.8.
+  The final default leaves 20 below 0.8. Explicit flattening produces identical
+  netlists on those 20 cases; a separate <code>pass.usyn.delay=50</code> experiment
+  raises eight more above 0.8 with area tradeoffs. These recipes remain separate
+  from the default headline. Eleven remaining default cases have no eligible
+  register-rooted endpoints: combinational-output factoring beyond the local
+  residual stage remains a native optimization opportunity. Every diagnosis
+  retains cell/load evidence and a next step; bounded checks and timeouts remain
+  explicit and never qualify an unbounded frequency claim. The same 23 proven
+  idiomatic headline slots move from 94.73% to 95.01% of ABC frequency with
+  essentially unchanged paired area; larger arithmetic gains with unresolved
+  proofs remain provisional.</li>
   <li>Not required: DOMINO emission, domino Liberty (<a href="domino.html">domino</a> P3-P6), or any 2u search tier still
   pending. The ASAP7 report gate is satisfied; optional search tiers and physical
   DOMINO work remain deferred under the stated implementation priority.</li>
