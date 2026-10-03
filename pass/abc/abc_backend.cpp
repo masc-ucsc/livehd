@@ -793,6 +793,14 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
   Flow_result flow_result;
   if (!rewrite_mapped) {
     flow_result = execute_flow(frame, plan, flow_admission);
+  } else {
+    // A native rewrite owns the Boolean network. Run only the shared physical
+    // sizing ladder: the mapping-only branch used to stop after downsizing,
+    // even when its weak cells missed the region's timing budget.
+    plan.flow.clear();
+    plan.remappable     = false;
+    plan.area_candidate = false;
+    flow_result         = execute_flow(frame, plan, flow_admission);
   }
   if (flow_result.status == Flow_status::refused) {
     if (flow_result.refusal == Flow_refusal::time) {

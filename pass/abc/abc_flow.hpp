@@ -14,6 +14,7 @@ namespace livehd::abc {
 // graph handles or callbacks are stored here, so the same plan can travel to
 // an isolated ABC worker without duplicating the mapping policy.
 struct Flow_plan {
+  // Empty flow accepts an already mapped network for cell sizing only.
   std::string flow, size_to_budget, map_step, remap_post, area_flow;
   bool        ladder = false, remappable = false, area_candidate = false;
   float       budget         = 0;

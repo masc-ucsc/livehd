@@ -74,10 +74,15 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!adder || !read("adder_block", "0", options.design.adder_block) || options.design.adder_block < 0) {
     return false;
   }
-  options.design.adder    = *adder;
-  options.tmap            = var.get_stage("tmap", "abc");
-  options.mapping.library = var.get_stage("library", "");
-  const auto target       = var.get_stage("target", "cmos");
+  options.design.adder  = *adder;
+  const auto multiplier = livehd::synth::arith::parse_mult_kind(var.get_stage("multiplier", "csa"));
+  if (!multiplier) {
+    return false;
+  }
+  options.design.multiplier = *multiplier;
+  options.tmap              = var.get_stage("tmap", "abc");
+  options.mapping.library   = var.get_stage("library", "");
+  const auto target         = var.get_stage("target", "cmos");
   if (target != "cmos") {
     livehd::diag::err("pass.usyn", "unsupported-target", "unsupported")
         .msg("USYN currently emits target=cmos; physical DominoLatch emission is not implemented")
@@ -145,8 +150,11 @@ void Pass_usyn::setup() {
   Eprp_method m("pass.usyn", "Native register-rooted XAG synthesis with optional technology mapping", &Pass_usyn::work);
   m.add_label_optional("tmap", "Optional technology mapping: none (logical CMOS, no Liberty) or abc (mapping only)", "abc");
   m.add_label_optional("target", "Output target; currently cmos retains original state", "cmos");
-  m.add_label_optional("adder", "Native arithmetic lowering: auto (wide sums use prefix), rca, cska, cla or prefix", "auto");
+  m.add_label_optional("adder",
+                       "Native arithmetic: auto (prefix wide sums, comparisons and multiplier carry), rca, cska, cla or prefix",
+                       "auto");
   m.add_label_optional("adder_block", "Native CSKA/CLA group width (0: derive from operating width)", "0");
+  m.add_label_optional("multiplier", "Native partial-product summation: csa (carry-save), tree or array", "csa");
   m.add_label_optional("logical_inputs", "Maximum logical inputs of one selected gate, counting Q/!Q once (1..16)", "8");
   m.add_label_optional("stack", "Maximum series stack of a selected gate", "4");
   m.add_label_optional("branches", "Maximum factored parallel discharge width of a selected gate", "10");

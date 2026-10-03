@@ -48,8 +48,9 @@ inline std::optional<Adder_kind> parse_adder_kind(std::string_view s) {
 
 // Combinational multiplier architecture (mirrors Adder_kind). `array` is the
 // simple shift-and-add multiplier; `tree` sums partial products in balanced
-// pairs. Both reuse the selected adder. Tree is not a carry-save Wallace tree.
-enum class Mult_kind { array, tree };
+// pairs. `csa` compresses three rows to two without propagating carries until
+// the final addition. All reuse the selected adder for carry propagation.
+enum class Mult_kind { array, tree, csa };
 
 inline std::optional<Mult_kind> parse_mult_kind(std::string_view s) {
   if (s == "tree") {
@@ -57,6 +58,9 @@ inline std::optional<Mult_kind> parse_mult_kind(std::string_view s) {
   }
   if (s == "array") {
     return Mult_kind::array;
+  }
+  if (s == "csa") {
+    return Mult_kind::csa;
   }
   return std::nullopt;
 }
@@ -348,7 +352,8 @@ inline std::vector<Bit> build_div(Adder_kind kind, int block_size, Ops& ops, con
   return conditional_negate(quotient, ops.xor_(aneg, bneg));
 }
 
-// a < b via the chosen subtractor: d = a + ~b + 1. Unsigned: a<b iff the
+// a < b via a balanced comparison tree for prefix, otherwise the chosen
+// subtractor: d = a + ~b + 1. Unsigned: a<b iff the
 // subtract borrows (no carry-out). Signed: callers pass operands extended by
 // one guard bit so a-b cannot overflow W bits, hence the sign bit d[W-1] is the
 // comparison result (mixed sign works: an unsigned operand zero-extends into a
@@ -356,6 +361,34 @@ inline std::vector<Bit> build_div(Adder_kind kind, int block_size, Ops& ops, con
 template <class Bit, class Ops>
 inline Bit build_lt(Adder_kind kind, int block_size, Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b,
                     bool is_unsigned) {
+  if (kind == Adder_kind::prefix) {
+    // Compare high groups before low groups. Equality propagates the lower
+    // group's result; signed order reverses only the sign-bit ordering.
+    // No unobserved difference bits are constructed.
+    struct Group {
+      Bit less, equal;
+    };
+    std::vector<Group> level;
+    level.reserve(a.size());
+    for (size_t i = 0; i < a.size(); ++i) {
+      const bool sign = !is_unsigned && i + 1 == a.size();
+      level.push_back({sign ? ops.and_(a[i], ops.inv(b[i])) : ops.and_(ops.inv(a[i]), b[i]), ops.inv(ops.xor_(a[i], b[i]))});
+    }
+    while (level.size() > 1) {
+      std::vector<Group> next;
+      next.reserve((level.size() + 1) / 2);
+      for (size_t i = 0; i < level.size(); i += 2) {
+        if (i + 1 == level.size()) {
+          next.push_back(level[i]);
+        } else {
+          const auto lo = level[i], hi = level[i + 1];
+          next.push_back({ops.or_(hi.less, ops.and_(hi.equal, lo.less)), ops.and_(hi.equal, lo.equal)});
+        }
+      }
+      level = std::move(next);
+    }
+    return level.empty() ? ops.zero() : level.front().less;
+  }
   auto diff = build_add(kind, block_size, ops, a, bv_invert(ops, b), ops.one());
   if (is_unsigned) {
     return ops.inv(diff.carry_out);
@@ -526,11 +559,19 @@ inline std::vector<Bit> build_mul(Mult_kind kind, Adder_kind adder, int block_si
       int j = i - k;
       pp[i] = (j >= 0 && j < aw) ? ops.and_(b[k], a[j]) : ops.zero();
     }
-    if (kind == Mult_kind::tree) {
+    if (kind != Mult_kind::array) {
       rows.push_back(std::move(pp));
     } else {
       acc = build_add(adder, block_size, ops, acc, pp, ops.zero()).sum;
     }
+  }
+  if (kind == Mult_kind::csa) {
+    std::vector<Sum_operand<Bit>> operands;
+    operands.reserve(rows.size());
+    for (auto& row : rows) {
+      operands.push_back({std::move(row), false, false});
+    }
+    return build_sum(adder, block_size, ops, operands, out_w);
   }
   while (rows.size() > 1) {
     std::vector<std::vector<Bit>> next;

@@ -175,12 +175,16 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     synth::Blast_options blast_options;
     blast_options.adder      = options.adder;
     blast_options.block_size = options.adder_block;
+    blast_options.multiplier = options.multiplier;
     if (options.auto_sum_adder) {
       // The native mapper has no subsequent Boolean restructuring to remove
-      // a ripple carry chain. Keep narrow arithmetic and multiplier/divider
-      // internals compact; seed only wide Sum cells with logarithmic carries.
-      blast_options.sum_adder           = synth::arith::Adder_kind::prefix;
-      blast_options.sum_adder_min_width = 16;
+      // a ripple carry chain. Keep narrow sums and divider internals compact;
+      // wide sums and the final multiplier addition use logarithmic carries.
+      blast_options.sum_adder                  = synth::arith::Adder_kind::prefix;
+      blast_options.sum_adder_min_width        = 16;
+      blast_options.multiplier_adder           = synth::arith::Adder_kind::prefix;
+      blast_options.comparator_adder           = synth::arith::Adder_kind::prefix;
+      blast_options.comparator_adder_min_width = 8;
     }
     blast_options.logical_state     = true;
     blast_options.state_target      = synth::State_target::cmos;
@@ -215,13 +219,13 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     if (output->cache.enabled) {
       const auto names = identity_names(rb, blast, top->get_name(), io);
       cached           = probe_logical_cache(cache_options,
-                                             rb.module_name,
-                                             blast.lnet,
-                                             *blast.source_state,
-                                             names,
-                                             options.logical,
-                                             credits,
-                                             io);
+                                   rb.module_name,
+                                   blast.lnet,
+                                   *blast.source_state,
+                                   names,
+                                   options.logical,
+                                   credits,
+                                   io);
     }
     if (io.resource_exhausted) {
       work.resource_exhausted = work.exhausted = true;

@@ -1,6 +1,9 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "abc_flow.hpp"
 
+#include <algorithm>
+#include <vector>
+
 #include "gtest/gtest.h"
 
 // clang-format off
@@ -83,6 +86,38 @@ TEST_F(AbcFlow, CommandFailureIsDistinctFromResourceRefusal) {
   EXPECT_EQ(result.stage, "mapping");
   EXPECT_EQ(result.command, plan.flow);
   EXPECT_EQ(result.commands_completed, 0);
+}
+
+TEST_F(AbcFlow, MappedSizingNeverRunsBooleanMappingOrAreaCandidate) {
+  ASSERT_EQ(execute_flow(frame, plan).status, Flow_status::completed);
+  plan.flow.clear();
+  plan.ladder = true;
+  plan.budget = 0.001f;  // Deliberately unattainable: exercises both sizing rungs.
+  std::vector<std::string> stages;
+  const auto               result = execute_flow(frame, plan, [&](auto stage) {
+    stages.emplace_back(stage);
+    return true;
+  });
+  ASSERT_EQ(result.status, Flow_status::completed);
+  EXPECT_EQ(result.commands_completed, 2);
+  ASSERT_TRUE(result.delay_qor);
+  EXPECT_TRUE(Abc_NtkIsMappedLogic(Abc_FrameReadNtk(frame)));
+  EXPECT_EQ(std::count(stages.begin(), stages.end(), "mapping"), 0);
+  EXPECT_EQ(std::count(stages.begin(), stages.end(), "area-candidate"), 0);
+  EXPECT_EQ(std::count(stages.begin(), stages.end(), "budget-sizing"), 2);
+  EXPECT_EQ(std::count(stages.begin(), stages.end(), "conditional-sizing"), 2);
+}
+
+TEST_F(AbcFlow, MappedSizingRefusesUnmappedInputAndResynthesisPlans) {
+  const auto mapping = plan.flow;
+  plan.flow.clear();
+  EXPECT_EQ(execute_flow(frame, plan).status, Flow_status::failed);
+  ASSERT_EQ(Cmd_CommandExecute(frame, mapping.c_str()), 0);
+  plan.area_candidate = true;
+  EXPECT_EQ(execute_flow(frame, plan).status, Flow_status::failed);
+  plan.area_candidate = false;
+  plan.remappable     = true;
+  EXPECT_EQ(execute_flow(frame, plan).status, Flow_status::failed);
 }
 
 TEST_F(AbcFlow, AreaCandidateTieKeepsDelayMapping) {

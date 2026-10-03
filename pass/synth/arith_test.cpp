@@ -65,6 +65,7 @@ TEST(abc_arith, parse_and_default_block_size) {
   EXPECT_FALSE(parse_adder_kind("nope").has_value());
 
   EXPECT_EQ(parse_mult_kind("array").value(), Mult_kind::array);
+  EXPECT_EQ(parse_mult_kind("csa").value(), Mult_kind::csa);
   EXPECT_FALSE(parse_mult_kind("wallace").has_value());
   EXPECT_FALSE(parse_mult_kind("").has_value());
 
@@ -138,9 +139,80 @@ TEST(abc_arith, prefix_carry_depth_is_logarithmic) {
     const auto               prefix = prefix_add(ops, inputs, inputs, Level{});
     const auto               ripple = rca_add(ops, inputs, inputs, Level{});
     EXPECT_LE(prefix.carry_out.depth, 2 * std::bit_width(w - 1) + 3);
+    for (bool uns : {false, true}) {
+      EXPECT_LE(build_lt(Adder_kind::prefix, 0, ops, inputs, inputs, uns).depth, 2 * std::bit_width(w - 1) + 1);
+    }
     if (w >= 7) {
       EXPECT_LT(prefix.carry_out.depth, ripple.carry_out.depth);
     }
+  }
+}
+
+TEST(abc_arith, carry_save_multiplier_signed_unsigned_and_truncation) {
+  ByteOps ops;
+  for (auto adder : kKinds) {
+    for (int w = 1; w <= 6; ++w) {
+      const uint64_t limit = uint64_t{1} << w;
+      for (uint64_t a = 0; a < limit; ++a) {
+        for (uint64_t b = 0; b < limit; ++b) {
+          for (bool signed_a : {false, true}) {
+            for (bool signed_b : {false, true}) {
+              auto      av    = signed_a && (a & (limit >> 1)) ? a | ~(limit - 1) : a;
+              auto      bv    = signed_b && (b & (limit >> 1)) ? b | ~(limit - 1) : b;
+              const int out_w = 2 * w;
+              EXPECT_EQ(from_bits(build_mul(Mult_kind::csa, adder, 3, ops, to_bits(av, out_w), to_bits(bv, out_w), out_w)),
+                        (av * bv) & ((uint64_t{1} << out_w) - 1));
+            }
+          }
+        }
+      }
+    }
+  }
+  uint64_t rng = 748923;
+  for (int out_w : {1, 3, 7, 16, 31, 63}) {
+    for (int trial = 0; trial < 100; ++trial) {
+      rng          = rng * 6364136223846793005ULL + 1442695040888963407ULL;
+      const auto a = rng;
+      rng          = rng * 6364136223846793005ULL + 1442695040888963407ULL;
+      const auto b = rng;
+      EXPECT_EQ(from_bits(build_mul(Mult_kind::csa, Adder_kind::prefix, 0, ops, to_bits(a, out_w), to_bits(b, out_w), out_w)),
+                (a * b) & ((uint64_t{1} << out_w) - 1));
+    }
+  }
+  EXPECT_TRUE(build_mul(Mult_kind::csa, Adder_kind::prefix, 0, ops, std::vector<B>{}, std::vector<B>{}, 0).empty());
+}
+
+TEST(abc_arith, carry_save_multiplier_depth) {
+  struct Level {
+    uint32_t depth = 0;
+  };
+  struct Ops {
+    Level zero() { return {}; }
+    Level one() { return {}; }
+    Level inv(Level a) { return a; }
+    Level and_(Level a, Level b) { return {1 + std::max(a.depth, b.depth)}; }
+    Level or_(Level a, Level b) { return and_(a, b); }
+    Level xor_(Level a, Level b) { return and_(a, b); }
+  } ops;
+  for (int w : {8, 16, 31, 64}) {
+    const std::vector<Level> inputs(w);
+    const auto               csa    = build_mul(Mult_kind::csa, Adder_kind::prefix, 0, ops, inputs, inputs, w);
+    const auto               serial = build_mul(Mult_kind::array, Adder_kind::rca, 0, ops, inputs, inputs, w);
+    const auto               depth  = [](const auto& bits) {
+      uint32_t result = 0;
+      for (auto bit : bits) {
+        result = std::max(result, bit.depth);
+      }
+      return result;
+    };
+    EXPECT_LT(depth(csa), depth(serial));
+    uint32_t rounds = 0;
+    for (int rows = w; rows > 2; rows -= rows / 3) {
+      ++rounds;
+    }
+    // Each 3:2 compression round costs at most three gate levels; only the
+    // final two rows propagate carry through the logarithmic prefix adder.
+    EXPECT_LE(depth(csa), 3 * rounds + 2 * std::bit_width(static_cast<uint32_t>(w - 1)) + 4);
   }
 }
 

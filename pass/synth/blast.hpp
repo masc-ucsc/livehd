@@ -28,42 +28,45 @@ namespace blast_gu = livehd::graph_util;
 struct Blast_options {
   arith::Adder_kind                adder = arith::Adder_kind::rca;
   std::optional<arith::Adder_kind> sum_adder;
-  int                              sum_adder_min_width = 0;
-  int                              block_size          = 0;  // CSKA skip-block / CLA group width; 0 = auto from the operating width
-  arith::Mult_kind                 multiplier          = arith::Mult_kind::array;
-  bool                             reverse_barrel      = false;
+  std::optional<arith::Adder_kind> multiplier_adder;
+  std::optional<arith::Adder_kind> comparator_adder;
+  int                              comparator_adder_min_width = 0;
+  int                              sum_adder_min_width        = 0;
+  int                              block_size       = 0;  // CSKA skip-block / CLA group width; 0 = auto from the operating width
+  arith::Mult_kind                 multiplier       = arith::Mult_kind::array;
+  bool                             reverse_barrel   = false;
   // Flops cross as latches (register mapping); false keeps every flop a native
   // boundary.
-  bool                             map_register        = true;
+  bool                             map_register     = true;
   // A crossing latch without a power-on value stores ~next_state: the QN-only
   // DFF encoding, exact only under a flow that preserves the latches.
-  bool                             qn_encode           = false;
+  bool                             qn_encode        = false;
   // Asynchronous-reset register cells for reset value v: -1 none, else that
   // cell's q_inverted (0/1). A register whose async reset the cells can
   // express crosses as a latch (reset left OUT of D, Seq_flop::async_reset);
   // otherwise it stays a native boundary.
-  int8_t                           areset_cell[2]      = {-1, -1};
+  int8_t                           areset_cell[2]   = {-1, -1};
   // Whether that cell's reset pin asserts at 0 (Dff_cell::reset_low): the
   // level an internally computed reset crosses at (Seq_flop::arst_po).
-  bool                             areset_low[2]       = {false, false};
+  bool                             areset_low[2]    = {false, false};
   // The flow keeps every latch as crossed (why an async cell may be absent:
   // reported precisely in the reset-native diagnostic).
-  bool                             areset_flow_ok      = true;
+  bool                             areset_flow_ok   = true;
   // The Liberty has an integrated clock-gate cell (Dff_selection::icg_ladder)
   // and the flow keeps every latch as crossed: a register clocked by a
   // recognized latch+AND clock gate crosses as a latch clocked by an ICG cell
   // (Region_blast::icgs) instead of staying a native flop.
-  bool                             icg                 = false;
+  bool                             icg              = false;
   // Why `icg` is off, for the derived-clock-native report: false = the flow may
   // reshape latches, true = the Liberty has no ICG cell (or no DFF cell).
-  bool                             icg_flow_ok         = true;
+  bool                             icg_flow_ok      = true;
   // The Liberty's transparent data-latch cells (Dff_selection::latch_ladder),
   // [enable active-low][0 plain, 1 reset-to-0, 2 reset-to-1]: -1 none, else
   // that pick's q_inverted (0/1). A level-sensitive Latch whose shape a cell
   // covers is still a native boundary for ABC (a level-sensitive latch never
   // crosses as an ABC latch), but the read-back mints one cell per bit
   // (Bbox::latch_map) instead of rebuilding the native Latch.
-  int8_t                           latch_cell[2][3]    = {
+  int8_t                           latch_cell[2][3] = {
       {-1, -1, -1},
       {-1, -1, -1}
   };
@@ -545,8 +548,8 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
           av[i] = abc_eff_bit(a, i);
           bv[i] = abc_eff_bit(b, i);
         }
-        auto pair = op == Ntype_op::LT ? arith::build_lt(opts_.adder, bs, ops, av, bv, uns)
-                                       : arith::build_lt(opts_.adder, bs, ops, bv, av, uns);
+        const auto kind = opts_.comparator_adder && w >= opts_.comparator_adder_min_width ? *opts_.comparator_adder : opts_.adder;
+        auto pair = op == Ntype_op::LT ? arith::build_lt(kind, bs, ops, av, bv, uns) : arith::build_lt(kind, bs, ops, bv, av, uns);
         result    = ops.and_(result, pair);
       }
     }
@@ -772,8 +775,8 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         if (const auto chain = affine_chain(b_d); chain && gu::is_unsign(chain->index)) {
           const int iw    = eff_width(chain->index);
           bool      valid = iw > 0 && iw <= 16
-                            && (uint64_t{1} << iw) * static_cast<uint64_t>(demand_w)
-                                   < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1));
+                       && (uint64_t{1} << iw) * static_cast<uint64_t>(demand_w)
+                              < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1));
           for (size_t i = 0; valid && i < chain->links.size(); ++i) {
             valid = region.contains(chain->links[i].first);
           }
@@ -893,7 +896,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     } else {
       acc = extend(ds[0]);
       for (size_t k = 1; k < ds.size(); ++k) {
-        acc = arith::build_mul(opts_.multiplier, opts_.adder, bs, ops, acc, extend(ds[k]), out_w);
+        acc = arith::build_mul(opts_.multiplier, opts_.multiplier_adder.value_or(opts_.adder), bs, ops, acc, extend(ds[k]), out_w);
       }
     }
     // low out_w bits are the product; the spare bit(s) above the magnitude
