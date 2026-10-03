@@ -322,12 +322,12 @@ syntax (name := compileChunkFact) "compile_chunk_fact " ident
 def elabCompileChunkFact : CommandElab := fun stx => do
   match stx with
   | `(command| compile_chunk_fact $d:ident from $lo:num take $len:num as $nm:ident) => do
-    let R ← liftTermElabM do
+    let (cert, R) ← liftTermElabM do
       let dExpr ← Term.elabTerm d none
       let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
       match compileDesign cert with
       | .error _ => throwError "compile_chunk_fact: compileDesign refused {d}"
-      | .ok R    => pure R
+      | .ok R    => pure (cert, R)
     let lo' := lo.getNat
     let len' := len.getNat
     if lo' + len' > R.bindings.size then
@@ -342,12 +342,39 @@ def elabCompileChunkFact : CommandElab := fun stx => do
         | .mem a w  => `(Compiler.ValueType.mem $(quote a) $(quote w)))
       let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
       rhs ← `(($rhs).push { ty := $tyQ, rhs := $rhsQ })
+    -- One CLOSED lookup per node, by `rfl`. Measured, kernel array indexing is
+    -- flat in the index -- +13 MB at node 0 and +25 MB at node 1152 of a
+    -- 1,186-node design -- whereas letting `simp` reach the node by unfolding
+    -- the design costs +120 MB at the front and +2.10 GB at the back, and
+    -- exceeds the default step limit outright past the middle.
+    --
+    -- So the design is NOT in the chunk's simp set: these facts are, and simp
+    -- never walks the node array.
+    let lkNm : Nat → Ident := fun k =>
+      mkIdent (nm.getId ++ Name.mkSimple s!"look{k}")
+    for k in [lo' : lo' + len'] do
+      match cert.nodes[k]? with
+      | none => throwError "compile_chunk_fact: no node {k}"
+      | some c =>
+        -- `DenseNodeCert` derives `Repr`, so the literal round-trips through
+        -- the parser; a hand-written quoter would need a case per LGraphOp
+        -- constructor and would silently go stale when one is added.
+        let str := toString (repr c)
+        let cq : Term ←
+          match Lean.Parser.runParserCategory (← getEnv) `term str with
+          | .ok stx   => pure ⟨stx⟩
+          | .error e  => throwError "compile_chunk_fact: could not re-parse \
+              node {k} from its Repr: {e}"
+        elabCommand (← `(command|
+          theorem $(lkNm k) : ($d).nodes[$(quote k)]? = some $cq := rfl))
+    let mut lks : Array (TSyntax `Lean.Parser.Tactic.simpLemma) := #[]
+    for k in [lo' : lo' + len'] do
+      lks := lks.push (← `(Lean.Parser.Tactic.simpLemma| $(lkNm k):ident))
     elabCommand (← `(command|
       theorem $nm ($accId : Array Compiler.ResidualBinding) :
           Compiler.compileFrom $d $(quote lo') $(quote len') $accId = .ok $rhs := by
-        simp (config := { maxSteps := 2000000 })
-          [Compiler.compileFrom, $d:ident, Compiler.compileOp,
-           Compiler.opValueType]))
+        simp [Compiler.compileFrom, Compiler.compileOp, Compiler.opValueType,
+              Compiler.DesignCert.slotOfNode, $lks,*]))
     logInfo m!"compile_chunk_fact: {nm} over [{lo'}, {lo' + len'})"
   | _ => throwUnsupportedSyntax
 
