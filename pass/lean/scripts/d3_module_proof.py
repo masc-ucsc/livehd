@@ -152,6 +152,15 @@ def main() -> int:
     ap.add_argument("--per-group", type=int, default=4)
     ap.add_argument("--group-max-kb", type=int, default=10000000)
     ap.add_argument("--final-max-kb", type=int, default=14000000)
+    ap.add_argument("--phase-markers", action="store_true",
+                    help="have the composition append a timestamped line per "
+                         "proof phase to <out-dir>/phases.txt. DIAGNOSTIC only: "
+                         "a marker records that a phase was REACHED, never that "
+                         "it holds, and the file is written as the phases run "
+                         "so it survives a kill that discards buffered stdout. "
+                         "This is the only way to localise a composition that "
+                         "produces no output before its bound -- serdiv_gate "
+                         "ran 90 minutes and emitted nothing at all.")
     ap.add_argument("--timeout", type=float, default=0,
                     help="seconds to allow the COMPOSITION stage; 0 means "
                          "unbounded (the historical behaviour). On expiry the "
@@ -257,11 +266,17 @@ def main() -> int:
             return 1
 
     comp = out / "composition.lean"
+    # The marker file is named by an absolute path because the composition is
+    # elaborated with cwd=LEAN, not from --out-dir.
+    phases = out / "phases.txt"
+    if a.phase_markers and phases.exists():
+        phases.unlink()
     comp.write_text(
         f"import LeanSemanticPrimitives.Gen.{ns}.G{ngroup-1}\n"
         "import LeanSemanticPrimitives.Compiler.D3Harness\n"
         "set_option maxRecDepth 1000000\nset_option maxHeartbeats 0\n"
-        "open Compiler\n\n"
+        + (f'set_option d3.proofPhase "{phases}"\n' if a.phase_markers else "")
+        + "open Compiler\n\n"
         f"reify_design_chunked {a.module}_designCert as d3_fast size {a.chunk_size}\n"
         f"prove_reified_chunked {a.module}_designCert as d3_fast "
         f"size {a.chunk_size} using {ns}\n"
@@ -311,6 +326,14 @@ def main() -> int:
            "olean_digest": snap_before, "olean_digest_after": snap_after,
            "olean_drift": drifted,
            "timeout_s": a.timeout,
+           "phase_markers": str(phases) if a.phase_markers else "",
+           # Which phases were REACHED, in order, with their timestamps. A
+           # marker is never evidence that a phase HOLDS -- it fires after the
+           # command is elaborated, whatever the command concluded.
+           "phases_reached": ([l.strip() for l in
+                               phases.read_text(errors="replace").splitlines()
+                               if l.strip()]
+                              if a.phase_markers and phases.exists() else []),
            "final_rc": rc, "final_max_rss_kb": rss, "final_wall_s": round(wall, 2),
            "final_cgroup_peak_kb": next(
                (int(x.split("peak=")[1].split()[0].replace(",", ""))
