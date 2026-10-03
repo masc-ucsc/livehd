@@ -116,6 +116,8 @@ PHASE_SPLIT_ON = False
 PHASE_ONLY = ""
 # Chunk size for --reifier chunked.
 CHUNK_SIZE = 32
+# Which backend proves the model: the in-process probe, or generated modules.
+PROOF_BACKEND = "inprocess"
 # Segment size for the incremental walk, passed to the PROOF probe only (0 = off).
 PROOF_SEGMENT = 0
 
@@ -1364,6 +1366,10 @@ def run_config(a, manifest_digest: str) -> dict:
         # rows from two sizes describe different models and must not merge.
         "chunk_size": (lambda v: 32 if v is None else int(v))(
             getattr(a, "chunk_size", None)),
+        # SEMANTIC: an in-process proof and a module proof are different
+        # experiments producing different evidence, so their rows must not
+        # resume into or merge with one another.
+        "proof_backend": getattr(a, "proof_backend", "inprocess"),
         "lake": LAKE,
         "worktree_head": subprocess.run(
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
@@ -2529,6 +2535,14 @@ def main() -> int:
                          "bindings (0 = one monolithic walk, the default). Sets "
                          "`d3.segment` in the PROOF probe only, and requires "
                          "--reifier named.")
+    ap.add_argument("--proof-backend", choices=("inprocess", "module"),
+                    default="inprocess",
+                    help="how --prove proves the model. `inprocess` (default) "
+                         "is unchanged: one probe elaborates and audits "
+                         "everything. `module` builds the chunk facts as "
+                         "separate modules and composes them, which is the "
+                         "only path that completes on designs whose in-process "
+                         "audit exceeds the guard. Requires --reifier chunked.")
     ap.add_argument("--chunk-size", type=int, default=None, metavar="N",
                     help="bindings per chunk for --reifier chunked (default 32). "
                          "The sim and proof probes are emitted with the SAME "
@@ -2860,6 +2874,7 @@ def main() -> int:
 
     external, why = build_root_is_external()
     global PROVE, REIFIER, PROOF_SEGMENT, PHASE_SPLIT_ON, PHASE_ONLY, CHUNK_SIZE
+    global PROOF_BACKEND
     PROVE = bool(a.prove)
     REIFIER = a.reifier
     if a.phase_split and a.reifier not in ("named", "shared"):
@@ -2900,6 +2915,18 @@ def main() -> int:
               "--chunk-size.", file=sys.stderr)
         return 2
     CHUNK_SIZE = 32 if a.chunk_size is None else int(a.chunk_size)
+    if a.proof_backend == "module":
+        if not a.prove:
+            print("REFUSING: --proof-backend module without --prove proves "
+                  "nothing.", file=sys.stderr)
+            return 2
+        if a.reifier != "chunked":
+            print(f"REFUSING: --proof-backend module requires --reifier "
+                  f"chunked; got {a.reifier}. The generated modules hold "
+                  f"CHUNK facts, which only the chunked prover consumes.",
+                  file=sys.stderr)
+            return 2
+    PROOF_BACKEND = a.proof_backend
     if a.proof_segment_size < 0:
         print("REFUSING: --proof-segment-size must be >= 0.", file=sys.stderr)
         return 2
@@ -2926,6 +2953,7 @@ def main() -> int:
     cfg["phase_split"] = bool(a.phase_split)
     cfg["phase_only"] = a.phase_only
     cfg["chunk_size"] = CHUNK_SIZE
+    cfg["proof_backend"] = a.proof_backend
     if a.runner_selftest:
         # Branded in the metadata rather than forbidden: the drift regressions
         # must exercise the manifest path.  The brand is what stops the result
