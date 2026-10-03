@@ -211,6 +211,31 @@ tables, and no same-program rewriting lemma relates them automatically:
   is bound inside `main`.  Using it would have looked like a passing check
   while measuring nothing.
 
+  **THE PROOF TARGET IS A DIFFERENT PROGRAM, and for a while it was not wired
+  up at all.**  `hwSVar`/`hwAPVar` (`InterpreterVariant.lean`) are built from
+  the `partial` `goInline`; everything proved above is about `rewrittenT`, the
+  TOTAL one.  `RewriteTotal.lean` originally defined `rewrittenT` and stopped
+  there -- no program -- so the first `--host-var` feasibility run exercised
+  `hwAPVar`, the OLD variant, and was NOT a run of the proof target.
+
+  Now wired: `hwSVarT`, `hwResolvedVarT`, `hwPVarT`, `hwAVarT`, `hwAPVarT`,
+  with B1 instantiated AT IT (`sFn_hwSVarT`, `SEval_hwSVarT_of_hwS`) through a
+  generalised table lemma `sFn_mapF` that covers replacement by any
+  name-preserving function that is the identity off `main` -- `hwSVar` replaces
+  a fixed `SFun`, `hwSVarT` replaces the BODY of whichever function is named
+  `main`, and both are instances.  `hwSVarT_rewritten` and
+  `hwS_not_rewritten` confirm by kernel reduction that `hwSVarT` is the
+  rewritten program and not a silent fallback to `hwS`.
+
+  The resolution and BTA facts for `hwSVarT` are `#guard`s -- CHECKS, not
+  theorems -- and are labelled so in the file; turning them into kernel-reduced
+  theorems is separate work and nothing may cite them as proved.
+
+  `--host-var-total` runs `mixDriver` with `hwAPVarT`.  `--host-var` runs it
+  with `hwAPVar`.  They are different backends and the manifest now records
+  which one ran, refusing a log whose marker does not match the `--runner`
+  given.
+
   WHAT REMAINS in B2: the semantic step.  The facts above say the transform
   fired and which transform it was; they do not say the rewrite preserves
   `SEval`.  That is the lemma, and it is next.

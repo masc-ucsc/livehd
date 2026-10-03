@@ -233,5 +233,78 @@ theorem env0_bound_once_before :
 theorem env0_binder_gone_after :
     (rewrittenT.map (fun p => countBindT "env0" p.1)) = some 0 := by rfl
 
+/-! ## The TOTAL variant program, and B1 instantiated at IT
+
+`hwSVar` in `InterpreterVariant.lean` is built from the `partial` `goInline`.
+Everything proved about the body above is about `rewrittenT`, the TOTAL one.
+Those are different definitions, and a regression showing they agree on this
+input is evidence, not a transfer of theorems -- there is nothing to transfer
+to, an opaque definition having no equations.
+
+So the proof target needs its OWN program.  That is `hwSVarT`, and it is what
+`main_agree_varT` and everything after it must be stated about. -/
+
+def hwSVarT : SProgram :=
+  match rewrittenT with
+  | none        => Hw.hwS
+  | some (b, r) =>
+      if r.ok then
+        { Hw.hwS with
+          funs := Hw.hwS.funs.map
+            (fun g => if g.name == "main" then { g with body := b } else g) }
+      else Hw.hwS
+
+/-- The replacement is name-preserving and the identity off `main`, which is
+what B1's table lemma needs. -/
+theorem sFn_hwSVarT (f : String) (hne : f ≠ "main") : sFn hwSVarT f = sFn Hw.hwS f := by
+  unfold hwSVarT
+  cases hp : rewrittenT with
+  | none   => simp only [hp]
+  | some p =>
+      simp only [hp]
+      by_cases hok : p.2.ok = true
+      · rw [if_pos hok]
+        refine sFn_mapF (fun h => ?_) (fun h hh => ?_) f hne
+        · by_cases hn : h.name == "main" <;> simp [hn]
+        · have : ¬(h.name = "main") := hh
+          simp [this]
+      · rw [if_neg hok]
+
+/-- B1, for the program the proof target actually uses. -/
+theorem SEval_hwSVarT_of_hwS {σ : SEnv} {e : SExp} {v : Val}
+    (hnm : noMainCallB e = true) (h : SEval Hw.hwS σ e v) : SEval hwSVarT σ e v :=
+  SEval_congr (fun f hne => sFn_hwSVarT f hne) MainFreeFuns_hwS _ _ _ hnm h
+
+theorem SEvalList_hwSVarT_of_hwS {σ : SEnv} {es : List SExp} {vs : List Val}
+    (hnm : noMainCallL es = true) (h : SEvalList Hw.hwS σ es vs) :
+    SEvalList hwSVarT σ es vs :=
+  SEvalList_congr (fun f hne => sFn_hwSVarT f hne) MainFreeFuns_hwS _ _ _ hnm h
+
+/-- `hwSVarT` really is the rewritten program, not a fallback to `hwS`:
+`main`'s binder count dropped, kernel-checked. -/
+theorem hwSVarT_rewritten :
+    (mainBodyOf hwSVarT).map (countBindT "env0") = some 0 := by rfl
+
+theorem hwS_not_rewritten :
+    (mainBodyOf Hw.hwS).map (countBindT "env0") = some 1 := by rfl
+
+/-! ### Resolution and BTA for the total variant
+
+CHECKS, not theorems.  `#guard` runs the compiler's evaluator; turning these
+into kernel-reduced theorems is separate work and is NOT done here, so nothing
+below may be cited as a proved fact. -/
+
+def hwResolvedVarT : Except String (Program × List Bool) := resolveProgram hwSVarT
+def hwPVarT   : Program   := match hwResolvedVarT with | .ok (p, _) => p | .error _ => ⟨[], 0⟩
+def hwInlVarT : List Bool := match hwResolvedVarT with | .ok (_, i) => i | .error _ => []
+def hwAVarT   : Except BTAError AProgram :=
+  bta hwPVarT hwInlVarT [.stat, .dyn, .dyn, .dyn] 200
+def hwAPVarT  : AProgram := match hwAVarT with | .ok a => a | .error _ => ⟨[], 0⟩
+
+#guard hwResolvedVarT.toOption.isSome
+#guard hwAVarT.toOption.isSome
+#guard wfAProgram hwAPVarT
+#guard eraseProgram hwAPVarT == hwPVarT
+
 end ProtoVar
 end Projection

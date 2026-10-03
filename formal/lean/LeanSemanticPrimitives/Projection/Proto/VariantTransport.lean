@@ -160,6 +160,30 @@ theorem idxOf_name : ∀ {fs : List SFun} {f : String} {i : Nat},
         obtain ⟨fd, hfd, hname⟩ := idxOf_name hj
         exact ⟨fd, by simpa using hfd, hname⟩
 
+/-- Generalised: replacement by any NAME-PRESERVING function that is the
+identity off `main`.  `hwSVar` replaces a fixed `SFun`; `hwSVarT` replaces the
+BODY of whichever function is named `main`.  Both are instances. -/
+theorem funNames_mapF {P : SProgram} {F : SFun → SFun}
+    (hname : ∀ h, (F h).name = h.name) :
+    funNames { P with funs := P.funs.map F } = funNames P := by
+  simp only [funNames, List.map_map]
+  exact List.map_congr_left (fun h _ => hname h)
+
+theorem sFn_mapF {P : SProgram} {F : SFun → SFun}
+    (hname : ∀ h, (F h).name = h.name)
+    (hid : ∀ h, h.name ≠ "main" → F h = h)
+    (f : String) (hne : f ≠ "main") :
+    sFn { P with funs := P.funs.map F } f = sFn P f := by
+  unfold sFn
+  rw [funNames_mapF hname]
+  cases hi : idxOf (funNames P) f with
+  | none   => simp
+  | some i =>
+      obtain ⟨fd, hfd, hnm⟩ :=
+        idxOf_name (fs := P.funs) (f := f) (i := i) (by simpa [funNames] using hi)
+      have : F fd = fd := hid fd (by rw [hnm]; exact hne)
+      simp only [Option.bind_some, List.getElem?_map, hfd, Option.map_some, this]
+
 /-- B1's side condition, for any single in-place replacement of `main`. -/
 theorem sFn_replace {P : SProgram} {g : SFun} (hg : g.name = "main")
     (f : String) (hne : f ≠ "main") :

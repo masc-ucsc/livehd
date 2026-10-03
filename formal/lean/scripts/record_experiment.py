@@ -36,6 +36,33 @@ CODE = ['scripts/proto_probe.lean',
         'LeanSemanticPrimitives/Projection/Proto/PartialEvaluatorFast.lean']
 SUPPORT_FIELDS = ['wf', 'memFree', 'sources', 'ops', 'arities', 'flopClocks']
 
+# Which runner produced the log, and therefore WHICH BACKEND ran.  The fields
+# below were hardcoded to the fork+variant pair until a review pointed out that
+# `--host-var` uses a different specializer and `--host-var-total` a different
+# interpreter as well; recording a host run under the fork's labels would have
+# misstated what was executed.  `log_marker` is checked against the log so a
+# mismatched --runner is refused rather than silently mislabelled.
+RUNNERS = {
+    'file-ab': {
+        'log_marker': 'fuel ',
+        'specializer': 'Projection.ProtoFast.mixDriver  (FORK -- PRes.val has no bridge)',
+        'interpreter': 'Projection.ProtoVar.hwAPVar  (VARIANT from the PARTIAL goInline -- no equivalence lemma)',
+        'acceptance': '6 width-aware stimuli + multi-cycle trace + control interpreter',
+    },
+    'host-var': {
+        'log_marker': 'HOST mixDriver (proved) + hwAPVar',
+        'specializer': 'Projection.mixDriver  (the PROVED specializer -- no fork)',
+        'interpreter': 'Projection.ProtoVar.hwAPVar  (VARIANT from the PARTIAL goInline -- no equivalence lemma, and NOT the proof target)',
+        'acceptance': 'FEASIBILITY ONLY: 3 seeds, no trace, no control',
+    },
+    'host-var-total': {
+        'log_marker': 'HOST mixDriver (proved) + hwAPVarT',
+        'specializer': 'Projection.mixDriver  (the PROVED specializer -- no fork)',
+        'interpreter': 'Projection.ProtoVar.hwAPVarT  (TOTAL variant, the PROOF TARGET -- adequacy still unproved)',
+        'acceptance': 'FEASIBILITY ONLY: 3 seeds, no trace, no control',
+    },
+}
+
 
 def sha(path):
     h = hashlib.sha256()
@@ -135,6 +162,12 @@ def cmd_prelaunch(a):
 
 def cmd_record(a):
     t = open(a.log).read()
+    marker = RUNNERS[a.runner]['log_marker']
+    if marker not in t:
+        raise SystemExit(
+            f"refusing to record: --runner {a.runner} expects {marker!r} in the "
+            f"log and it is absent.  Recording a run under another backend's "
+            f"labels would misstate what executed.")
     exit_code, exit_evidence = parse_exit(t)
     stage = re.search(
         r'STAGE TIMES ms: specialize (\d+)\s+checkResidual (\d+)\s+'
@@ -167,11 +200,13 @@ def cmd_record(a):
         'provenance_note': 'a CONFIGURED EXPORT WRAPPER of one module, not '
                            'arbitrary or whole-core CVA6',
         'code_identity': code_identity,
-        'specializer': 'Projection.ProtoFast.mixDriver  (FORK -- PRes.val has no bridge)',
-        'interpreter': 'Projection.ProtoVar.hwAPVar  (VARIANT -- no equivalence lemma)',
+        'runner': a.runner,
+        'specializer': RUNNERS[a.runner]['specializer'],
+        'interpreter': RUNNERS[a.runner]['interpreter'],
+        'acceptance_strength': RUNNERS[a.runner]['acceptance'],
         'category': 'EXPERIMENTAL: certificate-relative execution agreement. '
                     'NOT theorem-covered (the proved path is mixDriver + hwAP, '
-                    'which was not run) and NOT RTL equivalence.',
+                    'and NO design has been run on it) and NOT RTL equivalence.',
         'fuel': {'step': num(r'fuel (\d+)/', t), 'work': num(r'fuel \d+/(\d+)', t)},
         'stock_fuel': {'step': 20000, 'work': 200},
         'design_shape': {'sources': num(r'sources (\d+) nodes', t),
@@ -251,9 +286,13 @@ def cmd_selftest(_a):
                      "  seed 1: residual ok  matches interpretDesign false\n")
     check('seeds/mismatch', sd['all_match_interpretDesign'], False)
 
+    # 9. the runner table must name a distinct backend pair for each runner
+    pairs = {(v['specializer'], v['interpreter']) for v in RUNNERS.values()}
+    check('runners/distinct', len(pairs), len(RUNNERS))
+
     if fails:
         print('SELFTEST FAILED:'); [print('  ' + f) for f in fails]; return 1
-    print('selftest: 8 checks passed')
+    print('selftest: 9 checks passed')
     return 0
 
 
@@ -265,6 +304,7 @@ def main():
     p.add_argument('--out', required=True); p.set_defaults(fn=cmd_prelaunch)
     r = sub.add_parser('record'); r.add_argument('log'); r.add_argument('cert')
     r.add_argument('--provenance', required=True); r.add_argument('--capture')
+    r.add_argument('--runner', required=True, choices=sorted(RUNNERS))
     r.set_defaults(fn=cmd_record)
     s = sub.add_parser('selftest'); s.set_defaults(fn=cmd_selftest)
     a = ap.parse_args()

@@ -66,4 +66,18 @@ nothing to prove about an opaque definition. -/
 #print axioms env0_bound_once_before
 #print axioms env0_binder_gone_after
 
+/- B1 instantiated at the PROOF TARGET.  `hwSVar` (InterpreterVariant) is built
+from the `partial` `goInline`; `hwSVarT` (RewriteTotal) from the TOTAL
+`rewrittenT`.  They are DIFFERENT DEFINITIONS, and `--rewrite-agree` showing
+they agree on this input is evidence, not a transfer -- an opaque definition
+has no equations to transfer to.  Everything downstream of B2 must be stated
+about `hwSVarT`. -/
+#print axioms funNames_mapF
+#print axioms sFn_mapF
+#print axioms sFn_hwSVarT
+#print axioms SEval_hwSVarT_of_hwS
+#print axioms SEvalList_hwSVarT_of_hwS
+#print axioms hwSVarT_rewritten
+#print axioms hwS_not_rewritten
+
 end Projection.ProtoVar

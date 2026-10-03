@@ -705,6 +705,47 @@ same-report {sameRep}  (applied {ra.applied}/{rb.applied}, beforeTotal \
       if bad then return 1 else do
         IO.println "  OK: the kernel-visible transform agrees with the checked one"
         return 0
+  | "--host-var-total" :: p :: a :: b :: _ => do
+      -- The PROOF TARGET: `hwAPVarT`, built from the TOTAL `rewrittenT`, not
+      -- from the `partial` `goInline` that `hwAPVar` uses.  These are different
+      -- programs; `--rewrite-agree` shows they agree on this input, which is
+      -- evidence and not a transfer of theorems.
+      let D ← CertIO.loadCert p
+      IO.println s!"{p}: sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size}"
+      let sr := CertLoad.supportReport D
+      unless sr.allOK do IO.eprintln "  NOT SupportedByProjection"; return 2
+      let sf := (a.toNat?).getD 20000
+      let wf := (b.toNat?).getD 200
+      IO.println s!"HOST mixDriver (proved) + hwAPVarT (TOTAL variant, the proof \
+target), fuel {sf}/{wf}"
+      (← IO.getStdout).flush
+      let (res, tms) ← stage "host-specialize-total"
+        (fun r => match r with | .ok q => szOf q | .error _ => 0)
+        (fun _ => mixDriver sf wf ProtoVar.hwAPVarT [encDesign D])
+      match res with
+      | .error e => do
+          IO.eprintln s!"host+totalvariant FAILED ({repr e}) after {tms} ms -- a \
+failure at THIS budget, not impossibility"
+          return (match e with | .outOfFuel => 3 | _ => 2)
+      | .ok R => do
+          profileResidual R
+          let mut bad := false
+          let fuel ← match Hw.checkResidual R with
+            | some f => do IO.println s!"  checkResidual: ACCEPTED, bound {f}"; pure f
+            | none   => do
+                IO.eprintln "  checkResidual: REJECTED -- this run FAILS"
+                bad := true; pure 4000000
+          for seed in [0, 1, 4] do
+            let e := allEdges D
+            let i := mkInputFor D seed
+            let st := mkStateFor D seed
+            let got := runResidAt fuel R D e i st
+            let ok := Outcome.agree got (Outcome.ok (interpretDesign D e i st))
+            IO.println s!"  seed {seed}: residual {got.tag}  matches interpretDesign {ok}"
+            unless ok do bad := true
+          IO.println "  NOTE: 3 seeds, no trace, no control -- FEASIBILITY evidence, \
+NOT the 6-stimulus acceptance"
+          return (if bad then 1 else 0)
   | "--host-var" :: p :: a :: b :: _ => do
       -- FEASIBILITY: the PROVED specializer with the VARIANT interpreter.
       let D ← CertIO.loadCert p
@@ -727,10 +768,18 @@ THIS budget, not impossibility"
           return (match e with | .outOfFuel => 3 | _ => 2)
       | .ok R => do
           profileResidual R
+          -- `bad` MUST be declared before the checker match.  An earlier
+          -- version declared it after, so a REJECTED checker printed to stderr
+          -- and was then overwritten by `bad := false` -- the run could exit 0
+          -- having had its fragment check rejected.
+          let mut bad := false
           let fuel ← match Hw.checkResidual R with
             | some f => do IO.println s!"  checkResidual: ACCEPTED, bound {f}"; pure f
-            | none   => do IO.eprintln "  checkResidual: REJECTED"; pure 4000000
-          let mut bad := false
+            | none   => do
+                IO.eprintln "  checkResidual: REJECTED -- execution below is \
+UNCHECKED and this run FAILS"
+                bad := true
+                pure 4000000
           for seed in [0, 1, 4] do
             let e := allEdges D
             let i := mkInputFor D seed
@@ -739,6 +788,8 @@ THIS budget, not impossibility"
             let ok := Outcome.agree got (Outcome.ok (interpretDesign D e i st))
             IO.println s!"  seed {seed}: residual {got.tag}  matches interpretDesign {ok}"
             unless ok do bad := true
+          IO.println "  NOTE: 3 seeds, no trace, no control -- FEASIBILITY evidence \
+for this backend at this budget, NOT the 6-stimulus acceptance --file-ab runs"
           return (if bad then 1 else 0)
   | "--inline-negative" :: _ => do
       -- The counterexample `beforeHoleTotal` exists to reject.  `noBranch` and
