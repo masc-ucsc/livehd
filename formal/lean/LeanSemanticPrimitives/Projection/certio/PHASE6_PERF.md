@@ -745,8 +745,11 @@ recorded in Phase 1, a third chain, still open.
 
 ### 8.3 What this does NOT fix
 
-**Fuel is unchanged.**  On `rt_intpipe_alu` at `projectDesign`'s own
-20000/200, the variant still fails:
+**Fuel is unchanged.**  (And see 8.7: a raised budget is not itself outside the
+theorem -- `specializeDesign_correct` is budget-parametric and conditional on
+success.  What follows is about the budget `projectDesign` happens to fix.)
+On `rt_intpipe_alu` at `projectDesign`'s own 20000/200, the variant still
+fails:
 
     variant FAILED (MixError.outOfFuel)     wall 309.68 s   peak RSS 97,524 KB
 
@@ -771,12 +774,11 @@ moves.  Neither is this rewrite's business.
 The variant is NOT proved and must not be counted.  The promotion path is the
 one the review named, and it is small:
 
-* the rewrite is a SINGLE-USE LET INLINING on the surface syntax, with the four
-  side conditions above.  The lemma to prove is the generic one -- inlining a
-  let whose bound variable occurs exactly once, in a strict position, in the
-  immediately following binding -- stated over `SEval`, where
-  `SurfaceSemantics.lean` already provides the relation and `SEval_sound` the
-  bridge down to `Eval`;
+* the rewrite is a SINGLE-USE LET INLINING on the surface syntax.  **The side
+  conditions as first written were not sufficient -- see 9.1, which gives the
+  counterexample and adds a fourth -- and the theorem is an `SEval` iff, not
+  observational equivalence; 9.2 states it exactly.**  `SurfaceSemantics.lean`
+  already provides the relation and `SEval_sound` the bridge down to `Eval`;
 * it does NOT need a new hardware semantics, and it does NOT touch the
   specializer, so `mixDriver_iff` is untouched;
 * `IHwAdequate_proved` is stated about `hwS`.  Promoting the variant means
@@ -820,9 +822,11 @@ Three cautions that keep this from being a reach claim:
   and which only becomes visible once (B) is gone.  Read the column as "(B) is
   no longer the dominant term", not as a residual size.
 
-* **Fuel, not residual size, is the binding constraint** (8.3).  The ALU still
-  fails at `projectDesign`'s own 20000/200 WITH the rewrite.  None of these
-  designs becomes projectable on this evidence.
+* **Fuel, not residual size, is the binding constraint at `projectDesign`'s
+  fixed budget** (8.3).  The ALU still fails at 20000/200 WITH the rewrite.
+  That is a statement about that budget, not about the theorem, which is
+  budget-parametric (8.7).  None of these designs becomes projectable AT THAT
+  BUDGET on this evidence.
 * The table also shows why the corrected `cert_shape.py` matters.  These
   designs have SPARSE input indices -- `rt_btb_gate` has 5 inputs at indices
   0,2,3,4,5 (sum 14, not 5*4/2 = 10); `rt_decoder_gate` has 27 inputs with max
@@ -889,14 +893,167 @@ accepted by `checkResidual` and then EXECUTED and compared against
 the interpreter itself checked on the same stimulus as a control on the
 stimulus builder.
 
-It does **not** count toward the 30-block destination, for two independent
-reasons, either of which alone is disqualifying:
+It does **not** count toward the 30-block destination.  But the reason is NOT
+the one an earlier revision of this section gave, and getting that wrong
+mattered:
 
-1. **Raised fuel.**  `projectDesign` as defined (20000/200) still returns
-   `outOfFuel` on this design WITH the variant (8.3).  No fuel-respecting run
-   produced this residual.
-2. **Unproved interpreter.**  The variant is `hwSVar`, not `hwS`.
+**Raised fuel is not in itself a disqualifier.**  `specializeDesign_correct`
+(`ProjectionCorrect.lean:108`) is already stated for `{sf wf : Nat}` with the
+hypothesis `mixDriver sf wf hwAP [encDesign D] = .ok R` -- correctness
+CONDITIONAL ON SUCCESS, at ANY budget.  `projectDesign` merely fixes
+`20000/200`, and `projectDesign_correct` is a one-line instance of the general
+theorem.  So "it used 200000/2000, therefore it is outside the theorem" was
+wrong: a run at any budget that SUCCEEDS is covered.  `outOfFuel` is a
+diagnostic failure of a particular budget, not evidence about the design.
+
+The two things that actually disqualify this run are both about WHAT WAS RUN,
+not how much fuel it got:
+
+1. **Unproved specializer.**  It used `ProtoFast.mixDriver`, the diagnostic
+   fork, whose `PRes.val` change has no bridge.  `specializeDesign_correct` is
+   about `mixDriver`, not the fork.
+2. **Unproved interpreter.**  It used `hwAPVar`, not `hwAP`.
    `IHwAdequate_proved` says nothing about it, and the equivalence lemma in 8.4
-   does not exist yet.
+   / 9.2 does not exist yet.
+
+Fix either and the other still blocks; fix both and the budget is already
+covered by the existing theorem.
 
 It is also one cycle, not a trace: `trace_agree` has not been exercised here.
+
+## 9. Hardening the gate, and a side condition that was not sound
+
+### 9.1 `noBranch` does not give order preservation
+
+Section 8 claimed the three occurrence conditions plus `noBranch` gave "the
+same order, and failure or divergence of `e` preserved, because `call` is
+strict in its arguments".  **That is false.**
+
+    letN "z" E (letN "w" (call f [A, z]) body)        -- E runs FIRST
+    ==>  letN "w" (call f [A, E]) body                 -- A runs first, THEN E
+
+Strictness says every argument is eventually evaluated.  It says nothing about
+WHICH ONE FAILS FIRST.  With `E` a type error and `A` a loop, the original
+fails with `typeError` and the rewritten one diverges.
+
+A fourth side condition now covers it -- `beforeHoleTotal`: everything
+evaluated strictly before the occurrence must be a `ref` or a `lit`, i.e.
+incapable of failing or diverging.  Arguments AFTER the hole need no condition,
+because they run after `e` in both programs.  `noBranch` is still required and
+still load-bearing for a different reason: `substRef` is NOT capture-avoiding,
+and `noBranch` is what guarantees no binder lies on the path to the hole.
+
+`proto_probe --inline-negative` is the regression:
+
+    negative case: found true useInNext 1 nextStrict true beforeTotal false applied false
+      before rewrite: typeError      after FORCED rewrite: outOfFuel
+      checker refused it: true   outcomes differ: true
+
+Note `nextStrict true`: the OLD condition set would have ACCEPTED this rewrite.
+The real `env0` rewrite satisfies the new condition -- its occurrence sits at
+`call "evalNodes" [ref "nodes", ref "env0", ref "nsrc"]`, whose only preceding
+argument is a `ref`.
+
+### 9.2 The theorem to prove is an `SEval` iff, not observational equivalence
+
+Stated in `InterpreterVariant.lean`'s header so a promotion cannot quietly aim
+higher than the evidence:
+
+    beforeHoleTotal + the three occurrence conditions  -->
+      forall rho v,  SEval P rho (letN x e e2) v  <->  SEval P rho (e2[x := e]) v
+
+`SEval` relates only terminating successful evaluations.  This is NOT an
+equality of `evalFuel` results -- fuel accounting differs by one `letIn`
+descent -- and without `beforeHoleTotal` the FAILURE MODE differs, as 9.1
+shows.  Promotion must prove that statement and not a stronger one that is
+false.
+
+### 9.3 The execution gate is now strict
+
+Previously `--file-ab` printed a checker rejection and a control mismatch and
+still returned 0, and `--env0-ab` printed specialization failures and still
+returned 0.  Both are now failures.  Exit codes:
+
+| code | meaning |
+|---|---|
+| 0 | every check passed |
+| 1 | disagreement with `interpretDesign`, checker rejection, or a vacuous trace |
+| 2 | setup failure, or the design is NOT `SupportedByProjection` |
+| 3 | `outOfFuel` at the requested budget -- a DIAGNOSTIC FAILURE, not a pass |
+
+Four further changes, each closing a way the old gate could pass without
+testing anything:
+
+* **Failure kinds are preserved.**  The old comparator mapped every failure to
+  `none` and treated `none == none` as agreement, so a `typeError` on one side
+  and an `outOfFuel` on the other read as "both agree".  `Outcome` now carries
+  `ok`/`undecodable`/`fuelOut`/`typeErr` and `Outcome.agree` matches on the
+  kind.  The out-of-range case now reports `ref typeError  variant typeError
+  same-kind true`, which is a real statement; `none == none` was not.
+* **Checked execution runs at the CHECKED bound.**  `checkResidual` returns an
+  EXACT fuel; running at a hardcoded 4,000,000 never exercised it.  `--file-ab`
+  now executes at the returned bound, and falls back to 4M only when the
+  checker REJECTED -- in which case it also fails.
+* **Stimulus is width-aware.**  An 8-bit constant for every input cannot set a
+  bit above 7, so the 64-bit operands of a real design were never driven.
+  Seeds 0-4 are now the corners -- zero, all-ones, sign bit only, everything
+  but the sign bit, alternating -- at each input's widest declared use, with
+  pseudorandom values above that.
+* **Traces, and vacuity detection.**  Multi-cycle runs feed `nextState`
+  forward against `interpretDesign` iterated the same way, under an edge
+  schedule where every third cycle nothing fires.  The runner also reports
+  whether the state EVER changed and fails if a design with flops never moves,
+  so a vacuous trace cannot pass as a sequential test.
+
+### 9.4 What the strict gate immediately found
+
+Not a bug in the residual -- a gap in what was being tested.  Three small
+certificates disagreed with `interpretDesign` on every nonzero stimulus.  They
+are designs the theorem EXCLUDES:
+
+    rt_fx_opconst      wf T memFree T sources T ops F arities T flopClocks T
+    rt_fx_opconst_wide wf T memFree T sources T ops F arities T flopClocks T
+    rt_fx_memwritebe   wf T memFree F sources F ops F arities T flopClocks T
+
+`I_hw` defines memory sources as `bvMk 0 0` -- deliberately-wrong, documented
+in its header -- so disagreement there is the DESIGNED behaviour, not a defect.
+`--file-ab` now evaluates all six `SupportedByProjection` fields first and
+refuses to compare when any is false, naming the field.
+
+`--support` over all 19 certificates: **14 supported, 5 not**.  The five are
+the three above plus `rt_aes_gate` (sources, ops) and
+`rt_cva6_hpdcache_subsystem_gate` (memFree, sources, ops).
+
+### 9.5 `rt_intpipe_alu` re-run under the strict gate
+
+The section 8.7 run predates the hardening: it used the old 8-bit stimulus and
+executed at a hardcoded 4,000,000 fuel.  Re-run once, under every check in 9.3:
+
+    support: wf true memFree true sources true ops true arities true flopClocks true
+    fuel 200000/2000
+      terms 72558   tl 1211  hd 6  consP 9165
+      checkResidual: ACCEPTED, exact fuel 20207
+      seed 0: residual ok  matches interpretDesign true      <- zero
+      seed 1: residual ok  matches interpretDesign true      <- all ones
+      seed 2: residual ok  matches interpretDesign true      <- sign bit only
+      seed 3: residual ok  matches interpretDesign true      <- all but sign bit
+      seed 4: residual ok  matches interpretDesign true      <- alternating
+      seed 7: residual ok  matches interpretDesign true      <- pseudorandom
+      trace: 4 cycles, state fed forward -- agrees true  state-changed false
+             clock-domains 1  flops 0
+      control: variant interpreter ok vs interpretDesign true
+    wall 814.44 s   RSS 102,016 KB      (contended; two other jobs on the box)
+
+Now a stronger statement than 8.7's: the execution happens at the bound
+`checkResidual` RETURNED, so the fragment check is actually exercised rather
+than bypassed by a larger constant, and the stimulus drives the 64-bit operands
+this design has.  `state-changed false` is correct and is NOT flagged vacuous:
+`rt_intpipe_alu` has zero flops, so there is no state to move.  The vacuity
+check fires only when `D.flops.size > 0`.
+
+Residual numbers are unchanged from 8.7, as they must be -- the gate changed,
+not the specializer.
+
+What this still is not: the fork specializer and the variant interpreter are
+both unproved (8.7), so this is experimental execution evidence, not verified
+coverage, and it is one design.

@@ -20,6 +20,7 @@ import LeanSemanticPrimitives.Projection.ProjectedStep
 import LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorFast
 import LeanSemanticPrimitives.Projection.Proto.InterpreterVariant
 import LeanSemanticPrimitives.Compiler.CertIO
+import LeanSemanticPrimitives.Projection.CertLoad
 
 open Compiler Projection
 
@@ -227,43 +228,125 @@ def maxInputIdx (D : DesignCert) : Nat :=
     | .flopQAsync _ _ ri _ _  => max a (ri + 1)
     | _                       => a) 0
 
+/-- The widest declared use of input `i`.  `srcVal` applies `bvResize w` to the
+vector element, so a vector element narrower than `w` silently zero-extends and
+the high bits of the design are never exercised. -/
+def inputWidth (D : DesignCert) (i : Nat) : Nat :=
+  D.sources.foldl (fun a s => match s with
+    | .input idx w           => if idx == i then max a w else a
+    | .flopQAsync _ _ ri _ _ => if ri == i then max a 1 else a
+    | _                      => a) 1
+
+/-- Width-aware stimulus patterns, so the sign bit and the all-ones case are
+actually driven.  Seed 0..4 are the FIXED corners; 5 and up are pseudorandom.
+An 8-bit constant for every width, which is what this used to do, never sets a
+bit above 7 and so cannot exercise the 64-bit operands this design has. -/
+def patternAt (w : Nat) (seed i : Nat) : Int :=
+  let allOnes : Int := Int.ofNat (2 ^ w - 1)
+  let highBit : Int := Int.ofNat (2 ^ (w - 1))
+  match seed with
+  | 0 => 0
+  | 1 => allOnes
+  | 2 => highBit                              -- sign bit only
+  | 3 => allOnes - highBit                    -- everything BUT the sign bit
+  | 4 => if i % 2 == 0 then allOnes else 0
+  | k => Int.ofNat ((k * 2654435761 + i * 40503 + 1) % (2 ^ w))
+
 def mkInputFor (D : DesignCert) (seed : Nat) : RuntimeInput :=
   (List.range (maxInputIdx D)).toArray.map
-    (fun i => mk_bv 8 (Int.ofNat ((seed * 7 + i * 13 + 1) % 256)))
+    (fun i => let w := inputWidth D i; mk_bv w (patternAt w seed i))
 
 def mkStateFor (D : DesignCert) (seed : Nat) : RuntimeState :=
   { flops := (List.range D.flops.size).toArray.map
                (fun i => mk_bv (D.flops[i]!).width (Int.ofNat ((seed * 5 + i * 3) % 16)))
   , mems  := #[] }
 
-/-- Run a RESIDUAL (3 dynamic args) on design-sized stimulus. -/
-def runResid (R : Program) (D : DesignCert) (seed : Nat) : Option RuntimeResult :=
-  match evalFuel 4000000 R []
-      (.call R.entry [.lit (encEdges (allEdges D)), .lit (encInput (mkInputFor D seed)),
-                      .lit (encState (mkStateFor D seed))]) with
-  | .value v => decResult v
-  | _        => none
+/-- A run's outcome, KEEPING the failure kind.  Collapsing every failure to
+`none` makes "both failed" look like agreement when one diverged and the other
+raised a type error -- which is exactly the distinction the inliner's side
+conditions turn on. -/
+inductive Outcome where
+  | ok          : RuntimeResult → Outcome
+  | undecodable : Outcome
+  | fuelOut     : Outcome
+  | typeErr     : String → Outcome
+  deriving Inhabited
+
+def Outcome.tag : Outcome → String
+  | .ok _        => "ok"
+  | .undecodable => "undecodable"
+  | .fuelOut     => "outOfFuel"
+  | .typeErr _   => "typeError"
+
+def Outcome.isOk : Outcome → Bool | .ok _ => true | _ => false
+
+/-- Equality that distinguishes failure KINDS.  Two `typeError`s agree, a
+`typeError` and an `outOfFuel` do not, and neither counts as a success. -/
+def Outcome.agree : Outcome → Outcome → Bool
+  | .ok a,        .ok b        => encResult a == encResult b
+  | .undecodable, .undecodable => true
+  | .fuelOut,     .fuelOut     => true
+  | .typeErr _,   .typeErr _   => true
+  | _,            _            => false
+
+def outcomeOf (r : EvalResult) : Outcome :=
+  match r with
+  | .value v     => match decResult v with
+                    | some x => .ok x
+                    | none   => .undecodable
+  | .outOfFuel   => .fuelOut
+  | .typeError m => .typeErr m
+
+/-- Run a RESIDUAL (3 dynamic args) at an EXPLICIT fuel budget.  Callers that
+claim "checked execution" pass the bound `checkResidual` returned, not a
+hardcoded constant: the point of the fragment checker is that the bound is
+exact, and running at some unrelated larger number does not exercise it. -/
+def runResidAt (fuel : Nat) (R : Program) (D : DesignCert) (e : ClockEdges)
+    (i : RuntimeInput) (st : RuntimeState) : Outcome :=
+  outcomeOf (evalFuel fuel R []
+    (.call R.entry [.lit (encEdges e), .lit (encInput i), .lit (encState st)]))
+
+def runResid (R : Program) (D : DesignCert) (seed : Nat) : Outcome :=
+  runResidAt 4000000 R D (allEdges D) (mkInputFor D seed) (mkStateFor D seed)
 
 /-- Run an INTERPRETER program (4 args, the certificate static) on the same. -/
-def runInterp (P : Program) (D : DesignCert) (seed : Nat) : Option RuntimeResult :=
-  match evalFuel 4000000 P []
-      (.call P.entry [.lit (encDesign D), .lit (encEdges (allEdges D)),
-                      .lit (encInput (mkInputFor D seed)),
-                      .lit (encState (mkStateFor D seed))]) with
-  | .value v => decResult v
-  | _        => none
+def runInterpAt (fuel : Nat) (P : Program) (D : DesignCert) (e : ClockEdges)
+    (i : RuntimeInput) (st : RuntimeState) : Outcome :=
+  outcomeOf (evalFuel fuel P []
+    (.call P.entry [.lit (encDesign D), .lit (encEdges e), .lit (encInput i),
+                    .lit (encState st)]))
+
+def runInterp (P : Program) (D : DesignCert) (seed : Nat) : Outcome :=
+  runInterpAt 4000000 P D (allEdges D) (mkInputFor D seed) (mkStateFor D seed)
+
+/-- An edge schedule that is NOT constant where the design has clock domains:
+every third cycle, nothing fires, so the hold path is exercised too. -/
+def edgeSchedule (D : DesignCert) (k : Nat) : ClockEdges :=
+  if k % 3 == 2 then Array.replicate D.clocks.size false else allEdges D
 
 /-- The SHARED reference semantics -- what everything is ultimately checked
 against, rather than one residual against another. -/
 def refSem (D : DesignCert) (seed : Nat) : RuntimeResult :=
   interpretDesign D (allEdges D) (mkInputFor D seed) (mkStateFor D seed)
 
-/-- Agreement INCLUDING failure: both failing counts as agreement.  Used only
-for the deliberate-error cases, where "both reject" is the property. -/
-def outcomeEq : Option RuntimeResult → Option RuntimeResult → Bool
-  | some a, some b => encResult a == encResult b
-  | none,   none   => true
-  | _,      _      => false
+/-- Iterate `n` cycles, feeding `nextState` forward, against `interpretDesign`
+iterated the same way.  Returns (agree, stateEverChanged): a trace where the
+state never moves proves nothing about sequential behaviour, so the caller can
+fail instead of silently passing a vacuous test. -/
+def traceCompare (fuel : Nat) (R : Program) (D : DesignCert) (n seed : Nat) :
+    IO (Bool × Bool) := do
+  let mut st := mkStateFor D seed
+  let mut agree := true
+  let mut moved := false
+  for k in List.range n do
+    let e := edgeSchedule D k
+    let i := mkInputFor D (seed + k)
+    let want := interpretDesign D e i st
+    let got := runResidAt fuel R D e i st
+    unless Outcome.agree got (Outcome.ok want) do agree := false
+    if encState want.nextState != encState st then moved := true
+    st := want.nextState
+  return (agree, moved)
 
 /-- One cycle, decoded, so the A/B comparison is semantic.  A sequential design
 needs a correctly sized state, so the state is built from the design. -/
@@ -350,11 +433,48 @@ def main (args : List String) : IO UInt32 := do
             IO.println s!"srcD nsrc={ns} nnode={nn}"
             profileResidual R
       return (if bad then 2 else 0)
+  | "--support" :: rest => do
+      -- All SIX SupportedByProjection fields, per file, reported separately.
+      let mut any := false
+      for f in rest do
+        let D ← CertIO.loadCert f
+        let r := CertLoad.supportReport D
+        let nm := (f.splitOn "/").getLast!
+        IO.println s!"{nm}: src {D.sources.size} node {D.nodes.size} flop \
+{D.flops.size} | wf {r.wf} memFree {r.memFree} sources {r.sources} ops {r.ops} \
+arities {r.arities} flopClocks {r.flopClocks} | SUPPORTED {r.allOK}"
+        if r.allOK then any := true
+      return (if any then 0 else 2)
+  | "--inline-negative" :: _ => do
+      -- The counterexample `beforeHoleTotal` exists to reject.  `noBranch` and
+      -- "call is strict in its arguments" do NOT give order preservation:
+      -- moving the bound expression into argument position 1 puts argument 0
+      -- ahead of it.
+      let r := ProtoVar.negReport
+      IO.println s!"negative case: found {r.found} useInNext {r.useInNext} \
+nextStrict {r.nextStrict} beforeTotal {r.beforeTotal} applied {r.applied}"
+      let refused := !r.beforeTotal && !r.applied
+      let b := outcomeOf (evalFuel 2000 ProtoVar.negBefore [] (.call ProtoVar.negBefore.entry []))
+      let a := outcomeOf (evalFuel 2000 ProtoVar.negAfter  [] (.call ProtoVar.negAfter.entry  []))
+      IO.println s!"  before rewrite: {b.tag}      after FORCED rewrite: {a.tag}"
+      let distinguishes := !(Outcome.agree b a)
+      IO.println s!"  checker refused it: {refused}   outcomes differ: {distinguishes}"
+      if refused && distinguishes then
+        IO.println "  OK: the side condition is load-bearing and the checker enforces it"
+        return 0
+      else do
+        IO.eprintln "  FAILED: either the checker accepted an unsound rewrite, or the \
+counterexample no longer distinguishes the two programs"
+        return 1
+
   | "--env0-ab" :: _ => do
-      -- ===== 1. the rewrite's side conditions, reported either way =========
+      -- STRICT acceptance command.  Every failure below is nonzero; nothing is
+      -- reported-and-passed.  Exit 1 = disagreement, 2 = setup/specialization
+      -- failure, 3 = outOfFuel at the stated budget (a diagnostic failure, not
+      -- a pass).
       let r := ProtoVar.report
       IO.println s!"rewrite: found {r.found} selfRef {r.selfRef} useInNext {r.useInNext} \
-useLater {r.useLater} nextStrict {r.nextStrict} applied {r.applied}"
+useLater {r.useLater} nextStrict {r.nextStrict} beforeTotal {r.beforeTotal} applied {r.applied}"
       unless ProtoVar.changed do
         IO.eprintln "side conditions NOT met -- variant == reference, nothing to measure"
         return 2
@@ -366,59 +486,70 @@ useLater {r.useLater} nextStrict {r.nextStrict} applied {r.applied}"
       unless okRes && okBta && okWf && okEr do
         IO.eprintln "variant failed resolve/bta/wf"; return 2
 
-      -- ===== 2. the VARIANT INTERPRETER vs the shared reference semantics ===
-      -- Not residual-vs-residual: both interpreters are compared to
-      -- `interpretDesign`, on stimulus sized from each design.
+      -- ---- 1. both interpreters vs interpretDesign, width-aware stimulus ----
       let sem : List (String × DesignCert) :=
         [ ("mix4", mixD 4), ("mix8", mixD 8), ("sparse", sparseD)
         , ("chain8", chainD 8), ("fan8", fanD 8), ("flop8-seq", flopD 8)
         , ("src8", srcD 8 8), ("cst8", cstD 8 8) ]
       let mut bad := false
       for (nm, D) in sem do
-        for seed in [0, 1, 2] do
-          let want := refSem D seed
+        for seed in [0, 1, 2, 3, 4, 7] do          -- 0..4 are the width corners
+          let want := Outcome.ok (refSem D seed)
           let gotR := runInterp Hw.hwP D seed
           let gotV := runInterp ProtoVar.hwPVar D seed
-          let okR := gotR.map encResult == some (encResult want)
-          let okV := gotV.map encResult == some (encResult want)
-          unless okR && okV do
-            IO.eprintln s!"SEMANTICS {nm} seed={seed}: ref-ok {okR} variant-ok {okV}"
+          unless Outcome.agree gotR want && Outcome.agree gotV want do
+            IO.eprintln s!"SEMANTICS {nm} seed={seed}: ref {gotR.tag} variant {gotV.tag} \
+want ok"
             bad := true
-      IO.println s!"semantics: {sem.length} designs x 3 stimuli, both interpreters \
-vs interpretDesign -- {if bad then "MISMATCH" else "all agree"}"
-      -- error behaviour: the property is that they fail TOGETHER
+      IO.println s!"semantics: {sem.length} designs x 6 stimuli (0-4 = zero/ones/\
+signbit/not-signbit/alternating, 7 = pseudorandom) -- {if bad then "MISMATCH" else "all agree"}"
+
+      -- ---- 2. error behaviour: the FAILURE KIND must match, not merely fail --
       let eR := runInterp Hw.hwP oorD 0
       let eV := runInterp ProtoVar.hwPVar oorD 0
-      IO.println s!"out-of-range dep: ref-produced {eR.isSome} variant-produced \
-{eV.isSome}  same-outcome {outcomeEq eR eV}"
-      unless outcomeEq eR eV do bad := true
+      IO.println s!"out-of-range dep: ref {eR.tag}  variant {eV.tag}  \
+same-kind {Outcome.agree eR eV}  (neither is a success: {!eR.isOk && !eV.isOk})"
+      unless Outcome.agree eR eV do bad := true
 
-      -- ===== 3. projection A/B on source-heavy fixtures =====================
+      -- ---- 3. multi-cycle traces on the sequential fixtures -----------------
+      for (nm, D) in [("flopD 8", flopD 8), ("flopD 32", flopD 32)] do
+        match fastVarOf D with
+        | .error e => do IO.eprintln s!"TRACE {nm}: variant failed ({repr e})"; bad := true
+        | .ok R => do
+            let (ag, moved) ← traceCompare 4000000 R D 6 0
+            IO.println s!"  trace {nm}: 6 cycles, state fed forward -- agrees {ag}  \
+state-changed {moved}  clock-domains {D.clocks.size}"
+            unless ag do bad := true
+            unless moved do
+              IO.eprintln s!"TRACE {nm}: state never changed -- the trace test is VACUOUS"
+              bad := true
+
+      -- ---- 4. projection A/B ------------------------------------------------
       IO.println "projection A/B (same fork specializer, two interpreters):"
       let fx : List (String × DesignCert) :=
         [ ("cstD 64/64", cstD 64 64), ("cstD 256/64", cstD 256 64)
         , ("cstD 512/64", cstD 512 64), ("cstD 1024/64", cstD 1024 64)
         , ("srcD 256/64", srcD 256 64), ("mixD 128", mixD 128)
         , ("flopD 64", flopD 64) ]
+      let mut fuelled := false
       for (nm, D) in fx do
         match fastOf D, fastVarOf D with
         | .ok A, .ok B =>
             let (ta, la, ca) := statsOf A
             let (tb, lb, cb) := statsOf B
-            let ra := runResid A D 0
-            let rb := runResid B D 0
-            let want := encResult (refSem D 0)
-            let okA := ra.map encResult == some want
-            let okB := rb.map encResult == some want
+            let want := Outcome.ok (refSem D 0)
+            let oa := runResid A D 0
+            let ob := runResid B D 0
             IO.println s!"  {nm}: terms {ta} -> {tb}  tl {la} -> {lb}  consP {ca} -> {cb}  \
- vs-interpretDesign ref {okA} var {okB}"
-            unless okA && okB do bad := true
-        | a, b =>
-            IO.println s!"  {nm}: ref-ok {a.toOption.isSome} var-ok {b.toOption.isSome} \
-(at projectDesign fuel 20000/200)"
-            if a.toOption.isSome != b.toOption.isSome then
-              IO.println "    (fuel behaviour DIFFERS -- recorded, not a failure)"
-      return (if bad then 1 else 0)
+ref {oa.tag} var {ob.tag}"
+            unless Outcome.agree oa want && Outcome.agree ob want do
+              IO.eprintln s!"  {nm}: residual disagrees with interpretDesign"; bad := true
+        | a, b => do
+            IO.eprintln s!"  {nm}: SPECIALIZATION FAILED -- ref-ok {a.toOption.isSome} \
+var-ok {b.toOption.isSome} at 20000/200"
+            fuelled := true
+      if bad then return 1 else if fuelled then return 3 else return 0
+
   | "--node-depth" :: _ => do
       -- node-portion read depth grows as ~nnode^2/2; source prefix is 2.
       let mut bad := false
@@ -453,31 +584,64 @@ vs interpretDesign -- {if bad then "MISMATCH" else "all agree"}"
       let D ← CertIO.loadCert p
       IO.println s!"{p}: sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size}"
       unless ProtoVar.changed do IO.eprintln "variant not applied"; return 2
+      -- SUPPORT FIRST.  `IHwAdequate` is stated under `SupportedByProjection`;
+      -- comparing `I_hw` against `interpretDesign` on a design that fails it is
+      -- not a test of anything -- `I_hw` defines memory sources
+      -- deliberately-wrong, for one.  All SIX fields, reported separately.
+      let sr := CertLoad.supportReport D
+      IO.println s!"support: wf {sr.wf} memFree {sr.memFree} sources {sr.sources} \
+ops {sr.ops} arities {sr.arities} flopClocks {sr.flopClocks}"
+      unless sr.allOK do
+        IO.eprintln "  NOT SupportedByProjection -- refusing to compare; \
+any disagreement here would be expected, not informative"
+        return 2
       let sf := (a.toNat?).getD 20000
       let wf := (b.toNat?).getD 200
       IO.println s!"fuel {sf}/{wf}  (projectDesign's own is 20000/200)"
       match fastVarOfFuel sf wf D with
-      | .error e => do IO.eprintln s!"variant FAILED ({repr e})"; return 2
+      | .error e => do
+          IO.eprintln s!"variant FAILED ({repr e})"
+          -- outOfFuel at the requested budget is a DIAGNOSTIC FAILURE, not a pass.
+          return (match e with | .outOfFuel => 3 | _ => 2)
       | .ok R    => do
           profileResidual R
-          let frag := Hw.checkResidual R
-          match frag with
-          | some fuel => IO.println s!"  checkResidual: ACCEPTED, exact fuel {fuel}"
-          | none      => IO.println "  checkResidual: rejected (not the one-function call-free fragment)"
-          -- EXECUTE it, on stimulus sized from the design, against the SHARED
-          -- reference semantics -- not against another residual.
           let mut bad := false
-          for seed in [0, 1, 2, 3] do
-            let want := encResult (refSem D seed)
-            let got  := runResid R D seed
-            let ok   := got.map encResult == some want
-            IO.println s!"  seed {seed}: residual-ran {got.isSome}  \
-matches interpretDesign {ok}"
+          -- The fragment checker's bound is EXACT.  Claiming "checked
+          -- execution" means running at that bound, not at some larger
+          -- hardcoded number that never exercises it.
+          let fuel ← match Hw.checkResidual R with
+            | some f => do
+                IO.println s!"  checkResidual: ACCEPTED, exact fuel {f}"
+                pure f
+            | none   => do
+                IO.eprintln "  checkResidual: REJECTED (not the one-function \
+call-free fragment) -- execution below is UNCHECKED, run at a fallback budget"
+                bad := true
+                pure 4000000
+          -- EXECUTE it, on width-aware stimulus sized from the design, against
+          -- the SHARED reference semantics -- not against another residual.
+          for seed in [0, 1, 2, 3, 4, 7] do
+            let e := allEdges D
+            let i := mkInputFor D seed
+            let st := mkStateFor D seed
+            let want := Outcome.ok (interpretDesign D e i st)
+            let got  := runResidAt fuel R D e i st
+            let ok   := Outcome.agree got want
+            IO.println s!"  seed {seed}: residual {got.tag}  matches interpretDesign {ok}"
             unless ok do bad := true
-          -- and the INTERPRETER itself, as a control on the stimulus builder
+          -- a multi-cycle trace, state fed forward
+          let (ag, moved) ← traceCompare fuel R D 4 0
+          IO.println s!"  trace: 4 cycles, state fed forward -- agrees {ag}  \
+state-changed {moved}  clock-domains {D.clocks.size}  flops {D.flops.size}"
+          unless ag do bad := true
+          if D.flops.size > 0 && !moved then do
+            IO.eprintln "  trace: design HAS flops but state never changed -- VACUOUS"
+            bad := true
+          -- control on the stimulus builder: the interpreter itself
           let ctl := runInterp ProtoVar.hwPVar D 0
-          IO.println s!"  control: variant interpreter vs interpretDesign \
-{ctl.map encResult == some (encResult (refSem D 0))}"
+          let ctlOk := Outcome.agree ctl (Outcome.ok (refSem D 0))
+          IO.println s!"  control: variant interpreter {ctl.tag} vs interpretDesign {ctlOk}"
+          unless ctlOk do bad := true
           return (if bad then 1 else 0)
   | "--file-profile" :: p :: a :: b :: _ => do
       let D ← CertIO.loadCert p

@@ -40,6 +40,7 @@ MODULES=(
   Projection/ProjectionCorrect
   Projection/ResidualFragment
   Projection/ProjectedStep
+  Projection/CertLoad
   Projection/Proto/PartialEvaluatorFast
   Projection/Proto/InterpreterVariant
 )
