@@ -385,6 +385,13 @@ commit path are exercised, not only the combinational environment.  (Its
 residual is itself quadratic in n; that is the pre-existing flop-state
 quadratic recorded in Phase 1, not something this change causes.)
 
+LIMIT OF `same-result`: `runOne` drives TWO 4-bit inputs and a state built from
+`D.flops`, for ONE cycle.  That is adequate for these synthetic fixtures, whose
+designs read at most two inputs.  It is NOT adequate for a real certificate --
+inputs, state and edges would have to be sized and initialised from the design
+and compared against `interpretDesign` over a TRACE.  No such comparison has
+been run, so nothing recorded here is a real-file execution result.
+
 ### Timing, separate processes, clean build
 
     shape    n     reference      fast    speedup
@@ -440,7 +447,11 @@ change it overflowed the interpreter stack, and natively extrapolated to hours.
 
 Three things this is NOT.  It used RAISED fuel, so `projectDesign` AS DEFINED
 still fails on this design -- the hardcoded 20000/200 is now the binding
-constraint, directly observed rather than inferred.  The residual was not run
+constraint, directly observed rather than inferred.  Observed ON THE FORK: the
+reference specializer was never run to `outOfFuel` on this design, and there is
+no ref/fork generic equivalence theorem that would let the fork's failure be
+read as the reference's.  The equivalence evidence is the finite table above
+(chain/fan/flop at 64/128/256) and nothing wider.  The residual was not run
 through `checkResidual`, not executed, and not compared against the reference
 (which would need the same raised fuel and far longer).  And 24.6M terms for
 5118 nodes is ~4800 terms per node against `chainD`'s ~15, so the per-node
@@ -461,3 +472,134 @@ proof cost against `PartialEvaluatorCorrect.lean`, and `prepare` is named in
 `prepare_cons_join_left/right`, `prepare_total_binds` and `prepare_hot_path`,
 so none of them is local. Recorded here so the next increment starts from a
 measurement rather than a guess.
+
+## 7. What the 24.6M-term ALU residual actually is
+
+Section 6 produced a residual and did not explain it.  The number was inferred
+from nothing: 24.6M terms for 5118 nodes, "~4800 terms per node".  This section
+replaces that with a closed-form model, fitted on synthetic fixtures where the
+inputs are varied ONE AT A TIME, and then checked against the real design.
+
+### 7.1 The hypothesis that was wrong
+
+The obvious candidate was the runtime `nthD` chains -- `srcVal` reads an
+`.input` source as `nthD inp idx` and a `.flopQ` source as `nthD fq idx`, over
+the DYNAMIC input and flop vectors, so source `idx` costs `idx` steps.
+
+`scripts/cert_shape.py rt_intpipe_alu.dcert` kills it outright:
+
+    sources 4045  nodes 5118  outputs 2
+    source kinds: {'const': 4041, 'input': 4}
+    input-vector chain: 4 inputs  -> at most 6 tl steps
+
+Four inputs.  The input-vector chain can account for SIX `tl` steps out of
+millions.  Had this gone unchecked, the next "optimization" would have targeted
+a chain that costs nothing on this design.
+
+### 7.2 Varying the inputs one at a time
+
+Three fixtures, NODE COUNT HELD AT 64 throughout so that nothing below can be
+explained by node count (`--depth-grid`), plus a fourth that moves node count
+alone (`--node-depth`):
+
+| fixture | sources | what the nodes read | isolates |
+|---|---|---|---|
+| `srcD`   | `nsrc` inputs | source slot `i % nsrc` -- DEEP | both chains together |
+| `shalD`  | `nsrc` inputs | the two newest slots -- depth 0/1 | the input-vector chain alone |
+| `cstD`   | 2 inputs + `nsrc-2` consts | source slot `i % nsrc` -- DEEP | the slot chain alone |
+| `midD`   | 1 input + 1 const | node 0's slot, which sinks with every node | NODE-portion depth alone |
+
+`midD` is the one that settles the shape of the answer:
+
+    midD nnode=1024   node-portion read depth sums to 523,776
+                      residual: terms 11,301   tl 1
+
+Half a million levels of node-portion walking cost ONE residual `tl`, and the
+residual is linear (11.0 terms/node at every size).  Phase 1's structural peel
+works perfectly on the node portion of the environment.
+
+`shalD` is exactly the input-vector chain and nothing else:
+
+    shalD tl  =  nsrc*(nsrc-1)/2 + 1       EXACT at nsrc = 2,16,64,128,256,512,1024
+
+`cstD` is exactly the slot chain and nothing else, and -- the key observation --
+a slot read costs its depth in the SOURCE PREFIX, `nsrc - 1 - d`, not its depth
+in the whole environment.  The node results stacked above it are free.
+
+And the two are ADDITIVE: `srcD tl = shalD tl + cstD tl - 2` at all seven sizes.
+
+### 7.3 The model
+
+    tl  =  nInputs*(nInputs-1)/2                    (A) runtime input-vector chain
+         + SUM over node deps `d` pointing at a SOURCE of (nSources - 1 - d)
+                                                    (B) source-prefix slot chain
+         ( node deps contribute ZERO )
+
+    hd  =  nInputs + (number of node deps reading a source slot) + c,  c in 1..3
+
+    terms ~ 3.0 * tl        (each surviving step emits one letIn + one var + one prim)
+
+Checked against `rt_intpipe_alu` -- a design the model was not fitted on:
+
+| quantity | predicted | measured | error |
+|---|---|---|---|
+| `tl` | 8,179,111 | 8,180,316 | 0.015% |
+| `hd` | 4,181 | 4,182 | 1 |
+
+    measured: terms 24614113  lit 13584 var 8202953 letIn 8191420 ite 1155
+              prim 8204998 ctorT 2 caseT 1 call 0
+              tl 8180316  hd 4182  consP 9165  isNil 0
+              bvResize 3248  bvAnd 1170  bvMk 63  eqI 1124
+    (wall 702 s, peak RSS 997 MB, diagnostic fuel 200000/2000)
+
+So:
+
+* **99.97%** of the residual is term (B), the source-prefix slot chain.
+* **99.998%** of term (B) is reads of **`const` sources** -- 4,041 of them sitting
+  in a 4,045-entry source prefix, read at a mean depth of 2,024.
+* term (A), the chain the previous section would have attacked, is **6 steps**.
+* the ACTUAL operator work is **6,760 terms for 5,118 nodes -- 1.32 terms/node**.
+  The "~4800 terms per node" in section 6 was the chain, not the design.
+
+### 7.4 Where the cost comes from, and what is not yet established
+
+ESTABLISHED by measurement: walking the NODE portion of the environment is
+free, walking the SOURCE portion costs one let-bound `tl` per level and one
+`hd` at the end.  Two independent counters agree, on 26 synthetic points and on
+the real design, to within 0.02%.
+
+NOT YET ESTABLISHED: *why* the two portions differ.  `mkSources`
+(`HardwareInterpreter.lean:144`) and `evalNodes` (`:170`) build their spines
+with the same syntactic `cons` in the same accumulator style, so the asymmetry
+is not visible in the interpreter text.  The leading candidate is that `env0`
+is bound by its own `letIn` in `main`'s `lets` block (`:115`), and a dynamic
+`letIn` reifies its body (`PartialEvaluator.lean:326`), whereas the node spine
+is the RESULT of the unfolded `evalNodes` call and survives as a `PVal.cons`.
+That is a HYPOTHESIS; the experiment that would settle it is an A/B on a
+minimal surface program, let-binding a partially-static cons spine versus
+inlining it, and it has not been run.
+
+Consequences for what to do next, recorded so the next increment is not chosen
+on vibes:
+
+* The fix is not in the input/flop vectors.  A shared-prefix destructuring of
+  the runtime input vector would have removed 6 of 8,180,316 steps here.
+* A constant source needs no runtime environment entry at all -- its value is
+  static.  Making `srcVal` of a `.const` resolve without an environment slot
+  would remove ~99.998% of this design's residual.  That is a change to `I_hw`,
+  which `IHwAdequate_proved` is stated about, so it is NOT free: it re-opens the
+  adequacy proof.  It is not a specializer change and must not be sold as one.
+* `projectDesign`'s own fuel (20000/200) is still the binding constraint at
+  section 6's numbers; nothing here changes that.
+
+### 7.5 Reproducing
+
+    bash scripts/build-native.sh scripts/proto_probe.lean
+    ./.native-dev/proto_probe --depth-grid     # srcD / shalD / cstD, node count fixed at 64
+    ./.native-dev/proto_probe --node-depth     # midD, node-portion depth alone
+    ./.native-dev/proto_probe --file-profile rt_intpipe_alu.dcert 200000 2000
+    python3 scripts/cert_shape.py rt_intpipe_alu.dcert
+
+Raw logs: `.perfwork/depth-grid.log`, `.perfwork/node-depth.log`,
+`.perfwork/alu-profile.log` (kept outside the repo; the commands above
+regenerate them).
