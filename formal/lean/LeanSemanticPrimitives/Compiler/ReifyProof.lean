@@ -301,6 +301,56 @@ def elabProveReified : CommandElab := fun stx => do
     logInfo m!"prove_reified: {corNm} proved, {R.bindings.size} bindings"
   | _ => throwUnsupportedSyntax
 
+/-- `compile_chunk_fact <designCert> from <lo> take <len> as <name>` — one
+chunk-local fact about the COMPILER, with the accumulator left abstract:
+
+    <name> (acc) : compileFrom <D> <lo> <len> acc = .ok (acc.push b_lo ... )
+
+Nothing in the statement mentions the design beyond this chunk's own bindings,
+and `acc` is universally quantified, so the whole residual is never named. With
+`Compiler.compileFrom_add` these compose into `compileGraph D = .ok ...` with no
+step evaluating the compiler over the whole design.
+
+Emitted on its own so the per-chunk cost can be MEASURED before it is wired
+into the prover: `compileFrom` still resolves `D.nodes[start]?` against the
+design's full node literal, and whether that normalises the source array once
+per chunk is the question this command exists to answer. -/
+syntax (name := compileChunkFact) "compile_chunk_fact " ident
+  " from " num " take " num " as " ident : command
+
+@[command_elab compileChunkFact]
+def elabCompileChunkFact : CommandElab := fun stx => do
+  match stx with
+  | `(command| compile_chunk_fact $d:ident from $lo:num take $len:num as $nm:ident) => do
+    let R ← liftTermElabM do
+      let dExpr ← Term.elabTerm d none
+      let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
+      match compileDesign cert with
+      | .error _ => throwError "compile_chunk_fact: compileDesign refused {d}"
+      | .ok R    => pure R
+    let lo' := lo.getNat
+    let len' := len.getNat
+    if lo' + len' > R.bindings.size then
+      throwError "compile_chunk_fact: [{lo'}, {lo'+len'}) is outside the \
+        design's {R.bindings.size} binding(s)"
+    let accId := mkIdent (Name.mkSimple "acc")
+    let mut rhs : Term ← `($accId:ident)
+    for k in [lo' : lo' + len'] do
+      let b := R.bindings[k]!
+      let tyQ ← liftTermElabM (match b.ty with
+        | .bv w     => `(Compiler.ValueType.bv $(quote w))
+        | .mem a w  => `(Compiler.ValueType.mem $(quote a) $(quote w)))
+      let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
+      rhs ← `(($rhs).push { ty := $tyQ, rhs := $rhsQ })
+    elabCommand (← `(command|
+      theorem $nm ($accId : Array Compiler.ResidualBinding) :
+          Compiler.compileFrom $d $(quote lo') $(quote len') $accId = .ok $rhs := by
+        simp (config := { maxSteps := 2000000 })
+          [Compiler.compileFrom, $d:ident, Compiler.compileOp,
+           Compiler.opValueType]))
+    logInfo m!"compile_chunk_fact: {nm} over [{lo'}, {lo' + len'})"
+  | _ => throwUnsupportedSyntax
+
 /-- `prove_reified_chunked <designCert> as <name> [size <n>]` — proves the model
 `reify_design_chunked` emitted, with the SAME `size`.
 

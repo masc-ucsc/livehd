@@ -27,6 +27,38 @@ import LeanSemanticPrimitives.Compiler.CompileGraphDefs
 
 namespace Compiler
 
+/-- Compiling `n₁ + n₂` nodes is compiling `n₁`, then `n₂` from where that
+left off.
+
+`compileFrom` is a fuel-driven tail recursion over the COUNT with an
+accumulator, so this is an induction on the first count with the accumulator
+generalized. Proved ONCE for an arbitrary design, start, split and accumulator.
+
+This is what lets a proof relate the compiler's output to generated chunks
+WITHOUT any step evaluating the compiler over the whole design: each chunk
+supplies a fact about its own nodes against an abstract accumulator, and the
+joining is symbolic. -/
+theorem compileFrom_add (D : DesignCert) (n₁ : Nat) :
+    ∀ (start n₂ : Nat) (acc : Array ResidualBinding),
+      compileFrom D start (n₁ + n₂) acc
+        = match compileFrom D start n₁ acc with
+          | .ok acc' => compileFrom D (start + n₁) n₂ acc'
+          | .error e => .error e := by
+  induction n₁ with
+  | zero => intro start n₂ acc; simp [compileFrom]
+  | succ k ih =>
+    intro start n₂ acc
+    rw [Nat.succ_add]
+    cases hn : D.nodes[start]? with
+    | none => simp [compileFrom, hn]
+    | some c =>
+      cases he : compileOp (D.slotOfNode start) c with
+      | error e => simp [compileFrom, hn, he]
+      | ok e =>
+        simp only [compileFrom, hn, he]
+        have harg : start + 1 + k = start + (k + 1) := by omega
+        rw [ih (start + 1) n₂ _, harg]
+
 /-- Run a binding list in two pieces.
 
 `runBindings` is a fold that threads the environment, so splitting the list
