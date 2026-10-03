@@ -2111,6 +2111,8 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
       labels["debug"] = v;
     } else if (k == "sim.unknown_zero") {
       labels["unknown_zero"] = v;
+    } else if (k == "sim.unroll_sites") {
+      labels["unroll_sites"] = v;
     }
   }
   // The tune vector always reaches cgen RESOLVED and concrete (explicit --set >

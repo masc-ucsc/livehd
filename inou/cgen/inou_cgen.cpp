@@ -2,6 +2,7 @@
 
 #include "inou_cgen.hpp"
 
+#include <charconv>
 #include <map>
 #include <string>
 #include <string_view>
@@ -96,6 +97,10 @@ void Inou_cgen::setup() {
                         "[0, 2^20] (0 = always); none = no module fences; auto or empty = none with color_dirty off, the "
                         "built-in ratio with it on",
                         "");
+  m2.add_label_optional("unroll_sites",
+                        "sim.unroll_sites: expand a compact loop into straight-line code when its trip count times its "
+                        "body's node count (nested loops multiplied out) is at most N in [0, 2^20]; 0 keeps every loop rolled",
+                        "8192");
   register_inou("cgen", m2);
 }
 
@@ -174,7 +179,8 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   auto      unknown_zero_s    = var.get("unknown_zero");
   auto      live_words_s      = var.get("live_words");
   auto      fence_ratio_s     = var.get("fence_ratio");
-  auto       backend_s         = var.get("backend");
+  auto      backend_s         = var.get("backend");
+  auto      unroll_sites_s    = var.get("unroll_sites");
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
   // but these labels are also reachable directly).
@@ -210,6 +216,28 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   const auto live_words_knob
       = knob("sim.tune.live_words", livehd::sim::parse_tune_live_words(live_words_s == "0" ? std::string_view{} : live_words_s));
   const auto backend_knob = knob("sim.tune.backend", livehd::sim::parse_tune_backend(backend_s));
+  // sim.unroll_sites: a plain whole number (0 = never unroll). Not a tune
+  // knob: it is applied, never trialed, so it is not part of the tune vector.
+  uint32_t unroll_sites = Cgen_sim::kDefaultUnrollSites;
+  if (!unroll_sites_s.empty()) {
+    uint64_t    parsed = 0;
+    const char* end    = unroll_sites_s.data() + unroll_sites_s.size();
+    const auto [p, ec] = std::from_chars(unroll_sites_s.data(), end, parsed);
+    if (ec != std::errc{} || p != end || parsed > (uint64_t{1} << 20)) {
+      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
+          .msg("sim.unroll_sites expects N in [0, 2^20], got '{}'", unroll_sites_s)
+          .emit();
+      bad_flag = true;
+    } else {
+      unroll_sites = static_cast<uint32_t>(parsed);
+    }
+  }
+  // An observation run (VCD, probe, query) keeps every loop rolled, as it keeps
+  // specialize_constants off: the names a user looks up are the design's own,
+  // not a spliced replica's.
+  if (observe_on || !vcd_out.empty()) {
+    unroll_sites = 0;
+  }
   if (bad_flag) {
     return;
   }
@@ -279,6 +307,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // and rewire edges, so planning first would retain stale class indices.
   {
     Cgen_sim prep(dir, vcd_out, top, fakedelay);
+    prep.set_unroll_sites(unroll_sites);
     for (const auto& g : sim_graphs) {
       // A body that cannot be prepared cannot be emitted correctly (the
       // diagnostic came from prepare_graph): stop the whole emission rather
@@ -411,7 +440,8 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                     tune.llvm,
                     is_dut(g),
                     static_cast<uint32_t>(tune.live_words),
-                    tune.fence);
+                    tune.fence,
+                    unroll_sites);
   };
   const auto probe_for = [&](const std::shared_ptr<hhds::Graph>& g) { return cgen_for(g, /*plan=*/nullptr); };
   // Which modules are already generated. Asked BEFORE the color plan, because

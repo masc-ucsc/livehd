@@ -72,7 +72,9 @@
 #include "hash_util.hpp"
 #include "latch_contract.hpp"  // //graph — clock_op_of (the ONE shared ICG recognizer)
 #include "node_util.hpp"
+#include "inline_sub.hpp"              // //graph — splice a small loop's replicas into the body that held the loop
 #include "occurrence_materialize.hpp"  // //graph — realize native loop groups in the private simulator library
+#include "sim_specialize.hpp"          // refold_private_body: cprop/bitwidth over a body a splice just changed
 #include "sim_color_plan.hpp"
 #include "sim_plusargs_rt.hpp"
 #include "sim_program.hpp"
@@ -3820,6 +3822,10 @@ std::string Cgen_sim::generation_key(hhds::Graph* g, bool color_root) {
   gd          = fnv1a(gd, slop_u_ ? 1u : 0u);
   gd          = fnv1a(gd, debug_ ? 1u : 0u);
   gd          = fnv1a(gd, unknown_zero_ ? 1u : 0u);
+  // The unroll ceiling decides which loops prepare_graph expands. The parent's
+  // body digest already reflects an expansion, but the knob is folded too so a
+  // flip can never meet a stale generation through an unchanged-looking body.
+  gd          = fnv1a(gd, unroll_sites_);
   // Conservative: every emission read of the backend sits inside a color root,
   // and the root set it changes is already keyed by the color_root bit below,
   // but a backend flip regenerating everything is cheap insurance.
@@ -4094,6 +4100,39 @@ int Cgen_sim::graph_node_count(hhds::Graph* g) {
   return n;
 }
 
+// Flat cost of a compact loop: its trip count times the body's node count,
+// with nested loops multiplied out so a 16x16 nest costs 256 bodies, not 16.
+// The body is memoized because one definition is reached from every instance
+// of its parent. Capped: a cost past the cap is "do not unroll" either way.
+int64_t Cgen_sim::loop_unrolled_cost(const hhds::Node_class& loop, int depth) {
+  constexpr int64_t kCap = int64_t{1} << 30;
+  const auto        d    = loop.subnode_loop();
+  auto              body = loop.get_subnode_graph();
+  if (!d || !body) {
+    return kCap;
+  }
+  int64_t body_cost = 0;
+  if (auto it = unrolled_cost_memo_.find(body.get()); it != unrolled_cost_memo_.end()) {
+    body_cost = it->second;
+  } else {
+    for (auto n : body->body().nodes()) {
+      if (n.subnode_loop()) {
+        body_cost += depth < 8 ? loop_unrolled_cost(n, depth + 1) : kCap;
+      } else {
+        ++body_cost;
+      }
+      if (body_cost >= kCap) {
+        body_cost = kCap;
+        break;
+      }
+    }
+    unrolled_cost_memo_.emplace(body.get(), body_cost);
+  }
+  const auto count = static_cast<int64_t>(std::min<uint64_t>(d->count, uint64_t{1} << 20));
+  const auto total = body_cost * std::max<int64_t>(count, 1);
+  return total >= kCap || total < 0 ? kCap : total;
+}
+
 // Every STRUCTURAL rewrite the emitter makes to a body, factored out of
 // do_from_graph so the caller can run it over the WHOLE library first.
 //
@@ -4138,16 +4177,71 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // and skips their calls at runtime (while reset keeps the call open).
   // Snapshot in reverse storage order for the occurrence formatter's
   // module-scoped ordinal accounting.
+  //
+  // A SMALL loop is expanded the same way, for speed rather than correctness
+  // (sim.unroll_sites, default kDefaultUnrollSites flat sites, 0 = never). The
+  // rolled form is one call per iteration: the invariant inputs are bound and
+  // change-tested per lane, every lane slice is a runtime-offset extraction
+  // from the whole word, and the carry is compared and stored between calls.
+  // Flat, the same loop is the straight-line code the Verilog reader produces
+  // for a generate loop: constant-offset slices the compiler folds, no call,
+  // no carry traffic. Measured on lhdtrack (verilator-tuned cycle counts):
+  // br_mux_onehot (one 16-lane loop) 4.00 s -> 1.61 s, br_arb_lru (a 16x16
+  // nest) 18.3 s -> 3.26 s, both then at or past their Verilog twins. Big
+  // loops keep the shared body: unrolling them multiplies code and host
+  // compile time for a body whose per-call overhead is already amortized.
   std::vector<hhds::Node_class> fallback_loops;
+  std::vector<hhds::Node_class> small_loops;
+  const auto small_loop = [&](const hhds::Node_class& n) { return unroll_sites_ > 0 && loop_unrolled_cost(n) <= unroll_sites_; };
   for (auto n : g->body().nodes()) {
-    if (auto d = n.subnode_loop(); d && compact_loop_has_external_ring(n)) {
-      fallback_loops.push_back(n);
+    if (auto d = n.subnode_loop()) {
+      if (compact_loop_has_external_ring(n)) {
+        fallback_loops.push_back(n);
+      } else if (small_loop(n)) {
+        small_loops.push_back(n);
+      }
     }
   }
   for (auto it = fallback_loops.rbegin(); it != fallback_loops.rend(); ++it) {
     if (!livehd::graph_util::materialize_occurrence(g, *it, "inou.cgen.sim")) {
       return false;
     }
+  }
+  // A small loop's replicas are then SPLICED into this body. Left as
+  // instances they are still one call per iteration, now with a change-tested
+  // carry per replica: br_arb_lru expanded to 136 instances threading a 256-bit
+  // state, 7950 sites and 201 colors, against 906 sites and 8 colors flat.
+  // The splice exposes the body's own loops here, so iterate until none is
+  // small; a body kept rolled by its size keeps its boundary. Index and
+  // activation inputs arrive as constants, so one cprop/bitwidth round folds
+  // the per-ordinal arithmetic the rolled body computed at runtime (the
+  // `i*N + j` of a priority matrix: 1403 SRA / 617 Sum sites before, none
+  // after), as specialize_constants does once a callee publishes a constant.
+  // Ring loops stay instances: their parent-level cycle is exactly the
+  // feed-through the splice refuses.
+  bool spliced = false;
+  while (!small_loops.empty()) {
+    for (auto it = small_loops.rbegin(); it != small_loops.rend(); ++it) {
+      std::vector<hhds::Node_class> replicas;
+      if (!livehd::graph_util::materialize_occurrence(g, *it, "inou.cgen.sim", &replicas)) {
+        return false;
+      }
+      for (const auto& replica : replicas) {
+        if (!livehd::graph_util::inline_sub_instance(g, replica, "inou.cgen.sim")) {
+          return false;
+        }
+      }
+      spliced = true;
+    }
+    small_loops.clear();
+    for (auto n : g->body().nodes()) {
+      if (auto d = n.subnode_loop(); d && !compact_loop_has_external_ring(n) && small_loop(n)) {
+        small_loops.push_back(n);
+      }
+    }
+  }
+  if (spliced) {
+    livehd::sim::refold_private_body(graph);
   }
   // No false-loop inlining: the occurrence-wide color plan resolves hierarchy
   // crossings without cloning. The old inliners multiplied cloned subtrees up
@@ -8234,7 +8328,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // the tick; Settle is the trailing comb refresh that keeps `__out` (and any
   // a testbench ref bound to it) current. A module with no negedge state emits no Fall
   // at all, so dino stays exactly one pass per tick.
-  enum class Pass { Rise, Fall, Settle };
+  enum class Sim_pass { Rise, Fall, Settle };
   absl::flat_hash_set<hhds::Class_index> settle_cone;
   auto                                   build_settle_cone = [&] {
     settle_cone.clear();
@@ -8356,9 +8450,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // per module emission, like the cycle classification.
   Kernel_support callee_support([this](hhds::Graph* cg) { return clock_input_of(cg); });
 
-  auto emit_period_body = [&](Pass pass_) -> bool {
-    const bool settle     = pass_ == Pass::Settle;
-    const bool fall       = pass_ == Pass::Fall;
+  auto emit_period_body = [&](Sim_pass pass_) -> bool {
+    const bool settle     = pass_ == Sim_pass::Settle;
+    const bool fall       = pass_ == Sim_pass::Fall;
     // Where this method's text begins: the temporary sweeps detach and rewrite
     // exactly this region once the body is closed (see compact_body_temps).
     const auto body_mark  = fout->mark();
@@ -8376,7 +8470,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // can now be lifted -- before the settle/commit split there was no way to ask
     // a child for its outputs without also stepping it.
     settle_mode = settle || fall;
-    if (pass_ != Pass::Rise) {
+    if (pass_ != Sim_pass::Rise) {
       // Fresh binding environment. The settle reads the COMMITTED members rather
       // than the temporaries the rise left behind; the fall likewise starts from
       // the state the rise just committed, which is what makes its half-cycle
@@ -8408,7 +8502,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // under VCD (a skipped body would freeze __vcd_tick and the waveform). ----
     std::string gate_done, gate_kids, gate_ksum;
     if (vcd_file.empty() && !env_.nogate) {
-      if (pass_ == Pass::Rise) {
+      if (pass_ == Sim_pass::Rise) {
         gate_done = "__done_pos";
         gate_kids = "__kids_pos";
       } else if (fall) {
@@ -9613,7 +9707,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // the next pass's pre-binding reads it. Nothing to do in the settle pass:
     // it never advances a child, and the pre-binding above pointed these
     // outputs straight at `<inst>.__out`.
-    for (const auto* sp : (pass_ == Pass::Rise) ? deferred_moore : std::vector<const Sub*>{}) {
+    for (const auto* sp : (pass_ == Sim_pass::Rise) ? deferred_moore : std::vector<const Sub*>{}) {
       const auto& s    = *sp;
       auto        dsio = s.node.get_subnode_io();
       if (!dsio) {
@@ -9718,7 +9812,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (f.clock_guards.empty() && f.sec_clock.is_invalid()) {
         return;  // ungated, on the reference clock: commits every tick
       }
-      if (f.gate_fall && pass_ == Pass::Rise) {
+      if (f.gate_fall && pass_ == Sim_pass::Rise) {
         return;  // fall-gated: its guards are sampled POST-rise, in the fall pass
       }
       // The guard and secondary-clock cones are NOT in flop_operand_ports, so no
@@ -9969,7 +10063,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // latch into `<q>_low`.  This works for both explicit active-low cells and a
     // source-level `if !clk` gate (whose cell polarity remains active-high).
     for (const auto& f : flops) {
-      if (pass_ != Pass::Rise || !f.is_latch) {
+      if (pass_ != Sim_pass::Rise || !f.is_latch) {
         continue;
       }
       for (const auto* port : flop_operand_ports) {
@@ -9988,7 +10082,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // result is the hold value, so a latch open in either half retains the last
     // transparent value and closes with the correct end-of-period state.
     for (const auto& f : flops) {
-      if (pass_ != Pass::Rise || !f.is_latch) {
+      if (pass_ != Sim_pass::Rise || !f.is_latch) {
         continue;
       }
       for (const auto* port : flop_operand_ports) {
@@ -10025,7 +10119,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       emit_flop_next(f, false, true);
     }
-    if (pass_ == Pass::Rise && !ref_clock_pin.is_invalid()) {
+    if (pass_ == Sim_pass::Rise && !ref_clock_pin.is_invalid()) {
       pin2var[ref_clock_pin.get_class_index()] = absl::StrCat("__in.", cpp_port_path(ref_clock_name));
       // The `__in` field's type came from io.unsign (decl, default SIGNED), so
       // that is the authority here -- not is_unsign() on the pin, which reports
@@ -10042,7 +10136,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
     for (const auto& f : flops) {
-      if (pass_ == Pass::Rise && f.is_latch) {
+      if (pass_ == Sim_pass::Rise && f.is_latch) {
         auto qpin = f.node.get_driver_pin(0);
         if (!qpin.is_invalid()) {
           invalidate_downstream(qpin);
@@ -10054,7 +10148,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
     for (const auto& f : flops) {
-      if (pass_ != Pass::Rise) {
+      if (pass_ != Sim_pass::Rise) {
         break;  // the rise owns posedge next-state; the fall emits its own below
       }
       if (!f.is_latch && f.posedge) {
@@ -10537,15 +10631,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     return true;
   };
   if (!color_runtime_root && !color_storage_only) {
-    if (!emit_period_body(Pass::Rise)) {
+    if (!emit_period_body(Sim_pass::Rise)) {
       return;
     }
-    if (has_fall && !emit_period_body(Pass::Fall)) {
+    if (has_fall && !emit_period_body(Sim_pass::Fall)) {
       return;
     }
   }
   if (!color_runtime_root && !color_storage_only) {
-    if (!emit_period_body(Pass::Settle)) {
+    if (!emit_period_body(Sim_pass::Settle)) {
       return;
     }
   }

@@ -245,6 +245,12 @@ private:
 
   absl::flat_hash_map<hhds::Graph*, int> node_count_memo_;
 
+  // Flat cost of a compact loop: trip count times its body's node count, nested
+  // loops multiplied out (capped). Memoized per body definition.
+  int64_t loop_unrolled_cost(const hhds::Node_class& loop, int depth = 0);
+
+  absl::flat_hash_map<hhds::Graph*, int64_t> unrolled_cost_memo_;
+
 public:
   // ICG fold: guard operands of a `<clock> & <enable>` clock cone, or empty
   // when the cone is not a foldable ICG (2f-latch M5).
@@ -317,7 +323,7 @@ public:
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
            bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = false, bool _debug = false,
            bool _unknown_zero = false, bool _llvm_backend = false, bool _dut = false, uint32_t _live_words = 0,
-           int64_t _fence_ratio = -1)
+           int64_t _fence_ratio = -1, uint32_t _unroll_sites = kDefaultUnrollSites)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
@@ -331,9 +337,19 @@ public:
       , debug_(_debug)
       , unknown_zero_(_unknown_zero)
       , dut_(_dut)
+      , unroll_sites_(_unroll_sites)
       , tune_(livehd::sim::canonical_tune_vector(_color_dirty, _fence_ratio, _live_words, _llvm_backend))
       , tune_vector_(tune_.tv1())
       , env_(Sim_env::read()) {}
+
+  // sim.unroll_sites (see prepare_graph). The default is a few thousand flat
+  // sites, counted BEFORE folding: br_arb_lru's 16x16 priority nest is ~5k
+  // nodes of index arithmetic that cprop collapses to ~900 once the ordinals
+  // are constants, and it stayed rolled at 4096 (8.7 s) but fully flattens at
+  // 8192 (3.1 s, the same as 16k and 64k). Still a fraction of one evaluator
+  // shard of generated code.
+  static constexpr uint32_t kDefaultUnrollSites = 8192;
+  void                      set_unroll_sites(uint32_t n) { unroll_sites_ = n; }
 
 private:
   const livehd::sim::Color_plan* color_plan_     = nullptr;  // non-null only while emitting the selected hierarchy root
@@ -366,6 +382,7 @@ private:
   // so its wide inputs carry no trustworthy change version: never forward
   // them by version (see "Versioned wide inputs" in do_from_graph).
   bool                           dut_            = false;
+  uint32_t                       unroll_sites_   = kDefaultUnrollSites;  // sim.unroll_sites: flat-cost ceiling for unrolling a compact loop
 
   // ---- sim.tune codegen knobs (sim_profile.md §3; sim.tune.dirty / fence /
   // live_words / backend). `tune_` is the CANONICAL vector of the constructor

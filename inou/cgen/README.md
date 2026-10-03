@@ -2,7 +2,21 @@
 
 `sim_color_plan.cpp` builds a simulator-private, occurrence-aware DAG. It keeps
 compact loops as calls; each loop definition is compiled separately, so nested
-loops retain their hierarchy. Carry and independent work from one source loop
+loops retain their hierarchy. Before planning, `Cgen_sim::prepare_graph`
+expands a SMALL compact loop into straight-line code on the private library
+(`sim.unroll_sites`, default 8192: the trip count times the body's node count,
+nested loops multiplied out; 0 keeps every loop rolled). A rolled loop is one
+call per iteration with runtime-offset lane slices and a change-tested carry;
+flat, it is the constant-offset code the Verilog reader produces for a generate
+loop. On lhdtrack, br_mux_onehot (one 16-lane loop) ran 2.5x and br_arb_lru (a
+16x16 nest) 5.6x faster flat, both then at or past their Verilog twins. The
+replicas are spliced into the body that held the loop and one cprop/bitwidth
+round folds the now-constant ordinal arithmetic; left as instances they would
+still be a call each with a change-tested carry (br_arb_lru: 7950 sites and 201
+colors against 906 and 8). The expansion never changes a simulated value, an
+observation run (VCD, probe, query) keeps every loop rolled, and
+`:expect_instances:` fixtures count the compiled graph, not this private copy.
+Larger loops keep the shared body. Carry and independent work from one source loop
 execute in the same ordinal traversal. Independent sibling loops with equal
 start, step and count also fuse, regardless of source location. A topological
 ancestor check rejects dependent pairs; groups are bounded to eight loops,

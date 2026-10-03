@@ -563,6 +563,13 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "false", Sim_set_option::Kind::boolean,
      "retain runtime validation landings for bitwidth-proven unsigned Slop_u values. The default trusts the proof "
      "and emits only compile-time width checks, avoiding masks in production generated code", Sim_set_option::Stage::codegen},
+    {"unroll_sites",
+     "8192", Sim_set_option::Kind::count,
+     "N — expand a compact (rolled) loop into straight-line code when its trip count times its body's node count, "
+     "nested loops multiplied out, is at most N. A rolled loop is one call per iteration, with runtime-offset lane "
+     "slices and a change-tested carry; flat code reads every lane at a constant offset (lhdtrack br_mux_onehot "
+     "2.5x, br_arb_lru 5.6x cycles/s). Larger loops stay rolled, where one shared body wins. 0 = never unroll. "
+     "Speed only: the simulated values never change", Sim_set_option::Stage::codegen},
     {"init_zero",
      "false", Sim_set_option::Kind::boolean,
      "use zero as the power-on value only for flops and memories that have neither an initializer nor a reset. "

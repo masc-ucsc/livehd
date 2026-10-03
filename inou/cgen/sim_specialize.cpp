@@ -59,6 +59,11 @@ std::vector<hhds::Node_class> zero_index_shifts(hhds::Graph& graph, hhds::Port_i
 }
 }  // namespace
 
+void refold_private_body(const std::shared_ptr<hhds::Graph>& graph) {
+  Cprop{}.do_trans(graph);
+  Bitwidth{16}.do_trans(graph);
+}
+
 void specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
   std::map<std::string, std::shared_ptr<hhds::Graph>> specializations;
   bool                                                changed = true;

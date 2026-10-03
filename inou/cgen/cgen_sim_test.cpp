@@ -646,3 +646,105 @@ TEST(CgenSim, ZeroTripIdentityCarryKeepsTheSeedInputBoundary) {
   ASSERT_TRUE(output.is_const());
   EXPECT_TRUE(gu::const_of(output).eq_op(Dlop::create_integer(255))->is_known_true());
 }
+
+// ---- sim.unroll_sites: a small compact loop is spliced flat ------------------
+namespace {
+struct Unroll_fixture {
+  std::shared_ptr<hhds::Graph> parent;
+  hhds::Node_class             compact;
+};
+
+// A rolled loop over an 8-bit carry whose body is one Not: `count` iterations
+// chain `count` inversions of `seed` into `result`.
+Unroll_fixture make_unroll_loop(std::string_view tag, uint64_t count) {
+  auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_cgen_sim_unroll_") + std::string(tag));
+
+  auto body_io = lib.create_io(std::string(tag) + "_body");
+  body_io->add_input("acc_in", 0);
+  body_io->add_output("acc_out", 1);
+  body_io->set_bits("acc_in", 8);
+  body_io->set_bits("acc_out", 8);
+  auto body = body_io->create_graph();
+  auto inv  = gu::create_typed_node(*body, Ntype_op::Not);
+  body->get_input_pin("acc_in").connect_sink(inv.create_sink_pin(0));
+  inv.create_driver_pin(0).connect_sink(body->get_output_pin("acc_out"));
+
+  auto parent_io = lib.create_io(std::string(tag) + "_parent");
+  parent_io->add_input("seed", 0);
+  parent_io->add_output("result", 1);
+  parent_io->set_bits("seed", 8);
+  parent_io->set_bits("result", 8);
+  auto parent = parent_io->create_graph();
+
+  auto compact = gu::create_typed_node(*parent, Ntype_op::Sub);
+  compact.set_name("u_loop");
+  hhds::Subnode_loop loop;
+  loop.count = count;
+  compact.set_subnode(body_io, loop);
+  parent->get_input_pin("seed").connect_sink(compact.create_sink_pin(0));
+  auto output = compact.create_driver_pin(1);
+  gu::set_bits(output, 8);
+  output.connect_sink(parent->get_output_pin("result"));
+  output.connect_sink(compact.create_sink_pin(0));  // the carry: acc_out -> acc_in
+  compact.subnode_group().validate();
+  return {parent, compact};
+}
+
+size_t count_loops(const std::shared_ptr<hhds::Graph>& g) {
+  size_t n = 0;
+  for (auto node : g->body().nodes()) {
+    if (node.subnode_loop()) {
+      ++n;
+    }
+  }
+  return n;
+}
+size_t count_subs(const std::shared_ptr<hhds::Graph>& g) {
+  size_t n = 0;
+  for (auto node : g->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Sub) {
+      ++n;
+    }
+  }
+  return n;
+}
+}  // namespace
+
+// prepare_graph expands a compact loop whose flat cost (count x body nodes) is
+// within sim.unroll_sites and splices every replica into the body, so no
+// instance is left; a loop past the budget, or any loop with the knob at 0,
+// keeps its native call. The expansion is a sim-private rewrite: it must not
+// touch the body definition the rolled form still calls.
+TEST(CgenSim, SmallCompactLoopIsSplicedFlatAndLargeOneStaysRolled) {
+  const auto dir = (std::filesystem::temp_directory_path() / "cgen_sim_unroll_test").string();
+  std::filesystem::create_directories(dir);
+  {
+    auto     f = make_unroll_loop("small", 4);
+    Cgen_sim prep(dir, "", std::string(f.parent->get_name()), "false");
+    ASSERT_TRUE(prep.prepare_graph(f.parent));
+    EXPECT_EQ(count_loops(f.parent), 0u) << "4 x 1 node is under the default budget: the loop is expanded";
+    EXPECT_EQ(count_subs(f.parent), 0u) << "every replica is spliced into the parent, none stays an instance";
+  }
+  {
+    auto     f = make_unroll_loop("large", 1'000'000'000ULL);
+    Cgen_sim prep(dir, "", std::string(f.parent->get_name()), "false");
+    ASSERT_TRUE(prep.prepare_graph(f.parent));
+    EXPECT_EQ(count_loops(f.parent), 1u) << "a billion-iteration loop is past any budget and stays a call";
+  }
+  {
+    auto     f = make_unroll_loop("off", 4);
+    Cgen_sim prep(dir, "", std::string(f.parent->get_name()), "false");
+    prep.set_unroll_sites(0);
+    ASSERT_TRUE(prep.prepare_graph(f.parent));
+    EXPECT_EQ(count_loops(f.parent), 1u) << "sim.unroll_sites=0 keeps every loop rolled";
+  }
+  {
+    // The budget is a ceiling on the FLAT cost, not the trip count: 5 x 1 nodes
+    // fits a budget of 5 and not one of 4.
+    auto     f = make_unroll_loop("edge", 5);
+    Cgen_sim prep(dir, "", std::string(f.parent->get_name()), "false");
+    prep.set_unroll_sites(4);
+    ASSERT_TRUE(prep.prepare_graph(f.parent));
+    EXPECT_EQ(count_loops(f.parent), 1u);
+  }
+}
