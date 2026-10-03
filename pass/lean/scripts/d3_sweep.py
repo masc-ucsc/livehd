@@ -112,6 +112,8 @@ PROVE = False
 REIFIER = "legacy"
 # Diagnostic component-by-component phase split in the sim probe (off).
 PHASE_SPLIT_ON = False
+# Diagnostic single-component probe ("" = off): selftest | agree | distinct.
+PHASE_ONLY = ""
 # Segment size for the incremental walk, passed to the PROOF probe only (0 = off).
 PROOF_SEGMENT = 0
 
@@ -784,6 +786,28 @@ def run_group(cmd, cwd, timeout, env=None):
         with _GROUPS_LOCK:
             _GROUPS.discard(pgid)
 
+PROBE_TAIL_ONLY = """
+reify_design_named {m}_designCert as d3_fast
+
+#eval show IO Unit from do
+  let t ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"reified t={{t}}"
+
+def d3_residual : ResidualProgram :=
+  match compileDesign {m}_designCert with
+  | .ok R    => R
+  | .error _ => default
+
+#eval show IO Unit from do
+  let R := d3_residual
+  let nb := R.bindings.size
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"residual_bindings {{nb}}"
+  let tr ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"residual_ready t={{tr}}"
+{component}"""
+
 PROBE_HEAD = """import LeanSemanticPrimitives.Compiler.ReifyGen
 import LeanSemanticPrimitives.Compiler.D3Harness
 """
@@ -805,23 +829,94 @@ import LeanSemanticPrimitives.Compiler.D3Harness
 # that could drift from it.
 PHASE_SPLIT = """  let r0 := d3_fast (Compiler.D3.stimIn {m}_designCert 1) (Compiler.D3.stimSt {m}_designCert 1)
   let o0 := Compiler.D3.obs r0
-  let t1 ← (if o0 == 0 then IO.monoMsNow else IO.monoMsNow)
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
-    h.putStrLn s!"sim_one_done obs={{o0}} t={{t1}}"
+    h.putStrLn s!"sim_one_result obs={{o0}}"
+  let t1 ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"sim_one_done t={{t1}}"
   let st0 := Compiler.D3.checkerSelfTest {m}_designCert R
   let b0 := st0.base
-  let t2 ← (if b0 then IO.monoMsNow else IO.monoMsNow)
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
-    h.putStrLn s!"selftest_done base={{b0}} t={{t2}}"
+    h.putStrLn s!"selftest_result base={{b0}}"
+  let t2 ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"selftest_done t={{t2}}"
   let ag0 := Compiler.D3.agree {m}_designCert d3_fast R {samples}
-  let t3 ← (if ag0 then IO.monoMsNow else IO.monoMsNow)
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
-    h.putStrLn s!"agree_done {{ag0}} t={{t3}}"
+    h.putStrLn s!"agree_result {{ag0}}"
+  let t3 ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"agree_done t={{t3}}"
   let dd0 := Compiler.D3.distinctObservables {m}_designCert d3_fast {samples}
-  let t4 ← (if dd0 == 0 then IO.monoMsNow else IO.monoMsNow)
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
-    h.putStrLn s!"distinct_done {{dd0}} t={{t4}}"
+    h.putStrLn s!"distinct_result {{dd0}}"
+  let t4 ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"distinct_done t={{t4}}"
 """
+
+# DIAGNOSTIC ONLY. One component, alone, in a FRESH process.
+#
+# Order-swap runs showed the SAME function with the SAME arguments costing
+# 0.45 s in one position and 37.3 s in the next, so a per-component time taken
+# from one sequential pass is not attribution. The MECHANISM is not established.
+# Running each component in its own process removes the ordering entirely.
+#
+# No `report` call, so no D3GATE line is printed and the row cannot be credited.
+PHASE_ONLY_BODY = {
+    "none": "",
+    "selftest": """  let ts ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_start selftest t={{ts}}"
+  let st0 := Compiler.D3.checkerSelfTest {m}_designCert R
+  let v0 := st0.base
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_result selftest base={{v0}}"
+  let t9 ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_done selftest t={{t9}}"
+""",
+    "agree": """  let ts ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_start agree t={{ts}}"
+  let v0 := Compiler.D3.agree {m}_designCert d3_fast R {samples}
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_result agree={{v0}} samples={samples}"
+  let t9 ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_done agree t={{t9}}"
+""",
+    "fast1": """  let ts ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_start fast1 t={{ts}}"
+  let v0 := Compiler.D3.obs (d3_fast (Compiler.D3.stimIn {m}_designCert 1)
+                                     (Compiler.D3.stimSt {m}_designCert 1))
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_result fast1 obs={{v0}}"
+  let t9 ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_done fast1 t={{t9}}"
+""",
+    "fast2": """  let ts ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_start fast2 t={{ts}}"
+  let v0 := Compiler.D3.obs (d3_fast (Compiler.D3.stimIn {m}_designCert 1)
+                                     (Compiler.D3.stimSt {m}_designCert 1))
+             + Compiler.D3.obs (d3_fast (Compiler.D3.stimIn {m}_designCert 2)
+                                        (Compiler.D3.stimSt {m}_designCert 2))
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_result fast2 obs={{v0}}"
+  let t9 ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_done fast2 t={{t9}}"
+""",
+    "distinct": """  let ts ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_start distinct t={{ts}}"
+  let v0 := Compiler.D3.distinctObservables {m}_designCert d3_fast {samples}
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_result distinct={{v0}} samples={samples}"
+  let t9 ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"component_done distinct t={{t9}}"
+""",
+}
 
 IMPORTS_MARKER = """
 #eval show IO Unit from do
@@ -890,12 +985,18 @@ def d3_residual : ResidualProgram :=
   -- forced value, so `residual_ready` really does mean compileDesign is behind us.
   let R := d3_residual
   let nb := R.bindings.size
-  -- `let` is LAZY, so the clock must be read only after the value is FORCED --
-  -- otherwise every stamp lands before the work it is meant to measure. The
-  -- comparison forces it; both branches read the same clock.
-  let tr ← (if nb == 0 then IO.monoMsNow else IO.monoMsNow)
+  -- The clock must be read only after the value has actually been COMPUTED,
+  -- otherwise the stamp lands before the work it is meant to measure. Writing
+  -- the value out is what guarantees that: rendering it into the string forces
+  -- it. An earlier revision used `if nb == 0 then A else A` and claimed the
+  -- comparison forced it -- it does not, the branches are identical and the
+  -- value was only rendered afterwards, which is why every delta read 0 ms
+  -- against a 46 s process.
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
-    h.putStrLn s!"residual_ready bindings={{nb}} t={{tr}}"
+    h.putStrLn s!"residual_bindings {{nb}}"
+  let tr ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"residual_ready t={{tr}}"
 {split}  Compiler.D3.report "{m}" {m}_designCert d3_fast R {samples}
 """
 
@@ -1243,6 +1344,8 @@ def run_config(a, manifest_digest: str) -> dict:
         # DIAGNOSTIC: a split run does the executable work twice, so its timings
         # are not comparable with a normal row.
         "phase_split": bool(getattr(a, "phase_split", False)),
+        # DIAGNOSTIC: a single-component probe runs no report at all.
+        "phase_only": getattr(a, "phase_only", "") or "",
         "lake": LAKE,
         "worktree_head": subprocess.run(
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
@@ -1256,7 +1359,8 @@ def module_of(path: pathlib.Path) -> str:
 
 
 def make_probe(cert: pathlib.Path, m: str, samples: int, reifier: str = "legacy",
-               phase_file: str = "", phase_split: bool = False) -> str:
+               phase_file: str = "", phase_split: bool = False,
+               phase_only: str = "") -> str:
     """Certificate body + reify + gate report.
 
     The certificate's own `theorem` block is DROPPED: `<m>_compiles` is a
@@ -1277,6 +1381,10 @@ def make_probe(cert: pathlib.Path, m: str, samples: int, reifier: str = "legacy"
                              "would report nothing when the target is killed")
         head = PROBE_HEAD + IMPORTS_MARKER.format(phase=json.dumps(phase_file))
         ph = json.dumps(phase_file)
+        if phase_only:
+            body = PHASE_ONLY_BODY[phase_only].format(m=m, samples=samples, phase=ph)
+            return _cert_body(cert, head) + PROBE_TAIL_ONLY.format(
+                m=m, phase=ph, component=body)
         split = PHASE_SPLIT.format(m=m, samples=samples, phase=ph) if phase_split else ""
         return _cert_body(cert, head) + PROBE_TAIL_NAMED.format(
             m=m, samples=samples, phase=ph, split=split)
@@ -1630,7 +1738,8 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         phase_path.unlink(missing_ok=True)
         probe.write_text(make_probe(cert, m, samples, reifier=REIFIER,
                                     phase_file=str(phase_path),
-                                    phase_split=PHASE_SPLIT_ON), encoding="utf-8")
+                                    phase_split=PHASE_SPLIT_ON,
+                                    phase_only=PHASE_ONLY), encoding="utf-8")
 
     # /usr/bin/time -v, so job count and timeouts for the long tiers can be
     # chosen from MEASURED peak RSS rather than guessed.  Wrapping rather than
@@ -2345,6 +2454,12 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="print the selected targets IN RUN ORDER and exit, "
                          "writing nothing")
+    ap.add_argument("--phase-only", choices=("none", "selftest", "agree", "distinct", "fast1", "fast2"),
+                    default="", metavar="COMPONENT",
+                    help="DIAGNOSTIC: run ONLY this component of report, alone "
+                         "in a fresh process, with timing markers and NO report "
+                         "call -- so no D3GATE line is printed and the row "
+                         "cannot be credited. Requires --reifier named.")
     ap.add_argument("--phase-split", action="store_true",
                     help="DIAGNOSTIC: in the sim probe, run report's public "
                          "components one at a time with a phase marker after "
@@ -2680,7 +2795,7 @@ def main() -> int:
             return 2
 
     external, why = build_root_is_external()
-    global PROVE, REIFIER, PROOF_SEGMENT, PHASE_SPLIT_ON
+    global PROVE, REIFIER, PROOF_SEGMENT, PHASE_SPLIT_ON, PHASE_ONLY
     PROVE = bool(a.prove)
     REIFIER = a.reifier
     if a.phase_split and a.reifier != "named":
@@ -2688,6 +2803,17 @@ def main() -> int:
               "has no phase markers, so the option would do nothing.", file=sys.stderr)
         return 2
     PHASE_SPLIT_ON = bool(a.phase_split)
+    if a.phase_only and a.reifier != "named":
+        print("REFUSING: --phase-only requires --reifier named.", file=sys.stderr)
+        return 2
+    if a.phase_only and a.phase_split:
+        print("REFUSING: --phase-only and --phase-split are different "
+              "experiments; pick one.", file=sys.stderr)
+        return 2
+    if a.phase_only and a.prove:
+        print("REFUSING: --phase-only emits no model to prove.", file=sys.stderr)
+        return 2
+    PHASE_ONLY = a.phase_only
     if a.proof_segment_size < 0:
         print("REFUSING: --proof-segment-size must be >= 0.", file=sys.stderr)
         return 2
@@ -2712,6 +2838,7 @@ def main() -> int:
     cfg["reifier"] = a.reifier
     cfg["proof_segment_size"] = int(a.proof_segment_size)
     cfg["phase_split"] = bool(a.phase_split)
+    cfg["phase_only"] = a.phase_only
     if a.runner_selftest:
         # Branded in the metadata rather than forbidden: the drift regressions
         # must exercise the manifest path.  The brand is what stops the result
