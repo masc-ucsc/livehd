@@ -488,13 +488,23 @@ the DYNAMIC input and flop vectors, so source `idx` costs `idx` steps.
 
 `scripts/cert_shape.py rt_intpipe_alu.dcert` kills it outright:
 
-    sources 4045  nodes 5118  outputs 2
+    sources 4045  nodes 5118  outputs 2  flops 0
     source kinds: {'const': 4041, 'input': 4}
-    input-vector chain: 4 inputs  -> at most 6 tl steps
+    (A) runtime-vector chain 6 tl steps   {'const': 0, 'input': 6}
+        indices [0, 1, 2, 3]  max 3  distinct 4/4  dense 0..m-1
 
 Four inputs.  The input-vector chain can account for SIX `tl` steps out of
 millions.  Had this gone unchecked, the next "optimization" would have targeted
 a chain that costs nothing on this design.
+
+(An earlier version of this script computed that chain as `m*(m-1)/2` and
+called it an upper bound.  That is FALSE: the cost is the sum of the ACTUAL
+indices, which for a sparse or high-indexed design exceeds `m*(m-1)/2` -- a
+single input at index 100 costs 100, where the formula says 0.  It happens to
+be right here only because this design's indices are dense `0..3`.  The script
+now sums the real indices, covers `flopQ` and `flopQAsync` (which read BOTH
+runtime vectors), range-checks deps, and prints whether the indices are dense;
+8.5 shows three real designs where the old formula would have been wrong.)
 
 ### 7.2 Varying the inputs one at a time
 
@@ -521,6 +531,10 @@ works perfectly on the node portion of the environment.
 `shalD` is exactly the input-vector chain and nothing else:
 
     shalD tl  =  nsrc*(nsrc-1)/2 + 1       EXACT at nsrc = 2,16,64,128,256,512,1024
+
+(`shalD`'s inputs sit at dense indices `0..nsrc-1`, so the sum of indices IS
+`nsrc*(nsrc-1)/2` here.  The general form is the sum of the actual indices --
+see 7.1.)
 
 `cstD` is exactly the slot chain and nothing else, and -- the key observation --
 a slot read costs its depth in the SOURCE PREFIX, `nsrc - 1 - d`, not its depth
@@ -552,14 +566,47 @@ Checked against `rt_intpipe_alu` -- a design the model was not fitted on:
               bvResize 3248  bvAnd 1170  bvMk 63  eqI 1124
     (wall 702 s, peak RSS 997 MB, diagnostic fuel 200000/2000)
 
-So:
+#### How much of the residual the chain is -- stated as bounds, not one number
 
-* **99.97%** of the residual is term (B), the source-prefix slot chain.
+An earlier revision of this section said "99.97%".  That was arrived at by
+SUBTRACTING a hand-picked set of operator primitives from the total and calling
+the rest chain, which assumes the answer.  The defensible statement is a pair of
+bounds, because `letIn` and `var` nodes are not labelled by what produced them.
+
+Directly measured counts, which sum to the total exactly:
+
+    lit 13,584 + var 8,202,953 + letIn 8,191,420 + ite 1,155
+      + prim 8,204,998 + ctorT 2 + caseT 1 + call 0  =  24,614,113
+
+    of the prim nodes, `tl` applications are 8,180,316
+
+A surviving `nthD` step emits one `tl` prim, one `letIn` and one `var`, so:
+
+| | terms | share |
+|---|---|---|
+| lower bound, 3 x tl | 24,540,948 | **99.7028%** |
+| upper bound, letIn + var + tl (all three measured) | 24,574,689 | **99.8398%** |
+| `tl` prim nodes alone | 8,180,316 | 33.23% |
+
+The bounds are tight because `letIn` exceeds `tl` by only 11,104 and `var` by
+22,637 -- i.e. almost every `letIn` and `var` in this residual belongs to the
+chain.  **Non-chain residual is between 39,424 and 73,165 terms, 7.7 to 14.3 AST
+nodes per node.**  Section 6's "~4800 terms per node" was the chain, not the
+design, by a factor of 340 to 620.
+
+The remaining points:
+
 * **99.998%** of term (B) is reads of **`const` sources** -- 4,041 of them sitting
   in a 4,045-entry source prefix, read at a mean depth of 2,024.
 * term (A), the chain the previous section would have attacked, is **6 steps**.
-* the ACTUAL operator work is **6,760 terms for 5,118 nodes -- 1.32 terms/node**.
-  The "~4800 terms per node" in section 6 was the chain, not the design.
+* `countPrim` covers 8 primitives and therefore misses **5,730** prim
+  applications in this residual outright (`bvOr`, `bvXor`, `bvNot`, `bvUint`,
+  `addI`, `subI`, `notB`, ...).  Any per-operator figure derived from it is a
+  LOWER bound on operator work, not a term count.  The earlier "6,760 operator
+  terms / 1.32 terms per node" was exactly that mistake: it counted
+  `bvResize + bvAnd + bvMk + eqI` applications plus `ite` nodes, which is
+  neither all operators nor a count of AST terms.  The honest figure for
+  non-chain work is the 7.7-14.3 nodes/node bound above.
 
 ### 7.4 Where the cost comes from, and what is not yet established
 
@@ -575,9 +622,10 @@ is not visible in the interpreter text.  The leading candidate is that `env0`
 is bound by its own `letIn` in `main`'s `lets` block (`:115`), and a dynamic
 `letIn` reifies its body (`PartialEvaluator.lean:326`), whereas the node spine
 is the RESULT of the unfolded `evalNodes` call and survives as a `PVal.cons`.
-That is a HYPOTHESIS; the experiment that would settle it is an A/B on a
-minimal surface program, let-binding a partially-static cons spine versus
-inlining it, and it has not been run.
+That was a HYPOTHESIS when this section was written.  **Section 8 runs the
+experiment and confirms it**: inlining that one binding drops `tl` to 1 on every
+`cstD` size.  The rest of 7.4 is left as written, because the reasoning it
+records was done before the answer was known.
 
 Consequences for what to do next, recorded so the next increment is not chosen
 on vibes:
@@ -589,6 +637,9 @@ on vibes:
   would remove ~99.998% of this design's residual.  That is a change to `I_hw`,
   which `IHwAdequate_proved` is stated about, so it is NOT free: it re-opens the
   adequacy proof.  It is not a specializer change and must not be sold as one.
+  **Section 8 shows this is not the change to make**: a far smaller rewrite,
+  which does not reindex or delete any slot and does not touch source
+  semantics, removes the same cost.
 * `projectDesign`'s own fuel (20000/200) is still the binding constraint at
   section 6's numbers; nothing here changes that.
 
@@ -603,3 +654,249 @@ on vibes:
 Raw logs: `.perfwork/depth-grid.log`, `.perfwork/node-depth.log`,
 `.perfwork/alu-profile.log` (kept outside the repo; the commands above
 regenerate them).
+
+## 8. The `env0` A/B: the hypothesis in 7.4 was right
+
+Section 7.4 recorded, as a hypothesis and not a finding, that the source
+portion of the environment is opaque to the specializer because `env0` is bound
+by its own `letN` in `main`'s binding block, and a dynamic `letIn` reifies its
+body.  This section runs the experiment.
+
+`Projection/Proto/InterpreterVariant.lean` applies ONE checked, local,
+source-to-source rewrite to a COPY of `hwS`.  `hwS` itself is untouched and
+remains the reference; `IHwAdequate_proved` is stated about `hwS`, not about
+the variant.
+
+    letN "env0" e (letN "env" e2 body)   ==>   letN "env" e2[env0 := e] body
+
+Single-use inlining of the immediately following binding, applied only when all
+four side conditions hold, and reported either way so a failure is visible:
+
+| condition | why | measured |
+|---|---|---|
+| `env0` not free in its own rhs | no self-reference | `selfRef 0` |
+| `env0` occurs EXACTLY once in the next rhs | work done exactly once | `useInNext 1` |
+| `env0` occurs nowhere later in the block | nothing else observes it | `useLater 0` |
+| that rhs has no `ite`/`switch`/`letN` | the use is unconditional, in the same order, and `e`'s failure is preserved -- `call` is strict in its arguments | `nextStrict true` |
+
+No binder is introduced between the two bindings, so the rewrite cannot
+capture.  That is an argument, not a proof; the variant is not proved and is
+not in the core build or the axiom audit.
+
+    rewrite: found true selfRef 0 useInNext 1 useLater 0 nextStrict true applied true
+    variant: resolves true  bta true  wfA true  erase-ok true
+
+### 8.1 Semantics first, measurement second
+
+Before any speed number, both interpreters are run against the SHARED
+reference semantics -- `interpretDesign`, not each other -- on stimulus sized
+from each design (`maxInputIdx`, so sparse and high input indices are driven
+correctly; the old fixed two-element vector was not adequate for that).
+
+    semantics: 8 designs x 3 stimuli, both interpreters vs interpretDesign -- all agree
+
+covering mixed const/input spines (`mixD 4`, `mixD 8`), SPARSE input indices
+(`sparseD`: inputs at 0 and 9), `chainD`, `fanD`, a SEQUENTIAL fixture
+(`flopD 8`), and the source-heavy `srcD`/`cstD`.  Error behaviour is a separate
+case, because the property there is that they fail TOGETHER:
+
+    out-of-range dep: ref-produced false variant-produced false  same-outcome true
+
+### 8.2 The measurement
+
+Same fork specializer on both sides, so the ONLY difference is the interpreter.
+Every residual was also executed and matched `interpretDesign`.
+
+| fixture | terms | | tl | | what the remaining `tl` is |
+|---|---:|---:|---:|---:|---|
+| `cstD 64/64`   | 13,214 | **988** | 4,033 | **1** | nothing -- chain (B) gone |
+| `cstD 256/64`  | 87,518 | **1,756** | 28,545 | **1** | nothing |
+| `cstD 512/64`  | 186,846 | **2,780** | 61,313 | **1** | nothing |
+| `cstD 1024/64` | 385,502 | **4,828** | 126,849 | **1** | nothing |
+| `srcD 256/64`  | 186,197 | 100,435 | 61,184 | 32,640 | chain (A), = 256*255/2 |
+| `mixD 128`     | 57,205 | 8,179 | 18,272 | 2,016 | chain (A), = 64*63/2 |
+| `flopD 64`     | 13,985 | 13,726 | 4,096 | 4,032 | the FLOP-vector chain |
+
+Term (B), the source-prefix slot chain, is **eliminated**: `tl` drops to 1 at
+every size, and `cstD` -- which is nothing but term (B) -- shrinks by 13x to
+80x, growing with source count exactly as the model predicts it should.
+
+Every remaining `tl` is exactly chain (A) or the flop-vector chain, neither of
+which this rewrite touches and neither of which it claims to.
+
+**`consP` is unchanged, and I first wrote that down as a good sign.  It is
+not.**  Fitting it rather than assuming it:
+
+    consP  =  nSources + nNodes + nFlops + 1      EXACT on all 8 fixtures
+              (129, 321, 577, 1089, 321, 257, 131, 1027)
+
+That is the ENVIRONMENT SPINE, not the output and flop-result lists -- `cstD`
+has one output and no flops, so those account for 1 or 2 conses, not 1,089.
+This is Trap 2 in the plan, and it catches the claim rather than exonerating
+it: the residual no longer WALKS the slot environment, but it still BUILDS it,
+one `consP` per slot.  That cost is LINEAR, not quadratic, so it is not what
+section 7 was about -- but the plan's acceptance condition is a residual with
+"no runtime slot environment AT ALL", the legacy straight-line `let` chain, and
+this residual does not meet it.  The rewrite closes the quadratic; it does not
+deliver the target shape.
+
+`flopD` barely moves, as expected -- its cost is the flop-state quadratic
+recorded in Phase 1, a third chain, still open.
+
+### 8.3 What this does NOT fix
+
+**Fuel is unchanged.**  On `rt_intpipe_alu` at `projectDesign`'s own
+20000/200, the variant still fails:
+
+    variant FAILED (MixError.outOfFuel)     wall 309.68 s   peak RSS 97,524 KB
+
+against the reference fork's `outOfFuel` after 309 s at 993 MB (section 6).
+Same wall time, same failure, **10.2x less memory**.  That is the expected
+shape: fuel counts SPECIALIZATION STEPS -- unfoldings of `nthD` and friends --
+and the rewrite does not remove a single unfolding.  It removes what those
+unfoldings EMIT.  The specializer still walks the chain; it just now collapses
+each step instead of residualising it.
+
+So the three walls separated in section 5 remain three walls.  This closes the
+RESIDUAL SIZE one for term (B) and leaves the hardcoded-fuel one exactly where
+it was.  Anyone reading "80x smaller" as "the ALU now projects" would be wrong.
+
+**Two other chains are untouched**, by construction, and both are visible in
+the table above: chain (A), the runtime input vector, which costs the sum of
+the actual input indices; and the flop-state chain, which is why `flopD` barely
+moves.  Neither is this rewrite's business.
+
+### 8.4 What it would take to promote this
+
+The variant is NOT proved and must not be counted.  The promotion path is the
+one the review named, and it is small:
+
+* the rewrite is a SINGLE-USE LET INLINING on the surface syntax, with the four
+  side conditions above.  The lemma to prove is the generic one -- inlining a
+  let whose bound variable occurs exactly once, in a strict position, in the
+  immediately following binding -- stated over `SEval`, where
+  `SurfaceSemantics.lean` already provides the relation and `SEval_sound` the
+  bridge down to `Eval`;
+* it does NOT need a new hardware semantics, and it does NOT touch the
+  specializer, so `mixDriver_iff` is untouched;
+* `IHwAdequate_proved` is stated about `hwS`.  Promoting the variant means
+  either re-deriving adequacy for `hwSVar` through that equivalence lemma, or
+  applying the rewrite to `hwS` itself and re-running the adequacy proof.  The
+  first is the cheaper and the more honest: `hwS` stays the reference and the
+  variant is related to it by a theorem.
+
+Until that lemma exists, every number in section 8 is a measurement of an
+unproved program, and the four side conditions are checked by `#eval`-style
+runtime assertions in `proto_probe --env0-ab`, not by the kernel.
+
+### 8.5 What the model predicts for the real certificates
+
+`scripts/cert_shape.py --summary` applies the section 7.3 model to all 19
+DCERT1 files in `livehd-d4-incremental/temp`.  These are **predictions**, not
+runs: only `rt_intpipe_alu` has been measured, and only (A)+(B) is modelled
+exactly -- (C), the flop hold-vector chain, is a LOWER bound (`flopD`
+residualises about twice it).
+
+| design | src | node | (A) inp | (B) slot | (C) flop | before = A+B | after = A+C |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `rt_btb_gate` | 1,784 | 1,782 | 2,286 | 1,758,607 | 2,016 | 1,760,893 | **4,302** |
+| `rt_intpipe_alu` | 4,045 | 5,118 | 6 | 8,179,105 | 0 | 8,179,111 | **6** |
+| `rt_alu_gate` | 6,137 | 6,597 | 3 | 18,828,961 | 0 | 18,828,964 | **3** |
+| `rt_decoder_gate` | 8,373 | 8,971 | 405 | 35,061,620 | 0 | 35,062,025 | **405** |
+| `rt_aes_gate` | 8,658 | 11,681 | 3 | 37,476,641 | 0 | 37,476,644 | **3** |
+| `rt_csr_regfile_gate` | 32,822 | 34,874 | 12,248 | 753,272,071 | 9,180 | 753,284,319 | **21,428** |
+| `rt_cva6_hpdcache_subsystem_gate` | 97,774 | 108,666 | 155,551 | 4,956,403,289 | 146,611 | 4,956,558,840 | **302,162** |
+
+Three to five orders of magnitude on every real design, because every one of
+them is dominated by `const` sources read out of a long source prefix -- the
+same shape as the ALU, not a peculiarity of it.
+
+Three cautions that keep this from being a reach claim:
+
+* **The "after" column is an UNDERCOUNT**, and 8.7 measures by how much on the
+  one design that has been run: it predicts 6 for `rt_intpipe_alu` and the
+  measured value is **1,211**.  The gap is the third additive term identified
+  in 8.7, a per-design constant of 1,205 here, which this model does not cover
+  and which only becomes visible once (B) is gone.  Read the column as "(B) is
+  no longer the dominant term", not as a residual size.
+
+* **Fuel, not residual size, is the binding constraint** (8.3).  The ALU still
+  fails at `projectDesign`'s own 20000/200 WITH the rewrite.  None of these
+  designs becomes projectable on this evidence.
+* The table also shows why the corrected `cert_shape.py` matters.  These
+  designs have SPARSE input indices -- `rt_btb_gate` has 5 inputs at indices
+  0,2,3,4,5 (sum 14, not 5*4/2 = 10); `rt_decoder_gate` has 27 inputs with max
+  index 29 (sum 405, not 351); `rt_csr_regfile_gate`'s lowest input index is 2.
+  The `m*(m-1)/2` formula the first version of the script used would have been
+  wrong on every one of them, and `rt_btb_gate` and `rt_csr_regfile_gate` also
+  carry `flopQAsync` sources, which read BOTH runtime vectors.
+
+### 8.6 Reproducing section 8
+
+    bash scripts/build-native.sh scripts/proto_probe.lean
+    ./.native-dev/proto_probe --env0-ab              # conditions, semantics, A/B; exit 0 only if all agree
+    ./.native-dev/proto_probe --file-ab CERT.dcert 20000 200     # projectDesign's own fuel
+    ./.native-dev/proto_probe --file-ab CERT.dcert 200000 2000   # diagnostic fuel
+    python3 scripts/cert_shape.py --summary /path/to/*.dcert
+
+`--env0-ab` exits nonzero if any side condition fails, if the variant stops
+being a different program from the reference, or if any interpreter or residual
+disagrees with `interpretDesign`.  Logs: `.perfwork/env0-ab.log`,
+`.perfwork/alu-var.log`, `.perfwork/alu-var2.log`.
+
+### 8.7 `rt_intpipe_alu` with the variant: measured, checked, and EXECUTED
+
+    fuel 200000/2000  (projectDesign's own is 20000/200)
+      terms 72558   lit 13584 var 23816 letIn 12283 ite 1155
+                    prim 21717 ctorT 2 caseT 1 call 0
+      prims: tl 1211  hd 6  consP 9165  isNil 0
+             bvResize 3248  bvAnd 1170  bvMk 63  eqI 1124
+      checkResidual: ACCEPTED, exact fuel 20207
+      seed 0..3: residual-ran true   matches interpretDesign true   (all four)
+      control: variant interpreter vs interpretDesign true
+    wall 785.74 s   RSS 101,888 KB
+
+    reference interpreter, same fuel:  24,614,113 terms, tl 8,180,316,
+                                       702 s, RSS 997,220 KB
+
+**339x fewer terms, 6,755x fewer `tl`, 9.8x less memory.**  The wall time is NOT
+comparable: this run shared the machine with a core build and an `--env0-ab`
+run.  Memory and term counts are unaffected by that.
+
+Three independent checks of the section 7.3 model fall out, and all three land:
+
+* **`tl`.**  Before: 8,180,316 = (A) 6 + (B) 8,179,105 + 1,205.  After:
+  1,211 = (A) 6 + 1,205.  **The same constant 1,205 in both.**  So (A)+(B) is
+  exactly right and the 0.015% "error" in 7.3 was never error -- it is a THIRD,
+  additive term the model does not cover, now the dominant one.  What produces
+  it is not identified; the arity histogram (two arity-64 nodes, one each of 65,
+  33, 32, 16, and 72 `MuxN`) is the obvious place to look next.
+* **`hd`.**  Model `nInputs + sourceSlotReads + c`.  Before 4+4,176+2 = 4,182
+  measured.  After 4+0+2 = **6, measured 6, exact.**
+* **non-chain terms.**  8.2 predicted the non-chain residual lay in
+  [39,424 , 73,165], i.e. 7.70-14.30 AST nodes per node.  Removing the chain
+  leaves **72,558 terms = 14.18 per node** -- inside the band, at the top.
+  The bounds were right and the upper one was tight.
+
+`consP` is 9,165 against `nSrc + nNodes + nFlops + 1` = 9,164, consistent with
+8.2: the environment spine is still built, just no longer walked.
+
+#### What this is, and what it is not
+
+This is the **first real supported design whose projected residual has been
+accepted by `checkResidual` and then EXECUTED and compared against
+`interpretDesign`** -- four stimuli, sized from the design, all matching, with
+the interpreter itself checked on the same stimulus as a control on the
+stimulus builder.
+
+It does **not** count toward the 30-block destination, for two independent
+reasons, either of which alone is disqualifying:
+
+1. **Raised fuel.**  `projectDesign` as defined (20000/200) still returns
+   `outOfFuel` on this design WITH the variant (8.3).  No fuel-respecting run
+   produced this residual.
+2. **Unproved interpreter.**  The variant is `hwSVar`, not `hwS`.
+   `IHwAdequate_proved` says nothing about it, and the equivalence lemma in 8.4
+   does not exist yet.
+
+It is also one cycle, not a trace: `trace_agree` has not been exercised here.

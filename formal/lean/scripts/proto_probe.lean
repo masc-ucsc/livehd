@@ -18,6 +18,7 @@ work across `IO.monoMsNow`, verified in the generated C.
 -/
 import LeanSemanticPrimitives.Projection.ProjectedStep
 import LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorFast
+import LeanSemanticPrimitives.Projection.Proto.InterpreterVariant
 import LeanSemanticPrimitives.Compiler.CertIO
 
 open Compiler Projection
@@ -165,11 +166,104 @@ def midD (nnode : Nat) : DesignCert where
 @[inline] def fastOf (D : DesignCert) : Except ProtoFast.MixError Program :=
   ProtoFast.mixDriver 20000 200 Hw.hwAP [encDesign D]
 
+/-- MIXED const/input spine, interleaved, so neither kind is contiguous. -/
+def mixD (n : Nat) : DesignCert where
+  sources  := (List.range n).toArray.map (fun i =>
+                if i % 2 == 0 then .input (i / 2) 4 else .const 4 (Int.ofNat (i % 13)))
+  nodes    := (List.range n).toArray.map (fun i =>
+                { op := .Op_And, width := 4, deps := #[i % n, (i * 3 + 1) % n] })
+  outputs  := #[{ slot := n + (n - 1), width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+/-- SPARSE input indices: two inputs at indices 0 and 9, so `m*(m-1)/2` is the
+wrong cost model and the vector must be sized from the max index. -/
+def sparseD : DesignCert where
+  sources  := #[.input 0 4, .const 4 7, .input 9 4, .const 4 2]
+  nodes    := #[ { op := .Op_And, width := 4, deps := #[0, 2] }
+               , { op := .Op_Or,  width := 4, deps := #[1, 3] }
+               , { op := .Op_Xor, width := 4, deps := #[4, 5] } ]
+  outputs  := #[{ slot := 6, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+/-- DELIBERATELY out of range: a dep past the end of the environment.  `I_hw`
+has no bounds check (`RuntimeSized`), so the property under test is that the
+variant FAILS EXACTLY WHERE THE REFERENCE FAILS, not that either succeeds. -/
+def oorD : DesignCert where
+  sources  := #[.input 0 4, .const 4 3]
+  nodes    := #[{ op := .Op_And, width := 4, deps := #[0, 99] }]
+  outputs  := #[{ slot := 2, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+@[inline] def fastVarOf (D : DesignCert) : Except ProtoFast.MixError Program :=
+  ProtoFast.mixDriver 20000 200 ProtoVar.hwAPVar [encDesign D]
+
+@[inline] def fastVarOfFuel (sf wf : Nat) (D : DesignCert) : Except ProtoFast.MixError Program :=
+  ProtoFast.mixDriver sf wf ProtoVar.hwAPVar [encDesign D]
+
+/-- terms, tl, consP -- the three numbers the A/B is about. -/
+def statsOf (R : Program) : Nat × Nat × Nat :=
+  let b := R.funs.map (fun fd => fd.body)
+  (szOf R, (b.map (countPrim .tl)).foldl (·+·) 0, (b.map (countPrim .consP)).foldl (·+·) 0)
+
 /-- Same, with the fuel overridden -- a DIAGNOSTIC knob, to tell "ran out of
 the hardcoded fuel" apart from any other failure.  `projectDesign` itself is
 unchanged. -/
 @[inline] def fastOfFuel (sf wf : Nat) (D : DesignCert) : Except ProtoFast.MixError Program :=
   ProtoFast.mixDriver sf wf Hw.hwAP [encDesign D]
+
+/-! ## Stimulus SIZED FROM THE DESIGN
+
+`runOne` below drives a fixed two-element input vector, which is adequate only
+for fixtures that read at most two inputs.  These build the vector from the
+design's own largest input index (including async-reset pins), so a design with
+sparse or high indices is driven correctly. -/
+
+def maxInputIdx (D : DesignCert) : Nat :=
+  D.sources.foldl (fun a s => match s with
+    | .input idx _            => max a (idx + 1)
+    | .flopQAsync _ _ ri _ _  => max a (ri + 1)
+    | _                       => a) 0
+
+def mkInputFor (D : DesignCert) (seed : Nat) : RuntimeInput :=
+  (List.range (maxInputIdx D)).toArray.map
+    (fun i => mk_bv 8 (Int.ofNat ((seed * 7 + i * 13 + 1) % 256)))
+
+def mkStateFor (D : DesignCert) (seed : Nat) : RuntimeState :=
+  { flops := (List.range D.flops.size).toArray.map
+               (fun i => mk_bv (D.flops[i]!).width (Int.ofNat ((seed * 5 + i * 3) % 16)))
+  , mems  := #[] }
+
+/-- Run a RESIDUAL (3 dynamic args) on design-sized stimulus. -/
+def runResid (R : Program) (D : DesignCert) (seed : Nat) : Option RuntimeResult :=
+  match evalFuel 4000000 R []
+      (.call R.entry [.lit (encEdges (allEdges D)), .lit (encInput (mkInputFor D seed)),
+                      .lit (encState (mkStateFor D seed))]) with
+  | .value v => decResult v
+  | _        => none
+
+/-- Run an INTERPRETER program (4 args, the certificate static) on the same. -/
+def runInterp (P : Program) (D : DesignCert) (seed : Nat) : Option RuntimeResult :=
+  match evalFuel 4000000 P []
+      (.call P.entry [.lit (encDesign D), .lit (encEdges (allEdges D)),
+                      .lit (encInput (mkInputFor D seed)),
+                      .lit (encState (mkStateFor D seed))]) with
+  | .value v => decResult v
+  | _        => none
+
+/-- The SHARED reference semantics -- what everything is ultimately checked
+against, rather than one residual against another. -/
+def refSem (D : DesignCert) (seed : Nat) : RuntimeResult :=
+  interpretDesign D (allEdges D) (mkInputFor D seed) (mkStateFor D seed)
+
+/-- Agreement INCLUDING failure: both failing counts as agreement.  Used only
+for the deliberate-error cases, where "both reject" is the property. -/
+def outcomeEq : Option RuntimeResult → Option RuntimeResult → Bool
+  | some a, some b => encResult a == encResult b
+  | none,   none   => true
+  | _,      _      => false
 
 /-- One cycle, decoded, so the A/B comparison is semantic.  A sequential design
 needs a correctly sized state, so the state is built from the design. -/
@@ -256,6 +350,75 @@ def main (args : List String) : IO UInt32 := do
             IO.println s!"srcD nsrc={ns} nnode={nn}"
             profileResidual R
       return (if bad then 2 else 0)
+  | "--env0-ab" :: _ => do
+      -- ===== 1. the rewrite's side conditions, reported either way =========
+      let r := ProtoVar.report
+      IO.println s!"rewrite: found {r.found} selfRef {r.selfRef} useInNext {r.useInNext} \
+useLater {r.useLater} nextStrict {r.nextStrict} applied {r.applied}"
+      unless ProtoVar.changed do
+        IO.eprintln "side conditions NOT met -- variant == reference, nothing to measure"
+        return 2
+      let okRes := ProtoVar.hwResolvedVar.toOption.isSome
+      let okBta := ProtoVar.hwAVar.toOption.isSome
+      let okWf  := wfAProgram ProtoVar.hwAPVar
+      let okEr  := eraseProgram ProtoVar.hwAPVar == ProtoVar.hwPVar
+      IO.println s!"variant: resolves {okRes}  bta {okBta}  wfA {okWf}  erase-ok {okEr}"
+      unless okRes && okBta && okWf && okEr do
+        IO.eprintln "variant failed resolve/bta/wf"; return 2
+
+      -- ===== 2. the VARIANT INTERPRETER vs the shared reference semantics ===
+      -- Not residual-vs-residual: both interpreters are compared to
+      -- `interpretDesign`, on stimulus sized from each design.
+      let sem : List (String × DesignCert) :=
+        [ ("mix4", mixD 4), ("mix8", mixD 8), ("sparse", sparseD)
+        , ("chain8", chainD 8), ("fan8", fanD 8), ("flop8-seq", flopD 8)
+        , ("src8", srcD 8 8), ("cst8", cstD 8 8) ]
+      let mut bad := false
+      for (nm, D) in sem do
+        for seed in [0, 1, 2] do
+          let want := refSem D seed
+          let gotR := runInterp Hw.hwP D seed
+          let gotV := runInterp ProtoVar.hwPVar D seed
+          let okR := gotR.map encResult == some (encResult want)
+          let okV := gotV.map encResult == some (encResult want)
+          unless okR && okV do
+            IO.eprintln s!"SEMANTICS {nm} seed={seed}: ref-ok {okR} variant-ok {okV}"
+            bad := true
+      IO.println s!"semantics: {sem.length} designs x 3 stimuli, both interpreters \
+vs interpretDesign -- {if bad then "MISMATCH" else "all agree"}"
+      -- error behaviour: the property is that they fail TOGETHER
+      let eR := runInterp Hw.hwP oorD 0
+      let eV := runInterp ProtoVar.hwPVar oorD 0
+      IO.println s!"out-of-range dep: ref-produced {eR.isSome} variant-produced \
+{eV.isSome}  same-outcome {outcomeEq eR eV}"
+      unless outcomeEq eR eV do bad := true
+
+      -- ===== 3. projection A/B on source-heavy fixtures =====================
+      IO.println "projection A/B (same fork specializer, two interpreters):"
+      let fx : List (String × DesignCert) :=
+        [ ("cstD 64/64", cstD 64 64), ("cstD 256/64", cstD 256 64)
+        , ("cstD 512/64", cstD 512 64), ("cstD 1024/64", cstD 1024 64)
+        , ("srcD 256/64", srcD 256 64), ("mixD 128", mixD 128)
+        , ("flopD 64", flopD 64) ]
+      for (nm, D) in fx do
+        match fastOf D, fastVarOf D with
+        | .ok A, .ok B =>
+            let (ta, la, ca) := statsOf A
+            let (tb, lb, cb) := statsOf B
+            let ra := runResid A D 0
+            let rb := runResid B D 0
+            let want := encResult (refSem D 0)
+            let okA := ra.map encResult == some want
+            let okB := rb.map encResult == some want
+            IO.println s!"  {nm}: terms {ta} -> {tb}  tl {la} -> {lb}  consP {ca} -> {cb}  \
+ vs-interpretDesign ref {okA} var {okB}"
+            unless okA && okB do bad := true
+        | a, b =>
+            IO.println s!"  {nm}: ref-ok {a.toOption.isSome} var-ok {b.toOption.isSome} \
+(at projectDesign fuel 20000/200)"
+            if a.toOption.isSome != b.toOption.isSome then
+              IO.println "    (fuel behaviour DIFFERS -- recorded, not a failure)"
+      return (if bad then 1 else 0)
   | "--node-depth" :: _ => do
       -- node-portion read depth grows as ~nnode^2/2; source prefix is 2.
       let mut bad := false
@@ -285,6 +448,37 @@ def main (args : List String) : IO UInt32 := do
               IO.println s!"{nm} nsrc={ns} nnode={nn}"
               profileResidual R
       return (if bad then 2 else 0)
+  | "--file-ab" :: p :: a :: b :: _ => do
+      -- A real certificate, both interpreters, same fork specializer.
+      let D ← CertIO.loadCert p
+      IO.println s!"{p}: sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size}"
+      unless ProtoVar.changed do IO.eprintln "variant not applied"; return 2
+      let sf := (a.toNat?).getD 20000
+      let wf := (b.toNat?).getD 200
+      IO.println s!"fuel {sf}/{wf}  (projectDesign's own is 20000/200)"
+      match fastVarOfFuel sf wf D with
+      | .error e => do IO.eprintln s!"variant FAILED ({repr e})"; return 2
+      | .ok R    => do
+          profileResidual R
+          let frag := Hw.checkResidual R
+          match frag with
+          | some fuel => IO.println s!"  checkResidual: ACCEPTED, exact fuel {fuel}"
+          | none      => IO.println "  checkResidual: rejected (not the one-function call-free fragment)"
+          -- EXECUTE it, on stimulus sized from the design, against the SHARED
+          -- reference semantics -- not against another residual.
+          let mut bad := false
+          for seed in [0, 1, 2, 3] do
+            let want := encResult (refSem D seed)
+            let got  := runResid R D seed
+            let ok   := got.map encResult == some want
+            IO.println s!"  seed {seed}: residual-ran {got.isSome}  \
+matches interpretDesign {ok}"
+            unless ok do bad := true
+          -- and the INTERPRETER itself, as a control on the stimulus builder
+          let ctl := runInterp ProtoVar.hwPVar D 0
+          IO.println s!"  control: variant interpreter vs interpretDesign \
+{ctl.map encResult == some (encResult (refSem D 0))}"
+          return (if bad then 1 else 0)
   | "--file-profile" :: p :: a :: b :: _ => do
       let D ← CertIO.loadCert p
       IO.println s!"{p}: sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size}"
