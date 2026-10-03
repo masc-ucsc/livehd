@@ -1659,3 +1659,77 @@ in-flight runs, and one of them cannot produce those:
 |---|---|---|---|---|---|
 | 2877239 | `proto_probe --host-var` | seeds **[0,1,4] only** | **NOT RUN** | **NOT RUN** | its own output says "3 seeds, no trace, no control -- FEASIBILITY evidence".  It is also the OLD binary, which predates the checker-rejection gate fix: if its checker rejects, its exit status is the OLD, WRONG one, and that caveat stands regardless of what the present source says. |
 | 3238710 | `total_probe` | 6 width-aware | yes | yes | full acceptance through the checked simulator path belongs to THIS run only |
+
+## 17. The native builds are `-O0`, and three profile claims withdrawn
+
+### 17.1 What the sample does and does NOT show
+
+`perf record -F 49 -p 2877239 -- sleep 12`, 569 samples, 0 lost, **no
+`-g`/`--call-graph`**.  So these are SELF samples only:
+
+    19.47% lean_is_ctor   10.63% lean_ptr_tag   7.40% lean_to_ctor  ...
+     2.82% l_Projection_prepare   2.45% l_Projection_PVal_toPRes
+     1.75% l_Projection_PVal_shift
+
+**Withdrawn: "the dominant stacks map to `prepare`/`toPRes`/`shift`".**  Without
+call chains the helper samples cannot be attributed to any caller.  What the
+sample supports is only that those three functions are ACTIVE, which is
+consistent with the earlier profiles -- not that they account for the helper
+time.
+
+**Withdrawn: the proposed discriminator** "a moving worklist should change the
+distribution, a tight loop should not".  It is not a discriminator in either
+direction: homogeneous productive work keeps the same distribution, and a
+pathological loop can vary.  A second histogram alone cannot establish progress
+or termination.
+
+**Qualified: the binary hash.**  `/proc/2877239/exe` matching
+`hostvar-alu-capture.json` identifies the sampled EXECUTABLE.  It is not an
+exact source/build reconstruction: that capture was taken with 4 dirty files
+and a code list that did not cover every backend-relevant source.
+
+### 17.2 The optimization setting, established rather than assumed
+
+`build-native.sh` calls `leanc -c` with no optimization flag, which says
+nothing on its own.  Checked directly:
+
+* `leanc --print-cflags` emits `-fPIC -fvisibility=hidden -ffunction-sections
+  -fdata-sections -fstack-clash-protection` and **no `-O` at all**;
+* `leanc -v` shows it drives
+  `.elan/toolchains/leanprover--lean4---v4.31.0/bin/clang`, **clang 22.1.4**,
+  with no `-O` in the command line.  clang's default is `-O0`;
+* the SHIPPED objects carry Lean's `static inline` runtime helpers as REAL
+  local text symbols -- `7 of 7` of `lean_is_ctor`, `lean_ptr_tag`,
+  `lean_to_ctor`, `lean_ctor_get`, `lean_ctor_set`, `lean_align`,
+  `lean_is_scalar` in both `Projection_PartialEvaluator.o` and
+  `proto_probe.o`.  At `-O2` those are inlined away;
+* A/B on the SAME generated `.c`, into a scratch directory, nothing shipped
+  touched:
+
+      leanc (default) -> 5 helper symbols, 404,512 bytes
+      leanc -O2       -> 2 helper symbols, 624,448 bytes
+
+So **every native binary in this project, and every wall-clock number recorded
+in this file, was produced at `-O0`.**  That is also the straightforward
+reading of a sample in which ~60% of the time sits in functions that would not
+exist at `-O2`.
+
+### 17.3 What this does and does not invalidate
+
+* **Absolute times are inflated by an unknown factor.**  1,226 s, 2,413 s,
+  190.91 s and the rest are `-O0` numbers.  No hardware extrapolation should be
+  made from them, and none has been.
+* **Ratios between two `-O0` builds are less affected** -- both sides carry the
+  same handicap -- but "less affected" is not "unaffected": `-O0` can change
+  where the bottleneck is, so even 2.66x and 31.11x are `-O0` ratios and are
+  not safe to carry to an optimized build.
+* **Nothing about CORRECTNESS changes.**  Every theorem, every `#guard`, and
+  every reference-agreement result is independent of optimization level.
+
+### 17.4 Bounded A/B, proposed and NOT run
+
+Build ONE `-O2` binary under a different name, leaving every in-flight process
+and shipped artifact alone, and re-run a small fixture ladder on it.  That
+gives a measured `-O0` vs `-O2` factor on this codebase instead of a guess, and
+it is the prerequisite for any timing claim that is meant to survive.  It is
+NOT a reason to interrupt the running acceptance experiment.
