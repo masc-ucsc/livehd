@@ -61,6 +61,14 @@ SEMANTIC_KEYS = [
                                             # different experiments
     "reifier",                              # named and legacy rows describe
                                             # DIFFERENT emitted functions
+    # An in-process proof and a module proof are different experiments
+    # producing different evidence, and a different chunk size is a different
+    # emitted function, so rows from either must not be added together.
+    "proof_backend", "chunk_size",
+    # Diagnostic modes change what the probe DOES: `--phase-split` runs the
+    # executable work twice and `--phase-only` runs one component and no
+    # report, so their timings and gates are not comparable with a normal row.
+    "proof_segment_size", "phase_split", "phase_only",
 ]
 
 # Present only on a run that aborted on artifact drift.  Classified so the
