@@ -242,7 +242,7 @@ def cmd_prelaunch(a):
     print(f'pre-launch capture written to {a.out}')
 
 
-def cmd_record(a):
+def record_one(a):
     t = open(a.log).read()
     marker = RUNNERS[a.runner]['log_marker']
     if marker not in t:
@@ -316,6 +316,18 @@ def cmd_record(a):
         f.write(json.dumps(rec, sort_keys=True) + '\n')
     print(f'appended {rec["design"]} (exit {rec["exit"]!r}, {exit_evidence}) to {out}')
     return rec
+
+
+def cmd_record(a):
+    """CLI wrapper.  `record_one` returns the RECORD, which is a payload, not a
+    status: returning it from here made `main`'s `sys.exit(a.fn(a) or 0)` call
+    `sys.exit(dict)`, which prints the whole dict to stderr and exits 1.  The
+    record appended fine; the process still reported failure.
+
+    Recording success is independent of the recorded experiment's outcome: a
+    run that exited 1 is recorded, and recording it is an exit-0 event."""
+    record_one(a)
+    return 0
 
 
 def cmd_selftest(_a):
@@ -414,10 +426,17 @@ def cmd_selftest(_a):
     # PROJECT-LOCAL temp manifest, never the real one.
     import tempfile, shutil, argparse as _ap
     # project-local, and OUTSIDE the git repo so a crashed test leaves no
-    # artifact in a tracked tree
-    scratch = os.path.abspath(os.path.join(LEAN, '..', '..', '..', '.perfwork'))
-    tmp = tempfile.mkdtemp(prefix='recordtest-',
-                           dir=scratch if os.path.isdir(scratch) else None)
+    # artifact in a tracked tree.  `dir=None` would silently fall back to /tmp
+    # on a fresh checkout, which the workspace instructions forbid, so the
+    # directory is CREATED and a failure is raised rather than papered over.
+    scratch = os.path.abspath(os.path.join(LEAN, '..', '..', '..',
+                                           '.perfwork', 'recorder-tests'))
+    try:
+        os.makedirs(scratch, exist_ok=True)
+    except OSError as err:
+        raise SystemExit(f'cannot create the project-local test directory '
+                         f'{scratch}: {err}.  Refusing to fall back to /tmp.')
+    tmp = tempfile.mkdtemp(prefix='recordtest-', dir=scratch)
     try:
         cert = os.path.join(tmp, 'f.dcert')
         open(cert, 'w').write('DCERT1\n0\n0\n0\n0\n0\n')
@@ -427,7 +446,7 @@ def cmd_selftest(_a):
             lg = os.path.join(tmp, 'l.log'); open(lg, 'w').write(logtext)
             ns = _ap.Namespace(log=lg, cert=cert, provenance='test', capture=capture,
                                runner=runner, out=manifest)
-            return cmd_record(ns)
+            return record_one(ns)
 
         FULL_TP = ('  sources 2 nodes 1 flops 0 outputs 1 clocks 1\n'
                    '  support: wf true memFree true sources true ops true '
@@ -489,6 +508,32 @@ def cmd_selftest(_a):
         check('e2e/fileab-bound-alternation', r['check_residual_bound'], 19)
         check('e2e/fileab-seeds', r['stimuli']['count'], 1)
 
+        # ---- REAL SUBPROCESS CLI.  Everything above calls `record_one`
+        # directly, so none of it exercises the PROCESS EXIT STATUS -- which
+        # was broken: `main` did `sys.exit(a.fn(a) or 0)` on a returned record,
+        # printing the whole dict to stderr and exiting 1 after a successful
+        # append.  Recording success is independent of the RECORDED
+        # experiment's outcome, so exits 0 / 1 / unknown must all record with
+        # process exit 0 and exactly one new row.
+        for nm, logtext in [('exit0', FULL_TP), ('exit1', FAIL_TP), ('unknown', TRUNC)]:
+            cli_log = os.path.join(tmp, f'cli-{nm}.log')
+            open(cli_log, 'w').write(logtext)
+            cli_manifest = os.path.join(tmp, f'cli-{nm}.jsonl')
+            proc = subprocess.run(
+                [sys.executable, os.path.abspath(__file__), 'record', cli_log, cert,
+                 '--provenance', 'cli-test', '--runner', 'total-probe',
+                 '--out', cli_manifest],
+                capture_output=True, text=True)
+            check(f'cli/{nm}-exit', proc.returncode, 0)
+            check(f'cli/{nm}-rows',
+                  len([l for l in open(cli_manifest).read().split('\n') if l.strip()]), 1)
+            # a dict on stderr is the signature of the bug
+            check(f'cli/{nm}-no-dict-stderr',
+                  ("'design'" in proc.stderr or proc.stderr.strip().startswith('{')),
+                  False)
+            check(f'cli/{nm}-row-parses',
+                  isinstance(json.loads(open(cli_manifest).read().strip()), dict), True)
+
         # the real manifest must be untouched
         check('e2e/wrote-only-temp', os.path.getsize(manifest) > 0, True)
         check('e2e/five-records', len(open(manifest).read().strip().split('\n')), 5)
@@ -517,7 +562,9 @@ def main():
     r.set_defaults(fn=cmd_record)
     s = sub.add_parser('selftest'); s.set_defaults(fn=cmd_selftest)
     a = ap.parse_args()
-    sys.exit(a.fn(a) or 0)
+    rc = a.fn(a)
+    # never `sys.exit(<payload>)`: anything that is not an int is a success
+    sys.exit(rc if isinstance(rc, int) else 0)
 
 
 if __name__ == '__main__':
