@@ -12,11 +12,7 @@ case "$mode" in
   legacy) extra=(--set sim.slop_u=false) ;;
   *) echo "unknown pure-loop mode: $mode" >&2; exit 1 ;;
 esac
-# sim.unroll_sites=0: the structural checks below are about the ROLLED pure
-# evaluator (one `__pure_eval`, a runtime ordinal loop, no `__li3` replica);
-# the default would splice loops this small flat.
 "$LHD" sim lhd/tests/lhd_sim_pure_loop.prp --workdir "$W/$mode" --set compile.unroll=false \
-  --set sim.unroll_sites=0 \
   --set sim.tune.profile=off "${extra[@]}" --result-json "$W/$mode.json" --diag-fmt pretty
 python3 - "$W" "$mode" <<'PY'
 import json, pathlib, sys

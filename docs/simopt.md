@@ -700,12 +700,13 @@ Never tunable, and so never under `tune`: `sim.unknown_zero`, `sim.init_zero`
 and `lhd.seed` (they change simulated values), `sim.vcd*` and `sim.checkpoint*`
 (observability), `sim.jobs`, `sim.ninja`, `sim.hlop_dir`, `sim.iassert_dir` and
 `sim.compile_only` (build plumbing), and `sim.slop_u` / `sim.debug` (validation
-fallbacks). `sim.unroll_sites` (default 8192) is speed-only but applied, never
-trialed: a compact loop whose trip count times its body's node count (nested
-loops multiplied out) is at most N is expanded into straight-line code before
-coloring, which is what a Verilog generate loop already is; measured on
-lhdtrack, br_mux_onehot 2.5x and br_arb_lru 5.6x cycles/s, both then at or past
-their Verilog twins. 0 keeps every loop rolled.
+fallbacks). `sim.unroll_sites` (default 0 = off) is a debug/experiment knob,
+applied, never trialed: a compact loop whose trip count times its body's node
+count (nested loops multiplied out) is at most N is expanded into straight-line
+code before coloring, which is what a Verilog generate loop already is. It is
+off by ruling -- the compact form's O(1) code footprint is what the large
+benchmarks depend on -- and exists to measure what the rolled protocol costs
+(lhdtrack: br_mux_onehot 2.5x, br_arb_lru 5.6x cycles/s flat).
 
 ### 13.2 Modes
 

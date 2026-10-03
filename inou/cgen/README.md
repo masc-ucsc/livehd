@@ -2,25 +2,23 @@
 
 `sim_color_plan.cpp` builds a simulator-private, occurrence-aware DAG. It keeps
 compact loops as calls; each loop definition is compiled separately, so nested
-loops retain their hierarchy. Before planning, `Cgen_sim::prepare_graph`
-expands a SMALL compact loop into straight-line code on the private library
-(`sim.unroll_sites`, default 8192: the trip count times the body's node count,
-nested loops multiplied out; 0 keeps every loop rolled). A rolled loop is one
-call per iteration with runtime-offset lane slices and a change-tested carry;
-flat, it is the constant-offset code the Verilog reader produces for a generate
-loop. On lhdtrack, br_mux_onehot (one 16-lane loop) ran 2.5x and br_arb_lru (a
-16x16 nest) 5.6x faster flat, both then at or past their Verilog twins. The
-replicas are spliced into the body that held the loop and one cprop/bitwidth
-round folds the now-constant ordinal arithmetic; left as instances they would
-still be a call each with a change-tested carry (br_arb_lru: 7950 sites and 201
-colors against 906 and 8). The expansion never changes a simulated value, an
-observation run (VCD, probe, query) keeps every loop rolled, and
-`:expect_instances:` fixtures count the compiled graph, not this private copy.
-Larger loops keep the shared body. Flattening grows a module's site count, so
-`sim.tune.fence` can newly fence a single-use module (br_flow_burst_mux_lru:
-2 to 7 colors, 1.38 s to 2.21 s; with `sim.tune.fence=none` the flat form runs
-1.21 s) -- the fence heuristic's documented cost on an always-toggling design,
-which the tuner resolves on a persistent workdir. Carry and independent work from one source loop
+loops retain their hierarchy. Compact loops are PRESERVED by ruling: the
+O(1)-in-trip-count code footprint is what the large benchmarks depend on. The
+debug/experiment knob `sim.unroll_sites` (default 0) lets
+`Cgen_sim::prepare_graph` expand a small loop into straight-line code on the
+private library to measure what the rolled form costs: the replicas are spliced
+into the body that held the loop and one cprop/bitwidth round folds the
+now-constant ordinal arithmetic (left as instances they would still be a call
+each with a change-tested carry). A rolled loop is one call per iteration with
+runtime-offset lane slices and a change-tested carry; flat, it is the
+constant-offset code the Verilog reader produces for a generate loop, and on
+lhdtrack that was 2.5x (br_mux_onehot) to 5.6x (br_arb_lru) -- the gap the
+rolled protocol has to close by hoisting invariants out of the body at cprop
+time and by cheaper carry and slice handling here. The expansion never changes
+a simulated value, an observation run (VCD, probe, query) keeps every loop
+rolled regardless, and `:expect_instances:` fixtures count the compiled graph.
+Flattening also grows a module's site count, so `sim.tune.fence` can newly
+fence a single-use module (br_flow_burst_mux_lru: 2 to 7 colors). Carry and independent work from one source loop
 execute in the same ordinal traversal. Independent sibling loops with equal
 start, step and count also fuse, regardless of source location. A topological
 ancestor check rejects dependent pairs; groups are bounded to eight loops,

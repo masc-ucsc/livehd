@@ -342,13 +342,13 @@ public:
       , tune_vector_(tune_.tv1())
       , env_(Sim_env::read()) {}
 
-  // sim.unroll_sites (see prepare_graph). The default is a few thousand flat
-  // sites, counted BEFORE folding: br_arb_lru's 16x16 priority nest is ~5k
-  // nodes of index arithmetic that cprop collapses to ~900 once the ordinals
-  // are constants, and it stayed rolled at 4096 (8.7 s) but fully flattens at
-  // 8192 (3.1 s, the same as 16k and 64k). Still a fraction of one evaluator
-  // shard of generated code.
-  static constexpr uint32_t kDefaultUnrollSites = 8192;
+  // sim.unroll_sites (see prepare_graph): a DEBUG/EXPERIMENT knob, off by
+  // default. Compact loops are preserved as the ruling for every backend: the
+  // O(1)-in-trip-count code footprint is what makes the large benchmarks
+  // compile and run at all, and a flat copy per ordinal gives that up. Setting
+  // it (flat cost ceiling, counted before folding; br_arb_lru's 16x16 nest is
+  // ~5k) is the quick way to measure what a rolled loop costs the simulator.
+  static constexpr uint32_t kDefaultUnrollSites = 0;
   void                      set_unroll_sites(uint32_t n) { unroll_sites_ = n; }
 
 private:

@@ -50,18 +50,7 @@ cat "${PRPS[@]}" > "$batch"
 # BRANCH_JOBS*2 with its cpu: tag; keep the two in step when changing either.
 SMOKE_JOBS="${SIM_COLOR_SMOKE_JOBS:-8}"
 BRANCH_JOBS="${SIM_COLOR_BRANCH_JOBS:-6}"
-# Every sim here asserts the ROLLED compact-loop machinery (one scratch callee per
-# stateless leaf loop, the fused-loop kernel, the backend switch of a compact
-# kernel), so the small-loop splice `sim.unroll_sites` applies by default is
-# pinned off: these fixtures' loops are exactly the size it would flatten.
-run() {
-  if [ "$1" = sim ]; then
-    shift
-    "$LHD" sim --set sim.unroll_sites=0 "$@" -q
-  else
-    "$LHD" "$@" -q
-  fi
-}
+run() { "$LHD" "$@" -q; }
 run sim "$batch"  --set sim.checkpoint=false \
   --set sim.jobs="$SMOKE_JOBS" --workdir "$work/slop" --result-json "$work/slop.json" &
 slop_pid=$!

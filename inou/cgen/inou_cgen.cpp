@@ -98,9 +98,10 @@ void Inou_cgen::setup() {
                         "built-in ratio with it on",
                         "");
   m2.add_label_optional("unroll_sites",
-                        "sim.unroll_sites: expand a compact loop into straight-line code when its trip count times its "
-                        "body's node count (nested loops multiplied out) is at most N in [0, 2^20]; 0 keeps every loop rolled",
-                        "8192");
+                        "sim.unroll_sites (debug/experiment): expand a compact loop into straight-line code when its trip "
+                        "count times its body's node count (nested loops multiplied out) is at most N in [0, 2^20]; the "
+                        "default 0 keeps every loop rolled",
+                        "0");
   register_inou("cgen", m2);
 }
 

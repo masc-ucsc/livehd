@@ -4178,18 +4178,18 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // Snapshot in reverse storage order for the occurrence formatter's
   // module-scoped ordinal accounting.
   //
-  // A SMALL loop is expanded the same way, for speed rather than correctness
-  // (sim.unroll_sites, default kDefaultUnrollSites flat sites, 0 = never). The
-  // rolled form is one call per iteration: the invariant inputs are bound and
-  // change-tested per lane, every lane slice is a runtime-offset extraction
-  // from the whole word, and the carry is compared and stored between calls.
-  // Flat, the same loop is the straight-line code the Verilog reader produces
-  // for a generate loop: constant-offset slices the compiler folds, no call,
-  // no carry traffic. Measured on lhdtrack (verilator-tuned cycle counts):
-  // br_mux_onehot (one 16-lane loop) 4.00 s -> 1.61 s, br_arb_lru (a 16x16
-  // nest) 18.3 s -> 3.26 s, both then at or past their Verilog twins. Big
-  // loops keep the shared body: unrolling them multiplies code and host
-  // compile time for a body whose per-call overhead is already amortized.
+  // A small loop CAN be expanded the same way for speed (sim.unroll_sites, a
+  // debug/experiment knob: a flat-cost ceiling, 0 = never, and 0 is the
+  // default). The rolled form is one call per iteration: the invariant inputs
+  // are bound and change-tested per lane, every lane slice is a runtime-offset
+  // extraction from the whole word, and the carry is compared and stored
+  // between calls; flat, the same loop is the straight-line code the Verilog
+  // reader produces for a generate loop (lhdtrack: br_mux_onehot 4.00 s ->
+  // 1.34 s, br_arb_lru 18.3 s -> 3.1 s). It is OFF by ruling: the compact
+  // form's O(1)-in-trip-count footprint is what the large benchmarks depend
+  // on, so the loop body's cost is to be cut where the loop stays rolled --
+  // invariants hoisted out of the body at cprop time, cheaper carry and slice
+  // protocols here -- and the knob exists to measure how far that is.
   std::vector<hhds::Node_class> fallback_loops;
   std::vector<hhds::Node_class> small_loops;
   const auto small_loop = [&](const hhds::Node_class& n) { return unroll_sites_ > 0 && loop_unrolled_cost(n) <= unroll_sites_; };

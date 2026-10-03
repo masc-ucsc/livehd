@@ -710,33 +710,35 @@ size_t count_subs(const std::shared_ptr<hhds::Graph>& g) {
 }
 }  // namespace
 
-// prepare_graph expands a compact loop whose flat cost (count x body nodes) is
-// within sim.unroll_sites and splices every replica into the body, so no
-// instance is left; a loop past the budget, or any loop with the knob at 0,
-// keeps its native call. The expansion is a sim-private rewrite: it must not
-// touch the body definition the rolled form still calls.
-TEST(CgenSim, SmallCompactLoopIsSplicedFlatAndLargeOneStaysRolled) {
+// By default (sim.unroll_sites = 0) prepare_graph keeps every compact loop as
+// its native call: the compact form is preserved by ruling. With the debug knob
+// set, a loop whose flat cost (count x body nodes) is within the ceiling is
+// expanded and every replica spliced into the body, so no instance is left,
+// while a loop past the ceiling keeps its call. The expansion is a sim-private
+// rewrite: it must not touch the body definition the rolled form still calls.
+TEST(CgenSim, CompactLoopStaysRolledByDefaultAndSplicesFlatOnlyWhenAsked) {
   const auto dir = (std::filesystem::temp_directory_path() / "cgen_sim_unroll_test").string();
   std::filesystem::create_directories(dir);
   {
-    auto     f = make_unroll_loop("small", 4);
+    auto     f = make_unroll_loop("default", 4);
     Cgen_sim prep(dir, "", std::string(f.parent->get_name()), "false");
     ASSERT_TRUE(prep.prepare_graph(f.parent));
-    EXPECT_EQ(count_loops(f.parent), 0u) << "4 x 1 node is under the default budget: the loop is expanded";
+    EXPECT_EQ(count_loops(f.parent), 1u) << "the default keeps a 4-iteration loop rolled";
+  }
+  {
+    auto     f = make_unroll_loop("small", 4);
+    Cgen_sim prep(dir, "", std::string(f.parent->get_name()), "false");
+    prep.set_unroll_sites(4096);
+    ASSERT_TRUE(prep.prepare_graph(f.parent));
+    EXPECT_EQ(count_loops(f.parent), 0u) << "4 x 1 node is under the requested ceiling: the loop is expanded";
     EXPECT_EQ(count_subs(f.parent), 0u) << "every replica is spliced into the parent, none stays an instance";
   }
   {
     auto     f = make_unroll_loop("large", 1'000'000'000ULL);
     Cgen_sim prep(dir, "", std::string(f.parent->get_name()), "false");
+    prep.set_unroll_sites(4096);
     ASSERT_TRUE(prep.prepare_graph(f.parent));
-    EXPECT_EQ(count_loops(f.parent), 1u) << "a billion-iteration loop is past any budget and stays a call";
-  }
-  {
-    auto     f = make_unroll_loop("off", 4);
-    Cgen_sim prep(dir, "", std::string(f.parent->get_name()), "false");
-    prep.set_unroll_sites(0);
-    ASSERT_TRUE(prep.prepare_graph(f.parent));
-    EXPECT_EQ(count_loops(f.parent), 1u) << "sim.unroll_sites=0 keeps every loop rolled";
+    EXPECT_EQ(count_loops(f.parent), 1u) << "a billion-iteration loop is past any ceiling and stays a call";
   }
   {
     // The budget is a ceiling on the FLAT cost, not the trip count: 5 x 1 nodes
