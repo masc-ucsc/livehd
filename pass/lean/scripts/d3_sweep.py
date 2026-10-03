@@ -787,7 +787,7 @@ def run_group(cmd, cwd, timeout, env=None):
             _GROUPS.discard(pgid)
 
 PROBE_TAIL_ONLY = """
-reify_design_named {m}_designCert as d3_fast
+{reifycmd} {m}_designCert as d3_fast
 
 #eval show IO Unit from do
   let t ← IO.monoMsNow
@@ -960,7 +960,7 @@ PROBE_TAIL_NAMED = """
   let t ← IO.monoMsNow
   IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"cert_elaborated t={{t}}"
 
-reify_design_named {m}_designCert as d3_fast
+{reifycmd} {m}_designCert as d3_fast
 
 #eval show IO Unit from do
   let t ← IO.monoMsNow
@@ -1370,24 +1370,23 @@ def make_probe(cert: pathlib.Path, m: str, samples: int, reifier: str = "legacy"
     drops `<m>_step_correct` and the trailing `<m>_residual`/`#print axioms`,
     all of which this probe replaces or does not need.
     """
-    if reifier == "named":
-        # A Lean string literal for the marker path. `json.dumps` escapes exactly
-        # the characters Lean's string syntax also escapes, and an empty path
-        # would make `withFile` throw, so the markers are emitted only when the
-        # caller supplied one.
+    if reifier in ("named", "shared"):
+        # A Lean string literal for the marker path. `json.dumps` escapes exactly        # the characters Lean's string syntax also escapes, and an empty path        # would make `withFile` throw, so the markers are emitted only when the        # caller supplied one.
         if not phase_file:
             raise ValueError("make_probe(reifier='named') needs phase_file: the "
                              "phase markers write to it, and a probe without one "
                              "would report nothing when the target is killed")
         head = PROBE_HEAD + IMPORTS_MARKER.format(phase=json.dumps(phase_file))
         ph = json.dumps(phase_file)
+        reifycmd = ("reify_design_shared" if reifier == "shared"
+                    else "reify_design_named")
         if phase_only:
             body = PHASE_ONLY_BODY[phase_only].format(m=m, samples=samples, phase=ph)
             return _cert_body(cert, head) + PROBE_TAIL_ONLY.format(
-                m=m, phase=ph, component=body)
+                m=m, phase=ph, component=body, reifycmd=reifycmd)
         split = PHASE_SPLIT.format(m=m, samples=samples, phase=ph) if phase_split else ""
         return _cert_body(cert, head) + PROBE_TAIL_NAMED.format(
-            m=m, samples=samples, phase=ph, split=split)
+            m=m, samples=samples, phase=ph, split=split, reifycmd=reifycmd)
     return _cert_body(cert, PROBE_HEAD) + PROBE_TAIL.format(m=m, samples=samples)
 
 
@@ -1441,6 +1440,12 @@ def make_proof_probe(cert: pathlib.Path, m: str, reifier: str = "legacy",
     by a proof that did not work out.  `proof` is the LAST gate and must not be
     able to retract an earlier one.
     """
+    if reifier == "shared":
+        # No proof bridge exists for the chunked model yet. Refusing is the
+        # point: a runtime-only model must not reach the proof gate.
+        raise ValueError("reify_design_shared has no proof path yet: --prove "
+                         "with --reifier shared would credit a model that no "
+                         "theorem covers")
     if reifier == "named":
         # `set_option d3.segment` goes HERE -- after the imports and the
         # certificate body, immediately before the command it affects, and in
@@ -2167,7 +2172,7 @@ def extract_gates(row, out, rc, timeout, expect_module=None, expect_samples=None
     shape = _one(r"^D3GATE module=\S+ (.*)$", out)
     # either reifier: the two emit the same line shape on purpose, so the gate
     # does not have to know which mode the run is in.
-    emitted = _one(r"^reify_design(?:_named)?: \S+ emitted, \d+ sources, (\d+) bindings$", out)
+    emitted = _one(r"^reify_design(?:_named|_shared)?: \S+ emitted, \d+ sources, (\d+) bindings$", out)
     clean_exit = rc == 0 and not ERR_RE.search(out) and "error:" not in out
 
     if shape is None:
@@ -2203,7 +2208,7 @@ def extract_gates(row, out, rc, timeout, expect_module=None, expect_samples=None
                   "this log does not describe this certificate")
         return
     if emitted is not None:
-        em = re.search(r"^reify_design(?:_named)?: \S+ emitted, (\d+) sources, (\d+) bindings$",
+        em = re.search(r"^reify_design(?:_named|_shared)?: \S+ emitted, (\d+) sources, (\d+) bindings$",
                        out, re.M)
         if em and (em.group(1) != shape_fields.get("sources")
                    or em.group(2) != shape_fields.get("bindings")):
@@ -2470,7 +2475,7 @@ def main() -> int:
                          "bindings (0 = one monolithic walk, the default). Sets "
                          "`d3.segment` in the PROOF probe only, and requires "
                          "--reifier named.")
-    ap.add_argument("--reifier", choices=("legacy", "named"), default="legacy",
+    ap.add_argument("--reifier", choices=("legacy", "named", "shared"), default="legacy",
                     help="which reifier BOTH stages use. `legacy` (default) is "
                          "`reify_design` + `prove_reified`, unchanged. `named` is "
                          "`reify_design_named` + `prove_reified_incr`, where the "
@@ -2798,12 +2803,16 @@ def main() -> int:
     global PROVE, REIFIER, PROOF_SEGMENT, PHASE_SPLIT_ON, PHASE_ONLY
     PROVE = bool(a.prove)
     REIFIER = a.reifier
-    if a.phase_split and a.reifier != "named":
+    if a.phase_split and a.reifier not in ("named", "shared"):
         print("REFUSING: --phase-split requires --reifier named. The legacy probe "
               "has no phase markers, so the option would do nothing.", file=sys.stderr)
         return 2
     PHASE_SPLIT_ON = bool(a.phase_split)
-    if a.phase_only and a.reifier != "named":
+    if a.prove and a.reifier == "shared":
+        print("REFUSING: --reifier shared has no proof bridge yet, so --prove "
+              "would credit a model that no theorem covers.", file=sys.stderr)
+        return 2
+    if a.phase_only and a.reifier not in ("named", "shared"):
         print("REFUSING: --phase-only requires --reifier named.", file=sys.stderr)
         return 2
     if a.phase_only and a.phase_split:

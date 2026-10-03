@@ -121,52 +121,59 @@ diamond's value tree grows with the graph's reconvergence rather than its size.
 
 The positional memory/bit-vector split comes from `exprRefsTyped`'s rule, applied
 per constructor here. -/
-def valRef (base : Name) (nsrc : Nat) (isMem : Bool) (r : ResidualRef) : MetaM Term :=
+def valRef (base : Name) (nsrc : Nat) (loc : Bool) (isMem : Bool)
+    (r : ResidualRef) : MetaM Term :=
   if r < nsrc then
     let e0 := mkIdent (Name.mkSimple "e0")
     if isMem then `(refMem $e0 $(quote r)) else `(refBV $e0 $(quote r))
+  else if loc then
+    -- SHARED form: the operand is a local the let-chain already bound, so it
+    -- is evaluated once however many consumers read it. The `val{k} e0` call
+    -- below is the other form, where every consumer re-evaluates the cone.
+    pure (mkIdent (Name.mkSimple s!"v{r - nsrc}"))
   else
     let nm := mkIdent (base ++ Name.mkSimple s!"val{r - nsrc}")
     let e0 := mkIdent (Name.mkSimple "e0")
     `($nm $e0)
 
-private def valRefs (base : Name) (nsrc : Nat) (rs : Array ResidualRef) : MetaM Term := do
-  let args ← rs.mapM (valRef base nsrc false)
+private def valRefs (base : Name) (nsrc : Nat) (loc : Bool)
+    (rs : Array ResidualRef) : MetaM Term := do
+  let args ← rs.mapM (valRef base nsrc loc false)
   `([$args,*])
 
 /-- Fail LOUDLY, by construction: this match is total over `ResidualExpr`, so a
 constructor added later is a compile error in this file rather than a silent gap
 inside a generated proof. -/
-private def valSyntax (base : Name) (nsrc : Nat) : ResidualExpr → MetaM Term
-  | .rsum w n a     => do `(Residual.rsumV $(quote w) $(quote n) $(← valRefs base nsrc a))
-  | .rmult w a      => do `(Residual.rmultV $(quote w) $(← valRefs base nsrc a))
-  | .rand w a       => do `(Residual.randV $(quote w) $(← valRefs base nsrc a))
-  | .rorBits w a    => do `(Residual.rorBitsV $(quote w) $(← valRefs base nsrc a))
-  | .rxor w a       => do `(Residual.rxorV $(quote w) $(← valRefs base nsrc a))
-  | .rredOr w a     => do `(Residual.rredOrV $(quote w) $(← valRefs base nsrc a))
-  | .req w a        => do `(Residual.reqV $(quote w) $(← valRefs base nsrc a))
-  | .rshl w a       => do `(Residual.rshlV $(quote w) $(← valRefs base nsrc a))
-  | .rmuxN w a      => do `(Residual.rmuxNV $(quote w) $(← valRefs base nsrc a))
-  | .rnot w a       => do `(Residual.rnotV $(quote w) $(← valRef base nsrc false a))
-  | .rult w a b     => do `(Residual.rultV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
-  | .rugt w a b     => do `(Residual.rugtV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
-  | .rslt w a b     => do `(Residual.rsltV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
-  | .rsgt w a b     => do `(Residual.rsgtV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
-  | .rsra w a b     => do `(Residual.rsraV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
-  | .rsext w a m    => do `(Residual.rsextV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false m))
-  | .rgetMask w a m => do `(Residual.rgetMaskV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false m))
+private def valSyntax (base : Name) (nsrc : Nat) (loc : Bool) : ResidualExpr → MetaM Term
+  | .rsum w n a     => do `(Residual.rsumV $(quote w) $(quote n) $(← valRefs base nsrc loc a))
+  | .rmult w a      => do `(Residual.rmultV $(quote w) $(← valRefs base nsrc loc a))
+  | .rand w a       => do `(Residual.randV $(quote w) $(← valRefs base nsrc loc a))
+  | .rorBits w a    => do `(Residual.rorBitsV $(quote w) $(← valRefs base nsrc loc a))
+  | .rxor w a       => do `(Residual.rxorV $(quote w) $(← valRefs base nsrc loc a))
+  | .rredOr w a     => do `(Residual.rredOrV $(quote w) $(← valRefs base nsrc loc a))
+  | .req w a        => do `(Residual.reqV $(quote w) $(← valRefs base nsrc loc a))
+  | .rshl w a       => do `(Residual.rshlV $(quote w) $(← valRefs base nsrc loc a))
+  | .rmuxN w a      => do `(Residual.rmuxNV $(quote w) $(← valRefs base nsrc loc a))
+  | .rnot w a       => do `(Residual.rnotV $(quote w) $(← valRef base nsrc loc false a))
+  | .rult w a b     => do `(Residual.rultV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false b))
+  | .rugt w a b     => do `(Residual.rugtV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false b))
+  | .rslt w a b     => do `(Residual.rsltV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false b))
+  | .rsgt w a b     => do `(Residual.rsgtV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false b))
+  | .rsra w a b     => do `(Residual.rsraV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false b))
+  | .rsext w a m    => do `(Residual.rsextV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false m))
+  | .rgetMask w a m => do `(Residual.rgetMaskV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false m))
   | .rmux w s f t   => do
-      `(Residual.rmuxV $(quote w) $(← valRef base nsrc false s) $(← valRef base nsrc false f)
-         $(← valRef base nsrc false t))
+      `(Residual.rmuxV $(quote w) $(← valRef base nsrc loc false s) $(← valRef base nsrc loc false f)
+         $(← valRef base nsrc loc false t))
   | .rmemRead w m a e => do
-      `(Residual.rmemReadV $(quote w) $(← valRef base nsrc true m) $(← valRef base nsrc false a)
-         $(← valRef base nsrc false e))
+      `(Residual.rmemReadV $(quote w) $(← valRef base nsrc loc true m) $(← valRef base nsrc loc false a)
+         $(← valRef base nsrc loc false e))
   | .rmemWrite m a d e => do
-      `(Residual.rmemWriteV $(← valRef base nsrc true m) $(← valRef base nsrc false a)
-         $(← valRef base nsrc false d) $(← valRef base nsrc false e))
+      `(Residual.rmemWriteV $(← valRef base nsrc loc true m) $(← valRef base nsrc loc false a)
+         $(← valRef base nsrc loc false d) $(← valRef base nsrc loc false e))
   | .rmemWriteBE w bw m a d be => do
-      `(Residual.rmemWriteBEV $(quote w) $(← valRef base nsrc true m) $(← valRef base nsrc false a)
-         $(← valRef base nsrc false d) $(← valRef base nsrc false be) $(quote bw))
+      `(Residual.rmemWriteBEV $(quote w) $(← valRef base nsrc loc true m) $(← valRef base nsrc loc false a)
+         $(← valRef base nsrc loc false d) $(← valRef base nsrc loc false be) $(quote bw))
 
 /-- How a slot is written in terms of the named values, at an EXPLICIT
 environment rather than the `e0` the value definitions bind, with the same
@@ -223,7 +230,7 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
     for k in [0 : R.bindings.size] do
       let b   := R.bindings[k]!
       let nm  := mkIdent (base ++ Name.mkSimple s!"val{k}")
-      let rhs ← liftTermElabM (NamedModel.valSyntax base nsrc b.rhs)
+      let rhs ← liftTermElabM (NamedModel.valSyntax base nsrc false b.rhs)
       match b.ty with
       | .bv _    => elabCommand (← `(command| def $nm ($e0 : Compiler.SlotEnv) : BV := $rhs))
       | .mem _ _ => elabCommand (← `(command| def $nm ($e0 : Compiler.SlotEnv) : Int → BV := $rhs))
@@ -262,6 +269,94 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
     -- counts against the probe's own shape line. A different wording here reads
     -- as "the reifier never ran".
     logInfo m!"reify_design_named: {f} emitted, {nsrc} sources, \
+      {R.bindings.size} bindings"
+  | _ => throwUnsupportedSyntax
+
+/-- `reify_design_shared <designCert> as <name>` — OPT-IN, under development.
+
+NOT CHUNKED, and deliberately not called so. This emits ONE monolithic
+let-chain over every binding. Bounded chunk functions -- `SlotEnv → SlotEnv`
+over 16-64 pushes each, with a per-chunk theorem against `runBindings` composed
+by `runBindings_append` -- are the next increment and are what a scalability
+claim would need; a single let-chain can still meet an elaboration cliff on a
+design the size of `commit_stage`.
+
+The same emitted meaning as `reify_design_named`, with the DAG's sharing kept at
+run time instead of only in the term.
+
+`reify_design_named` gives every binding its own top-level `val{k} e0`, and an
+operand is a CALL to one. The term stays linear in node count, which is what it
+was for, but a value with `F` consumers is EVALUATED `F` times, recursively, so
+one evaluation costs the number of paths rather than the number of nodes.
+Measured on `instr_queue_gate` (1,186 bindings): the named model takes 135.86 s
+for one sample where the straight-line legacy model takes 18.10 s, both `agree`.
+
+Here each binding is a `let` in ONE function, so it is computed once per sample
+however many consumers read it, and the term is still linear in node count --
+neither axis carries the reconvergence factor.
+
+Emits only the model. The proof bridge is a separate command; until it exists a
+chunked model is RUNTIME ONLY and must not be credited as proved. -/
+syntax (name := reifyDesignShared) "reify_design_shared " ident " as " ident : command
+
+@[command_elab reifyDesignShared]
+def elabReifyDesignShared : CommandElab := fun stx => do
+  match stx with
+  | `(command| reify_design_shared $d:ident as $f:ident) => do
+    let R ← liftTermElabM do
+      let dExpr ← Term.elabTerm d none
+      let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
+      match compileDesign cert with
+      | .error _ => throwError "reify_design_shared: compileDesign refused {d}"
+      | .ok R    => pure R
+    let nsrc := R.sources.size
+    let iId  := mkIdent (Name.mkSimple "i")
+    let stId := mkIdent (Name.mkSimple "st")
+    let e0   := mkIdent (Name.mkSimple "e0")
+    let vId  := fun (k : Nat) => mkIdent (Name.mkSimple s!"v{k}")
+    -- A ROOT reads a source from `e0` or a produced slot from its local.
+    let rootRef : Bool → Nat → MetaM Term := fun isMem r =>
+      if r < nsrc then
+        (if isMem then `(Compiler.refMem $e0 $(quote r))
+         else `(Compiler.refBV $e0 $(quote r)))
+      else pure (vId (r - nsrc))
+    let outs : Array Term ← R.outputs.mapM fun o => do
+      let v ← liftTermElabM (rootRef false o.slot)
+      `(bv_resize $(quote o.width) $v)
+    let flops : Array Term ← (Array.ofFn (n := R.flopUpdates.size) (fun j => j.val)).mapM
+      fun j => do
+        let fu := R.flopUpdates[j]!
+        let din ← liftTermElabM (rootRef false fu.din)
+        let en ← liftTermElabM (match fu.enable with
+          | none   => `(none)
+          | some e => do `(some $(← rootRef false e)))
+        let rp ← liftTermElabM (match fu.resetPin with
+          | none   => `(none)
+          | some r => do `(some $(← rootRef false r)))
+        let rvq ← liftTermElabM (if fu.resetValue < 0
+          then `(-(Int.ofNat $(quote fu.resetValue.natAbs)))
+          else `(Int.ofNat $(quote fu.resetValue.toNat)))
+        let ral := if fu.resetActiveLow then mkIdent ``true else mkIdent ``false
+        `(Compiler.flopNextV $(quote fu.width) $din $en $rp $rvq $ral
+            (($stId).flops[$(quote j)]?))
+    let mems : Array Term ← R.memoryUpdates.mapM fun mu =>
+      liftTermElabM (rootRef true mu.nextImg)
+    -- innermost first, then wrap one `let` per binding, outermost = binding 0
+    let mut body ← `({ outputs := #[$outs,*],
+                       nextState := { flops := #[$flops,*], mems := #[$mems,*] } })
+    for k in [0 : R.bindings.size] do
+      let idx := R.bindings.size - 1 - k
+      let b := R.bindings[idx]!
+      let rhs ← liftTermElabM (NamedModel.valSyntax f.getId nsrc true b.rhs)
+      body ← `(let $(vId idx):ident := $rhs
+               $body)
+    let full ← `(let $e0:ident : Compiler.SlotEnv :=
+                   Compiler.sourceEnvArr ($d).sources $iId $stId
+                 $body)
+    elabCommand (← `(command|
+      def $f ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState) :
+          Compiler.RuntimeResult := $full))
+    logInfo m!"reify_design_shared: {f} emitted, {nsrc} sources, \
       {R.bindings.size} bindings"
   | _ => throwUnsupportedSyntax
 
