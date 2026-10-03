@@ -299,8 +299,14 @@ def outcomeOf (r : EvalResult) : Outcome :=
 
 /-- Run a RESIDUAL (3 dynamic args) at an EXPLICIT fuel budget.  Callers that
 claim "checked execution" pass the bound `checkResidual` returned, not a
-hardcoded constant: the point of the fragment checker is that the bound is
-exact, and running at some unrelated larger number does not exercise it. -/
+hardcoded constant: running at some unrelated larger number does not exercise
+the checker at all.
+
+The bound is PROVED SUFFICIENT, not minimal.  `checkResidual_sound`
+(ResidualFragment:318) gives `evalFuel b R [] ... != .outOfFuel` -- it is the
+`height`, so it covers the DEEPEST path.  A particular input that takes shorter
+branches needs less.  "exact fuel", which this used to print, claimed a
+minimality the theorem does not state. -/
 def runResidAt (fuel : Nat) (R : Program) (D : DesignCert) (e : ClockEdges)
     (i : RuntimeInput) (st : RuntimeState) : Outcome :=
   outcomeOf (evalFuel fuel R []
@@ -335,18 +341,32 @@ state never moves proves nothing about sequential behaviour, so the caller can
 fail instead of silently passing a vacuous test. -/
 def traceCompare (fuel : Nat) (R : Program) (D : DesignCert) (n seed : Nat) :
     IO (Bool × Bool) := do
-  let mut st := mkStateFor D seed
+  -- TWO INDEPENDENT STATES.  An earlier version fed the REFERENCE's next state
+  -- to both sides; because `Outcome.agree` compares the whole `RuntimeResult`,
+  -- including `nextState`, that was still a sound lockstep regression by
+  -- induction -- but it re-synchronised the residual every cycle, so a residual
+  -- that drifted could only ever fail on the cycle it drifted.  Here the
+  -- residual carries its OWN state forward, so drift compounds and later
+  -- cycles see genuinely different inputs.
+  let mut stRef := mkStateFor D seed
+  let mut stRes := mkStateFor D seed
   let mut agree := true
-  let mut moved := false
+  let mut seen : List Val := [encState stRef]
   for k in List.range n do
     let e := edgeSchedule D k
     let i := mkInputFor D (seed + k)
-    let want := interpretDesign D e i st
-    let got := runResidAt fuel R D e i st
+    let want := interpretDesign D e i stRef
+    let got  := runResidAt fuel R D e i stRes
     unless Outcome.agree got (Outcome.ok want) do agree := false
-    if encState want.nextState != encState st then moved := true
-    st := want.nextState
-  return (agree, moved)
+    let key := encState want.nextState
+    unless seen.any (· == key) do seen := key :: seen
+    stRef := want.nextState
+    match got with
+    | .ok g => stRes := g.nextState
+    | _     => agree := false          -- nothing meaningful to continue with
+  -- DISTINCT STATES, not "did it ever change".  A design that collapses to its
+  -- reset value on cycle 1 and sits there changed once and is still vacuous.
+  return (agree, seen.length > 2)
 
 /-- One cycle, decoded, so the A/B comparison is semantic.  A sequential design
 needs a correctly sized state, so the state is built from the design. -/
@@ -433,6 +453,113 @@ def main (args : List String) : IO UInt32 := do
             IO.println s!"srcD nsrc={ns} nnode={nn}"
             profileResidual R
       return (if bad then 2 else 0)
+  | "--reset-probe" :: path :: _ => do
+      -- CHEAP, reference-only (interpretDesign; no specialization).  Drives an
+      -- explicit reset sequence -- ASSERT, then DE-ASSERT -- and measures
+      -- progression only AFTER de-assertion, which is the part that says
+      -- whether a design has reachable sequential behaviour.  A design that
+      -- merely collapses to its reset value once looks "changed" to a
+      -- did-it-ever-move bit, which is why that bit is not enough.
+      let D ← CertIO.loadCert path
+      IO.println s!"{path}: flops {D.flops.size} sources {D.sources.size}"
+      if D.flops.size == 0 then do
+        IO.println "  combinational -- no reset sequence to drive"; return 0
+      -- reset pins as the SOURCES declare them, and as the FLOP RECORDS do
+      let srcPins := D.sources.foldl (fun acc sd => match sd with
+        | .flopQAsync _ _ ri _ al => if acc.any (fun p => p.1 == ri) then acc
+                                     else acc.push (ri, al)
+        | _ => acc) (#[] : Array (Nat × Bool))
+      -- a flop's resetPin is a SLOT; map it back to an input index
+      let slotToInput : Nat → Option Nat := fun sl =>
+        if h : sl < D.sources.size then
+          match D.sources[sl] with | .input idx _ => some idx | _ => none
+        else none
+      let flopPins := D.flops.foldl (fun acc f => match f.resetPin with
+        | some sl => match slotToInput sl with
+                     | some idx => if acc.any (fun p => p.1 == idx) then acc
+                                   else acc.push (idx, f.resetActiveLow)
+                     | none => acc
+        | none => acc) (#[] : Array (Nat × Bool))
+      IO.println s!"  reset pins -- sources say {srcPins.toList}, flop records say \
+{flopPins.toList}   (index, activeLow)"
+      for (i, al) in srcPins do
+        for (j, bl) in flopPins do
+          if i == j && al != bl then
+            IO.println s!"  !! POLARITY CONFLICT on input {i}: sources activeLow \
+{al}, flop records activeLow {bl} -- no value of this pin leaves both paths \
+out of reset.  Certificate/export-boundary discrepancy, NOT a projection bug; \
+quarantine the design, do not edit its literals."
+      -- drive: cycles 0-1 reset ASSERTED (per the SOURCE polarity), 2-7 de-asserted
+      let drive := fun (k : Nat) =>
+        (List.range (maxInputIdx D)).toArray.map (fun i =>
+          let w := inputWidth D i
+          match srcPins.find? (fun p => p.1 == i) with
+          | some (_, al) =>
+              let asserted := k < 2
+              -- activeLow: reset when 0.  so assert => 0, deassert => 1
+              let bit := if al then (if asserted then 0 else 1)
+                               else (if asserted then 1 else 0)
+              mk_bv w (Int.ofNat bit)
+          | none => mk_bv w (patternAt w (k + 5) i))
+      let mut st := mkStateFor D 0
+      let mut seenPost : List Val := []
+      for k in List.range 8 do
+        let r := interpretDesign D (allEdges D) (drive k) st
+        st := r.nextState
+        if k >= 2 then
+          let key := encState st
+          unless seenPost.any (· == key) do seenPost := key :: seenPost
+        IO.println s!"    cycle {k}{if k < 2 then " (reset asserted)" else ""}: \
+state-after = {if (encState st) == (encState (mkStateFor D 0)) then "initial" else "moved"}"
+      IO.println s!"  distinct states over the 6 cycles AFTER de-assertion: {seenPost.length}"
+      if seenPost.length <= 1 then do
+        IO.eprintln "  DEGENERATE: the state is constant once reset is released -- \
+no reachable sequential behaviour, so a trace on this design proves nothing \
+sequential (combinational agreement may still be real)"
+        return 1
+      else do
+        IO.println "  non-degenerate: the state progresses after reset release"
+        return 0
+  | "--trace-ref" :: path :: ncyc :: _ => do
+      -- interpretDesign ONLY -- no specialization, so this is instant and can
+      -- answer "does this design's state actually move?" without a 30-minute
+      -- projection.  A state that collapses to reset on cycle 1 and then sits
+      -- there CHANGED ONCE but has no reachable sequential behaviour, and a
+      -- vacuity check that only asks "did it ever change" passes it.
+      let D ← CertIO.loadCert path
+      let n := (ncyc.toNat?).getD 8
+      IO.println s!"{path}: flops {D.flops.size} clock-domains {D.clocks.size}"
+      let mut st := mkStateFor D 0
+      let mut seen : List Val := [encState st]
+      let mut changes := 0
+      for k in List.range n do
+        let e := edgeSchedule D k
+        let i := mkInputFor D k
+        let r := interpretDesign D e i st
+        let key := encState r.nextState
+        if key != encState st then changes := changes + 1
+        unless seen.any (· == key) do seen := key :: seen
+        st := r.nextState
+      IO.println s!"  {n} cycles: state changed on {changes}, distinct states {seen.length}"
+      if D.flops.size == 0 then do
+        IO.println "  combinational (no flops) -- no sequential behaviour to reach"
+        return 0
+      else if n < 3 then do
+        -- With n cycles you can see at most n+1 states, so "<= 2 distinct" is
+        -- UNAVOIDABLE below 3 cycles and says nothing.  An earlier version
+        -- pronounced DEGENERATE at n = 1, which was a verdict its own evidence
+        -- could not support.
+        IO.println s!"  INCONCLUSIVE: {n} cycle(s) can show at most {n+1} states; \
+run at least 3 to distinguish collapse from progression"
+        return 0
+      else if seen.length <= 2 then do
+        IO.eprintln s!"  DEGENERATE: only {seen.length} distinct states over {n} \
+cycles -- the state collapses and sits there, so a trace test on this design \
+proves nothing sequential"
+        return 1
+      else do
+        IO.println s!"  non-degenerate: {seen.length} distinct states"
+        return 0
   | "--support" :: rest => do
       -- All SIX SupportedByProjection fields, per file, reported separately.
       let mut any := false
@@ -518,10 +645,10 @@ same-kind {Outcome.agree eR eV}  (neither is a success: {!eR.isOk && !eV.isOk})"
         | .ok R => do
             let (ag, moved) ← traceCompare 4000000 R D 6 0
             IO.println s!"  trace {nm}: 6 cycles, state fed forward -- agrees {ag}  \
-state-changed {moved}  clock-domains {D.clocks.size}"
+non-degenerate {moved}  clock-domains {D.clocks.size}"
             unless ag do bad := true
             unless moved do
-              IO.eprintln s!"TRACE {nm}: state never changed -- the trace test is VACUOUS"
+              IO.eprintln s!"TRACE {nm}: <=2 distinct states -- the trace test is VACUOUS"
               bad := true
 
       -- ---- 4. projection A/B ------------------------------------------------
@@ -611,7 +738,8 @@ any disagreement here would be expected, not informative"
           -- hardcoded number that never exercises it.
           let fuel ← match Hw.checkResidual R with
             | some f => do
-                IO.println s!"  checkResidual: ACCEPTED, exact fuel {f}"
+                IO.println s!"  checkResidual: ACCEPTED, proved-sufficient bound {f} \
+(height; no outOfFuel at this bound -- not a minimum for any given input)"
                 pure f
             | none   => do
                 IO.eprintln "  checkResidual: REJECTED (not the one-function \
@@ -632,10 +760,10 @@ call-free fragment) -- execution below is UNCHECKED, run at a fallback budget"
           -- a multi-cycle trace, state fed forward
           let (ag, moved) ← traceCompare fuel R D 4 0
           IO.println s!"  trace: 4 cycles, state fed forward -- agrees {ag}  \
-state-changed {moved}  clock-domains {D.clocks.size}  flops {D.flops.size}"
+non-degenerate {moved}  clock-domains {D.clocks.size}  flops {D.flops.size}"
           unless ag do bad := true
           if D.flops.size > 0 && !moved then do
-            IO.eprintln "  trace: design HAS flops but state never changed -- VACUOUS"
+            IO.eprintln "  trace: design HAS flops but reaches <=2 distinct states -- VACUOUS"
             bad := true
           -- control on the stimulus builder: the interpreter itself
           let ctl := runInterp ProtoVar.hwPVar D 0

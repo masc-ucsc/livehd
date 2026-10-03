@@ -936,9 +936,17 @@ Strictness says every argument is eventually evaluated.  It says nothing about
 WHICH ONE FAILS FIRST.  With `E` a type error and `A` a loop, the original
 fails with `typeError` and the rewritten one diverges.
 
-A fourth side condition now covers it -- `beforeHoleTotal`: everything
-evaluated strictly before the occurrence must be a `ref` or a `lit`, i.e.
-incapable of failing or diverging.  Arguments AFTER the hole need no condition,
+**What that counterexample does and does not refute.**  It is NOT a
+counterexample to the successful-`SEval` iff of 9.2: one side raises
+`typeError`, the other diverges, so NEITHER has a successful `SEval` and the
+iff holds vacuously there.  It refutes FAILURE-ORDER EQUIVALENCE, a strictly
+stronger property.  Section 9 originally ran the two together.
+
+A fourth side condition covers the stronger property -- `beforeHoleTotal`:
+everything evaluated strictly before the occurrence must be a `ref` or a `lit`,
+i.e. incapable of failing or diverging.  It is NOT needed for the iff.  It is
+kept because a rewrite that silently turns an error into a hang is not one to
+ship, proved iff or not.  Arguments AFTER the hole need no condition,
 because they run after `e` in both programs.  `noBranch` is still required and
 still load-bearing for a different reason: `substRef` is NOT capture-avoiding,
 and `noBranch` is what guarantees no binder lies on the path to the hole.
@@ -1057,3 +1065,172 @@ not the specializer.
 What this still is not: the fork specializer and the variant interpreter are
 both unproved (8.7), so this is experimental execution evidence, not verified
 coverage, and it is one design.
+
+## 10. Four corrections to section 9, and the provenance question
+
+### 10.1 "exact fuel" overstated what `checkResidual` proves
+
+`checkResidual_sound` (`ResidualFragment.lean:318`) is
+
+    checkResidual R = some b  ->  evalFuel b R [] (.call R.entry [a0,a1,a2]) != .outOfFuel
+
+A **proved sufficient** bound, and it is the `height`, so it covers the DEEPEST
+path through the residual.  It is NOT the minimum fuel for a given input: an
+input that takes shorter branches needs less.  `--file-ab` now prints
+
+    checkResidual: ACCEPTED, proved-sufficient bound 20207
+      (height; no outOfFuel at this bound -- not a minimum for any given input)
+
+Running AT that bound is still the right thing -- a larger constant never
+exercises the checker -- but the claim attached to it was wrong.
+
+### 10.2 `traceCompare` re-synchronised the residual every cycle
+
+It fed `want.nextState`, the REFERENCE's next state, to both sides.  Because
+`Outcome.agree` compares the whole `RuntimeResult`, `nextState` included, a
+passing run was still a sound lockstep regression by induction -- not a false
+pass.  But it meant a residual that drifted could only ever fail on the cycle
+it drifted, never compound.
+
+Fixed rather than merely documented: the two sides now carry INDEPENDENT
+states, `stRef` from `interpretDesign` and `stRes` from the residual's own
+`nextState`, so drift propagates into later cycles' inputs.
+
+### 10.3 `obviouslyTotal` on a `ref` needs a scoping premise
+
+`.ref y` is total only relative to an environment that BINDS `y`; an unbound
+name fails.  So scopedness is needed to CLAIM `.ref` totality, and hence for
+the failure-order property.
+
+**But it does not make the successful iff false**, and an earlier revision of
+this section said it did.  Scopedness sits with `beforeHoleTotal` in the
+failure-order group, not with the iff.
+
+The binder-aware statement, with the right scope: `x` is bound by the let being
+REMOVED, so the environment at issue is the one the OUTER `letN` is evaluated
+in, not the caller's.  `e2` runs under `sigma[x := w]` before and under
+`sigma` after; the free names other than `x` agree because `z != x` and
+`countRef x body = 0`, and `e` sees the same environment at the hole as at the
+binding because no binder lies between them (`noBranch`).
+
+### 10.4 Provenance: the ALU is CORE-ET, not CVA6
+
+`rt_intpipe_alu` is a **CORE-ET** design -- the `intpipe_*` family
+(`livehd-d4-incremental` `pass/lean/README.md:864`,
+`CVA6_COVERAGE_PLAN.md:261`).  Nothing in sections 7-9 is CVA6 coverage, and
+the destination in `SIMULATOR_PLAN.md` is 30 CVA6 blocks.  `rt_btb_gate` IS
+CVA6 -- `frontend/btb.sv`, `CVA6_COVERAGE_PLAN.md:88`.
+
+### 10.5 `btb_gate` is degenerate as a SEQUENTIAL target -- upstream, not here
+
+Found while checking provenance, before the run finished.
+`DIRECTION4_INCREMENTAL.md:516`:
+
+> `btb_gate` turned out to be degenerate for this purpose at BOTH reset levels.
+> Its `flopQAsync` sources say reset when input 4 is 0, while all 64 of its
+> `FlopDesc` records say reset when input 4 is 1 -- opposite polarities on the
+> same port, so no value lets the design run and the digest is all zeros
+> throughout.  That looks like the `negreset` conflation the `FlopDesc`
+> docstring warns about; it is upstream of this work.
+
+So NO stimulus moves its state, and the vacuity check added in 9.3 should fail
+it: `flops 64` with `state-changed false` is exit 1.  That is the gate working.
+It also means `btb_gate` cannot be the "one supported real CVA6 block executed
+and reference-compared over traces" -- not because projection fails, but
+because the design has no reachable sequential behaviour to compare.
+
+Remaining supported CVA6 candidates, from `--support`: `rt_alu_gate` (6,137
+sources, 6,597 nodes, 0 flops) and `rt_decoder_gate` (8,373 / 8,971, 0 flops)
+are COMBINATIONAL, so they can be executed and reference-compared but cannot
+exercise a trace; `rt_csr_regfile_gate` (32,822 / 34,874, 136 flops) is the
+only supported CVA6 design with flops that is not the degenerate `btb` family,
+and it is the largest of them.
+
+## 11. `rt_btb_gate`: the actual result, and two things I got wrong
+
+### 11.1 The run
+
+Finished before the degeneracy prediction in 10.5 could be tested; it was NOT
+restarted for the harness edits in section 10, so it ran the pre-10 binary.
+
+    rt_btb_gate: sources 1784 nodes 1782 flops 64
+    support: wf true memFree true sources true ops true arities true flopClocks true
+    fuel 20000/200  (projectDesign's OWN budget -- not raised)
+      terms 415935   tl 129172  hd 390  consP 3631
+      checkResidual: ACCEPTED, bound 8075
+      seed 0,1,2,3,4,7: residual ok, matches interpretDesign  (all six)
+      trace: 4 cycles -- agrees true   state-changed true   flops 64
+      control: variant interpreter ok vs interpretDesign true
+    wall 1901.10 s   RSS 70,520 KB   exit 0
+
+A supported CVA6 block, projected **at the stock budget**, fragment-checked,
+executed, and matching `interpretDesign` on six width-aware stimuli and a
+4-cycle trace.  Still experimental: the fork specializer and the interpreter
+variant are both unproved (8.7).
+
+### 11.2 I predicted this would fail the vacuity check.  It did not, and the
+reason is a defect in the check
+
+10.5 predicted `state-changed false`.  It reported `state-changed true`.  The
+cause is exactly the one review named: `mkStateFor` seeds flops with NONZERO
+values (`(seed*5 + i*3) % 16`), so a design that merely collapses to its reset
+value on cycle 1 and sits there has CHANGED ONCE and satisfies an
+ever-changed bit.  A `stateEverChanged` flag is weak coverage, not evidence of
+non-reset progression.
+
+`traceCompare` now counts DISTINCT STATES instead, and fails at `<= 2`.
+
+**And the first fix was itself wrong.**  Running `--trace-ref` at 1 cycle
+printed `DEGENERATE: only 2 distinct states over 1 cycles`.  With `n` cycles
+you can see at most `n+1` states, so `<= 2` is unavoidable below 3 cycles: the
+verdict was unsupportable by its own evidence.  `--trace-ref` now reports
+INCONCLUSIVE below 3 cycles.
+
+So the degeneracy of `btb_gate` is **not established here**.  10.5 quotes the
+upstream note and review confirmed the file evidence independently -- source
+rows are `flopQAsync ... resetInput=4 activeLow=1` while all 64 flop rows are
+`resetPin=1779 activeLow=0`, and slot 1779 is input 4, so the two paths
+disagree on polarity for the same pin.  That is a certificate/export-boundary
+discrepancy to QUARANTINE, not a demonstrated projection bug, and its literals
+must not be edited to make a test pass.
+
+### 11.3 The "cheap" reference-only diagnostic is not cheap on this design
+
+`--reset-probe` drives reset asserted then de-asserted and measures
+progression only after release.  It uses `interpretDesign` alone, no
+specialization, and should be instant.  On `rt_btb_gate` it timed out at 600 s.
+
+Measured directly: **one `interpretDesign` cycle on `rt_btb_gate` takes
+190.91 s.**  For comparison, the ALU's `--file-ab` run (5,118 nodes) was 814 s
+against 785 s for projection alone, so ~11 `interpretDesign` calls cost ~29 s
+there -- about 2.6 s each.  `btb_gate` is 3x SMALLER and ~70x slower per cycle.
+
+Two consequences, both load-bearing:
+
+* **The 1901 s in 11.1 is mostly the REFERENCE, not projection.**  That run
+  makes 11 `interpretDesign` calls; at 190 s each that is ~2,100 s of the
+  budget, i.e. essentially all of it.  Projection at 20000/200 was comparatively
+  fast.  Reading 1901 s as "projection is slow on btb" would be wrong.
+* A reference-only diagnostic is only cheap where `interpretDesign` is cheap.
+  Establishing `btb_gate`'s degeneracy needs >= 3 post-release cycles, i.e.
+  >= 5 cycles total, i.e. ~16 min of REFERENCE time alone.  Not run.
+
+What makes `btb_gate`'s reference evaluation 70x more expensive per node than
+the ALU's is not identified.  It has 64 `flopQAsync` sources and 64-bit
+widths where the ALU has none and mostly narrower ones; that is a hypothesis,
+not a finding.
+
+### 11.4 Coverage status, combinational and sequential kept apart
+
+Per review, a supported COMBINATIONAL CVA6 block counts toward simulator
+coverage without inventing sequential activity, provided the two are not
+merged into one number.
+
+| | design | status |
+|---|---|---|
+| CVA6, sequential | `rt_btb_gate` | executed and reference-compared at stock budget, BUT quarantined: reset-polarity discrepancy, degeneracy neither confirmed nor refuted |
+| CVA6, combinational | `rt_alu_gate`, `rt_decoder_gate` | supported; NOT yet executed |
+| CORE-ET, combinational | `rt_intpipe_alu` | executed and reference-compared (9.5), at a raised budget |
+
+**Counted toward the 30 CVA6 blocks: zero.**  `rt_intpipe_alu` is CORE-ET.
+`rt_btb_gate` is quarantined.  The combinational CVA6 blocks have not been run.

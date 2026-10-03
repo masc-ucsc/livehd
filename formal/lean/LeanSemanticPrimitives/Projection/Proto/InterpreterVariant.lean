@@ -56,14 +56,55 @@ module REFUSES it, and checks that applying it anyway changes `typeError` into
 NOT "the two programs are observationally equivalent".  What the side
 conditions support is agreement on SUCCESSFUL evaluation:
 
-    beforeHoleTotal and the three occurrence conditions  -->
-      forall rho v,  SEval P rho (letN x e e2') v  <->  SEval P rho (e2'[x := e]) v
+    beforeHoleTotal x e2  and the three occurrence conditions,
+    and  SigmaScoped sigma e2                                      -->
+      forall v,  SEval P sigma (letN x e e2) v  <->  SEval P sigma (e2[x := e]) v
 
 i.e. an `SEval` iff, where `SEval` relates only terminating successful
-evaluations.  It is NOT an equality of `evalFuel` results: fuel accounting
-differs (one fewer `letIn` to descend), and without `beforeHoleTotal` the
-FAILURE MODE differs as above.  Any promotion must prove that statement, not a
-stronger one that is false.
+evaluations.
+
+**Which condition buys which property -- an earlier draft ran the two together,
+and that was wrong.**
+
+The counterexample above is NOT a counterexample to the successful-`SEval` iff.
+In it one program raises `typeError` and the other diverges, so NEITHER has a
+successful `SEval` at any `v`: the iff holds there, vacuously.  What the
+counterexample refutes is FAILURE-ORDER EQUIVALENCE -- "the two programs fail
+the same way" -- a strictly stronger property the iff does not state.  So:
+
+  * the three occurrence conditions plus `noBranch` are what the successful iff
+    needs (`noBranch` also being what keeps `substRef`, which is NOT
+    capture-avoiding, from capturing);
+  * `beforeHoleTotal` is what FAILURE-ORDER equivalence needs.  It is not
+    required for the iff.  This module keeps it anyway, because a rewrite that
+    silently turns an error into a hang is not one to ship, proved iff or not.
+
+Scopedness belongs to the second group too: `obviouslyTotal` calls `.ref y`
+total, and a reference is total only relative to an environment binding `y`.
+That premise is needed to CLAIM `.ref` totality, and so for the failure-order
+property.  It does NOT make the successful iff false.
+
+### The exact rewrite, binder-aware
+
+`x` is bound by the let being REMOVED, so the scope at issue is not the
+caller's.  Writing `sigma` for the environment the OUTER `letN` is evaluated in:
+
+    SEval P sigma (letN x e (letN z e2 body)) v
+      -- e under sigma, giving w;  e2 under sigma[x := w]
+    SEval P sigma (letN z e2[x := e] body) v
+      -- e2[x := e] under sigma, with e at the hole, also under sigma
+
+The obligations are that `e2`'s free names other than `x` mean the same under
+`sigma` and `sigma[x := w]` -- which holds because `z != x` and
+`countRef x body = 0` -- and that `e` sees the same environment at the hole as
+it did at the binding, which holds because no binder lies between the two, i.e.
+`noBranch`.  The scopedness condition is about `e2`'s free names being bound in
+`sigma`; it is not a condition on the caller.
+
+It is also NOT an equality of `evalFuel` results: fuel accounting differs by one
+`letIn` descent.  A promotion must prove the iff, and may SEPARATELY prove
+failure-order equivalence under `beforeHoleTotal`.  It must not claim the iff
+needs `beforeHoleTotal`, nor that the iff delivers failure-order agreement.
 
 SCOPE: nothing here is proved, nothing here is in the core build or the axiom
 audit, and `IHwAdequate_proved` is stated about `hwS`, not about this.  `hwS`
@@ -120,8 +161,11 @@ partial def noBranch : SExp → Bool
   | .mk _ es    => es.all noBranch
   | .call _ es  => es.all noBranch
 
-/-- Evaluating this can neither fail nor diverge: it is a variable already in
-scope, or a literal. -/
+/-- Evaluating this can neither fail nor diverge -- a literal, or a variable
+IN SCOPE.  Scope is a premise this syntactic test cannot see: `.ref y` is total
+only relative to an environment binding `y`, so the inliner theorem must carry
+a scopedness hypothesis (see the header).  At the real call site the preceding
+argument is `ref "nodes"`, bound by the enclosing `switch` pattern. -/
 def obviouslyTotal : SExp → Bool
   | .ref _ => true
   | .lit _ => true
