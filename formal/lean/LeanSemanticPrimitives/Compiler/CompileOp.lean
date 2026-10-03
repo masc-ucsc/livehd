@@ -53,7 +53,8 @@ not occur.  Each gets `.unsupportedOp`, so if one ever appears the sweep reports
 a compile error rather than a wrong proof.  (`Op_MemWrite` at zero is kept
 supported: it is the non-byte-enabled write the chain can emit.)
 -/
-import Mathlib
+import Mathlib.Tactic.Ring
+import Mathlib.Data.Int.GCD
 import LeanSemanticPrimitives.Compiler.CompileOpDefs
 
 namespace Compiler

@@ -26,7 +26,6 @@ compiler's storage: it is built by repeated `envSetG`, so a lookup traverses N
 `if` layers — O(N) each, O(N²) overall.  That cost is fine for the interpreter
 (never executed, only reasoned about) and fatal for the compiler (actually runs).
 -/
-import Mathlib
 import LeanSemanticPrimitives.Compiler.CompileGraphDefs
 import LeanSemanticPrimitives.Compiler.CompileOp
 

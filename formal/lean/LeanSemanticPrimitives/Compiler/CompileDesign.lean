@@ -6,7 +6,6 @@ Step 7: outputs, sequential state, and the top-level theorem.
 The graph-level step (`compileGraph_correct`) is *uniqueness of the topo
 fixpoint*, not a fresh induction — see `CompileGraph.lean`'s header.
 -/
-import Mathlib
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 import LeanSemanticPrimitives.Compiler.CompileGraph
 
