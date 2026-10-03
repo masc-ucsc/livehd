@@ -284,10 +284,37 @@ def main() -> int:
     # Snapshot BEFORE and AFTER, and abort on drift. Recording it only at the
     # end would name whatever the oleans became, not what was imported.
     snap_before = olean_snapshot(ns)
-    cmd = [sys.executable, gb, "--max-kb", str(a.final_max_kb), "--",
+    cgpath_file = out / "composition.cgroup"
+    cmd = [sys.executable, gb, "--max-kb", str(a.final_max_kb),
+           "--cgroup-path-file", str(cgpath_file), "--",
            "lake", "env", "lean", str(comp)]
     rc, rss, wall, txt = run(cmd, out / "composition.log", cwd=LEAN,
                              timeout=a.timeout)
+    # The wrapper prints `peak=` on a normal exit. On a TIMEOUT the kill took
+    # the whole process group, including the wrapper, so it never printed and
+    # never ran its cleanup: the charge was reported as 0 and the cgroup was
+    # left behind. Both are recoverable from the corpse, whose path the
+    # wrapper wrote before starting.
+    charge_kb = next((int(x.split("peak=")[1].split()[0].replace(",", ""))
+                      for x in txt.splitlines()
+                      if "d3_guarded_build:" in x and "peak=" in x), 0)
+    charge_src = "wrapper"
+    if not charge_kb and cgpath_file.exists():
+        try:
+            cgdir = pathlib.Path(cgpath_file.read_text().strip())
+            charge_kb = int((cgdir / "memory.peak").read_text().strip()) // 1024
+            charge_src = "salvaged-from-orphan-cgroup"
+        except (OSError, ValueError):
+            pass
+    # Remove the cgroup the killed wrapper could not. Only ever this run's
+    # own, named from the path it recorded, and only once it holds no process.
+    if cgpath_file.exists():
+        try:
+            cgdir = pathlib.Path(cgpath_file.read_text().strip())
+            if cgdir.is_dir() and not (cgdir / "cgroup.procs").read_text().strip():
+                cgdir.rmdir()
+        except OSError:
+            pass
     snap_after = olean_snapshot(ns)
     drifted = snap_before != snap_after
     # A gate line is necessary and NOT sufficient: the command must also have
@@ -335,10 +362,8 @@ def main() -> int:
                                if l.strip()]
                               if a.phase_markers and phases.exists() else []),
            "final_rc": rc, "final_max_rss_kb": rss, "final_wall_s": round(wall, 2),
-           "final_cgroup_peak_kb": next(
-               (int(x.split("peak=")[1].split()[0].replace(",", ""))
-                for x in txt.splitlines() if "d3_guarded_build:" in x
-                and "peak=" in x), 0),
+           "final_cgroup_peak_kb": charge_kb,
+           "final_cgroup_peak_source": charge_src,
            "gate_line": gate, "group_builds": rows,
            "command": " ".join(sys.argv)}
     (out / "result.json").write_text(json.dumps(res, indent=2) + "\n")

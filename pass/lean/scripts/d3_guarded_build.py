@@ -35,6 +35,16 @@ _spec.loader.exec_module(sweep)
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max-kb", type=int, required=True)
+    ap.add_argument("--cgroup-path-file", default="",
+                    help="write this run's cgroup path here as soon as it "
+                         "exists. A caller that KILLS this wrapper takes the "
+                         "whole process group with it, so the `finally` never "
+                         "runs: the peak is never reported and the cgroup "
+                         "leaks. With the path on disk the caller can still "
+                         "read `memory.peak` from the corpse and remove it. "
+                         "Measured: a timed-out composition reported rss=0 "
+                         "charge=0 while its orphaned cgroup held the real "
+                         "12,207,062 kB.")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     a = ap.parse_args()
     cmd = a.cmd[1:] if a.cmd and a.cmd[0] == "--" else a.cmd
@@ -51,6 +61,14 @@ def main() -> int:
 
     cg = base / f"d3build_{os.getpid()}"
     cg.mkdir(parents=True, exist_ok=True)
+    if a.cgroup_path_file:
+        # Written BEFORE the command starts, so it is on disk even if this
+        # process is killed in the first instant.
+        try:
+            pathlib.Path(a.cgroup_path_file).write_text(str(cg))
+        except OSError as e:
+            print(f"d3_guarded_build: could not record cgroup path: {e}",
+                  file=sys.stderr)
     shimdir = None
     try:
         (cg / "memory.max").write_text(str(a.max_kb * 1024))
