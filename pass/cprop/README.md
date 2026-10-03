@@ -28,6 +28,38 @@ pass-wide budget for shared children. Consuming private associative regions
 are flattened only at their outer consumer. Finite reduction descriptors are
 computed forward once, with a bounded representation size.
 
+## Loop-invariant hoisting (compact loops)
+
+`loop_hoist.cpp` runs serially after the per-graph sweep (`pass.cprop`
+label `loop_hoist`, default true). A compact loop's body sees two kinds of
+input: the ordinal, the activation and every carry-in change between
+iterations; every other input is bound once per evaluation. A body cell that
+reads only invariant inputs and constants (transitively) computes the same
+value in every iteration, and the rolled form still computes it `count`
+times -- once per call in the simulator, once per instantiated copy in
+synthesis. The frontier of such cells (those a varying cell, an inner loop or
+a body output consumes) moves out: the body definition gains one
+`__hoist<k>` input per value, each loop instance clones the cone into its
+parent once (fed from what the parent already drives into the instance's
+invariant inputs) and drives the port, and the body reads the port. The
+descriptor, carries, trip count and per-ordinal body are untouched: the
+compact form is preserved by ruling, so this -- not unrolling -- is where
+the body gets cheaper. Two filters: the value's width must be known (it
+becomes a declared port, and a 0-width port takes the body off the
+simulator's inline pure evaluator, which cost br_arb_lru 18 -> 25 s before
+the filter), so in the compile schedule the move happens in the cprop round
+after bitwidth; and the cone must compute something -- a lone slice,
+widening, pack or shift of an invariant mints no gate and would only add a
+bound input per instance. A body also instantiated as an ordinary Sub is
+left alone (that call's inputs may all vary); a cone reading an input some
+instance leaves unconnected stays. Sweeps repeat while a hoisted cone lands
+in a parent that is itself a body. `LIVEHD_LOOP_HOIST_DEBUG=1` prints each
+move; `--set compile.cprop.loop_hoist=false` disables it. On the lhdtrack
+`for`-loop designs the bodies are ordinal-indexed slices with little
+invariant computation, so the move is neutral there; the rolled form's
+remaining cost is the simulator's per-call protocol (invariant binds, carry
+compare/copy, wide mux arms widened to a signed carrier), not body logic.
+
 ## Mux sharing
 
 `cprop_opshare.cpp` factors private same-shape operators out of binary muxes

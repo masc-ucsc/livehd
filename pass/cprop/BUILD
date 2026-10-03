@@ -71,3 +71,16 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "loop_hoist_test",
+    srcs = ["loop_hoist_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":pass_cprop",
+        "//core",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)

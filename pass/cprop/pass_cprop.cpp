@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "cprop.hpp"
+#include "loop_hoist.hpp"
 #include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
 static Pass_plugin sample("pass_cprop", Pass_cprop::setup);
@@ -18,11 +19,26 @@ void Pass_cprop::setup() {
                         "true: narrow operations reading a value with known low bits, Or(Shl(H,k),L), to their H parts "
                         "(bitwidth runs after cprop in every compile)",
                         "true");
+  m1.add_label_optional("loop_hoist",
+                        "true: move a compact loop body's iteration-invariant computations (those reading only invariant "
+                        "inputs and constants, never the ordinal, the activation or a carry) out to every loop instance's "
+                        "parent, computed once per evaluation and fed through a new `__hoist<k>` body input. The compact "
+                        "form is preserved; the values never change",
+                        "true");
 
   register_pass(m1);
 }
 
 Pass_cprop::Pass_cprop(const Eprp_var& var) : Pass("pass.cprop", var) {}
+
+// Loop-invariant code motion is a library-wide rewrite (a body and all its
+// parents change together), so it follows the per-graph transform serially.
+static void hoist_after(Eprp_var& var) {
+  if (var.get("loop_hoist", "true") == "false") {
+    return;
+  }
+  livehd::cprop::hoist_loop_invariants(var.graphs);
+}
 
 void Pass_cprop::optimize(Eprp_var& var) {
   Pass_cprop pcp(var);
@@ -43,6 +59,7 @@ void Pass_cprop::optimize(Eprp_var& var) {
     for (const auto& g : var.graphs) {
       cp.do_trans(g);
     }
+    hoist_after(var);
     return;
   }
 
@@ -75,4 +92,5 @@ void Pass_cprop::optimize(Eprp_var& var) {
       std::rethrow_exception(error);
     }
   }
+  hoist_after(var);
 }
