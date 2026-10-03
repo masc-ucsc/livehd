@@ -509,26 +509,12 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
     for j in [0 : nseg] do
       let lo' := bnd j
       let hi' := bnd (j+1)
-      -- The node lookups are LOCAL `have`s, not top-level theorems. Measured:
-      -- as declarations they accumulate -- 32 per chunk, and a 38-chunk design
-      -- died part-way through chunk 27 at 10,093,404 kB with ~293 MB added per
-      -- chunk. Each lookup is only needed inside its own chunk's proof, so
-      -- scoping them there keeps the environment flat.
-      let lkId : Nat → Ident := fun k => mkIdent (Name.mkSimple s!"look{k}")
-      let mut haves : Array (TSyntax `tactic) := #[]
-      for k in [lo' : hi'] do
-        match cert.nodes[k]? with
-        | none => throwError "prove_reified_chunked: no node {k}"
-        | some c =>
-          -- `Repr` text is NOT trusted: `rfl` checks the literal against the
-          -- design, so a bad round-trip fails here, not inside the proof.
-          let cq : Term ←
-            match Lean.Parser.runParserCategory (← getEnv) `term (toString (repr c)) with
-            | .ok stx  => pure (⟨stx⟩ : Term)
-            | .error e => throwError "prove_reified_chunked: node {k} Repr \
-                did not re-parse: {e}"
-          haves := haves.push (← `(tactic|
-            have $(lkId k) : ($d).nodes[$(quote k)]? = some $cq := rfl))
+      -- The chunk fact is `rfl` against `compileFrom` directly, so nothing
+      -- about the design is quoted here and there is no round-trip to trust.
+      -- An earlier revision proved it by `simp` over per-node lookup lemmas;
+      -- those lemmas needed the node literals, which came from `Repr`. Both
+      -- are gone: `rfl` is both smaller and, measured on txfma_e6, about twice
+      -- as fast (13.17 s against 25.41 s at the same memory).
       let accId := mkIdent (Name.mkSimple "acc")
       let mut rhs : Term ← `($accId:ident)
       for k in [lo' : hi'] do
@@ -538,16 +524,11 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
           | .mem a w => `(Compiler.ValueType.mem $(quote a) $(quote w)))
         let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
         rhs ← `(($rhs).push { ty := $tyQ, rhs := $rhsQ })
-      let mut lks : Array (TSyntax `Lean.Parser.Tactic.simpLemma) := #[]
-      for k in [lo' : hi'] do
-        lks := lks.push (← `(Lean.Parser.Tactic.simpLemma| $(lkId k):ident))
       elabCommand (← `(command|
         theorem $(cfNm j) ($accId : Array Compiler.ResidualBinding) :
             Compiler.compileFrom $d $(quote lo') $(quote (hi' - lo')) $accId
               = .ok $rhs := by
-          $haves*
-          simp [Compiler.compileFrom, Compiler.compileOp, Compiler.opValueType,
-                Compiler.DesignCert.slotOfNode, $lks,*]))
+          rfl))
       markPhase s!"compile_chunk {j}"
     -- compose: compileGraph D = .ok <the push chain the chunks build>
     let mut chainT : Term ← `((#[] : Array Compiler.ResidualBinding))
@@ -647,7 +628,13 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         rw [$carNm:ident $iId $stId]
         exact Compiler.compileAndRun_correct $d $okNm $iId $stId))
     markPhase "correct"
+    -- The `correct` marker fires when its `elabCommand` RETURNS, and Lean
+    -- checks theorem bodies asynchronously, so reaching it means the proof was
+    -- dispatched, not checked. `collectAxioms` forces that checking. These two
+    -- markers are what separate "elaborated" from "checked and audited".
+    markPhase "audit_start"
     auditOrThrow (base ++ `correct) "prove_reified_chunked"
+    markPhase "audit_done"
     logInfo m!"prove_reified_chunked: {corNm} proved over {nb} binding(s) in \
       {nseg} chunk(s) of at most {csize}"
   | _ => throwUnsupportedSyntax
@@ -1152,14 +1139,17 @@ syntax (name := d3ProofGate) "d3_proof_gate " ident : command
 def elabD3ProofGate : CommandElab := fun stx => do
   match stx with
   | `(command| d3_proof_gate $t:ident) => do
+    markPhase "gate_start"
     let (n, cs) ← liftCoreM do
       let n ← resolveGlobalConstNoOverload t
       pure (n, ← collectAxioms n)
+    markPhase "gate_axioms_collected"
     let bad := cs.filter fun a => !(d3AllowedAxioms.contains a)
     if !bad.isEmpty then
       throwError "d3_proof_gate: {t} depends on DISALLOWED axiom(s) {bad.toList}; \
                   allowed: {d3AllowedAxioms}"
     logInfo m!"D3GATE proof=1 thm={n} axioms={cs.toList}"
+    markPhase "gate_done"
   | _ => throwUnsupportedSyntax
 
 end Compiler
