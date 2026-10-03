@@ -80,6 +80,7 @@ private:
 
   absl::flat_hash_set<uint32_t>                  variant_ports_;
   absl::flat_hash_map<hhds::Node_class, int8_t> invariant_memo_;  // -1 in progress (a cycle is not invariant)
+  absl::flat_hash_set<hhds::Node_class>         wiring_only_;     // cone_computes: cones already found pure wiring
 };
 
 void Hoister::collect_variant_ports() {
@@ -186,7 +187,7 @@ bool Hoister::cone_computes(const hhds::Node_class& root) {
   while (!work.empty()) {
     auto n = work.back();
     work.pop_back();
-    if (!seen.insert(n).second) {
+    if (wiring_only_.contains(n) || !seen.insert(n).second) {
       continue;
     }
     if (!wiring_op(gu::type_op_of(n))) {
@@ -200,6 +201,8 @@ bool Hoister::cone_computes(const hhds::Node_class& root) {
       }
     }
   }
+  // The whole cone is wiring: later frontier values that share it stop here.
+  wiring_only_.insert(seen.begin(), seen.end());
   return false;
 }
 
@@ -221,6 +224,8 @@ hhds::Pin_class Hoister::clone(const hhds::Pin_class& pin, const Instance& inst,
   // Width and sign ride the driver pin; the node stays unnamed -- the port it
   // feeds is the traceable name, and a name would collide across instances.
   gu::carry_pin_attrs(n.create_driver_pin(0), neo.create_driver_pin(0));
+  // A LUT's function is a node attribute: without it the clone computes nothing.
+  gu::carry_attr<livehd::attrs::lut_t>(n, neo);
   for (auto spin : n.inp_sorted_pins()) {
     for (auto drv : spin.get_driver_pins()) {
       neo.create_sink_pin(spin.get_port_id()).connect_driver(clone(drv, inst, memo));
@@ -307,13 +312,16 @@ bool Hoister::run() {
       inst.node.create_sink_pin(pid).connect_driver(value);
     }
     // Snapshot: the fan-out view is live and every step below rewires through it.
-    std::vector<hhds::Pin_class> sinks;
+    // Delete only THIS edge: a reader's sink may hold other drivers too (an
+    // inner compact loop's carry-in sink holds its self edge beside the
+    // external initial value), and those must survive the move.
+    std::vector<hhds::Edge_class> edges;
     for (const auto& e : fdrv.out_edges()) {
-      sinks.push_back(e.sink);
+      edges.push_back(e);
     }
-    for (auto& sink : sinks) {
-      sink.del_sink();
-      new_in.connect_sink(sink);
+    for (auto& edge : edges) {
+      edge.del_edge();
+      new_in.connect_sink(edge.sink);
     }
     ++hoisted;
     if (debug_) {
@@ -355,11 +363,41 @@ bool Hoister::run() {
 Loop_hoist_stats hoist_loop_invariants(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
   Loop_hoist_stats stats;
   const bool       debug = ::getenv("LIVEHD_LOOP_HOIST_DEBUG") != nullptr;
+  // A body's new port must be driven by EVERY parent. Parents are found only
+  // in `graphs`, so the move is sound only when `graphs` is each touched
+  // library's whole graph set: a parent left outside (an unloaded unit, a
+  // partial pass run) would read the new input undriven. all_gids() lists
+  // the library without materializing bodies, so the check is cheap.
+  {
+    absl::flat_hash_map<hhds::GraphLibrary*, size_t> seen;
+    for (const auto& g : graphs) {
+      if (!g) {
+        continue;
+      }
+      auto io = g->get_io();
+      if (!io || io->get_library() == nullptr) {
+        return stats;
+      }
+      ++seen[io->get_library()];
+    }
+    for (const auto& [lib, count] : seen) {
+      if (lib->all_gids().size() != count) {
+        if (debug) {
+          std::println(stderr, "loop_hoist: skipped -- {} of {} library graphs in scope", count, lib->all_gids().size());
+        }
+        return stats;
+      }
+    }
+  }
   // A hoisted cone lands in the parent; when that parent is itself a loop body
   // the cone may be invariant there too, so sweep until nothing moves. Each
   // sweep sees the library as the previous one left it.
   for (int round = 0; round < 4; ++round) {
-    absl::flat_hash_map<hhds::Graph*, Body> bodies;
+    // Discovery order, not hash order: which body moves first decides whether
+    // a parent body sees its child's clones this round or the next, and so the
+    // `__hoist<k>` numbering -- it must not depend on pointer values (ASLR).
+    std::vector<Body>                         bodies;
+    absl::flat_hash_map<hhds::Graph*, size_t> body_ix;
     for (const auto& g : graphs) {
       if (!g) {
         continue;
@@ -372,7 +410,11 @@ Loop_hoist_stats hoist_loop_invariants(const std::vector<std::shared_ptr<hhds::G
         if (!child) {
           continue;
         }
-        auto& body = bodies[child.get()];
+        auto [it, fresh] = body_ix.try_emplace(child.get(), bodies.size());
+        if (fresh) {
+          bodies.emplace_back();
+        }
+        auto& body = bodies[it->second];
         body.graph = child;
         if (n.subnode_loop()) {
           body.instances.push_back({g.get(), n});
@@ -382,7 +424,7 @@ Loop_hoist_stats hoist_loop_invariants(const std::vector<std::shared_ptr<hhds::G
       }
     }
     bool changed = false;
-    for (auto& [ptr, body] : bodies) {
+    for (auto& body : bodies) {
       if (body.instances.empty()) {
         continue;
       }

@@ -4242,6 +4242,9 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
   if (spliced) {
     livehd::sim::refold_private_body(graph);
+    // This body's flat cost changed: a later parent must not size it from the
+    // pre-splice memo entry.
+    unrolled_cost_memo_.erase(g);
   }
   // No false-loop inlining: the occurrence-wide color plan resolves hierarchy
   // crossings without cloning. The old inliners multiplied cloned subtrees up
