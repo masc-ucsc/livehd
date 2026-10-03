@@ -79,3 +79,42 @@ measurement deliberately leaves local in B.
   * Earlier hypotheses about serdiv (Op_Xor, Op_MuxBool volume) are about
     ELABORATION, which is 7 seconds. They are hypotheses about the wrong
     phase and are not revived by this work.
+
+## Result of a cheaper arm tried first (D), and a design error in it
+
+Before arm B, a cheaper idea was tested: if the audit is expensive because
+`collectAxioms` forces the whole dependency graph at once, maybe simply
+BUILDING the composition as a module -- where checking happens per
+declaration at build time -- is the whole fix, with no restructure at all.
+
+    design              arm A (one file)        arm D1 (one module)
+    txfma_e6   (133)    9.88 s /   664,544 kB   10.52 s /   685,084 kB
+    serdiv_gate(1180)   TIMEOUT 2400 s /        TIMEOUT 2700 s /
+                        12,207,062 kB            13,718,216 kB, no olean
+
+    arm D2 (import that module, audit the imported theorem):
+                        2.27 s / 292,148 kB  -- near the bare-import floor
+
+REFUTED. Building the composition as a module does not help: serdiv fails
+that way too, at HIGHER charge. Relocating the kernel check to build time
+does not reduce it. D2 does confirm the import mechanism itself is cheap, so
+the mechanism is sound and the problem is elsewhere.
+
+**Arm D1 was poorly designed and the error is worth recording.** It put the
+entire model in ONE module. The compiler facts are not organised that way --
+they are split across TEN modules, and that is what makes them cheap:
+
+    ariane_regfile_gate  10 compiler-fact modules   619,844 - 2,228,880 kB each
+                         composition, model local        12,267,132 kB
+
+So D1 tested MODULE-NESS when the property that actually worked is SPLITTING.
+It refutes "put the whole model in one module". It does NOT refute arm B,
+which is the split, and the table above is the positive evidence for arm B:
+the same facts cost 0.6-2.2 GB apiece when divided across ten modules and
+12.3 GB when checked together.
+
+Arm B therefore stands, with its acceptance numbers unchanged, and with one
+addition learned here: B must split the model facts across MANY modules on
+the same grouping the compiler facts already use (`--per-group`, default 4
+chunks per module), not into a single model module. A single-module arm is
+already answered -- it is D1, and it fails.
