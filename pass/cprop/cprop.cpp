@@ -2799,7 +2799,37 @@ bool Cprop::indexed_get_mask(hhds::Node_class& node, hhds::Pin_class source, int
   if (!pieces || pieces->empty()) {
     return false;
   }
+  // Adjacent pieces that are contiguous slices of ONE source are one slice:
+  // {x[b +: w2], x[a +: w1]} with b == a + w1 is x[a +: w1 + w2]. Merging here
+  // lets a window over a word's own bit lanes resolve to one Get_mask of that
+  // word instead of a Concat that merge_concat_slices must re-pack later.
+  {
+    std::sort(pieces->begin(), pieces->end(), [](const auto& a, const auto& b) { return a.lo < b.lo; });
+    size_t out = 0;
+    for (size_t i = 1; i < pieces->size(); ++i) {
+      auto&       keep = (*pieces)[out];
+      const auto& next = (*pieces)[i];
+      if (!keep.source.is_const() && next.source == keep.source && keep.hi == next.lo
+          && keep.source_lo + (keep.hi - keep.lo) == next.source_lo) {
+        keep.hi = next.hi;
+      } else {
+        (*pieces)[++out] = next;
+      }
+    }
+    pieces->resize(out + 1);
+  }
   if (pieces->size() == 1 && pieces->front().source == source && pieces->front().source_lo == lo) {
+    return false;
+  }
+  // A window that still spans several lanes of a pack OTHER readers keep alive
+  // stays this one Get_mask of the shared pack. Re-assembling the lanes into a
+  // private Concat per reader multiplies the lane work by the reader count:
+  // the Pyrope writer's one-bit tuple ports turned every `in_internal#[0..=k]`
+  // of br_enc_priority_encoder into a Concat of up to 30 one-bit lanes, and the
+  // simulator paid each lane per cycle (lhdtrack br_multi_xfer_distributor_rr,
+  // 8x slower than the same design read from Verilog). The pack is swept only
+  // when this node is its last reader, which is exactly when the Concat wins.
+  if (pieces->size() > 1 && !has_single_consumer(source)) {
     return false;
   }
   // A lane source may already be a canonical Get_mask. Compose that ONE
