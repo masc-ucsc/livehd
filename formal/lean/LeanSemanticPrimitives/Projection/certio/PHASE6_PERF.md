@@ -1629,3 +1629,33 @@ the canonical witness `main_agree_var`, and B3 (making
 `specializeDesign_correct` interpreter-parametric) are untouched.  The
 corollary deliberately excludes a term that calls `main`, since that node is
 exactly what the rewrite changes.
+
+
+## 16. ETA discipline: no real-design time estimates
+
+I projected a host specialization of `rt_alu_gate` at "~54 min" from
+1226 s x 2.66, and called a run "inside that envelope".  **Withdrawn.**  The
+2.66x figure is superseded by this document's own warning at section 14.2: the
+fork's advantage is not only that constant factor -- the zero-shift change
+measured **31.11x at n = 1024**, with the fitted exponent moving 2.91 -> 1.90
+(table in the zero-shift section).  The estimate used a number the file
+explicitly flags as incomplete.
+
+Substituting 31.11x would be no better: it is a DIFFERENT SYNTHETIC SHAPE
+(`chain`), at one size, and the exponent shift means the ratio is not even
+constant across sizes, let alone transferable to a 6,597-node real design.
+
+**There is no reliable real-design ETA, and none should be quoted.**  While a
+run is in flight, report only MEASURED elapsed wall, CPU, RSS and the stage it
+is in.  CPU saturation is liveness, not progress, and "no transition expected
+yet" is a claim about an envelope that does not exist.
+
+### What each runner can actually report
+
+Marking this because a summary promised "all six / trace / control" for both
+in-flight runs, and one of them cannot produce those:
+
+| PID | runner | stimuli | trace | control | notes |
+|---|---|---|---|---|---|
+| 2877239 | `proto_probe --host-var` | seeds **[0,1,4] only** | **NOT RUN** | **NOT RUN** | its own output says "3 seeds, no trace, no control -- FEASIBILITY evidence".  It is also the OLD binary, which predates the checker-rejection gate fix: if its checker rejects, its exit status is the OLD, WRONG one, and that caveat stands regardless of what the present source says. |
+| 3238710 | `total_probe` | 6 width-aware | yes | yes | full acceptance through the checked simulator path belongs to THIS run only |
