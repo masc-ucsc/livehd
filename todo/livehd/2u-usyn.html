@@ -966,35 +966,91 @@ prerequisite to functional search.</li>
   separate physical backend and timing contract.</li>
   </ul>
 </li>
+
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
 <li id="n"><strong>N — ASAP7 evaluation against ABC in ../lhdtrack.</strong>
+  <span class="status landed">landed</span>
   <ul>
   <li>Goal: the lhdtrack Verilog evaluation (<code>../lhdtrack/flows/syn_lhd_verilog_usyn.py</code>,
   <code>lec_netlist_verilog_usyn.py</code>, <code>_no_satopt</code> variants; <code>techs = ["sky130","asap7"]</code>
   in <code>lhdtrack.toml</code>) compares <code>synth.mapper=usyn</code> (CMOS, <code>tmap=abc</code>) with
   <code>synth.mapper=abc</code> on ASAP7: same sources, the one merged ASAP7 Liberty, same SDC period, OpenSTA
-  timing of the emitted netlist, independent LEC. Last ASAP7 pages (<code>../lhdtrack/target/eval-2026092*.html</code>)
-  predate the 2026-09-27 option/report migration; the newest dated 2026-09-25.</li>
-  <li><strong>Blocker — flow is stale against J.</strong> <code>../lhdtrack/flows/syn_lhd_verilog.py</code> (lines ~122-127)
-  reads the USYN report and requires <code>usyn["abc"] == "tmap"</code>, recording <code>pass.usyn.abc</code>. Schema-5
-  reports carry <code>tmap</code> (<code>none|abc</code>), and <code>abc</code> is now an obsolete option that gives a
-  migration error. Update the flow to read <code>tmap</code>, require <code>tmap=abc</code> and <code>output=mapped-cmos</code>,
-  record <code>pass.usyn.tmap</code>, and confirm the report path/name it opens still matches what
-  <code>pass_usyn.cpp</code> writes (<code>&lt;output&gt;.qor.json</code> / region reports). Check any other
-  <code>pass.usyn.*</code> overrides it passes against the current option list.</li>
-  <li>Run one small ASAP7 case end to end (synth, emit, OpenSTA, LEC), then the full set. Retain failed variants,
-  record mapped area, timing completeness, runtime, memory and LEC verdict per row; LEC timeouts (multipliers, CRC32 in the
-  2026-09-27 baseline) stay explicit rows, not omissions.</li>
-  <li>Also run the three-configuration residual ablation (selection, plus residual, plus feedback) on the ASAP7 set;
-  this is K's measured-benefit gate, using lhdtrack as the corpus owner (inputs stay external to LiveHD scripts).</li>
+  timing of the emitted netlist, independent LEC. Earlier ASAP7 pages (<code>../lhdtrack/target/eval-2026092*.html</code>)
+  predate the 2026-09-27 option/report migration; the new 2026-10-02 evaluation covers 195 design/configuration slots.</li>
+  <li><strong>Flow migration landed (2026-10-02).</strong> lhdtrack commit <code>2840df8</code>
+  reads schema-5 <code>tmap=abc</code> / <code>output=mapped-cmos</code>, records
+  <code>pass.usyn.tmap</code> and the SDC-derived <code>pass.usyn.delay</code>, and accepts the
+  technology-map report's definition-region totals. <code>make usyn</code> runs ASAP7 only,
+  with compiler SAT optimization explicitly off. The small adder passes synthesis, emission,
+  OpenSTA and both native/Yosys exact-netlist LEC in each compile SAT profile.</li>
+  <li><strong>Proof coverage fixed.</strong> SAT-disabled synthesis, its retained-artifact
+  lookup, rechecks and report selection now use the SAT-disabled netlist and proof. The
+  enabled profile explicitly passes <code>pass.satopt=true</code>; older runs incorrectly
+  relied on an enabled default. Native synthesis time is attributed to mapping. New
+  synthesis rows record source, SDC, Liberty and emitted-netlist digests. Failed or bounded
+  proofs remain explicit, and frequency aggregation requires compatible timing and an
+  unbounded proof of each exact emission.</li>
+  <li><strong>First native timing iteration.</strong> Equal-area residual candidates may
+  replace an incumbent only at strictly lower depth; reference pricing still protects
+  outside readers. Exhaustive AND/XOR-chain and shared-reader regressions pass. In the
+  seven-design ASAP7 experiment <code>20261002T163144</code>, ALU minimum period improves
+  from <code>335.043 ps</code> to <code>307.9358 ps</code> (8.8% frequency improvement),
+  versus <code>330.5333 ps</code> for ABC. Both checkers prove its exact emission. Six cases
+  pass both checkers; alpha_blend times out in both engines for both mappers.</li>
+  <li><strong>Second native timing iteration.</strong> Native parallel-prefix carry
+  construction removes the wide Sum ripple chain before selection. The default
+  <code>pass.usyn.adder=auto</code> uses it for Sum widths of at least 16 bits,
+  preserving ripple lowering for narrow sums and multiplier/divider internals.
+  Exhaustive small-width/carry-in checks and non-power-of-two depth checks pass.
+  In experiment <code>20261002T172414</code>, AddMop improves from
+  <code>1549.3994 ps</code> to <code>411.6284 ps</code> versus ABC's
+  <code>416.3854 ps</code>; both checkers prove the emission. Native area rises
+  from <code>77.653</code> to <code>106.011 µm²</code> (ABC: <code>158.791 µm²</code>).
+  The 32-bit signed and 48-bit three-operand additions reach <code>281.3362 ps</code>
+  and <code>294.1638 ps</code>, versus ABC's <code>347.9968 ps</code> and
+  <code>361.2361 ps</code>, also proven by both checkers. ALU retains
+  <code>307.9358 ps</code>. Eight cases pass both checkers; alpha_blend and
+  carry_save_select time out in both engines and do not enter frequency claims.
+  Mixed arithmetic still has timing gaps. These are local improvements, not a
+  whole-corpus win; explicit <code>adder=rca</code> restores the old lowering.</li>
+  <li><strong>Full evaluation complete (2026-10-02).</strong> The
+  <a href="https://github.com/masc-ucsc/lhdtrack/blob/main/data/usyn-asap7-20261002-satsuma.json">committed paired matrix</a>
+  retains all 195 slots, exact producer hashes, source/SDC/Liberty/netlist digests,
+  mapped area and timing availability, runtime/RSS, native stage costs/work and both
+  checker verdicts. Regenerate its page with
+  <code>python3 tools/report_usyn_ablation.py --from-summary data/usyn-asap7-20261002-satsuma.json</code>.
+  Each native variant has 190 successful syntheses and five explicit constraint skips;
+  ABC has 184 successes, six synthesis timeouts and five skips. Improved USYN has
+  unbounded exact-netlist proofs for 136 of its 190 emissions; unresolved checks remain
+  visible. No emitted native netlist is refuted. Preserved native state has explicit
+  missing whole-design area/timing. An audit of 644 structural-normalization logs
+  found zero ABC gate extractions: native Boolean synthesis was not supplemented by
+  ABC optimization. The final integrated compiler also passes <code>make usyn</code>'s
+  adder smoke with both checkers for both mappers (run <code>20261002T181921</code>).</li>
+  <li><strong>K's residual/feedback measurement gate completed.</strong> ABC and the
+  three native ablations use the same frozen compiler, library and constraints;
+  endpoint settings and work caps are fixed. The improved arithmetic iteration has
+  its separately recorded compiler. On the same 23 proven idiomatic headline slots,
+  native frequency / ABC frequency is:
+  <table><thead><tr><th>Native configuration</th><th>Frequency geomean</th></tr></thead>
+  <tbody><tr><td>Selection only</td><td>83.04%</td></tr>
+  <tr><td>Selection + residual</td><td>89.46%</td></tr>
+  <tr><td>Selection + residual + feedback</td><td>89.43%</td></tr>
+  <tr><td>Wide-sum prefix lowering + residual + feedback</td><td>94.73%</td></tr></tbody></table>
+  Residual optimization adds 7.7%; feedback adds essentially no frequency benefit on
+  this population. Prefix lowering adds another 5.9%, with a 1.36% mapped-area increase
+  in the paired geomean. Native stage costs are definition-region proxies, separate
+  from mapped cell area. Runtime/RSS observations were collected with concurrent
+  proof workers. Timing gaps remain in mixed arithmetic and some selection logic;
+  this is a measured baseline and improvement, not a claim of universal superiority.</li>
   <li>Not required: DOMINO emission, domino Liberty (<a href="domino.html">domino</a> P3-P6), or any 2u search tier still
-  pending. Gate: an ASAP7 report page with USYN and ABC rows for the same tests, none silently dropped, with the
-  Liberty and SDC digests recorded; no QoR threshold is set before that baseline exists.</li>
+  pending. The ASAP7 report gate is satisfied; optional search tiers and physical
+  DOMINO work remain deferred under the stated implementation priority.</li>
   </ul>
 </li>
-</ul>
-
-<h2>Subtasks — landed</h2>
-<ul class="subtasks">
 <li id="l"><strong>L — Make USYN independently buildable and runnable without ABC.</strong>
   <span class="status landed">landed</span>
   <ul>
