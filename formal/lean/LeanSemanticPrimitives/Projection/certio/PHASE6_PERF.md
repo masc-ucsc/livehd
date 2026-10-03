@@ -1550,3 +1550,82 @@ all six named fields -- `wf`, `memFree`, `sources`, `ops`, `arities`,
 `flopClocks` -- to be present AND true, records each field separately, and
 flags any that is absent.  The record also keeps the raw log's sha256 and the
 control and trace lines verbatim.
+
+## 15. `rt_decoder_gate`, and B1 proved
+
+### 15.1 The run
+
+    rt_decoder_gate.dcert   sha256 f87080df26fcfa7b08b62f157066a14893d95a01db0048fc66e0e883370b72f4
+    8,373 sources  8,971 nodes  0 flops -- COMBINATIONAL, CVA6
+    support: wf true memFree true sources true ops true arities true flopClocks true
+    fuel 200000/2000
+      [specialize ... d=138135 2413597 ms]
+      terms 138135  tl 478  hd 30  consP 17347
+      checkResidual: ACCEPTED, proved-sufficient bound 38902
+      seed 0,1,2,3,4,7: residual ok, matches interpretDesign  (all six)
+      trace: 4 cycles -- agrees true  states-reached 1  flops 0
+      control: variant interpreter ok vs interpretDesign true
+      STAGE TIMES ms: specialize 2413597  checkResidual 44
+                      reference-runs 44806 (6)  residual-runs 12341 (6)  control 382996
+    wall 2900.21 s  RSS 172,360 KB  exit 0
+
+`states-reached 1` again carries no coverage note and should not: zero flops,
+no state to move.
+
+Identity was captured MID-RUN, not before launch -- `/proc/2795132/exe` hashed
+identical to `.native-dev/proto_probe` (`efbed80c2b4cda45...`), tree clean at
+`322029ec1`.  The manifest row records `captured-during-run`, which is weaker
+than `captured-pre-launch` and says so.
+
+| stage | time | share |
+|---|---:|---:|
+| specialize | 2413.6 s | 84.6% |
+| control | 383.0 s | 13.4% |
+| reference runs, 6 | 44.8 s | 7.47 s each |
+| residual runs, 6 | 12.3 s | 2.06 s each |
+| staged total vs wall | 2853.8 s / 2900.21 s | 46.4 s unaccounted |
+
+On these six runs, the residual took 2.06 s per cycle against the
+interpreter's 7.47 s, a ratio of 3.63.  `rt_alu_gate`'s was 2.15 on its own six
+runs.  Two designs is not a trend, and neither figure is a general speedup.
+
+Model checks hold again: `consP` 17,347 against
+`nSources + nNodes + nFlops + 1` = 17,345 (off by 2); `tl` 478 against the
+model's (A) = 405, a residue of 73.  Residues so far: 1,205 (CORE-ET alu),
+62 (cva6 alu_gate), 73 (cva6 decoder_gate) -- per-design, as 8.7 said, and
+still unidentified.  **Not being chased.**
+
+### 15.2 Coverage
+
+| category | design | executed + reference-compared | budget |
+|---|---|---|---|
+| CVA6, combinational | `rt_alu_gate` | yes, 6 stimuli | 200000/2000 (stock FAILS) |
+| CVA6, combinational | `rt_decoder_gate` | yes, 6 stimuli | 200000/2000 |
+| CVA6, sequential | `rt_btb_gate` | quarantined -- reset-descriptor conflict |  |
+| CORE-ET, combinational | `rt_intpipe_alu` | yes | 200000/2000 |
+
+**CVA6 toward the 30: TWO, both combinational, both EXPERIMENTAL.**  Sequential
+CVA6: zero.  Theorem-covered path (`mixDriver` + `hwAP`): **zero designs run**.
+
+### 15.3 B1 is proved
+
+`Proto/VariantTransport.lean`, audited by `Proto/ProtoAudit.lean`: 14
+directives, `propext`/`Quot.sound` only, no `sorryAx`, no `ofReduceBool`, and
+`mainFreeB_hwS` **axiom-free**.
+
+What it is: the function-table congruence `SEval_congr`, with
+`MainFreeFuns hwS` DISCHARGED (`mainFreeB_sound` + a kernel `rfl`, not a
+`#guard`), instantiated at the REAL `hwSVar` via `sFn_hwSVar`, plus the
+corollary `SEval_hwSVar_of_hwS` that B2 will consume.
+
+One thing that fell out of doing it: `goInline` is a `partial def`, so
+`ProtoVar.changed` is NOT kernel-reducible and could not have been a
+hypothesis.  `sFn_hwSVar` is unconditional instead, because the replacement
+keeps the name `main` whatever `goInline` returns -- only the BODY depends on
+it.
+
+What it is NOT: variant adequacy.  B2 (the rewrite for `main`'s ACTUAL body),
+the canonical witness `main_agree_var`, and B3 (making
+`specializeDesign_correct` interpreter-parametric) are untouched.  The
+corollary deliberately excludes a term that calls `main`, since that node is
+exactly what the rewrite changes.

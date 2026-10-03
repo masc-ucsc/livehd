@@ -144,12 +144,37 @@ It splits into two pieces, and **neither is a generic term lemma applied
 blindly** -- `hwS` and `hwSVar` are different programs with different function
 tables, and no same-program rewriting lemma relates them automatically:
 
-* **B1, the table.**  `hwSVar` differs from `hwS` only in `main`'s body; every
-  helper is byte-identical.  `SEval` resolves calls by NAME against the
-  program, so what is needed is a congruence: for a derivation that does not
-  re-enter `main`, `SEval hwS σ e v → SEval hwSVar σ e v`.  `main_agree`'s
-  derivation calls helpers only, so the whole sub-derivation transports and
-  only the top node is affected.
+* **B1, the table. -- PROVED.**  `hwSVar` differs from `hwS` only in `main`'s
+  body; every helper is byte-identical.  `SEval` resolves calls by NAME against
+  the program and uses it in exactly ONE rule, so a derivation cannot observe a
+  function it does not call.  `Proto/VariantTransport.lean`:
+
+  ```
+  SEval_congr {P Q} (hag : ∀ f, f ≠ "main" → sFn Q f = sFn P f)
+              (hmf : MainFreeFuns P) :
+      ∀ σ e v, noMainCallB e = true → SEval P σ e v → SEval Q σ e v
+  ```
+
+  `MainFreeFuns hwS` is DISCHARGED, not assumed: `mainFreeB_sound` turns the
+  Bool check into the predicate and `mainFreeB_hwS` is a kernel `rfl` (1.6 s),
+  not a `#guard`.  The precondition was checked against the source first --
+  `main` is called by nothing in `hwS`, not by any of the other 39 functions
+  and not by itself.
+
+  Instantiated at the REAL `hwSVar`, not an arbitrary replacement:
+  `sFn_hwSVar` holds UNCONDITIONALLY, because the replacement keeps the name
+  `main` whatever `goInline` returns -- only the BODY depends on it.  That
+  matters: `goInline` is a `partial def`, so `ProtoVar.changed` is NOT
+  kernel-reducible and could not have been assumed.
+
+  The corollary B2 consumes is `SEval_hwSVar_of_hwS`, and it deliberately does
+  NOT cover a term that calls `main` -- `noMainCallB` excludes it, because the
+  top `call "main"` node is exactly what the rewrite changes.  Transporting
+  that node would assume what B2 must prove.
+
+  Audited by `Proto/ProtoAudit.lean`: 14 directives, `propext`/`Quot.sound`
+  only, `mainFreeB_hwS` axiom-free, no `sorryAx`, no `ofReduceBool`.  This is
+  GENERIC TRANSPORT plus its instantiation -- **not** variant adequacy.
 * **B2, the rewrite, for the ACTUAL term.**  The inlining lemma must be proved
   for `main`'s body as it is -- under the σ that `main`'s parameters, the two
   `switch` patterns and the preceding `lets` bindings create -- with the side
