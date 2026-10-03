@@ -8,12 +8,25 @@ discovery and `cgexec` shim so there is one mechanism, not two.
 
   d3_guarded_build.py --max-kb N -- <cmd> [args...]
 
-Reports the cgroup's `memory.peak` and whether the kernel killed anything.
+Reports the cgroup's `memory.peak`, whether the kernel killed anything, and
+the `memory.events` counters that say whether the cap was BINDING:
+
+  oom_kill  the kernel killed a process -- the build did not fit
+  max       allocations were blocked at `memory.max` and the kernel reclaimed
+  high      the throttling threshold was crossed
+
+`max > 0` with `oom_kill == 0` is the case that is easy to misread as success:
+the build completed, but only because reclaim kept evicting pages it then had
+to fault back in. `peak == cap` exactly is its signature. Recording the counter
+makes the difference explicit instead of leaving it to be inferred from the
+peak, so "fit under the cap" is distinguishable from "ran pinned against it".
+
 Exit status is the command's, or 137 if the cgroup OOM-killed it.
 """
-import argparse, importlib.util, os, pathlib, subprocess, sys, tempfile
+import argparse, importlib.util, os, pathlib, shutil, subprocess, sys, tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
+ROOT = HERE.parents[2]
 _spec = importlib.util.spec_from_file_location("d3_sweep_mod", HERE / "d3_sweep.py")
 sweep = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sweep)
@@ -38,13 +51,22 @@ def main() -> int:
 
     cg = base / f"d3build_{os.getpid()}"
     cg.mkdir(parents=True, exist_ok=True)
+    shimdir = None
     try:
         (cg / "memory.max").write_text(str(a.max_kb * 1024))
         try:
             (cg / "memory.oom.group").write_text("1")
         except OSError:
             pass
-        shim = pathlib.Path(tempfile.mkdtemp(prefix="d3cgx_")) / "cgexec.py"
+        # Project-local scratch, not the system temp dir. `tempfile.mkdtemp`
+        # follows TMPDIR, which the module-proof driver sets project-local --
+        # but this wrapper also runs standalone, and then the shim landed in
+        # /tmp, which does not survive a host rebuild. Enforce it here too
+        # rather than depend on the caller's environment.
+        tmproot = ROOT / "temp/d3_tmpdir"
+        tmproot.mkdir(parents=True, exist_ok=True)
+        shimdir = pathlib.Path(tempfile.mkdtemp(prefix="d3cgx_", dir=str(tmproot)))
+        shim = shimdir / "cgexec.py"
         shim.write_text(
             "import os, sys\n"
             "with open(os.path.join(sys.argv[1], 'cgroup.procs'), 'w') as fh:\n"
@@ -54,10 +76,19 @@ def main() -> int:
         peak = int((cg / "memory.peak").read_text().strip())
         ev = dict(l.split() for l in (cg / "memory.events").read_text().splitlines())
         killed = int(ev.get("oom_kill", "0"))
+        at_max = int(ev.get("max", "0"))
+        at_high = int(ev.get("high", "0"))
         print(f"d3_guarded_build: rc={rc} peak={peak // 1024:,} kB "
-              f"cap={a.max_kb:,} kB oom_kill={killed}")
+              f"cap={a.max_kb:,} kB oom_kill={killed} max={at_max} high={at_high}")
+        if at_max and not killed:
+            print(f"d3_guarded_build: the cap was BINDING -- {at_max} allocation(s) "
+                  f"blocked at memory.max and reclaimed. The command completed, but "
+                  f"its peak is the CAP, not its demand; its demand is unmeasured "
+                  f"and strictly greater.", file=sys.stderr)
         return 137 if killed else rc
     finally:
+        if shimdir is not None:
+            shutil.rmtree(shimdir, ignore_errors=True)
         try:
             (cg / "cgroup.kill").write_text("1")
         except OSError:

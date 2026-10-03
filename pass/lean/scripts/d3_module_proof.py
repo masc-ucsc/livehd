@@ -45,10 +45,19 @@ def runner_digest() -> str:
     modules -- all of which change what a generated module MEANS, so a stamp
     keyed on `tool_digest` alone would treat an olean built before such a
     change as current.
+
+    `d3_guarded_build.py` is here for a different reason, and it is worth
+    stating because it is the easy one to leave out: it does not change what a
+    module means, it changes what "built under the cap" CLAIMS. Weaken the
+    wrapper -- drop the refusal when no delegated cgroup exists, stop reading
+    `memory.events` -- and every existing stamp still matches while the
+    guarantee behind it is gone. A digest over meaning alone cannot catch
+    that, so the enforcement mechanism is digested alongside the inputs.
     """
     h = hashlib.sha256()
     h.update(sweep.tool_digest().encode())
     for f in (HERE / "d3_gen_modules.py", HERE / "d3_module_proof.py",
+              HERE / "d3_guarded_build.py",
               LEAN / "LeanSemanticPrimitives/Compiler/CompileGraph.lean",
               LEAN / "LeanSemanticPrimitives/Compiler/CompileOp.lean",
               LEAN / "LeanSemanticPrimitives/Compiler/ReifyProof.lean"):
