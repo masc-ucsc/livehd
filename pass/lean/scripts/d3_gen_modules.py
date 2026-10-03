@@ -60,11 +60,16 @@ def main() -> int:
     ap.add_argument("--per-group", type=int, default=4)
     ap.add_argument("--groups", type=int, default=0, help="0 = all")
     ap.add_argument("--bindings", type=int, required=True)
+    ap.add_argument("--gen-digest", default="",
+                    help="digest to embed as <module>_genSha. The runner passes "
+                         "its own runner_digest so the embedded value and the "
+                         "run's provenance.json agree; defaulting to "
+                         "sweep.tool_digest() would make them differ silently.")
     a = ap.parse_args()
 
     cert = pathlib.Path(a.cert)
     csha = hashlib.sha256(cert.read_bytes()).hexdigest()
-    tsha = sweep.tool_digest()
+    tsha = a.gen_digest or sweep.tool_digest()
     ns = re.sub(r"[^A-Za-z0-9]", "", a.module.title())
     out = GEN_ROOT / ns
     out.mkdir(parents=True, exist_ok=True)

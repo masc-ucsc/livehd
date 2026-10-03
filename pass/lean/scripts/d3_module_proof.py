@@ -23,7 +23,10 @@ trusting the artifact.
 import argparse, hashlib, importlib.util, json, os, pathlib, re, shutil, subprocess, sys, time
 
 ALLOWED = {"propext", "Classical.choice", "Quot.sound"}
-GATE_RE = re.compile(r"^D3GATE proof=1 thm=(\S+) axioms=\[([^\]]*)\]$")
+# The composition always names its model `d3_fast`, so the gate must be for
+# `d3_fast.correct` specifically -- any other theorem's gate line appearing in
+# the transcript is not evidence about this model.
+GATE_RE = re.compile(r"^D3GATE proof=1 thm=(d3_fast\.correct) axioms=\[([^\]]*)\]$")
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent.parent
@@ -36,11 +39,12 @@ _spec.loader.exec_module(sweep)
 def runner_digest() -> str:
     """`d3_sweep.tool_digest()` plus the inputs IT does not cover.
 
-    TOOL_FILES carries the *Defs* modules, ReifyGen, Reify and D3Harness, but
-    not `CompileGraph.lean`, `CompileOp.lean`, `ReifyProof.lean`, nor either of
-    the scripts that generate and drive these modules. All of those change what
-    a generated module MEANS, so a stamp keyed on `tool_digest` alone would
-    treat an olean built before such a change as current.
+    TOOL_FILES already carries ReifyProof, CompileDesign, the *Defs* modules,
+    ReifyGen, Reify and D3Harness. It does NOT carry `CompileGraph.lean`,
+    `CompileOp.lean`, or either of the scripts that generate and drive these
+    modules -- all of which change what a generated module MEANS, so a stamp
+    keyed on `tool_digest` alone would treat an olean built before such a
+    change as current.
     """
     h = hashlib.sha256()
     h.update(sweep.tool_digest().encode())
@@ -91,7 +95,11 @@ def main() -> int:
     if tmp is None or (ROOT not in tmp.parents and tmp != ROOT):
         tmp = ROOT / "temp/d3_tmpdir"
         tmp.mkdir(parents=True, exist_ok=True)
-        os.environ["TMPDIR"] = str(tmp)
+        # TMPDIR is what Lean and lake honour; TMP and TEMP are honoured by
+        # other tools that may run underneath, and a stray one would put
+        # scratch outside the project.
+        for var in ("TMPDIR", "TMP", "TEMP"):
+            os.environ[var] = str(tmp)
         print(f"d3_module_proof: TMPDIR set project-local -> {tmp}")
     out.mkdir(parents=True, exist_ok=True)
     csha = hashlib.sha256(cert.read_bytes()).hexdigest()
@@ -133,7 +141,15 @@ def main() -> int:
                     "--cert", str(cert), "--module", a.module,
                     "--bindings", str(a.bindings),
                     "--chunk-size", str(a.chunk_size),
-                    "--per-group", str(a.per_group)], check=True)
+                    "--per-group", str(a.per_group),
+                    "--gen-digest", tsha], check=True)
+    # The embedded genSha must be the digest this run stamped, or the modules
+    # on disk and the run's provenance would describe different generators.
+    emitted = (gen / "Cert.lean").read_text(encoding="utf-8")
+    if f'_genSha  : String := "{tsha}"' not in emitted:
+        print(f"REFUSING: {gen / 'Cert.lean'} does not embed the expected "
+              f"generator digest {tsha[:16]}...", file=sys.stderr)
+        return 2
     stamp.write_text(json.dumps(
         {**want, "cert": str(cert), "namespace": ns,
          "chunks": nchunk, "groups": ngroup}, indent=2) + "\n")
