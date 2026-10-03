@@ -61,7 +61,7 @@ def parse_ports(path: pathlib.Path, top: str) -> list[Port]:
         ports.append(
             Port(
                 rtlil_name[1:],
-                words[direction_index],
+                "inout" if "input" in words and "output" in words else words[direction_index],
                 width,
                 port_id,
                 source_position,
@@ -116,6 +116,12 @@ def build_adapter(gold: list[Port], gate: list[Port], impl_top: str, adapter_top
             members = [port for port in gate if port.name.startswith(prefix)]
             members = order_members(members)
         if not members:
+            if gold_port.direction == "input":
+                # Keep this input on the wrapper as an unconstrained miter
+                # input, but leave it unconnected to the implementation.
+                # Equivalence still has to prove that the reference does not
+                # depend on it. Never invent an output or an inout connection.
+                continue
             raise ValueError(f"gold port {gold_port.name!r} has no corresponding implementation port")
         if any(port.direction != gold_port.direction for port in members):
             raise ValueError(f"direction mismatch while mapping gold port {gold_port.name!r}")

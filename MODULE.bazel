@@ -133,6 +133,8 @@ http_archive(
 git_repository(
     name = "hhds",
     commit = "e3ed37a590ed8debc06daacd02400db69158581a",
+    patch_args = ["-p1"],
+    patches = ["//packages:hhds_pin_padding.patch"],
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:

@@ -543,3 +543,11 @@ sh_test(
     ],
     tags = ["no-sandbox"],  # forks the in-process cvc5 solver per def
 )
+
+sh_test(
+    name = "lec_mem_unpaired_smoke",
+    size = "small",
+    srcs = ["tests/lec_mem_unpaired_smoke.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)

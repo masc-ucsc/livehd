@@ -5316,6 +5316,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     Io_name_map<cvc5::Term> ref_mem  = build_shared_mems("m0_");
     Io_name_map<cvc5::Term> impl_mem = ref_mem;
     Io_name_map<cvc5::Term> ref_mem_x;
+    std::set<std::string>   bridged_mem_keys;
 
     // ── Memory <-> single-wide-flop init bridge ───────────────────────────────
     // A behavioral memory (one SMT array) on one design can appear on the OTHER
@@ -5429,6 +5430,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           ref_mem[mkey]  = arr;
           impl_mem[mkey] = arr;
+          bridged_mem_keys.insert(mkey);
         }
       };
       try_bridge(ref_mem_keys, impl_mem_keys, ref_flop_w, impl_flop_w);  // ref memory <-> impl wide flop
@@ -5504,6 +5506,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           ref_mem[mkey]  = arr;
           impl_mem[mkey] = arr;
+          bridged_mem_keys.insert(mkey);
           if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
             std::fprintf(stderr,
                          "[LEC_MEMBANK bmc] memory '%s' (%dx%d) initial array tied to its storage-flop bank (%s)\n",
@@ -5550,7 +5553,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       return out;
     };
-    auto collect_memory_types = [&](hhds::Graph* g) {
+    std::set<std::string> memory_image_keys;
+    auto                  collect_memory_types = [&](hhds::Graph* g) {
       Io_name_map<int> out;
       for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
@@ -5565,6 +5569,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         auto        tpin = graph_util::get_driver_of_sink_name(node, "type");
         if (tpin.is_const()) {
           type = static_cast<int>(graph_util::const_of(tpin).to_just_i64());
+        }
+        if (graph_util::memory_image_of(node)) {
+          memory_image_keys.insert(key);
         }
         out.emplace(key, type);
       }
@@ -5618,6 +5625,31 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (unspecified_writable_pair) {
           rs->second = paired;
         }
+      }
+    }
+
+    // An uninitialized reference memory whose storage has no correspondence
+    // starts with unknown contents, just like an unmatched reference flop.
+    // Independent free arrays and flop symbols otherwise manufacture a
+    // counterexample on a read before any write. Keep shared/bridged storage
+    // and explicit initial contents observable. The encoder threads this
+    // knowledge array and clears written bits, so incorrect writes still
+    // refute; only unwritten reference bits are don't-cares under gold_x=ignore.
+    for (const auto& [key, sig] : ref_mem_sig) {
+      if (impl_mem_sig.contains(key) || bridged_mem_keys.contains(key) || initialized_mem_keys.contains(key)
+          || memory_image_keys.contains(key) || sig.n_wr == 0 || !ref_mem_type.contains(key) || ref_mem_type.at(key) == 2) {
+        continue;
+      }
+      auto it = ref_mem.find(key);
+      if (it == ref_mem.end()) {
+        continue;
+      }
+      const auto zero = tm.mkBitVector(static_cast<uint32_t>(sig.bits), 0);
+      if (opts.gold_x == "zero") {
+        it->second = tm.mkConstArray(it->second.getSort(), zero);
+      } else {
+        const auto unknown = tm.mkBitVector(static_cast<uint32_t>(sig.bits), std::string(static_cast<size_t>(sig.bits), '1'), 2);
+        ref_mem_x[key]     = tm.mkConstArray(it->second.getSort(), unknown);
       }
     }
 

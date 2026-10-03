@@ -1,0 +1,82 @@
+diff --git a/hhds/graph.hpp b/hhds/graph.hpp
+--- a/hhds/graph.hpp
++++ b/hhds/graph.hpp
+@@ -1527,7 +1527,7 @@
+     auto overflow_handling(Pid self_id, Vid other_id, OverflowPool &pool)
+         -> bool;
+ 
+-    // Layout (packed, 32 bytes = 256 bits; 255 used, 1 still spare):
++    // Layout (packed, 32 bytes = 256 bits; 255 used, 1 reserved):
+     //
+     //   master_nid   : 40   owning node's nid >> 2  (see below)
+     //   has_driver   :  1 |
+@@ -1536,8 +1536,9 @@
+     //   next_pin_id  : 42
+     //   ledge0       : 42
+     //   ledge1       : 42
+-    //   use_overflow :  1   -> 127 bits
+-    //   sedges_      : 64   -> 255 bits
++    //   use_overflow :  1
++    //   reserved     :  1   -> 128 bits
++    //   sedges_      : 64   -> 256 bits
+     //
+     // master_nid stores the owning node's nid SHIFTED RIGHT BY 2, not the nid.
+     // A node nid is `index << 2` (Graph::create_node) and every writer masks
+@@ -1560,6 +1561,7 @@
+     Nid ledge1 : Nid_bits;       // 42 bits to too far node/pin (does not fit in
+                                  // sedge) => 64 bits (8 bytes)
+     uint8_t use_overflow : 1;    // 1 bit      => 64 bits (8 bytes)
++    uint8_t reserved : 1;        // canonical zero in the existing spare bit
+ 
+     union {
+       int64_t sedges; // 4 × 16-bit packed slots (when use_overflow == 0)
+diff --git a/hhds/graph.cpp b/hhds/graph.cpp
+--- a/hhds/graph.cpp
++++ b/hhds/graph.cpp
+@@ -1505,7 +1505,7 @@
+ auto Pin_class::get_current_gid() const noexcept -> Gid { return graph_ != nullptr ? graph_->get_gid() : Gid_invalid; }
+ 
+ Graph::PinEntry::PinEntry()
+-    : master_nid(0), has_driver(0), has_sink(0), port_id(0), next_pin_id(0), ledge0(0), ledge1(0), use_overflow(0),
++    : master_nid(0), has_driver(0), has_sink(0), port_id(0), next_pin_id(0), ledge0(0), ledge1(0), use_overflow(0), reserved(0),
+       sedges_{.sedges = 0} {}
+ 
+ // `mn` is an owning node nid; master_nid stores it >> 2 (see the field comment
+@@ -1520,6 +1520,7 @@
+       ledge0(0),
+       ledge1(0),
+       use_overflow(0),
++      reserved(0),
+       sedges_{.sedges = 0} {
+   assert((mn & static_cast<Nid>(3)) == 0 && "PinEntry: master nid must be a node id (low 2 bits clear)");
+ }
+@@ -6565,6 +6566,7 @@
+ 
+ void Graph::load_body(const std::string& dir_path) {
+   namespace fs = std::filesystem;
++  bool canonicalized_padding = false;
+ 
+   // --- body.bin ---
+   {
+@@ -6606,6 +6608,12 @@
+ 
+     pin_table.resize(pin_count);
+     ifs.read(reinterpret_cast<char*>(pin_table.data()), static_cast<std::streamsize>(pin_count * sizeof(PinEntry)));
++    // Older version-7 bodies can contain an uninitialized spare bit. It is
++    // not graph state; normalize it before any clone or subsequent save.
++    for (auto& pin : pin_table) {
++      canonicalized_padding = canonicalized_padding || pin.reserved != 0;
++      pin.reserved = 0;
++    }
+     load_constant_pool(ifs);
+ 
+     // Size the overflow vector (holes included) but DEFER reading the set
+@@ -6712,7 +6720,7 @@
+       throw std::runtime_error("load_body: next-active role requires activation input");
+     }
+   }
+-  dirty_       = false;
++  dirty_       = canonicalized_padding;
+   attrs_dirty_ = false;
+   body_dir_    = dir_path;
+   {

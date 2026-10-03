@@ -151,6 +151,12 @@ sh_test(
     data = [":scripts"],
 )
 
+sh_test(
+    name = "lgcheck_input_adapter_smoke",
+    srcs = ["tests/yosys_input_adapter_smoke.sh"],
+    data = [":scripts"],
+)
+
 # Bounded-check reset protocol: the reset window must clock the design and
 # un-reset power-on state is X (a don't-care on gold), so a QN-flop netlist of
 # a synchronous-reset design is not falsely refuted while real post-reset
