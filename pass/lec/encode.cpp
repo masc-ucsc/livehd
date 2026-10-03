@@ -1082,7 +1082,7 @@ Encoded::Cone_stats cone_over(const std::vector<hhds::Occurrence_pin>& seeds) {
   while (!work.empty()) {
     auto pin = work.back();
     work.pop_back();
-    if (pin.is_invalid()) {
+    if (pin.is_invalid() || gu::is_graph_input_pin(pin)) {  // inputs are not nodes, as in cone_of
       continue;
     }
     auto node = pin.get_master_node();

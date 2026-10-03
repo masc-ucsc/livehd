@@ -18,6 +18,23 @@ void flag(Writer& w, const char* key, bool value) {
   w.Key(key);
   w.Bool(value);
 }
+const char* adder_name(synth::arith::Adder_kind kind) {
+  switch (kind) {
+    case synth::arith::Adder_kind::cska  : return "cska";
+    case synth::arith::Adder_kind::cla   : return "cla";
+    case synth::arith::Adder_kind::prefix: return "prefix";
+    case synth::arith::Adder_kind::rca   : break;
+  }
+  return "rca";
+}
+const char* multiplier_name(synth::arith::Mult_kind kind) {
+  switch (kind) {
+    case synth::arith::Mult_kind::array: return "array";
+    case synth::arith::Mult_kind::tree : return "tree";
+    case synth::arith::Mult_kind::csa  : break;
+  }
+  return "csa";
+}
 void cost(Writer& w, const char* key, const Logical_cost& c) {
   w.Key(key);
   w.StartObject();
@@ -72,6 +89,17 @@ std::string native_report(const Logical_design& design, const Design_options& op
   number(w, "branches", options.logical.endpoint.gates.branches);
   number(w, "cut_inputs", options.logical.endpoint.window.inputs);
   number(w, "clock_phases", options.logical.endpoint.clock_phases);
+  w.EndObject();
+  // The lowering choices change the translated network, so a report must name
+  // them: an `adder=rca multiplier=array` run and the default are otherwise
+  // indistinguishable here.
+  w.Key("arithmetic");
+  w.StartObject();
+  w.Key("adder");
+  text(w, options.auto_sum_adder ? "auto" : adder_name(options.adder));
+  number(w, "adder_block", static_cast<uint64_t>(options.adder_block));
+  w.Key("multiplier");
+  text(w, multiplier_name(options.multiplier));
   w.EndObject();
   w.Key("endpoint_search");
   w.StartObject();

@@ -71,12 +71,28 @@ bool read_options(const Eprp_var& var, Options& options) {
   const auto adder_text         = var.get_stage("adder", "auto");
   options.design.auto_sum_adder = adder_text == "auto";
   const auto adder              = livehd::synth::arith::parse_adder_kind(options.design.auto_sum_adder ? "rca" : adder_text);
-  if (!adder || !read("adder_block", "0", options.design.adder_block) || options.design.adder_block < 0) {
+  if (!adder) {
+    livehd::diag::err("pass.usyn", "invalid-options", "syntax")
+        .msg("invalid native USYN adder '{}'", adder_text)
+        .hint("adder=auto|rca|cska|cla|prefix")
+        .emit();
     return false;
   }
-  options.design.adder  = *adder;
-  const auto multiplier = livehd::synth::arith::parse_mult_kind(var.get_stage("multiplier", "csa"));
+  if (!read("adder_block", "0", options.design.adder_block) || options.design.adder_block < 0) {
+    livehd::diag::err("pass.usyn", "invalid-options", "syntax")
+        .msg("invalid native USYN adder_block '{}'", var.get_stage("adder_block", "0"))
+        .hint("adder_block is a non-negative group width; 0 derives it from the operating width")
+        .emit();
+    return false;
+  }
+  options.design.adder       = *adder;
+  const auto multiplier_text = var.get_stage("multiplier", "csa");
+  const auto multiplier      = livehd::synth::arith::parse_mult_kind(multiplier_text);
   if (!multiplier) {
+    livehd::diag::err("pass.usyn", "invalid-options", "syntax")
+        .msg("invalid native USYN multiplier '{}'", multiplier_text)
+        .hint("multiplier=csa|tree|array")
+        .emit();
     return false;
   }
   options.design.multiplier = *multiplier;
