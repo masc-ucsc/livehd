@@ -356,6 +356,103 @@ the proved specializer as the semantic reference and prove a
 representation/operation bridge -- and the obligations are unchanged: guarded
 discards, binding order, scope, object-specializer agreement, axiom audit.
 
+## 6. MEASURED: the zero-shift fast path -- the small fix that DID move the exponent
+
+`PVal.shift 0 v` and `PEnv.shiftBy 0 env` were fully recursive: they walked the
+whole value / whole environment to rebuild something identical.  `mixPArgs`
+calls both with k = 0 whenever `prepare` emitted no bindings, which on this
+workload is most of the time.  Added to the FORK as O(1) arms, k > 0 untouched:
+
+    PVal.shift   : | 0, v => v   | _, .stat v => ...   | k, .dyn i => ...
+    PEnv.shiftBy : | 0, env => env   | _, [] => []   | k, v :: rest => ...
+
+Extensionally the identity, and the PROVED reference already states exactly
+these two equations -- `PVal.shift_zero` (PartialEvaluatorCorrect:76) and
+`PEnv.shiftBy_zero` (:88) -- so the bridge, if this is ever promoted, is those
+two lemmas and nothing else.
+
+### Equivalence, three shapes
+
+Real `Hw.projectDesign` against the fork, `==` on the shared `Program` plus a
+decoded one-cycle run of each residual:
+
+    chain  n = 64/128/256   sizes 993 / 1953 / 3873        identical, same-result
+    fan    n = 64/128/256   sizes 1056 / 2080 / 4128       identical, same-result
+    flop   n = 64/128/256   sizes 13985 / 52513 / 203297   identical, same-result
+
+`flop` is the sequential shape -- a flop per node, so the edge vector and the
+commit path are exercised, not only the combinational environment.  (Its
+residual is itself quadratic in n; that is the pre-existing flop-state
+quadratic recorded in Phase 1, not something this change causes.)
+
+### Timing, separate processes, clean build
+
+    shape    n     reference      fast    speedup
+    chain    64       0.23 s    0.08 s      2.88x
+    chain   128       1.21 s    0.26 s      4.65x
+    chain   256       7.82 s    0.92 s      8.50x
+    chain   512      55.72 s    3.61 s     15.43x
+    chain  1024     417.80 s   13.43 s     31.11x
+    fan      64       0.36 s    0.12 s      3.00x
+    fan     128       2.11 s    0.42 s      5.02x
+    fan     256      14.61 s    1.63 s      8.96x
+    fan     512     109.06 s    6.18 s     17.65x
+    flop     64       0.33 s    0.19 s      1.74x
+    flop    128       1.58 s    0.68 s      2.32x
+    flop    256       9.22 s    2.55 s      3.62x
+
+Growth exponent per doubling, ON THE SIZES TESTED:
+
+    chain reference   2.40  2.69  2.83  2.91
+    chain fast        1.70  1.82  1.97  1.90
+    fan   reference   2.55  2.79  2.90
+    fan   fast        1.81  1.96  1.92
+
+The speedup GROWS with n, which is what distinguishes this from the earlier
+`PRes.val` experiment: that one was a flat constant factor.  These are finite
+ratios over 64..1024 and are NOT a proof of an asymptotic bound -- but on the
+sizes tested the reference is near-cubic and the fork is near-quadratic.
+
+### What this does to the remaining shift cost
+
+callgrind on the fork, inclusive, n = 128, before and after this change:
+
+    PVal.shift     61.28%  ->  10.47%
+    PEnv.shiftBy'2     --  ->   7.48%
+    PVal.shift'2 CALLS   3,511,844  ->  195,080      (18x fewer)
+    PVal.shift'2 exponent     2.74  ->  2.01
+
+**So de Bruijn LEVELS are no longer the priority.**  The question this section
+was told to answer before pursuing them is answered: the remaining NONZERO
+shift cost is about 10%, not 61%.  What is left at the top is `mixPArgs`
+(94.67% inclusive, it is the caller), `mixTerm`, and `PRes.toCode'2` at 47.55%.
+
+### rt_intpipe_alu
+
+    fast, projectDesign's own fuel (20000/200)
+        -> MixError.outOfFuel after 309 s, peak RSS 993 MB
+
+    fast, DIAGNOSTIC fuel 200000/2000 (projectDesign itself UNCHANGED)
+        -> SUCCEEDS: residual size 24,614,113 in 644 s, peak RSS 997 MB
+
+The smallest fully-supported real design now PRODUCES A RESIDUAL.  Before this
+change it overflowed the interpreter stack, and natively extrapolated to hours.
+
+Three things this is NOT.  It used RAISED fuel, so `projectDesign` AS DEFINED
+still fails on this design -- the hardcoded 20000/200 is now the binding
+constraint, directly observed rather than inferred.  The residual was not run
+through `checkResidual`, not executed, and not compared against the reference
+(which would need the same raised fuel and far longer).  And 24.6M terms for
+5118 nodes is ~4800 terms per node against `chainD`'s ~15, so the per-node
+residual cost on a real design is nothing like the synthetic shapes.
+
+### Status of this change
+
+Still a DIAGNOSTIC fork.  Not proved, not in the core build, not in the axiom
+audit.  It is the strongest promotion candidate so far -- two extensional
+equations that the reference already proves -- but promotion is a separate
+decision and a separate piece of work.
+
 ## 3. Status
 
 No optimization has been applied. The three candidate fixes differ sharply in

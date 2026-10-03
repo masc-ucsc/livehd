@@ -15,6 +15,12 @@ A byte-for-byte copy of `Projection/PartialEvaluator.lean` in namespace
     both already total, so the guard needs no walk                  -- O(1)
   * `peelHd`/`peelTl`/`peelIsNil` answer from the spine directly     -- O(1)
 
+CHANGE 2: `PVal.shift 0 v = v` and `PEnv.shiftBy 0 env = env` as O(1) arms.
+`mixPArgs` calls both with k = 0 whenever `prepare` emitted no bindings, and
+the recursive versions then rebuild an identical structure.  Extensionally the
+identity, and the proved reference already carries exactly those two equations
+(`PVal.shift_zero`, `PEnv.shiftBy_zero`).
+
 NOTHING ELSE CHANGES.  No guard is weakened: the discard guard on `peelHd` /
 `peelTl` / `peelIsNil` is still the totality test, it is merely answered in
 O(1) for a representation where the answer is known.  Binding order, scope and
@@ -74,14 +80,23 @@ abbrev PEnv := List PVal
 /-- Entering a residual binder shifts every residual index in scope.  Static
 entries are untouched -- they name no residual variable -- and a partial cons
 shifts componentwise, because its leaves are where the indices live. -/
-def PVal.shift (k : Nat) : PVal → PVal
-  | .stat v   => .stat v
-  | .dyn i    => .dyn (i + k)
-  | .cons a b => .cons (PVal.shift k a) (PVal.shift k b)
+-- CHANGE 2 (zero fast path).  `mixPArgs` calls both of these even when
+-- `prepare` emitted no bindings, i.e. with k = 0, and the recursive versions
+-- then walk the whole value / the whole environment to rebuild something
+-- identical.  The k = 0 arm is extensionally the identity -- the proved
+-- reference already says so, `PVal.shift_zero` (PartialEvaluatorCorrect:76)
+-- and `PEnv.shiftBy_zero` (:88) -- so this is the cheapest possible bridge if
+-- it ever earns promotion.  The k > 0 behaviour is untouched.
+def PVal.shift : Nat → PVal → PVal
+  | 0, v         => v
+  | _, .stat v   => .stat v
+  | k, .dyn i    => .dyn (i + k)
+  | k, .cons a b => .cons (PVal.shift k a) (PVal.shift k b)
 
-def PEnv.shiftBy (k : Nat) : PEnv → PEnv
-  | []              => []
-  | v :: rest       => PVal.shift k v :: PEnv.shiftBy k rest
+def PEnv.shiftBy : Nat → PEnv → PEnv
+  | 0, env       => env
+  | _, []        => []
+  | k, v :: rest => PVal.shift k v :: PEnv.shiftBy k rest
 
 /-- `let e₀ in let e₁ in … let e_{k-1} in body`. -/
 def wrapLets : List Term → Term → Term

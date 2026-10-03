@@ -19,6 +19,7 @@ MODULES=(
   Compiler/Runtime
   Compiler/DesignCertWF
   Compiler/DesignSemantics
+  Compiler/CertIO
   Projection/ObjectLanguage
   Projection/ObjectLanguageSemantics
   Projection/BindingTime
