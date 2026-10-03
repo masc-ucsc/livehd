@@ -68,11 +68,15 @@ def seqChecks : IO Bool := do
                    (allEdges seqD, seqIn 13 0 0)]
       match stepTrace (stepOf sim) seqD (seqSt 3) stim with
       | .ok rs =>
-          let shapes := rs.map (fun r => r.nextState.flops)
-          let refEq  := rs.map encResult == (refTrace seqD (seqSt 3) stim).map encResult
-          IO.println s!"  seq trace: len {rs.length} next-states-ok \
-{shapes == [#[mk_bv 4 0], #[mk_bv 4 12], #[mk_bv 4 12]]}  ref-equal {refEq}"
-          unless refEq do ok := false
+          let shapes   := rs.map (fun r => r.nextState.flops)
+          let shapeOK  := shapes == [#[mk_bv 4 0], #[mk_bv 4 12], #[mk_bv 4 12]]
+          let lenOK    := rs.length == 3
+          let refEq    := rs.map encResult == (refTrace seqD (seqSt 3) stim).map encResult
+          IO.println s!"  seq trace: len3 {lenOK} next-states-ok {shapeOK}  ref-equal {refEq}"
+          -- all THREE gate the exit.  Previously only `refEq` did, so a wrong
+          -- length or a wrong next-state shape would have printed `false` and
+          -- still exited 0.
+          unless lenOK && shapeOK && refEq do ok := false
       | .error _ => do IO.println "  seq trace: ERROR"; ok := false
   return ok
 
