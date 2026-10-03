@@ -506,25 +506,29 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
     -- ABSTRACT. `compileFrom_step` chains them. Nothing here names the whole
     -- residual.
     let cfNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"cf{j}")
-    let lkNm : Nat → Nat → Ident := fun j k =>
-      mkIdent (base ++ Name.mkSimple s!"cf{j}_look{k}")
     for j in [0 : nseg] do
       let lo' := bnd j
       let hi' := bnd (j+1)
+      -- The node lookups are LOCAL `have`s, not top-level theorems. Measured:
+      -- as declarations they accumulate -- 32 per chunk, and a 38-chunk design
+      -- died part-way through chunk 27 at 10,093,404 kB with ~293 MB added per
+      -- chunk. Each lookup is only needed inside its own chunk's proof, so
+      -- scoping them there keeps the environment flat.
+      let lkId : Nat → Ident := fun k => mkIdent (Name.mkSimple s!"look{k}")
+      let mut haves : Array (TSyntax `tactic) := #[]
       for k in [lo' : hi'] do
         match cert.nodes[k]? with
         | none => throwError "prove_reified_chunked: no node {k}"
         | some c =>
-          -- `Repr` text is NOT trusted: the literal it produces is checked by
-          -- `rfl` against the design, so a wrong round-trip fails here rather
-          -- than entering the proof.
+          -- `Repr` text is NOT trusted: `rfl` checks the literal against the
+          -- design, so a bad round-trip fails here, not inside the proof.
           let cq : Term ←
             match Lean.Parser.runParserCategory (← getEnv) `term (toString (repr c)) with
             | .ok stx  => pure (⟨stx⟩ : Term)
             | .error e => throwError "prove_reified_chunked: node {k} Repr \
                 did not re-parse: {e}"
-          elabCommand (← `(command|
-            theorem $(lkNm j k) : ($d).nodes[$(quote k)]? = some $cq := rfl))
+          haves := haves.push (← `(tactic|
+            have $(lkId k) : ($d).nodes[$(quote k)]? = some $cq := rfl))
       let accId := mkIdent (Name.mkSimple "acc")
       let mut rhs : Term ← `($accId:ident)
       for k in [lo' : hi'] do
@@ -536,11 +540,12 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         rhs ← `(($rhs).push { ty := $tyQ, rhs := $rhsQ })
       let mut lks : Array (TSyntax `Lean.Parser.Tactic.simpLemma) := #[]
       for k in [lo' : hi'] do
-        lks := lks.push (← `(Lean.Parser.Tactic.simpLemma| $(lkNm j k):ident))
+        lks := lks.push (← `(Lean.Parser.Tactic.simpLemma| $(lkId k):ident))
       elabCommand (← `(command|
         theorem $(cfNm j) ($accId : Array Compiler.ResidualBinding) :
             Compiler.compileFrom $d $(quote lo') $(quote (hi' - lo')) $accId
               = .ok $rhs := by
+          $haves*
           simp [Compiler.compileFrom, Compiler.compileOp, Compiler.opValueType,
                 Compiler.DesignCert.slotOfNode, $lks,*]))
       markPhase s!"compile_chunk {j}"
