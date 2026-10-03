@@ -147,10 +147,18 @@ partial def substRef (x : String) (v : SExp) : SExp → SExp
       (alts.map (fun (p : SAlt) =>
          (p.1, p.2.1, if p.2.1.contains x then p.2.2 else substRef x v p.2.2)))
 
-/-- No `ite`, `switch` or `letN`: every leaf is reached unconditionally and
-exactly once, and the object language evaluates `call`/`prim`/`mk` arguments
-strictly, so substituting into such a term preserves evaluation order, work
-count, and failure. -/
+/-- No `ite`, `switch` or `letN`.
+
+What this buys, exactly: every leaf is reached UNCONDITIONALLY (so the single
+occurrence is evaluated, rather than possibly skipped), and NO BINDER lies on
+the path (so `substRef`, which is not capture-avoiding, cannot capture).
+
+What it does NOT buy, and an earlier version of this comment wrongly claimed it
+did: preservation of evaluation ORDER or of the FAILURE MODE.  Arguments are
+evaluated left to right, so moving the bound expression into argument position
+puts earlier arguments ahead of it; `beforeHoleTotal` is the condition for
+that, and `proto_probe --inline-negative` exhibits a case where `noBranch`
+holds and the failure mode still changes. -/
 partial def noBranch : SExp → Bool
   | .lit _      => true
   | .ref _      => true

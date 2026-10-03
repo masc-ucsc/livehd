@@ -176,10 +176,44 @@ tables, and no same-program rewriting lemma relates them automatically:
   only, `mainFreeB_hwS` axiom-free, no `sorryAx`, no `ofReduceBool`.  This is
   GENERIC TRANSPORT plus its instantiation -- **not** variant adequacy.
 * **B2, the rewrite, for the ACTUAL term.**  The inlining lemma must be proved
-  for `main`'s body as it is -- under the σ that `main`'s parameters, the two
-  `switch` patterns and the preceding `lets` bindings create -- with the side
-  conditions `InterpreterVariant.lean` already checks mechanically
-  (`selfRef 0`, `useInNext 1`, `useLater 0`, `noBranch`).
+  for `main`'s body as it is -- under the sigma that `main`'s parameters, the
+  two `switch` patterns and the preceding `lets` bindings create.
+
+  **Its PREREQUISITE is done.**  B1 could say nothing about the body, so it
+  never had to reduce a traversal.  B2's whole content is a fact about the
+  body, and every traversal in `InterpreterVariant.lean` -- `countRef`,
+  `substRef`, `noBranch`, `beforeHoleTotal`, `goInline`, `goAlts` -- is a
+  `partial def`.  **`partial` definitions are OPAQUE to the kernel**: they have
+  no computational equations, so `goInline "env0" mainBody = some (…)` cannot
+  be proved by `rfl`, `simp` or `decide`.  Not "is hard to"; cannot.
+
+  `Proto/RewriteTotal.lean` supplies structurally recursive versions of exactly
+  those traversals, reproducing the side conditions unchanged (including
+  `beforeHoleTotal`), and the facts B2 needs then reduce:
+
+  ```
+  rewrittenT_applied      : rewrittenT.map (·.2.ok) = some true       := by rfl
+  env0_bound_once_before  : (mainBodyOf hwS).map (countBindT "env0") = some 1
+  env0_binder_gone_after  : rewrittenT.map (countBindT "env0" ·.1)   = some 0
+  ```
+
+  No axiom, no `native_decide`, no assumed equation about the `partial`
+  definitions: they stay opaque, and these are separate definitions that happen
+  to be written the same way.  That the two agree on the REAL input is
+  `proto_probe --rewrite-agree` -- exact `BEq` on the resulting body plus every
+  report field, on `hwS`'s `main` and on the negative fixture -- which is
+  REGRESSION EVIDENCE, a run and not a theorem, because there is nothing to
+  prove about an opaque definition.
+
+  The binder count is the witness rather than a syntactic inequality, and
+  deliberately not `countRefT "env0"` of the whole body: that is 0 both before
+  and after, correctly, since `countRef` counts FREE occurrences and the name
+  is bound inside `main`.  Using it would have looked like a passing check
+  while measuring nothing.
+
+  WHAT REMAINS in B2: the semantic step.  The facts above say the transform
+  fired and which transform it was; they do not say the rewrite preserves
+  `SEval`.  That is the lemma, and it is next.
 
 What B2 is NOT: it is an iff on SUCCESSFUL evaluation only.  Not failure-order
 equivalence (`beforeHoleTotal` is what that needs, and `--inline-negative`

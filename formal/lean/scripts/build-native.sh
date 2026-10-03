@@ -43,6 +43,8 @@ MODULES=(
   Projection/CertLoad
   Projection/Proto/PartialEvaluatorFast
   Projection/Proto/InterpreterVariant
+  Projection/Proto/VariantTransport
+  Projection/Proto/RewriteTotal
 )
 
 # Dependency-aware invalidation.  MODULES is in DEPENDENCY ORDER, so once any

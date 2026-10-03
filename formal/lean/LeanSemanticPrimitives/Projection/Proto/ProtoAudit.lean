@@ -24,7 +24,7 @@ nothing in this file should be read as standing in for them.
 which this audit therefore cannot cover.  That is why `ProtoVar.changed` is a
 runtime check in `proto_probe --env0-ab` and not a hypothesis of anything here.
 -/
-import LeanSemanticPrimitives.Projection.Proto.VariantTransport
+import LeanSemanticPrimitives.Projection.Proto.RewriteTotal
 
 namespace Projection.ProtoVar
 
@@ -51,5 +51,19 @@ namespace Projection.ProtoVar
 -- the corollary B2 will consume
 #print axioms SEval_hwSVar_of_hwS
 #print axioms SEvalList_hwSVar_of_hwS
+
+/- B2's PREREQUISITE: facts about the ACTUAL rewritten body, visible to the
+kernel.  `InterpreterVariant.lean`'s traversals are `partial` and therefore
+opaque -- they have no computational equations, so no `rfl`/`simp`/`decide`
+can reach them.  `RewriteTotal.lean` supplies structurally recursive versions
+and these three reduce.
+
+That the two agree is REGRESSION EVIDENCE from `proto_probe --rewrite-agree`
+(exact `BEq` on the resulting body, plus every report field, on `hwS`'s real
+`main` and on the negative fixture) -- a run, NOT a theorem, because there is
+nothing to prove about an opaque definition. -/
+#print axioms rewrittenT_applied
+#print axioms env0_bound_once_before
+#print axioms env0_binder_gone_after
 
 end Projection.ProtoVar

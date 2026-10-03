@@ -19,6 +19,7 @@ work across `IO.monoMsNow`, verified in the generated C.
 import LeanSemanticPrimitives.Projection.ProjectedStep
 import LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorFast
 import LeanSemanticPrimitives.Projection.Proto.InterpreterVariant
+import LeanSemanticPrimitives.Projection.Proto.RewriteTotal
 import LeanSemanticPrimitives.Compiler.CertIO
 import LeanSemanticPrimitives.Projection.CertLoad
 
@@ -239,6 +240,12 @@ def oorD : DesignCert where
 
 @[inline] def fastVarOfFuel (sf wf : Nat) (D : DesignCert) : Except ProtoFast.MixError Program :=
   ProtoFast.mixDriver sf wf ProtoVar.hwAPVar [encDesign D]
+
+/-- The PROVED specializer with the VARIANT interpreter.  This is the
+combination obligation B would cover: no fork.  Whether it is viable at a
+workable budget is the open empirical question in PROMOTION_OBLIGATIONS.md. -/
+@[inline] def hostVarOfFuel (sf wf : Nat) (D : DesignCert) : Except MixError Program :=
+  mixDriver sf wf ProtoVar.hwAPVar [encDesign D]
 
 /-- terms, tl, consP -- the three numbers the A/B is about. -/
 def statsOf (R : Program) : Nat × Nat × Nat :=
@@ -652,6 +659,87 @@ evidence of unreachable behaviour)"
 arities {r.arities} flopClocks {r.flopClocks} | SUPPORTED {r.allOK}"
         if r.allOK then any := true
       return (if any then 0 else 2)
+  | "--rewrite-agree" :: _ => do
+      -- REGRESSION EVIDENCE, not a theorem.  `RewriteTotal.lean`'s traversals
+      -- are structurally recursive so the kernel can reduce them; the ones in
+      -- `InterpreterVariant.lean` are `partial` and opaque to it.  Nothing can
+      -- PROVE they agree -- a `partial def` has no equations to reason from --
+      -- so this runs both on the real body and on the negative fixture and
+      -- compares.  A mismatch would mean the kernel-visible facts are about a
+      -- different transform than the one the gate checks.
+      let mut bad := false
+      match ProtoVar.mainBodyOf Hw.hwS with
+      | none => do IO.eprintln "no main in hwS"; bad := true
+      | some body => do
+          let pa := ProtoVar.goInline "env0" body
+          let pb := ProtoVar.goInlineT "env0" ProtoVar.rewriteDepth body
+          match pa, pb with
+          | some (ea, ra), some (eb, rb) =>
+              let sameBody := ea == eb
+              let sameRep := ra.found == rb.found && ra.selfRef == rb.selfRef
+                && ra.useInNext == rb.useInNext && ra.useLater == rb.useLater
+                && ra.nextStrict == rb.nextStrict && ra.beforeTotal == rb.beforeTotal
+                && ra.applied == rb.applied
+              IO.println s!"hwS main: partial-vs-total  same-body {sameBody}  \
+same-report {sameRep}  (applied {ra.applied}/{rb.applied}, beforeTotal \
+{ra.beforeTotal}/{rb.beforeTotal})"
+              unless sameBody && sameRep do bad := true
+          | a, b => do
+              IO.eprintln s!"hwS main: partial-some {a.isSome} total-some {b.isSome}"
+              bad := true
+      -- the negative fixture: BOTH must refuse, for the same reason
+      match ProtoVar.negS.funs.find? (fun f => f.name == "main") with
+      | none => do IO.eprintln "no main in negS"; bad := true
+      | some f => do
+          let pa := ProtoVar.goInline "z" f.body
+          let pb := ProtoVar.goInlineT "z" ProtoVar.rewriteDepth f.body
+          match pa, pb with
+          | some (_, ra), some (_, rb) =>
+              IO.println s!"negS: partial beforeTotal {ra.beforeTotal} applied \
+{ra.applied} | total beforeTotal {rb.beforeTotal} applied {rb.applied}"
+              unless ra.beforeTotal == rb.beforeTotal && ra.applied == rb.applied
+                && !rb.applied do bad := true
+          | a, b => do
+              IO.eprintln s!"negS: partial-some {a.isSome} total-some {b.isSome}"
+              bad := true
+      if bad then return 1 else do
+        IO.println "  OK: the kernel-visible transform agrees with the checked one"
+        return 0
+  | "--host-var" :: p :: a :: b :: _ => do
+      -- FEASIBILITY: the PROVED specializer with the VARIANT interpreter.
+      let D ← CertIO.loadCert p
+      IO.println s!"{p}: sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size}"
+      let sr := CertLoad.supportReport D
+      IO.println s!"support: wf {sr.wf} memFree {sr.memFree} sources {sr.sources} \
+ops {sr.ops} arities {sr.arities} flopClocks {sr.flopClocks}"
+      unless sr.allOK do IO.eprintln "  NOT SupportedByProjection"; return 2
+      let sf := (a.toNat?).getD 20000
+      let wf := (b.toNat?).getD 200
+      IO.println s!"HOST mixDriver (proved) + hwAPVar (variant), fuel {sf}/{wf}"
+      (← IO.getStdout).flush
+      let (res, tms) ← stage "host-specialize"
+        (fun r => match r with | .ok q => szOf q | .error _ => 0)
+        (fun _ => hostVarOfFuel sf wf D)
+      match res with
+      | .error e => do
+          IO.eprintln s!"host+variant FAILED ({repr e}) after {tms} ms -- a failure at \
+THIS budget, not impossibility"
+          return (match e with | .outOfFuel => 3 | _ => 2)
+      | .ok R => do
+          profileResidual R
+          let fuel ← match Hw.checkResidual R with
+            | some f => do IO.println s!"  checkResidual: ACCEPTED, bound {f}"; pure f
+            | none   => do IO.eprintln "  checkResidual: REJECTED"; pure 4000000
+          let mut bad := false
+          for seed in [0, 1, 4] do
+            let e := allEdges D
+            let i := mkInputFor D seed
+            let st := mkStateFor D seed
+            let got := runResidAt fuel R D e i st
+            let ok := Outcome.agree got (Outcome.ok (interpretDesign D e i st))
+            IO.println s!"  seed {seed}: residual {got.tag}  matches interpretDesign {ok}"
+            unless ok do bad := true
+          return (if bad then 1 else 0)
   | "--inline-negative" :: _ => do
       -- The counterexample `beforeHoleTotal` exists to reject.  `noBranch` and
       -- "call is strict in its arguments" do NOT give order preservation:
