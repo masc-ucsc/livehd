@@ -152,7 +152,12 @@ def main() -> int:
             if d.exists():
                 shutil.rmtree(d)
 
-    nchunk = (a.bindings + a.chunk_size - 1) // a.chunk_size
+    # A design with no bindings still gets ONE chunk, of length zero.
+    # `prove_reified_chunked` already treats `nb == 0` as one chunk, so a
+    # generator that produced none left the composition importing `G-1`.
+    # Measured: both zero-node designs in the first cohort failed exactly
+    # there, with `object file ... Gen/<Ns>/G.olean does not exist`.
+    nchunk = max(1, (a.bindings + a.chunk_size - 1) // a.chunk_size)
     ngroup = (nchunk + a.per_group - 1) // a.per_group
     subprocess.run([sys.executable, str(HERE / "d3_gen_modules.py"),
                     "--cert", str(cert), "--module", a.module,
