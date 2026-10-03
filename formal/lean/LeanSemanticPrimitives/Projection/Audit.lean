@@ -383,6 +383,7 @@ namespace Projection
 #print axioms Hw.fragB_evalFuel
 #print axioms Hw.fragListB_evalFuel
 #print axioms Hw.checkResidual_complete
+#print axioms Hw.SimWF.toSimSound
 #print axioms Hw.runProjected_correct
 #print axioms Hw.runProjected_success
 #print axioms Hw.stepOf_correct

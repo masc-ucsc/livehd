@@ -368,6 +368,33 @@ structure SimWF (sim : ProjectedSimulator) : Prop where
   chk  : checkResidual sim.prog = some sim.bound
   sup  : SupportedByProjection sim.design
 
+/-- What `SimWF.proj` is USED for, abstracted from HOW the residual was
+produced.
+
+`runProjected` is already backend-independent -- it reads only `sim.prog` and
+`sim.bound`.  And `.proj` enters every proof below in exactly ONE shape:
+`projectDesign_correct hsim.proj hsim.sup hwf hrs`.  That `iff` is the content;
+`projectDesign`, which hardcodes `hwAP`, is not.
+
+An instance may come from `projectDesign` (`SimWF.toSimSound`) or from any
+other specializer/interpreter pair whose composition theorem has been proved --
+`specialize_correct_of` is what makes such a pair statable. -/
+structure SimSound (sim : ProjectedSimulator) : Prop where
+  chk   : checkResidual sim.prog = some sim.bound
+  sup   : SupportedByProjection sim.design
+  agree : ∀ {e : ClockEdges} {i : RuntimeInput} {s : RuntimeState},
+            Compiler.RuntimeWF sim.design i s → RuntimeSized sim.design e i s →
+            ∀ r : Val,
+              Eval sim.prog [] (.call sim.prog.entry
+                [.lit (encEdges e), .lit (encInput i), .lit (encState s)]) r
+              ↔ ResultRel r (interpretDesign sim.design e i s)
+
+/-- The original bundle is an instance: nothing is lost by generalising. -/
+theorem SimWF.toSimSound {sim : ProjectedSimulator} (h : SimWF sim) : SimSound sim where
+  chk   := h.chk
+  sup   := h.sup
+  agree := fun hwf hrs r => projectDesign_correct h.proj h.sup hwf hrs r
+
 /-- Specialize once, check once.  Everything expensive happens here. -/
 def mkSim (D : DesignCert) : Option ProjectedSimulator :=
   match projectDesign D with

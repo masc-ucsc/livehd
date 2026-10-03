@@ -122,4 +122,21 @@ automatically carry to `hwAPVarT`.  That is the next link, and it is not done. -
 #print axioms specializeDesign_varT_correct
 #print axioms seq_cycle_varT
 
+/- The EXECUTABLE link.  `SimSound` (ResidualFragment) is `SimWF` with the HOW
+abstracted away; `SimWF.toSimSound` makes the original an instance, so
+`runProjected_correct`, `runProjected_success`, `stepOf_correct`,
+`stepOf_succeeds` and `stepTrace_projected` are the SAME theorems restated over
+the contract -- reused, not duplicated.  `simSound_varT` is the other instance.
+
+`seq_cycle_varT` above checks `Eval hwPVarT`, the INTERPRETER.  The fixtures
+below check a SPECIALIZED RESIDUAL through `stepOf`, which is a different
+claim, and cover reset / enabled / held plus a three-cycle trace.  Both halves:
+successful results are correct, AND valid runs succeed at the checker bound. -/
+#print axioms simSound_varT
+#print axioms seq_varT_step
+#print axioms seq_varT_reset
+#print axioms seq_varT_enabled
+#print axioms seq_varT_held
+#print axioms seq_varT_trace
+
 end Projection.ProtoVar

@@ -30,11 +30,12 @@ and `flopNexts` arrive as the existing lemmas.
 import LeanSemanticPrimitives.Projection.Proto.RewriteTotal
 import LeanSemanticPrimitives.Projection.HardwareAdequacy
 import LeanSemanticPrimitives.Projection.ProjectionCorrect
+import LeanSemanticPrimitives.Projection.ProjectedStep
 
 namespace Projection
 namespace ProtoVar
 
-open Projection.Surface Projection.Hw Compiler
+open Projection.Surface Projection.Hw Compiler Projection.Acceptance
 
 /-- The variant's `main`, as `hwSVarT` actually holds it. -/
 def mainFunVarT : Option SFun := sFn hwSVarT "main"
@@ -256,7 +257,6 @@ theorem specializeDesign_varT_correct {sf wf : Nat} {D : DesignCert} {R : Progra
 `seqD` carries a flop, so this exercises the flop-commit path rather than only
 the combinational one.  Stated over every stimulus, not a chosen one. -/
 
-open Projection.Acceptance in
 theorem seq_cycle_varT (d en rst q : Int) (r : Val) :
     Eval hwPVarT []
       (.call hwPVarT.entry
@@ -266,6 +266,92 @@ theorem seq_cycle_varT (d en rst q : Int) (r : Val) :
           (interpretDesign seqD (allEdges seqD) (seqIn d en rst) (seqSt q)) :=
   IHwAdequate_varT SupportCheck.seq_supported
     (GuardCorollary.seq_sized d en rst q) r
+
+/-! ## The executable link, for the total variant
+
+`runProjected` was already backend-independent.  `SimWF` was not -- its `proj`
+field named `projectDesign`, which hardcodes `hwAP`.  `SimSound`
+(`ResidualFragment.lean`) is that bundle with the HOW abstracted away, and the
+old `SimWF` is an instance of it (`SimWF.toSimSound`), so nothing was
+duplicated: `runProjected_correct`, `runProjected_success`, `stepOf_correct`,
+`stepOf_succeeds` and `stepTrace_projected` are the SAME theorems, now stated
+over the contract.
+
+This is the other instance. -/
+
+/-- A checked residual from the PROVED specializer and the TOTAL variant.
+Budget-parametric: `sf`/`wf` enter only through `hproj`, so correctness is
+conditional on success at whatever budget was used. -/
+theorem simSound_varT {sf wf : Nat} {D : DesignCert} {R : Program} {b : Nat}
+    (hproj : mixDriver sf wf hwAPVarT [encDesign D] = .ok R)
+    (hchk : checkResidual R = some b)
+    (hsup : SupportedByProjection D) :
+    SimSound ⟨D, R, b⟩ where
+  chk   := hchk
+  sup   := hsup
+  agree := fun hwf hrs r => specializeDesign_varT_correct hproj hsup hwf hrs r
+
+/-! ### A total-variant PROJECTED sequential fixture
+
+`seq_cycle_varT` above checks `Eval hwPVarT` -- the INTERPRETER.  These check a
+SPECIALIZED RESIDUAL, through `stepOf`, which is a different claim.
+
+`seqD` has a flop with both an enable and a reset, so the three transitions are
+reachable from the stimulus alone:
+
+    seqIn d 1 1   reset asserted  (reset beats enable)
+    seqIn d 1 0   enabled         (the flop takes `din`)
+    seqIn d 0 0   held            (enable low: the flop keeps `q`)
+
+Both halves are covered: every successful result is the reference one
+(`stepOf_correct` via `stepTrace_projected`), AND a valid run DOES succeed at
+the checker bound (`stepOf_succeeds`). -/
+
+theorem seq_varT_step {sf wf : Nat} {R : Program} {b : Nat}
+    (hproj : mixDriver sf wf hwAPVarT [encDesign seqD] = .ok R)
+    (hchk : checkResidual R = some b) (d en rst q : Int) :
+    stepOf ⟨seqD, R, b⟩ seqD (allEdges seqD) (seqIn d en rst) (seqSt q)
+      = .ok (interpretDesign seqD (allEdges seqD) (seqIn d en rst) (seqSt q)) :=
+  stepOf_succeeds (simSound_varT hproj hchk SupportCheck.seq_supported)
+    (show runtimeOK (ProjectedSimulator.mk seqD R b).design
+            (allEdges seqD) (seqIn d en rst) (seqSt q) = true from
+      FixtureStep.seq_runtimeOK d en rst q)
+
+/-- The three transitions, named, as instances of the above. -/
+theorem seq_varT_reset {sf wf : Nat} {R : Program} {b : Nat}
+    (hproj : mixDriver sf wf hwAPVarT [encDesign seqD] = .ok R)
+    (hchk : checkResidual R = some b) (d q : Int) :
+    stepOf ⟨seqD, R, b⟩ seqD (allEdges seqD) (seqIn d 1 1) (seqSt q)
+      = .ok (interpretDesign seqD (allEdges seqD) (seqIn d 1 1) (seqSt q)) :=
+  seq_varT_step hproj hchk d 1 1 q
+
+theorem seq_varT_enabled {sf wf : Nat} {R : Program} {b : Nat}
+    (hproj : mixDriver sf wf hwAPVarT [encDesign seqD] = .ok R)
+    (hchk : checkResidual R = some b) (d q : Int) :
+    stepOf ⟨seqD, R, b⟩ seqD (allEdges seqD) (seqIn d 1 0) (seqSt q)
+      = .ok (interpretDesign seqD (allEdges seqD) (seqIn d 1 0) (seqSt q)) :=
+  seq_varT_step hproj hchk d 1 0 q
+
+theorem seq_varT_held {sf wf : Nat} {R : Program} {b : Nat}
+    (hproj : mixDriver sf wf hwAPVarT [encDesign seqD] = .ok R)
+    (hchk : checkResidual R = some b) (d q : Int) :
+    stepOf ⟨seqD, R, b⟩ seqD (allEdges seqD) (seqIn d 0 0) (seqSt q)
+      = .ok (interpretDesign seqD (allEdges seqD) (seqIn d 0 0) (seqSt q)) :=
+  seq_varT_step hproj hchk d 0 0 q
+
+/-- A THREE-cycle trace -- reset, then enable, then hold -- each cycle starting
+from the previous one's `nextState`, which no single-cycle theorem says. -/
+theorem seq_varT_trace {sf wf : Nat} {R : Program} {b : Nat}
+    (hproj : mixDriver sf wf hwAPVarT [encDesign seqD] = .ok R)
+    (hchk : checkResidual R = some b) (q : Int) (rs : List RuntimeResult)
+    (h : stepTrace (stepOf ⟨seqD, R, b⟩) seqD (seqSt q)
+           [(allEdges seqD, seqIn 5 1 1), (allEdges seqD, seqIn 7 1 0),
+            (allEdges seqD, seqIn 9 0 0)] = .ok rs) :
+    rs = refTrace seqD (seqSt q)
+           [(allEdges seqD, seqIn 5 1 1), (allEdges seqD, seqIn 7 1 0),
+            (allEdges seqD, seqIn 9 0 0)] :=
+  stepTrace_projected (simSound_varT hproj hchk SupportCheck.seq_supported)
+    (seqSt q) _ rs h
 
 end ProtoVar
 end Projection

@@ -298,9 +298,34 @@ tables, and no same-program rewriting lemma relates them automatically:
     covered;
   * multi-cycle trace correctness -- NOT covered.
 
-  Closing it means either a variant wrapper reusing the existing checker-bound
-  and trace premises, or generalising the simulator contract the same way
-  `specialize_correct_of` generalised the composition.
+  **CLOSED**, by the second route.  `runProjected` was already
+  backend-independent -- it reads only `sim.prog` and `sim.bound`.  `SimWF` was
+  not: its `proj` field named `projectDesign`.  But `.proj` entered every proof
+  in exactly ONE shape, `projectDesign_correct hsim.proj hsim.sup hwf hrs`, so
+  `SimSound` carries that `iff` directly and `SimWF.toSimSound` makes the
+  original an instance.  `runProjected_correct`, `runProjected_success`,
+  `stepOf_correct`, `stepOf_succeeds` and `stepTrace_projected` are the SAME
+  theorems restated over the contract -- nine hypotheses changed, no proof
+  duplicated.
+
+  `simSound_varT` is the other instance, budget-parametric: `sf`/`wf` enter
+  only through `hproj`.  Support, `RuntimeWF`/`RuntimeSized`, `checkResidual`
+  success and the runtime rejection are all preserved, and BOTH halves hold --
+  successful results are the reference ones, and valid runs DO succeed at the
+  checker bound.
+
+  A PRECISION CORRECTION this exposed: `seq_cycle_varT` checks
+  `Eval hwPVarT` -- the INTERPRETER -- not a specialized residual.  The new
+  `seq_varT_reset` / `_enabled` / `_held` and the three-cycle `seq_varT_trace`
+  check a RESIDUAL through `stepOf`, which is a different claim.  `seqD`'s flop
+  has both an enable and a reset, so all three transitions are reachable from
+  the stimulus.
+
+  Still a KERNEL-theorem/native-guard distinction to keep: these fixtures are
+  conditional on `mixDriver sf wf hwAPVarT [encDesign seqD] = .ok R`, which is
+  NOT discharged -- `mixDriver` does not kernel-reduce at nontrivial fuel.  The
+  executable `#guard`s in `ProjectedStep` run the compiled evaluator instead
+  and are checks, not proofs.
 
   ### What B3 does NOT do
 

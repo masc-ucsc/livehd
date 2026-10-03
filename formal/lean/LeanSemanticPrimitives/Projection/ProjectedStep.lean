@@ -186,7 +186,7 @@ theorem checkResidual_complete {R : Program} {b : Nat} (h : checkResidual R = so
 
 /-- **Partial correctness.**  Whatever `runProjected` returns is the reference
 answer.  This half needs nothing from the success half. -/
-theorem runProjected_correct {sim : ProjectedSimulator} (hsim : SimWF sim)
+theorem runProjected_correct {sim : ProjectedSimulator} (hsim : SimSound sim)
     {e : ClockEdges} {i : RuntimeInput} {s : RuntimeState} {r : RuntimeResult}
     (hrt : runtimeOK sim.design e i s = true)
     (hok : runProjected sim e i s = .ok r) :
@@ -207,14 +207,14 @@ theorem runProjected_correct {sim : ProjectedSimulator} (hsim : SimWF sim)
           simp only [Except.ok.injEq] at hok
           subst hok
           have hev := evalFuel_sound _ _ _ _ _ hr
-          have hrel := (projectDesign_correct hsim.proj hsim.sup hwf hrs v).mp hev
+          have hrel := (hsim.agree hwf hrs v).mp hev
           simp only [ResultRel, hd] at hrel
           exact Option.some.inj hrel
 
 /-- **Success.**  For a valid run it DOES answer, and the answer is the
 reference one -- so neither `typeError` nor `undecodableResult` can fire, and
 by increment 1 neither can `boundExceeded`. -/
-theorem runProjected_success {sim : ProjectedSimulator} (hsim : SimWF sim)
+theorem runProjected_success {sim : ProjectedSimulator} (hsim : SimSound sim)
     {e : ClockEdges} {i : RuntimeInput} {s : RuntimeState}
     (hrt : runtimeOK sim.design e i s = true) :
     runProjected sim e i s = .ok (interpretDesign sim.design e i s) := by
@@ -223,7 +223,7 @@ theorem runProjected_success {sim : ProjectedSimulator} (hsim : SimWF sim)
     interpretDesign_memFree hsim.sup.memFree e i s
   have hrel : ResultRel (encResult (interpretDesign sim.design e i s))
       (interpretDesign sim.design e i s) := ResultRel_encResult hmf
-  have hev := (projectDesign_correct hsim.proj hsim.sup hwf hrs _).mpr hrel
+  have hev := (hsim.agree hwf hrs _).mpr hrel
   have hfuel := checkResidual_complete hsim.chk hev
   simp only [ResultRel] at hrel
   unfold runProjected
@@ -246,7 +246,7 @@ def stepOf (sim : ProjectedSimulator) : Step SimError :=
     else .error .runtimeShape
 
 /-- **The first thing on this branch to satisfy `StepCorrect`.** -/
-theorem stepOf_correct {sim : ProjectedSimulator} (hsim : SimWF sim) :
+theorem stepOf_correct {sim : ProjectedSimulator} (hsim : SimSound sim) :
     StepCorrect (stepOf sim) sim.design := by
   intro e i s r hstep
   unfold stepOf at hstep
@@ -256,7 +256,7 @@ theorem stepOf_correct {sim : ProjectedSimulator} (hsim : SimWF sim) :
   · simp at hstep
 
 /-- …and it answers whenever the runtime shape is right. -/
-theorem stepOf_succeeds {sim : ProjectedSimulator} (hsim : SimWF sim)
+theorem stepOf_succeeds {sim : ProjectedSimulator} (hsim : SimSound sim)
     {e : ClockEdges} {i : RuntimeInput} {s : RuntimeState}
     (hrt : runtimeOK sim.design e i s = true) :
     stepOf sim sim.design e i s = .ok (interpretDesign sim.design e i s) := by
@@ -270,7 +270,7 @@ theorem stepOf_succeeds {sim : ProjectedSimulator} (hsim : SimWF sim)
 and are generic over `Step`.  Nothing here defines a second trace runner; this
 is one instantiation. -/
 
-theorem stepTrace_projected {sim : ProjectedSimulator} (hsim : SimWF sim)
+theorem stepTrace_projected {sim : ProjectedSimulator} (hsim : SimSound sim)
     (s : RuntimeState) (is : List Stim) (rs : List RuntimeResult)
     (h : stepTrace (stepOf sim) sim.design s is = .ok rs) :
     rs = refTrace sim.design s is :=
@@ -278,7 +278,9 @@ theorem stepTrace_projected {sim : ProjectedSimulator} (hsim : SimWF sim)
 
 /-! ## Fixture acceptance, at theorem level
 
-Conditional on `SimWF sim`, which is exactly the bundle being honest.
+Conditional on `SimSound sim`, which is exactly the residual being correct
+for its design -- weaker than `SimWF`, and satisfiable by any specializer /
+interpreter pair with a proved composition theorem, not only `projectDesign`.
 
 That hypothesis cannot currently be discharged for a CONCRETE fixture: it
 contains `projectDesign D = .ok R`, and the previous commit measured that the
@@ -303,7 +305,7 @@ theorem seq_runtimeOK (d en rst q : Int) :
   decide
 
 /-- One cycle, as a theorem rather than a `#guard`. -/
-theorem tiny_one_cycle {sim : ProjectedSimulator} (hsim : SimWF sim)
+theorem tiny_one_cycle {sim : ProjectedSimulator} (hsim : SimSound sim)
     (hd : sim.design = tinyD) :
     stepOf sim tinyD (allEdges tinyD) tinyIn tinySt
       = .ok (interpretDesign tinyD (allEdges tinyD) tinyIn tinySt) := by
@@ -313,7 +315,7 @@ theorem tiny_one_cycle {sim : ProjectedSimulator} (hsim : SimWF sim)
   rw [hd] at h
   exact h
 
-theorem seq_one_cycle {sim : ProjectedSimulator} (hsim : SimWF sim)
+theorem seq_one_cycle {sim : ProjectedSimulator} (hsim : SimSound sim)
     (hd : sim.design = seqD) (d en rst q : Int) :
     stepOf sim seqD (allEdges seqD) (seqIn d en rst) (seqSt q)
       = .ok (interpretDesign seqD (allEdges seqD) (seqIn d en rst) (seqSt q)) := by
@@ -326,7 +328,7 @@ theorem seq_one_cycle {sim : ProjectedSimulator} (hsim : SimWF sim)
 /-- Two cycles, through the SHARED `stepTrace`/`refTrace`, with the second
 cycle starting from the first one's `nextState` -- which is the part a
 one-cycle theorem does not say. -/
-theorem tiny_two_cycles {sim : ProjectedSimulator} (hsim : SimWF sim)
+theorem tiny_two_cycles {sim : ProjectedSimulator} (hsim : SimSound sim)
     (hd : sim.design = tinyD) (rs : List RuntimeResult)
     (h : stepTrace (stepOf sim) tinyD tinySt
             [(allEdges tinyD, tinyIn), (allEdges tinyD, tinyIn)] = .ok rs) :
@@ -336,7 +338,7 @@ theorem tiny_two_cycles {sim : ProjectedSimulator} (hsim : SimWF sim)
   rw [hd] at h'
   exact h'
 
-theorem seq_two_cycles {sim : ProjectedSimulator} (hsim : SimWF sim)
+theorem seq_two_cycles {sim : ProjectedSimulator} (hsim : SimSound sim)
     (hd : sim.design = seqD) (q : Int) (rs : List RuntimeResult)
     (h : stepTrace (stepOf sim) seqD (seqSt q)
             [(allEdges seqD, seqIn 5 1 0), (allEdges seqD, seqIn 3 0 0)] = .ok rs) :
@@ -349,7 +351,7 @@ theorem seq_two_cycles {sim : ProjectedSimulator} (hsim : SimWF sim)
 
 /-! ### Executable regressions
 
-The theorems above are conditional on `SimWF`.  These are not: they run the
+The theorems above are conditional on `SimSound`.  These are not: they run the
 compiled evaluator on a bundle `mkSim` actually built, and fail the build if
 the executable path stops agreeing. -/
 
