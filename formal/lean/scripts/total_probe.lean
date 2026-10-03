@@ -137,8 +137,9 @@ at a fallback bound"
               | _        => false
             IO.println s!"  control: variant interpreter matches interpretDesign {ctlOk}"
             unless ctlOk do bad := true
-            IO.println s!"  STAGE TIMES ms: specialize+check {tms}  reference-runs {tRef} (6)  \
-  step-runs {tRes} (6)  control {tCtl}"
+            IO.println s!"  specialize {tms} ms  checkResidual {tchk} ms (ONE specialization; the checker result is kept from it, not recomputed)"
+            IO.println s!"  STAGE TIMES ms: specialize+check {tms + tchk}  reference-runs {tRef} (6)  \
+step-runs {tRes} (6)  control {tCtl}"
             return (if bad then 1 else 0)
     | _ => do
         IO.eprintln "usage: total_probe CERT.dcert STEPFUEL WORKFUEL"

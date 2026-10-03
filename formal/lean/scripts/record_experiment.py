@@ -161,8 +161,18 @@ def tree_state(code):
 
 
 def num(pat, text, cast=int, default=None):
+    """First CAPTURED value, or `default`.
+
+    `m.group(1)` was wrong: a pattern with an alternation leaves the arm that
+    did not match as `None`, so `cast(None)` raised `TypeError`.  Reproduced on
+    `file-ab`'s bound pattern against an `exact fuel` log."""
     m = re.search(pat, text)
-    return cast(m.group(1)) if m else default
+    if not m:
+        return default
+    for g in m.groups():
+        if g is not None:
+            return cast(g)
+    return default
 
 
 # --------------------------------------------------------------------------
@@ -241,8 +251,8 @@ def cmd_record(a):
             f"log and it is absent.  Recording a run under another backend's "
             f"labels would misstate what executed.")
     exit_code, exit_evidence = parse_exit(t)
-    stage = re.search(R['stage_re'], t) if R['stage_re'] else None
     R = RUNNERS[a.runner]
+    stage = re.search(R['stage_re'], t) if R['stage_re'] else None
     cap = json.load(open(a.capture)) if a.capture else None
 
     if cap:
@@ -255,7 +265,7 @@ def cmd_record(a):
                          'is NOT evidence about what executed; the binary that '
                          'ran was not hashed and is UNKNOWN',
             'binary_sha256': None,
-            **tree_state(),
+            **tree_state(R['code']),
         }
 
     rec = {
@@ -301,9 +311,11 @@ def cmd_record(a):
         'exit': exit_code,
         'exit_evidence': exit_evidence,
     }
-    with open(OUT, 'a') as f:
+    out = a.out or OUT
+    with open(out, 'a') as f:
         f.write(json.dumps(rec, sort_keys=True) + '\n')
-    print(f'appended {rec["design"]} (exit {rec["exit"]!r}, {exit_evidence}) to {OUT}')
+    print(f'appended {rec["design"]} (exit {rec["exit"]!r}, {exit_evidence}) to {out}')
+    return rec
 
 
 def cmd_selftest(_a):
@@ -395,6 +407,94 @@ def cmd_selftest(_a):
     pairs = {(v['specializer'], v['interpreter']) for v in RUNNERS.values()}
     check('runners/distinct', len(pairs), len(RUNNERS))
 
+    # ---- END-TO-END cmd_record.  The parser selftests above never ran the
+    # entry point, and it was broken three ways at once: `R` used before
+    # assignment, `tree_state()` called without its now-required argument, and
+    # `num` raising on an alternation.  Every case below writes to a
+    # PROJECT-LOCAL temp manifest, never the real one.
+    import tempfile, shutil, argparse as _ap
+    # project-local, and OUTSIDE the git repo so a crashed test leaves no
+    # artifact in a tracked tree
+    scratch = os.path.abspath(os.path.join(LEAN, '..', '..', '..', '.perfwork'))
+    tmp = tempfile.mkdtemp(prefix='recordtest-',
+                           dir=scratch if os.path.isdir(scratch) else None)
+    try:
+        cert = os.path.join(tmp, 'f.dcert')
+        open(cert, 'w').write('DCERT1\n0\n0\n0\n0\n0\n')
+        manifest = os.path.join(tmp, 'out.jsonl')
+
+        def run(logtext, runner, capture=None):
+            lg = os.path.join(tmp, 'l.log'); open(lg, 'w').write(logtext)
+            ns = _ap.Namespace(log=lg, cert=cert, provenance='test', capture=capture,
+                               runner=runner, out=manifest)
+            return cmd_record(ns)
+
+        FULL_TP = ('  sources 2 nodes 1 flops 0 outputs 1 clocks 1\n'
+                   '  support: wf true memFree true sources true ops true '
+                   'arities true flopClocks true | ALL true\n'
+                   '  backend: PROVED mixDriver + hwAPVarT (TOTAL variant), fuel 20/2\n'
+                   '  residual 45 terms, checker bound 14 (height)\n'
+                   '  seed 0: ok  matches interpretDesign true\n'
+                   '  trace: 4 cycles -- agrees true states-reached 1 flops 0\n'
+                   '  control: variant interpreter matches interpretDesign true\n'
+                   '  STAGE TIMES ms: specialize+check 7  reference-runs 8 (6)'
+                   '  step-runs 9 (6)  control 10\n'
+                   'wall 1.5 s RSS 99 KB exit 0\n')
+
+        # (a) full log, NO capture -> reconstructed, and it must not crash
+        r = run(FULL_TP, 'total-probe')
+        check('e2e/no-capture-exit', r['exit'], 0)
+        check('e2e/no-capture-evidence', r['code_identity']['evidence'],
+              'reconstructed-at-record-time')
+        check('e2e/terms', r['residual']['terms'], 45)
+        check('e2e/bound', r['check_residual_bound'], 14)
+        check('e2e/support', r['support']['all_six_true'], True)
+        check('e2e/seeds', r['stimuli']['all_match_interpretDesign'], True)
+        check('e2e/stage', r['stage_times_ms']['specialize_and_check'], 7)
+        check('e2e/untracked-listed', isinstance(
+            r['code_identity'].get('untracked_sources'), list), True)
+
+        # (b) WITH a pre-launch capture -> the capture wins, evidence upgraded
+        capf = os.path.join(tmp, 'cap.json')
+        json.dump({'evidence': 'captured-pre-launch', 'binary_sha256': 'deadbeef'},
+                  open(capf, 'w'))
+        r = run(FULL_TP, 'total-probe', capture=capf)
+        check('e2e/capture-evidence', r['code_identity']['evidence'], 'captured-pre-launch')
+        check('e2e/capture-binary', r['code_identity']['binary_sha256'], 'deadbeef')
+
+        # (c) FAILURE log: checker rejected, exit 1, no seeds, no stage
+        FAIL_TP = ('  backend: PROVED mixDriver + hwAPVarT (TOTAL variant), fuel 20/2\n'
+                   '  checkResidual REJECTED -- failing closed\n'
+                   'wall 1.0 s RSS 9 KB exit 1\n')
+        r = run(FAIL_TP, 'total-probe')
+        check('e2e/fail-exit', r['exit'], 1)
+        check('e2e/fail-seeds', r['stimuli']['all_match_interpretDesign'], None)
+        check('e2e/fail-stage', r['stage_times_ms'], None)
+        check('e2e/fail-bound', r['check_residual_bound'], None)
+
+        # (d) TRUNCATED log: exit UNKNOWN, never inferred from a partial log
+        TRUNC = ('  backend: PROVED mixDriver + hwAPVarT (TOTAL variant), fuel 20/2\n'
+                 '  [specialize ...')
+        r = run(TRUNC, 'total-probe')
+        check('e2e/trunc-exit', r['exit'], None)
+        check('e2e/trunc-evidence-str', 'MISSING' in r['exit_evidence'], True)
+
+        # (e) the file-ab path, including the alternation that raised TypeError
+        FULL_FA = ('fuel 20000/200\n'
+                   '  terms 45   lit 9\n'
+                   '  checkResidual: ACCEPTED, exact fuel 19\n'
+                   '  seed 0: residual ok  matches interpretDesign true\n'
+                   'wall 2.0 s RSS 9 KB exit 0\n')
+        r = run(FULL_FA, 'file-ab')
+        check('e2e/fileab-bound-alternation', r['check_residual_bound'], 19)
+        check('e2e/fileab-seeds', r['stimuli']['count'], 1)
+
+        # the real manifest must be untouched
+        check('e2e/wrote-only-temp', os.path.getsize(manifest) > 0, True)
+        check('e2e/five-records', len(open(manifest).read().strip().split('\n')), 5)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
     if fails:
         print('SELFTEST FAILED:'); [print('  ' + f) for f in fails]; return 1
     print(f'selftest: all checks passed ({len(RUNNERS)} runners)')
@@ -412,6 +512,8 @@ def main():
     r = sub.add_parser('record'); r.add_argument('log'); r.add_argument('cert')
     r.add_argument('--provenance', required=True); r.add_argument('--capture')
     r.add_argument('--runner', required=True, choices=sorted(RUNNERS))
+    r.add_argument('--out', help='write here instead of the real manifest; '
+                                 'tests MUST pass this')
     r.set_defaults(fn=cmd_record)
     s = sub.add_parser('selftest'); s.set_defaults(fn=cmd_selftest)
     a = ap.parse_args()
