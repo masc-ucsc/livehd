@@ -24,7 +24,7 @@ nothing in this file should be read as standing in for them.
 which this audit therefore cannot cover.  That is why `ProtoVar.changed` is a
 runtime check in `proto_probe --env0-ab` and not a hypothesis of anything here.
 -/
-import LeanSemanticPrimitives.Projection.Proto.RewriteTotal
+import LeanSemanticPrimitives.Projection.Proto.VariantAdequacy
 
 namespace Projection.ProtoVar
 
@@ -79,5 +79,34 @@ about `hwSVarT`. -/
 #print axioms SEvalList_hwSVarT_of_hwS
 #print axioms hwSVarT_rewritten
 #print axioms hwS_not_rewritten
+
+/- B2: the canonical witness and adequacy for the TOTAL variant.
+`main_agree_varT` mirrors `HardwareAdequacy.main_agree` step for step, with the
+`env0` binding removed and `mkSources`'s derivation handed directly to
+`evalNodes_agree`.  `IHwAdequate_varT` then follows `IHwAdequate_proved`'s
+pattern -- one constructed evaluation, `Eval_det` forward and
+`ResultRel_canonical` back -- so no surface completeness theorem is involved.
+
+STILL OUTSTANDING: B3.  `specializeDesign_correct` names `hwAP` literally, so
+`IHwAdequate_varT` does not yet compose into a statement about a residual. -/
+#print axioms mainFunVarT_params
+#print axioms mainBodyVarT_mainFree
+#print axioms main_agree_varT
+#print axioms hwResolvedVarT_isOk
+#print axioms hwResolvedVarT_ok
+#print axioms hwPVarT_resolves
+#print axioms hw_entry_varT
+#print axioms IHwAdequate_varT
+
+/- B3's PREREQUISITES, promoted from `#guard`s to theorems because B3 consumes
+them and a check may not be cited as a discharged premise.  `hwAPVarT_erases`
+goes through the generic `bta_erases` rather than kernel reduction, the same
+route `hwAP_erases` takes. -/
+#print axioms hwAVarT_isOk
+#print axioms hwAVarT_ok
+#print axioms hwAPVarT_wf
+#print axioms hwAPVarT_erases
+#print axioms hwAPVarT_entry_params
+#print axioms hwAPVarT_entry
 
 end Projection.ProtoVar

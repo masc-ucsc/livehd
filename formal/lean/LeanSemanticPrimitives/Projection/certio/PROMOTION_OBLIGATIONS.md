@@ -236,7 +236,40 @@ tables, and no same-program rewriting lemma relates them automatically:
   which one ran, refusing a log whose marker does not match the `--runner`
   given.
 
-  WHAT REMAINS in B2: the semantic step.  The facts above say the transform
+  **B2 IS CLOSED.**  `Proto/VariantAdequacy.lean`:
+
+  ```
+  main_agree_varT  : SEval hwSVarT [] (.call "main" [...])
+                       (encResult (interpretDesign D e i s))
+  IHwAdequate_varT : ∀ r, Eval hwPVarT [] (.call hwPVarT.entry [...]) r
+                            ↔ ResultRel r (interpretDesign D e i s)
+  ```
+
+  under `SupportedByProjection` and `RuntimeSized` only.  It mirrors
+  `main_agree` step for step; the ONE difference is the `env0` binding, where
+  `mkSources`'s derivation is handed DIRECTLY to `evalNodes_agree` as its
+  environment argument instead of being bound and then read back.
+
+  No "lookup irrelevance" lemma was needed after all: the `*_agree` helpers are
+  sigma-POLYMORPHIC, so they are re-applied at the variant's shorter
+  environment rather than transported across it, and every later `.ref rfl`
+  still computes because `slookup` is by name and `env0` is not shadowed.
+
+  B1 is used exactly once, on the whole body, which is main-free; it is NOT
+  applied to the `call "main"` node -- that node is built by `SEval_call4` from
+  `hwSVarT`'s own `sFn` equation.  No operator or graph adequacy is reproved.
+
+  Adequacy then follows `IHwAdequate_proved`'s pattern verbatim: one
+  constructed evaluation, `Eval_det` forward, `ResultRel_canonical` back.  No
+  surface completeness theorem is involved, and the generic inliner iff stays
+  OFF the critical path.
+
+  B3's prerequisites are promoted from `#guard`s to THEOREMS, since B3 consumes
+  them and a check may not be cited as discharged: `hwResolvedVarT_ok`,
+  `hwAVarT_ok`, `hwAPVarT_wf`, `hwAPVarT_erases` (via the generic `bta_erases`,
+  not kernel reduction) and `hwAPVarT_entry`.
+
+  WHAT REMAINS: B3 only.  The facts above say the transform
   fired and which transform it was; they do not say the rewrite preserves
   `SEval`.  That is the lemma, and it is next.
 
