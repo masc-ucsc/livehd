@@ -38,6 +38,18 @@ register_option d3.traceCtx : Bool := {
   descr    := "D3: log local-context and goal size after each incremental walk step"
 }
 
+/-- Path of a file the chunked prover appends a timestamped line to after each
+sub-theorem it emits. Empty (the default) writes nothing.
+
+A proof killed by the memory guard is SIGKILLed, so its log is empty and says
+nothing about which theorem it reached. The prover is a command elaborator, so
+it can write this itself -- no generated `#eval`, and the line is on disk
+before the next theorem starts. -/
+register_option d3.proofPhase : String := {
+  defValue := ""
+  descr    := "D3: append chunked-prover progress to this file (empty = off)"
+}
+
 /-- Segment size for the incremental walk.  0 (the default) keeps the single
 monolithic walk; `n > 0` emits the walk as segment theorems of at most `n`
 bindings each, composed through `Compiler.runBindings_append`.
@@ -51,6 +63,16 @@ register_option d3.segment : Nat := {
 }
 
 namespace Compiler
+
+/-- Append one timestamped progress line, if `d3.proofPhase` names a file.
+Written by the elaborator itself and closed immediately, so it survives the
+SIGKILL that leaves the probe's own log empty. -/
+def markPhase (msg : String) : CommandElabM Unit := do
+  let path : String := (← getOptions).get `d3.proofPhase ""
+  if path.isEmpty then return
+  let t ← IO.monoMsNow
+  IO.FS.withFile path IO.FS.Mode.append fun h => h.putStrLn s!"{msg} t={t}"
+
 
 /-- Slot `sl` names a source (`s<sl>`) or an earlier binding (`v<sl-nsrc>`). -/
 private def slotIdent (nsrc sl : Nat) : Ident :=
@@ -315,6 +337,7 @@ def elabReifyDesignChunked : CommandElab := fun stx => do
       match compileDesign cert with
       | .error _ => throwError "reify_design_chunked: compileDesign refused {d}"
       | .ok R    => pure R
+    markPhase "reify_compiled"
     let csize := match sz with | some k => max 1 k.getNat | none => 32
     let nsrc  := R.sources.size
     let nb    := R.bindings.size
@@ -353,6 +376,7 @@ def elabReifyDesignChunked : CommandElab := fun stx => do
                  $body)
       elabCommand (← `(command|
         def $(chkNm j) ($(envNm 0) : Compiler.SlotEnv) : Compiler.SlotEnv := $body))
+    markPhase "reify_chunks_emitted"
     -- 2. the model: source env, then the chunks in order, then the roots read
     --    from the FINAL environment exactly as `denoteResidual` reads them
     let fin := mkIdent (Name.mkSimple s!"c{nseg}")
@@ -391,6 +415,7 @@ def elabReifyDesignChunked : CommandElab := fun stx => do
     elabCommand (← `(command|
       def $f ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState) :
           Compiler.RuntimeResult := $full))
+    markPhase "reify_model_emitted"
     logInfo m!"reify_design_chunked: {f} emitted, {nsrc} sources, \
       {nb} bindings, {nseg} chunk(s) of at most {csize}"
   | _ => throwUnsupportedSyntax

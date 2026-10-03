@@ -328,6 +328,7 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
       match compileDesign cert with
       | .error _ => throwError "prove_reified_chunked: compileDesign refused {d}"
       | .ok R    => pure R
+    markPhase "prover_start"
     let csize := match sz with | some k => max 1 k.getNat | none => 32
     let nb    := R.bindings.size
     let nseg  := if nb == 0 then 1 else (nb + csize - 1) / csize
@@ -358,6 +359,7 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
     elabCommand (← `(command|
       theorem $hRNm : Compiler.compileDesign $d = .ok $rNm :=
         Compiler.compileDesign_ok_witness $d $okNm))
+    markPhase "compiles_ok"
     let sNm := mkIdent (base ++ `R_sources)
     elabCommand (← `(command| theorem $sNm : ($rNm).sources = ($d).sources := rfl))
     let oProjNm := mkIdent (base ++ `R_outputs_proj)
@@ -369,6 +371,7 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
     let mProjNm := mkIdent (base ++ `R_mems_proj)
     elabCommand (← `(command|
       theorem $mProjNm : ($rNm).memoryUpdates = ($d).memories.map Compiler.compileMemory := rfl))
+    markPhase "projections"
     -- 1. the segment lists, and the per-chunk obligations
     for j in [0 : nseg] do
       let lit ← liftTermElabM (ReifyProof.qBindingsList (R.bindings.extract (bnd j) (bnd (j+1))))
@@ -379,6 +382,7 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
           simp only [$(chkNm j):ident, $(segNm j):ident, Compiler.runBindings,
                      Compiler.denoteExpr, Compiler.refBVs,
                      List.map_cons, List.map_nil]))
+      markPhase s!"chunk_eq {j}"
     -- 2. the flat list IS the segments appended, by one `rfl`
     let segsEq := mkIdent (base ++ `segs_eq)
     let appTerm ← liftTermElabM do
@@ -388,6 +392,7 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
       go 0
     elabCommand (← `(command|
       theorem $segsEq : ($rNm).bindings.toList = $appTerm := rfl))
+    markPhase "segs_eq"
     -- 3. compose the chunks into ONE environment equality
     let srcEnv ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)
     let mut comp := srcEnv
@@ -404,6 +409,7 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
       theorem $envEq ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState) :
           $comp = Compiler.runBindings (($rNm).bindings.toList) $srcEnv := by
         rw [$rules,*]))
+    markPhase "env_eq"
     -- 4. the roots, read from that environment exactly as denoteResidual reads them
     let dfNm := mkIdent (base ++ `D_flops)
     let flopsLit ← liftTermElabM do
@@ -439,6 +445,7 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
               Compiler.compileMemory, Compiler.flopNext_eq,
               $dfNm:ident, $dmNm:ident, $doNm:ident]))
+    markPhase "eq_compileAndRun"
     let corNm := mkIdent (base ++ `correct)
     elabCommand (← `(command|
       theorem $corNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
@@ -446,6 +453,7 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         intro $iId:ident $stId:ident
         rw [$carNm:ident $iId $stId]
         exact Compiler.compileAndRun_correct $d $okNm $iId $stId))
+    markPhase "correct"
     auditOrThrow (base ++ `correct) "prove_reified_chunked"
     logInfo m!"prove_reified_chunked: {corNm} proved over {nb} binding(s) in \
       {nseg} chunk(s) of at most {csize}"

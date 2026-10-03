@@ -83,7 +83,8 @@ def main() -> int:
     # what ran, and nothing downstream would notice.
     _ksim = sweep.make_probe(_c, "segtext", 32, reifier="chunked",
                              phase_file=str(tmp / "k.phase"), chunk_size=16)
-    _kprf = sweep.make_proof_probe(_c, "segtext", reifier="chunked", chunk_size=16)
+    _kprf = sweep.make_proof_probe(_c, "segtext", reifier="chunked", chunk_size=16,
+                                  phase_file=str(tmp / "kp.phase"))
     check("chunk_sim_carries_size",
           "as d3_fast size 16" in _ksim,
           "the chunked sim probe emits the model at the requested size")

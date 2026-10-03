@@ -1013,6 +1013,8 @@ d3_proof_gate d3_fast.correct
 # same `size`. A different size is a different function, so it would prove
 # something other than what ran.
 PROVE_TAIL_CHUNKED = """
+set_option d3.proofPhase {phase}
+
 reify_design_chunked {m}_designCert as d3_fast size {chunksz}
 
 prove_reified_chunked {m}_designCert as d3_fast size {chunksz}
@@ -1453,7 +1455,8 @@ def _cert_body(cert: pathlib.Path, head: str) -> str:
 
 
 def make_proof_probe(cert: pathlib.Path, m: str, reifier: str = "legacy",
-                     segment: int = 0, chunk_size: int = 32) -> str:
+                     segment: int = 0, chunk_size: int = 32,
+                     phase_file: str = "") -> str:
     """The last-mile proof, in its OWN file and its OWN process.
 
     SEPARATE ON PURPOSE.  In one process a failed `prove_reified` or a failed
@@ -1464,8 +1467,14 @@ def make_proof_probe(cert: pathlib.Path, m: str, reifier: str = "legacy",
     able to retract an earlier one.
     """
     if reifier == "chunked":
+        # The prover appends one timestamped line per sub-theorem here, so a
+        # proof killed by the guard still says which theorem it reached.
+        if not phase_file:
+            raise ValueError("make_proof_probe(reifier='chunked') needs "
+                             "phase_file: without it a killed proof reports "
+                             "nothing about where it stopped")
         return _cert_body(cert, PROVE_HEAD) + PROVE_TAIL_CHUNKED.format(
-            m=m, chunksz=int(chunk_size))
+            m=m, chunksz=int(chunk_size), phase=json.dumps(phase_file))
     if reifier == "shared":
         # No proof bridge exists for the chunked model yet. Refusing is the
         # point: a runtime-only model must not reach the proof gate.
@@ -1872,8 +1881,11 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             pprobe = probe_dir / f"{m}.proof.lean"
             pprobe.write_text(make_proof_probe(cert, m, reifier=REIFIER,
                                                segment=PROOF_SEGMENT,
-                                               chunk_size=CHUNK_SIZE),
+                                               chunk_size=CHUNK_SIZE,
+                                               phase_file=str(
+                                                   log_dir / f"{m}.proofphase")),
                               encoding="utf-8")
+            (log_dir / f"{m}.proofphase").unlink(missing_ok=True)
             ptv = log_dir / f"{m}.proof.time"
             pcmd = ([LEAN_BIN, str(pprobe)] if LEAN_BIN
                     else [LAKE, "env", "lean", str(pprobe)])
