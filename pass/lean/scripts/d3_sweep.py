@@ -1360,7 +1360,8 @@ def run_config(a, manifest_digest: str) -> dict:
         "phase_only": getattr(a, "phase_only", "") or "",
         # SEMANTIC: a different chunk size is a different emitted function, so
         # rows from two sizes describe different models and must not merge.
-        "chunk_size": int(getattr(a, "chunk_size", 32) or 32),
+        "chunk_size": (lambda v: 32 if v is None else int(v))(
+            getattr(a, "chunk_size", None)),
         "lake": LAKE,
         "worktree_head": subprocess.run(
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
@@ -2503,7 +2504,7 @@ def main() -> int:
                          "bindings (0 = one monolithic walk, the default). Sets "
                          "`d3.segment` in the PROOF probe only, and requires "
                          "--reifier named.")
-    ap.add_argument("--chunk-size", type=int, default=32, metavar="N",
+    ap.add_argument("--chunk-size", type=int, default=None, metavar="N",
                     help="bindings per chunk for --reifier chunked (default 32). "
                          "The sim and proof probes are emitted with the SAME "
                          "size: a different size is a different function.")
@@ -2856,20 +2857,24 @@ def main() -> int:
         print("REFUSING: --phase-only emits no model to prove.", file=sys.stderr)
         return 2
     PHASE_ONLY = a.phase_only
-    if a.chunk_size < 1:
-        print("REFUSING: --chunk-size must be >= 1.", file=sys.stderr)
-        return 2
-    if a.chunk_size != 32 and a.reifier != "chunked":
+    # PRESENCE, not value. An earlier revision tested `chunk_size != 32`, which
+    # let an explicit `--chunk-size 32 --reifier named` through -- silently
+    # inert, which is exactly what this refusal exists to prevent. The default
+    # is None so "supplied" and "happens to equal the default" are different.
+    if a.chunk_size is not None and a.reifier != "chunked":
         print(f"REFUSING: --chunk-size is meaningful only for --reifier chunked; "
               f"got --reifier {a.reifier}. The option would be accepted and do "
               f"nothing.", file=sys.stderr)
+        return 2
+    if a.chunk_size is not None and a.chunk_size < 1:
+        print("REFUSING: --chunk-size must be >= 1.", file=sys.stderr)
         return 2
     if a.proof_segment_size and a.reifier == "chunked":
         print("REFUSING: --proof-segment-size segments the INCREMENTAL walk and "
               "has no meaning for the chunked prover, which has its own "
               "--chunk-size.", file=sys.stderr)
         return 2
-    CHUNK_SIZE = int(a.chunk_size)
+    CHUNK_SIZE = 32 if a.chunk_size is None else int(a.chunk_size)
     if a.proof_segment_size < 0:
         print("REFUSING: --proof-segment-size must be >= 0.", file=sys.stderr)
         return 2
@@ -2895,7 +2900,7 @@ def main() -> int:
     cfg["proof_segment_size"] = int(a.proof_segment_size)
     cfg["phase_split"] = bool(a.phase_split)
     cfg["phase_only"] = a.phase_only
-    cfg["chunk_size"] = int(a.chunk_size)
+    cfg["chunk_size"] = CHUNK_SIZE
     if a.runner_selftest:
         # Branded in the metadata rather than forbidden: the drift regressions
         # must exercise the manifest path.  The brand is what stops the result

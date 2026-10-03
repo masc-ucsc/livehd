@@ -101,6 +101,10 @@ def main() -> int:
               "phase_only": "", "chunk_size": 16})(), "d")["chunk_size"] == 16,
           "and the size is in the resume key, so two sizes cannot merge")
     for _lbl, _extra in (("size_without_chunked", ["--chunk-size", "16", "--reifier", "named"]),
+                         # explicit 32 is still SUPPLIED, even though it equals
+                         # the effective default; a value test would miss this.
+                         ("explicit_default_without_chunked",
+                          ["--chunk-size", "32", "--reifier", "named"]),
                          ("size_zero", ["--chunk-size", "0", "--reifier", "chunked"]),
                          ("segment_with_chunked",
                           ["--chunk-size", "16", "--reifier", "chunked",
