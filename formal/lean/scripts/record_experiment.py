@@ -31,9 +31,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LEAN = os.path.dirname(HERE)
 OUT = os.path.join(LEAN, 'LeanSemanticPrimitives', 'Projection', 'certio',
                    'experiments.jsonl')
-CODE = ['scripts/proto_probe.lean',
-        'LeanSemanticPrimitives/Projection/Proto/InterpreterVariant.lean',
-        'LeanSemanticPrimitives/Projection/Proto/PartialEvaluatorFast.lean']
+# The sources that decide what a run DID, per runner.  A fixed list was wrong:
+# it hashed proto_probe/InterpreterVariant/PartialEvaluatorFast for every runner,
+# including `total-probe`, which is built from none of the first and all of a
+# different set.  Several are UNTRACKED, so a `git diff HEAD` hash does not
+# cover them either and they must be hashed individually.
+CODE_COMMON = ['LeanSemanticPrimitives/Projection/ProjectionCorrect.lean',
+               'LeanSemanticPrimitives/Projection/ResidualFragment.lean',
+               'LeanSemanticPrimitives/Projection/ProjectedStep.lean',
+               'LeanSemanticPrimitives/Projection/HardwareInterpreter.lean']
+CODE_FORK  = ['scripts/proto_probe.lean',
+              'LeanSemanticPrimitives/Projection/Proto/InterpreterVariant.lean',
+              'LeanSemanticPrimitives/Projection/Proto/PartialEvaluatorFast.lean']
+CODE_TOTAL = ['scripts/total_probe.lean',
+              'LeanSemanticPrimitives/Projection/Proto/RunnerSupport.lean',
+              'LeanSemanticPrimitives/Projection/Proto/VariantExec.lean',
+              'LeanSemanticPrimitives/Projection/Proto/VariantAdequacy.lean',
+              'LeanSemanticPrimitives/Projection/Proto/RewriteTotal.lean',
+              'LeanSemanticPrimitives/Projection/Proto/VariantTransport.lean']
 SUPPORT_FIELDS = ['wf', 'memFree', 'sources', 'ops', 'arities', 'flopClocks']
 
 # Which runner produced the log, and therefore WHICH BACKEND ran.  The fields
@@ -48,18 +63,69 @@ RUNNERS = {
         'specializer': 'Projection.ProtoFast.mixDriver  (FORK -- PRes.val has no bridge)',
         'interpreter': 'Projection.ProtoVar.hwAPVar  (VARIANT from the PARTIAL goInline -- no equivalence lemma)',
         'acceptance': '6 width-aware stimuli + multi-cycle trace + control interpreter',
+        'code': CODE_FORK + CODE_COMMON,
+        'seed_re': r'seed (\d+): residual (\S+)\s+matches interpretDesign (\w+)',
+        'terms_re': r'terms (\d+)',
+        'bound_re': r'proved-sufficient bound (\d+)|ACCEPTED, exact fuel (\d+)',
+        'stage_re': (r'STAGE TIMES ms: specialize (\d+)\s+checkResidual (\d+)\s+'
+                     r'reference-runs (\d+) \((\d+)\)\s+residual-runs (\d+) \((\d+)\)'
+                     r'\s+control (\d+)'),
+        'stage_keys': ['specialize', 'check_residual', 'reference_runs_total',
+                       'reference_runs_n', 'residual_runs_total', 'residual_runs_n',
+                       'control'],
+        'category': ('EXPERIMENTAL: certificate-relative execution agreement on an '
+                     'UNPROVED backend.  The fork has no bridge and the old variant '
+                     'no equivalence lemma.  NOT theorem-covered, NOT RTL equivalence.'),
     },
     'host-var': {
         'log_marker': 'HOST mixDriver (proved) + hwAPVar',
         'specializer': 'Projection.mixDriver  (the PROVED specializer -- no fork)',
         'interpreter': 'Projection.ProtoVar.hwAPVar  (VARIANT from the PARTIAL goInline -- no equivalence lemma, and NOT the proof target)',
         'acceptance': 'FEASIBILITY ONLY: 3 seeds, no trace, no control',
+        'code': CODE_FORK + CODE_COMMON,
+        'seed_re': r'seed (\d+): residual (\S+)\s+matches interpretDesign (\w+)',
+        'terms_re': r'terms (\d+)',
+        'bound_re': r'ACCEPTED, bound (\d+)',
+        'stage_re': None, 'stage_keys': None,
+        'category': ('EXPERIMENTAL feasibility on the PROVED specializer with the '
+                     'OLD partial-goInline variant -- which has no equivalence '
+                     'lemma and is NOT the proof target.'),
+    },
+    'total-probe': {
+        'log_marker': 'backend: PROVED mixDriver + hwAPVarT',
+        'specializer': 'Projection.mixDriver  (the PROVED specializer -- no fork)',
+        'interpreter': 'Projection.ProtoVar.hwAPVarT  (TOTAL variant; IHwAdequate_varT and specializeDesign_varT_correct are PROVED, so this pair is the covered backend)',
+        'acceptance': 'CHECKED SIMULATOR PATH: specialized once, checker must accept, every cycle at the CHECKED BOUND; 6 width-aware stimuli + threaded trace + control interpreter',
+        'code': CODE_TOTAL + CODE_COMMON,
+        'seed_re': r'seed (\d+): (\S+)\s+matches interpretDesign (\w+)',
+        'terms_re': r'residual (\d+) terms',
+        'bound_re': r'checker bound (\d+)',
+        'stage_re': (r'STAGE TIMES ms: specialize\+check (\d+)\s+'
+                     r'reference-runs (\d+) \((\d+)\)\s+step-runs (\d+) \((\d+)\)'
+                     r'\s+control (\d+)'),
+        'stage_keys': ['specialize_and_check', 'reference_runs_total',
+                       'reference_runs_n', 'step_runs_total', 'step_runs_n', 'control'],
+        'category': ('EXPERIMENTAL EXECUTION on the COVERED backend: mixDriver + '
+                     'hwAPVarT, for which IHwAdequate_varT, '
+                     'specializeDesign_varT_correct and simSound_varT ARE proved.  '
+                     'What is NOT established is the concrete hproj -- mixDriver '
+                     'does not kernel-reduce at nontrivial fuel -- so this is a '
+                     'trusted native execution, not a kernel-certified result, and '
+                     'it is NOT RTL equivalence.'),
     },
     'host-var-total': {
         'log_marker': 'HOST mixDriver (proved) + hwAPVarT',
         'specializer': 'Projection.mixDriver  (the PROVED specializer -- no fork)',
-        'interpreter': 'Projection.ProtoVar.hwAPVarT  (TOTAL variant, the PROOF TARGET -- adequacy still unproved)',
-        'acceptance': 'FEASIBILITY ONLY: 3 seeds, no trace, no control',
+        'interpreter': 'Projection.ProtoVar.hwAPVarT  (TOTAL variant, the PROOF TARGET)',
+        'acceptance': 'FEASIBILITY ONLY: 3 seeds, no trace, no control; and it '
+                      'interprets at a FALLBACK bound when the checker rejects, '
+                      'so it is not a checked run -- superseded by total-probe',
+        'code': CODE_FORK + CODE_TOTAL + CODE_COMMON,
+        'seed_re': r'seed (\d+): residual (\S+)\s+matches interpretDesign (\w+)',
+        'terms_re': r'terms (\d+)',
+        'bound_re': r'ACCEPTED, bound (\d+)',
+        'stage_re': None, 'stage_keys': None,
+        'category': 'EXPERIMENTAL: superseded by the total-probe runner.',
     },
 }
 
@@ -77,15 +143,20 @@ def git(*args):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
-def tree_state():
+def tree_state(code):
     dirty = git('status', '--porcelain') or ''
     diff = git('diff', 'HEAD') or ''
+    tracked = set((git('ls-files') or '').split())
+    files = [f for f in code if os.path.exists(os.path.join(LEAN, f))]
     return {
         'git_rev': git('rev-parse', 'HEAD'),
         'dirty_file_count': len([l for l in dirty.splitlines() if l.strip()]),
         'diff_sha256': hashlib.sha256(diff.encode()).hexdigest(),
-        'source_sha256': {p: sha(os.path.join(LEAN, p)) for p in CODE
-                          if os.path.exists(os.path.join(LEAN, p))},
+        'diff_sha256_note': 'covers TRACKED files only; untracked sources are '
+                            'hashed individually below and flagged',
+        'source_sha256': {f: sha(os.path.join(LEAN, f)) for f in files},
+        'source_tracked': {f: (f in tracked) for f in files},
+        'untracked_sources': sorted(f for f in files if f not in tracked),
     }
 
 
@@ -129,8 +200,8 @@ def parse_support(t):
                     else 'one or more fields absent from the log'}
 
 
-def parse_seeds(t):
-    seeds = re.findall(r'seed (\d+): residual (\S+)\s+matches interpretDesign (\w+)', t)
+def parse_seeds(t, seed_re=r'seed (\d+): residual (\S+)\s+matches interpretDesign (\w+)'):
+    seeds = re.findall(seed_re, t)
     return {
         'count': len(seeds),
         'kinds': "seeds 0-4 are width-aware corners (zero, all-ones, sign bit, "
@@ -145,6 +216,7 @@ def parse_seeds(t):
 
 # --------------------------------------------------------------------------
 def cmd_prelaunch(a):
+    R = RUNNERS[a.runner]
     cap = {
         'captured_utc': datetime.datetime.now(datetime.timezone.utc)
                                 .strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -153,7 +225,7 @@ def cmd_prelaunch(a):
         'cert_sha256': sha(a.cert),
         'binary_sha256': sha(os.path.join(LEAN, a.binary)) if a.binary else None,
         'binary_path': a.binary,
-        **tree_state(),
+        **tree_state(RUNNERS[a.runner]['code']),
     }
     with open(a.out, 'w') as f:
         json.dump(cap, f, indent=1, sort_keys=True)
@@ -169,9 +241,8 @@ def cmd_record(a):
             f"log and it is absent.  Recording a run under another backend's "
             f"labels would misstate what executed.")
     exit_code, exit_evidence = parse_exit(t)
-    stage = re.search(
-        r'STAGE TIMES ms: specialize (\d+)\s+checkResidual (\d+)\s+'
-        r'reference-runs (\d+) \((\d+)\)\s+residual-runs (\d+) \((\d+)\)\s+control (\d+)', t)
+    stage = re.search(R['stage_re'], t) if R['stage_re'] else None
+    R = RUNNERS[a.runner]
     cap = json.load(open(a.capture)) if a.capture else None
 
     if cap:
@@ -204,34 +275,27 @@ def cmd_record(a):
         'specializer': RUNNERS[a.runner]['specializer'],
         'interpreter': RUNNERS[a.runner]['interpreter'],
         'acceptance_strength': RUNNERS[a.runner]['acceptance'],
-        'category': 'EXPERIMENTAL: certificate-relative execution agreement. '
-                    'NOT theorem-covered (the proved path is mixDriver + hwAP, '
-                    'and NO design has been run on it) and NOT RTL equivalence.',
+        'category': R['category'],
         'fuel': {'step': num(r'fuel (\d+)/', t), 'work': num(r'fuel \d+/(\d+)', t)},
         'stock_fuel': {'step': 20000, 'work': 200},
         'design_shape': {'sources': num(r'sources (\d+) nodes', t),
                          'nodes': num(r'nodes (\d+) flops', t),
                          'flops': num(r'flops (\d+)', t)},
         'support': parse_support(t),
-        'residual': {'terms': num(r'terms (\d+)', t),
+        'residual': {'terms': num(R['terms_re'], t),
                      'tl': num(r'prims: tl (\d+)', t),
                      'consP': num(r'consP (\d+)', t)},
-        'check_residual_bound': num(r'proved-sufficient bound (\d+)', t)
-                                 or num(r'ACCEPTED, exact fuel (\d+)', t),
+        'check_residual_bound': num(R['bound_re'], t),
         'bound_meaning': 'height; checkResidual_sound proves no outOfFuel at it. '
                          'NOT a minimum for any given input.',
-        'stimuli': parse_seeds(t),
+        'stimuli': parse_seeds(t, R['seed_re']),
         'trace': (re.search(r'trace: (.*)', t).group(1).strip()
                   if re.search(r'trace: ', t) else None),
         'control': (re.search(r'control: (.*)', t).group(1).strip()
                     if re.search(r'control: ', t) else None),
-        'stage_times_ms': ({'specialize': int(stage.group(1)),
-                            'check_residual': int(stage.group(2)),
-                            'reference_runs_total': int(stage.group(3)),
-                            'reference_runs_n': int(stage.group(4)),
-                            'residual_runs_total': int(stage.group(5)),
-                            'residual_runs_n': int(stage.group(6)),
-                            'control': int(stage.group(7))} if stage else None),
+        'stage_times_ms': (dict(zip(R['stage_keys'],
+                                    [int(g) for g in stage.groups()]))
+                           if stage else None),
         'wall_s': num(r'wall ([\d.]+) s', t, float),
         'peak_rss_kb': num(r'RSS (\d+) KB', t),
         'exit': exit_code,
@@ -286,13 +350,54 @@ def cmd_selftest(_a):
                      "  seed 1: residual ok  matches interpretDesign false\n")
     check('seeds/mismatch', sd['all_match_interpretDesign'], False)
 
+    # --- runner-specific grammars.  total_probe emits `seed N: ok ...`, not
+    # `seed N: residual ...`, and different terms / bound / stage formats; the
+    # fork regexes silently matched NOTHING on its logs.
+    TP = RUNNERS['total-probe']
+    tp_ok = ('  residual 89996 terms, checker bound 28899 (height; proved sufficient)\n'
+             '  seed 0: ok  matches interpretDesign true\n'
+             '  seed 1: ok  matches interpretDesign true\n'
+             '  STAGE TIMES ms: specialize+check 11  reference-runs 22 (6)'
+             '  step-runs 33 (6)  control 44\n'
+             'wall 9.0 s RSS 10 KB exit 0\n')
+    sd = parse_seeds(tp_ok, TP['seed_re'])
+    check('tp/seeds-count', sd['count'], 2)
+    check('tp/seeds-match', sd['all_match_interpretDesign'], True)
+    check('tp/terms', num(TP['terms_re'], tp_ok), 89996)
+    check('tp/bound', num(TP['bound_re'], tp_ok), 28899)
+    st = re.search(TP['stage_re'], tp_ok)
+    check('tp/stage', [int(g) for g in st.groups()] if st else None, [11, 22, 6, 33, 6, 44])
+    check('tp/exit', parse_exit(tp_ok)[0], 0)
+    # the FORK regex must NOT match a total-probe log -- that was the bug
+    check('tp/fork-regex-misses',
+          parse_seeds(tp_ok, RUNNERS['file-ab']['seed_re'])['count'], 0)
+
+    # a FAILED total-probe log: checker rejected, exit 1, no seeds, no stage line
+    tp_fail = ('  checkResidual REJECTED -- failing closed\n'
+               'wall 3.0 s RSS 10 KB exit 1\n')
+    check('tp/fail-exit', parse_exit(tp_fail)[0], 1)
+    check('tp/fail-seeds', parse_seeds(tp_fail, TP['seed_re'])['all_match_interpretDesign'], None)
+    check('tp/fail-bound', num(TP['bound_re'], tp_fail), None)
+    check('tp/fail-stage', re.search(TP['stage_re'], tp_fail), None)
+
+    # a TRUNCATED total-probe log: exit must stay UNKNOWN, never 0
+    tp_trunc = '  [specialize+check ...'
+    check('tp/trunc-exit', parse_exit(tp_trunc)[0], None)
+    check('tp/trunc-terms', num(TP['terms_re'], tp_trunc), None)
+
+    # every runner must declare a complete parsing contract
+    for nm, v in RUNNERS.items():
+        for k in ('code', 'seed_re', 'terms_re', 'bound_re', 'category'):
+            if v.get(k) in (None, ''):
+                fails.append(f'runner {nm}: missing {k}')
+
     # 9. the runner table must name a distinct backend pair for each runner
     pairs = {(v['specializer'], v['interpreter']) for v in RUNNERS.values()}
     check('runners/distinct', len(pairs), len(RUNNERS))
 
     if fails:
         print('SELFTEST FAILED:'); [print('  ' + f) for f in fails]; return 1
-    print('selftest: 9 checks passed')
+    print(f'selftest: all checks passed ({len(RUNNERS)} runners)')
     return 0
 
 
@@ -301,7 +406,9 @@ def main():
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('prelaunch'); p.add_argument('cert')
     p.add_argument('--binary'); p.add_argument('--cmd', required=True)
-    p.add_argument('--out', required=True); p.set_defaults(fn=cmd_prelaunch)
+    p.add_argument('--out', required=True)
+    p.add_argument('--runner', required=True, choices=sorted(RUNNERS))
+    p.set_defaults(fn=cmd_prelaunch)
     r = sub.add_parser('record'); r.add_argument('log'); r.add_argument('cert')
     r.add_argument('--provenance', required=True); r.add_argument('--capture')
     r.add_argument('--runner', required=True, choices=sorted(RUNNERS))

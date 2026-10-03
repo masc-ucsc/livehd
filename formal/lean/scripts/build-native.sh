@@ -45,6 +45,9 @@ MODULES=(
   Projection/Proto/InterpreterVariant
   Projection/Proto/VariantTransport
   Projection/Proto/RewriteTotal
+  Projection/Proto/VariantAdequacy
+  Projection/Proto/VariantExec
+  Projection/Proto/RunnerSupport
 )
 
 # Dependency-aware invalidation.  MODULES is in DEPENDENCY ORDER, so once any
