@@ -949,6 +949,9 @@ struct Verify_result {
   bool                     unsupported      = false;  // encoder REFUSED a cell/shape (see Query_result::unsupported)
   int                      checked_steps    = 0;      // bound actually run
   int                      reset_hold       = 0;      // after_reset prologue length (incl. pipeline flush)
+  // Deepest history any formal block reads (`past(x, n)`). A run whose
+  // checked_steps does not exceed it never exercised those properties.
+  int                      max_history      = 0;
   bool                     reset_detected   = false;  // a reset prologue actually pinned state[0] (a primary reset input
                                                       // was found/applied). When false, the BMC starts from FREE flop
                                                       // state, so a refute may rest on an unreachable initial state — the

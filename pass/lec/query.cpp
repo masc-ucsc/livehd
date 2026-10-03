@@ -922,6 +922,7 @@ std::string serialize_verify(const Verify_result& v) {
   put_str(b, v.detail);
   put_u32(b, static_cast<uint32_t>(v.checked_steps));
   put_u32(b, static_cast<uint32_t>(v.reset_hold));
+  put_u32(b, static_cast<uint32_t>(v.max_history));
   put_u32(b, static_cast<uint32_t>(v.n_assumes));
   b.push_back(static_cast<char>(v.vacuous ? 1 : 0));
   b.push_back(static_cast<char>(v.reset_detected ? 1 : 0));
@@ -1031,12 +1032,13 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
   if (!get_str(b, v.detail)) {
     return false;
   }
-  uint32_t cs = 0, rh = 0, na = 0;
-  if (!get_u32(b, cs) || !get_u32(b, rh) || !get_u32(b, na)) {
+  uint32_t cs = 0, rh = 0, mh = 0, na = 0;
+  if (!get_u32(b, cs) || !get_u32(b, rh) || !get_u32(b, mh) || !get_u32(b, na)) {
     return false;
   }
   v.checked_steps = static_cast<int>(cs);
   v.reset_hold    = static_cast<int>(rh);
+  v.max_history   = static_cast<int>(mh);
   v.n_assumes     = static_cast<int>(na);
   if (b.empty()) {
     return false;
@@ -11674,6 +11676,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     }
     m.checked_steps  = std::max(A.checked_steps, B.checked_steps);
     m.reset_hold     = std::max(A.reset_hold, B.reset_hold);
+    m.max_history    = std::max(A.max_history, B.max_history);
     m.reset_detected = A.reset_detected || B.reset_detected;
     m.vacuous        = A.vacuous || B.vacuous;
     // Structured timeout core: prop indices are walk-stable across the two
@@ -12698,6 +12701,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       for (const auto& b : mon.binds) {
         max_delay = std::max(max_delay, b.delay);
       }
+      res.max_history = std::max(res.max_history, max_delay);
       if (cyc < max_delay) {
         if (!mon_hist_noted[mi]) {
           mon_hist_noted[mi]  = true;
