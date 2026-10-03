@@ -1709,8 +1709,13 @@ nothing on its own.  Checked directly:
       leanc (default) -> 5 helper symbols, 404,512 bytes
       leanc -O2       -> 2 helper symbols, 624,448 bytes
 
-So **every native binary in this project, and every wall-clock number recorded
-in this file, was produced at `-O0`.**  That is also the straightforward
+So **the current `build-native.sh` path produces `-O0` native binaries.**
+
+NARROWER than the first version of this sentence, which said "every wall-clock
+number recorded in this file".  It does not: this file also contains
+INTERPRETED timings (which never go through `leanc` at all) and instrumented
+callgrind/perf runs, and the build provenance of the older measurements is
+incomplete.  The claim covers the native binaries built by this script.  That is also the straightforward
 reading of a sample in which ~60% of the time sits in functions that would not
 exist at `-O2`.
 
@@ -1719,17 +1724,56 @@ exist at `-O2`.
 * **Absolute times are inflated by an unknown factor.**  1,226 s, 2,413 s,
   190.91 s and the rest are `-O0` numbers.  No hardware extrapolation should be
   made from them, and none has been.
-* **Ratios between two `-O0` builds are less affected** -- both sides carry the
-  same handicap -- but "less affected" is not "unaffected": `-O0` can change
-  where the bottleneck is, so even 2.66x and 31.11x are `-O0` ratios and are
-  not safe to carry to an optimized build.
+* **"Ratios between two `-O0` builds are less affected" is WITHDRAWN.**  It
+  does not follow without measurement: `-O0` can move the bottleneck, and
+  helper inlining is compiler-dependent.  2.66x and 31.11x are `-O0` ratios and
+  nothing is claimed about what they become at `-O2`.
 * **Nothing about CORRECTNESS changes.**  Every theorem, every `#guard`, and
   every reference-agreement result is independent of optimization level.
 
-### 17.4 Bounded A/B, proposed and NOT run
+### 17.4 The bounded A/B -- RUN
 
-Build ONE `-O2` binary under a different name, leaving every in-flight process
-and shipped artifact alone, and re-run a small fixture ladder on it.  That
-gives a measured `-O0` vs `-O2` factor on this codebase instead of a guess, and
-it is the prerequisite for any timing claim that is meant to survive.  It is
-NOT a reason to interrupt the running acceptance experiment.
+(The scratch `.c` A/B COMPILE in 17.2 had already happened when 17.2 was
+written; "proposed, not run" referred only to the executable TIMING
+comparison.  That is what follows.)
+
+`scripts/ab_probe.lean`, built twice from the SAME 37 generated `.c` files,
+with every object AND the link compiled at an explicit `-O0` / `-O2` -- not
+just the probe or the link flag.  Separate project-local trees under
+`.perfwork/abopt/{O0,O2}`; `.native-dev` was not touched and both in-flight
+experiments ran throughout.  Provenance, with hashes, in
+`.perfwork/abopt/provenance.txt`.
+
+Flag effectiveness, checked at the object level rather than assumed:
+`Projection_PartialEvaluator.o` carries **7/7** Lean helper symbols at `-O0`
+and **2/7** at `-O2`.
+
+**Results and shapes are IDENTICAL across builds; only times differ.**  Both
+exit 0.
+
+    seq reset / enabled / held   next == 0 / 12 / 3, ref-equal   both builds
+    seq refusal                  runtimeShape                    both builds
+    seq trace (3 cycles)         next-states [0,12,12], ref-equal both builds
+
+    n     -O0 spec   -O2 spec   ratio      terms / bound (identical)
+    8        7 ms       1 ms     7.0x      118 / 33
+    16      14 ms       4 ms     3.5x      206 / 57
+    32      50 ms      13 ms     3.8x      382 / 105
+    64     227 ms      43 ms     5.3x      734 / 201
+    wall   330 ms      70 ms     4.7x
+
+MEASUREMENT LIMITS, stated rather than buried: 1 ms resolution makes n = 8 and
+16 unreliable; n = 64 (227 -> 43) is the firmest point; one run per build, no
+repetition.  **The ratio is NOT constant across n** (7.0, 3.5, 3.8, 5.3), so it
+is not a factor that may be carried to a real design, and none is carried.
+
+### 17.5 Proposal, not a switch
+
+On these fixtures `-O2` is several times faster with byte-identical results.
+That is a reason to PROPOSE the optimized path for future acceptance runs, and
+the proposal is: add an explicit optimization flag to `build-native.sh`, rebuild
+under a NEW artifact name, and re-establish the fixture regressions on it
+before any real-design run is attributed to it.  Switching silently would
+invalidate the comparability of every number already recorded, and optimized
+native executions still need their own regression evidence -- the identical
+results above are for FIXTURES, not for a real design.
