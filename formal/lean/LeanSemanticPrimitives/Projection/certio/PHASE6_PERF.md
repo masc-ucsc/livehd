@@ -1234,3 +1234,192 @@ merged into one number.
 
 **Counted toward the 30 CVA6 blocks: zero.**  `rt_intpipe_alu` is CORE-ET.
 `rt_btb_gate` is quarantined.  The combinational CVA6 blocks have not been run.
+
+## 12. Coverage is not correctness, and the state-count heuristic was wrong both ways
+
+### 12.1 The heuristic
+
+Section 11.2 replaced "did the state ever change" with "> 2 distinct states"
+and used it as a correctness gate.  That is wrong in BOTH directions, and three
+one-line fixtures show it:
+
+| fixture | states reached | heuristic says | truth |
+|---|---:|---|---|
+| `toggleD` -- `q' = not q` | **2** | VACUOUS | a one-bit toggler has two states FOREVER and is healthy |
+| `holdD` -- enable tied low | **1** | VACUOUS | a hold test has one state BY DESIGN; that is the property under test |
+| `resetOnlyD` -- reset tied asserted | **1** | VACUOUS | correct collapse to the reset value |
+
+And in the other direction, three reset-driven states establish no useful
+activity at all.  Measured, with the gate rebuilt:
+
+    trace toggle (2 states forever): 6 cycles -- agrees true  states-reached 2
+    trace hold (enable low, 1 state): 6 cycles -- agrees true  states-reached 1
+    trace reset-only (collapses):     6 cycles -- agrees true  states-reached 1
+
+All three PASS.  Under the section 11 gate all three would have FAILED.
+
+### 12.2 The split
+
+`traceCompare` now returns `(agree, distinctStates)`: a correctness verdict and
+a coverage observation, which are different kinds of answer.
+
+* **Agreement** with `interpretDesign` is the verdict.  It is a hard failure.
+* **States reached** is reported beside it and is never a failure by itself.
+
+When a design with flops reaches <= 2 states the runner prints
+
+    coverage: INCONCLUSIVE -- N state(s) over 4 cycles.  That is correct for a
+    toggler or a hold test and uninformative otherwise; it is NOT evidence of
+    unreachable behaviour.
+
+"Coverage-inconclusive", not "degenerate".  **Finite stimuli cannot establish
+that a behaviour is unreachable** -- only that this stimulus did not reach it.
+Sections 10.5 and 11.2 used the stronger word and should not have.
+
+`btb_gate` stays quarantined, and on the DESCRIPTOR INCONSISTENCY alone --
+`flopQAsync ... resetInput=4 activeLow=1` against all 64 flop rows
+`resetPin=1779 activeLow=0` with slot 1779 being input 4 -- which is a
+certificate/export-boundary discrepancy, independent of any state-count
+heuristic and not something this branch should "fix" by editing literals.
+
+### 12.3 The timing partition was also unsound
+
+Section 11.3 multiplied 190.91 s by 11 calls to claim the 1901 s run was
+"essentially all reference".  **The product is 2,100 s, which exceeds the
+total** -- so at best the two numbers came from different runs with different
+state and contention, and at worst the reasoning is circular.  190.91 s is also
+per-CYCLE; calling it "70x slower per node" mixed units.
+
+What survives: one `interpretDesign` cycle on `rt_btb_gate` did take 190.91 s,
+measured directly, and that is large.  What does NOT survive: any claimed share
+of the 1901 s.
+
+`--file-ab` now MEASURES each stage in the same process -- specialize,
+`checkResidual`, each reference run, each residual run, control -- and prints a
+`STAGE TIMES` line.  Each stage forces its result INSIDE its own interval, via
+a printed digest, because Lean reorders pure work across `IO.monoMsNow` (the
+trap verified once in the generated C).  Progress is flushed, so a long run
+reports as it goes.
+
+## 13. `rt_alu_gate` -- the first targeted CVA6 run
+
+### 13.1 Provenance, recorded before the run
+
+    design     rt_alu_gate.dcert
+    sha256     d731ee22a85e77bab50ba0c20225df138e2dd59227d82f2911dfec586432bdb1
+    size       220,566 bytes
+    source     CVA6 `alu.sv`, exported as `cva6_alu_export`
+               (livehd-d4-incremental pass/lean/CVA6_COVERAGE_PLAN.md:125)
+    shape      6,137 sources (6,135 const, 2 input), 6,597 nodes, 2 outputs,
+               0 flops -- COMBINATIONAL
+    inputs     indices 1 and 2 -- SPARSE, index 0 unused, so a vector sized
+               from the max index is required and `m*(m-1)/2` would be wrong
+    ops        all inside the validated set; max arity 65
+    predicted  tl = 18,828,964 with term (B); 3 without it
+
+Unlike `rt_intpipe_alu` (CORE-ET), this is a CVA6 block.
+
+### 13.2 Stock fuel is NOT enough
+
+    fuel 20000/200  (projectDesign's own)
+      support: wf true memFree true sources true ops true arities true flopClocks true
+      [specialize d=0 345788 ms]
+    variant FAILED (MixError.outOfFuel) after 345788 ms
+    wall 345.88 s  RSS 104,200 KB  exit 3
+
+Exit 3 is the diagnostic-failure code from 9.3 doing its job: `outOfFuel` is
+reported as a failure, not quietly passed.
+
+### 13.3 The stage timer settles the partition question
+
+| | |
+|---|---:|
+| wall, whole process | 345.88 s |
+| `specialize`, forced inside its own interval | 345.788 s |
+| everything else (load + support + startup) | **0.09 s** |
+
+**99.97% of the run is specialization**, measured IN-PROCESS rather than
+inferred from a different run -- which is what 11.3 did wrongly.
+
+This also disposes of a hypothesis raised while chasing 11.3: that `loadCert`
+might have dominated the 190.91 s `--trace-ref` measurement on `btb_gate`.
+Parsing a 220 KB certificate here costs ~0.1 s, so it cannot. That leaves the
+single `interpretDesign` cycle as the remaining candidate for btb's 190.91 s --
+an inference ACROSS designs, not a measurement, and settleable by running
+`--file-ab` stage times on btb when a rerun is warranted.  Not rerun now.
+
+### 13.4 Higher budget
+
+Per review, a recorded higher budget is legitimate; the theorem is
+budget-parametric and conditional on success (8.7).  Re-running at 200000/2000,
+recorded, with every check in 9.3.
+
+### 13.5 At 200000/2000 it passes
+
+    support: wf true memFree true sources true ops true arities true flopClocks true
+      [specialize ... d=89996 1226168 ms]
+      terms 89996   lit 18062 var 30610 letIn 16317 ite 430 prim 24574
+      prims: tl 65  hd 4  consP 12736  isNil 0  bvResize 1633 bvAnd 1135 bvMk 206 eqI 397
+      [checkResidual ... d=28899 17 ms]
+      checkResidual: ACCEPTED, proved-sufficient bound 28899
+      seed 0,1,2,3,4,7: residual ok, matches interpretDesign  (all six)
+      trace: 4 cycles -- agrees true  states-reached 1  flops 0
+      control: variant interpreter ok vs interpretDesign true
+      STAGE TIMES ms: specialize 1226168  checkResidual 17
+                      reference-runs 19275 (6)  residual-runs 8959 (6)  control 209133
+    wall 1485.48 s  RSS 124,004 KB  exit 0
+
+`states-reached 1` carries no coverage warning and should not: the design has
+ZERO flops, so there is no state to move.  The coverage note fires only when
+`D.flops.size > 0`.
+
+### 13.6 Measured stage split
+
+| stage | time | share |
+|---|---:|---:|
+| specialize | 1226.2 s | 83.8% |
+| control (interpreter on the design) | 209.1 s | 14.3% |
+| reference runs, 6 | 19.3 s | 3.21 s each |
+| residual runs, 6 | 9.0 s | **1.49 s each** |
+| `checkResidual` | 0.017 s | |
+| staged total | 1463.6 s | |
+| wall | 1485.48 s | |
+| unaccounted | 21.9 s | trace (4 cycles, not individually staged), load, `profileResidual` |
+
+The accounting nearly closes, which is the point: this is a MEASUREMENT, not
+the kind of inference 11.3 made.
+
+**The residual runs 2.15x faster than interpreting the design** -- 1.49 s
+against 3.21 s per cycle.  That is the first measured speedup from projection
+on a real design, and it is modest.
+
+On btb's 190.91 s: a reference run here costs 3.21 s on 6,597 nodes, so
+`btb_gate` at 1,782 nodes really does look far slower per cycle.  But that
+compares a STAGED measurement here against an UNSTAGED whole-invocation
+measurement there, so it remains an inference across designs; `--file-ab` stage
+times on btb would settle it, and btb was not rerun.
+
+Two model checks, both holding:
+
+* `consP` 12,736 against `nSources + nNodes + nFlops + 1` = 12,735 -- the
+  environment spine, off by one (8.2).
+* `tl` 65 against the model's (A) = 3, a residue of 62.  The CORE-ET ALU's
+  residue was 1,205 (8.7), so the uncovered third term is per-design, as 8.7
+  said.  Still unidentified.
+
+### 13.7 Coverage, by category, with the status distinction kept
+
+| category | design | executed + reference-compared | budget | path |
+|---|---|---|---|---|
+| **CVA6, combinational** | `rt_alu_gate` | **YES** -- 6 width-aware stimuli | 200000/2000 (stock 20000/200 FAILS) | experimental |
+| CVA6, sequential | `rt_btb_gate` | yes, stock budget | 20000/200 | experimental, QUARANTINED (reset-descriptor inconsistency) |
+| CORE-ET, combinational | `rt_intpipe_alu` | yes | 200000/2000 | experimental |
+
+**CVA6 blocks counted toward the 30: one, combinational, EXPERIMENTAL.**
+
+"Experimental" is not a hedge, it is the status: every run above uses
+`ProtoFast.mixDriver` (the fork, whose `PRes.val` change has no bridge) and
+`ProtoVar.hwAPVar` (the interpreter variant, which has no equivalence lemma).
+The theorem-covered path is `mixDriver` + `hwAP`, and **zero blocks have been
+run on it**.  Sequential CVA6 coverage is zero: the only non-degenerate
+candidate, `rt_csr_regfile_gate`, has not been run.

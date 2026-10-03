@@ -167,6 +167,42 @@ def midD (nnode : Nat) : DesignCert where
 @[inline] def fastOf (D : DesignCert) : Except ProtoFast.MixError Program :=
   ProtoFast.mixDriver 20000 200 Hw.hwAP [encDesign D]
 
+/-! ## Sequential fixtures a distinct-state heuristic gets WRONG
+
+Each is correct and each would be mis-classified by "a healthy sequential
+design reaches more than two states". -/
+
+/-- A one-bit toggler: `q' = not q`.  Exactly TWO states, forever, and
+perfectly healthy. -/
+def toggleD : DesignCert where
+  sources  := #[.flopQ 0 1, .const 1 1]
+  nodes    := #[{ op := .Op_Xor, width := 1, deps := #[0, 1] }]
+  outputs  := #[{ slot := 2, width := 1 }]
+  flops    := #[{ width := 1, din := 2, enable := none, resetPin := none
+                , resetValue := 0, resetActiveLow := false }]
+  memories := #[]
+
+/-- Enable tied LOW by a constant: the state never changes.  ONE state, by
+design and by intent -- this is what a hold test looks like. -/
+def holdD : DesignCert where
+  sources  := #[.flopQ 0 4, .const 4 7, .const 1 0]
+  nodes    := #[{ op := .Op_And, width := 4, deps := #[0, 1] }]
+  outputs  := #[{ slot := 3, width := 4 }]
+  flops    := #[{ width := 4, din := 3, enable := some 2, resetPin := none
+                , resetValue := 0, resetActiveLow := false }]
+  memories := #[]
+
+/-- Reset tied ASSERTED: the state collapses to the reset value and stays.
+Two states from a nonzero initial state, one thereafter -- and `> 2 distinct`
+would call it healthy if the initial state happened to differ. -/
+def resetOnlyD : DesignCert where
+  sources  := #[.flopQ 0 4, .const 4 5, .const 1 1]
+  nodes    := #[{ op := .Op_And, width := 4, deps := #[0, 1] }]
+  outputs  := #[{ slot := 3, width := 4 }]
+  flops    := #[{ width := 4, din := 3, enable := none, resetPin := some 2
+                , resetValue := 0, resetActiveLow := false }]
+  memories := #[]
+
 /-- MIXED const/input spine, interleaved, so neither kind is contiguous. -/
 def mixD (n : Nat) : DesignCert where
   sources  := (List.range n).toArray.map (fun i =>
@@ -325,6 +361,39 @@ def runInterpAt (fuel : Nat) (P : Program) (D : DesignCert) (e : ClockEdges)
 def runInterp (P : Program) (D : DesignCert) (seed : Nat) : Outcome :=
   runInterpAt 4000000 P D (allEdges D) (mkInputFor D seed) (mkStateFor D seed)
 
+/-! ## Stage timing
+
+The earlier "190.91 s x 11 calls" partition of a 1901 s run was UNSOUND: the
+product exceeds the total, the two numbers came from different runs with
+different state and contention, and 190.91 s is per-CYCLE, not per-node.  These
+measure each stage in the same process instead.
+
+Lean reorders pure work across `IO.monoMsNow` -- verified once in the generated
+C -- so every timed stage must FORCE its result INSIDE the interval.  `stage`
+does that by printing a cheap digest of the value before taking the end stamp;
+an `IO.println` cannot be moved across the computation it consumes. -/
+def stage (name : String) (digest : α → Nat) (thunk : Unit → α) : IO (α × Nat) := do
+  -- Announce the stage and FLUSH BEFORE doing any work.  `IO.lazyPure` turned
+  -- out to evaluate eagerly, so an announcement placed after it does not
+  -- appear until the stage has already finished -- which is exactly when it is
+  -- no longer useful on a run that takes minutes.
+  IO.print s!"  [{name} ..."
+  (← IO.getStdout).flush
+  let t0 ← IO.monoMsNow
+  let v ← IO.lazyPure thunk
+  let d ← IO.lazyPure (fun _ => digest v)
+  IO.print s!" d={d}"                       -- forcing `d` forces `v` INSIDE t0..t1
+  let t1 ← IO.monoMsNow
+  IO.println s!" {t1 - t0} ms]"
+  (← IO.getStdout).flush
+  return (v, t1 - t0)
+
+def outcomeDigest : Outcome → Nat
+  | .ok r        => r.outputs.size + r.nextState.flops.size
+  | .undecodable => 1
+  | .fuelOut     => 2
+  | .typeErr _   => 3
+
 /-- An edge schedule that is NOT constant where the design has clock domains:
 every third cycle, nothing fires, so the hold path is exercised too. -/
 def edgeSchedule (D : DesignCert) (k : Nat) : ClockEdges :=
@@ -340,7 +409,7 @@ iterated the same way.  Returns (agree, stateEverChanged): a trace where the
 state never moves proves nothing about sequential behaviour, so the caller can
 fail instead of silently passing a vacuous test. -/
 def traceCompare (fuel : Nat) (R : Program) (D : DesignCert) (n seed : Nat) :
-    IO (Bool × Bool) := do
+    IO (Bool × Nat) := do
   -- TWO INDEPENDENT STATES.  An earlier version fed the REFERENCE's next state
   -- to both sides; because `Outcome.agree` compares the whole `RuntimeResult`,
   -- including `nextState`, that was still a sound lockstep regression by
@@ -364,9 +433,14 @@ def traceCompare (fuel : Nat) (R : Program) (D : DesignCert) (n seed : Nat) :
     match got with
     | .ok g => stRes := g.nextState
     | _     => agree := false          -- nothing meaningful to continue with
-  -- DISTINCT STATES, not "did it ever change".  A design that collapses to its
-  -- reset value on cycle 1 and sits there changed once and is still vacuous.
-  return (agree, seen.length > 2)
+  -- Returns AGREEMENT and a COVERAGE observation, which are different kinds of
+  -- answer and must not be merged.  Agreement is a correctness verdict and is
+  -- a hard failure.  The distinct-state count is only how much of the state
+  -- space THIS stimulus reached: a one-bit toggler has exactly 2 states
+  -- forever, a hold test has 1, and neither is a defect.  Conversely three
+  -- reset-driven states establish nothing.  And finite stimuli can never show
+  -- a behaviour is UNREACHABLE, only that it was not reached here.
+  return (agree, seen.length)
 
 /-- One cycle, decoded, so the A/B comparison is semantic.  A sequential design
 needs a correctly sized state, so the state is built from the design. -/
@@ -544,6 +618,17 @@ sequential (combinational agreement may still be real)"
       if D.flops.size == 0 then do
         IO.println "  combinational (no flops) -- no sequential behaviour to reach"
         return 0
+      else if true then do
+        -- Coverage reporting only.  An earlier version pronounced DEGENERATE
+        -- on <= 2 distinct states; that is wrong in both directions.  A
+        -- one-bit toggler has exactly 2 states forever and a hold test has 1,
+        -- both healthy; and 3 reset-driven states establish no useful
+        -- activity.  Finite stimuli cannot prove unreachability either way.
+        IO.println s!"  coverage: {seen.length} distinct state(s) over {n} cycle(s)\
+{if n < 3 then s!" -- at most {n+1} are observable at this length" else ""}"
+        IO.println "  (coverage observation, NOT a correctness verdict and NOT \
+evidence of unreachable behaviour)"
+        return 0
       else if n < 3 then do
         -- With n cycles you can see at most n+1 states, so "<= 2 distinct" is
         -- UNAVOIDABLE below 3 cycles and says nothing.  An earlier version
@@ -639,17 +724,20 @@ same-kind {Outcome.agree eR eV}  (neither is a success: {!eR.isOk && !eV.isOk})"
       unless Outcome.agree eR eV do bad := true
 
       -- ---- 3. multi-cycle traces on the sequential fixtures -----------------
-      for (nm, D) in [("flopD 8", flopD 8), ("flopD 32", flopD 32)] do
+      for (nm, D) in [("flopD 8", flopD 8), ("flopD 32", flopD 32),
+                      ("toggle (2 states forever)", toggleD),
+                      ("hold (enable low, 1 state)", holdD),
+                      ("reset-only (collapses)", resetOnlyD)] do
         match fastVarOf D with
         | .error e => do IO.eprintln s!"TRACE {nm}: variant failed ({repr e})"; bad := true
         | .ok R => do
-            let (ag, moved) ← traceCompare 4000000 R D 6 0
-            IO.println s!"  trace {nm}: 6 cycles, state fed forward -- agrees {ag}  \
-non-degenerate {moved}  clock-domains {D.clocks.size}"
+            let (ag, nstates) ← traceCompare 4000000 R D 6 0
+            -- AGREEMENT is the verdict.  The state count is COVERAGE, reported
+            -- beside it and never a failure by itself: `toggle` reaches two
+            -- states forever and `hold` one, both correctly.
+            IO.println s!"  trace {nm}: 6 cycles -- agrees {ag}  \
+states-reached {nstates}  clock-domains {D.clocks.size}"
             unless ag do bad := true
-            unless moved do
-              IO.eprintln s!"TRACE {nm}: <=2 distinct states -- the trace test is VACUOUS"
-              bad := true
 
       -- ---- 4. projection A/B ------------------------------------------------
       IO.println "projection A/B (same fork specializer, two interpreters):"
@@ -725,9 +813,13 @@ any disagreement here would be expected, not informative"
       let sf := (a.toNat?).getD 20000
       let wf := (b.toNat?).getD 200
       IO.println s!"fuel {sf}/{wf}  (projectDesign's own is 20000/200)"
-      match fastVarOfFuel sf wf D with
+      (← IO.getStdout).flush
+      let (res, tSpec) ← stage "specialize"
+        (fun r => match r with | .ok p => szOf p | .error _ => 0)
+        (fun _ => fastVarOfFuel sf wf D)
+      match res with
       | .error e => do
-          IO.eprintln s!"variant FAILED ({repr e})"
+          IO.eprintln s!"variant FAILED ({repr e}) after {tSpec} ms"
           -- outOfFuel at the requested budget is a DIAGNOSTIC FAILURE, not a pass.
           return (match e with | .outOfFuel => 3 | _ => 2)
       | .ok R    => do
@@ -736,7 +828,9 @@ any disagreement here would be expected, not informative"
           -- The fragment checker's bound is EXACT.  Claiming "checked
           -- execution" means running at that bound, not at some larger
           -- hardcoded number that never exercises it.
-          let fuel ← match Hw.checkResidual R with
+          let (fragRes, tChk) ← stage "checkResidual" (fun (o : Option Nat) => o.getD 0)
+            (fun _ => Hw.checkResidual R)
+          let fuel ← match fragRes with
             | some f => do
                 IO.println s!"  checkResidual: ACCEPTED, proved-sufficient bound {f} \
 (height; no outOfFuel at this bound -- not a minimum for any given input)"
@@ -748,28 +842,42 @@ call-free fragment) -- execution below is UNCHECKED, run at a fallback budget"
                 pure 4000000
           -- EXECUTE it, on width-aware stimulus sized from the design, against
           -- the SHARED reference semantics -- not against another residual.
+          let mut tRef := 0
+          let mut tRes := 0
           for seed in [0, 1, 2, 3, 4, 7] do
             let e := allEdges D
             let i := mkInputFor D seed
             let st := mkStateFor D seed
-            let want := Outcome.ok (interpretDesign D e i st)
-            let got  := runResidAt fuel R D e i st
-            let ok   := Outcome.agree got want
+            let (wantR, a) ← stage s!"ref seed {seed}" (fun (r : RuntimeResult) =>
+              r.outputs.size + r.nextState.flops.size) (fun _ => interpretDesign D e i st)
+            let (got, b) ← stage s!"residual seed {seed}" outcomeDigest
+              (fun _ => runResidAt fuel R D e i st)
+            tRef := tRef + a; tRes := tRes + b
+            let ok := Outcome.agree got (Outcome.ok wantR)
             IO.println s!"  seed {seed}: residual {got.tag}  matches interpretDesign {ok}"
             unless ok do bad := true
           -- a multi-cycle trace, state fed forward
-          let (ag, moved) ← traceCompare fuel R D 4 0
-          IO.println s!"  trace: 4 cycles, state fed forward -- agrees {ag}  \
-non-degenerate {moved}  clock-domains {D.clocks.size}  flops {D.flops.size}"
+          let (ag, nstates) ← traceCompare fuel R D 4 0
+          IO.println s!"  trace: 4 cycles -- agrees {ag}  states-reached {nstates}  \
+clock-domains {D.clocks.size}  flops {D.flops.size}"
           unless ag do bad := true
-          if D.flops.size > 0 && !moved then do
-            IO.eprintln "  trace: design HAS flops but reaches <=2 distinct states -- VACUOUS"
-            bad := true
+          -- COVERAGE, reported separately and never a correctness failure.
+          -- Finite stimuli cannot show a behaviour is unreachable, only that
+          -- this stimulus did not reach it.
+          if D.flops.size > 0 && nstates <= 2 then
+            IO.println s!"  coverage: INCONCLUSIVE -- {nstates} state(s) over 4 cycles. \
+That is correct for a toggler or a hold test and uninformative otherwise; it is \
+NOT evidence of unreachable behaviour."
           -- control on the stimulus builder: the interpreter itself
-          let ctl := runInterp ProtoVar.hwPVar D 0
+          let (ctl, tCtl) ← stage "control interpreter" outcomeDigest
+            (fun _ => runInterp ProtoVar.hwPVar D 0)
           let ctlOk := Outcome.agree ctl (Outcome.ok (refSem D 0))
           IO.println s!"  control: variant interpreter {ctl.tag} vs interpretDesign {ctlOk}"
           unless ctlOk do bad := true
+          -- MEASURED stage times, same process, each result forced inside its
+          -- own interval.  Not a partition inferred from a different run.
+          IO.println s!"  STAGE TIMES ms: specialize {tSpec}  checkResidual {tChk}  \
+reference-runs {tRef} (6)  residual-runs {tRes} (6)  control {tCtl}"
           return (if bad then 1 else 0)
   | "--file-profile" :: p :: a :: b :: _ => do
       let D ← CertIO.loadCert p
