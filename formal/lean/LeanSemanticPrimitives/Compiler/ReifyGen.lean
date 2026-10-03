@@ -136,44 +136,61 @@ def valRef (base : Name) (nsrc : Nat) (loc : Bool) (isMem : Bool)
     let e0 := mkIdent (Name.mkSimple "e0")
     `($nm $e0)
 
-private def valRefs (base : Name) (nsrc : Nat) (loc : Bool)
+/-- The operand renderer is a PARAMETER, so one match over `ResidualExpr`
+serves every form: named calls, let-bound locals, and -- for the chunk
+functions -- plain reads from the environment as it stands at that binding.
+
+The match stays total over `ResidualExpr`, so a constructor added later is a
+compile error here rather than a silent gap inside a generated proof. -/
+private def refsOf (ref : Bool → ResidualRef → MetaM Term)
     (rs : Array ResidualRef) : MetaM Term := do
-  let args ← rs.mapM (valRef base nsrc loc false)
+  let args ← rs.mapM (ref false)
   `([$args,*])
 
-/-- Fail LOUDLY, by construction: this match is total over `ResidualExpr`, so a
-constructor added later is a compile error in this file rather than a silent gap
-inside a generated proof. -/
-private def valSyntax (base : Name) (nsrc : Nat) (loc : Bool) : ResidualExpr → MetaM Term
-  | .rsum w n a     => do `(Residual.rsumV $(quote w) $(quote n) $(← valRefs base nsrc loc a))
-  | .rmult w a      => do `(Residual.rmultV $(quote w) $(← valRefs base nsrc loc a))
-  | .rand w a       => do `(Residual.randV $(quote w) $(← valRefs base nsrc loc a))
-  | .rorBits w a    => do `(Residual.rorBitsV $(quote w) $(← valRefs base nsrc loc a))
-  | .rxor w a       => do `(Residual.rxorV $(quote w) $(← valRefs base nsrc loc a))
-  | .rredOr w a     => do `(Residual.rredOrV $(quote w) $(← valRefs base nsrc loc a))
-  | .req w a        => do `(Residual.reqV $(quote w) $(← valRefs base nsrc loc a))
-  | .rshl w a       => do `(Residual.rshlV $(quote w) $(← valRefs base nsrc loc a))
-  | .rmuxN w a      => do `(Residual.rmuxNV $(quote w) $(← valRefs base nsrc loc a))
-  | .rnot w a       => do `(Residual.rnotV $(quote w) $(← valRef base nsrc loc false a))
-  | .rult w a b     => do `(Residual.rultV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false b))
-  | .rugt w a b     => do `(Residual.rugtV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false b))
-  | .rslt w a b     => do `(Residual.rsltV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false b))
-  | .rsgt w a b     => do `(Residual.rsgtV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false b))
-  | .rsra w a b     => do `(Residual.rsraV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false b))
-  | .rsext w a m    => do `(Residual.rsextV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false m))
-  | .rgetMask w a m => do `(Residual.rgetMaskV $(quote w) $(← valRef base nsrc loc false a) $(← valRef base nsrc loc false m))
+private def valSyntaxG (ref : Bool → ResidualRef → MetaM Term) :
+    ResidualExpr → MetaM Term
+  | .rsum w n a     => do `(Residual.rsumV $(quote w) $(quote n) $(← refsOf ref a))
+  | .rmult w a      => do `(Residual.rmultV $(quote w) $(← refsOf ref a))
+  | .rand w a       => do `(Residual.randV $(quote w) $(← refsOf ref a))
+  | .rorBits w a    => do `(Residual.rorBitsV $(quote w) $(← refsOf ref a))
+  | .rxor w a       => do `(Residual.rxorV $(quote w) $(← refsOf ref a))
+  | .rredOr w a     => do `(Residual.rredOrV $(quote w) $(← refsOf ref a))
+  | .req w a        => do `(Residual.reqV $(quote w) $(← refsOf ref a))
+  | .rshl w a       => do `(Residual.rshlV $(quote w) $(← refsOf ref a))
+  | .rmuxN w a      => do `(Residual.rmuxNV $(quote w) $(← refsOf ref a))
+  | .rnot w a       => do `(Residual.rnotV $(quote w) $(← ref false a))
+  | .rult w a b     => do `(Residual.rultV $(quote w) $(← ref false a) $(← ref false b))
+  | .rugt w a b     => do `(Residual.rugtV $(quote w) $(← ref false a) $(← ref false b))
+  | .rslt w a b     => do `(Residual.rsltV $(quote w) $(← ref false a) $(← ref false b))
+  | .rsgt w a b     => do `(Residual.rsgtV $(quote w) $(← ref false a) $(← ref false b))
+  | .rsra w a b     => do `(Residual.rsraV $(quote w) $(← ref false a) $(← ref false b))
+  | .rsext w a m    => do `(Residual.rsextV $(quote w) $(← ref false a) $(← ref false m))
+  | .rgetMask w a m => do `(Residual.rgetMaskV $(quote w) $(← ref false a) $(← ref false m))
   | .rmux w s f t   => do
-      `(Residual.rmuxV $(quote w) $(← valRef base nsrc loc false s) $(← valRef base nsrc loc false f)
-         $(← valRef base nsrc loc false t))
+      `(Residual.rmuxV $(quote w) $(← ref false s) $(← ref false f)
+         $(← ref false t))
   | .rmemRead w m a e => do
-      `(Residual.rmemReadV $(quote w) $(← valRef base nsrc loc true m) $(← valRef base nsrc loc false a)
-         $(← valRef base nsrc loc false e))
+      `(Residual.rmemReadV $(quote w) $(← ref true m) $(← ref false a)
+         $(← ref false e))
   | .rmemWrite m a d e => do
-      `(Residual.rmemWriteV $(← valRef base nsrc loc true m) $(← valRef base nsrc loc false a)
-         $(← valRef base nsrc loc false d) $(← valRef base nsrc loc false e))
+      `(Residual.rmemWriteV $(← ref true m) $(← ref false a)
+         $(← ref false d) $(← ref false e))
   | .rmemWriteBE w bw m a d be => do
-      `(Residual.rmemWriteBEV $(quote w) $(← valRef base nsrc loc true m) $(← valRef base nsrc loc false a)
-         $(← valRef base nsrc loc false d) $(← valRef base nsrc loc false be) $(quote bw))
+      `(Residual.rmemWriteBEV $(quote w) $(← ref true m) $(← ref false a)
+         $(← ref false d) $(← ref false be) $(quote bw))
+
+/-- Named-call form. -/
+def valSyntax (base : Name) (nsrc : Nat) (loc : Bool) : ResidualExpr → MetaM Term :=
+  valSyntaxG (fun isMem r => valRef base nsrc loc isMem r)
+
+/-- CHUNK form: every operand, source or produced, is a read from the
+environment as it stands at that binding. A chunk threads a real `SlotEnv`, so
+there is nothing else for an operand to be. -/
+def valSyntaxEnv (envId : Term) : ResidualExpr → MetaM Term :=
+  valSyntaxG (fun isMem r =>
+    let rbv := mkIdent ``Compiler.refBV
+    let rmm := mkIdent ``Compiler.refMem
+    if isMem then `($rmm $envId $(quote r)) else `($rbv $envId $(quote r)))
 
 /-- How a slot is written in terms of the named values, at an EXPLICIT
 environment rather than the `e0` the value definitions bind, with the same
@@ -270,6 +287,112 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
     -- as "the reifier never ran".
     logInfo m!"reify_design_named: {f} emitted, {nsrc} sources, \
       {R.bindings.size} bindings"
+  | _ => throwUnsupportedSyntax
+
+/-- `reify_design_chunked <designCert> as <name> [size <n>]` — OPT-IN.
+
+Emits the model as BOUNDED CHUNKS: each chunk is a `SlotEnv → SlotEnv` that
+pushes at most `n` bindings (default 32), reading every operand from the
+environment as it stands at that binding, and computing each value with the
+fast value-level op rather than through `denoteExpr`.
+
+Two properties follow, and they are the reason for this shape rather than one
+let-chain. Each binding is computed ONCE per sample, as in `reify_design_shared`.
+And each chunk carries a SEPARATE obligation `chunk_j e = runBindings seg_j e`
+for an arbitrary `e`, so no single proof goal grows with the design -- which is
+what a monolithic chain cannot promise, and what `prove_reified_chunked`
+composes with `Compiler.runBindings_append`. -/
+syntax (name := reifyDesignChunked) "reify_design_chunked " ident " as " ident
+  (" size " num)? : command
+
+@[command_elab reifyDesignChunked]
+def elabReifyDesignChunked : CommandElab := fun stx => do
+  match stx with
+  | `(command| reify_design_chunked $d:ident as $f:ident $[size $sz]?) => do
+    let R ← liftTermElabM do
+      let dExpr ← Term.elabTerm d none
+      let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
+      match compileDesign cert with
+      | .error _ => throwError "reify_design_chunked: compileDesign refused {d}"
+      | .ok R    => pure R
+    let csize := match sz with | some k => max 1 k.getNat | none => 32
+    let nsrc  := R.sources.size
+    let nb    := R.bindings.size
+    let nseg  := if nb == 0 then 1 else (nb + csize - 1) / csize
+    let base  := f.getId
+    let iId   := mkIdent (Name.mkSimple "i")
+    let stId  := mkIdent (Name.mkSimple "st")
+    let eArg  := mkIdent (Name.mkSimple "e")
+    let bnd   : Nat → Nat := fun j => min (j * csize) nb
+    let chkNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"chunk{j}")
+    let envNm : Nat → Ident := fun j => mkIdent (Name.mkSimple s!"e{j}")
+    -- The SEGMENT LISTS are not emitted here. They exist only to state
+    -- `chunk_j e = runBindings seg_j e`, which is a proof artifact, and
+    -- quoting a binding list needs `ReifyProof`, which imports this file.
+    -- `prove_reified_chunked` emits them.
+    --
+    -- 1. the chunk functions
+    for j in [0 : nseg] do
+      let lo := bnd j
+      let hi := bnd (j+1)
+      let mut body : Term ← `($(envNm (hi - lo)):ident)
+      for t in [0 : hi - lo] do
+        let idx := hi - 1 - t
+        let pos := idx - lo
+        let b := R.bindings[idx]!
+        let isMem := match b.ty with | .mem _ _ => true | .bv _ => false
+        let cur ← liftTermElabM `($(envNm pos):ident)
+        let rhs ← liftTermElabM (NamedModel.valSyntaxEnv cur b.rhs)
+        -- `mkIdent` on a RESOLVED constant: writing `Compiler.CertVal.bv`
+        -- inside the quotation picks up a macro scope and reaches the probe as
+        -- `Compiler.CertVal.bv✝`, which resolves to nothing there.
+        let cbv  := mkIdent ``CertVal.bv
+        let cmem := mkIdent ``CertVal.mem
+        let v ← liftTermElabM (if isMem then `($cmem $rhs) else `($cbv $rhs))
+        body ← `(let $(envNm (pos+1)):ident := ($(envNm pos):ident).push $v
+                 $body)
+      elabCommand (← `(command|
+        def $(chkNm j) ($(envNm 0) : Compiler.SlotEnv) : Compiler.SlotEnv := $body))
+    -- 2. the model: source env, then the chunks in order, then the roots read
+    --    from the FINAL environment exactly as `denoteResidual` reads them
+    let fin := mkIdent (Name.mkSimple s!"c{nseg}")
+    let rootRef : Bool → Nat → MetaM Term := fun isMem r =>
+      if isMem then `(Compiler.refMem $fin $(quote r)) else `(Compiler.refBV $fin $(quote r))
+    let outs : Array Term ← R.outputs.mapM fun o => do
+      `(bv_resize $(quote o.width) $(← liftTermElabM (rootRef false o.slot)))
+    let flops : Array Term ← (Array.ofFn (n := R.flopUpdates.size) (fun j => j.val)).mapM
+      fun j => do
+        let fu := R.flopUpdates[j]!
+        let din ← liftTermElabM (rootRef false fu.din)
+        let en ← liftTermElabM (match fu.enable with
+          | none => `(none) | some e => do `(some $(← rootRef false e)))
+        let rp ← liftTermElabM (match fu.resetPin with
+          | none => `(none) | some r => do `(some $(← rootRef false r)))
+        let rvq ← liftTermElabM (if fu.resetValue < 0
+          then `(-(Int.ofNat $(quote fu.resetValue.natAbs)))
+          else `(Int.ofNat $(quote fu.resetValue.toNat)))
+        let ral := if fu.resetActiveLow then mkIdent ``true else mkIdent ``false
+        `(Compiler.flopNextV $(quote fu.width) $din $en $rp $rvq $ral
+            (($stId).flops[$(quote j)]?))
+    let mems : Array Term ← R.memoryUpdates.mapM fun mu =>
+      liftTermElabM (rootRef true mu.nextImg)
+    let mut mbody ← `({ outputs := #[$outs,*],
+                        nextState := { flops := #[$flops,*], mems := #[$mems,*] } })
+    for t in [0 : nseg] do
+      let j := nseg - 1 - t
+      let cj := mkIdent (Name.mkSimple s!"c{j+1}")
+      let pj := mkIdent (Name.mkSimple s!"c{j}")
+      mbody ← `(let $cj:ident := $(chkNm j) $pj
+                $mbody)
+    let c0 := mkIdent (Name.mkSimple "c0")
+    let full ← `(let $c0:ident : Compiler.SlotEnv :=
+                   Compiler.sourceEnvArr ($d).sources $iId $stId
+                 $mbody)
+    elabCommand (← `(command|
+      def $f ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState) :
+          Compiler.RuntimeResult := $full))
+    logInfo m!"reify_design_chunked: {f} emitted, {nsrc} sources, \
+      {nb} bindings, {nseg} chunk(s) of at most {csize}"
   | _ => throwUnsupportedSyntax
 
 /-- `reify_design_shared <designCert> as <name>` — OPT-IN, under development.

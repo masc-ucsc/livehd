@@ -101,4 +101,29 @@ def eqOn (D : DesignCert)
 #guard Compiler.D3.agree fxFlop    cFlop    (match compileDesign fxFlop    with | .ok R => R | _ => default) 16
 #guard Compiler.D3.agree fxMem     cMem     (match compileDesign fxMem     with | .ok R => R | _ => default) 16
 
+-- The CHUNKED model, with deliberately small chunk sizes so that composition
+-- across several chunks is exercised rather than a single chunk standing in
+-- for the whole design.
+reify_design_chunked fxChain   as kChain   size 2
+reify_design_chunked fxDiamond as kDiamond size 2
+reify_design_chunked fxFlop    as kFlop    size 1
+reify_design_chunked fxMem     as kMem     size 1
+
+#guard eqOn fxChain   nChain   kChain   0
+#guard eqOn fxChain   nChain   kChain   3
+#guard eqOn fxDiamond nDiamond kDiamond 0
+#guard eqOn fxDiamond nDiamond kDiamond 1
+#guard eqOn fxDiamond nDiamond kDiamond 9
+#guard eqOn fxFlop    nFlop    kFlop    0
+#guard eqOn fxFlop    nFlop    kFlop    4
+#guard eqOn fxFlop    nFlop    kFlop    6
+#guard eqOn fxMem     nMem     kMem     0
+#guard eqOn fxMem     nMem     kMem     3
+#guard eqOn fxMem     nMem     kMem     8
+
+#guard Compiler.D3.agree fxChain   kChain   (match compileDesign fxChain   with | .ok R => R | _ => default) 16
+#guard Compiler.D3.agree fxDiamond kDiamond (match compileDesign fxDiamond with | .ok R => R | _ => default) 16
+#guard Compiler.D3.agree fxFlop    kFlop    (match compileDesign fxFlop    with | .ok R => R | _ => default) 16
+#guard Compiler.D3.agree fxMem     kMem     (match compileDesign fxMem     with | .ok R => R | _ => default) 16
+
 #eval IO.println "D3SHARED OK"

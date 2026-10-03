@@ -301,6 +301,156 @@ def elabProveReified : CommandElab := fun stx => do
     logInfo m!"prove_reified: {corNm} proved, {R.bindings.size} bindings"
   | _ => throwUnsupportedSyntax
 
+/-- `prove_reified_chunked <designCert> as <name> [size <n>]` — proves the model
+`reify_design_chunked` emitted, with the SAME `size`.
+
+Each chunk carries its own obligation, for an ARBITRARY environment:
+
+    <F>.chunk_j_eq (e) : <F>.chunk_j e = runBindings <F>.seg_j e
+
+so no single goal grows with the design -- that is the whole point of chunking
+rather than one let-chain. They compose through `Compiler.runBindings_append`
+into one environment equality, and the roots are then read from that
+environment exactly as `denoteResidual` reads them, which is why the closing
+step needs no per-slot facts at all.
+
+Emits `<F>.correct : <F> = interpretDesign <D>` and audits its axioms. -/
+syntax (name := proveReifiedChunked) "prove_reified_chunked " ident " as " ident
+  (" size " num)? : command
+
+@[command_elab proveReifiedChunked]
+def elabProveReifiedChunked : CommandElab := fun stx => do
+  match stx with
+  | `(command| prove_reified_chunked $d:ident as $f:ident $[size $sz]?) => do
+    let R ← liftTermElabM do
+      let dExpr ← Term.elabTerm d none
+      let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
+      match compileDesign cert with
+      | .error _ => throwError "prove_reified_chunked: compileDesign refused {d}"
+      | .ok R    => pure R
+    let csize := match sz with | some k => max 1 k.getNat | none => 32
+    let nb    := R.bindings.size
+    let nseg  := if nb == 0 then 1 else (nb + csize - 1) / csize
+    let base  := f.getId
+    let iId   := mkIdent (Name.mkSimple "i")
+    let stId  := mkIdent (Name.mkSimple "st")
+    let eArg  := mkIdent (Name.mkSimple "e")
+    let bnd   : Nat → Nat := fun j => min (j * csize) nb
+    let segNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"seg{j}")
+    let chkNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"chunk{j}")
+    let eqNmJ : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"chunk{j}_eq")
+    let env ← getEnv
+    if !(env.contains base) then
+      throwError "prove_reified_chunked: no model named `{base}` is in scope. \
+        This command PROVES a model emitted by `reify_design_chunked {d} as {f}`."
+    if !(env.contains (base ++ Name.mkSimple "chunk0")) then
+      throwError "prove_reified_chunked: `{base}` is in scope but `{base}.chunk0` \
+        is not. That is the signature of a model emitted by a DIFFERENT reifier; \
+        a chunk theorem must not be credited for it."
+    -- the residual, and the facts the closing step reads off it
+    let rNm := mkIdent (base ++ `R)
+    elabCommand (← `(command|
+      def $rNm : Compiler.ResidualProgram :=
+        match Compiler.compileDesign $d with | .ok R => R | .error _ => default))
+    let okNm := mkIdent (base ++ `compilesOk)
+    elabCommand (← `(command| theorem $okNm : Compiler.compilesOk $d = true := by rfl))
+    let hRNm := mkIdent (base ++ `hR)
+    elabCommand (← `(command|
+      theorem $hRNm : Compiler.compileDesign $d = .ok $rNm :=
+        Compiler.compileDesign_ok_witness $d $okNm))
+    let sNm := mkIdent (base ++ `R_sources)
+    elabCommand (← `(command| theorem $sNm : ($rNm).sources = ($d).sources := rfl))
+    let oProjNm := mkIdent (base ++ `R_outputs_proj)
+    elabCommand (← `(command|
+      theorem $oProjNm : ($rNm).outputs = ($d).outputs.map Compiler.compileOutput := rfl))
+    let fProjNm := mkIdent (base ++ `R_flops_proj)
+    elabCommand (← `(command|
+      theorem $fProjNm : ($rNm).flopUpdates = ($d).flops.map Compiler.compileFlop := rfl))
+    let mProjNm := mkIdent (base ++ `R_mems_proj)
+    elabCommand (← `(command|
+      theorem $mProjNm : ($rNm).memoryUpdates = ($d).memories.map Compiler.compileMemory := rfl))
+    -- 1. the segment lists, and the per-chunk obligations
+    for j in [0 : nseg] do
+      let lit ← liftTermElabM (ReifyProof.qBindingsList (R.bindings.extract (bnd j) (bnd (j+1))))
+      elabCommand (← `(command| def $(segNm j) : List Compiler.ResidualBinding := $lit))
+      elabCommand (← `(command|
+        theorem $(eqNmJ j) ($eArg : Compiler.SlotEnv) :
+            $(chkNm j) $eArg = Compiler.runBindings $(segNm j) $eArg := by
+          simp only [$(chkNm j):ident, $(segNm j):ident, Compiler.runBindings,
+                     Compiler.denoteExpr, Compiler.refBVs,
+                     List.map_cons, List.map_nil]))
+    -- 2. the flat list IS the segments appended, by one `rfl`
+    let segsEq := mkIdent (base ++ `segs_eq)
+    let appTerm ← liftTermElabM do
+      let rec go (j : Nat) : TermElabM Term :=
+        if j + 1 ≥ nseg then `($(segNm j))
+        else do `($(segNm j) ++ $(← go (j+1)))
+      go 0
+    elabCommand (← `(command|
+      theorem $segsEq : ($rNm).bindings.toList = $appTerm := rfl))
+    -- 3. compose the chunks into ONE environment equality
+    let srcEnv ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)
+    let mut comp := srcEnv
+    for j in [0 : nseg] do
+      comp ← liftTermElabM `($(chkNm j) $comp)
+    let mut rules : Array (TSyntax `Lean.Parser.Tactic.rwRule) :=
+      #[← `(Lean.Parser.Tactic.rwRule| $segsEq:ident)]
+    for _ in [0 : nseg - 1] do
+      rules := rules.push (← `(Lean.Parser.Tactic.rwRule| Compiler.runBindings_append))
+    for j in [0 : nseg] do
+      rules := rules.push (← `(Lean.Parser.Tactic.rwRule| $(eqNmJ j):ident))
+    let envEq := mkIdent (base ++ `env_eq)
+    elabCommand (← `(command|
+      theorem $envEq ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState) :
+          $comp = Compiler.runBindings (($rNm).bindings.toList) $srcEnv := by
+        rw [$rules,*]))
+    -- 4. the roots, read from that environment exactly as denoteResidual reads them
+    let dfNm := mkIdent (base ++ `D_flops)
+    let flopsLit ← liftTermElabM do
+      let fs ← R.flopUpdates.mapM fun fu => do
+        let enq ← (match fu.enable with | none => `(none) | some e => do `(some $(quote e)))
+        let rpq ← (match fu.resetPin with | none => `(none) | some r => do `(some $(quote r)))
+        let rvq ← (if fu.resetValue < 0 then `(-(Int.ofNat $(quote fu.resetValue.natAbs)))
+                   else `(Int.ofNat $(quote fu.resetValue.toNat)))
+        let ral := if fu.resetActiveLow then mkIdent ``true else mkIdent ``false
+        `({ width := $(quote fu.width), din := $(quote fu.din), enable := $enq,
+            resetPin := $rpq, resetValue := $rvq, resetActiveLow := $ral })
+      `(#[$fs,*])
+    elabCommand (← `(command| theorem $dfNm : ($d).flops = $flopsLit := rfl))
+    let dmNm := mkIdent (base ++ `D_mems)
+    let memsLit ← liftTermElabM do
+      let ms ← R.memoryUpdates.mapM fun mu =>
+        `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg) })
+      `(#[$ms,*])
+    elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
+    let doNm := mkIdent (base ++ `D_outputs)
+    let outsLit ← liftTermElabM do
+      let os ← R.outputs.mapM fun o => `({ slot := $(quote o.slot), width := $(quote o.width) })
+      `(#[$os,*])
+    elabCommand (← `(command| theorem $doNm : ($d).outputs = $outsLit := rfl))
+    let carNm := mkIdent (base ++ `eq_compileAndRun)
+    elabCommand (← `(command|
+      theorem $carNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
+          $f $iId $stId = Compiler.compileAndRun $d $iId $stId := by
+        intro $iId:ident $stId:ident
+        simp only [Compiler.compileAndRun, $hRNm:ident, Compiler.denoteResidual, $sNm:ident]
+        rw [← $envEq:ident $iId $stId]
+        simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
+        simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
+              Compiler.compileMemory, Compiler.flopNext_eq,
+              $dfNm:ident, $dmNm:ident, $doNm:ident]))
+    let corNm := mkIdent (base ++ `correct)
+    elabCommand (← `(command|
+      theorem $corNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
+          $f $iId $stId = Compiler.interpretDesign $d $iId $stId := by
+        intro $iId:ident $stId:ident
+        rw [$carNm:ident $iId $stId]
+        exact Compiler.compileAndRun_correct $d $okNm $iId $stId))
+    auditOrThrow (base ++ `correct) "prove_reified_chunked"
+    logInfo m!"prove_reified_chunked: {corNm} proved over {nb} binding(s) in \
+      {nseg} chunk(s) of at most {csize}"
+  | _ => throwUnsupportedSyntax
+
 /-- `prove_reified_incr <designCert> as <name>` — the opt-in INCREMENTAL path.
 
 Emits, for a COMBINATIONAL design:
