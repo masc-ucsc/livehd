@@ -2355,6 +2355,13 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
     "sim_max_rss_kb", "sim_user_s", "sim_sys_s", "sim_wall_s",
     "proof_max_rss_kb", "proof_max_rss_source",
     "proof_user_s", "proof_sys_s", "proof_wall_s",
+    # MODULE-PROOF BACKEND, kept apart from `proof_*` and from `agree`.
+    # A sampled agreement and a kernel proof are different claims; collapsing
+    # them into one column is how a sampled row starts being read as proved.
+    "module_proof", "module_proof_rss_kb", "module_proof_wall_s",
+    "module_cgroup_peak_kb", "module_groups", "module_chunk_size",
+    "module_chunks", "module_cert_sha256", "module_runner_digest",
+    "module_olean_digest", "module_log_dir",
     "detail"])
 
 # COLUMN SCOPES, so no generic column quietly mixes them.
@@ -2364,6 +2371,12 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
 #       is measured end to end across both.
 #   sim_*                                  the executable probe alone.
 #   proof_*                                the `--prove` probe alone.
+#   module_*                               the module-proof backend alone: its
+#       own composition process, its own guard, its own digests. `module_proof`
+#       is 1 ONLY for an exact gate line with rc==0 and axioms inside the
+#       allowed set; a killed or timed-out composition is 0 and UNDECIDED, and
+#       never raises `verdict`. `module_cgroup_peak_kb` is a CHARGE and is not
+#       comparable with any `*_rss_kb` column.
 #   cgroup_peak_kb                         the probe's cgroup, over both stages.
 #
 # Without `--prove` only one stage runs, so the generic columns and `sim_*` hold
