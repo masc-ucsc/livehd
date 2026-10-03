@@ -78,6 +78,42 @@ def main() -> int:
     pr0  = sweep.make_proof_probe(_c, "segtext", reifier="named", segment=0)
     sim  = sweep.make_probe(_c, "segtext", 32, reifier="named",
                             phase_file=str(tmp / "segtext.phase"))
+    # CHUNKED: the sim and proof probes must emit the SAME function. A proof
+    # of a model built at a different chunk size proves something other than
+    # what ran, and nothing downstream would notice.
+    _ksim = sweep.make_probe(_c, "segtext", 32, reifier="chunked",
+                             phase_file=str(tmp / "k.phase"), chunk_size=16)
+    _kprf = sweep.make_proof_probe(_c, "segtext", reifier="chunked", chunk_size=16)
+    check("chunk_sim_carries_size",
+          "as d3_fast size 16" in _ksim,
+          "the chunked sim probe emits the model at the requested size")
+    check("chunk_proof_emits_same_model",
+          "reify_design_chunked segtext_designCert as d3_fast size 16" in _kprf
+          and "prove_reified_chunked segtext_designCert as d3_fast size 16" in _kprf,
+          "and the proof probe emits AND proves that same model at that size")
+    check("chunk_proof_gate_last",
+          _kprf.rstrip().endswith("d3_proof_gate d3_fast.correct"),
+          "with the gate still the last command")
+    check("chunk_size_in_resume_key",
+          sweep.run_config(type("A", (), {
+              "manifest": "", "samples": 1, "timeout": 9, "native": False,
+              "tier": "", "proof_segment_size": 0, "phase_split": False,
+              "phase_only": "", "chunk_size": 16})(), "d")["chunk_size"] == 16,
+          "and the size is in the resume key, so two sizes cannot merge")
+    for _lbl, _extra in (("size_without_chunked", ["--chunk-size", "16", "--reifier", "named"]),
+                         ("size_zero", ["--chunk-size", "0", "--reifier", "chunked"]),
+                         ("segment_with_chunked",
+                          ["--chunk-size", "16", "--reifier", "chunked",
+                           "--proof-segment-size", "8", "--prove"])):
+        _q = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(tmp), "--out",
+             str(tmp / f"k_{_lbl}.tsv"), "--only", "^nothing$"] + _extra,
+            capture_output=True, text=True)
+        check(f"chunk_cli_refuses_{_lbl}",
+              _q.returncode == 2 and not (tmp / f"k_{_lbl}.tsv").exists(),
+              f"{' '.join(_extra)} exits 2 and writes nothing",
+              f"rc={_q.returncode} err={_q.stderr.strip()[:160]}")
+
     # The residual must be bound ONCE and the report must receive that binding.
     # Mentioning `d3_residual` a second time would not establish that the report
     # gets the value the `residual_ready` marker forced -- that holds only if the

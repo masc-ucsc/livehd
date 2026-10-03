@@ -114,6 +114,8 @@ REIFIER = "legacy"
 PHASE_SPLIT_ON = False
 # Diagnostic single-component probe ("" = off): selftest | agree | distinct.
 PHASE_ONLY = ""
+# Chunk size for --reifier chunked.
+CHUNK_SIZE = 32
 # Segment size for the incremental walk, passed to the PROOF probe only (0 = off).
 PROOF_SEGMENT = 0
 
@@ -787,7 +789,7 @@ def run_group(cmd, cwd, timeout, env=None):
             _GROUPS.discard(pgid)
 
 PROBE_TAIL_ONLY = """
-{reifycmd} {m}_designCert as d3_fast
+{reifycmd} {m}_designCert as d3_fast{reifysuf}
 
 #eval show IO Unit from do
   let t ← IO.monoMsNow
@@ -960,7 +962,7 @@ PROBE_TAIL_NAMED = """
   let t ← IO.monoMsNow
   IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"cert_elaborated t={{t}}"
 
-{reifycmd} {m}_designCert as d3_fast
+{reifycmd} {m}_designCert as d3_fast{reifysuf}
 
 #eval show IO Unit from do
   let t ← IO.monoMsNow
@@ -1004,6 +1006,16 @@ PROVE_TAIL_NAMED = """
 reify_design_named {m}_designCert as d3_fast
 {segopt}
 prove_reified_incr {m}_designCert as d3_fast
+d3_proof_gate d3_fast.correct
+"""
+
+# The chunked proof probe emits the SAME `F` as the sim probe -- same command,
+# same `size`. A different size is a different function, so it would prove
+# something other than what ran.
+PROVE_TAIL_CHUNKED = """
+reify_design_chunked {m}_designCert as d3_fast size {chunksz}
+
+prove_reified_chunked {m}_designCert as d3_fast size {chunksz}
 d3_proof_gate d3_fast.correct
 """
 
@@ -1346,6 +1358,9 @@ def run_config(a, manifest_digest: str) -> dict:
         "phase_split": bool(getattr(a, "phase_split", False)),
         # DIAGNOSTIC: a single-component probe runs no report at all.
         "phase_only": getattr(a, "phase_only", "") or "",
+        # SEMANTIC: a different chunk size is a different emitted function, so
+        # rows from two sizes describe different models and must not merge.
+        "chunk_size": int(getattr(a, "chunk_size", 32) or 32),
         "lake": LAKE,
         "worktree_head": subprocess.run(
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
@@ -1360,7 +1375,7 @@ def module_of(path: pathlib.Path) -> str:
 
 def make_probe(cert: pathlib.Path, m: str, samples: int, reifier: str = "legacy",
                phase_file: str = "", phase_split: bool = False,
-               phase_only: str = "") -> str:
+               phase_only: str = "", chunk_size: int = 32) -> str:
     """Certificate body + reify + gate report.
 
     The certificate's own `theorem` block is DROPPED: `<m>_compiles` is a
@@ -1370,23 +1385,30 @@ def make_probe(cert: pathlib.Path, m: str, samples: int, reifier: str = "legacy"
     drops `<m>_step_correct` and the trailing `<m>_residual`/`#print axioms`,
     all of which this probe replaces or does not need.
     """
-    if reifier in ("named", "shared"):
-        # A Lean string literal for the marker path. `json.dumps` escapes exactly        # the characters Lean's string syntax also escapes, and an empty path        # would make `withFile` throw, so the markers are emitted only when the        # caller supplied one.
+    if reifier in ("named", "shared", "chunked"):
+        # A Lean string literal for the marker path. `json.dumps` escapes
+        # exactly the characters Lean's string syntax also escapes, and an
+        # empty path would make `withFile` throw, so the markers are emitted
+        # only when the caller supplied one.
         if not phase_file:
             raise ValueError("make_probe(reifier='named') needs phase_file: the "
                              "phase markers write to it, and a probe without one "
                              "would report nothing when the target is killed")
         head = PROBE_HEAD + IMPORTS_MARKER.format(phase=json.dumps(phase_file))
         ph = json.dumps(phase_file)
-        reifycmd = ("reify_design_shared" if reifier == "shared"
-                    else "reify_design_named")
+        reifycmd = {"shared": "reify_design_shared",
+                    "chunked": "reify_design_chunked"}.get(reifier,
+                                                           "reify_design_named")
+        reifysuf = f" size {int(chunk_size)}" if reifier == "chunked" else ""
         if phase_only:
             body = PHASE_ONLY_BODY[phase_only].format(m=m, samples=samples, phase=ph)
             return _cert_body(cert, head) + PROBE_TAIL_ONLY.format(
-                m=m, phase=ph, component=body, reifycmd=reifycmd)
+                m=m, phase=ph, component=body, reifycmd=reifycmd,
+                reifysuf=reifysuf)
         split = PHASE_SPLIT.format(m=m, samples=samples, phase=ph) if phase_split else ""
         return _cert_body(cert, head) + PROBE_TAIL_NAMED.format(
-            m=m, samples=samples, phase=ph, split=split, reifycmd=reifycmd)
+            m=m, samples=samples, phase=ph, split=split,
+            reifycmd=reifycmd, reifysuf=reifysuf)
     return _cert_body(cert, PROBE_HEAD) + PROBE_TAIL.format(m=m, samples=samples)
 
 
@@ -1430,7 +1452,7 @@ def _cert_body(cert: pathlib.Path, head: str) -> str:
 
 
 def make_proof_probe(cert: pathlib.Path, m: str, reifier: str = "legacy",
-                     segment: int = 0) -> str:
+                     segment: int = 0, chunk_size: int = 32) -> str:
     """The last-mile proof, in its OWN file and its OWN process.
 
     SEPARATE ON PURPOSE.  In one process a failed `prove_reified` or a failed
@@ -1440,6 +1462,9 @@ def make_proof_probe(cert: pathlib.Path, m: str, reifier: str = "legacy",
     by a proof that did not work out.  `proof` is the LAST gate and must not be
     able to retract an earlier one.
     """
+    if reifier == "chunked":
+        return _cert_body(cert, PROVE_HEAD) + PROVE_TAIL_CHUNKED.format(
+            m=m, chunksz=int(chunk_size))
     if reifier == "shared":
         # No proof bridge exists for the chunked model yet. Refusing is the
         # point: a runtime-only model must not reach the proof gate.
@@ -1744,7 +1769,8 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         probe.write_text(make_probe(cert, m, samples, reifier=REIFIER,
                                     phase_file=str(phase_path),
                                     phase_split=PHASE_SPLIT_ON,
-                                    phase_only=PHASE_ONLY), encoding="utf-8")
+                                    phase_only=PHASE_ONLY,
+                                    chunk_size=CHUNK_SIZE), encoding="utf-8")
 
     # /usr/bin/time -v, so job count and timeouts for the long tiers can be
     # chosen from MEASURED peak RSS rather than guessed.  Wrapping rather than
@@ -1844,7 +1870,9 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             # `/usr/bin/time` reports instead.
             pprobe = probe_dir / f"{m}.proof.lean"
             pprobe.write_text(make_proof_probe(cert, m, reifier=REIFIER,
-                                               segment=PROOF_SEGMENT), encoding="utf-8")
+                                               segment=PROOF_SEGMENT,
+                                               chunk_size=CHUNK_SIZE),
+                              encoding="utf-8")
             ptv = log_dir / f"{m}.proof.time"
             pcmd = ([LEAN_BIN, str(pprobe)] if LEAN_BIN
                     else [LAKE, "env", "lean", str(pprobe)])
@@ -2172,7 +2200,7 @@ def extract_gates(row, out, rc, timeout, expect_module=None, expect_samples=None
     shape = _one(r"^D3GATE module=\S+ (.*)$", out)
     # either reifier: the two emit the same line shape on purpose, so the gate
     # does not have to know which mode the run is in.
-    emitted = _one(r"^reify_design(?:_named|_shared)?: \S+ emitted, \d+ sources, (\d+) bindings$", out)
+    emitted = _one(r"^reify_design(?:_named|_shared|_chunked)?: \S+ emitted, \d+ sources, (\d+) bindings", out)
     clean_exit = rc == 0 and not ERR_RE.search(out) and "error:" not in out
 
     if shape is None:
@@ -2208,7 +2236,7 @@ def extract_gates(row, out, rc, timeout, expect_module=None, expect_samples=None
                   "this log does not describe this certificate")
         return
     if emitted is not None:
-        em = re.search(r"^reify_design(?:_named|_shared)?: \S+ emitted, (\d+) sources, (\d+) bindings$",
+        em = re.search(r"^reify_design(?:_named|_shared|_chunked)?: \S+ emitted, (\d+) sources, (\d+) bindings",
                        out, re.M)
         if em and (em.group(1) != shape_fields.get("sources")
                    or em.group(2) != shape_fields.get("bindings")):
@@ -2475,7 +2503,12 @@ def main() -> int:
                          "bindings (0 = one monolithic walk, the default). Sets "
                          "`d3.segment` in the PROOF probe only, and requires "
                          "--reifier named.")
-    ap.add_argument("--reifier", choices=("legacy", "named", "shared"), default="legacy",
+    ap.add_argument("--chunk-size", type=int, default=32, metavar="N",
+                    help="bindings per chunk for --reifier chunked (default 32). "
+                         "The sim and proof probes are emitted with the SAME "
+                         "size: a different size is a different function.")
+    ap.add_argument("--reifier", choices=("legacy", "named", "shared", "chunked"),
+                    default="legacy",
                     help="which reifier BOTH stages use. `legacy` (default) is "
                          "`reify_design` + `prove_reified`, unchanged. `named` is "
                          "`reify_design_named` + `prove_reified_incr`, where the "
@@ -2800,7 +2833,7 @@ def main() -> int:
             return 2
 
     external, why = build_root_is_external()
-    global PROVE, REIFIER, PROOF_SEGMENT, PHASE_SPLIT_ON, PHASE_ONLY
+    global PROVE, REIFIER, PROOF_SEGMENT, PHASE_SPLIT_ON, PHASE_ONLY, CHUNK_SIZE
     PROVE = bool(a.prove)
     REIFIER = a.reifier
     if a.phase_split and a.reifier not in ("named", "shared"):
@@ -2823,6 +2856,20 @@ def main() -> int:
         print("REFUSING: --phase-only emits no model to prove.", file=sys.stderr)
         return 2
     PHASE_ONLY = a.phase_only
+    if a.chunk_size < 1:
+        print("REFUSING: --chunk-size must be >= 1.", file=sys.stderr)
+        return 2
+    if a.chunk_size != 32 and a.reifier != "chunked":
+        print(f"REFUSING: --chunk-size is meaningful only for --reifier chunked; "
+              f"got --reifier {a.reifier}. The option would be accepted and do "
+              f"nothing.", file=sys.stderr)
+        return 2
+    if a.proof_segment_size and a.reifier == "chunked":
+        print("REFUSING: --proof-segment-size segments the INCREMENTAL walk and "
+              "has no meaning for the chunked prover, which has its own "
+              "--chunk-size.", file=sys.stderr)
+        return 2
+    CHUNK_SIZE = int(a.chunk_size)
     if a.proof_segment_size < 0:
         print("REFUSING: --proof-segment-size must be >= 0.", file=sys.stderr)
         return 2
@@ -2848,6 +2895,7 @@ def main() -> int:
     cfg["proof_segment_size"] = int(a.proof_segment_size)
     cfg["phase_split"] = bool(a.phase_split)
     cfg["phase_only"] = a.phase_only
+    cfg["chunk_size"] = int(a.chunk_size)
     if a.runner_selftest:
         # Branded in the metadata rather than forbidden: the drift regressions
         # must exercise the manifest path.  The brand is what stops the result
