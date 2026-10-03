@@ -118,6 +118,8 @@ PHASE_ONLY = ""
 CHUNK_SIZE = 32
 # Which backend proves the model: the in-process probe, or generated modules.
 PROOF_BACKEND = "inprocess"
+# Seconds allowed for the module backend's COMPOSITION stage (0 = unbounded).
+MODULE_PROOF_TIMEOUT = 0.0
 # Segment size for the incremental walk, passed to the PROOF probe only (0 = off).
 PROOF_SEGMENT = 0
 
@@ -704,9 +706,42 @@ def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
 _ENV_KEYS = re.compile(r"^(LEAN|LAKE|ELAN)")
 
 
+# Path-list variables whose VALUE is normalised before it is digested. Order
+# is preserved; only exact duplicates after the first occurrence are dropped.
+_PATH_LIST_KEYS = ("PATH", "LD_LIBRARY_PATH")
+
+
+def _dedup_path(value: str) -> str:
+    """Drop repeat entries from a `:`-separated path list, keeping the first.
+
+    Semantics-preserving for lookup: the FIRST matching entry is the one that
+    wins, and first-occurrence dedup keeps exactly that entry in exactly that
+    position. A later duplicate can never be reached, so removing it cannot
+    change which binary or library is found.
+
+    This exists because the digest was unstable for a reason that cannot
+    affect a result. Two cohorts here differed only in that one PATH carried
+    `.elan/bin`, `.local/bin` and `~/.local/bin` twice and the other carried
+    them once -- the residue of activating a venv more than once in a parent
+    shell. Same SET of entries, same effective lookup, different digest, so
+    `d3_merge.py` refused two tables whose environments were provably
+    equivalent, and `--resume` would have refused its own run's rows.
+    Normalising is strictly safer than dropping PATH from the digest: the
+    resolved `lean`/`lake` paths and their versions are pinned separately,
+    but PATH still decides what any tool Lean shells out to resolves to.
+    """
+    seen, out = set(), []
+    for part in value.split(":"):
+        if part not in seen:
+            seen.add(part)
+            out.append(part)
+    return ":".join(out)
+
+
 def _lean_env_subset(env: dict) -> dict:
-    return {k: v for k, v in env.items()
-            if _ENV_KEYS.match(k) or k in ("PATH", "LD_LIBRARY_PATH")}
+    return {k: (_dedup_path(v) if k in _PATH_LIST_KEYS else v)
+            for k, v in env.items()
+            if _ENV_KEYS.match(k) or k in _PATH_LIST_KEYS}
 
 
 def resolve_lean():
@@ -1372,6 +1407,10 @@ def run_config(a, manifest_digest: str) -> dict:
         # experiments producing different evidence, so their rows must not
         # resume into or merge with one another.
         "proof_backend": getattr(a, "proof_backend", "inprocess"),
+        # SEMANTIC for the same reason `timeout` is: a different bound changes
+        # which designs come back decided, so two tables built under different
+        # bounds describe different experiments even where they agree.
+        "module_proof_timeout": float(getattr(a, "module_proof_timeout", 0) or 0),
         "lake": LAKE,
         "worktree_head": subprocess.run(
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
@@ -1888,6 +1927,8 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
                 [sys.executable, str(SCRIPTS / "d3_module_proof.py"),
                  "--cert", str(cert), "--module", m, "--bindings", str(nb),
                  "--chunk-size", str(CHUNK_SIZE),
+                 *(["--timeout", str(MODULE_PROOF_TIMEOUT)]
+                   if MODULE_PROOF_TIMEOUT else []),
                  "--out-dir", str(mdir)],
                 capture_output=True, text=True)
             res = {}
@@ -1901,6 +1942,11 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             # UNDECIDED -- it never raises `verdict`, which stays whatever the
             # executable gates earned.
             row["module_proof"] = 1 if res.get("status") == "proved" else 0
+            # Carried through verbatim so a reviewer can tell a gate that was
+            # evaluated and disagreed from one that was never reached. All of
+            # them give module_proof=0, so none overclaims, but "timeout" and
+            # "not_proved" are different facts about the run.
+            row["module_proof_status"] = res.get("status", "")
             row["module_proof_rss_kb"] = res.get("final_max_rss_kb", "")
             row["module_proof_wall_s"] = res.get("final_wall_s", "")
             row["module_cgroup_peak_kb"] = res.get("final_cgroup_peak_kb", "")
@@ -2414,7 +2460,8 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
     # MODULE-PROOF BACKEND, kept apart from `proof_*` and from `agree`.
     # A sampled agreement and a kernel proof are different claims; collapsing
     # them into one column is how a sampled row starts being read as proved.
-    "module_proof", "module_proof_rss_kb", "module_proof_wall_s",
+    "module_proof", "module_proof_status", "module_proof_rss_kb",
+    "module_proof_wall_s",
     "module_cgroup_peak_kb", "module_groups", "module_chunk_size",
     "module_chunks", "module_cert_sha256", "module_runner_digest",
     "module_olean_digest", "module_log_dir",
@@ -2585,6 +2632,14 @@ def main() -> int:
                          "bindings (0 = one monolithic walk, the default). Sets "
                          "`d3.segment` in the PROOF probe only, and requires "
                          "--reifier named.")
+    ap.add_argument("--module-proof-timeout", type=float, default=0,
+                    metavar="SECONDS",
+                    help="bound the module backend's COMPOSITION stage; 0 means "
+                         "unbounded. On expiry the row is module_proof=0 with "
+                         "module_proof_status=timeout, which is UNDECIDED -- not "
+                         "a failed theorem. Needed because one design (serdiv_gate) "
+                         "ran 90 minutes on a saturated core while the compositions "
+                         "that converged took 525-742 s, and nothing stopped it.")
     ap.add_argument("--proof-backend", choices=("inprocess", "module"),
                     default="inprocess",
                     help="how --prove proves the model. `inprocess` (default) "
@@ -2924,7 +2979,7 @@ def main() -> int:
 
     external, why = build_root_is_external()
     global PROVE, REIFIER, PROOF_SEGMENT, PHASE_SPLIT_ON, PHASE_ONLY, CHUNK_SIZE
-    global PROOF_BACKEND
+    global PROOF_BACKEND, MODULE_PROOF_TIMEOUT
     PROVE = bool(a.prove)
     REIFIER = a.reifier
     if a.phase_split and a.reifier not in ("named", "shared"):
@@ -2977,6 +3032,16 @@ def main() -> int:
                   file=sys.stderr)
             return 2
     PROOF_BACKEND = a.proof_backend
+    MODULE_PROOF_TIMEOUT = float(a.module_proof_timeout or 0)
+    if MODULE_PROOF_TIMEOUT < 0:
+        print("REFUSING: --module-proof-timeout must be >= 0.", file=sys.stderr)
+        return 2
+    if MODULE_PROOF_TIMEOUT and a.proof_backend != "module":
+        print("REFUSING: --module-proof-timeout only bounds the MODULE backend's "
+              "composition stage, and --proof-backend is "
+              f"{a.proof_backend!r}. Accepting it silently would record a bound "
+              "that never applied.", file=sys.stderr)
+        return 2
     if a.proof_segment_size < 0:
         print("REFUSING: --proof-segment-size must be >= 0.", file=sys.stderr)
         return 2
@@ -3241,6 +3306,14 @@ def main() -> int:
              "aggregate_rss_killed_kb": _RSS_PEAK["killed_at_kb"],
              "lean_env": _lean_env_subset(LEAN_ENV) if LEAN_ENV else {},
              "cert_sha256": {t.key: t.sha256 for t in targets},
+             # PROVENANCE, deliberately outside `config`: every key in `config`
+             # is compared on resume, and two runs reading byte-identical
+             # certificates from different directories are the SAME experiment
+             # -- `cert_sha256` already pins the content per target. Recorded
+             # because without it, working out which directory a finished
+             # cohort read meant re-hashing every *_Lgraph.lean under the
+             # generator output and matching on (filename, sha).
+             "certs": [str(pathlib.Path(c).resolve()) for c in (a.certs or [])],
              "modules": {t.key: t.module for t in targets},
              "targets": len(targets), "updated": time.strftime("%Y-%m-%d %H:%M:%S")},
             indent=2) + "\n")

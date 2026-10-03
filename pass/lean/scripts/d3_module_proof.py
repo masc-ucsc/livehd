@@ -20,9 +20,13 @@ it. Before reusing anything this RECOMPUTES both from the inputs on disk and
 compares. On a mismatch it regenerates and forces a rebuild rather than
 trusting the artifact.
 """
-import argparse, hashlib, importlib.util, json, os, pathlib, re, shutil, subprocess, sys, time
+import argparse, hashlib, importlib.util, json, os, pathlib, re, shutil, signal, subprocess, sys, time
 
 ALLOWED = {"propext", "Classical.choice", "Quot.sound"}
+# Distinct from any Lean exit status so a timeout can never be read as a
+# toolchain error, or the reverse. 124 is what `timeout(1)` uses, and
+# `d3_sweep.run_group` already uses the same convention.
+RC_TIMEOUT = 124
 # The composition always names its model `d3_fast`, so the gate must be for
 # `d3_fast.correct` specifically -- any other theorem's gate line appearing in
 # the transcript is not evidence about this model.
@@ -85,15 +89,58 @@ def olean_snapshot(ns: str) -> str:
     return h.hexdigest()
 
 
-def run(cmd, log: pathlib.Path, cwd=None):
+def run(cmd, log: pathlib.Path, cwd=None, timeout: float = 0):
+    """Run one stage under `/usr/bin/time -v`, optionally bounded in time.
+
+    `timeout <= 0` means unbounded, which is what every call did before this
+    and is still right for the cheap group builds. On expiry the return code
+    is `RC_TIMEOUT`, which the caller turns into `status="timeout"` --
+    UNDECIDED, never a refutation: nothing was proved and nothing disproved,
+    the clock ran out.
+
+    Measured need: `serdiv_gate` ran 90 minutes saturating one core with RSS
+    flat at 3,441,760 kB and zero bytes of output, while the compositions that
+    did converge took 525-742 s. Nothing in this driver would ever have
+    stopped it, so one non-converging design hangs an entire cohort.
+
+    The kill goes to the process GROUP. `/usr/bin/time` forks `lake`, which
+    forks `lean`; signalling the direct child leaves the real worker running
+    and still charging memory. `start_new_session=True` gives the stage its
+    own group for `killpg` to reach. SIGTERM first so Lean can unwind, then
+    SIGKILL for whatever ignored it.
+    """
     t0 = time.time()
     with log.open("w", encoding="utf-8") as fh:
-        p = subprocess.run(["/usr/bin/time", "-v"] + cmd, cwd=cwd,
-                           stdout=fh, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(["/usr/bin/time", "-v"] + cmd, cwd=cwd,
+                                stdout=fh, stderr=subprocess.STDOUT,
+                                start_new_session=True)
+        try:
+            rc = proc.wait(timeout=timeout if timeout and timeout > 0 else None)
+        except subprocess.TimeoutExpired:
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(os.getpgid(proc.pid), sig)
+                except (ProcessLookupError, PermissionError):
+                    break
+                try:
+                    proc.wait(timeout=20)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            # Deliberately NO final unbounded `proc.wait()` here. If SIGKILL to
+            # the group somehow did not reap it, blocking forever would restore
+            # exactly the hang this timeout exists to prevent. Report the
+            # timeout and move on; a survivor is visible in `ps`.
+            rc = RC_TIMEOUT
     txt = log.read_text(encoding="utf-8", errors="replace")
+    if rc == RC_TIMEOUT:
+        txt += (f"\n[d3_module_proof] STAGE TIMED OUT after {timeout:.0f}s and was "
+                f"killed by process group. UNDECIDED: nothing proved, nothing "
+                f"refuted.\n")
+        log.write_text(txt, encoding="utf-8")
     rss = next((int(l.split()[-1]) for l in txt.splitlines()
                 if "Maximum resident" in l), 0)
-    return p.returncode, rss, time.time() - t0, txt
+    return rc, rss, time.time() - t0, txt
 
 
 def main() -> int:
@@ -105,6 +152,13 @@ def main() -> int:
     ap.add_argument("--per-group", type=int, default=4)
     ap.add_argument("--group-max-kb", type=int, default=10000000)
     ap.add_argument("--final-max-kb", type=int, default=14000000)
+    ap.add_argument("--timeout", type=float, default=0,
+                    help="seconds to allow the COMPOSITION stage; 0 means "
+                         "unbounded (the historical behaviour). On expiry the "
+                         "row is status=timeout and module_proof=0, which is "
+                         "UNDECIDED -- not a failed theorem. The group builds "
+                         "are left unbounded: they are cheap and have never "
+                         "been the stage that fails to converge.")
     ap.add_argument("--out-dir", required=True)
     a = ap.parse_args()
 
@@ -217,7 +271,8 @@ def main() -> int:
     snap_before = olean_snapshot(ns)
     cmd = [sys.executable, gb, "--max-kb", str(a.final_max_kb), "--",
            "lake", "env", "lean", str(comp)]
-    rc, rss, wall, txt = run(cmd, out / "composition.log", cwd=LEAN)
+    rc, rss, wall, txt = run(cmd, out / "composition.log", cwd=LEAN,
+                             timeout=a.timeout)
     snap_after = olean_snapshot(ns)
     drifted = snap_before != snap_after
     # A gate line is necessary and NOT sufficient: the command must also have
@@ -239,7 +294,15 @@ def main() -> int:
               f"composition ({snap_before[:16]} -> {snap_after[:16]}). A shared "
               f".lake rebuild can change what an import means with every source "
               f"digest unchanged.", file=sys.stderr)
-    res = {"status": "proved" if proved else "not_proved",
+    # `timeout` is kept DISTINCT from `not_proved`. Both give module_proof=0,
+    # so neither overclaims, but collapsing them loses the only thing a
+    # reviewer needs to know: whether the gate was evaluated and disagreed, or
+    # was never reached. 143 is SIGTERM, i.e. killed from outside.
+    status = ("proved" if proved else
+              "timeout" if rc == RC_TIMEOUT else
+              "killed" if rc == 143 else
+              "not_proved")
+    res = {"status": status,
            "gate_axioms_within_allowed": axioms_ok,
            "module": a.module, "cert": str(cert), "cert_sha256": csha,
            "tool_digest": tsha, "bindings": a.bindings,
@@ -247,6 +310,7 @@ def main() -> int:
            "group_max_kb": a.group_max_kb, "final_max_kb": a.final_max_kb,
            "olean_digest": snap_before, "olean_digest_after": snap_after,
            "olean_drift": drifted,
+           "timeout_s": a.timeout,
            "final_rc": rc, "final_max_rss_kb": rss, "final_wall_s": round(wall, 2),
            "final_cgroup_peak_kb": next(
                (int(x.split("peak=")[1].split()[0].replace(",", ""))

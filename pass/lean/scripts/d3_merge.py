@@ -65,6 +65,11 @@ SEMANTIC_KEYS = [
     # producing different evidence, and a different chunk size is a different
     # emitted function, so rows from either must not be added together.
     "proof_backend", "chunk_size",
+    # The module backend's composition bound. SEMANTIC for the same reason
+    # `timeout` is: it decides which designs come back decided at all, so a
+    # table built under a 1,800 s bound and one built unbounded disagree about
+    # what "not proved" means even where every row matches.
+    "module_proof_timeout",
     # Diagnostic modes change what the probe DOES: `--phase-split` runs the
     # executable work twice and `--phase-only` runs one component and no
     # report, so their timings and gates are not comparable with a normal row.
