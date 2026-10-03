@@ -54,3 +54,4 @@ difftest_*/
 
 # D3 sweep run artifacts (probes, logs, per-run dirs) -- never committed
 temp/
+formal/lean/LeanSemanticPrimitives/Gen/
