@@ -78,6 +78,20 @@ def main() -> int:
     pr0  = sweep.make_proof_probe(_c, "segtext", reifier="named", segment=0)
     sim  = sweep.make_probe(_c, "segtext", 32, reifier="named",
                             phase_file=str(tmp / "segtext.phase"))
+    # The residual must be bound ONCE and the report must receive that binding.
+    # Mentioning `d3_residual` a second time would not establish that the report
+    # gets the value the `residual_ready` marker forced -- that holds only if the
+    # compiler shares the top-level constant, which is an implementation detail,
+    # not something the probe may assume. If this regresses, `residual_ready`
+    # silently stops meaning "compileDesign is behind us".
+    _simn = sweep.make_probe(_c, "segtext", 32, reifier="named",
+                             phase_file=str(tmp / "segtext2.phase"))
+    _after = _simn[_simn.index("let R := d3_residual") + len("let R := d3_residual"):]
+    check("residual_bound_once_before_report",
+          _after.count("d3_residual") == 0 and "d3_fast R 32" in _simn,
+          "the residual is let-bound once and the report receives that binding",
+          f"after-let occurrences={_after.count('d3_residual')}")
+
     check("seg_option_in_proof_probe", "set_option d3.segment 16" in pr16,
           "the proof probe carries `set_option d3.segment 16`")
     check("seg_option_before_the_command",

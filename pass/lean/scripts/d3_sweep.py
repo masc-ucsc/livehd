@@ -110,6 +110,8 @@ PROVE = False
 # simulating one function and proving another, and the row would credit a
 # theorem that says nothing about what ran.
 REIFIER = "legacy"
+# Diagnostic component-by-component phase split in the sim probe (off).
+PHASE_SPLIT_ON = False
 # Segment size for the incremental walk, passed to the PROOF probe only (0 = off).
 PROOF_SEGMENT = 0
 
@@ -790,6 +792,31 @@ import LeanSemanticPrimitives.Compiler.D3Harness
 # an empty `.phase` means "did not finish starting up / loading oleans / parsing"
 # rather than being ambiguous between that and certificate elaboration. It needs
 # no `open` and no `set_option`, so it is safe this early.
+# DIAGNOSTIC ONLY, and off unless --phase-split asks for it.
+#
+# Each component below is a PUBLIC def in D3Harness that `report` itself calls,
+# so running them here changes NOTHING in Lean and leaves the artifact digest
+# alone -- an earlier note claiming the isolation needs markers inside
+# `D3Harness.report`, and so an artifact break, was wrong.
+#
+# `report` is still called afterwards, UNCHANGED, and remains the only thing
+# that prints D3GATE lines. So a split run costs roughly double, and the gates
+# it credits still come from the real `report` rather than from an inlined copy
+# that could drift from it.
+PHASE_SPLIT = """  let r0 := d3_fast (Compiler.D3.stimIn {m}_designCert 1) (Compiler.D3.stimSt {m}_designCert 1)
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"sim_one_done obs={{Compiler.D3.obs r0}}"
+  let st0 := Compiler.D3.checkerSelfTest {m}_designCert R
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"selftest_done base={{st0.base}}"
+  let ag0 := Compiler.D3.agree {m}_designCert d3_fast R {samples}
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"agree_done {{ag0}}"
+  let dd0 := Compiler.D3.distinctObservables {m}_designCert d3_fast {samples}
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"distinct_done {{dd0}}"
+"""
+
 IMPORTS_MARKER = """
 #eval show IO Unit from
   IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn "imports_ready"
@@ -847,10 +874,16 @@ def d3_residual : ResidualProgram :=
 -- the earlier marker set could not separate from simulation.
 #eval show IO Unit from do
   IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn "report_started"
-  let nb := d3_residual.bindings.size
+  -- Bound ONCE. Mentioning `d3_residual` twice would not establish that the
+  -- report receives the value the marker forced: that holds only if the
+  -- compiler shares the top-level constant, which is an implementation detail
+  -- and is not proved here. With a single `let`, the report provably gets the
+  -- forced value, so `residual_ready` really does mean compileDesign is behind us.
+  let R := d3_residual
+  let nb := R.bindings.size
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"residual_ready bindings={{nb}}"
-  Compiler.D3.report "{m}" {m}_designCert d3_fast d3_residual {samples}
+{split}  Compiler.D3.report "{m}" {m}_designCert d3_fast R {samples}
 """
 
 PROVE_TAIL_NAMED = """
@@ -1194,6 +1227,9 @@ def run_config(a, manifest_digest: str) -> dict:
         # experiments over the same design, so they must not resume into or
         # merge with one another.
         "proof_segment_size": int(getattr(a, "proof_segment_size", 0) or 0),
+        # DIAGNOSTIC: a split run does the executable work twice, so its timings
+        # are not comparable with a normal row.
+        "phase_split": bool(getattr(a, "phase_split", False)),
         "lake": LAKE,
         "worktree_head": subprocess.run(
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
@@ -1207,7 +1243,7 @@ def module_of(path: pathlib.Path) -> str:
 
 
 def make_probe(cert: pathlib.Path, m: str, samples: int, reifier: str = "legacy",
-               phase_file: str = "") -> str:
+               phase_file: str = "", phase_split: bool = False) -> str:
     """Certificate body + reify + gate report.
 
     The certificate's own `theorem` block is DROPPED: `<m>_compiles` is a
@@ -1227,8 +1263,10 @@ def make_probe(cert: pathlib.Path, m: str, samples: int, reifier: str = "legacy"
                              "phase markers write to it, and a probe without one "
                              "would report nothing when the target is killed")
         head = PROBE_HEAD + IMPORTS_MARKER.format(phase=json.dumps(phase_file))
+        ph = json.dumps(phase_file)
+        split = PHASE_SPLIT.format(m=m, samples=samples, phase=ph) if phase_split else ""
         return _cert_body(cert, head) + PROBE_TAIL_NAMED.format(
-            m=m, samples=samples, phase=json.dumps(phase_file))
+            m=m, samples=samples, phase=ph, split=split)
     return _cert_body(cert, PROBE_HEAD) + PROBE_TAIL.format(m=m, samples=samples)
 
 
@@ -1578,7 +1616,8 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         # progress, so the file starts empty every launch.
         phase_path.unlink(missing_ok=True)
         probe.write_text(make_probe(cert, m, samples, reifier=REIFIER,
-                                    phase_file=str(phase_path)), encoding="utf-8")
+                                    phase_file=str(phase_path),
+                                    phase_split=PHASE_SPLIT_ON), encoding="utf-8")
 
     # /usr/bin/time -v, so job count and timeouts for the long tiers can be
     # chosen from MEASURED peak RSS rather than guessed.  Wrapping rather than
@@ -2293,6 +2332,11 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="print the selected targets IN RUN ORDER and exit, "
                          "writing nothing")
+    ap.add_argument("--phase-split", action="store_true",
+                    help="DIAGNOSTIC: in the sim probe, run report's public "
+                         "components one at a time with a phase marker after "
+                         "each, then call report unchanged. Roughly doubles the "
+                         "executable stage; requires --reifier named.")
     ap.add_argument("--proof-segment-size", type=int, default=0, metavar="N",
                     help="emit the incremental walk in segments of at most N "
                          "bindings (0 = one monolithic walk, the default). Sets "
@@ -2623,9 +2667,14 @@ def main() -> int:
             return 2
 
     external, why = build_root_is_external()
-    global PROVE, REIFIER, PROOF_SEGMENT
+    global PROVE, REIFIER, PROOF_SEGMENT, PHASE_SPLIT_ON
     PROVE = bool(a.prove)
     REIFIER = a.reifier
+    if a.phase_split and a.reifier != "named":
+        print("REFUSING: --phase-split requires --reifier named. The legacy probe "
+              "has no phase markers, so the option would do nothing.", file=sys.stderr)
+        return 2
+    PHASE_SPLIT_ON = bool(a.phase_split)
     if a.proof_segment_size < 0:
         print("REFUSING: --proof-segment-size must be >= 0.", file=sys.stderr)
         return 2
@@ -2649,6 +2698,7 @@ def main() -> int:
     # functions, so they must not resume into or merge with one another.
     cfg["reifier"] = a.reifier
     cfg["proof_segment_size"] = int(a.proof_segment_size)
+    cfg["phase_split"] = bool(a.phase_split)
     if a.runner_selftest:
         # Branded in the metadata rather than forbidden: the drift regressions
         # must exercise the manifest path.  The brand is what stops the result
