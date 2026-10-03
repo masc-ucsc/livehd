@@ -405,9 +405,9 @@ def refSem (D : DesignCert) (seed : Nat) : RuntimeResult :=
   interpretDesign D (allEdges D) (mkInputFor D seed) (mkStateFor D seed)
 
 /-- Iterate `n` cycles, feeding `nextState` forward, against `interpretDesign`
-iterated the same way.  Returns (agree, stateEverChanged): a trace where the
-state never moves proves nothing about sequential behaviour, so the caller can
-fail instead of silently passing a vacuous test. -/
+iterated the same way.  Returns (agree, distinctStatesReached): a correctness
+verdict and a coverage observation, which are different kinds of answer and
+must not be merged -- see the body. -/
 def traceCompare (fuel : Nat) (R : Program) (D : DesignCert) (n seed : Nat) :
     IO (Bool × Nat) := do
   -- TWO INDEPENDENT STATES.  An earlier version fed the REFERENCE's next state
@@ -556,9 +556,11 @@ def main (args : List String) : IO UInt32 := do
         | none => acc) (#[] : Array (Nat × Bool))
       IO.println s!"  reset pins -- sources say {srcPins.toList}, flop records say \
 {flopPins.toList}   (index, activeLow)"
+      let mut conflicts := 0
       for (i, al) in srcPins do
         for (j, bl) in flopPins do
           if i == j && al != bl then
+            conflicts := conflicts + 1
             IO.println s!"  !! POLARITY CONFLICT on input {i}: sources activeLow \
 {al}, flop records activeLow {bl} -- no value of this pin leaves both paths \
 out of reset.  Certificate/export-boundary discrepancy, NOT a projection bug; \
@@ -586,13 +588,23 @@ quarantine the design, do not edit its literals."
         IO.println s!"    cycle {k}{if k < 2 then " (reset asserted)" else ""}: \
 state-after = {if (encState st) == (encState (mkStateFor D 0)) then "initial" else "moved"}"
       IO.println s!"  distinct states over the 6 cycles AFTER de-assertion: {seenPost.length}"
-      if seenPost.length <= 1 then do
-        IO.eprintln "  DEGENERATE: the state is constant once reset is released -- \
-no reachable sequential behaviour, so a trace on this design proves nothing \
-sequential (combinational agreement may still be real)"
+      -- COVERAGE, not a verdict.  A constant post-reset state is correct for a
+      -- hold or a reset-stuck test, and finite stimuli cannot show a behaviour
+      -- is unreachable -- only that this stimulus did not reach it.
+      if seenPost.length <= 1 then
+        IO.println "  coverage: INCONCLUSIVE -- the state is constant over these \
+6 post-release cycles.  Correct for a hold/reset-stuck design, uninformative \
+otherwise, and NOT evidence of unreachable behaviour."
+      else
+        IO.println s!"  coverage: {seenPost.length} distinct post-release states"
+      -- A DESCRIPTOR CONFLICT is a different thing entirely: a concrete,
+      -- stimulus-independent inconsistency in the certificate.  That IS a
+      -- failure, and it is the only failure this probe reports.
+      if conflicts > 0 then do
+        IO.eprintln s!"  QUARANTINE: {conflicts} reset-descriptor conflict(s) -- \
+the certificate is internally inconsistent, independent of any stimulus"
         return 1
-      else do
-        IO.println "  non-degenerate: the state progresses after reset release"
+      else
         return 0
   | "--trace-ref" :: path :: ncyc :: _ => do
       -- interpretDesign ONLY -- no specialization, so this is instant and can
@@ -618,32 +630,15 @@ sequential (combinational agreement may still be real)"
       if D.flops.size == 0 then do
         IO.println "  combinational (no flops) -- no sequential behaviour to reach"
         return 0
-      else if true then do
-        -- Coverage reporting only.  An earlier version pronounced DEGENERATE
-        -- on <= 2 distinct states; that is wrong in both directions.  A
-        -- one-bit toggler has exactly 2 states forever and a hold test has 1,
-        -- both healthy; and 3 reset-driven states establish no useful
-        -- activity.  Finite stimuli cannot prove unreachability either way.
+      else do
+        -- Coverage reporting only.  Earlier versions pronounced DEGENERATE on
+        -- <= 2 distinct states, which is wrong in both directions: a one-bit
+        -- toggler has exactly 2 states forever and a hold test has 1, both
+        -- healthy, while 3 reset-driven states establish no useful activity.
         IO.println s!"  coverage: {seen.length} distinct state(s) over {n} cycle(s)\
 {if n < 3 then s!" -- at most {n+1} are observable at this length" else ""}"
         IO.println "  (coverage observation, NOT a correctness verdict and NOT \
 evidence of unreachable behaviour)"
-        return 0
-      else if n < 3 then do
-        -- With n cycles you can see at most n+1 states, so "<= 2 distinct" is
-        -- UNAVOIDABLE below 3 cycles and says nothing.  An earlier version
-        -- pronounced DEGENERATE at n = 1, which was a verdict its own evidence
-        -- could not support.
-        IO.println s!"  INCONCLUSIVE: {n} cycle(s) can show at most {n+1} states; \
-run at least 3 to distinguish collapse from progression"
-        return 0
-      else if seen.length <= 2 then do
-        IO.eprintln s!"  DEGENERATE: only {seen.length} distinct states over {n} \
-cycles -- the state collapses and sits there, so a trace test on this design \
-proves nothing sequential"
-        return 1
-      else do
-        IO.println s!"  non-degenerate: {seen.length} distinct states"
         return 0
   | "--support" :: rest => do
       -- All SIX SupportedByProjection fields, per file, reported separately.
@@ -825,7 +820,9 @@ any disagreement here would be expected, not informative"
       | .ok R    => do
           profileResidual R
           let mut bad := false
-          -- The fragment checker's bound is EXACT.  Claiming "checked
+          -- The fragment checker's bound is PROVED SUFFICIENT (the height;
+          -- `checkResidual_sound` gives no outOfFuel at it, not minimality).
+          -- Claiming "checked
           -- execution" means running at that bound, not at some larger
           -- hardcoded number that never exercises it.
           let (fragRes, tChk) ← stage "checkResidual" (fun (o : Option Nat) => o.getD 0)

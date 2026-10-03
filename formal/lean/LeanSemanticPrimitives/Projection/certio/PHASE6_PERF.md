@@ -1389,9 +1389,11 @@ ZERO flops, so there is no state to move.  The coverage note fires only when
 The accounting nearly closes, which is the point: this is a MEASUREMENT, not
 the kind of inference 11.3 made.
 
-**The residual runs 2.15x faster than interpreting the design** -- 1.49 s
-against 3.21 s per cycle.  That is the first measured speedup from projection
-on a real design, and it is modest.
+On these six runs, with this backend, the residual took 1.49 s per cycle
+against the interpreter's 3.21 s -- a ratio of 2.15.  Stated that narrowly on
+purpose: it is six measurements of one design under one native build, not a
+general speedup figure, and nothing here establishes how it moves with design
+size, stimulus, or backend.
 
 On btb's 190.91 s: a reference run here costs 3.21 s on 6,597 nodes, so
 `btb_gate` at 1,782 nodes really does look far slower per cycle.  But that
@@ -1415,7 +1417,9 @@ Two model checks, both holding:
 | CVA6, sequential | `rt_btb_gate` | yes, stock budget | 20000/200 | experimental, QUARANTINED (reset-descriptor inconsistency) |
 | CORE-ET, combinational | `rt_intpipe_alu` | yes | 200000/2000 | experimental |
 
-**CVA6 blocks counted toward the 30: one, combinational, EXPERIMENTAL.**
+**CVA6 blocks counted toward the 30: one, combinational, EXPERIMENTAL** --
+and "CVA6" here means ONE MODULE exported through a configured wrapper
+(`cva6_alu_export`), not arbitrary or whole-core CVA6.
 
 "Experimental" is not a hedge, it is the status: every run above uses
 `ProtoFast.mixDriver` (the fork, whose `PRes.val` change has no bridge) and
@@ -1423,3 +1427,79 @@ Two model checks, both holding:
 The theorem-covered path is `mixDriver` + `hwAP`, and **zero blocks have been
 run on it**.  Sequential CVA6 coverage is zero: the only non-degenerate
 candidate, `rt_csr_regfile_gate`, has not been run.
+
+## 14. Durable record, and the gap to a theorem
+
+### 14.1 `experiments.jsonl`
+
+Prose cannot be re-identified later, and "the ALU passed" is meaningless
+without the certificate, the code, the budget and the category it passed
+under.  `scripts/record_experiment.py` parses a `--file-ab` log and appends one
+JSON object per run to `certio/experiments.jsonl`, pinning:
+
+* design name, certificate **sha256** and byte size;
+* source provenance, with an explicit note that it is a CONFIGURED EXPORT
+  WRAPPER of one module, not arbitrary or whole-core CVA6;
+* **code identity** -- sha256 of `proto_probe.lean`,
+  `Proto/InterpreterVariant.lean` and `Proto/PartialEvaluatorFast.lean` -- plus
+  the git commit, and the binary sha256 when supplied;
+* the specializer and interpreter ACTUALLY USED, named as the fork and the
+  variant, each with the bridge it is missing;
+* the category string, which says in full that the run is certificate-relative
+  execution agreement, NOT theorem-covered and NOT RTL equivalence;
+* fuel (and the stock budget, for contrast), design shape, support result,
+  residual counts, the `checkResidual` bound WITH its meaning, the stimulus
+  kinds, the trace line, measured stage times, wall, peak RSS and exit code.
+
+Failed runs are recorded too: the stock-fuel `rt_alu_gate` attempt is in the
+file with `exit 3` and null residual fields, which is the honest shape for a
+run that produced nothing.
+
+### 14.2 The gap
+
+`certio/PROMOTION_OBLIGATIONS.md` states the two things standing between these
+runs and a theorem, in full:
+
+* **A** -- `ProtoFast` must satisfy `mixDriver_iff`.  Change 2 (the zero-shift
+  arms) is already discharged by `PVal.shift_zero` / `PEnv.shiftBy_zero`;
+  Change 1 (`PRes.val`) is not.  Smallest route: an erasure
+  `E : ProtoFast.PRes -> PRes` and six commutation lemmas, transporting the
+  host's theorem rather than re-proving it.
+* **B** -- `hwPVar` must be adequate.  Smallest route: construct the CANONICAL
+  WITNESS `main_agree_var` for the variant and reuse the existing
+  `Eval_det` + `ResultRel_canonical` pattern, which needs no surface
+  completeness theorem at all.
+
+**B first**, and it is three pieces, not one: **B1** a function-table
+congruence (`hwSVar` differs from `hwS` only in `main`'s body, so any
+derivation that does not re-enter `main` transports); **B2** the restricted
+inlining lemma proved for `main`'s ACTUAL body under its ACTUAL environment;
+**B3** generalizing `specializeDesign_correct` over the interpreter.
+
+Three corrections to the first version of this paragraph, all recorded in
+`PROMOTION_OBLIGATIONS.md` rather than quietly fixed, because two of them would
+have sent the proof work down a route that does not close:
+
+* `specializeDesign_correct` is **not** interpreter-parametric -- its
+  hypothesis literally names `hwAP` (`ProjectionCorrect.lean:109`) and its
+  proof consumes `hwAP_entry`, `hwAP_erases` and `IHwAdequacyGoal_proved`.  It
+  cannot be re-instantiated at `hwAPVar`; hence B3.
+* `Eval_det` does **not** supply the missing direction.  Determinism pins a
+  value one already has; it cannot manufacture a source evaluation.  The tree
+  already has the right pattern -- construct the witness, then read both
+  directions off it.
+* A's erasure does **not** commute, so "six lemmas and transport" was wrong.
+  `primStruct .consP` on `[.val (.stat a), .val (.stat b)]` gives
+  `.cons (.stat a) (.stat b)` after erasure, where the host gives
+  `.stat (.cons a b)` -- equal in denotation, different as `PRes`.  A needs a
+  semantic relation over the whole pass, which is the host development's shape
+  rather than a transport of it.
+
+Whether B is practically sufficient is an OPEN EMPIRICAL QUESTION, not a near
+certainty: the fork's measured advantage is not only the 2.66x constant factor
+-- the zero-shift change measured 31.11x at n = 1024 with the exponent moving
+2.91 to 1.90 -- and the `env0` rewrite removed MEASURED growth on the designs
+tried, not a proven asymptotic bound.  One `--file-ab`-shaped run with
+`mixDriver` substituted for the fork would answer it; a negative result would
+make A load-bearing and change the order.  Not run, and not to be launched
+alongside another long run.
