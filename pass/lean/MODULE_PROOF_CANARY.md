@@ -74,3 +74,32 @@ Nothing here is coverage. The existing in-process `--prove` backend is
 unchanged and remains the default. Broad 122/30 is deferred until the canary
 rows above are reproducible, and a passing canary is evidence about two
 designs, not about a cohort.
+
+## Canary result
+
+Run through the sweep at 32 samples, jobs=1, group builds <=10 GB cgroup,
+composition <=14 GB cgroup.
+
+    design              agree  requested_samples  module_proof  rss_kb      wall_s
+    txfma_e6              1          32                1         2,275,404   12.49
+    instr_queue_gate      1          32                1        13,961,652  616.45
+
+    instr_queue_gate: groups 10, chunks 38, cgroup peak 12,254,544 kB
+
+1. Both `module_proof=1`, each from an exact gate line with rc 0, axioms inside
+   the allowed set, and no olean drift.  PASS
+2. Both also produced their usual `agree` row from the executable stage in the
+   same run, recorded in separate fields.  PASS
+3. Re-run reproduces both. Identical: agree, requested_samples, module_proof,
+   module_groups, module_chunks, module_cert_sha256, module_runner_digest,
+   module_olean_digest. Varying: RSS, wall, cgroup peak, log dir -- instr_queue
+   13,961,652 -> 14,092,372 kB and 616.45 -> 777.46 s.  PASS
+4. Two tables differing ONLY in `proof_backend` are refused, exit 2.
+   `proof_backend`, `chunk_size`, `proof_segment_size`, `phase_split` and
+   `phase_only` were added to SEMANTIC_KEYS, which previously carried `prove`
+   and `reifier` alone.  PASS
+5. Tables written before this schema lack the `module_*` columns and are
+   refused by resume, so no pre-backend row can join a canary row.  PASS
+
+What this is NOT: coverage. Two designs proved is evidence about two designs.
+The in-process backend remains the default and is unchanged.
