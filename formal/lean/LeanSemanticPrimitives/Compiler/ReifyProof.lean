@@ -417,8 +417,20 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         if j + 1 ≥ nseg then `($(segNm j))
         else do `($(segNm j) ++ $(← go (j+1)))
       go 0
+    -- DIAGNOSTIC SPLIT. `segs_eq` does two things at once: it forces the
+    -- compiler's output (evaluating `compileDesign` and building `toList` over
+    -- every binding) AND it performs 37 appends over literal segments. Which
+    -- half costs is the question that decides whether per-slice equalities can
+    -- work at all -- if forcing the output dominates, a slice equality per
+    -- chunk repeats it once per chunk and is strictly worse.
+    let bindsAll ← liftTermElabM (ReifyProof.qBindingsList R.bindings)
+    let blNm := mkIdent (base ++ `R_bindings_list)
     elabCommand (← `(command|
-      theorem $segsEq : ($rNm).bindings.toList = $appTerm := rfl))
+      theorem $blNm : ($rNm).bindings.toList = $bindsAll := rfl))
+    markPhase "bindings_literal"
+    elabCommand (← `(command|
+      theorem $segsEq : ($rNm).bindings.toList = $appTerm := by
+        rw [$blNm:ident]; rfl))
     markPhase "segs_eq"
     -- 3. compose the chunks into ONE environment equality
     let srcEnv ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)
