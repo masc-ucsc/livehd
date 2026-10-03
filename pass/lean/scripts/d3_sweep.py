@@ -804,22 +804,29 @@ import LeanSemanticPrimitives.Compiler.D3Harness
 # it credits still come from the real `report` rather than from an inlined copy
 # that could drift from it.
 PHASE_SPLIT = """  let r0 := d3_fast (Compiler.D3.stimIn {m}_designCert 1) (Compiler.D3.stimSt {m}_designCert 1)
+  let o0 := Compiler.D3.obs r0
+  let t1 ← (if o0 == 0 then IO.monoMsNow else IO.monoMsNow)
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
-    h.putStrLn s!"sim_one_done obs={{Compiler.D3.obs r0}}"
+    h.putStrLn s!"sim_one_done obs={{o0}} t={{t1}}"
   let st0 := Compiler.D3.checkerSelfTest {m}_designCert R
+  let b0 := st0.base
+  let t2 ← (if b0 then IO.monoMsNow else IO.monoMsNow)
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
-    h.putStrLn s!"selftest_done base={{st0.base}}"
+    h.putStrLn s!"selftest_done base={{b0}} t={{t2}}"
   let ag0 := Compiler.D3.agree {m}_designCert d3_fast R {samples}
+  let t3 ← (if ag0 then IO.monoMsNow else IO.monoMsNow)
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
-    h.putStrLn s!"agree_done {{ag0}}"
+    h.putStrLn s!"agree_done {{ag0}} t={{t3}}"
   let dd0 := Compiler.D3.distinctObservables {m}_designCert d3_fast {samples}
+  let t4 ← (if dd0 == 0 then IO.monoMsNow else IO.monoMsNow)
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
-    h.putStrLn s!"distinct_done {{dd0}}"
+    h.putStrLn s!"distinct_done {{dd0}} t={{t4}}"
 """
 
 IMPORTS_MARKER = """
-#eval show IO Unit from
-  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn "imports_ready"
+#eval show IO Unit from do
+  let t ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"imports_ready t={{t}}"
 """
 
 PROBE_TAIL = """
@@ -854,13 +861,15 @@ PROBE_TAIL_NAMED = """
 -- A file write is not captured, and `withFile` CLOSES the handle, so the bytes
 -- are with the OS before the next phase starts and survive the kill.  The last
 -- line of the `.phase` file names the last phase that COMPLETED.
-#eval show IO Unit from
-  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn "cert_elaborated"
+#eval show IO Unit from do
+  let t ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"cert_elaborated t={{t}}"
 
 reify_design_named {m}_designCert as d3_fast
 
-#eval show IO Unit from
-  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn "reified"
+#eval show IO Unit from do
+  let t ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"reified t={{t}}"
 
 def d3_residual : ResidualProgram :=
   match compileDesign {m}_designCert with
@@ -881,8 +890,12 @@ def d3_residual : ResidualProgram :=
   -- forced value, so `residual_ready` really does mean compileDesign is behind us.
   let R := d3_residual
   let nb := R.bindings.size
+  -- `let` is LAZY, so the clock must be read only after the value is FORCED --
+  -- otherwise every stamp lands before the work it is meant to measure. The
+  -- comparison forces it; both branches read the same clock.
+  let tr ← (if nb == 0 then IO.monoMsNow else IO.monoMsNow)
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
-    h.putStrLn s!"residual_ready bindings={{nb}}"
+    h.putStrLn s!"residual_ready bindings={{nb}} t={{tr}}"
 {split}  Compiler.D3.report "{m}" {m}_designCert d3_fast R {samples}
 """
 
