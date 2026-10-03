@@ -393,12 +393,12 @@ step needs no per-slot facts at all.
 
 Emits `<F>.correct : <F> = interpretDesign <D>` and audits its axioms. -/
 syntax (name := proveReifiedChunked) "prove_reified_chunked " ident " as " ident
-  (" size " num)? : command
+  (" size " num)? (" using " ident)? : command
 
 @[command_elab proveReifiedChunked]
 def elabProveReifiedChunked : CommandElab := fun stx => do
   match stx with
-  | `(command| prove_reified_chunked $d:ident as $f:ident $[size $sz]?) => do
+  | `(command| prove_reified_chunked $d:ident as $f:ident $[size $sz]? $[using $ns]?) => do
     let (cert, R) ← liftTermElabM do
       let dExpr ← Term.elabTerm d none
       let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
@@ -460,6 +460,14 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
           ∧ ($rNm).flopUpdates = ($d).flops.map Compiler.compileFlop
           ∧ ($rNm).memoryUpdates = ($d).memories.map Compiler.compileMemory :=
         Compiler.compileDesign_parts $d $rNm $hRNm))
+    -- COVERAGE, asserted rather than argued. The composition does
+    -- `show compileFrom D 0 nb #[] = _` against `compileGraph`, which is
+    -- `compileFrom D 0 D.nodes.size #[]`, so a wrong `nb` fails to typecheck
+    -- -- but that is reasoning about the proof, not a check inside it. This
+    -- states it: the chunks tile exactly [0, D.nodes.size), no tail omitted.
+    let covNm := mkIdent (base ++ `chunks_cover)
+    elabCommand (← `(command|
+      theorem $covNm : ($d).nodes.size = $(quote nb) := rfl))
     let sNm := mkIdent (base ++ `R_sources)
     elabCommand (← `(command|
       theorem $sNm : ($rNm).sources = ($d).sources := ($partsNm).2.2.1))
@@ -505,8 +513,13 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
     -- one fact about `compileFrom` over that chunk with the accumulator left
     -- ABSTRACT. `compileFrom_step` chains them. Nothing here names the whole
     -- residual.
-    let cfNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"cf{j}")
-    for j in [0 : nseg] do
+    -- With `using NS` the chunk facts are IMPORTED from modules that already
+    -- built and checked them; regenerating would re-pay in this process the
+    -- kernel checking that the split exists to distribute.
+    let cfNm : Nat → Ident := match ns with
+      | some n => fun j => mkIdent (n.getId ++ Name.mkSimple s!"cf{j}")
+      | none   => fun j => mkIdent (base ++ Name.mkSimple s!"cf{j}")
+    for j in (if ns.isSome then [0:0] else [0 : nseg]) do
       let lo' := bnd j
       let hi' := bnd (j+1)
       -- The chunk fact is `rfl` against `compileFrom` directly, so nothing
@@ -657,7 +670,8 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
     auditOrThrow (base ++ `correct) "prove_reified_chunked"
     markPhase "audit_done"
     logInfo m!"prove_reified_chunked: {corNm} proved over {nb} binding(s) in \
-      {nseg} chunk(s) of at most {csize}"
+      {nseg} chunk(s) of at most {csize}\
+      {if ns.isSome then ", facts imported" else ""}"
   | _ => throwUnsupportedSyntax
 
 /-- `prove_reified_incr <designCert> as <name>` — the opt-in INCREMENTAL path.
