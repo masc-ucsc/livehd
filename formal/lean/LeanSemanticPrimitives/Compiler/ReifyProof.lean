@@ -360,17 +360,44 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
       theorem $hRNm : Compiler.compileDesign $d = .ok $rNm :=
         Compiler.compileDesign_ok_witness $d $okNm))
     markPhase "compiles_ok"
+    -- The four projections come from the GENERIC `compileDesign_parts`,
+    -- instantiated at `hR`, rather than from four `rfl`s.
+    --
+    -- Each `rfl` made the KERNEL evaluate `compileDesign D` and force the whole
+    -- residual, once per projection. Measured, that was the single largest step
+    -- of the proof (`projections` 5.24 s on a 133-binding design where every
+    -- chunk theorem together cost 0.20 s) and it is where the 1,186-binding
+    -- proof was killed: the markers stop at `compiles_ok`, the step before.
+    --
+    -- `compileDesign_parts` is proved once, for an arbitrary design, so
+    -- instantiating it computes nothing. The statements are unchanged -- the
+    -- same four equalities, now derived from the generic theorem instead of by
+    -- evaluation -- so this is reuse, not a weakened obligation.
+    let partsNm := mkIdent (base ++ `parts)
+    elabCommand (← `(command|
+      theorem $partsNm :
+          Compiler.DesignCert.DepsBounded $d
+          ∧ Compiler.compileGraph $d = .ok ($rNm).bindings
+          ∧ ($rNm).sources = ($d).sources
+          ∧ ($rNm).outputs = ($d).outputs.map Compiler.compileOutput
+          ∧ ($rNm).flopUpdates = ($d).flops.map Compiler.compileFlop
+          ∧ ($rNm).memoryUpdates = ($d).memories.map Compiler.compileMemory :=
+        Compiler.compileDesign_parts $d $rNm $hRNm))
     let sNm := mkIdent (base ++ `R_sources)
-    elabCommand (← `(command| theorem $sNm : ($rNm).sources = ($d).sources := rfl))
+    elabCommand (← `(command|
+      theorem $sNm : ($rNm).sources = ($d).sources := ($partsNm).2.2.1))
     let oProjNm := mkIdent (base ++ `R_outputs_proj)
     elabCommand (← `(command|
-      theorem $oProjNm : ($rNm).outputs = ($d).outputs.map Compiler.compileOutput := rfl))
+      theorem $oProjNm : ($rNm).outputs = ($d).outputs.map Compiler.compileOutput :=
+        ($partsNm).2.2.2.1))
     let fProjNm := mkIdent (base ++ `R_flops_proj)
     elabCommand (← `(command|
-      theorem $fProjNm : ($rNm).flopUpdates = ($d).flops.map Compiler.compileFlop := rfl))
+      theorem $fProjNm : ($rNm).flopUpdates = ($d).flops.map Compiler.compileFlop :=
+        ($partsNm).2.2.2.2.1))
     let mProjNm := mkIdent (base ++ `R_mems_proj)
     elabCommand (← `(command|
-      theorem $mProjNm : ($rNm).memoryUpdates = ($d).memories.map Compiler.compileMemory := rfl))
+      theorem $mProjNm : ($rNm).memoryUpdates = ($d).memories.map Compiler.compileMemory :=
+        ($partsNm).2.2.2.2.2))
     markPhase "projections"
     -- 1. the segment lists, and the per-chunk obligations
     for j in [0 : nseg] do
