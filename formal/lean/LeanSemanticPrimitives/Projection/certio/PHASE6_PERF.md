@@ -1777,3 +1777,67 @@ before any real-design run is attributed to it.  Switching silently would
 invalidate the comparability of every number already recorded, and optimized
 native executions still need their own regression evidence -- the identical
 results above are for FIXTURES, not for a real design.
+
+## 18. The covered backend, executed on a real design
+
+`total_probe` built at explicit `-O2`, `mixDriver` + `hwAPVarT`, on
+`rt_alu_gate` at 200000/2000.  **Exit 0**, wall **61,330.78 s (17 h 02 m)**,
+peak RSS **24,904 KB**.
+
+    support: wf true memFree true sources true ops true arities true
+             flopClocks true | ALL true
+    residual 89,996 terms, checker bound 28,899
+    seed 0,1,2,3,4,7: ok, matches interpretDesign   (all six)
+    trace: 4 cycles, INDEPENDENT states -- agrees true, states-reached 1, flops 0
+    control: variant interpreter matches interpretDesign true
+    STAGE TIMES ms: specialize+check 61,267,341   reference-runs 8,902 (6)
+                    step-runs 9,897 (6)   control 27,513
+
+`states-reached 1` carries no coverage note and should not: zero flops.
+
+Pre-launch captured, binary sha256
+`9168c8362030a190d9b44549d77cd7652486737a6c9053cf4e13966f928ba771`, cert
+`d731ee22...432bdb1`, 38 object hashes, 14 source hashes, clean tree at
+`ecf59cf7d`.  Recorded in `experiments.jsonl` under runner `total-probe`.
+
+### 18.1 EXACT boundaries
+
+* ONE NATIVE EXECUTION of an existing certificate.  The concrete
+  `mixDriver sf wf hwAPVarT [encDesign D] = .ok R` is **NOT kernel-certified**;
+  `mixDriver` does not kernel-reduce at nontrivial fuel.  The theorems
+  (`IHwAdequate_varT`, `specializeDesign_varT_correct`, `simSound_varT`) are
+  about that hypothesis, and this run does not discharge it.
+* **NOT a new CVA6-block count.**  `rt_alu_gate` was already one of the two
+  experimental combinational blocks; this is the SAME design on a different
+  backend.  The count stays **two**.
+* NOT RTL equivalence, and not a sequential result -- the design has no flops.
+* The `-O2` flags are recorded ALONGSIDE the `-O0` records, not replacing them.
+
+### 18.2 Two measured facts worth stating plainly
+
+**The residual is identical to the fork backend's.**  Same design, same budget:
+
+    fork  -O0  ProtoFast + hwAPVar   89,996 terms, bound 28,899
+    host  -O2  mixDriver  + hwAPVarT 89,996 terms, bound 28,899
+
+Identical size and identical checker bound.  That is a strong agreement signal
+between the two backends; it is not a proof that they produce the same program.
+
+**Specialization took 50x longer on the covered backend** -- 61,267,338 ms
+against the fork's 1,226,168 ms -- and the `-O2` advantage works in the HOST
+run's favour, so 50x is a LOWER bound on the specializer difference, not an
+upper one.
+
+This answers the open question in `PROMOTION_OBLIGATIONS.md`: **B alone is not
+practically sufficient.**  B gives a covered backend, and that backend takes
+17 hours on one combinational CVA6 block.  Obligation A -- the fork's
+`PRes.val` bridge -- is therefore load-bearing for practicality, not only for
+tidiness, and the plan's ordering should reflect that.
+
+**And on this design the residual is NOT faster than the interpreter**:
+reference 1.48 s/cycle against step 1.65 s/cycle.  Two caveats, both load-
+bearing: `step` goes through `stepOf`, which adds a `runtimeOK` check and
+`runProjected` at the checked bound, where the earlier fork figure used
+`runResidAt` directly -- so this is NOT like-for-like with the 2.15x recorded
+in section 13.6; and a single run of each.  What it does show is that no
+speed-up should be assumed for the checked simulator path on this design.
