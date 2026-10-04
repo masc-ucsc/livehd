@@ -16,24 +16,62 @@ logs it names are under `generated/` and are deliberately NOT staged.
 | global default | UNCHANGED. `proc -ifx` remains the default for every other module |
 | why | under `-ifx` this module has 39 combinational SCCs and pass.lean refuses; under plain `proc` it has 0 (`pass/lean/CYCLE_PROVENANCE.txt` part 6) |
 
-## Identities
+## Artifact identities (full SHA-256)
 
-| artifact | sha256 (16) |
-|---|---|
-| commit | `fc1d6a70135d1db808ce9dc6983d063318081dfd` |
-| `lhd` (k8-dbg) | `ee2e7824e8e0aa6b` |
-| `pass/single_edge/pass_single_edge.cpp` | `ada3569d3d95ce99` |
-| `inou/cgen/cgen_verilog.cpp` | `ee13dae1cc0b6495` |
-| `ware/rtl/cgen_memory_1rd_1wr.v` | `e0c57724fbf66c60` |
-| candidate `.ys` | `58103f928fb3be7f` |
-| input graph `lgdb_raw` (library+srcmap) | `8e05a6767e32f95e` |
-| CORE-ET filelist | `e665f932f81dd2c6` |
-| stimulus `vectors.hex` | `497807334ddc115b` |
-| raw netlist | `9bd26b6fdd4adc23` |
-| normalized netlist | `af8e7cb01da42a64` |
-| certificate | `e87dc22c7c8e0d3e` |
+Measured at commit `fc1d6a701`. Commits after it change only tests, BUILD,
+this document, and one `friend` declaration in `inou/cgen/cgen_verilog.hpp`
+that grants a test peer access to a private generator -- `cgen_verilog.cpp`,
+`pass_single_edge.cpp` and every `ware/rtl` model are byte-identical to the
+measured state (`git diff fc1d6a701 HEAD -- inou/cgen/cgen_verilog.cpp
+pass/single_edge/pass_single_edge.cpp ware/rtl/` is empty).
 
-core-et revision `c72b6a2`.
+| path | what | sha256 |
+|---|---|---|
+| `pass/single_edge/pass_single_edge.cpp` | tracked source | `ada3569d3d95ce995f09ce287b212dbc497736351a573305d42ead2ebce42954` |
+| `inou/cgen/cgen_verilog.cpp` | tracked source | `ee13dae1cc0b6495a5ce28a82e8676030ecd8b9778e9c421164f9b999cd60b4d` |
+| `ware/rtl/cgen_memory_1rd_1wr.v` | tracked support model | `e0c57724fbf66c60bbd3a086ce6ed902fdcf6716ee6ae3756b93570a10f94edb` |
+| `generated/plainproc_txfmafrac/equiv7/read_plain_proc.ys` | candidate lowering script | `58103f928fb3be7f2bdb8a9740e11c9be15bd8478608074f2a196f1de4660786` |
+| `generated/core-et/filelists/txfmafrac_top.f` | CORE-ET filelist | `e665f932f81dd2c6be73e907b70554074f6b7f853aff2936cb84178617de84e0` |
+| `generated/plainproc_memfix/ds_norm/vectors.hex` | stimulus | `497807334ddc115b5cf1f24f186678a78bcaf0d173540eee6b45900b3941487e` |
+| `generated/plainproc_memfix/raw.v` | raw netlist (recipe O0) | `9bd26b6fdd4adc238a9a60b72bcd6ddea050ea6c4d217fa748c34b9c52da90ef` |
+| `generated/plainproc_memfix/norm.v` | normalized netlist (recipe O0) | `af8e7cb01da42a6480f7c195d3f2a94867ab919e9d0f20cb4492f7230358db7e` |
+| `generated/plainproc_memfix/lean/txfmafrac_top_Lgraph.lean` | certificate | `e87dc22c7c8e0d3efd2e183288f5c3817808bf6e8da9e4341da9d4e54728754f` |
+| `generated/plainproc_memfix/lean/txfmafrac_top_io.json` | certificate IO map | `23718771ef0b80621e1dbbdf17219a24151a9730ea11daa9112d386ce8eaefd9` |
+
+`lhd` binary as measured (k8-dbg):
+`ee2e7824e8e0aa6b4c73a05e5edde2825d8373728c30734fb5edcf750d51c8f8`
+at `bazel-out/k8-dbg/bin/lhd/lhd`. That path is a build output, not a tracked
+artifact, so it cannot be re-verified from the repository alone; it is
+recorded as measured.
+
+core-et revision `c72b6a2fe4aaad5a9eef437776864ff71f4b55d7`
+(`/soe/czeng14/projects/core-et`), which had 1 dirty file at measurement time
+-- so the RTL input is identified by the filelist and per-file hashes above
+rather than by that revision alone.
+
+### Graph identities -- full content manifests
+
+`library.txt`+`srcmap.txt` alone is only a PARTIAL identity: it omits
+`body.bin` and `overflow.bin`, which hold the graph itself. Sorted full
+manifests (hashed read-only; the graphs were not altered):
+
+INPUT graph, preserved pre-single_edge (`generated/plainproc_txfmafrac/equiv7/txfmafrac_top/lgdb_raw`):
+
+```
+    b84b5a8336baecb4a3645c672f5c001c240488388fbc297f5314cd40843d51cb  generated/plainproc_txfmafrac/equiv7/txfmafrac_top/lgdb_raw/graph_930469305945/body.bin
+    1269d2bb74dc150155dea0b723820ca75a3a46156ed57472e4be88d1e3e3faa4  generated/plainproc_txfmafrac/equiv7/txfmafrac_top/lgdb_raw/graph_930469305945/overflow.bin
+    e7cd5f1b6e997249a25cec4ea99971f785831c6fb63f7c5274c6d9abf39701d9  generated/plainproc_txfmafrac/equiv7/txfmafrac_top/lgdb_raw/library.txt
+    e7e89de9ab43800b8ffe100e0848f84bbd829ecd17dd14489fe93fab5a439d74  generated/plainproc_txfmafrac/equiv7/txfmafrac_top/lgdb_raw/srcmap.txt
+```
+
+OUTPUT graph, freshly normalized (`generated/plainproc_memfix/lgdb_norm`):
+
+```
+    8042a177ac41a7d0d23c7d6d90ad76ab2a9a0aa4230ba98cf3a365c54d15c9e6  generated/plainproc_memfix/lgdb_norm/graph_930469305945/body.bin
+    de89b373ceb14988641c854812bc9f8a0c94e0dccd00970fc5e7cac9ff037a6e  generated/plainproc_memfix/lgdb_norm/graph_930469305945/overflow.bin
+    e7cd5f1b6e997249a25cec4ea99971f785831c6fb63f7c5274c6d9abf39701d9  generated/plainproc_memfix/lgdb_norm/library.txt
+    b124424a52e59c12f08a11cc1f8a87e77704de2f44206d2e2f80341f484b8156  generated/plainproc_memfix/lgdb_norm/srcmap.txt
+```
 
 ## Recipes
 

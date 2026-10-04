@@ -15,6 +15,16 @@
 #include "hhds/sourcemap_emit.hpp"
 
 class Cgen_verilog {
+  // TEST SEAM, deliberately narrow. `gen_mem_wrapper` below builds the memory
+  // wrapper for a (R,W,clock) shape ware/rtl does not ship, and it is private.
+  // A behavioural test of GENERATED memory semantics has to call the real
+  // function -- grepping the template text proves nothing, and pasting a
+  // wrapper body into a test would be testing the paste. This grants exactly
+  // one named peer that access; the generator itself is unchanged, nothing
+  // becomes public API, and no `#define private public` is involved.
+  // Used by lhd/tests/gen_mem_wrapper_dump.cpp.
+  friend struct Cgen_verilog_test_peer;
+
 private:
   const bool        verbose;
   std::string_view  odir;

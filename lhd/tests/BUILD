@@ -12,6 +12,7 @@
 #  - lhd_equiv_test: prp->ln->lg->v1, prp->lg->v2, verilog0->lg->v3, then
 #    LEC of each against the golden verilog0.
 
+load("@rules_cc//cc:defs.bzl", "cc_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:lhd.bzl", "lhd_verilog")
 
@@ -778,6 +779,28 @@ sh_test(
 # -- yosys turns a small array into registers and a large one emits no
 # cgen_memory instance at all). This is where rd_enable_1 versus rd_enable_0
 # inside ONE model is checked, with exact per-port held/read values.
+# Prints the wrapper Cgen_verilog GENERATES for an unshipped (R,W,clock) shape,
+# so mem_gen_wrapper_test can simulate the real thing. The generator is private;
+# this links against it through the single named friend peer declared in
+# cgen_verilog.hpp.
+cc_binary(
+    name = "gen_mem_wrapper_dump",
+    srcs = ["gen_mem_wrapper_dump.cpp"],
+    visibility = ["//visibility:private"],
+    deps = ["//inou/cgen:inou_cgen"],
+)
+
+# The GENERATED wrapper, SIMULATED -- not grepped. Covers the generator's
+# output for a shape it owns (2rd_3wr, excluded by have_wrapper); it does NOT
+# cover shape dispatch, which the test says in place.
+sh_test(
+    name = "mem_gen_wrapper_test",
+    size = "small",
+    srcs = ["mem_gen_wrapper_test.sh"],
+    data = [":gen_mem_wrapper_dump"],
+    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
+)
+
 sh_test(
     name = "mem_multiread_hold_test",
     size = "small",
