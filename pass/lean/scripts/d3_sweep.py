@@ -1037,6 +1037,21 @@ def d3_residual : ResidualProgram :=
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"residual_ready t={{tr}}"
 {split}  Compiler.D3.report "{m}" {m}_designCert d3_fast R {samples}
+
+-- The CLOSING bracket for `report_started`. Without it the marker sequence of
+-- a HEALTHY run ends at `residual_ready`, because `D3.report` emits nothing of
+-- its own and every later marker (`sim_one_done`, `selftest_done`,
+-- `agree_done`, `component_*`) lives in PHASE_SPLIT, which a normal run does
+-- not use. A reader then cannot tell a report still running from one that
+-- finished long ago, and the natural reading -- "it entered report_started and
+-- never came out" -- is wrong: measured on serdiv_gate and instr_scan_gate,
+-- both completed the report in 12.31 s and 18.43 s with sim/checker/agree all
+-- 1, while the stage that actually ran long was the module-proof composition,
+-- which writes to a DIFFERENT file.
+#eval show IO Unit from do
+  let t ← IO.monoMsNow
+  IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
+    h.putStrLn s!"report_finished t={{t}}"
 """
 
 PROVE_TAIL_NAMED = """
