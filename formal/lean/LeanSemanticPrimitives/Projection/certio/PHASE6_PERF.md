@@ -2031,3 +2031,94 @@ NOTE on certificate identity: `cva6_30_auth`'s `csr_regfile_gate` is
 32,853 / 34,897, while the in-flight run uses `temp/rt_csr_regfile_gate.dcert`
 at 32,822 / 34,874.  **Different revisions of the same block** -- the hashes
 and shapes must travel with any result.
+
+## 21. Coverage: six more zero-flop CVA6 blocks, and the CSR failure
+
+### 21.1 Reproducible corpus audit
+
+`scripts/cva6_corpus_audit.py` replaces the earlier ad-hoc scan.  One command,
+from the certificates alone, printing the full per-block table (no ellipsis),
+every sha256, and a `--json` dump:
+
+    python3 scripts/cva6_corpus_audit.py \
+      --frozen <d4>/pass/lean/tests/d4/cva6_30.list \
+      --corpus <d4>/temp/cva6_30_auth/blocks \
+      --corpus <d4>/temp/cva6_30_auth2/blocks \
+      --json   .perfwork/cva6_corpus_audit.json
+
+Frozen list: `pass/lean/manifests/cva6_30_frozen.tsv` on
+`direction-3-translation-validation` @ `7f5b1bd27`; names at
+`pass/lean/tests/d4/cva6_30.list`.  Support is NOT computed by that script --
+it is Lean's, via `proto_probe --support`, and the script prints that command
+rather than duplicating the logic.
+
+Result: **30 of 30 named blocks have a certificate**, 0 missing.
+
+**CORRECTION to section 20.3: the figure is 21 of 21, not 20 of 20.**  The
+earlier scan missed `cva6_hpdcache_wrapper`, which lives in `cva6_30_auth2`.
+With it included: **21 sequential blocks, 21 with the reset-polarity conflict,
+9 combinational blocks on which the defect cannot apply.**
+
+### 21.2 E5 -- `csr_regfile`, FAILED
+
+    cert  temp/rt_csr_regfile_gate.dcert, sha 54c11010...fa54, 32,822 / 34,874
+    MixError.outOfFuel after 3,237,243 ms (53 m 57 s), exit 3
+    wall 3,237.32 s, RSS 93,320 KB
+
+No checker-accepted residual and no comparison, so it adds **zero** to either
+count.  Attached to THAT certificate only: the canonical
+`cva6_30_auth` `csr_regfile_gate` is 32,853 / 34,897, sha `54c110...` vs a
+different file -- a DIFFERENT REVISION, and this failure says nothing about it.
+
+### 21.3 E6-E11 -- six zero-flop blocks, all exit 0
+
+Canonical corpus, `--file-ab` full gate, one at a time, smallest first.  Every
+one: all six support fields true, `checkResidual` accepted, six width-aware
+stimuli matching `interpretDesign`, threaded trace agreeing, control agreeing.
+
+| block | sources / nodes | specialize | bound | ref s/cyc | residual s/cyc | ratio | wall |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `instr_scan` | 1,235 / 1,264 | 6,592 ms | 5,711 | 0.656 | 0.059 | **11.1x** | 15.6 s |
+| `commit_stage` | 1,193 / 1,283 | 6,308 ms | 5,448 | 3.014 | 0.145 | **20.8x** | 42.8 s |
+| `compressed_decoder` | 1,913 / 2,022 | 16,447 ms | 8,962 | 0.300 | 0.080 | **3.7x** | 25.8 s |
+| `pmp` | 2,881 / 3,213 | 36,402 ms | 14,277 | 0.128 | 0.190 | **0.7x** | 45.5 s |
+| `pmp_data_if` | 4,062 / 4,505 | 76,425 ms | 19,743 | 1.031 | 0.466 | **2.2x** | 115.3 s |
+| `alu_wrapper` | 6,134 / 6,595 | 172,645 ms | 28,889 | 1.542 | 1.470 | **1.0x** | 256.5 s |
+
+**There is no uniform speedup.**  Across all eight measured blocks the residual
+ranges from **0.7x (slower than the interpreter) to 20.8x faster**, with no
+visible relation to node count -- `pmp` at 3,213 nodes is slower while
+`commit_stage` at 1,283 is 20.8x faster.  Any claim that projection "is faster"
+needs a per-design qualifier.
+
+Specialization, by contrast, does rise with node count on this backend:
+6.6 s at 1,264 nodes to 172.6 s at 6,595.
+
+### 21.4 Counts
+
+| count | meaning | value |
+|---|---|---|
+| **differential** | specialized, checker-accepted, residual agrees with `interpretDesign` on the recorded stimuli | **8** |
+| **semantically trusted** | the above AND self-consistent certificate metadata | **8** |
+
+All eight are zero-flop, so the systemic reset defect cannot apply to any of
+them -- which is why the two counts coincide today.  They are
+`alu`, `decoder`, `commit_stage`, `instr_scan`, `compressed_decoder`, `pmp`,
+`pmp_data_if`, `alu_wrapper`.
+
+**That is every supported zero-flop block in the frozen 30.**  The ninth
+combinational block, `aes`, is unsupported (`sources`, `ops`).  Going further
+requires either operator coverage for `aes`, or the exporter reset fix to make
+the 21 sequential blocks trustworthy.
+
+PROVENANCE NOTE: `alu` was run on the canonical certificate (sha `d731ee22...`,
+identical to `temp/rt_alu_gate.dcert`).  **`decoder` was NOT** -- E3 used
+`temp/rt_decoder_gate.dcert` (8,373 / 8,971, sha `f87080df...`) where the
+canonical `decoder_gate` is 8,340 / 8,938, sha `23b4f031...`.  Different
+revisions of the same block.  So **7 of the 8 are canonical-corpus runs**, and
+`decoder` should be re-run on the canonical certificate before the count is
+quoted as "8 of the frozen 30".
+
+Status for every row: NATIVE / EXPERIMENTAL.  Not RTL equivalence, not kernel
+proof -- no run discharges the concrete `hproj`, and the fork backend has no
+bridge.
