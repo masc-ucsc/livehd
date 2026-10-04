@@ -2048,6 +2048,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       livehd::semdiff::Semdiff_options so;
       so.matching_names             = true;  // anchor flops/mems by hier name (lec's correspondence basis)
       so.state_pairing              = want_pairing;
+      so.project_state_bits         = want_pairing;
       so.seed_pairs                 = o.match;  // explicit formal.lec.match pairs are tier-1 anchors for the signatures
       // Defs run CONCURRENTLY (dispatch_dag below: top_down emits no edges at
       // all, and bottom_up still runs siblings in parallel) over graphs they all
@@ -2188,6 +2189,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         }
         return;  // skip the solver for this def
       }
+      o._state_projections  = m.state_projections;
+      o._memory_projections = m.memory_projections;
       if (want_pairing && !m.state_pairs.empty()) {
         std::vector<std::pair<std::string, std::string>> fresh;
         fresh.reserve(m.state_pairs.size());
@@ -2278,12 +2281,26 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // for the flat retry (which keeps the requested engine).
     const bool        netlist_cmp      = sub_lib != nullptr && !sub_lib->empty();
     const std::string requested_engine = o.engine;
+    const int         requested_timeout = o.timeout;
+    const bool        reserve_flat      = netlist_cmp && !coll.empty() && o.engine == "auto" && o.timeout > 0 && o.rlimit == 0;
+    long long         recovery_wall_ms  = 0;
     if (netlist_cmp && !coll.empty() && o.engine == "auto") {
       o.engine = "ind";
+      if (reserve_flat) {
+        recovery_wall_ms = livehd::lec::race_deadline_ms(o);
+        if (recovery_wall_ms > 0) {
+          recovery_wall_ms   = std::min(recovery_wall_ms, static_cast<long long>(o.timeout) * 1000 * o.hard_timeout_mult);
+          o._wall_timeout_ms = std::max(1LL, recovery_wall_ms / 2);
+        }
+        o.timeout = std::max(1, o.timeout / 2);
+      }
     }
-    auto r   = order.size() == 1 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib)
-                                 : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], o, sub_lib);
+    auto r                                 = order.size() == 1 && !reserve_flat
+                                                 ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], o, sub_lib)
+                                                 : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], o, sub_lib);
     o.engine = requested_engine;
+    o.timeout                              = requested_timeout;
+    o._wall_timeout_ms                     = 0;
     // Both a REFUTE and an UNKNOWN under proven-child collapse get ONE flat re-solve
     // (collapse cleared, children descended) — for opposite reasons:
     //
@@ -2347,11 +2364,12 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // and the debug build shipped the collapsed UNKNOWN (exit 7) for a def the
     // flat retry proves.
     const bool      cheap_unknown          = r.solve_ms < cheap_ms;
-    // A WALL-KILLED Unknown (a forked prover SIGKILLed at its deadline) reports
-    // solve_ms 0, so it would read as "cheap" -- but it spent its whole wall
-    // budget, and the bigger flat miter would only run out again: no retry.
-    const bool      unknown_under_collapse = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused && !r.wall_killed
-                                             && (!force_flat[def_ix].empty() || cheap_unknown || netlist_cmp);
+    // A wall kill reports no solver accounting and is not a cheap give-up.
+    // Only a deliberately shortened collapsed attempt has reserved recovery
+    // time: its kill must not suppress the remaining flat/BMC attempt.
+    const bool      unknown_under_collapse = r.verdict == Verdict::Unknown && !coll.empty() && !r.oversize_refused
+                                        && (!r.wall_killed || reserve_flat)
+                                        && (!force_flat[def_ix].empty() || cheap_unknown || netlist_cmp);
     //    (c) ABSORBING a known refutation and coming back PROVEN. This is the one
     //        place a wrong PROVEN silently converts a DEFINITE counterexample into
     //        a run-level pass, so it gets the same flat confirmation (a) already
@@ -2388,15 +2406,27 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // real counterexample this confirm is meant to validate. Only when the
       // trust list is empty is this the original full clear.
       oflat.collapse.assign(base.trust.begin(), base.trust.end());
+      if (reserve_flat) {
+        const int       induction_share = std::max(1, requested_timeout / 2);
+        const long long spent_s         = r.wall_killed ? induction_share : (r.solve_ms + 999) / 1000;
+        oflat._bmc_reserved_timeout     = std::max(1, requested_timeout - induction_share);
+        oflat.timeout                   = static_cast<int>(std::max<long long>(std::max(1, requested_timeout - induction_share),
+                                                             static_cast<long long>(requested_timeout) - spent_s));
+        if (recovery_wall_ms > 0) {
+          const auto elapsed_ms
+              = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+          oflat._wall_timeout_ms = std::max(1LL, recovery_wall_ms - elapsed_ms);
+        }
+      }
       // When escalation already inlined every ordinary child, `r` is the flat
       // query we are about to request.  Reuse it instead of spending the same
       // solver budget twice; deepen_if_bounded below is the additional check
       // that matters.
       const bool already_flat = proven_absorbing && coll.empty();
-      auto rf = already_flat ? r
-                             : (order.size() == 1
-                                    ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
-                                    : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib));
+      auto       rf                = already_flat ? r
+                                                  : (order.size() == 1 && !reserve_flat
+                                                         ? livehd::lec::prove_equal(ref_by_name[name], impl_by_name[name], oflat, sub_lib)
+                                                         : livehd::lec::prove_equal_isolated(ref_by_name[name], impl_by_name[name], oflat, sub_lib));
       // The collapsed run really ran cvc5, so its effort is part of what this def
       // cost: carry it into the survivor BEFORE the move discards `r` (lhd.stats).
       // A BOUNDED flat pass ("no CEX up to bound k") cannot by itself overrule
@@ -4975,8 +5005,11 @@ void lec_command(Options& opts, Result& res) {
         livehd::semdiff::Semdiff_options so;
         so.matching_names  = true;
         so.state_pairing   = true;
+        so.project_state_bits = true;
         so.seed_pairs      = o.match;
         auto m             = livehd::semdiff::structural_match(ref_g.get(), impl_g.get(), so);
+        o._state_projections  = m.state_projections;
+        o._memory_projections = m.memory_projections;
         flat_unpaired_ref  = m.a_state_unpaired;
         flat_unpaired_impl = m.b_state_unpaired;
         // 2f-lec diverged-use guard: keep genuinely-diverged memories uncollapsed.

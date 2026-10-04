@@ -842,8 +842,13 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
   }
   const size_t splice_budget = 10000 + side_nodes * 100;
 
+  // Cell classification depends on the definition, not its instance. Keep the
+  // definitions alive while caching so a released graph cannot reuse its key.
+  absl::flat_hash_map<hhds::Graph*, bool>   icg_defs;
+  std::vector<std::shared_ptr<hhds::Graph>> icg_defs_keepalive;
   size_t done = 0;
   for (auto* host : hosts) {
+    bool collect_all_candidates = false;
     // ONE SPLICE PER COLLECTION, then re-collect.
     //
     // `inline_sub_instance` MUTATES `host`, and every other handle in the
@@ -887,10 +892,20 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
         // model. Dissolving it here leaves a plain derived-clock cone, the
         // encoder REFUSES the def, and a real difference downstream of the gate
         // comes back UNKNOWN instead of REFUTED (clock_cell_test case 6b).
-        if (livehd::latch_contract::match_icg_def(def_g.get())) {
+        auto [icg, inserted] = icg_defs.try_emplace(def_g.get(), false);
+        if (inserted) {
+          icg->second = livehd::latch_contract::match_icg_def(def_g.get()).has_value();
+          icg_defs_keepalive.push_back(def_g);
+        }
+        if (icg->second) {
           continue;
         }
         insts.push_back(n);
+        // Most candidates splice immediately. Do not collect the entire host
+        // only to discard all but its first handle after that mutation.
+        if (!collect_all_candidates) {
+          break;
+        }
       }
       if (insts.empty()) {
         break;
@@ -933,8 +948,15 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
         }
       }
       if (spliced == 0) {
+        if (!collect_all_candidates) {
+          // A refused candidate must not hide a later inlinable instance.
+          // Nothing mutated: retry with the original full collection.
+          collect_all_candidates = true;
+          continue;
+        }
         break;  // nothing inlinable left (a real blackbox): stop rather than spin
       }
+      icg_defs.erase(host);  // this definition's body changed
       done += spliced;
     }
   }

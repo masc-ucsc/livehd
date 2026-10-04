@@ -15,6 +15,63 @@ register-rooted XAG algorithm in <a href="../../docs/synth_usyn.html">Register-R
 Unate/DOMINO Synthesis, proposal v4</a>: mandatory endpoint selection, exact bounded
 functional analysis, whole-cone one/two-phase attempts followed by selective removal,
 reuse-aware local and two-endpoint optimization, then residual XAG optimization and mapping.</p>
+<h2>Mapped validation and remaining proof work — 2026-10-03</h2>
+<p>The satsuma refresh measures 190 supported USYN mappings and 184 completed
+LiveHD ABC mappings with compile SAT optimization disabled. Six larger ABC
+designs reached the synthesis watchdog. All 191 supported Pyrope/Verilog source
+pairs pass native LEC, and all three source simulation flows pass their recorded
+checksums. The optimized suite passes 4,566 tests with two skips; the debug build,
+targeted formal checks and ABC-free smoke also pass.</p>
+<p>Sequential LEC now reserves half its finite budget for induction and half for
+BMC. Each leg has a fresh worker and a parent-enforced deadline, so a stalled
+induction call cannot prevent reachable-trace checking. Unused induction time
+transfers to BMC. Collapsed-netlist attempts preserve the same BMC reservation
+through flat recovery; a spent induction share goes directly to BMC. Tests cover
+stalled induction, unreachable step counterexamples, bounded passes and reachable
+refutes without increasing the timeout settings.</p>
+<p>Register projections and complete memory-bank correspondence now share
+<code>core/state_match.hpp</code> between semdiff and LEC. Semdiff exports its
+proposals; LEC revalidates them and proves initial state, transitions and outputs.
+Exact read-over-write expansion makes memory-bank induction obligations suitable
+for the cone accelerator. This is independent proof preparation: USYN synthesis
+still invokes ABC only through its optional technology-mapping provider.</p>
+<p>All 368 available standard mapped designs pass native LEC against both Pyrope
+and Verilog: 366 have unbounded proofs, while the two technology variants of
+<code>br_delay_shift_reg/ns1_w64</code> currently have six-step bounded checks.
+The other 22 technology/design slots have no retained
+mapped netlist. A raw ABC <code>br_ram_flops</code> proof that hit the 660-second
+watchdog now proves in about 24 seconds: shared normalization recovers 4,096
+storage bits from ordinary cell-model suffixes, and hierarchy preparation avoids
+repeated full candidate collection and repeated clock-gate classification.
+All 4,148 RAM obligations are discharged; no simulation evidence is substituted
+for this proof.</p>
+<p>Four of the previously eighteen inconclusive USYN arithmetic cases remain:
+<code>fma/bw32</code>, <code>fma_share_sgn/bw16</code>,
+<code>mul_add_sgn/bw24</code> and <code>sqr_sgn/bw26</code>. Their exact measured
+netlists pass 818,442 independent gate simulation cases, including signed corners
+and random inputs; this does not establish unbounded equivalence. Tree and array
+arithmetic expansions recover ABC proofs missed by the carry-save expansion.
+Sign partitions and operand-order variants did not recover the remaining cases
+within the existing budget and are not retained.</p>
+<p>Against LiveHD ABC, the paired USYN delay geomean is 0.990 (152 positive
+samples) and area geomean is 0.973 (153 positive samples). Twenty delay ratios and
+eighteen area ratios are below 0.8. The worst area cases include round-robin
+arbiters and binary muxes; fixed-priority arbitration and binary demuxes are among
+the worst delay cases. Their evidence exposes exhausted native search budgets
+and, for combinational blocks, no register endpoints. Native proxy cost differs
+from mapped area and timing, so these are diagnostic observations rather than a
+complete causal explanation. The generated
+<code>lhdtrack/target/usyn-under-0.8-satsuma.html</code> and JSON enumerate every
+sub-0.8 metric against both ABC baselines, with per-design search evidence and
+formal coverage. Physical DOMINO characterization and further mapped QoR work
+remain pending.</p>
+<p>Focused ablations use the same frozen binary and library on
+<code>br_arb_rr/nr16</code> and <code>br_mux_bin/nsi16_sw32</code>, with native
+LEC and lgcheck on each emitted netlist. Removing residual optimization raises
+the arbiter area to 39.045 µm²; residual optimization without feedback maps to
+33.957 µm². Binary mux area remains 66.981 µm² in both ablations, with zero
+residual rewrite/resubstitution wins. Stage switches do not recover its roughly
+0.49 area ratio; improving native Boolean optimization remains pending.</p>
 <p><strong>Confirmed architecture:</strong> USYN must build and run with zero ABC,
 including when ABC is removed. Only the optional technology-mapping step may depend
 on ABC. ABC remains in normal LiveHD builds as an alternative flow and benchmark

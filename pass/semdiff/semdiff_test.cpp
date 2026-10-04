@@ -1406,3 +1406,107 @@ TEST(Semdiff, DivergentOpIsGap) {
   EXPECT_EQ(0U, r.a_matched);
   EXPECT_EQ(0U, r.regions);
 }
+
+// Mapping may retain only bits 1 and 3 of a declared register. Report their
+// logical name correspondence, but never use that projection as a no-solver
+// identity proof (even when just one physical bit remains).
+TEST(Semdiff, ProjectedRegisterNamesRequireARealProof) {
+  auto make = [](const std::string& dir, const std::vector<std::string>& names, bool wide) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    auto  g   = gio->create_graph();
+    for (const auto& name : names) {
+      auto f = create_typed_node(*g, Ntype_op::Flop);
+      f.set_name(name);
+      auto q = f.create_driver_pin(0);
+      livehd::graph_util::set_ubits(q, wide ? 4 : 1);
+      livehd::graph_util::set_pin_name(q, name);
+    }
+    return g;
+  };
+  auto                             ref = make("lgdb_semdiff_projection_ref", {"lane.state"}, true);
+  livehd::semdiff::Semdiff_options opts;
+  opts.matching_names     = true;
+  opts.project_state_bits = true;
+  int id                  = 0;
+  for (const auto& names : std::vector<std::vector<std::string>>{
+           {"lane.state[1].flop_16", "lane.state[3].flop_16"},
+           {"lane.state[3].flop_16"}
+  }) {
+    auto impl = make(std::format("lgdb_semdiff_projection_impl{}", id++), names, false);
+    auto r    = livehd::semdiff::structural_match(ref.get(), impl.get(), opts);
+    EXPECT_EQ(1U, r.state.name_pairs);
+    EXPECT_EQ(1U, r.state.projected_name_pairs);
+    EXPECT_EQ(1U, r.state.a_total);
+    EXPECT_EQ(1U, r.state.b_total);
+    EXPECT_EQ(0U, r.state.a_unpaired);
+    EXPECT_EQ(0U, r.state.b_unpaired);
+    EXPECT_FALSE(livehd::semdiff::is_structural_identity(r));
+    EXPECT_FALSE(livehd::semdiff::structural_identical(ref.get(), impl.get(), opts));
+  }
+  auto       renamed   = make("lgdb_semdiff_projection_renamed", {"other.state[1].flop_16", "other.state[3].flop_16"}, false);
+  const auto candidate = livehd::semdiff::structural_match(ref.get(), renamed.get(), opts);
+  ASSERT_EQ(1U, candidate.state_projections.size());
+  EXPECT_EQ(1U, candidate.state.projection_candidates);
+  EXPECT_EQ("lane.state", candidate.state_projections.front().wide_key);
+  EXPECT_EQ((std::vector<std::string>{"", "other.state[1].flop_16", "", "other.state[3].flop_16"}),
+            candidate.state_projections.front().bit_keys);
+  EXPECT_FALSE(livehd::semdiff::is_structural_identity(candidate));
+  auto ambiguous = make("lgdb_semdiff_projection_ambiguous", {"lane.state", "other.wide"}, true);
+  EXPECT_TRUE(livehd::semdiff::structural_match(ambiguous.get(), renamed.get(), opts).state_projections.empty());
+  auto duplicate = make("lgdb_semdiff_projection_duplicate", {"other.state[1].a", "other.state[1].b"}, false);
+  EXPECT_TRUE(livehd::semdiff::structural_match(ref.get(), duplicate.get(), opts).state_projections.empty());
+  for (const auto& names : std::vector<std::vector<std::string>>{
+           {"lane.state[4].flop_16"},
+           {"lane.state[1].a", "lane.state[1].b"},
+           {"other.state[1].flop_16"}
+  }) {
+    auto impl = make(std::format("lgdb_semdiff_projection_bad{}", id++), names, false);
+    auto r    = livehd::semdiff::structural_match(ref.get(), impl.get(), opts);
+    EXPECT_EQ(0U, r.state.name_pairs);
+    EXPECT_EQ(0U, r.state.projected_name_pairs);
+    EXPECT_EQ(1U, r.state.a_unpaired);
+  }
+}
+
+TEST(Semdiff, MemoryBankCandidatesAreSharedAndRequireProof) {
+  const auto ref  = build_memory_kind("lgdb_semdiff_mem_bank_ref", 0);
+  const auto make = [](const std::string& directory, bool incomplete) {
+    auto& lib = livehd::Hhds_graph_library::instance(directory);
+    auto  g   = lib.create_io("memory_kind")->create_graph();
+    for (int entry = 0; entry < 4; ++entry) {
+      for (int bit = 0; bit < 8; ++bit) {
+        if (incomplete && entry == 3 && bit == 7) {
+          continue;
+        }
+        auto       flop = create_typed_node(*g, Ntype_op::Flop);
+        const auto name = std::format("m._mem[{}][{}].flop_16", entry, bit);
+        flop.set_name(name);
+        auto q = flop.create_driver_pin(0);
+        livehd::graph_util::set_ubits(q, 1);
+        livehd::graph_util::set_pin_name(q, name);
+      }
+    }
+    return g;
+  };
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names     = true;
+  options.project_state_bits = true;
+  auto       complete        = make("lgdb_semdiff_mem_bank_complete", false);
+  const auto result          = livehd::semdiff::structural_match(ref.get(), complete.get(), options);
+  ASSERT_EQ(result.memory_projections.size(), 1U);
+  EXPECT_EQ(result.state.memory_projection_candidates, 1U);
+  const auto& projection = result.memory_projections.front();
+  EXPECT_EQ(projection.memory_key, "m");
+  EXPECT_EQ(projection.entries, 4);
+  EXPECT_EQ(projection.bits, 8);
+  EXPECT_FALSE(projection.memory_in_impl);
+  ASSERT_EQ(projection.bank.bit_keys.size(), 4U);
+  EXPECT_EQ(projection.bank.bit_keys[3][7], "m._mem[3][7].flop_16");
+  EXPECT_FALSE(livehd::semdiff::is_structural_identity(result));
+  auto incomplete = make("lgdb_semdiff_mem_bank_incomplete", true);
+  EXPECT_TRUE(livehd::semdiff::structural_match(ref.get(), incomplete.get(), options).memory_projections.empty());
+  const auto reverse = livehd::semdiff::structural_match(complete.get(), ref.get(), options);
+  ASSERT_EQ(reverse.memory_projections.size(), 1U);
+  EXPECT_TRUE(reverse.memory_projections.front().memory_in_impl);
+}

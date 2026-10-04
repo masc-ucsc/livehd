@@ -12,8 +12,11 @@ load("//tools:copt_default.bzl", "COPTS")
 filegroup(
     name = "lec_query_srcs",
     srcs = [
+        "//core:state_match_srcs",
         "cone_abc.hpp",
+        "cone_expand.hpp",
         "cone_digest.cpp",
+        "cone_expand.cpp",
         "encode.cpp",
         "encode.hpp",
         "fork_race.hpp",
@@ -30,7 +33,10 @@ filegroup(
         "solve_stats.hpp",
     ] + select({
         "//:without_abc": ["cone_unavailable.cpp"],
-        "//conditions:default": ["cone_abc.cpp"],
+        "//conditions:default": [
+            "cone_abc.cpp",
+            "//pass/synth:arith.hpp",  # cone_abc's bvmul/bvadd blasting
+        ],
     }),
     visibility = ["//visibility:public"],
 )
@@ -63,6 +69,7 @@ cc_library(
     name = "lec_query",
     srcs = [
         "cone_digest.cpp",
+        "cone_expand.cpp",
         "observe.cpp",
         "query.cpp",
         "solve_stats.cpp",
@@ -72,6 +79,7 @@ cc_library(
     }),
     hdrs = [
         "cone_abc.hpp",
+        "cone_expand.hpp",
         "fork_race.hpp",
         "observe.hpp",
         "query.hpp",
@@ -86,6 +94,7 @@ cc_library(
         "//graph",
         "//pass/cost:host_mem",  # fork_race: cap each racer at its share of the memory budget
         "//pass/cprop:pass_cprop",
+        "//pass/synth:arith",
         "@cvc5",  # prebuilt cvc5 (combined+localized) -- the SMT backend
         "@hhds//hhds:graph",
     ] + select({
@@ -431,6 +440,14 @@ sh_test(
     tags = ["no-sandbox"],  # forks the in-process cvc5 solver as race workers
 )
 
+# Reserve reachable-trace checking after a wall-killed collapsed attempt.
+sh_test(
+    name = "lec_bmc_reserve_smoke",
+    srcs = ["tests/lec_bmc_reserve_smoke.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
 # Trusted-module assume-equal (`lhd lec --trust <def>` / formal.lec.trust): a def
 # ASSUMED equal without a proof — the escape hatch for a cell the encoder cannot
 # model (a latch). The driver skips proving it and boxes its instances so the
@@ -550,4 +567,24 @@ sh_test(
     srcs = ["tests/lec_mem_unpaired_smoke.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],
+)
+
+# Register bits eliminated by mapping leave a projected state relation. Every
+# retained next-state bit and all outputs still have to agree.
+sh_test(
+    name = "lec_sparse_state_smoke",
+    srcs = ["tests/lec_sparse_state_smoke.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+cc_test(
+    name = "cone_expand_test",
+    srcs = ["cone_expand_test.cpp"],
+    copts = COPTS,
+    deps = [":lec_query", "@cvc5", "@googletest//:gtest_main"],
+    target_compatible_with = select({
+        "//:without_abc": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )

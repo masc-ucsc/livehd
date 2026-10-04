@@ -9,6 +9,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "hhds/graph.hpp"
+#include "state_match.hpp"
 
 // pass/semdiff — structural diff/match between two LGraphs: a
 // *structural LEC*. It mirrors pass/lec's shape (two designs, a C++ API the
@@ -40,6 +41,10 @@ struct Semdiff_options {
   bool                                             matching_io_names = true;
   bool                                             state_pairing     = false;  // tier-2: full-match (SRP/ERP signature) pairing
                                                                                // of name-unmatched state cells (2f-lec consumer)
+  // Report correspondence of retained register bits after mapping prunes some
+  // bits. A projected pair is never a structural identity proof; LEC must
+  // discharge its retained-bit transition relation and all output obligations.
+  bool                                             project_state_bits = false;
   // Ask structural_identical to resolve any signature-level false miss with
   // the exact node/edge traversal. Intended for strict artifact validation
   // (compile-cache H5), where completeness matters more than the fast reject.
@@ -102,6 +107,9 @@ struct State_stats {
   // its compare-point obligation is keyed by the shared seed, so the
   // structural match re-verifies it (see build_sides), never trusts it.
   uint32_t name_reconstructed = 0;
+  uint32_t memory_projection_candidates = 0;
+  uint32_t projection_candidates        = 0;                      // renamed packed/bit relations needing a solver
+  uint32_t projected_name_pairs         = 0;                      // name-paired registers with eliminated bits
   uint32_t full_pairs     = 0;                      // tier-2 full-match pairs (state_pairing)
   // Memory subset of the pair counts (a_mems/b_mems are the memory subset of the
   // TOTALS). regs-vs-mems is the split a design health check reports, and only
@@ -130,6 +138,9 @@ struct State_stats {
     b_name_grouped   += o.b_name_grouped;
     seed_pairs       += o.seed_pairs;
     name_reconstructed += o.name_reconstructed;
+    projected_name_pairs         += o.projected_name_pairs;
+    projection_candidates        += o.projection_candidates;
+    memory_projection_candidates += o.memory_projection_candidates;
     full_pairs       += o.full_pairs;
     name_pairs_mem   += o.name_pairs_mem;
     full_pairs_mem   += o.full_pairs_mem;
@@ -191,6 +202,9 @@ struct Match_result {
   // has the same SRP/ERP but a different op/bits/init fold — the pair
   // precondition refuses), or `no full match` (no cross-side counterpart).
   std::vector<State_pair>  state_pairs;
+  // Shape candidates for retained bits of renamed registers; never identity proofs.
+  std::vector<livehd::state_match::Register_projection> state_projections;
+  std::vector<livehd::state_match::Memory_projection>   memory_projections;
   std::vector<std::string> a_state_unpaired, b_state_unpaired;
   // Memories whose correspondence GENUINELY diverges — unpaired with a kind/init
   // mismatch or no counterpart, NOT mere symmetric `ambiguous` (which is
@@ -223,7 +237,8 @@ struct Match_result {
 //     graphs the honest answer is no.
 [[nodiscard]] inline bool is_structural_identity(const Match_result& m) {
   return m.a_matched > 0 && m.a_unmatched == 0 && m.b_unmatched == 0 && m.cut_violated == 0 && m.cut_unknown == 0
-         && m.state.full_pairs == 0 && m.state.seed_pairs == 0;
+         && m.state.full_pairs == 0 && m.state.seed_pairs == 0 && m.state.projected_name_pairs == 0 && m.state_projections.empty()
+         && m.memory_projections.empty();
 }
 
 // Stamp the `match` attribute on nodes + driver pins of BOTH graphs: a shared id

@@ -60,6 +60,39 @@ void expect_agree(TermManager& tm, const Term& diff, const std::string& what) {
 
 Term distinct(TermManager& tm, const Term& a, const Term& b) { return tm.mkTerm(Kind::DISTINCT, {a, b}); }
 
+// An independent gate-level array multiplier. The faulty version drops one
+// carry term, so arithmetic proof must never equate its output to MUL.
+Term gate_product(TermManager& tm, const Term& a, const Term& b, uint32_t width, bool signed_a, bool signed_b,
+                  bool faulty_carry = false) {
+  const auto bit = [&](const Term& value, uint32_t index, bool sign) {
+    const auto n = value.getSort().getBitVectorSize();
+    if (index >= n && !sign) {
+      return tm.mkBitVector(1, 0);
+    }
+    const auto i = std::min(index, n - 1);
+    return tm.mkTerm(tm.mkOp(Kind::BITVECTOR_EXTRACT, {i, i}), {value});
+  };
+  std::vector<Term> sum(width, tm.mkBitVector(1, 0));
+  for (uint32_t j = 0; j < width; ++j) {
+    Term carry = tm.mkBitVector(1, 0);
+    for (uint32_t i = 0; i < width; ++i) {
+      const Term part
+          = i < j ? tm.mkBitVector(1, 0) : tm.mkTerm(Kind::BITVECTOR_AND, {bit(a, i - j, signed_a), bit(b, j, signed_b)});
+      const Term propagate = tm.mkTerm(Kind::BITVECTOR_XOR, {sum[i], part});
+      const Term generate  = tm.mkTerm(Kind::BITVECTOR_AND, {sum[i], part});
+      sum[i]               = tm.mkTerm(Kind::BITVECTOR_XOR, {propagate, carry});
+      carry                = faulty_carry && j == 1 && i == 2
+                                 ? generate
+                                 : tm.mkTerm(Kind::BITVECTOR_OR, {generate, tm.mkTerm(Kind::BITVECTOR_AND, {propagate, carry})});
+    }
+  }
+  Term product = sum.back();
+  for (size_t i = sum.size() - 1; i-- > 0;) {
+    product = tm.mkTerm(Kind::BITVECTOR_CONCAT, {product, sum[i]});
+  }
+  return product;
+}
+
 }  // namespace
 
 // ---- identities the blaster must reproduce exactly (all UNSAT) --------------
@@ -82,6 +115,24 @@ TEST(ConeAbc, ArithmeticIdentities) {
   expect_agree(tm, distinct(tm, tm.mkTerm(Kind::BITVECTOR_NEG, {tm.mkTerm(Kind::BITVECTOR_NEG, {a})}), a), "--a == a");
   // A real difference: a != a+1 for every a (bvadd wraps, so this is UNSAT-free).
   expect_agree(tm, distinct(tm, a, tm.mkTerm(Kind::BITVECTOR_ADD, {a, one})), "a vs a+1");
+}
+
+TEST(ConeAbc, ArithmeticTreesPreserveSignednessTruncationAndCarryFaults) {
+  for (const uint32_t width : {5U, 9U, 17U}) {
+    for (int signs = 0; signs < 4; ++signs) {
+      TermManager tm;
+      const Term  a      = tm.mkConst(tm.mkBitVectorSort(4), "a");
+      const Term  b      = tm.mkConst(tm.mkBitVectorSort(4), "b");
+      const auto  extend = [&](const Term& value, bool sign) {
+        return tm.mkTerm(tm.mkOp(sign ? Kind::BITVECTOR_SIGN_EXTEND : Kind::BITVECTOR_ZERO_EXTEND, {width - 4}), {value});
+      };
+      const Term product = tm.mkTerm(Kind::BITVECTOR_MULT, {extend(a, signs & 1), extend(b, signs & 2)});
+      expect_agree(tm, distinct(tm, product, gate_product(tm, a, b, width, signs & 1, signs & 2)), "array multiplier");
+      const Term fault = distinct(tm, product, gate_product(tm, a, b, width, signs & 1, signs & 2, true));
+      ASSERT_FALSE(cvc5_says_unsat(tm, fault)) << "fixture must expose its faulty carry";
+      expect_agree(tm, fault, "faulty array multiplier");
+    }
+  }
 }
 
 // ---- shifts: the saturating >= width semantics are easy to get wrong --------
@@ -416,4 +467,48 @@ TEST(ConeAbc, BatchResumesPastAStalledCone) {
   EXPECT_EQ(verdicts[3], Cone_verdict::Refuted) << "a vs a+1 behind a stalled cone";
   EXPECT_EQ(verdicts[4], Cone_verdict::Proven) << "~~a == a after two stalls";
   EXPECT_LT(ms, deadline_ms) << "a stalled cone held the batch to its deadline";
+}
+
+TEST(ConeAbc, WideMemoryReadMuxesPreserveDataAndAddress) {
+  TermManager       tm;
+  const Term        address = tm.mkConst(tm.mkBitVectorSort(4), "read_address");
+  std::vector<Term> words;
+  for (unsigned i = 0; i < 16; ++i) {
+    words.push_back(tm.mkConst(tm.mkBitVectorSort(32), "word" + std::to_string(i)));
+  }
+  Term priority = words.back();
+  for (unsigned i = 15; i-- > 0;) {
+    priority = tm.mkTerm(Kind::ITE, {tm.mkTerm(Kind::EQUAL, {address, tm.mkBitVector(4, i)}), words[i], priority});
+  }
+  auto level = words;
+  for (unsigned bit = 0; bit < 4; ++bit) {
+    const Term selector
+        = tm.mkTerm(Kind::EQUAL, {tm.mkTerm(tm.mkOp(Kind::BITVECTOR_EXTRACT, {bit, bit}), {address}), tm.mkBitVector(1, 1)});
+    std::vector<Term> next;
+    for (size_t i = 0; i < level.size(); i += 2) {
+      next.push_back(tm.mkTerm(Kind::ITE, {selector, level[i + 1], level[i]}));
+    }
+    level = std::move(next);
+  }
+  expect_agree(tm, distinct(tm, priority, level[0]), "priority and binary memory read muxes");
+  const Term fault = tm.mkTerm(Kind::BITVECTOR_XOR, {level[0], tm.mkBitVector(32, 1)});
+  expect_agree(tm, distinct(tm, priority, fault), "faulty wide memory read mux");
+}
+
+TEST(ConeAbc, ArithmeticPortfolioPreservesCounterexamples) {
+  TermManager tm;
+  const auto  input   = tm.mkBitVectorSort(4);
+  const auto  a       = tm.mkConst(input, "portfolio_a");
+  const auto  b       = tm.mkConst(input, "portfolio_b");
+  const auto  extend  = [&](const Term& t) { return tm.mkTerm(tm.mkOp(Kind::BITVECTOR_SIGN_EXTEND, {5}), {t}); };
+  const auto  product = tm.mkTerm(Kind::BITVECTOR_MULT, {extend(a), extend(b)});
+  const auto  good    = distinct(tm, product, gate_product(tm, a, b, 9, true, true));
+  const auto  bad     = distinct(tm, product, gate_product(tm, a, b, 9, true, true, true));
+  ASSERT_TRUE(cvc5_says_unsat(tm, good));
+  ASSERT_FALSE(cvc5_says_unsat(tm, bad));
+  // Two arithmetic cones receive 1000 ms each and exercise the bounded race.
+  const auto results = abc_prove_unsat_batch({good, bad}, 10000, 4000);
+  ASSERT_EQ(results.size(), 2U);
+  EXPECT_EQ(results[0], Cone_verdict::Proven);
+  EXPECT_EQ(results[1], Cone_verdict::Refuted);
 }

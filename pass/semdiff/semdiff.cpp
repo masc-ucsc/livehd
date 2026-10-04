@@ -371,6 +371,7 @@ struct State_cell {
   // lone `x.flop_16` / `x_cgen1.l` renamed to `x`). The pairing is a
   // bus_name HINT; the compare-point obligations below re-verify it.
   bool                                       name_reconstructed = false;
+  bool                                       name_partial       = false;
   bool        t1_pair = false, t1_group = false, t2_pair = false, physical_bridge = false, ambiguous = false;
   uint64_t    kind_nw  = 0;        // `kind` WITHOUT the width term (see collect_state)
   uint64_t    kind_ni  = 0;        // op + commit edge only: no init, no width (the reset-agnostic phase)
@@ -655,7 +656,7 @@ uint64_t rp_signature(const State_side& ss, const State_cell& c, bool backward,
 // both obligations were one-sided and silently skipped, and a `g` vs `g.l`
 // pair with swapped dins or a different reset constant PROVED with no solver.
 // Every renamed cell is marked name_reconstructed (State_stats counts them).
-void reconstruct_bus_groups(State_side& side, const State_side& other) {
+void reconstruct_bus_groups(State_side& side, const State_side& other, bool project_bits) {
   auto name_of = [](const State_cell& c) { return normalize_reg_name(c.node.get_hier_name()); };
   // The DECLARED Q width (node_out_bits only sees connected driver pins).
   auto q_bits  = [](const State_cell& c) {
@@ -721,7 +722,7 @@ void reconstruct_bus_groups(State_side& side, const State_side& other) {
   }
   for (auto& [base, members] : groups) {
     const auto n = static_cast<int64_t>(members.size());
-    if (n < 2 || n > std::numeric_limits<int32_t>::max() || own_names.contains(base)) {
+    if (n < (project_bits ? 1 : 2) || n > std::numeric_limits<int32_t>::max() || own_names.contains(base)) {
       continue;
     }
     auto oit = other_by_name.find(base);
@@ -730,13 +731,14 @@ void reconstruct_bus_groups(State_side& side, const State_side& other) {
     }
     const auto& wide = other.cells[oit->second];
     // Tier-1 pairs on the key, so the wide cell must carry exactly that key.
-    if (wide.is_mem || !wide.aggregate_key.empty() || wide.key != "n:" + base || q_bits(wide) != n) {
+    const auto  width = q_bits(wide);
+    if (wide.is_mem || !wide.aggregate_key.empty() || wide.key != "n:" + base || width < n || (!project_bits && width != n)) {
       continue;
     }
-    std::vector<uint8_t> seen(static_cast<size_t>(n), 0);
+    std::vector<uint8_t> seen(static_cast<size_t>(width), 0);
     bool                 ok = true;
     for (const auto& m : members) {
-      if (m.index >= n || seen[static_cast<size_t>(m.index)] != 0) {
+      if (m.index >= width || seen[static_cast<size_t>(m.index)] != 0) {
         ok = false;
         break;
       }
@@ -750,7 +752,8 @@ void reconstruct_bus_groups(State_side& side, const State_side& other) {
       c.aggregate_key      = base;
       c.key                = "n:" + base;
       c.name_lane          = static_cast<int32_t>(m.index);
-      c.name_extent        = static_cast<int32_t>(n);
+      c.name_extent        = static_cast<int32_t>(width);
+      c.name_partial       = n != width;
       c.name_reconstructed = true;
     }
   }
@@ -784,8 +787,105 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
   // physical bridge below, this is representation-only and must not undo the
   // name_noise experiment.
   if (opts.matching_names && opts.name_noise == 0.0) {
-    reconstruct_bus_groups(sa, sb);
-    reconstruct_bus_groups(sb, sa);
+    reconstruct_bus_groups(sa, sb, opts.project_state_bits);
+    reconstruct_bus_groups(sb, sa, opts.project_state_bits);
+  }
+  if (opts.project_state_bits && opts.matching_names && opts.name_noise == 0.0) {
+    auto registers = [](const State_side& side) {
+      std::vector<livehd::state_match::Register_name> names;
+      for (const auto& c : side.cells) {
+        if (c.is_mem || !c.aggregate_key.empty()) {
+          continue;
+        }
+        const auto width = gu::bits_of(c.node.get_driver_pin(0));
+        names.push_back({std::string(c.node.get_hier_name()),
+                         normalize_reg_name(c.node.get_hier_name()),
+                         width != 0 ? width : node_out_bits(c.node)});
+      }
+      return names;
+    };
+    res.state_projections    = livehd::state_match::renamed_register_projections(registers(sa), registers(sb));
+    st.projection_candidates = static_cast<uint32_t>(res.state_projections.size());
+    auto memory_candidates   = [&](const State_side& memories, const State_side& bank_side, bool memory_in_impl) {
+      std::map<std::string, std::pair<std::string, int>> candidates;
+      std::set<std::string>                              matched, other_memories;
+      for (const auto& c : memories.cells) {
+        if (!c.is_mem) {
+          matched.insert(normalize_reg_name(c.node.get_hier_name()));
+        }
+      }
+      for (const auto& c : bank_side.cells) {
+        auto name = normalize_reg_name(c.node.get_hier_name());
+        if (c.is_mem) {
+          other_memories.insert(name);
+          continue;
+        }
+        if (gu::type_op_of(c.node) != Ntype_op::Flop) {
+          continue;
+        }
+        const int width  = gu::real_width(c.node.get_driver_pin(0));
+        name             = livehd::state_match::memory_bank_name(name);
+        auto [it, fresh] = candidates.emplace(name, std::pair{std::string(c.node.get_hier_name()), width != 0 ? width : 1});
+        if (!fresh && it->second.first != c.node.get_hier_name()) {
+          it->second.second = -1;
+        }
+      }
+      std::map<std::string, int> memory_counts;
+      for (const auto& c : memories.cells) {
+        if (c.is_mem) {
+          ++memory_counts[normalize_reg_name(c.node.get_hier_name())];
+        }
+      }
+      for (const auto& c : memories.cells) {
+        if (!c.is_mem) {
+          continue;
+        }
+        const auto name = normalize_reg_name(c.node.get_hier_name());
+        if (other_memories.contains(name) || memory_counts[name] != 1) {
+          continue;
+        }
+        const auto size = gu::get_driver_of_sink_name(c.node, "size");
+        const auto bits = gu::get_driver_of_sink_name(c.node, "bits");
+        if (!size.is_const() || !bits.is_const()) {
+          continue;
+        }
+        const int64_t entries = gu::const_of(size).to_just_i64(), width = gu::const_of(bits).to_just_i64();
+        if (entries <= 0 || width <= 0 || entries > static_cast<int64_t>(candidates.size())
+            || width > std::numeric_limits<int>::max()) {
+          continue;
+        }
+        auto bank = livehd::state_match::memory_bank(name, static_cast<int>(entries), static_cast<int>(width), candidates, matched);
+        if (bank) {
+          res.memory_projections.push_back({std::string(c.node.get_hier_name()),
+                                            static_cast<int>(entries),
+                                            static_cast<int>(width),
+                                            memory_in_impl,
+                                            std::move(*bank)});
+        }
+      }
+    };
+    memory_candidates(sa, sb, false);
+    memory_candidates(sb, sa, true);
+    st.memory_projection_candidates = static_cast<uint32_t>(res.memory_projections.size());
+    if (opts.dump_state) {
+      for (const auto& projection : res.memory_projections) {
+        std::print("semdiff[state]: memory bank candidate '{}' ({}x{}, requires initial-state and transition proof)\n",
+                   projection.memory_key,
+                   projection.entries,
+                   projection.bits);
+      }
+    }
+    if (opts.dump_state) {
+      for (const auto& projection : res.state_projections) {
+        std::print("semdiff[state]: projection candidate '{}' ->", projection.wide_key);
+        for (const auto& bit : projection.bit_keys) {
+          if (!bit.empty()) {
+            std::print(" '{}'", bit);
+          }
+        }
+        std::print(" (requires initial-state and transition proof)\n");
+      }
+    }
   }
   auto logical_total = [](const State_side& ss) {
     absl::flat_hash_set<std::string> groups;
@@ -888,6 +988,7 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
       absl::flat_hash_map<int32_t, int32_t>    ordinal_to_source;
       std::vector<std::pair<int32_t, int32_t>> packed_ranges;
       int32_t                                  declared_extent = 0;
+      bool                                     projected       = false;
       for (uint32_t i : group) {
         const auto& c = ss.cells[i];
         if (c.aggregate_key.empty()) {
@@ -900,7 +1001,10 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
           } else if (declared_extent != c.name_extent) {
             return false;
           }
-          ordinals.insert(c.name_lane);
+          projected |= c.name_partial;
+          if (c.name_lane >= c.name_extent || !ordinals.insert(c.name_lane).second) {
+            return false;
+          }
           ordinal_to_source.try_emplace(c.name_lane, c.name_lane);
           packed_ranges.emplace_back(c.name_lane, c.name_lane + 1);
           continue;
@@ -930,13 +1034,13 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
       // Struct arrays can have several field leaves per lane. The distinct lane
       // ordinals must cover the declared extent and the absolute bit ranges
       // must reassemble one gap-free, non-overlapping packed value.
-      if (ordinals.size() != static_cast<size_t>(declared_extent)) {
+      if (!projected && ordinals.size() != static_cast<size_t>(declared_extent)) {
         return false;
       }
       std::sort(packed_ranges.begin(), packed_ranges.end());
       int32_t cursor = 0;
       for (const auto& [lo, hi] : packed_ranges) {
-        if (lo != cursor) {
+        if (lo < cursor || (!projected && lo != cursor)) {
           return false;
         }
         cursor = hi;
@@ -972,6 +1076,10 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
       if (std::any_of(av.begin(), av.end(), [&](uint32_t i) { return sa.cells[i].name_reconstructed; })
           || std::any_of(it->second.begin(), it->second.end(), [&](uint32_t i) { return sb.cells[i].name_reconstructed; })) {
         ++st.name_reconstructed;
+      }
+      if (std::any_of(av.begin(), av.end(), [&](uint32_t i) { return sa.cells[i].name_partial; })
+          || std::any_of(it->second.begin(), it->second.end(), [&](uint32_t i) { return sb.cells[i].name_partial; })) {
+        ++st.projected_name_pairs;
       }
       for (uint32_t i : av) {
         sa.cells[i].token           = tok;
@@ -1409,12 +1517,13 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
                    g->get_name(),
                    c.truth.empty() ? c.key : c.truth,
                    c.truth.empty() ? "" : " (noised)",
-                   c.t1_pair && c.name_reconstructed ? "name(reconstructed)"
-                   : c.t1_pair                       ? "name"
-                   : c.t1_group                      ? "name-group"
-                   : c.t2_pair                       ? "full"
-                   : c.ambiguous                     ? "UNPAIRED(ambiguous)"
-                                                     : "UNPAIRED(no-counterpart)");
+                   c.t1_pair && c.name_partial         ? "name(projected)"
+                   : c.t1_pair && c.name_reconstructed ? "name(reconstructed)"
+                   : c.t1_pair                         ? "name"
+                   : c.t1_group                        ? "name-group"
+                   : c.t2_pair                         ? "full"
+                   : c.ambiguous                       ? "UNPAIRED(ambiguous)"
+                                                       : "UNPAIRED(no-counterpart)");
       }
     }
   };

@@ -13,16 +13,22 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include "fork_race.hpp"
+#include "pass/synth/arith.hpp"
 
 // clang-format off
 // ABC headers must stay in dependency order: abc.h defines Abc_Frame_t (used by
@@ -33,14 +39,19 @@ extern "C" {
 #include "base/abc/abc.h"
 #include "base/main/abcapis.h"
 #include "base/main/main.h"
+#include "aig/gia/gia.h"
+#include "proof/cec/cec.h"
 #include "proof/fraig/fraig.h"
 #include "misc/extra/extra.h"
+extern Gia_Man_t* Cec5_ManSimulateTest3(Gia_Man_t*, int, int);
 }
 // clang-format on
 
 namespace livehd::lec {
 
 namespace {
+
+enum class Arithmetic_engine { correspondence, ivy, sweep, ripple, tree, array };
 
 using Bit = Abc_Obj_t*;  // AIG signal: node pointer with the complement bit in bit 0
 
@@ -62,17 +73,37 @@ std::string kind_name(cvc5::Kind k) {
   return os.str();
 }
 
+bool has_multiply(const cvc5::Term& root) {
+  std::vector<cvc5::Term>        pending{root};
+  std::unordered_set<cvc5::Term> seen;
+  while (!pending.empty()) {
+    auto term = pending.back();
+    pending.pop_back();
+    if (!seen.insert(term).second) {
+      continue;
+    }
+    if (term.getKind() == cvc5::Kind::BITVECTOR_MULT) {
+      return true;
+    }
+    for (const auto& child : term) {
+      pending.push_back(child);
+    }
+  }
+  return false;
+}
+
 // Blasts a term DAG into `ntk`. Every term is visited once (memoized), so the
 // shared structure a cut's two sides have in common collapses in the AIG the
 // same way it does in the cvc5 term graph.
 class Blaster {
 public:
-  Blaster(Abc_Ntk_t* ntk, const Cone_merge_map* merge)
-      : ntk_(ntk), man_(static_cast<Abc_Aig_t*>(ntk->pManFunc)), one_(Abc_AigConst1(ntk)), merge_(merge) {}
+  Blaster(Abc_Ntk_t* ntk, const Cone_merge_map* merge, Arithmetic_engine engine = Arithmetic_engine::correspondence)
+      : ntk_(ntk), man_(static_cast<Abc_Aig_t*>(ntk->pManFunc)), one_(Abc_AigConst1(ntk)), engine_(engine), merge_(merge) {}
 
   // Returns the AIG bit for `root` (Boolean), or nullptr if the term left the
   // blastable fragment (then why() names the offending kind).
   Bit run(const cvc5::Term& root) {
+    native_arithmetic_ = has_multiply(root);
     walk(root);
     if (bad_) {
       return nullptr;
@@ -93,6 +124,23 @@ public:
   // the counterexample may assign the abstracted leaves inconsistently. Callers
   // must degrade such a SAT to Unknown, never report it as a difference.
   [[nodiscard]] bool               abstracted() const { return abstracted_; }
+  [[nodiscard]] bool               arithmetic() const { return native_arithmetic_; }
+
+  std::vector<std::pair<Bit, Bit>> comparison_bits(const cvc5::Term& root) const {
+    std::vector<std::pair<Bit, Bit>> result;
+    if (root.getKind() != cvc5::Kind::DISTINCT || root.getNumChildren() != 2 || !root[0].getSort().isBitVector()) {
+      return result;
+    }
+    auto a = bv_.find(root[0]);
+    auto c = bv_.find(root[1]);
+    if (a == bv_.end() || c == bv_.end() || a->second.size() != c->second.size()) {
+      return result;
+    }
+    for (size_t i = 0; i < a->second.size(); ++i) {
+      result.emplace_back(a->second[i], c->second[i]);
+    }
+    return result;
+  }
 
 private:
   // ---- AIG primitives ------------------------------------------------------
@@ -129,7 +177,23 @@ private:
   }
 
   // ---- multi-bit helpers (all vectors are LSB-first) ------------------------
+  struct Ops {
+    Blaster& b;
+    Bit      zero() { return b.zero(); }
+    Bit      one() { return b.one(); }
+    Bit      inv(Bit a) { return b.inv(a); }
+    Bit      and_(Bit a, Bit c) { return b.and2(a, c); }
+    Bit      or_(Bit a, Bit c) { return b.or2(a, c); }
+    Bit      xor_(Bit a, Bit c) { return b.xor2(a, c); }
+  };
+
+  bool ripple_arithmetic() const { return engine_ == Arithmetic_engine::tree || engine_ == Arithmetic_engine::array; }
+
   std::vector<Bit> add(const std::vector<Bit>& a, const std::vector<Bit>& b, Bit cin) {
+    if (native_arithmetic_ && a.size() >= 16 && !ripple_arithmetic()) {
+      Ops ops{*this};
+      return synth::arith::prefix_add(ops, a, b, cin).sum;
+    }
     std::vector<Bit> r(a.size());
     Bit              c = cin;
     for (size_t i = 0; i < a.size(); ++i) {
@@ -153,16 +217,17 @@ private:
   }
 
   std::vector<Bit> mul(const std::vector<Bit>& a, const std::vector<Bit>& b) {
-    const size_t     w = a.size();
-    std::vector<Bit> acc(w, zero());
-    for (size_t j = 0; j < w; ++j) {
-      std::vector<Bit> part(w, zero());
-      for (size_t i = j; i < w; ++i) {
-        part[i] = and2(a[i - j], b[j]);
-      }
-      acc = add(acc, part, zero());
-    }
-    return acc;  // mod 2^w, exactly SMT-LIB bvmul
+    Ops ops{*this};
+    return synth::arith::build_mul(engine_ == Arithmetic_engine::tree    ? synth::arith::Mult_kind::tree
+                                   : engine_ == Arithmetic_engine::array ? synth::arith::Mult_kind::array
+                                                                         : synth::arith::Mult_kind::csa,
+                                   (engine_ == Arithmetic_engine::ripple || ripple_arithmetic()) ? synth::arith::Adder_kind::rca
+                                                                                                 : synth::arith::Adder_kind::prefix,
+                                   0,
+                                   ops,
+                                   a,
+                                   b,
+                                   static_cast<int>(a.size()));
   }
 
   // Barrel shifter. `fill` is what enters the vacated positions (0 for shl/lshr,
@@ -481,16 +546,29 @@ private:
         return r;
       }
       case cvc5::Kind::BITVECTOR_ADD: {
-        std::vector<Bit> acc = bits_of(t[0]);
-        for (size_t c = 1; c < t.getNumChildren(); ++c) {
-          acc = add(acc, bits_of(t[c]), zero());
+        if (!native_arithmetic_) {
+          auto acc = bits_of(t[0]);
+          for (size_t c = 1; c < t.getNumChildren(); ++c) {
+            acc = add(acc, bits_of(t[c]), zero());
+          }
+          return acc;
         }
-        return acc;
+        std::vector<synth::arith::Sum_operand<Bit>> operands;
+        for (size_t c = 0; c < t.getNumChildren(); ++c) {
+          operands.push_back({bits_of(t[c]), false, false});
+        }
+        Ops ops{*this};
+        return synth::arith::build_sum(
+            w >= 16 && !ripple_arithmetic() ? synth::arith::Adder_kind::prefix : synth::arith::Adder_kind::rca,
+            0,
+            ops,
+            operands,
+            static_cast<int>(w));
       }
       case cvc5::Kind::BITVECTOR_SUB: {
         std::vector<Bit> acc = bits_of(t[0]);
         for (size_t c = 1; c < t.getNumChildren(); ++c) {
-          acc = add(acc, neg(bits_of(t[c])), zero());
+          acc = native_arithmetic_ ? add(acc, bv_not(bits_of(t[c])), one()) : add(acc, neg(bits_of(t[c])), zero());
         }
         return acc;
       }
@@ -604,6 +682,8 @@ private:
   Bit         one_ = nullptr;
   bool        bad_        = false;
   bool        abstracted_ = false;
+  bool              native_arithmetic_ = false;
+  Arithmetic_engine engine_            = Arithmetic_engine::correspondence;
   int         npi_ = 0;
   std::string why_;
 
@@ -617,7 +697,8 @@ private:
 }  // namespace
 
 namespace {
-Cone_verdict prove_one(const cvc5::Term& diff, int64_t backtrack_limit, Cone_stats* st, const Cone_merge_map* merge) {
+Cone_verdict prove_one(const cvc5::Term& diff, int64_t backtrack_limit, Cone_stats* st, const Cone_merge_map* merge,
+                       Arithmetic_engine engine = Arithmetic_engine::correspondence) {
   if (diff.isNull() || !diff.getSort().isBoolean()) {
     return Cone_verdict::Unsupported;
   }
@@ -626,7 +707,7 @@ Cone_verdict prove_one(const cvc5::Term& diff, int64_t backtrack_limit, Cone_sta
   Abc_Ntk_t* ntk = Abc_NtkAlloc(ABC_NTK_STRASH, ABC_FUNC_AIG, 1);
   ntk->pName     = Extra_UtilStrsav(const_cast<char*>("lec_cone"));
 
-  Blaster b(ntk, merge);
+  Blaster b(ntk, merge, engine);
   Bit     po_bit = b.run(diff);
   if (b.bad() || po_bit == nullptr) {
     if (st != nullptr) {
@@ -663,6 +744,65 @@ Cone_verdict prove_one(const cvc5::Term& diff, int64_t backtrack_limit, Cone_sta
     return exact ? Cone_verdict::Refuted : Cone_verdict::Unknown;
   }
 
+  const bool wide_mux_cone = b.pis() >= 512 && Abc_NtkNodeNum(ntk) >= 1000;
+  if ((b.arithmetic() || wide_mux_cone) && engine != Arithmetic_engine::ivy) {
+    // The current CEC engine finds internal correspondences before solving the
+    // output miter. The legacy Ivy prover below can miss those correspondences
+    // between a mapped multiplier and its exact arithmetic expansion.
+    Gia_Man_t*       gia = Gia_ManStart(Abc_NtkObjNumMax(ntk));
+    std::vector<int> literals(static_cast<size_t>(Abc_NtkObjNumMax(ntk)));
+    literals[Abc_ObjId(Abc_AigConst1(ntk))] = 1;
+    Abc_Obj_t* obj;
+    int        index;
+    Abc_NtkForEachPi(ntk, obj, index) { literals[Abc_ObjId(obj)] = Gia_ManAppendCi(gia); }
+    Abc_NtkForEachNode(ntk, obj, index) {
+      const int a              = literals[Abc_ObjFaninId0(obj)] ^ Abc_ObjFaninC0(obj);
+      const int c              = literals[Abc_ObjFaninId1(obj)] ^ Abc_ObjFaninC1(obj);
+      literals[Abc_ObjId(obj)] = Gia_ManAppendAnd(gia, a, c);
+    }
+    if (engine == Arithmetic_engine::sweep) {
+      Gia_Man_t* single = Gia_ManDup(gia);
+      Gia_ManAppendCo(single, literals[Abc_ObjId(Abc_ObjRegular(po_bit))] ^ Abc_ObjIsComplement(po_bit));
+      Gia_Man_t* swept  = Cec5_ManSimulateTest3(single, backtrack_limit > 0 ? static_cast<int>(backtrack_limit) : 10000, 0);
+      const bool proven = swept != nullptr && Gia_ManPoNum(swept) == 1 && Gia_ManPoIsConst0(swept, 0);
+      if (swept != nullptr) {
+        Gia_ManStop(swept);
+      }
+      Gia_ManStop(single);
+      if (proven) {
+        Gia_ManStop(gia);
+        Abc_NtkDelete(ntk);
+        return Cone_verdict::Proven;
+      }
+    }
+    const auto comparisons = b.comparison_bits(diff);
+    if (!comparisons.empty()) {
+      for (const auto& [a, c] : comparisons) {
+        Gia_ManAppendCo(gia, literals[Abc_ObjId(Abc_ObjRegular(a))] ^ Abc_ObjIsComplement(a));
+        Gia_ManAppendCo(gia, literals[Abc_ObjId(Abc_ObjRegular(c))] ^ Abc_ObjIsComplement(c));
+      }
+    } else {
+      Abc_NtkForEachPo(ntk, obj, index) {
+        Gia_ManAppendCo(gia, literals[Abc_ObjFaninId0(obj)] ^ Abc_ObjFaninC0(obj));
+        Gia_ManAppendCo(gia, 0);  // CEC consumes pairs: diff must equal constant zero.
+      }
+    }
+    Cec_ParCec_t cec;
+    Cec_ManCecSetDefaultParams(&cec);
+    cec.fSilent             = 1;
+    // Start with cheap correspondence checks. CEC raises this limit as needed;
+    // spending the entire cone limit on each initial candidate can stall large
+    // multipliers before their useful internal correspondences are found.
+    const int initial_limit = 100;
+    cec.nBTLimit = backtrack_limit > 0 ? static_cast<int>(std::min<int64_t>(initial_limit, backtrack_limit)) : initial_limit;
+    const int cec_result = Cec_ManVerify(gia, &cec);
+    Gia_ManStop(gia);
+    if (cec_result >= 0) {
+      Abc_NtkDelete(ntk);
+      return cec_result == 1 ? Cone_verdict::Proven : exact ? Cone_verdict::Refuted : Cone_verdict::Unknown;
+    }
+  }
+
   // This is an OPPORTUNISTIC pre-pass, not a last-resort prover: a cone that is
   // not easy for the bit-level engine must fall to cvc5 FAST, because cvc5 is
   // still going to be asked the same question. That makes ABC's `cec` settings
@@ -690,6 +830,60 @@ Cone_verdict prove_one(const cvc5::Term& diff, int64_t backtrack_limit, Cone_sta
   }
   return (rv == 0 && exact) ? Cone_verdict::Refuted : Cone_verdict::Unknown;
 }
+struct Arithmetic_result {
+  Cone_verdict verdict = Cone_verdict::Unknown;
+  Cone_stats   stats;
+};
+
+Cone_verdict prove_arithmetic_portfolio(const cvc5::Term& diff, int64_t backtrack_limit, int64_t deadline_ms, Cone_stats* stats,
+                                        const Cone_merge_map* merge) {
+  // Each engine sees the original exact obligation. They share one wall
+  // deadline; a completed proof cancels the others. No candidate match or
+  // simulation result is itself sufficient to prove equivalence.
+  const std::array engines{Arithmetic_engine::correspondence,
+                           Arithmetic_engine::ivy,
+                           Arithmetic_engine::sweep,
+                           Arithmetic_engine::ripple,
+                           Arithmetic_engine::tree,
+                           Arithmetic_engine::array};
+  const auto       race = fork_race<Arithmetic_result>(
+      static_cast<int>(engines.size()),
+      [&](int i) {
+        Arithmetic_result result;
+        result.verdict = prove_one(diff, backtrack_limit, &result.stats, merge, engines[i]);
+        return result;
+      },
+      [](const Arithmetic_result& result) {
+        return std::to_string(static_cast<int>(result.verdict)) + " " + std::to_string(result.stats.pis) + " "
+               + std::to_string(result.stats.ands);
+      },
+      [](std::string_view blob, Arithmetic_result& result) {
+        std::istringstream input{std::string{blob}};
+        int                verdict;
+        if (!(input >> verdict >> result.stats.pis >> result.stats.ands) || verdict < 0
+            || verdict > static_cast<int>(Cone_verdict::Unknown)) {
+          return false;
+        }
+        result.verdict = static_cast<Cone_verdict>(verdict);
+        return true;
+      },
+      [](int, const Arithmetic_result& result) {
+        return result.verdict == Cone_verdict::Proven || result.verdict == Cone_verdict::Refuted;
+      },
+      deadline_ms);
+  if (!race.forked) {
+    return prove_one(diff, backtrack_limit, stats, merge);
+  }
+  if (race.winner >= 0) {
+    const auto& result = race.results[race.winner];
+    if (stats != nullptr) {
+      *stats = result.stats;
+    }
+    return result.verdict;
+  }
+  return Cone_verdict::Unknown;
+}
+
 }  // namespace
 
 Cone_verdict abc_prove_unsat(const cvc5::Term& diff, int64_t backtrack_limit, Cone_stats* st) {
@@ -748,6 +942,14 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
   // fresh child resumes with the next.
   const int64_t cone_ms
       = deadline_ms > 0 ? std::min<int64_t>(deadline_ms, std::max<int64_t>(kConeStallMs, deadline_ms / kConeStallShare)) : 0;
+  // A word-level arithmetic proof needs longer than a cheap SAT sweep. Reserve
+  // time for every other cone, while letting one arithmetic cone use a useful
+  // fraction of the existing batch deadline.
+  std::vector<bool> arithmetic(diffs.size(), false);
+  for (size_t i = 0; i < diffs.size(); ++i) {
+    arithmetic[i] = has_multiply(diffs[i]);
+  }
+  const int64_t arithmetic_ms = deadline_ms > 0 ? std::max(cone_ms, deadline_ms / static_cast<int64_t>(2 * diffs.size())) : 0;
   const auto t0      = std::chrono::steady_clock::now();
   auto       elapsed = [](std::chrono::steady_clock::time_point since) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - since).count();
@@ -785,7 +987,9 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
       }
       for (size_t i = next; i < diffs.size(); ++i) {
         Cone_stats         one;
-        const Cone_verdict v = prove_one(diffs[i], backtrack_limit, &one, merge);
+        const Cone_verdict v = arithmetic[i] && arithmetic_ms >= 1000
+                                   ? prove_arithmetic_portfolio(diffs[i], backtrack_limit, arithmetic_ms - 100, &one, merge)
+                                   : prove_one(diffs[i], backtrack_limit, &one, merge);
         unsigned char      rec[kRecord];
         put_u32(rec, static_cast<uint32_t>(i));
         rec[4] = static_cast<unsigned char>(v);
@@ -812,7 +1016,7 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
       int wait_ms = -1;
       if (deadline_ms > 0) {
         const auto left = deadline_ms - elapsed(t0);
-        const auto cone = cone_ms - elapsed(cone_t0);
+        const auto cone = (next < arithmetic.size() && arithmetic[next] ? arithmetic_ms : cone_ms) - elapsed(cone_t0);
         if (left <= 0) {
           expire = true;
           break;

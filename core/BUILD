@@ -86,10 +86,17 @@ cc_library(
 # hash_util.hpp rides along for free (its edits change digest values and thus
 # keys anyway, but keeping it salted removes the need to re-audit that).
 filegroup(
+    name = "state_match_srcs",
+    srcs = ["state_match.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
     name = "formal_srcs",
     srcs = [
         ":bus_name_srcs",
         "hash_util.hpp",
+        "state_match.hpp",
         "str_tools.hpp",
     ],
     visibility = ["//visibility:public"],

@@ -14,6 +14,52 @@ the original obligations remain for CVC5. Stable cone digests and verdict names
 live in `cone_digest.cpp`, independently of ABC. The normal build retains the
 existing accelerator and its differential tests.
 
+Mapped registers keep the source hierarchy in their bit names (`lane.state[3]`,
+or `lane.state[3].flop_16` after cell-model inlining). When mapping removes some
+bits, LEC relates only the retained bits to the corresponding slices of the
+source register. It leaves the removed source bits arbitrary, proves every
+retained next-state slice equal, and checks all outputs. Duplicate or
+out-of-range bit names cannot form a relation. Explicit implementation initial
+values take precedence over a proposed shared initial state. `pass semdiff
+--stats` reports these projected name pairs separately; they cannot justify a
+structural proof that skips the solver.
+
+Register and memory correspondence is shared with semdiff through
+`core/state_match.hpp`. Packed registers can correspond to retained scalar bits,
+including sparse groups after synthesis prunes unused bits. Renamed groups are
+only proposed when their shapes are unambiguous. Finite memories can correspond
+to complete named entry banks, with packed entries or individual bits. These
+relations are proof candidates: they never qualify as structural identity, and
+LEC checks initial state, retained next-state bits, and observable outputs.
+The shared bank-name normalizer also removes the cell model's final state
+segment from ordinary names such as `mem._mem[0][24].flop_16`, as well as
+encoded memory wrappers. Several states claiming the same alias remain
+ambiguous and cannot establish a bank relation.
+
+For a memory-to-bank induction bridge, the memory is represented by stores of
+independent bank state symbols at each valid address. Read definitions are
+expanded into exact read-over-write muxes before cone digests are computed.
+Unrepresented addresses retain the unconstrained array tail. This preserves the
+full state relation while allowing the Boolean cone prover to discharge dynamic
+reads. Large read muxes use ABC's internal correspondence CEC; multiplication
+cones race correspondence CEC, SAT sweeping, and Ivy with exact carry-save, tree
+and array arithmetic expansions under the existing wall deadline. An inconclusive engine retains the
+original cvc5 obligation.
+
+Sequential `auto` workers reserve half the finite solver allowance and wall
+backstop for induction and half for BMC. The dispatcher runs each leg in a fresh
+process, with at most one active solver per hierarchy job. A killed induction
+attempt or an arbitrary-state step counterexample still leaves BMC an attempt;
+unused induction time transfers to BMC. A reachable BMC counterexample refutes,
+while a BMC pass remains explicitly bounded. The combined deadline never exceeds
+the existing hard backstop. Parallel flat races already give both engines an
+opportunity concurrently and keep their existing limits; explicit engines,
+unbounded runs, and deterministic resource-limited solver grants are unchanged.
+For Liberty netlist comparisons, a collapsed induction attempt likewise reserves
+half for flat recovery; exhausting that first attempt cannot suppress recovery.
+The flat retry preserves the original BMC reservation: if the collapsed attempt
+spent the induction share, recovery goes directly to BMC.
+
 ## 1. The shape of the proof — top-down, then discharge
 
 ```

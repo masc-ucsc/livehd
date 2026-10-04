@@ -132,6 +132,12 @@ cc_library(
 
 exports_files(["arith.hpp"])
 
+cc_library(
+    name = "arith",
+    hdrs = ["arith.hpp"],
+    visibility = ["//visibility:public"],
+)
+
 cc_test(
     name = "tmap_cache_test",
     srcs = ["tmap_cache_test.cpp"],

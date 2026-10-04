@@ -83,6 +83,7 @@ void semdiff_command(Options& opts, Result& res) {
   livehd::semdiff::Semdiff_options o;
   o.matching_names = truthy("matching_names", stats ? "true" : "false");
   o.state_pairing  = truthy("state_pairing", stats ? "true" : "false");
+  o.project_state_bits = stats;
   o.dump_state     = truthy("dump_state", "false");
   o.id_granularity = label("id_granularity", "pair");
   o.verbose        = false;  // the command prints its own summary below
@@ -255,7 +256,21 @@ void semdiff_command(Options& opts, Result& res) {
                b_total - b_matched,
                st.b_unpaired,
                st.b_ambiguous);
-    const bool clean = a_matched == a_total && b_matched == b_total && st.a_unpaired == 0 && st.b_unpaired == 0 && ref_only == 0;
+    if (st.projected_name_pairs != 0) {
+      std::print("semdiff[stats]: projected {} register name pair(s) with eliminated bits; requires retained-state proof\n",
+                 st.projected_name_pairs);
+    }
+    if (st.projection_candidates != 0) {
+      std::print("semdiff[stats]: {} renamed register projection candidate(s); requires initial-state and transition proof\n",
+                 st.projection_candidates);
+    }
+    if (st.memory_projection_candidates != 0) {
+      std::print("semdiff[stats]: {} memory storage-bank candidate(s); requires initial-state and transition proof\n",
+                 st.memory_projection_candidates);
+    }
+    const bool clean = a_matched == a_total && b_matched == b_total && st.a_unpaired == 0 && st.b_unpaired == 0
+                       && st.projected_name_pairs == 0 && st.projection_candidates == 0 && st.memory_projection_candidates == 0
+                       && ref_only == 0;
     std::print(
         "semdiff[stats]: => {}\n",
         clean ? "designs fully correspond" : "DIFFERENCES present (grep the `match=0` nodes: `lhd tool grep match=0 lg:<impl>`)");

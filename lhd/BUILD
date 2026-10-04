@@ -40,6 +40,8 @@ genrule(
         "//pass/lec:formal_srcs",
         "//pass/semdiff:formal_srcs",
         "//pass/single_edge:pass_single_edge",  # proof_prep: time base, clock gates, lib-cell splicing (archive)
+        "//pass/synth:arith.hpp",  # cone_abc blasts bvmul/bvadd through the synthesis arithmetic builders
+        "//packages:abc.patch",  # cone_abc's CEC / full-adder detection (acecFadds) decide cone verdicts
         "//packages:cvc5_repo.bzl",
     ],
     outs = ["formal_salt.hpp"],

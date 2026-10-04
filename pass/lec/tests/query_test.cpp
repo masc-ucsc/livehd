@@ -7,8 +7,11 @@
 
 #include "query.hpp"
 
+#include <chrono>
+#include <cstdlib>
 #include <format>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -631,8 +634,8 @@ TEST(CombEquiv, ProvenBodyAndMatchedDescriptorUseCompactLoopCertificate) {
   lec::Lec_options body_options;
   body_options.engine = "ind";
   auto body_result    = lec::prove_equal(ref_lib.find_io("active_body")->get_graph().get(),
-                                         impl_lib.find_io("active_body")->get_graph().get(),
-                                         body_options);
+                                      impl_lib.find_io("active_body")->get_graph().get(),
+                                      body_options);
   ASSERT_EQ(body_result.verdict, Verdict::Proven) << body_result.detail;
 
   lec::Lec_options top_options;
@@ -1263,4 +1266,130 @@ TEST(LecNames, TransparentRepeatedInstancesDoNotMergeState) {
   auto proof = lec::prove_equal(top.get(), top.get(), lo);
   EXPECT_EQ(proof.verdict, Verdict::Unknown) << proof.detail;
   EXPECT_NE(proof.detail.find("ambiguous logical state name"), std::string::npos);
+}
+
+namespace {
+struct Scoped_racer_stall {
+  std::optional<std::string> seconds, only;
+  Scoped_racer_stall() {
+    if (const char* value = std::getenv("LIVEHD_LEC_RACER_STALL_S")) {
+      seconds = value;
+    }
+    if (const char* value = std::getenv("LIVEHD_LEC_RACER_STALL_ONLY")) {
+      only = value;
+    }
+    ::setenv("LIVEHD_LEC_RACER_STALL_S", "60", 1);
+    ::setenv("LIVEHD_LEC_RACER_STALL_ONLY", "0", 1);
+  }
+  ~Scoped_racer_stall() {
+    if (seconds) {
+      ::setenv("LIVEHD_LEC_RACER_STALL_S", seconds->c_str(), 1);
+    } else {
+      ::unsetenv("LIVEHD_LEC_RACER_STALL_S");
+    }
+    if (only) {
+      ::setenv("LIVEHD_LEC_RACER_STALL_ONLY", only->c_str(), 1);
+    } else {
+      ::unsetenv("LIVEHD_LEC_RACER_STALL_ONLY");
+    }
+  }
+};
+}  // namespace
+
+// A preprocessing/CaDiCaL stall ignores cvc5's tlimit. Killing that induction
+// attempt must leave the dispatcher alive to check reachable behaviour by BMC.
+TEST(LecBudget, StalledInductionLeavesBmcForBoundedProofAndReachableRefute) {
+  Scoped_racer_stall stall;
+  for (const bool wrong : {false, true}) {
+    Transparent_design d;
+    auto               ref  = d.state("q");
+    auto               impl = d.state("q", wrong);
+    lec::Lec_options   options;
+    options.engine            = "auto";
+    options.timeout           = 2;
+    options.min_timeout       = 1;
+    options.bound             = 2;
+    // An entity-name hint must not take the entire grant before the ladder.
+    options._preferred_engine = "ind";
+    const auto start          = std::chrono::steady_clock::now();
+    const auto result         = lec::prove_equal_isolated(ref.get(), impl.get(), options);
+    const auto elapsed        = std::chrono::steady_clock::now() - start;
+    EXPECT_LT(elapsed, std::chrono::seconds(6)) << result.detail;
+    EXPECT_EQ(result.engine, "bmc") << result.detail;
+    EXPECT_NE(result.detail.find("50/50"), std::string::npos) << result.detail;
+    EXPECT_NE(result.detail.find("ind racer exceeded formal.timeout"), std::string::npos) << result.detail;
+    if (wrong) {
+      EXPECT_EQ(result.verdict, Verdict::Refuted) << result.detail;
+      EXPECT_FALSE(result.trace.empty()) << result.detail;
+    } else {
+      EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+      EXPECT_TRUE(result.bounded) << result.detail;
+      EXPECT_GT(result.output_checks, 0);
+      EXPECT_TRUE(result.trace.empty());
+    }
+  }
+}
+
+TEST(LecBudget, FastInductionStillProvesUnboundedWithReservedBudget) {
+  Transparent_design d;
+  auto               ref  = d.state("q");
+  auto               impl = d.state("q");
+  lec::Lec_options   options;
+  options.engine      = "auto";
+  options.timeout     = 2;
+  options.min_timeout = 1;
+  const auto result   = lec::prove_equal_isolated(ref.get(), impl.get(), options);
+  EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+  EXPECT_FALSE(result.bounded) << result.detail;
+  EXPECT_EQ(result.engine, "ind") << result.detail;
+}
+
+TEST(LecBudget, UnreachableInductionCounterexampleStillRunsBmc) {
+  Transparent_design d;
+  auto               ref  = d.state("q");
+  auto               impl = d.state("q");
+  for (const auto& graph : {ref, impl}) {
+    for (auto node : graph->body().nodes()) {
+      if (graph_util::type_op_of(node) == Ntype_op::Flop) {
+        auto din = graph_util::setup_sink_by_name(node, "din");
+        din.del_sink(din.get_driver_pin());
+        graph_util::create_const(*graph, *Dlop::create_integer(0)).connect_sink(din);
+      }
+    }
+  }
+  // q is always zero from initialization. The arbitrary-state induction step
+  // can see q=1, where the output expressions differ; that is unreachable.
+  auto output = impl->get_output_pin("q");
+  output.del_sink(output.get_driver_pin());
+  graph_util::create_const(*impl, *Dlop::create_integer(0)).connect_sink(output);
+  lec::Lec_options options;
+  options.engine      = "ind";
+  options.timeout     = 2;
+  options.min_timeout = 1;
+  options.bound       = 2;
+  const auto step     = lec::prove_equal_isolated(ref.get(), impl.get(), options);
+  EXPECT_NE(step.verdict, Verdict::Proven) << step.detail;
+  options.engine    = "auto";
+  const auto result = lec::prove_equal_isolated(ref.get(), impl.get(), options);
+  EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+  EXPECT_TRUE(result.bounded) << result.detail;
+  EXPECT_EQ(result.engine, "bmc") << result.detail;
+}
+
+TEST(LecBudget, ExhaustedCollapsedInductionShareGoesDirectlyToBmc) {
+  Scoped_racer_stall stall;
+  Transparent_design d;
+  auto               ref  = d.state("q");
+  auto               impl = d.state("q");
+  lec::Lec_options   options;
+  options.engine                = "auto";
+  options.timeout               = 2;
+  options.min_timeout           = 1;
+  options._bmc_reserved_timeout = 2;
+  options._wall_timeout_ms      = 1000;
+  const auto result             = lec::prove_equal_isolated(ref.get(), impl.get(), options);
+  EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+  EXPECT_TRUE(result.bounded) << result.detail;
+  EXPECT_EQ(result.engine, "bmc") << result.detail;
+  EXPECT_NE(result.detail.find("goes directly to BMC"), std::string::npos) << result.detail;
 }

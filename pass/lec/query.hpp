@@ -14,6 +14,7 @@
 #include "phase_sched.hpp"
 #include "property_types.hpp"
 #include "solve_stats.hpp"
+#include "state_match.hpp"
 
 namespace livehd::lec {
 
@@ -322,10 +323,10 @@ struct Lec_options {
   // 13.7 GB RSS). Collapsed miters are unaffected — the lazy solver returns
   // between checkSats, so their legs land within a few percent of the cap.
   //
-  // The multiplier is NOT slack for one query: an isolated worker runs the
-  // whole ind->bmc ladder IN-PROCESS (`_isolated_worker`: no nested forks), so
-  // its LEGITIMATE wall is one `timeout` per leg. 3 covers the 2-leg auto
-  // ladder plus a margin; a single-engine worker simply never reaches it.
+  // Sequential auto uses fresh workers for induction and BMC, reserving half
+  // the finite solver allowance and wall deadline for each. Their combined
+  // deadline never exceeds this existing hard backstop; unused induction time
+  // transfers to BMC. Explicit single-engine runs keep their existing cap.
   //
   // Enforced by the PARENT (spawn_isolated_worker), which owns the child pid —
   // the only place a runaway can actually be stopped. Killing a worker can only
@@ -454,6 +455,10 @@ struct Lec_options {
   // are equal, which the producer guarantees and validate_uncertain_pairs
   // re-checks on hint replay.
   std::vector<std::pair<std::string, std::string>> uncertain_match;
+  // Semdiff proposals, revalidated against the encoded state and proved by
+  // the packed-state portfolio (induction plus reset-reachable base).
+  std::vector<livehd::state_match::Register_projection> _state_projections;
+  std::vector<livehd::state_match::Memory_projection>   _memory_projections;
 
   // Confident MEMORY correspondence (2f-lec diverged-use collapse guard; produced
   // by pass/semdiff's full-match signature pass, the mem entries of state_pairs).
@@ -605,7 +610,13 @@ struct Lec_options {
   // by-value Lec_options copy into every fork, so a worker never touches the
   // cache file -- it just checks membership. A hit skips abc for that cone.
   absl::flat_hash_set<std::string> _cone_cache;
-  bool                             _isolated_worker            = false;  // one global-pool child: no nested forks
+  bool                             _isolated_worker            = false;  // one global-pool job: no concurrent solver forks
+  // Internal ceiling for a reserved collapsed attempt / flat recovery. This
+  // can only shorten an existing wall backstop; 0 leaves it unchanged.
+  long long                        _wall_timeout_ms            = 0;
+  // Preserve BMC's original share when a collapsed induction attempt precedes
+  // flat auto recovery. 0 uses the ordinary half-budget reservation.
+  int                              _bmc_reserved_timeout       = 0;
   // Internal recursion guard: prove_equal() has already copied the design into
   // private scratch, summarized every admissible matched compact loop, and
   // materialized the remaining loop occurrences. Portfolio/tier retries must
@@ -811,7 +822,7 @@ long long race_deadline_ms(const Lec_options& opts);
 long long verify_race_deadline_ms(const Lec_options& opts, int n_units);
 
 // Run one proof in a fork-isolated worker. Used by the Taskflow hierarchy DAG:
-// one task owns one child process, so the solver-process count is bounded by
+// one task owns at most one active solver child, so the process count is bounded by
 // formal.jobs and cvc5 instances never execute concurrently in threads.
 Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts = {},
                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr);

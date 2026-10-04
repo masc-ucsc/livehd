@@ -25,12 +25,14 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "bus_name.hpp"
 #include "cone_abc.hpp"
+#include "cone_expand.hpp"
 #include "cprop.hpp"
 #include "encode.hpp"
 #include "fork_race.hpp"
@@ -41,6 +43,7 @@
 #include "observe.hpp"
 #include "occurrence_materialize.hpp"
 #include "split_selfref.hpp"
+#include "state_match.hpp"
 #include "str_tools.hpp"
 
 namespace livehd::lec {
@@ -177,10 +180,13 @@ std::string bbin_models_hint(const std::vector<std::string>& unmatched_impl) {
 // mix of the two shapes is dropped whole: an ambiguous regroup is no
 // correspondence. The caller still requires the reference's `base` to be
 // exactly n bits wide, and every relation built from these groups is
-// re-verified by the miter.
+// re-verified by the miter. With allow_sparse, an exact source base supplies
+// the declared width and missing bits are empty slots. Out-of-range or duplicate
+// indices still reject the entire group; holes impose no state equality.
 absl::flat_hash_map<std::string, std::vector<std::string>> bus_bit_groups(const Io_name_map<int>&         side,
                                                                           const Io_name_map<int>&         other,
-                                                                          const Io_name_map<std::string>& raw = {}) {
+                                                                          const Io_name_map<std::string>& raw          = {},
+                                                                          bool                            allow_sparse = false) {
   struct Group {
     std::map<int64_t, std::string> bits;
     int                            model_only = 0;  // members of the lone `r.<state>` shape
@@ -223,8 +229,25 @@ absl::flat_hash_map<std::string, std::vector<std::string>> bus_bit_groups(const 
   absl::flat_hash_map<std::string, std::vector<std::string>> out;
   for (auto& [base, g] : indexed) {
     const auto n = static_cast<int64_t>(g.bits.size());
-    if (g.broken || g.bits.rbegin()->first + 1 != n || (g.model_only != 0 && n != 1)) {
-      continue;  // duplicated or non-contiguous index set, or mixed shapes
+    if (g.broken || (g.model_only != 0 && n != 1)) {
+      continue;  // duplicated index or mixed model/index shapes
+    }
+    if (allow_sparse && g.model_only == 0) {
+      const auto wide = other.find(base);
+      if (wide == other.end() || wide->second < 1 || side.contains(base) || g.bits.rbegin()->first >= wide->second) {
+        continue;
+      }
+      // Missing bits remain arbitrary on the reference. Only retained bits
+      // enter the correspondence, and each tied next-state bit is rechecked.
+      std::vector<std::string> bits(static_cast<size_t>(wide->second));
+      for (const auto& [index, key] : g.bits) {
+        bits[static_cast<size_t>(index)] = key;
+      }
+      out.emplace(base, std::move(bits));
+      continue;
+    }
+    if (g.bits.rbegin()->first + 1 != n) {
+      continue;
     }
     std::vector<std::string> bits;
     bits.reserve(g.bits.size());
@@ -382,8 +405,8 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
   // Pairing just one of those scalar cells (often `state[1]`) to the packed
   // `state` aliases a 1-bit term onto an N-bit cut and also hides that member
   // from the exact packed-to-bits bridge used by both proof engines.  Reject
-  // only the complete, lossless shape here; unrelated width-changing tier-2
-  // pairs remain legal and retain their ordinary self-certifying/reset-backed
+  // complete and projected same-base shapes here; unrelated width-changing
+  // tier-2 pairs remain legal and retain their ordinary self-certifying/reset-backed
   // discipline.
   Io_name_map<int> rwidth, iwidth;
   for (const auto& [k, f] : rmap) {
@@ -392,7 +415,7 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
   for (const auto& [k, f] : imap) {
     iwidth[k] = f.count == 1 ? f.width : 0;
   }
-  const auto impl_groups                = bus_bit_groups(iwidth, rwidth);
+  const auto impl_groups                = bus_bit_groups(iwidth, rwidth, {}, /*allow_sparse=*/true);
   auto       exact_packed_scalar_member = [&](const std::string& rc, const std::string& ic) {
     auto ri = rmap.find(rc);
     if (ri == rmap.end() || ri->second.width <= 1 || imap.contains(rc)) {
@@ -1299,7 +1322,8 @@ namespace {
 template <class R>
 std::string race_timeout_note(const Race_result<R>& race, const Lec_options& opts) {
   return std::format(
-      "racer exceeded formal.timeout: killed at the {:.1f}s wall deadline (formal.timeout={}s + formal.min_timeout floor(s) + grace; "
+      "racer exceeded formal.timeout: killed at the {:.1f}s wall deadline (formal.timeout={}s + formal.min_timeout floor(s) + "
+      "grace; "
       "cvc5's tlimit-per cannot preempt its preprocessing or one eager CaDiCaL solve)",
       static_cast<double>(race.deadline_ms) / 1000.0,
       opts.timeout);
@@ -1487,48 +1511,127 @@ Query_result finish_packed_base(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   return ind;
 }
 
-// Sequential fallback when fork/pipe is unavailable: run ind, then bmc, applying
-// the same trust asymmetry. Used only on a (rare) fork failure.
+// Hierarchical workers run one engine at a time, so induction must yield before
+// the command's backstop consumes BMC's opportunity. Each leg has its own fresh
+// process and parent-enforced deadline; an uninterruptible solver call cannot
+// prevent the other leg from running. At most one solver is active per job.
+bool graph_is_combinational(hhds::Graph* g, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
+                            absl::flat_hash_set<hhds::Graph*>& seen);
+
 Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                                  const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
-  auto        t0  = std::chrono::steady_clock::now();
-  Lec_options oi  = opts;
-  oi.engine       = "ind";
-  auto         ti = std::chrono::steady_clock::now();
-  Query_result ri = finish_packed_base(ref, impl, opts, safe_prove_equal(ref, impl, oi, sub_lib), sub_lib);
-  ri.engine       = "ind";
-  ri.elapsed_ms   = now_ms(ti);
-  if (ri.verdict == Verdict::Proven) {
-    ri.detail = "auto(seq): ind Proven (k=1 induction); " + ri.detail;
+  const auto                        t0 = std::chrono::steady_clock::now();
+  absl::flat_hash_set<hhds::Graph*> seen;
+  const bool combinational = graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen);
+  const bool split_budget  = !combinational && opts.timeout > 0 && opts.rlimit == 0;
+  long long  wall_ms       = race_deadline_ms(opts);
+  if (wall_ms > 0) {
+    // Never extend the isolated worker's existing hard backstop, even for tiny
+    // grants where the encoding grace is larger than the solver allowance.
+    wall_ms = std::min(wall_ms, static_cast<long long>(opts.timeout) * 1000 * opts.hard_timeout_mult);
+    if (opts._wall_timeout_ms > 0) {
+      wall_ms = std::min(wall_ms, opts._wall_timeout_ms);
+    }
+  }
+  auto run_leg = [&](Lec_options o, int id, long long deadline_ms) {
+    o.partitions = 1;
+    o._preferred_engine.clear();
+    auto run = [&](int) {
+      auto r = safe_prove_equal(ref, impl, o, sub_lib);
+      if (id == 0 && !combinational) {
+        r = finish_packed_base(ref, impl, o, std::move(r), sub_lib);
+      }
+      return r;
+    };
+    const auto leg_start = std::chrono::steady_clock::now();
+    auto       race      = fork_race<Query_result>(
+        1,
+        run,
+        serialize_result,
+        deserialize_result,
+        [](int, const Query_result&) { return false; },
+        deadline_ms,
+        id);
+    Query_result r;
+    if (!race.forked) {
+      // Fork failure: keep the divided solver limits and trust policy. There
+      // is no parent that can preempt a solver running in this process.
+      r = run(0);
+    } else if (race.timed_out[0]) {
+      r.wall_killed     = true;
+      r.ind_wall_killed = id == 0;
+      r.detail          = o.engine + " " + race_timeout_note(race, o);
+    } else if (!race.done[0] || race.results[0].detail.empty()) {
+      r.detail = o.engine + " worker terminated without a result";
+    } else {
+      r = std::move(race.results[0]);
+    }
+    r.engine     = o.engine;
+    r.elapsed_ms = now_ms(leg_start);
+    return r;
+  };
+  Lec_options oi = opts;
+  oi.engine      = "ind";
+  if (split_budget) {
+    oi.timeout
+        = opts._bmc_reserved_timeout > 0 ? std::max(0, opts.timeout - opts._bmc_reserved_timeout) : std::max(1, opts.timeout / 2);
+  }
+  Query_result ri;
+  if (split_budget && oi.timeout == 0) {
+    ri.engine     = "ind";
+    ri.elapsed_ms = 0;
+    ri.detail     = "induction share spent by the collapsed attempt; reserved budget goes directly to BMC";
+  } else {
+    const long long ind_wall_ms
+        = wall_ms > 0 && split_budget ? std::max(1LL, wall_ms * oi.timeout / std::max(2, opts.timeout)) : wall_ms;
+    ri = run_leg(oi, 0, ind_wall_ms);
+  }
+  const std::string policy = split_budget ? "auto(seq, 50/50 ind/BMC budget): " : "auto(seq): ";
+  if (ri.verdict == Verdict::Proven || (combinational && ri.verdict == Verdict::Refuted)) {
+    ri.detail = policy + ri.detail;
     return ri;
   }
-  Lec_options ob  = opts;
-  ob.engine       = "bmc";
-  auto         tb = std::chrono::steady_clock::now();
-  Query_result rb = safe_prove_equal(ref, impl, ob, sub_lib);
-  rb.engine       = "bmc";
-  rb.elapsed_ms   = now_ms(tb);
+  if (combinational) {
+    // BMC repeats the same stateless miter; it adds no reachability information.
+    ri.detail = policy + "combinational (bmc skipped); " + ri.detail;
+    return ri;
+  }
+  Lec_options ob = opts;
+  ob.engine      = "bmc";
+  if (split_budget) {
+    // A killed induction leg spent its allocation, even though it could not
+    // serialize solver accounting. Otherwise transfer unused solver time, but
+    // always preserve BMC's half against induction's min_timeout floor.
+    const long long spent_s    = ri.wall_killed ? oi.timeout : (ri.solve_ms + 999) / 1000;
+    const long long reserved_s = std::max(1, opts.timeout - oi.timeout);
+    ob.timeout                 = static_cast<int>(std::max(reserved_s, static_cast<long long>(opts.timeout) - spent_s));
+  }
+  auto rb     = run_leg(ob, 1, wall_ms > 0 ? std::max(1LL, wall_ms - now_ms(t0)) : 0);
+  auto finish = [&](Query_result r) {
+    r.elapsed_ms  = now_ms(t0);
+    r.cvc5       += ri.cvc5;
+    r.solve_ms   += ri.solve_ms;
+    r.detail      = policy + r.detail + "; induction attempt: " + ri.detail;
+    return r;
+  };
   if (rb.verdict == Verdict::Refuted) {
-    rb.detail    = "auto(seq): bmc Refuted (reachable CEX); " + rb.detail;
-    rb.cvc5     += ri.cvc5;  // the ind leg ran too: merge, or its solve stops being counted
-    rb.solve_ms += ri.solve_ms;
-    return rb;
+    return finish(std::move(rb));
   }
   Query_result ps;
   if (try_packed_scalar_proven(ri, rb, ps)) {
     ps.elapsed_ms  = now_ms(t0);
     ps.cvc5       += rb.cvc5;
     ps.solve_ms   += rb.solve_ms;
+    ps.detail       = policy + ps.detail;
     return ps;
   }
   Query_result bp;
-  if (try_bounded_proven(rb, bp, &ri)) {  // bp is a copy of rb, so it already carries rb.cvc5
-    bp.elapsed_ms  = now_ms(t0);
-    bp.cvc5       += ri.cvc5;
-    bp.solve_ms   += ri.solve_ms;
-    return bp;
+  if (try_bounded_proven(rb, bp, &ri)) {
+    return finish(std::move(bp));
   }
-  return make_inconclusive(ri, rb, opts, now_ms(t0));  // merges both legs itself
+  auto inc   = make_inconclusive(ri, rb, opts, now_ms(t0));
+  inc.detail = policy + inc.detail;
+  return inc;
 }
 
 // A LEC pair is "combinational" when neither design — nor any descended sub-body
@@ -2013,7 +2116,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   long long  carried_solve_ms = 0;
   // Cache hints are ordering only. Try the previous winner once; if an edit
   // made it inconclusive, continue through the unchanged auto portfolio below.
-  if (opts._preferred_engine == "ind" || opts._preferred_engine == "bmc") {
+  if (!opts._isolated_worker && (opts._preferred_engine == "ind" || opts._preferred_engine == "bmc")) {
     Lec_options hinted = opts;
     hinted.engine      = opts._preferred_engine;
     hinted._preferred_engine.clear();
@@ -2041,59 +2144,10 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     carried_solve_ms += hr.solve_ms;
   }
   if (opts._isolated_worker) {
-    // The hierarchy Taskflow already supplies parallelism and process
-    // isolation. Run the method ladder in this one child to prevent nested
-    // auto/case-split forks from exceeding formal.jobs.
-    Lec_options oi = opts;
-    oi.engine      = "ind";
-    oi.partitions  = 1;
-    auto ti        = std::chrono::steady_clock::now();
-    auto ri        = finish_packed_base(ref, impl, opts, safe_prove_equal(ref, impl, oi, sub_lib), sub_lib);
-    ri.engine      = "ind";
-    ri.elapsed_ms  = now_ms(ti);  // real per-engine timing (was -1 in the ladder's diagnostics)
-    absl::flat_hash_set<hhds::Graph*> seen;
-    const bool combinational = graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen);
-    if (ri.verdict == Verdict::Proven || (combinational && ri.verdict == Verdict::Refuted)) {
-      ri.cvc5     += carried;
-      ri.solve_ms += carried_solve_ms;
-      return ri;
-    }
-    Lec_options ob = opts;
-    ob.engine      = "bmc";
-    ob.partitions  = 1;
-    auto tb        = std::chrono::steady_clock::now();
-    auto rb        = safe_prove_equal(ref, impl, ob, sub_lib);
-    rb.engine      = "bmc";
-    rb.elapsed_ms  = now_ms(tb);
-    if (rb.verdict == Verdict::Refuted) {
-      rb.cvc5     += ri.cvc5;  // the ind leg of this ladder ran too
-      rb.cvc5     += carried;
-      rb.solve_ms += ri.solve_ms;
-      rb.solve_ms += carried_solve_ms;
-      return rb;
-    }
-    Query_result ps;
-    if (try_packed_scalar_proven(ri, rb, ps)) {
-      ps.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
-      ps.cvc5       += rb.cvc5;
-      ps.cvc5       += carried;
-      ps.solve_ms   += rb.solve_ms;
-      ps.solve_ms   += carried_solve_ms;
-      return ps;
-    }
-    Query_result bp;
-    if (try_bounded_proven(rb, bp, &ri)) {  // bp copies rb, so rb.cvc5 is already in it
-      bp.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
-      bp.cvc5       += ri.cvc5;
-      bp.cvc5       += carried;
-      bp.solve_ms   += ri.solve_ms;
-      bp.solve_ms   += carried_solve_ms;
-      return bp;
-    }
-    Query_result inc  = make_inconclusive(ri, rb, opts, ri.elapsed_ms + rb.elapsed_ms);  // merges both legs
-    inc.cvc5         += carried;
-    inc.solve_ms     += carried_solve_ms;
-    return inc;
+    auto r      = run_auto_sequential(ref, impl, opts, sub_lib);
+    r.cvc5     += carried;
+    r.solve_ms += carried_solve_ms;
+    return r;
   }
   // Purely combinational pair: skip the bmc racer (and the fork). Run one ind
   // query and return its verdict directly — for a stateless design the inductive
@@ -2691,7 +2745,7 @@ std::string memory_bank_correspondence_name(std::string_view name, bool strip_re
   const auto marker = key.find(livehd::bus_name::memory_instance_marker);
   const auto entry  = key.find("_e__mem", marker);
   if (marker == std::string::npos || entry == std::string::npos) {
-    return key;
+    return livehd::state_match::memory_bank_name(key, '_');
   }
   const auto decoded = decode_cgen_memory_correspondence(key.substr(0, entry + 2) + "_data");
   if (!decoded) {
@@ -2713,24 +2767,15 @@ std::string memory_bank_correspondence_name(std::string_view name, bool strip_re
       prefix.clear();
     }
   }
-  auto suffix = key.substr(entry + 2);
-  // A Liberty cell model read back inline leaves its own state one segment
-  // below the entry (bit) cell: `_mem[i][b]_flop_16` (core/bus_name.hpp).
-  if (const auto piece = livehd::bus_name::parse_bus_piece(suffix, /*allow_model_suffix=*/true, '_');
-      piece && !piece->suffix.empty()) {
-    suffix.resize(suffix.size() - piece->suffix.size() - 1);
-  }
-  return prefix + decoded->substr(marker) + suffix;
+  return livehd::state_match::memory_bank_name(prefix + decoded->substr(marker) + key.substr(entry + 2), '_');
 }
 
-struct Mem_entry_bank {
-  std::vector<std::string>              entry_keys;  // per entry: the bits-wide flop key, "" when bit-blasted
-  std::vector<std::vector<std::string>> bit_keys;    // per entry: the one-bit cell keys LSB first, empty when whole
-};
+using Mem_entry_bank = livehd::state_match::Memory_bank;
 struct Mem_bank_index {
   Io_name_map<std::pair<std::string, int>> candidates;
   absl::flat_hash_set<std::string>         matched;
-  Mem_bank_index(const Io_name_map<int>& bank_flops, const Io_name_map<int>& mem_side_flops) {
+  Mem_bank_index(const Io_name_map<int>& bank_flops, const Io_name_map<int>& mem_side_flops,
+                 const std::vector<livehd::state_match::Memory_projection>& projections, bool memory_in_impl) {
     // Build once per side, rather than rescanning every flop for every memory.
     // Several actual states with the same alias cannot direct a total tie.
     for (const auto& [key, width] : bank_flops) {
@@ -2745,6 +2790,54 @@ struct Mem_bank_index {
         }
       }
     }
+    // Replay semdiff's shared matcher result only when every actual storage
+    // key, width and canonical name still agrees with the current encoding.
+    for (const auto& projection : projections) {
+      if (projection.memory_in_impl != memory_in_impl) {
+        continue;
+      }
+      if (projection.entries <= 0 || projection.bits <= 0
+          || projection.bank.entry_keys.size() != static_cast<size_t>(projection.entries)
+          || projection.bank.bit_keys.size() != static_cast<size_t>(projection.entries)) {
+        continue;
+      }
+      const auto                                                       base = memory_correspondence_name(projection.memory_key);
+      std::vector<std::pair<std::string, std::pair<std::string, int>>> replay;
+      std::set<std::string>                                            used;
+      bool                                                             valid = true;
+      const auto check = [&](const std::string& name, const std::string& raw_key, int width) {
+        const auto key = canon_flop_name(raw_key);
+        const auto it  = bank_flops.find(key);
+        if (it == bank_flops.end() || it->second != width || !used.insert(key).second
+            || (memory_bank_correspondence_name(key, false) != name && memory_bank_correspondence_name(key, true) != name)) {
+          return false;
+        }
+        replay.push_back({
+            name,
+            {key, width}
+        });
+        return true;
+      };
+      for (int i = 0; i < projection.entries && valid; ++i) {
+        const auto entry = livehd::bus_name::entry(base + "__mem", i);
+        if (!projection.bank.entry_keys[i].empty()) {
+          valid = check(entry, projection.bank.entry_keys[i], projection.bits);
+        } else {
+          valid = projection.bank.bit_keys[i].size() == static_cast<size_t>(projection.bits);
+          for (int b = 0; b < projection.bits && valid; ++b) {
+            valid = check(livehd::bus_name::bit(entry, b), projection.bank.bit_keys[i][b], 1);
+          }
+        }
+      }
+      if (valid) {
+        for (const auto& [name, candidate] : replay) {
+          auto [it, fresh] = candidates.emplace(name, candidate);
+          if (!fresh && it->second.first != candidate.first) {
+            it->second.second = -1;
+          }
+        }
+      }
+    }
     for (const auto& [key, width] : mem_side_flops) {
       (void)width;
       matched.insert(memory_bank_correspondence_name(key, false));
@@ -2753,37 +2846,12 @@ struct Mem_bank_index {
   }
 };
 std::optional<Mem_entry_bank> find_mem_entry_bank(const std::string& mem_name, const Mem_sig& sig, const Mem_bank_index& index) {
-  if (mem_name.empty() || sig.size <= 0 || sig.bits <= 0) {
-    return std::nullopt;
-  }
-  const auto     name       = memory_correspondence_name(mem_name);
-  const auto&    candidates = index.candidates;
-  const auto&    matched    = index.matched;
-  Mem_entry_bank out;
-  out.entry_keys.assign(static_cast<size_t>(sig.size), std::string{});
-  out.bit_keys.assign(static_cast<size_t>(sig.size), {});
-  for (int i = 0; i < sig.size; ++i) {
-    const std::string ek = livehd::bus_name::entry(name + "__mem", i);
-    if (auto it = candidates.find(ek); it != candidates.end()) {
-      if (it->second.second != sig.bits || matched.contains(ek)) {
-        return std::nullopt;
-      }
-      out.entry_keys[static_cast<size_t>(i)] = it->second.first;
-      continue;
-    }
-    std::vector<std::string> bits;
-    bits.reserve(static_cast<size_t>(sig.bits));
-    for (int b = 0; b < sig.bits; ++b) {
-      std::string bk  = livehd::bus_name::bit(ek, b);
-      auto        bit = candidates.find(bk);
-      if (bit == candidates.end() || bit->second.second != 1 || matched.contains(bk)) {
-        return std::nullopt;
-      }
-      bits.push_back(bit->second.first);
-    }
-    out.bit_keys[static_cast<size_t>(i)] = std::move(bits);
-  }
-  return out;
+  return livehd::state_match::memory_bank(memory_correspondence_name(mem_name),
+                                          sig.size,
+                                          sig.bits,
+                                          index.candidates,
+                                          index.matched,
+                                          '_');
 }
 
 struct Packed_scalar_bridge {
@@ -2850,7 +2918,8 @@ bool split_loop_replica_key(std::string_view key, std::string& group, int& repli
 // proved before the portfolio may turn it into a full equivalence result.
 std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<int>& ref_side, const Io_name_map<int>& impl_side,
                                                               const Io_name_map<uint64_t>&    impl_order,
-                                                              const Io_name_map<std::string>& impl_raw) {
+                                                              const Io_name_map<std::string>& impl_raw,
+                                                              const std::vector<livehd::state_match::Register_projection>& hints) {
   std::map<std::string, std::map<int, std::string>> groups;
   for (const auto& [key, width] : impl_side) {
     if (width != 1 || ref_side.contains(key)) {
@@ -2896,6 +2965,51 @@ std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<
       continue;  // an arbitrary choice among same-shaped groups is not a correspondence
     }
     out.push_back(Packed_scalar_bridge{wit->second.front(), std::move(scalar_groups.front()), false, {}});
+  }
+
+  // The same candidate miner feeds semdiff's report and LEC's solver. Shape
+  // proposes a relation; the induction and reset-reachable base prove it.
+  std::vector<livehd::state_match::Register_name> ref_registers, impl_registers;
+  for (const auto& [key, width] : ref_side) {
+    ref_registers.push_back({key, key, width});
+  }
+  for (const auto& [key, width] : impl_side) {
+    auto raw = impl_raw.find(key);
+    impl_registers.push_back({key, raw == impl_raw.end() ? key : canon_flop_name(raw->second), width});
+  }
+  std::set<std::string> already_bridged;
+  for (const auto& bridge : out) {
+    already_bridged.insert(bridge.wide_key);
+  }
+  for (auto& projection : livehd::state_match::renamed_register_projections(ref_registers, impl_registers, '_', already_bridged)) {
+    out.push_back(Packed_scalar_bridge{std::move(projection.wide_key), std::move(projection.bit_keys), false, {}});
+  }
+
+  // Reuse proposals made before hierarchy preparation as well. The encoder's
+  // names may differ from the graph's raw hierarchy, so resolve and revalidate
+  // every retained bit against the state that will actually enter the proof.
+  for (const auto& hint : hints) {
+    const auto wide = canon_flop_name(hint.wide_key);
+    if (!ref_side.contains(wide) || hint.bit_keys.size() != static_cast<size_t>(ref_side.at(wide))
+        || std::any_of(out.begin(), out.end(), [&](const auto& bridge) { return bridge.wide_key == wide; })) {
+      continue;
+    }
+    std::vector<std::string> bits(hint.bit_keys.size());
+    std::set<std::string>    seen;
+    bool                     valid = true;
+    for (size_t i = 0; i < bits.size(); ++i) {
+      if (hint.bit_keys[i].empty()) {
+        continue;
+      }
+      bits[i] = canon_flop_name(hint.bit_keys[i]);
+      if (!impl_side.contains(bits[i]) || impl_side.at(bits[i]) != 1 || !seen.insert(bits[i]).second) {
+        valid = false;
+        break;
+      }
+    }
+    if (valid && !seen.empty()) {
+      out.push_back(Packed_scalar_bridge{wide, std::move(bits), false, {}});
+    }
   }
 
   // Standard-cell mapping names bit i of a register `<source-register>[i]`
@@ -4996,7 +5110,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       collect_flops(ref);
       side_ix = 1;
       collect_flops(impl);
-      bmc_packed_scalar = infer_packed_scalar_bridges(fw_side[0], fw_side[1], impl_state_order, fw_raw[1]);
+      bmc_packed_scalar = infer_packed_scalar_bridges(fw_side[0], fw_side[1], impl_state_order, fw_raw[1], opts._state_projections);
 
       // ── bit-blasted state correspondence ──────────────────────────────────
       // Synthesis can implement ONE N-bit register as N one-bit library DFF
@@ -5008,26 +5122,28 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // Pair them here — impl bit i shares bit i of the ref's one symbol — so the
       // rest of the machinery (seeding, threading, the next-state compare below)
       // sees an ordinary correspondence. Deliberately conservative: the ref key
-      // must be absent from the impl side, EVERY bit must be present at width 1,
-      // and no bit key may also exist on the ref (which would make the pairing
-      // ambiguous).
+      // must be absent from the impl side, retained bits must be unique and
+      // within its width, and no bit key may also exist on the ref. Eliminated
+      // bits stay arbitrary on the reference; all outputs remain checked.
       absl::flat_hash_map<std::string, std::vector<std::string>> bitblast;  // ref key -> impl bit keys, LSB first
       absl::flat_hash_set<std::string>                           bitblast_bits;
       {
-        const auto groups = bus_bit_groups(fw_side[1], fw_side[0], fw_raw[1]);
+        const auto groups = bus_bit_groups(fw_side[1], fw_side[0], fw_raw[1], /*allow_sparse=*/true);
         for (const auto& [key, w] : fw_side[0]) {
           if (w < 1 || fw_side[1].count(key) != 0) {
             continue;
           }
           // The implementation has one cell per literal state bit, named
-          // `<key>[i]` (core/bus_name.hpp). Same exact-width bound as the
-          // inductive twin.
+          // `<key>[i]` (core/bus_name.hpp). Empty slots preserve eliminated
+          // reference bits without tying them to implementation state.
           auto grp = groups.find(key);
           if (grp == groups.end() || static_cast<int>(grp->second.size()) != w) {
             continue;
           }
           for (const auto& b : grp->second) {
-            bitblast_bits.insert(b);
+            if (!b.empty()) {
+              bitblast_bits.insert(b);
+            }
           }
           bitblast.emplace(key, grp->second);
         }
@@ -5206,6 +5322,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         const int  pw      = parent.width;
         const auto sign_op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(pw - 1), static_cast<uint32_t>(pw - 1)});
         for (size_t i = 0; i < bits.size(); ++i) {
+          if (bits[i].empty()) {
+            continue;
+          }
           Val bv{cvc5::Term{}, 1, false};
           if (static_cast<int>(i) < pw) {
             const auto b  = static_cast<uint32_t>(i);
@@ -5222,7 +5341,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             }
           }
           ref_state[bits[i]]  = bv;
-          impl_state[bits[i]] = bv;
+          if (!power_init[1].contains(bits[i])) {
+            impl_state[bits[i]] = bv;
+          }
         }
       }
       // Matched-reset shared init for each STATEFUL collapsed leaf: both designs
@@ -5454,8 +5575,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       auto try_bank_bridge = [&](const Io_name_map<Mem_cut>& mem_side,
                                  const Io_name_map<Mem_cut>& other_mem_side,
                                  const Io_name_map<int>&     mem_side_flops,
-                                 const Io_name_map<int>&     bank_side_flops) {
-        const Mem_bank_index                  bank_index(bank_side_flops, mem_side_flops);
+                                 const Io_name_map<int>&     bank_side_flops,
+                                 bool                        memory_in_impl) {
+        const Mem_bank_index                  bank_index(bank_side_flops, mem_side_flops, opts._memory_projections, memory_in_impl);
         // A name shared by two memories on the memory side cannot direct a tie.
         absl::flat_hash_map<std::string, int> name_count;
         for (const auto& [mkey, mc] : mem_side) {
@@ -5517,8 +5639,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
         }
       };
-      try_bank_bridge(ref_mem_keys, impl_mem_keys, ref_flop_w, impl_flop_w);  // ref memory <-> impl bank
-      try_bank_bridge(impl_mem_keys, ref_mem_keys, impl_flop_w, ref_flop_w);  // impl memory <-> ref bank
+      try_bank_bridge(ref_mem_keys, impl_mem_keys, ref_flop_w, impl_flop_w, false);  // ref memory <-> impl bank
+      try_bank_bridge(impl_mem_keys, ref_mem_keys, impl_flop_w, ref_flop_w, true);   // impl memory <-> ref bank
     }
 
     // A persistent WRITABLE memory may still have comptime power-on contents.
@@ -6208,7 +6330,19 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         std::vector<cvc5::Term> bits;
         bits.reserve(bridge.bit_keys.size());
+        // A hole spans its field at the field's packed offset (as in the
+        // inductive twin), not at its index: fields may be wider than one bit.
+        std::vector<int> offsets(bridge.bit_keys.size(), 0);
+        for (size_t i = 1; i < offsets.size(); ++i) {
+          offsets[i] = offsets[i - 1] + bridge.width_at(i - 1);
+        }
         for (size_t i = bridge.bit_keys.size(); i-- > 0;) {
+          if (bridge.bit_keys[i].empty()) {
+            const auto lo = static_cast<uint32_t>(offsets[i]);
+            const auto hi = static_cast<uint32_t>(offsets[i] + bridge.width_at(i) - 1);
+            bits.push_back(tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {hi, lo}), {wide->second.term}));
+            continue;
+          }
           auto bit = impl_state.find(bridge.bit_keys[i]);
           if (bit == impl_state.end() || bit->second.width != bridge.width_at(i)) {
             res.detail += "; packed/scalar base unavailable (replica state missing)";
@@ -6686,7 +6820,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   add_flops(ref);
   ind_side_ix = 1;
   add_flops(impl);
-  const auto ind_packed_scalar = infer_packed_scalar_bridges(ind_side[0], ind_side[1], impl_state_order, ind_raw[1]);
+  const auto ind_packed_scalar
+      = infer_packed_scalar_bridges(ind_side[0], ind_side[1], impl_state_order, ind_raw[1], opts._state_projections);
 
   // ── bit-blasted state correspondence (see the twin in the BMC seeding) ─────
   // Synthesis can implement ONE N-bit register as N one-bit library DFF cells;
@@ -6697,12 +6832,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // which is exactly the "inconclusive in milliseconds" post-synthesis LEC. Bind
   // the impl's bit i to bit i of the ref's one symbol.
   absl::flat_hash_map<std::string, std::vector<std::string>> ind_bitblast;  // ref key -> impl bit keys, LSB first
-  const auto                                                 ind_bus_groups = bus_bit_groups(ind_side[1], ind_side[0], ind_raw[1]);
+  const auto ind_bus_groups = bus_bit_groups(ind_side[1], ind_side[0], ind_raw[1], /*allow_sparse=*/true);
   for (const auto& [key, w] : ind_side[0]) {
     if (w < 1 || ind_side[1].count(key) != 0) {
       continue;
     }
-    // The complete `<key>[0..n-1]` group (core/bus_name.hpp), if any.
+    // An exact same-base retained-bit group (core/bus_name.hpp), if any.
     auto grp = ind_bus_groups.find(key);
     if (grp == ind_bus_groups.end()) {
       continue;
@@ -6722,14 +6857,19 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     if (m != w) {
       continue;
     }
+    // Inserting bit keys can rehash shared: retain the parent value by copy.
+    const Val  parent  = pit->second;
     const auto sign_op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(w - 1), static_cast<uint32_t>(w - 1)});
     for (size_t i = 0; i < bits.size(); ++i) {
+      if (bits[i].empty()) {
+        continue;
+      }
       cvc5::Term t;
       if (static_cast<int>(i) < w) {
         const auto b = static_cast<uint32_t>(i);
-        t            = tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b}), {pit->second.term});
+        t            = tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b}), {parent.term});
       } else {
-        t = pit->second.is_signed ? tm.mkTerm(sign_op, {pit->second.term}) : tm.mkBitVector(1, 0);
+        t = parent.is_signed ? tm.mkTerm(sign_op, {parent.term}) : tm.mkBitVector(1, 0);
       }
       shared[bits[i]] = Val{t, 1, false};
     }
@@ -6754,12 +6894,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     if (!available) {
       continue;
     }
+    const Val parent = pit->second;
     int offset = 0;
     for (size_t i = 0; i < bridge.bit_keys.size(); ++i) {
       const int  width = bridge.width_at(i);
-      cvc5::Term t     = tm.mkTerm(
+      if (bridge.bit_keys[i].empty()) {
+        offset += width;
+        continue;
+      }
+      cvc5::Term t = tm.mkTerm(
           tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(offset + width - 1), static_cast<uint32_t>(offset)}),
-          {pit->second.term});
+          {parent.term});
       shared[bridge.bit_keys[i]]  = Val{t, width, false};
       offset                     += width;
     }
@@ -6981,7 +7126,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       for (const auto& [key, rec] : mem_side_flops) {
         mem_w.emplace(key, rec.w);
       }
-      const Mem_bank_index                  bank_index(bank_w, mem_w);
+      const Mem_bank_index                  bank_index(bank_w, mem_w, opts._memory_projections, mem_in_impl);
       absl::flat_hash_map<std::string, int> name_count;
       for (const auto& [mkey, mrec] : mem_side_mems) {
         ++name_count[memory_correspondence_name(mrec.name)];
@@ -7192,6 +7337,44 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         shared_mems[br.mem_key] = arr;
         continue;
       }
+      // Materialize the finite memory from the bank's independent state
+      // symbols. This is the same total correspondence as flop_i=SELECT(A,i),
+      // but SELECT at a dynamic address can now simplify to the bank's mux.
+      // Preserve the original array outside the represented address range.
+      cvc5::Term bank_array    = A;
+      bool       bank_complete = br.flop_keys.size() == static_cast<size_t>(br.size);
+      for (size_t i = 0; i < br.flop_keys.size(); ++i) {
+        cvc5::Term entry;
+        if (i < br.bit_keys.size() && !br.bit_keys[i].empty()) {
+          if (br.bit_keys[i].size() != static_cast<size_t>(br.bits)) {
+            bank_complete = false;
+            break;
+          }
+          for (size_t b = br.bit_keys[i].size(); b-- > 0;) {
+            const auto it = shared.find(br.bit_keys[i][b]);
+            if (it == shared.end() || it->second.width != 1) {
+              bank_complete = false;
+              break;
+            }
+            entry = entry.isNull() ? it->second.term : tm.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, {entry, it->second.term});
+          }
+        } else {
+          const auto it = shared.find(br.flop_keys[i]);
+          if (it == shared.end() || it->second.width != br.bits) {
+            bank_complete = false;
+            break;
+          }
+          entry = it->second.term;
+        }
+        if (!bank_complete) {
+          break;
+        }
+        bank_array = tm.mkTerm(cvc5::Kind::STORE, {bank_array, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), i), entry});
+      }
+      if (bank_complete) {
+        shared_mems[br.mem_key] = bank_array;
+        A                       = bank_array;
+      }
       for (size_t i = 0; i < br.flop_keys.size(); ++i) {
         cvc5::Term sel
             = tm.mkTerm(cvc5::Kind::SELECT, {A, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
@@ -7227,7 +7410,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   for (const auto& [pkey, bits] : ind_bitblast) {
     ind_tied_state.insert("nxt:" + display_name(pkey));
     for (const auto& b : bits) {
-      ind_tied_state.insert("nxt:" + display_name(b));
+      if (!b.empty()) {
+        ind_tied_state.insert("nxt:" + display_name(b));
+      }
     }
   }
   for (const auto& br : bridges) {
@@ -7257,12 +7442,24 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // first -- the value to compare against the ref's one next state -- or
   // nullopt unless every bit is present at the width its shared symbol has.
   // `impl_next(key)` returns the impl's next state for `key`, or nullptr.
-  auto concat_bit_next = [&](const std::vector<std::string>& bits, const auto& impl_next) -> std::optional<Val> {
+  // Empty slots use the reference next-state bit on both sides, so eliminated
+  // bits are never constrained by the correspondence hypothesis or its step.
+  auto concat_bit_next
+      = [&](const std::vector<std::string>& bits, const auto& impl_next, const Val& reference) -> std::optional<Val> {
     std::vector<cvc5::Term> bt;
     int                     total_width = 0;
-    for (auto it = bits.rbegin(); it != bits.rend(); ++it) {
-      const Val* v   = impl_next(*it);
-      auto       sit = shared.find(*it);
+    for (size_t i = bits.size(); i-- > 0;) {
+      if (bits[i].empty()) {
+        if (i >= static_cast<size_t>(reference.width)) {
+          return std::nullopt;
+        }
+        const auto b = static_cast<uint32_t>(i);
+        bt.push_back(tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b}), {reference.term}));
+        ++total_width;
+        continue;
+      }
+      const Val* v   = impl_next(bits[i]);
+      auto       sit = shared.find(bits[i]);
       if (v == nullptr || sit == shared.end() || v->width != sit->second.width) {
         return std::nullopt;
       }
@@ -7395,10 +7592,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           if (rit == rnxt.end() || inxt.contains(pkey)) {
             continue;
           }
-          auto cat = concat_bit_next(bits, [&](const std::string& b) -> const Val* {
-            auto it = inxt.find(b);
-            return it == inxt.end() ? nullptr : &it->second;
-          });
+          auto cat = concat_bit_next(
+              bits,
+              [&](const std::string& b) -> const Val* {
+                auto it = inxt.find(b);
+                return it == inxt.end() ? nullptr : &it->second;
+              },
+              rit->second);
           if (!cat || cat->width != rit->second.width) {
             continue;
           }
@@ -7647,10 +7847,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (!rs.emitted.contains(pkey) || is.emitted.contains(pkey)) {
         continue;
       }
-      auto cat = concat_bit_next(bits, [&](const std::string& b) -> const Val* {
-        auto it = is.state.find(b);
-        return is.emitted.contains(b) && it != is.state.end() ? &it->second : nullptr;
-      });
+      auto cat = concat_bit_next(
+          bits,
+          [&](const std::string& b) -> const Val* {
+            auto it = is.state.find(b);
+            return is.emitted.contains(b) && it != is.state.end() ? &it->second : nullptr;
+          },
+          rs.state.at(pkey));
       if (!cat || cat->width != rs.state.at(pkey).width) {
         continue;  // left unmatched AND tied: one_sided_unobservable keeps the verdict open
       }
@@ -8110,39 +8313,31 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     bad = bad.isNull() ? t : tm.mkTerm(cvc5::Kind::OR, {bad, t});
     ind_diffs.push_back({"bridge", t});
   }
-  // Bit-blasted register: the ref emits ONE `nxt:<reg>` of width N, the impl one
-  // `nxt:<reg>_i` per bit. Fold the impl's bits back into a single N-bit output
-  // under the ref's name so the ordinary by-name compare pairs them — otherwise
-  // both land in unmatched_* and gate the verdict, which is the same disjoint-key
-  // failure the shared-symbol pairing above fixes for the CURRENT state.
+  // Recheck the state relation on every retained bit. Holes use the reference
+  // next-state bit on both sides of this obligation, imposing no equality on
+  // eliminated state. Outputs still read the entire arbitrary reference state.
   for (const auto& [pkey, bits] : ind_bitblast) {
     const std::string rkey = std::string("\x01nxt:") + pkey;
-    if (re.outputs.find(rkey) == re.outputs.end() || ie.outputs.find(rkey) != ie.outputs.end()) {
+    auto              rit  = re.outputs.find(rkey);
+    if (rit == re.outputs.end() || ie.outputs.contains(rkey)) {
       continue;
     }
-    std::vector<cvc5::Term> bt;  // MSB first, as cvc5 CONCAT expects
-    bool                    all         = true;
-    int                     total_width = 0;
-    for (auto it = bits.rbegin(); it != bits.rend(); ++it) {
-      auto bit = ie.outputs.find(std::string("\x01nxt:") + *it);
-      if (bit == ie.outputs.end() || !shared.contains(*it) || bit->second.width != shared.at(*it).width) {
-        all = false;
-        break;
-      }
-      bt.push_back(bit->second.term);
-      total_width += bit->second.width;
-    }
-    if (!all || bt.empty() || total_width != re.outputs.at(rkey).width) {
+    auto cat = concat_bit_next(
+        bits,
+        [&](const std::string& bit) -> const Val* {
+          auto it = ie.outputs.find(std::string("\x01nxt:") + bit);
+          return it == ie.outputs.end() ? nullptr : &it->second;
+        },
+        rit->second);
+    if (!cat || cat->width != rit->second.width) {
       continue;
-    }
-    cvc5::Term cat = bt.front();
-    for (size_t i = 1; i < bt.size(); ++i) {
-      cat = tm.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, {cat, bt[i]});
     }
     for (const auto& b : bits) {
-      ie.outputs.erase(std::string("\x01nxt:") + b);
+      if (!b.empty()) {
+        ie.outputs.erase(std::string("\x01nxt:") + b);
+      }
     }
-    ie.outputs[rkey] = Val{cat, total_width, false};
+    ie.outputs[rkey] = *cat;
   }
 
   for (const auto& [name, rv] : re.outputs) {
@@ -8564,6 +8759,20 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // `nxt:last` still means a diverging OUTPUT was computed from an arbitrary
   // `last`, which may be unreachable (suggestions6 1.6: engine=ind REFUTED an
   // equivalent one-hot arbiter from last=0 once ABC had proven the state cut).
+  if (!bridges.empty()) {
+    auto definitions = re.equalities;
+    definitions.insert(definitions.end(), ie.equalities.begin(), ie.equalities.end());
+    std::vector<cvc5::Term> obligations;
+    obligations.reserve(ind_diffs.size());
+    for (const auto& [name, term] : ind_diffs) {
+      (void)name;
+      obligations.push_back(term);
+    }
+    const auto expanded = expand_cone_definitions(tm, definitions, obligations);
+    for (size_t i = 0; i < ind_diffs.size(); ++i) {
+      ind_diffs[i].second = expanded[i];
+    }
+  }
   const bool ind_has_state_cut = std::any_of(ind_diffs.begin(), ind_diffs.end(), [](const auto& d) {
     return !d.first.empty() && (d.first[0] == '\x01' || d.first.starts_with("nxt:") || d.first.starts_with("mem:"));
   });
@@ -9194,9 +9403,29 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           direct_merge_touched[i] = rewritten != direct;
           direct                  = rewritten;
         }
-        const bool wide_external = !ind_diffs[i].first.starts_with("nxt:") && direct.getKind() == cvc5::Kind::DISTINCT
-                                   && direct.getNumChildren() == 2 && direct[0].getSort().isBitVector()
-                                   && direct[0].getSort() == direct[1].getSort() && direct[0].getSort().getBitVectorSize() >= 16;
+        bool arithmetic_whole = false;
+        {
+          std::vector<cvc5::Term>        work{direct};
+          std::unordered_set<cvc5::Term> seen;
+          while (!work.empty()) {
+            const auto term = work.back();
+            work.pop_back();
+            if (!seen.insert(term).second) {
+              continue;
+            }
+            if (term.getKind() == cvc5::Kind::BITVECTOR_MULT) {
+              arithmetic_whole = true;
+              break;
+            }
+            for (const auto& child : term) {
+              work.push_back(child);
+            }
+          }
+        }
+        const bool wide_external = !arithmetic_whole && !ind_diffs[i].first.starts_with("nxt:")
+                                   && direct.getKind() == cvc5::Kind::DISTINCT && direct.getNumChildren() == 2
+                                   && direct[0].getSort().isBitVector() && direct[0].getSort() == direct[1].getSort()
+                                   && direct[0].getSort().getBitVectorSize() >= 16;
         if (wide_external) {
           const uint32_t width = direct[0].getSort().getBitVectorSize();
           for (uint32_t lo = 0; lo < width; lo += 8) {
@@ -9214,7 +9443,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
         } else {
           direct_jobs_of[i].push_back(terms.size());
-          cvc5::Term job = solver.simplify(direct);
+          cvc5::Term job = arithmetic_whole ? direct : solver.simplify(direct);
           if (!coherence_all.isNull()) {
             job                     = tm.mkTerm(cvc5::Kind::AND, {job, coherence_all});
             direct_merge_touched[i] = true;
@@ -10955,6 +11184,7 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
     fallback.partitions  = 1;
     return safe_prove_equal(ref, impl, fallback, sub_lib);
   }
+  const pid_t parent = ::getpid();
   pid_t c = ::fork();
   if (c < 0) {
     ::close(p[0]);
@@ -10964,7 +11194,9 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
     return safe_prove_equal(ref, impl, fallback, sub_lib);
   }
   if (c == 0) {
+    race_detail::watch_parent(parent);
     ::close(p[0]);
+    race_detail::maybe_test_stall(opts.engine == "bmc" ? 1 : 0);
     Lec_options worker      = opts;
     worker._isolated_worker = true;
     worker.partitions       = 1;
@@ -10974,6 +11206,7 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
     ::close(p[1]);
     ::_exit(0);
   }
+  ::setpgid(c, c);
   ::close(p[1]);
   // HARD wall backstop (Lec_options::hard_timeout_mult). cvc5's tlimit-per cannot
   // preempt a single CaDiCaL solve, which is exactly what a flat box-free miter
@@ -10983,8 +11216,11 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
   // on read(), and SIGKILL the worker if it passes. A killed worker sends no
   // serialized result, so it falls into the `died` path below and reports as an
   // Unknown naming the backstop — never a verdict.
-  const long long hard_ms
+  long long hard_ms
       = (opts.timeout > 0 && opts.hard_timeout_mult > 0) ? static_cast<long long>(opts.timeout) * 1000 * opts.hard_timeout_mult : 0;
+  if (hard_ms > 0 && opts._wall_timeout_ms > 0) {
+    hard_ms = std::min(hard_ms, opts._wall_timeout_ms);
+  }
   bool        killed = false;
   std::string blob;
   char        buf[8192];
@@ -10999,7 +11235,7 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
         // Past the backstop and the child still holds the pipe open: kill it and
         // drain whatever it managed to write (a partial blob fails to
         // deserialize, which is the same `died` path a crash takes).
-        ::kill(c, SIGKILL);
+        race_detail::kill_tree(c);
         killed = true;
         continue;
       }
@@ -11042,12 +11278,13 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
         // cannot report itself, so a vague "worker died" here would read as a
         // host problem and send the reader hunting for memory.
         why         = std::format(
-            "exceeded the {}s hard wall backstop (formal.timeout={}s x formal.hard_timeout_mult={}); "
-            "cvc5's tlimit-per cannot preempt a single CaDiCaL solve, which is what a flat box-free "
-            "miter compiles to — raise either knob, or 0 disables the backstop",
-            static_cast<long long>(opts.timeout) * opts.hard_timeout_mult,
+            "exceeded the {:.3f}s hard wall backstop (formal.timeout={}s x formal.hard_timeout_mult={}, reserved ceiling={}ms); "
+                    "cvc5's tlimit-per cannot preempt a single CaDiCaL solve, which is what a flat box-free "
+                    "miter compiles to — raise either knob, or 0 disables the backstop",
+            static_cast<double>(hard_ms) / 1000.0,
             opts.timeout,
-            opts.hard_timeout_mult);
+            opts.hard_timeout_mult,
+            opts._wall_timeout_ms);
       } else if (sig == SIGKILL || sig == SIGABRT || sig == SIGBUS || sig == SIGSEGV) {
         // The usual causes at these signals on a big flat def: the RLIMIT_AS
         // memory backstop (malloc fails -> abort / the OS kills), or a genuine
@@ -11081,76 +11318,20 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
 
 Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
-  bool         died = false;
-  std::string  why;
-  bool         hard_killed = false;
-  Query_result r           = spawn_isolated_worker(ref, impl, opts, sub_lib, died, why, hard_killed);
-  if (!died) {
-    return r;
+  if (opts.engine == "auto") {
+    // Split BEFORE starting a worker. Killing induction must leave a live
+    // dispatcher that can start BMC; killing a combined ladder loses both.
+    return run_auto_sequential(ref, impl, opts, sub_lib);
   }
-  // A wall-backstop kill is NOT the memory story the per-engine split below is
-  // for: the ladder already had its full budget and blew through it, so the two
-  // retry workers would each draw a FRESH backstop and burn 2x more wall clock
-  // to reach the same Unknown. Report it and stop.
+  bool        died = false;
+  std::string why;
+  bool        hard_killed = false;
+  auto        r           = spawn_isolated_worker(ref, impl, opts, sub_lib, died, why, hard_killed);
   if (hard_killed) {
-    return r;
+    r.wall_killed     = true;
+    r.ind_wall_killed = opts.engine == "ind";
   }
-  // The auto ladder runs ind THEN bmc inside ONE worker process, so its peak
-  // memory (two full encodes + two cvc5 instances' heap high-water) is what
-  // usually killed it. Retry each engine in its OWN fresh worker: half the
-  // peak per process, and even if one engine's worker dies again the other
-  // can still settle — the same trust rules as the in-worker ladder (ind
-  // Proven; ind Refuted trusted only for a pure combinational pair; bmc
-  // Refuted; bounded-bmc PASS policy). Never an upgrade: a surviving verdict
-  // is a verdict prove_equal itself produced.
-  if (opts.engine != "auto") {
-    return r;  // explicit engine: nothing further to split; the diagnostic stands
-  }
-  const std::string died_note = "isolated auto worker died: " + why + "; per-engine retry in fresh workers: ";
-  Lec_options       oi        = opts;
-  oi.engine                   = "ind";
-  bool         ind_died       = false;
-  std::string  ind_why;
-  bool         ind_killed = false;
-  Query_result ri         = spawn_isolated_worker(ref, impl, oi, sub_lib, ind_died, ind_why, ind_killed);
-  ri.engine               = "ind";
-  if (ind_died) {
-    ri.detail = "ind retry worker also died: " + ind_why;
-  }
-  absl::flat_hash_set<hhds::Graph*> seen;
-  const bool combinational = graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen);
-  if (ri.verdict == Verdict::Proven || (combinational && ri.verdict == Verdict::Refuted)) {
-    ri.detail = died_note + ri.detail;
-    return ri;
-  }
-  Lec_options ob        = opts;
-  ob.engine             = "bmc";
-  bool         bmc_died = false;
-  std::string  bmc_why;
-  bool         bmc_killed = false;
-  Query_result rb         = spawn_isolated_worker(ref, impl, ob, sub_lib, bmc_died, bmc_why, bmc_killed);
-  rb.engine               = "bmc";
-  if (bmc_died) {
-    rb.detail = "bmc retry worker also died: " + bmc_why;
-  }
-  if (rb.verdict == Verdict::Refuted) {
-    rb.detail    = died_note + rb.detail;
-    rb.cvc5     += ri.cvc5;  // the ind retry worker ran too
-    rb.solve_ms += ri.solve_ms;
-    return rb;
-  }
-  Query_result bp;
-  if (try_bounded_proven(rb, bp, &ri)) {  // bp copies rb, so rb.cvc5 is already in it
-    bp.detail      = died_note + bp.detail;
-    bp.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
-    bp.cvc5       += ri.cvc5;
-    bp.solve_ms   += ri.solve_ms;
-    return bp;
-  }
-  Query_result out = make_inconclusive(ri, rb, opts, ri.elapsed_ms + rb.elapsed_ms);  // merges both legs
-  out.engine       = "isolated-worker";
-  out.detail       = died_note + out.detail;
-  return out;
+  return r;
 }
 
 Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts, Query_result first,
@@ -11177,6 +11358,8 @@ Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_opti
   o2.int_blast    = "iand";
   o2.timeout      = std::max(1, opts.min_timeout);
   o2.min_timeout  = std::max(1, opts.min_timeout);
+  o2._bmc_reserved_timeout = 0;
+  o2._wall_timeout_ms      = 0;
   Query_result r2 = isolated ? prove_equal_isolated(ref, impl, o2, sub_lib) : prove_equal(ref, impl, o2, sub_lib);
   if (r2.verdict == Verdict::Unknown) {
     // Keep the BV result: its detail names the real bottleneck, and the retry's
