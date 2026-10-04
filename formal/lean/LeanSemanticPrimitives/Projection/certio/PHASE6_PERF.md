@@ -1823,16 +1823,22 @@ Pre-launch captured, binary sha256
 Identical size and identical checker bound.  That is a strong agreement signal
 between the two backends; it is not a proof that they produce the same program.
 
-**Specialization took 50x longer on the covered backend** -- 61,267,338 ms
-against the fork's 1,226,168 ms -- and the `-O2` advantage works in the HOST
-run's favour, so 50x is a LOWER bound on the specializer difference, not an
-upper one.
+**The covered backend took 61,267,338 ms where the fork took 1,226,168 ms**,
+on the same certificate and budget.
 
-This answers the open question in `PROMOTION_OBLIGATIONS.md`: **B alone is not
-practically sufficient.**  B gives a covered backend, and that backend takes
-17 hours on one combinational CVA6 block.  Obligation A -- the fork's
-`PRes.val` bridge -- is therefore load-bearing for practicality, not only for
-tidiness, and the plan's ordering should reflect that.
+**That 50x is NOT a controlled comparison, and calling it a "lower bound on the
+specializer difference" was wrong.**  Three things differ at once, per
+`PERFORMANCE_INVESTIGATION_PLAN.md` H4: a different specialization
+implementation (`ProtoFast.mixDriver` vs `mixDriver`), different compiler flags
+(`-O0` vs `-O2`), and different source snapshots.  My reasoning -- "`-O2` helps
+the host, so the gap can only be larger" -- fixes the sign of ONE confounder
+and says nothing about the other two.  The controlled number requires the
+same-source `-O0`/`-O2` pair, and the `-O0` half is still running.
+
+What survives: the covered backend took 17 hours on one combinational CVA6
+block, measured.  That alone makes B's practical sufficiency DOUBTFUL and keeps
+obligation A on the table, but it does not yet establish how much of the gap
+is the representation change.
 
 **And on this design the residual is NOT faster than the interpreter**:
 reference 1.48 s/cycle against step 1.65 s/cycle.  Two caveats, both load-
@@ -1841,3 +1847,80 @@ bearing: `step` goes through `stepOf`, which adds a `runtimeOK` check and
 `runResidAt` directly -- so this is NOT like-for-like with the 2.15x recorded
 in section 13.6; and a single run of each.  What it does show is that no
 speed-up should be assumed for the checked simulator path on this design.
+
+## 19. Coverage inventory -- the 30-block milestone is certificate-limited
+
+Coverage is first priority (`PERFORMANCE_INVESTIGATION_PLAN.md`).  Before
+queuing more runs, the obvious question is what there is to run.  The answer
+changes the shape of the milestone.
+
+### 19.1 Nineteen files, SIX distinct CVA6 blocks
+
+Grouping `livehd-d4-incremental/temp/*.dcert` by `(sources, nodes)`:
+
+| shape | files | what they are |
+|---|---:|---|
+| 97,774 / 108,666 | 1 | `cva6_hpdcache_subsystem` |
+| 32,822 / 34,874 | 1 | `csr_regfile` |
+| 8,658 / 11,681 | 1 | `aes` |
+| 8,373 / 8,971 | **4** | `decoder_gate` + `dec_d1/d3/d6` -- MUTANTS of one block |
+| 6,137 / 6,597 | 1 | `alu_gate` |
+| 4,045 / 5,118 | 1 | `intpipe_alu` (CORE-ET, not CVA6) |
+| 1,784 / 1,782 | **7** | `btb_gate` + `btb_m1/m4/m5/m6/m7/m8` -- MUTANTS of one block |
+| tiny | 3 | `fx_*` operator fixtures |
+
+The `dec_d*` and `btb_m*` files are deliberately perturbed copies -- d4's
+negative controls for its digest test -- with identical shapes and different
+hashes.  **They are not separate blocks and must not be counted as such.**
+
+So the distinct CVA6 blocks present are **six**:
+
+| block | sources / nodes | supported | status |
+|---|---|---|---|
+| `alu` | 6,137 / 6,597 | yes | **executed + reference-compared** (fork backend; and again on the covered backend) |
+| `decoder` | 8,373 / 8,971 | yes | **executed + reference-compared** (fork backend) |
+| `btb` | 1,784 / 1,782 | yes | QUARANTINED -- reset-descriptor inconsistency |
+| `csr_regfile` | 32,822 / 34,874 | yes | not run |
+| `aes` | 8,658 / 11,681 | **no** -- `sources`, `ops` | blocked by support |
+| `cva6_hpdcache_subsystem` | 97,774 / 108,666 | **no** -- `memFree`, `sources`, `ops` | blocked by support |
+
+### 19.2 The blocker
+
+`CVA6_COVERAGE_PLAN.md` targets **82** CVA6 modules.  This branch has
+certificates for **6**, of which **4** are supported and **1** is quarantined.
+
+**The 30-block milestone cannot be reached from the certificates present**, at
+any specialization speed.  The binding constraint is CERTIFICATE SUPPLY, which
+is produced by `livehd-new`'s dense exporter -- a DATA dependency of this
+branch, not a code one, and deliberately so.
+
+That reorders the practical work.  Specialization cost determines how long each
+block takes; it does not determine how many blocks exist.  Of the two
+unsupported blocks, `aes` fails on `sources` and `ops` only -- which is
+operator-coverage work (Phase 3) rather than an exporter problem -- while
+`hpdcache` additionally fails `memFree`, which is Phase 7 memory work.
+
+### 19.3 Compact baseline table
+
+Per `PERFORMANCE_INVESTIGATION_PLAN.md` step 2.  `experiments.jsonl` holds the
+full records with hashes; this is the summary.  Native execution, theorem
+coverage, and kernel-certified concrete specialization are SEPARATE columns.
+
+| ID | design | runner / backend | flags | fuel | specialize | wall | peak RSS | residual / bound | checks | exit | native | theorem-covered | kernel-certified |
+|---|---|---|---|---|---:|---:|---:|---|---|---:|---|---|---|
+| E1 | `alu_gate` | file-ab, fork+hwAPVar | -O0 | 20000/200 | — | 345.88 s | 104,200 KB | — | — | 3 | yes | no | no |
+| E2 | `alu_gate` | file-ab, fork+hwAPVar | -O0 | 200000/2000 | 1,226,168 ms | 1,485.48 s | 124,004 KB | 89,996 / 28,899 | 6 seeds, trace, control | 0 | yes | no | no |
+| E3 | `decoder_gate` | file-ab, fork+hwAPVar | -O0 | 200000/2000 | 2,413,597 ms | 2,900.21 s | 172,360 KB | 138,135 / 38,902 | 6 seeds, trace, control | 0 | yes | no | no |
+| E4 | `alu_gate` | total-probe, **mixDriver+hwAPVarT** | **-O2** | 200000/2000 | 61,267,338 ms | 61,330.78 s | **24,904 KB** | 89,996 / 28,899 | 6 seeds, trace, control | 0 | yes | **conditionally** | **no** |
+
+E1-E3 use the diagnostic fork, which has no bridge, so "theorem-covered: no".
+E4 uses `mixDriver` + `hwAPVarT`, for which `IHwAdequate_varT`,
+`specializeDesign_varT_correct` and `simSound_varT` ARE proved -- but
+conditionally on `mixDriver … = .ok R`, which no run discharges, so
+"kernel-certified: no" for every row.
+
+Two in-flight `-O0` runs (PIDs 2877239, 3238710) are not in the table; they
+will be added with their own provenance when they exit.
+
+**CVA6 blocks counted toward 30: TWO** (`alu`, `decoder`), both combinational,
+both experimental.  E4 is the same `alu` on a different backend and adds none.
