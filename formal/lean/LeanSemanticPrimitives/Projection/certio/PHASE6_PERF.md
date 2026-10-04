@@ -1886,6 +1886,14 @@ So the distinct CVA6 blocks present are **six**:
 
 ### 19.2 The blocker
 
+> **WITHDRAWN -- see section 20.**  What follows was written after looking at
+> `livehd-d4-incremental/temp/*.dcert` only.  The authoritative corpus is
+> `temp/cva6_30_auth/blocks/<name>/lean/<name>_gate.dcert`, which I did not
+> look in.  **All 30 frozen CVA6 blocks have certificates on disk**, 22 of the
+> 29 present are SUPPORTED, and certificate supply is NOT the binding
+> constraint.  The paragraph below is wrong and is kept so the error is
+> visible.
+
 `CVA6_COVERAGE_PLAN.md` targets **82** CVA6 modules.  This branch has
 certificates for **6**, of which **4** are supported and **1** is quarantined.
 
@@ -1924,3 +1932,102 @@ will be added with their own provenance when they exit.
 
 **CVA6 blocks counted toward 30: TWO** (`alu`, `decoder`), both combinational,
 both experimental.  E4 is the same `alu` on a different backend and adds none.
+
+## 20. Certificate supply: the corpus exists, and the real blocker is a reset defect
+
+### 20.1 Correcting section 19.2
+
+Section 19.2 concluded the 30-block milestone was certificate-limited.  **That
+was wrong, and the cause was looking in one directory.**  I inventoried
+`livehd-d4-incremental/temp/*.dcert` (19 files, 6 distinct blocks) and did not
+look in `temp/cva6_30_auth/blocks/`.
+
+The canonical 30 are tracked: `pass/lean/manifests/cva6_30_frozen.tsv` on
+`direction-3-translation-validation` at `7f5b1bd27`, a size-ranked subset of
+the authoritative 78 in `CVA6_COVERAGE_PLAN.md` Phase 2, with names in
+`pass/lean/tests/d4/cva6_30.list`.  Matching those names against every
+`.dcert` under `projects/`: **30 of 30 have a certificate**, 29 of them as
+`temp/cva6_30_auth/blocks/<name>/lean/<name>_gate.dcert`
+(`cva6_hpdcache_wrapper` is in `cva6_30_auth2`).
+
+So **certificate supply is NOT the binding constraint.**
+
+### 20.2 Support across the authoritative 29
+
+Measured with the current-source checker, all six fields:
+
+**22 SUPPORTED.**  7 not: `aes` (sources, ops), `cva6_hpdcache_subsystem`
+(memFree, sources, ops), `fpu_wrap` (sources, ops), `load_unit`
+(sources, ops), `store_unit` (sources, ops), `mult` (ops), `multiplier` (ops).
+
+Several supported blocks are MUCH smaller than the ALU (6,597 nodes):
+
+| block | sources / nodes | flops |
+|---|---|---:|
+| `ariane_regfile` | 1,034 / 1,121 | 32 |
+| `serdiv` | 1,082 / 1,180 | 12 |
+| `instr_queue` | 1,105 / 1,190 | 71 |
+| `commit_stage` | 1,193 / 1,283 | 0 |
+| `instr_scan` | 1,235 / 1,264 | 0 |
+| `store_buffer` | 1,331 / 1,387 | 62 |
+| `btb` | 1,784 / 1,782 | 64 |
+| `compressed_decoder` | 1,913 / 2,022 | 0 |
+| `pmp` | 2,881 / 3,213 | 0 |
+| `cva6_ptw` | 3,423 / 3,774 | 11 |
+| `pmp_data_if` | 4,062 / 4,505 | 0 |
+
+### 20.3 THE ACTUAL BLOCKER: a systemic reset-polarity defect
+
+The conflict found on `btb`, and then on `csr_regfile`, is not per-design.
+Scanning all 29 by pure parse:
+
+    sequential blocks: 20     with reset-polarity CONFLICT: 20
+
+**Every sequential block in the authoritative corpus has it**, and always the
+same shape: the `flopQAsync` SOURCES declare reset on input `k` with
+`activeLow = 1`, while every `FlopDesc` row for the same input `k` declares
+`activeLow = 0`.
+
+    ariane_regfile  32 flops  src (2,1)   flop (2,0)
+    bht            256        (4,1)            (4,0)
+    btb             64        (4,1)            (4,0)
+    csr_regfile    136       (22,1)           (22,0)
+    frontend       409       (14,1)           (14,0)
+    issue_stage    332       (17,1)           (17,0)
+    scoreboard     243       (10,1)           (10,0)
+    ... 20 of 20, no exceptions
+
+| | |
+|---|---|
+| **owner** | the DCERT1 exporter -- `pass/lean/pass_lean.cpp` and `design_cert_export.hpp` in `livehd-d4-incremental` (the writer is there, not in `livehd-new`).  NOT this branch. |
+| **evidence** | the static scan above, reproducible from the certificates alone; plus `DIRECTION4_INCREMENTAL.md:516`, which already records the `btb` case and attributes it to "the `negreset` conflation the `FlopDesc` docstring warns about". |
+| **consequence** | NO trustworthy sequential CVA6 coverage is obtainable from ANY of these certificates.  Differential agreement (residual vs `interpretDesign`) stays valid, because both sides read the same contradictory metadata. |
+| **what would fix it** | one convention decision in the exporter, applied to both the source and the `FlopDesc` paths, then re-emission.  It is a single systematic bug, not 20. |
+
+### 20.4 Two counts, kept apart from here on
+
+| count | meaning | now |
+|---|---|---|
+| **differential** | specialized, checker-accepted, residual agrees with `interpretDesign` on the recorded stimuli | **2** (`alu`, `decoder`) |
+| **semantically trusted** | the above AND the certificate's metadata is self-consistent, so the agreement is about the intended circuit | **2** -- both combinational, so the reset defect cannot bite them |
+
+A sequential block that passes the gate adds to the FIRST count only, until the
+exporter defect is fixed.
+
+### 20.5 Concrete next step
+
+**Nine blocks have ZERO flops**, so the reset defect cannot affect them, and
+eight of those are supported: `alu` and `decoder` (done), plus `alu_wrapper`,
+`commit_stage`, `compressed_decoder`, `instr_scan`, `pmp`, `pmp_data_if`.
+`aes` is the ninth and is unsupported.
+
+Those six un-run combinational blocks are the only ones that can raise the
+SEMANTICALLY TRUSTED count today, and four of them are small
+(`commit_stage` 1,283 nodes, `instr_scan` 1,264, `compressed_decoder` 2,022,
+`pmp` 3,213) -- all well under the ALU's 6,597, so each should cost far less
+than the ALU's run.
+
+NOTE on certificate identity: `cva6_30_auth`'s `csr_regfile_gate` is
+32,853 / 34,897, while the in-flight run uses `temp/rt_csr_regfile_gate.dcert`
+at 32,822 / 34,874.  **Different revisions of the same block** -- the hashes
+and shapes must travel with any result.
