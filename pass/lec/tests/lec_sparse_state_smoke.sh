@@ -23,10 +23,12 @@ endmodule
 VERILOG
 sed 's/<= d\[3\]/<= ~d[3]/' "$WORK/good.v" > "$WORK/bad.v"
 sed 's/state\[1\]};/state[0]};/' "$WORK/ref.v" > "$WORK/exposed.v"
-sed 's/state <= d/state <= d ^ {state[0], 3\x27b000}/' "$WORK/ref.v" > "$WORK/feedback.v"
+sed 's/state <= d/state <= d ^ {state[0], 3'\''b000}/' "$WORK/ref.v" > "$WORK/feedback.v"
 sed 's/state\[3\]/state[4]/g' "$WORK/good.v" > "$WORK/out_of_range.v"
-sed '/reg \[3:0\] state;/a\  initial state = 4\x27b1000;' "$WORK/ref.v" > "$WORK/init_ref.v"
-sed '/reg \\state/a\  initial begin \\state[3].flop_16 = 0; \\state[1].flop_16 = 0; end' "$WORK/good.v" > "$WORK/init_bad.v"
+sed '/reg \[3:0\] state;/a\
+  initial state = 4'\''b1000;' "$WORK/ref.v" > "$WORK/init_ref.v"
+sed '/reg \\state/a\
+  initial begin \\state[3].flop_16 = 0; \\state[1].flop_16 = 0; end' "$WORK/good.v" > "$WORK/init_bad.v"
 check() {
   local tag=$1 ref=$2 impl=$3 engine=$4 expected=$5 rc=0
   "$LHD" lec --ref "verilog:$WORK/$ref.v" --impl "verilog:$WORK/$impl.v" --top dut \
@@ -77,8 +79,11 @@ check initialization init_ref init_bad bmc refuted
 check initialization_auto init_ref init_bad auto refuted
 # A renamed, pruned register needs a proved reachable base as well as its
 # retained transitions. Neither bit names nor a shape guess can prove it alone.
-sed '/reg \[3:0\] state;/a\  initial state = 0;' "$WORK/ref.v" > "$WORK/renamed_ref.v"
-sed 's/state\[/mapped[/g; /reg \\mapped/a\  initial begin \\mapped[3].flop_16 = 0; \\mapped[1].flop_16 = 0; end' \
+sed '/reg \[3:0\] state;/a\
+  initial state = 0;' "$WORK/ref.v" > "$WORK/renamed_ref.v"
+sed 's/state\[/mapped[/g
+/reg \\mapped/a\
+  initial begin \\mapped[3].flop_16 = 0; \\mapped[1].flop_16 = 0; end' \
   "$WORK/good.v" > "$WORK/renamed_good.v"
 sed 's/<= d\[3\]/<= ~d[3]/' "$WORK/renamed_good.v" > "$WORK/renamed_bad.v"
 check renamed renamed_ref renamed_good auto proven

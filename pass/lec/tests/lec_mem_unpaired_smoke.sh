@@ -23,8 +23,10 @@ EOF
 # The storage names deliberately have no bank correspondence. Only unwritten
 # reference bits are unknown; a real difference after a write must still fail.
 sed 's/hi <= d/hi <= ~d/' "$WORK/good.v" > "$WORK/bad.v"
-sed '/reg mem/a\  initial begin mem[0] = 1; mem[1] = 1; end' "$WORK/ref.v" > "$WORK/init.v"
-sed '/reg lo, hi/a\  initial begin lo = 0; hi = 0; end' "$WORK/good.v" > "$WORK/init_bad.v"
+sed '/reg mem/a\
+  initial begin mem[0] = 1; mem[1] = 1; end' "$WORK/ref.v" > "$WORK/init.v"
+sed '/reg lo, hi/a\
+  initial begin lo = 0; hi = 0; end' "$WORK/good.v" > "$WORK/init_bad.v"
 check() {
   local tag=$1 ref=$2 impl=$3 expected=$4 policy=$5 code=0
   "$LHD" lec --ref "verilog:$WORK/$ref.v" --impl "verilog:$WORK/$impl.v" --top dut \

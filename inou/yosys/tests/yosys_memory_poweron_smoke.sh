@@ -14,7 +14,8 @@ module mem(input clk, we, addr, input [7:0] d, output [7:0] q);
   assign q = data[addr];
 endmodule
 RTL
-sed '/always/i\  initial begin data[0] = 1; data[1] = 2; end' "$W/gold.v" > "$W/gate.v"
+sed '/always/i\
+  initial begin data[0] = 1; data[1] = 2; end' "$W/gold.v" > "$W/gate.v"
 sed "s/<= d;/<= d ^ 8'd1;/" "$W/gate.v" > "$W/broken.v"
 for variant in gate broken; do
   mkdir -p "$W/$variant"

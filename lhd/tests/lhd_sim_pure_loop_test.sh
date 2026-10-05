@@ -13,7 +13,7 @@ case "$mode" in
   *) echo "unknown pure-loop mode: $mode" >&2; exit 1 ;;
 esac
 "$LHD" sim lhd/tests/lhd_sim_pure_loop.prp --workdir "$W/$mode" --set compile.unroll=false \
-  --set sim.tune.profile=off "${extra[@]}" --result-json "$W/$mode.json" --diag-fmt pretty
+  --set sim.tune.profile=off ${extra[@]+"${extra[@]}"} --result-json "$W/$mode.json" --diag-fmt pretty
 python3 - "$W" "$mode" <<'PY'
 import json, pathlib, sys
 w = pathlib.Path(sys.argv[1])
