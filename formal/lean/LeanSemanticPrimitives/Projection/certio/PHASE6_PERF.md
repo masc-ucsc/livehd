@@ -2099,10 +2099,17 @@ Specialization, by contrast, does rise with node count on this backend:
 | count | meaning | value |
 |---|---|---|
 | **differential** | specialized, checker-accepted, residual agrees with `interpretDesign` on the recorded stimuli | **8** |
-| **semantically trusted** | the above AND self-consistent certificate metadata | **8** |
+| **no known reset conflict** | the above AND the per-flop reset scan finds no conflict -- which for a zero-flop block is vacuous | **8** |
 
 All eight are zero-flop, so the systemic reset defect cannot apply to any of
-them -- which is why the two counts coincide today.  They are
+them -- which is why the two counts coincide today.
+
+**The second count was called "semantically trusted".  That name overclaimed
+and is withdrawn.**  Zero flops excludes THIS reset defect and nothing else: it
+does not establish that a certificate's metadata is self-consistent in general,
+and it says nothing about whether the certificate expresses the intended RTL.
+Native differential coverage, reset-conflict status, and RTL/kernel evidence
+are three separate things and are kept separate.  They are
 `alu`, `decoder`, `commit_stage`, `instr_scan`, `compressed_decoder`, `pmp`,
 `pmp_data_if`, `alu_wrapper`.
 
@@ -2122,3 +2129,103 @@ quoted as "8 of the frozen 30".
 Status for every row: NATIVE / EXPERIMENTAL.  Not RTL equivalence, not kernel
 proof -- no run discharges the concrete `hproj`, and the fork backend has no
 bridge.
+
+## 22. E12 `decoder` canonical, and a CONTROLLED host-vs-fork measurement
+
+### 22.1 E12 -- canonical `decoder`, exit 0
+
+E3 used `temp/rt_decoder_gate` (8,373 / 8,971, `f87080df...`); the canonical
+`cva6_30_auth` certificate is 8,340 / 8,938, `23b4f0316c46af8d...`.  Re-run
+through the same gated `-O2` `--file-ab` runner, binary
+`1002f171cd5b9ff6...`, clean tree at `69dcfe359`:
+
+    support: all six true
+    checkResidual ACCEPTED, bound 38,754
+    seeds 0,1,2,3,4,7 all match interpretDesign
+    trace 4 cycles agrees; control agrees
+    STAGE TIMES ms: specialize 330,909  reference-runs 16,086 (6)
+                    residual-runs 11,290 (6)  control 52,040
+    wall 455.00 s   RSS 26,008 KB   exit 0
+
+So **all 8 counted blocks are now canonical-corpus runs.**  Residual
+2.68 s/cycle against the reference's 1.43 s/cycle -- 0.5x, i.e. SLOWER, on this
+certificate.
+
+### 22.2 Reset audit corrected to per-flop matching
+
+The first `reset_audit` compared two SETS of `(input, activeLow)` pairs
+collected across the whole design, so it could pair a source pin with a flop
+that never uses it, and it silently labelled an unresolved reset slot `ok`.
+
+Now matched by FLOP IDENTITY -- `flopQAsync` source *i* describes flop *i* and
+is compared with `FlopDesc` row *i* only -- with explicit `unknown:` verdicts
+for an out-of-range slot, a non-`input` reset driver, or a differing pin.  It
+is labelled in the output as a CANDIDATE CONFLICT SCAN, not a claim about
+intended RTL semantics.
+
+Sharper result: **21 sequential, 21 with at least one conflict, 16 conflicted
+on EVERY flop, 0 unknown**, 9 combinational.  The five partial ones carry a few
+flops with no `flopQAsync` source (`issue_read_operands` 88+1,
+`issue_stage` 331+1, `fpu_wrap` 269+6, `cva6_hpdcache_wrapper` 491+24,
+`cva6_hpdcache_subsystem` 518+24).
+
+### 22.3 EXPERIMENT P1 -- is the host's cost quadratic in SOURCE count?
+
+**Hypothesis** (plan H3): on the proved `mixDriver`, repeated preparation and
+environment shifting dominate, and the fork's `PRes.val` + zero-shift changes
+remove exactly that.  **Prediction:** the fork is faster at every size and the
+gap WIDENS, because per-node spine work grows with the spine.
+
+**Control:** both backends in ONE process, same source, build flags, input and
+budgets, `-O2` throughout.  The one documented difference is the interpreter --
+host `hwAPVarT` (from the TOTAL `rewrittenT`), fork `hwAPVar` (from the PARTIAL
+`goInline`) -- and `--rewrite-agree` shows those two transforms produce the SAME
+`main` body by exact `BEq`.  That is evidence, not a theorem.
+
+**Node ladder** (`chainD`, sources fixed at 2).  Residual sizes identical, both
+reference-checked:
+
+    n      host    fork   ratio
+    8      1 ms    1 ms    1.0x
+    16     1 ms    2 ms    0.5x
+    32     6 ms    3 ms    2.0x
+    64    24 ms   10 ms    2.4x
+    128  126 ms   36 ms    3.5x
+
+Prediction held in shape, but 3.5x at n = 128 is far short of what the real
+designs show -- because `chainD` holds SOURCES at 2, and section 7 measured
+that source count, not node count, drives the spine.
+
+**Source ladder** (`srcD`, nodes fixed at 64, sources varied).  Residual sizes
+identical at every point:
+
+    nsrc   host ms   fork ms   ratio   host exp   fork exp
+      16        58        21    2.8x          -          -
+      64       145        34    4.3x       0.66       0.35
+     256     1,128       123    9.2x       1.48       0.93
+    1024    14,190       515   27.6x       1.83       1.03
+    4096   231,974     2,616   88.7x       2.02       1.17
+
+**RESULT: the host is ~QUADRATIC in source count (exponent rising to 2.02);
+the fork is ~LINEAR (settling near 1.1).**  That is the measured mechanism
+behind the real-design gap: `rt_alu_gate` has 6,137 sources, where a
+quadratic-vs-linear difference is large.
+
+**Confounders, stated.**  One run per point; ms resolution makes `n = 8/16`
+unreliable; the interpreters differ as described; the source ladder checks
+residual-size identity but not reference agreement at every point (the node
+ladder checks both).  And this does NOT retroactively decontaminate the real
+ALU pair -- that one still differs in flags and source snapshots, so this
+ladder is the controlled evidence, not that.
+
+**Decision (plan H3 rule).**  The measured hotspot and the predicted complexity
+reduction agree, so a representation change is justified -- and the change is
+already written and measured: it is obligation A, the fork's `PRes.val` bridge.
+This strengthens the 18.2 conclusion from "B's practical sufficiency is
+doubtful" to a measured scaling difference in source count.
+
+**Next experiment (P2), not run:** vary source count on the PROVED path with a
+`perf` sample at the largest size that stays bounded, to attribute the
+quadratic term to `prepare` / `PVal.toPRes` / `PVal.shift` by call chain rather
+than by self-sample.  `nsrc = 4096` takes 232 s on the host, which is long
+enough to sample properly.

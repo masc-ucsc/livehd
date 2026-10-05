@@ -70,20 +70,67 @@ def parse(path):
 
 
 def reset_audit(srcs, flops):
-    """(source-side pins, flop-side pins, conflicts) -- all by input INDEX."""
-    src_pins = sorted({(s[3], s[5]) for s in srcs if s[0] == 'flopQAsync'})
-    flop_pins = set()
-    for f in flops:
-        if f['hasRst']:
-            sl = f['rst']
-            if sl < len(srcs) and srcs[sl][0] == 'input':
-                flop_pins.add((srcs[sl][1], f['activeLow']))
-            else:
-                flop_pins.add((f'slot{sl}', f['activeLow']))
-    flop_pins = sorted(flop_pins, key=str)
-    conflicts = [(ri, sa, fal) for (ri, sa) in src_pins
-                 for (fi, fal) in flop_pins if ri == fi and sa != fal]
-    return src_pins, flop_pins, conflicts
+    """Per-FLOP reset consistency.
+
+    CANDIDATE CONFLICT SCAN, and the limits matter.  An earlier version
+    compared two SETS of (input, activeLow) pairs gathered across the whole
+    design, which can report a conflict for pins that never meet on the same
+    flop, and silently labelled an unresolved reset slot `ok`.  This matches by
+    FLOP IDENTITY instead: `flopQAsync` source *i* describes the state of flop
+    *i*, so it is compared against `FlopDesc` row *i* and nothing else.
+
+    Still NOT a proof of intended RTL semantics.  It only says whether the two
+    places a certificate records a reset polarity agree, per flop.
+
+    Returns (per_flop, summary) where each per_flop entry is one of
+    'agree' / 'CONFLICT' / 'unknown:<why>' / 'no-async-source' / 'no-flop-reset'.
+    """
+    async_by_idx = {}
+    for s in srcs:
+        if s[0] == 'flopQAsync':          # (kind, idx, w, ri, rv, activeLow)
+            async_by_idx[s[1]] = {'reset_input': s[3], 'active_low': s[5]}
+
+    per_flop = []
+    for i, f in enumerate(flops):
+        src = async_by_idx.get(i)
+        if src is None:
+            per_flop.append({'flop': i, 'verdict': 'no-async-source'})
+            continue
+        if not f['hasRst']:
+            per_flop.append({'flop': i, 'verdict': 'no-flop-reset',
+                             'src_active_low': src['active_low']})
+            continue
+        sl = f['rst']
+        if sl >= len(srcs):
+            per_flop.append({'flop': i, 'verdict': 'unknown:reset-slot-out-of-range',
+                             'slot': sl})
+            continue
+        if srcs[sl][0] != 'input':
+            # the reset is driven by a node or a constant: the two sides are not
+            # describing the same thing in a form this scan can compare
+            per_flop.append({'flop': i,
+                             'verdict': f'unknown:reset-slot-is-{srcs[sl][0]}',
+                             'slot': sl})
+            continue
+        fin = srcs[sl][1]
+        same_pin = (fin == src['reset_input'])
+        same_pol = (f['activeLow'] == src['active_low'])
+        if not same_pin:
+            per_flop.append({'flop': i, 'verdict': 'unknown:different-reset-pin',
+                             'src_input': src['reset_input'], 'flop_input': fin})
+        elif not same_pol:
+            per_flop.append({'flop': i, 'verdict': 'CONFLICT', 'input': fin,
+                             'src_active_low': src['active_low'],
+                             'flop_active_low': f['activeLow']})
+        else:
+            per_flop.append({'flop': i, 'verdict': 'agree', 'input': fin,
+                             'active_low': f['activeLow']})
+
+    summary = {}
+    for e in per_flop:
+        k = e['verdict'].split(':')[0]
+        summary[k] = summary.get(k, 0) + 1
+    return per_flop, summary
 
 
 def main():
@@ -106,33 +153,37 @@ def main():
         if p is None:
             missing.append(n); continue
         srcs, nn, no, flops = parse(p)
-        sp, fp, conf = reset_audit(srcs, flops)
+        per_flop, rsum = reset_audit(srcs, flops)
         kinds = {}
         for s in srcs: kinds[s[0]] = kinds.get(s[0], 0) + 1
         rows.append({'block': n, 'path': p, 'sha256': sha256(p),
                      'bytes': os.path.getsize(p), 'sources': len(srcs),
                      'nodes': nn, 'outputs': no, 'flops': len(flops),
                      'source_kinds': kinds, 'sequential': len(flops) > 0,
-                     'src_reset_pins': sp, 'flop_reset_pins': fp,
-                     'reset_conflicts': conf})
+                     'reset_per_flop': per_flop, 'reset_summary': rsum})
 
     w = max((len(r['block']) for r in rows), default=10)
     print(f'frozen names: {len(names)}   with a certificate: {len(rows)}   missing: {len(missing)}')
     if missing: print('  MISSING: ' + ', '.join(missing))
     print()
-    print(f'{"block":{w}} {"sources":>8} {"nodes":>8} {"flops":>6} {"srcRst":>10} {"flopRst":>10}  reset')
+    print(f'{"block":{w}} {"sources":>8} {"nodes":>8} {"flops":>6}  per-flop reset verdicts')
     for r in sorted(rows, key=lambda x: x['nodes']):
-        s = ','.join(f'{i}:aL{v}' for i, v in r['src_reset_pins']) or '-'
-        f = ','.join(f'{i}:aL{v}' for i, v in r['flop_reset_pins']) or '-'
-        verdict = ('CONFLICT' if r['reset_conflicts']
-                   else ('ok' if r['sequential'] else 'combinational'))
-        print(f'{r["block"]:{w}} {r["sources"]:8,} {r["nodes"]:8,} {r["flops"]:6} '
-              f'{s:>10} {f:>10}  {verdict}')
+        if not r['sequential']:
+            v = 'combinational (no flops; this scan does not apply)'
+        else:
+            v = ', '.join(f'{k}={n}' for k, n in sorted(r['reset_summary'].items()))
+        print(f'{r["block"]:{w}} {r["sources"]:8,} {r["nodes"]:8,} {r["flops"]:6}  {v}')
     seq = [r for r in rows if r['sequential']]
-    bad = [r for r in seq if r['reset_conflicts']]
+    bad = [r for r in seq if r['reset_summary'].get('CONFLICT')]
+    unk = [r for r in seq if r['reset_summary'].get('unknown')]
+    allc = [r for r in bad if r['reset_summary']['CONFLICT'] == r['flops']]
     print()
-    print(f'sequential: {len(seq)}   with reset-polarity CONFLICT: {len(bad)}'
-          f'   combinational (defect cannot apply): {len(rows) - len(seq)}')
+    print(f'sequential: {len(seq)}   any CONFLICT: {len(bad)}   '
+          f'CONFLICT on EVERY flop: {len(allc)}   any unknown: {len(unk)}   '
+          f'combinational: {len(rows) - len(seq)}')
+    print('This is a CANDIDATE CONFLICT SCAN matched by flop identity.  It says')
+    print('whether a certificate\'s two records of a reset polarity agree; it is')
+    print('NOT a claim about intended RTL semantics.')
     print()
     print('sha256 of every certificate audited:')
     for r in sorted(rows, key=lambda x: x['block']):

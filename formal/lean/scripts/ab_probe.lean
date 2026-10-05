@@ -11,6 +11,7 @@ and shapes must be IDENTICAL across builds, only times may differ.
 -/
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Projection.CertLoad
+import LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorFast
 
 open Compiler Projection Projection.Hw Projection.Runner Projection.ProtoVar
 open Projection.Acceptance
@@ -80,37 +81,91 @@ def seqChecks : IO Bool := do
       | .error _ => do IO.println "  seq trace: ERROR"; ok := false
   return ok
 
+/-- HYPOTHESIS (PERFORMANCE_INVESTIGATION_PLAN H3): on the PROVED `mixDriver`,
+repeated preparation / environment shifting / rebuilding dominates, and the
+fork's `PRes.val` + zero-shift changes remove exactly that.  PREDICTION: the
+fork is several times faster at every ladder size, and the gap WIDENS with n
+because the per-node spine work grows with the spine.
+
+CONTROL: both backends run in ONE process, from the SAME source, build flags,
+input and budgets.  The only documented difference is the interpreter --
+host uses `hwAPVarT` (built from the TOTAL `rewrittenT`), fork uses `hwAPVar`
+(built from the PARTIAL `goInline`).  `proto_probe --rewrite-agree` shows the
+two transforms produce the SAME `main` body by exact `BEq`, so the interpreters
+agree on this input; that is evidence, not a theorem. -/
 def ladder : IO Bool := do
   let mut ok := true
-  for n in [8, 16, 32, 64] do
+  IO.println "  n | HOST mixDriver+hwAPVarT | FORK ProtoFast+hwAPVar | ratio | terms"
+  for n in [8, 16, 32, 64, 128] do
     let D := chainD n
-    let (res, tspec) ← timedF "spec"
+    let (hres, th) ← timedF "host"
       (fun _ => mixDriver 200000 2000 hwAPVarT [encDesign D])
       (fun r => match r with | .ok p => szOf p | .error _ => 0)
-    match res with
-    | .error e => do IO.println s!"  chain {n}: SPECIALIZE FAILED {repr e} ({tspec} ms)"; ok := false
-    | .ok R => do
-        let (chk, tchk) ← timedF "chk" (fun _ => checkResidual R) (fun o => o.getD 0)
-        match chk with
-        | none => do IO.println s!"  chain {n}: CHECKER REJECTED"; ok := false
-        | some b => do
-            let sim : ProjectedSimulator := ⟨D, R, b⟩
-            let i := mkInputFor D 1
-            let st := mkStateFor D 1
-            let (out, texe) ← timedF "exe"
-              (fun _ => stepOf sim D (allEdges D) i st)
-              (fun o => match o with | .ok r => r.outputs.size | .error _ => 0)
-            let refEq := match out with
-              | .ok r => encResult r == encResult (interpretDesign D (allEdges D) i st)
-              | .error _ => false
-            IO.println s!"  chain {n}: terms {szOf R} bound {b} ref-equal {refEq} | \
-spec {tspec} ms check {tchk} ms exec {texe} ms"
-            unless refEq do ok := false
+    let (fres, tf) ← timedF "fork"
+      (fun _ => ProtoFast.mixDriver 200000 2000 hwAPVar [encDesign D])
+      (fun r => match r with | .ok p => szOf p | .error _ => 0)
+    match hres, fres with
+    | .ok HR, .ok FR => do
+        let sameSize := szOf HR == szOf FR
+        -- both must still agree with the reference semantics
+        let i := mkInputFor D 1
+        let st := mkStateFor D 1
+        let want := encResult (interpretDesign D (allEdges D) i st)
+        let runIt := fun (R : Program) =>
+          match Hw.checkResidual R with
+          | none   => false
+          | some b => match evalFuel b R []
+                        (.call R.entry [.lit (encEdges (allEdges D)), .lit (encInput i),
+                                        .lit (encState st)]) with
+                      | .value v => (decResult v).map encResult == some want
+                      | _        => false
+        let hok := runIt HR
+        let fok := runIt FR
+        IO.println s!"  {n} | host {th} ms | fork {tf} ms | terms {szOf HR}/{szOf FR} \
+same-size {sameSize} | host-ref {hok} fork-ref {fok}"
+        unless sameSize && hok && fok do ok := false
+    | a, b => do
+        IO.println s!"  {n}: host-ok {a.toOption.isSome} fork-ok {b.toOption.isSome}"
+        ok := false
+  return ok
+
+/-- SOURCE ladder.  `chainD` holds sources at 2, so it varies only node count.
+Section 7 of PHASE6_PERF measured that SOURCE count, not node count, drives the
+environment-spine cost, and the real designs have thousands of sources.  This
+holds nodes at 64 and varies sources, which is the axis the chain ladder cannot
+see. -/
+def srcD (nsrc nnode : Nat) : DesignCert where
+  sources  := (List.range nsrc).toArray.map (fun i =>
+                if i < 2 then .input i 4 else .const 4 (Int.ofNat (i % 16)))
+  nodes    := (List.range nnode).toArray.map (fun i =>
+                { op := .Op_And, width := 4
+                , deps := #[i % nsrc, (i + 1) % nsrc] })
+  outputs  := #[{ slot := nsrc + (nnode - 1), width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+def srcLadder : IO Bool := do
+  let mut ok := true
+  IO.println "  nsrc (nodes=64) | HOST | FORK | terms"
+  for ns in [16, 64, 256, 1024, 4096] do
+    let D := srcD ns 64
+    let (hres, th) ← timedF "h" (fun _ => mixDriver 200000 2000 hwAPVarT [encDesign D])
+      (fun r => match r with | .ok p => szOf p | .error _ => 0)
+    let (fres, tf) ← timedF "f" (fun _ => ProtoFast.mixDriver 200000 2000 hwAPVar [encDesign D])
+      (fun r => match r with | .ok p => szOf p | .error _ => 0)
+    match hres, fres with
+    | .ok HR, .ok FR =>
+        IO.println s!"  {ns} | host {th} ms | fork {tf} ms | terms {szOf HR}/{szOf FR} \
+same-size {szOf HR == szOf FR}"
+        unless szOf HR == szOf FR do ok := false
+    | a, b => do
+        IO.println s!"  {ns}: host-ok {a.toOption.isSome} fork-ok {b.toOption.isSome}"; ok := false
   return ok
 
 def main : IO UInt32 := do
   IO.println "backend: PROVED mixDriver + hwAPVarT (TOTAL variant), fixtures only"
   let a ← seqChecks
   let b ← ladder
-  IO.println s!"RESULT: sequential {a}  ladder {b}"
-  return (if a && b then 0 else 1)
+  let c ← srcLadder
+  IO.println s!"RESULT: sequential {a}  node-ladder {b}  source-ladder {c}"
+  return (if a && b && c then 0 else 1)
