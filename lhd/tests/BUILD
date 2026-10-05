@@ -2327,3 +2327,14 @@ sh_test(
     args = ["legacy"],
     data = ["lhd_sim_pure_loop.prp", "//lhd"],
 )
+
+[
+    sh_test(
+        name = "sim_unknown_outputs_" + backend,
+        size = "large",
+        srcs = ["sim_unknown_outputs_test.sh"],
+        data = ["sim_unknown_outputs.prp", "//lhd"],
+        env = {"SIM_BACKEND": backend},
+    )
+    for backend in ["slop", "llvm"]
+]

@@ -1,0 +1,20 @@
+// Unknown output bits are seeded constants, shared by pre/post observations.
+pub mod unknown_outputs(clk:Clock) -> (y:U8@[]) {
+  y = 0ub10??0011
+}
+
+test unknown_outputs.stable(expect_zero:U1 = 0) {
+  mut dut = unknown_outputs
+  mut previous:U8 = 0
+  tick 4 {
+    step
+    assert((dut.y & 0xcf) == 0x83)
+    if expect_zero != 0 {
+      assert(dut.y == 0x83)
+    }
+    if clock > 0 {
+      assert(dut.y == previous)
+    }
+    previous = dut.y
+  }
+}

@@ -3172,21 +3172,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       const auto output            = body.graph->get_output_pin(decl.name);
       const auto add_output_driver = [&](const auto& driver) {
         if (driver.is_const()) {
-          const auto& constant = gu::const_of(driver);
-          const auto  literal  = constant.to_pyrope();
-          if (constant.has_unknowns()) {
-            if (std::getenv("LIVEHD_SIM_COLOR_DEBUG") != nullptr) {
-              std::fprintf(stderr,
-                           "[color-direct] unknown literal output port=%u bits=%d value=%s\n",
-                           static_cast<unsigned>(decl.port_id),
-                           decl.bits,
-                           literal.c_str());
-            }
-            plan.summary_.versioning_complete = false;
-            plan.errors_.emplace_back("a literal-only output contains runtime-unknown bits");
-            return;
-          }
-          const auto add_literal_output = [&](State_version version) {
+          const auto& constant           = gu::const_of(driver);
+          const auto  literal            = constant.to_pyrope();
+          // Unknown literal bits are concretized once by the emitter, just as
+          // for literals consumed by data sites. Retain both observation slots.
+          const auto  add_literal_output = [&](State_version version) {
             output_uses.push_back(Output_use{decl.port_id,
                                              body.anchor,
                                              is_top_body,
@@ -3238,12 +3228,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             }
             if (resolved->is_const()) {
               const auto& constant = gu::const_of(*resolved);
-              if (constant.has_unknowns()) {
-                plan.summary_.versioning_complete = false;
-                plan.errors_.emplace_back("a literal-only output contains runtime-unknown bits");
-                return;
-              }
-              const auto literal = constant.to_pyrope();
+              const auto  literal  = constant.to_pyrope();
               for (const auto version : {State_version::pre_rise, State_version::post_fall}) {
                 output_uses.push_back(Output_use{decl.port_id,
                                                  body.anchor,

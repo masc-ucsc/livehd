@@ -508,7 +508,7 @@ std::shared_ptr<hhds::Graph> make_narrow_child_boundary(std::string_view tag) {
   return parent;
 }
 
-std::shared_ptr<hhds::Graph> make_child_with_site_free_output_alias(std::string_view tag) {
+std::shared_ptr<hhds::Graph> make_child_with_site_free_output_alias(std::string_view tag, bool unknown_literal = false) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
 
   auto child_io = lib.create_io(std::string(tag) + "_child");
@@ -541,7 +541,9 @@ std::shared_ptr<hhds::Graph> make_child_with_site_free_output_alias(std::string_
   auto parent   = parent_io->create_graph();
   auto instance = gu::create_typed_node(*parent, Ntype_op::Sub);
   instance.set_subnode(child_io);
-  parent->get_input_pin("x").connect_sink(instance.create_sink_pin(0));
+  const auto alias_input
+      = unknown_literal ? gu::create_const(*parent, *Dlop::create_string("0ub10??0011")) : parent->get_input_pin("x");
+  alias_input.connect_sink(instance.create_sink_pin(0));
   parent->get_input_pin("clk").connect_sink(instance.create_sink_pin(1));
   parent->get_input_pin("d").connect_sink(instance.create_sink_pin(2));
   instance.create_driver_pin(3).connect_sink(parent->get_output_pin("x_out"));
@@ -1116,6 +1118,45 @@ TEST(SimColorPlan, SiteFreeChildOutputAliasResolvesOccurrenceInput) {
     EXPECT_EQ(slot.producer_port, 0u);
   }
   EXPECT_EQ(child_alias_slots, 2u) << "both child observation versions must retain the pure alias\n" << plan.report();
+}
+
+TEST(SimColorPlan, LiteralOnlyUnknownOutputKeepsBothObservationVersions) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_plan_unknown_output");
+  auto  io  = lib.create_io("unknown_output");
+  io->add_output("y", 0);
+  io->set_bits("y", 8);
+  auto graph = io->create_graph();
+  gu::create_const(*graph, *Dlop::create_string("0ub10??0011")).connect_sink(graph->get_output_pin("y"));
+  const auto plan = livehd::sim::Color_plan::discover(graph.get());
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  EXPECT_FALSE(plan.summary().runtime_random);
+  size_t outputs = 0;
+  for (const auto& slot : plan.boundary_slots()) {
+    if (slot.kind != livehd::sim::Color_plan::Boundary_kind::top_output) {
+      continue;
+    }
+    ++outputs;
+    EXPECT_EQ(slot.producer_version, livehd::sim::Color_plan::invalid_index);
+    EXPECT_NE(slot.literal.find('?'), std::string::npos);
+  }
+  EXPECT_EQ(outputs, 2u) << plan.report();
+}
+
+TEST(SimColorPlan, SiteFreeChildOutputAliasRetainsUnknownLiteralBinding) {
+  const auto graph = make_child_with_site_free_output_alias("unknown_alias", true);
+  const auto plan  = livehd::sim::Color_plan::discover(graph.get());
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  EXPECT_FALSE(plan.summary().runtime_random);
+  size_t outputs = 0;
+  for (const auto& slot : plan.boundary_slots()) {
+    if (slot.kind != livehd::sim::Color_plan::Boundary_kind::observation_output || slot.public_port != 3) {
+      continue;
+    }
+    ++outputs;
+    EXPECT_EQ(slot.producer_version, livehd::sim::Color_plan::invalid_index);
+    EXPECT_NE(slot.literal.find('?'), std::string::npos);
+  }
+  EXPECT_EQ(outputs, 2u) << plan.report();
 }
 
 TEST(SimColorPlan, ConditionalBoundaryExemptsForwardedDefinitionValid) {

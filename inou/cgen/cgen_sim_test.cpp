@@ -41,6 +41,72 @@ std::string emit(const std::shared_ptr<hhds::Graph>& graph, const std::string& n
   return code;
 }
 
+TEST(CgenSim, DynamicSplicesRespectColorKernelBindings) {
+  const std::string name = "dynamic_splice_boundary";
+  auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io   = lib.create_io(name);
+  unsigned          port = 0;
+  for (const auto& [field, bits] : {
+           std::pair{  "base", 128},
+           { "index",   4},
+           { "value",   8},
+           {"select",   1}
+  }) {
+    io->add_input(field, port++);
+    io->set_bits(field, bits);
+    io->set_unsign(field, true);
+  }
+  for (unsigned lane = 0; lane < 4; ++lane) {
+    const auto field = "y" + std::to_string(lane);
+    io->add_output(field, port++);
+    io->set_bits(field, 128);
+    io->set_unsign(field, true);
+  }
+  auto       graph  = io->create_graph();
+  const auto binary = [&](Ntype_op op, unsigned bits, hhds::Pin_class lhs, hhds::Pin_class rhs) {
+    auto node = gu::create_typed_node(*graph, op);
+    lhs.connect_sink(node.create_sink_pin(0));
+    rhs.connect_sink(node.create_sink_pin(1));
+    auto output = node.create_driver_pin(0);
+    gu::set_ubits(output, bits);
+    return output;
+  };
+  for (unsigned lane = 0; lane < 4; ++lane) {
+    auto mux = gu::create_typed_node(*graph, Ntype_op::Mux);
+    graph->get_input_pin("select").connect_sink(mux.create_sink_pin(0));
+    gu::create_const(*graph, *Dlop::create_integer(0xf5)).connect_sink(mux.create_sink_pin(1));
+    graph->get_input_pin("value").connect_sink(mux.create_sink_pin(2));
+    auto value = mux.create_driver_pin(0);
+    gu::set_ubits(value, 8);
+    const auto index = graph->get_input_pin("index");
+    const auto mask  = binary(Ntype_op::SHL, 128, gu::create_const(*graph, *Dlop::create_integer(255)), index);
+    const auto inverted
+        = binary(Ntype_op::Xor, 128, mask, gu::create_const(*graph, *Dlop::create_string("0uxffffffffffffffffffffffffffffffff")));
+    const auto keep    = binary(Ntype_op::And, 128, graph->get_input_pin("base"), inverted);
+    const auto shifted = binary(Ntype_op::SHL, 128, value, index);
+    const auto placed  = binary(Ntype_op::And, 128, shifted, mask);
+    binary(Ntype_op::Or, 128, keep, placed).connect_sink(graph->get_output_pin("y" + std::to_string(lane)));
+  }
+  bool shared_kernel = false;
+  for (unsigned words : {1, 4, 16, 256}) {
+    const auto dir = name + "_" + std::to_string(words);
+    std::filesystem::create_directories(dir);
+    const auto plan = livehd::sim::Color_plan::discover(graph.get(), false, false, words);
+    ASSERT_TRUE(plan.complete()) << plan.report();
+    Cgen_sim emitter(dir, "", name, "false", &plan, false, false, true, true, true, false, false, false, true, words);
+    emitter.do_from_graph(graph);
+    for (const auto& file : std::filesystem::directory_iterator(dir)) {
+      if (file.path().extension() != ".cpp") {
+        continue;
+      }
+      const auto code  = slurp(file.path());
+      shared_kernel   |= code.find("void __lhd_color_kernel_") != std::string::npos;
+      EXPECT_EQ(code.find("UNRESOLVED-CYCLE"), std::string::npos) << file.path();
+    }
+  }
+  EXPECT_TRUE(shared_kernel) << "the regression must exercise canonical kernel emission";
+}
+
 TEST(CgenSim, FusesAndReductionAfterTemporaryBindingsExpire) {
   for (int width : {1, 3, 8, 65}) {
     const auto name = "reduce_" + std::to_string(width);

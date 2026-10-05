@@ -4,15 +4,58 @@
 
 #include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "gtest/gtest.h"
 #include "llvm/Bitcode/BitcodeReader.h"
+#include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/raw_ostream.h"
+
+TEST(CgenLlvm, LinksWideBitTestCounts) {
+  llvm::LLVMContext context;
+  llvm::Module      host("wide_bit_test_counts", context);
+  llvm::IRBuilder<> builder(context);
+  auto*             word     = builder.getInt64Ty();
+  auto*             function = llvm::Function::Create(llvm::FunctionType::get(word, {word, builder.getPtrTy()}, false),
+                                                      llvm::GlobalValue::ExternalLinkage,
+                                                      "narrow_bt_count",
+                                                      host);
+  builder.SetInsertPoint(llvm::BasicBlock::Create(context, "entry", function));
+  auto* value = function->getArg(0);
+  auto* count = builder.CreateAnd(value, builder.getInt64(3));
+  // Keep the masked count shared. X86 can narrow the bit-test source to i32
+  // while its count remains i64, including after inlining a color kernel.
+  builder.CreateStore(count, function->getArg(1));
+  auto* fshr    = llvm::Intrinsic::getOrInsertDeclaration(&host, llvm::Intrinsic::fshr, {word});
+  auto* shifted = builder.CreateCall(fshr, {builder.getInt64(0), value, count});
+  auto* bit     = builder.CreateTrunc(shifted, builder.getInt1Ty());
+  builder.CreateRet(builder.CreateSelect(bit, value, builder.getInt64(0)));
+
+  const auto      base    = std::filesystem::temp_directory_path() / "livehd-cgen-wide-bit-test";
+  const auto      bitcode = base.string() + ".bc";
+  const auto      object  = base.string() + ".o";
+  std::error_code io_error;
+  {
+    llvm::raw_fd_ostream output(bitcode, io_error);
+    ASSERT_FALSE(io_error) << io_error.message();
+    llvm::WriteBitcodeToFile(host, output);
+  }
+  std::string error;
+  ASSERT_TRUE(Cgen_llvm::link_bitcode_object(bitcode, {}, object, error)) << error;
+  auto native = llvm::MemoryBuffer::getFile(object);
+  ASSERT_TRUE(native);
+  EXPECT_TRUE((*native)->getBuffer().contains("narrow_bt_count"));
+  std::filesystem::remove(bitcode);
+  std::filesystem::remove(object);
+}
 
 TEST(CgenLlvm, EmitsBitcode) {
   Cgen_llvm   llvm("lhd_llvm_add",

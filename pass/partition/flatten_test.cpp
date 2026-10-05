@@ -2,6 +2,7 @@
 #include "flatten.hpp"
 
 #include <stdexcept>
+#include <vector>
 
 #include "gtest/gtest.h"
 #include "node_util.hpp"
@@ -55,6 +56,38 @@ protected:
     instance(*top, child->get_io());
   }
 };
+
+TEST_F(FlattenAdmission, WideInputsKeepTheirPortsAndInstanceIdentity) {
+  constexpr unsigned            count = 4096;
+  auto                          wide  = make_graph(source, "wide_top");
+  auto                          join  = gu::create_typed_node(*wide, Ntype_op::Or, 1);
+  std::vector<hhds::Pin_class>  inputs;
+  std::vector<hhds::Node_class> producers;
+  for (unsigned i = 0; i < count; ++i) {
+    inputs.push_back(join.create_sink_pin(i + 1));
+  }
+  for (unsigned i = 0; i < count; ++i) {
+    auto output = instance(*wide, opaque);
+    producers.push_back(output.get_master_node());
+    output.connect_sink(inputs[i]);
+  }
+  join.create_driver_pin(0).connect_sink(wide->get_output_pin("y"));
+
+  hhds::GraphLibrary destination;
+  Flat_origin_map    origins;
+  auto               flat = flatten_hierarchy(wide.get(), &destination, "flat_wide", &origins);
+  ASSERT_TRUE(flat);
+  auto result = flat->get_output_pin("y").get_driver_pin().get_master_node();
+  ASSERT_EQ(gu::type_op_of(result), Ntype_op::Or);
+  for (unsigned i = 0; i < count; ++i) {
+    auto output = result.get_sink_pin(i + 1).get_driver_pin();
+    ASSERT_FALSE(output.is_invalid());
+    EXPECT_EQ(output.get_port_id(), 2U);
+    auto producer = output.get_master_node();
+    EXPECT_EQ(origins.at(producer).src_node, producers[i]);
+    EXPECT_EQ(producer.get_sink_pin(1).get_driver_pin(), flat->get_input_pin("a"));
+  }
+}
 
 TEST_F(FlattenAdmission, RefusalDuringExpansionWiringAndCompletionPreservesSources) {
   const auto gids   = source.all_gids();

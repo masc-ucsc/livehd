@@ -41,6 +41,7 @@ http_archive(
         "//packages:llvm22-bazel-root.patch",
         "//packages:llvm22-twoaddr-phys-map.patch",
         "//packages:llvm22-scheduler-dead-defs.patch",
+        "//packages:llvm22-bt-narrow-count.patch",
     ],
     sha256 = "922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888",
     strip_prefix = "llvm-project-22.1.8.src",
@@ -170,12 +171,6 @@ http_archive(
 # on the ../tree-sitter-pyrope working tree, and the build then depends on that
 # tree. @tree_sitter_pyrope below unzips the SAME archive, so both blocks swap
 # together.
-# LOCAL co-development (swap both parser and formatter blocks together):
-# new_local_repository(
-#     name = "prpparse",
-#     build_file = "//packages:prpparse.BUILD",
-#     path = "../tree-sitter-pyrope/prpparse",
-# )
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
@@ -183,6 +178,12 @@ http_archive(
     strip_prefix = "tree-sitter-pyrope-9807390890f3ec324f2ebdebd2c2bb585dbff411/prpparse",
     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/9807390890f3ec324f2ebdebd2c2bb585dbff411.zip"],
 )
+# Local co-development swap (replace the archive above):
+# new_local_repository(
+#     name = "prpparse",
+#     build_file = "//packages:prpparse.BUILD",
+#     path = "../tree-sitter-pyrope/prpparse",
+# )
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
 # Only the Pyrope *formatter* (`lhd pyrope fmt`, @tree_sitter_pyrope//:prpfmt)
@@ -211,12 +212,6 @@ http_archive(
 # prpfmt/ts_symbols.h (gitignored); //packages:prpfmt.BUILD regenerates it from
 # src/parser.c via a genrule, so no local checkout is required. Bump the pin per
 # the @prpparse note above (recompute integrity).
-# LOCAL co-development (swap both parser and formatter blocks together):
-# new_local_repository(
-#     name = "tree_sitter_pyrope",
-#     build_file = "//packages:prpfmt.BUILD",
-#     path = "../tree-sitter-pyrope",
-# )
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
@@ -224,6 +219,12 @@ http_archive(
     strip_prefix = "tree-sitter-pyrope-9807390890f3ec324f2ebdebd2c2bb585dbff411",
     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/9807390890f3ec324f2ebdebd2c2bb585dbff411.zip"],
 )
+# Local co-development swap (replace the archive above):
+# new_local_repository(
+#     name = "tree_sitter_pyrope",
+#     build_file = "//packages:prpfmt.BUILD",
+#     path = "../tree-sitter-pyrope",
+# )
 
 # OpenTimer
 http_archive(

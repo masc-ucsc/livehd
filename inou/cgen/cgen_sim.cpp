@@ -2116,6 +2116,13 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
               || !pin2var.contains(base.get_class_index())) {
             continue;
           }
+          // A fused splice reads through the placement cone. At a color
+          // boundary that cone's result may be bound while its input is not.
+          // Keep the ordinary Or/And expression unless the inserted value is
+          // also available in this evaluator or canonical kernel.
+          if (!v.is_const() && !pin2var.contains(v.get_class_index())) {
+            continue;
+          }
           const auto lo = shift_count_expr(placed->second);
           if (lo.empty()) {
             continue;

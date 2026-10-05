@@ -30,6 +30,7 @@ cc_library(
     deps = [
         "//core",
         "//graph",
+        "@abseil-cpp//absl/container:inlined_vector",
     ],
 )
 
