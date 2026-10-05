@@ -34,7 +34,7 @@ struct Residual_options {
   bool     npn4                 = false;
   bool     sweep                = false;
   bool     balance              = false;
-  bool     mux_balance          = false;  // pass.usyn enables it by default (corpus evidence in usyn2.md)
+  bool     mux_balance          = false;  // pass.usyn enables it by default (corpus evidence in todo/livehd/usyn2.md)
   bool     rewrite              = true;
   bool     resubstitute         = true;
 };
