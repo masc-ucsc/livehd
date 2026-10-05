@@ -37,7 +37,11 @@ http_archive(
     name = "llvm-raw",
     build_file_content = "exports_files([\"WORKSPACE\"])",
     patch_args = ["-p1"],
-    patches = ["//packages:llvm22-bazel-root.patch"],
+    patches = [
+        "//packages:llvm22-bazel-root.patch",
+        "//packages:llvm22-twoaddr-phys-map.patch",
+        "//packages:llvm22-scheduler-dead-defs.patch",
+    ],
     sha256 = "922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888",
     strip_prefix = "llvm-project-22.1.8.src",
     urls = ["https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz"],

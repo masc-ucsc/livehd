@@ -1,0 +1,158 @@
+--- a/llvm/lib/CodeGen/TwoAddressInstructionPass.cpp
++++ b/llvm/lib/CodeGen/TwoAddressInstructionPass.cpp
+@@ -28,6 +28,7 @@
+ 
+ #include "llvm/CodeGen/TwoAddressInstructionPass.h"
+ #include "llvm/ADT/DenseMap.h"
++#include "llvm/ADT/DenseSet.h"
+ #include "llvm/ADT/SmallPtrSet.h"
+ #include "llvm/ADT/SmallVector.h"
+ #include "llvm/ADT/Statistic.h"
+@@ -113,6 +114,19 @@
+   // registers. e.g. v1024 = move r0.
+   DenseMap<Register, Register> SrcRegMap;
+ 
++  // Only direct physical targets can be clobbered. Copy chains leave many
++  // virtual targets in SrcRegMap; scanning them at every physical definition
++  // is quadratic for large generated basic blocks.
++  DenseSet<Register> PhysicalSrcRegs;
++
++  void setSrcRegMapping(Register From, Register To) {
++    SrcRegMap[From] = To;
++    if (!To.isVirtual())
++      PhysicalSrcRegs.insert(From);
++    else
++      PhysicalSrcRegs.erase(From);
++  }
++
+   // A map from virtual registers to physical registers which are likely targets
+   // to be coalesced to due to copies to physical registers from virtual
+   // registers. e.g. r1 = move v1024.
+@@ -139,8 +153,7 @@
+ 
+   bool regsAreCompatible(Register RegA, Register RegB) const;
+ 
+-  void removeMapRegEntry(const MachineOperand &MO,
+-                         DenseMap<Register, Register> &RegMap) const;
++  void removeMapRegEntry(const MachineOperand &MO);
+ 
+   void removeClobberedSrcRegMap(MachineInstr *MI);
+ 
+@@ -541,28 +554,30 @@
+ }
+ 
+ /// From RegMap remove entries mapped to a physical register which overlaps MO.
+-void TwoAddressInstructionImpl::removeMapRegEntry(
+-    const MachineOperand &MO, DenseMap<Register, Register> &RegMap) const {
++void TwoAddressInstructionImpl::removeMapRegEntry(const MachineOperand &MO) {
+   assert(
+       (MO.isReg() || MO.isRegMask()) &&
+       "removeMapRegEntry must be called with a register or regmask operand.");
+ 
+   SmallVector<Register, 2> Srcs;
+-  for (auto SI : RegMap) {
+-    Register ToReg = SI.second;
+-    if (ToReg.isVirtual())
+-      continue;
++  for (Register FromReg : PhysicalSrcRegs) {
++    auto SI = SrcRegMap.find(FromReg);
++    assert(SI != SrcRegMap.end() && !SI->second.isVirtual() &&
++           "physical source index must match the source register map");
++    Register ToReg = SI->second;
+ 
+     if (MO.isReg()) {
+       Register Reg = MO.getReg();
+       if (TRI->regsOverlap(ToReg, Reg))
+-        Srcs.push_back(SI.first);
++        Srcs.push_back(FromReg);
+     } else if (MO.clobbersPhysReg(ToReg))
+-      Srcs.push_back(SI.first);
+-  }
+-
+-  for (auto SrcReg : Srcs)
+-    RegMap.erase(SrcReg);
++      Srcs.push_back(FromReg);
++  }
++
++  for (auto SrcReg : Srcs) {
++    SrcRegMap.erase(SrcReg);
++    PhysicalSrcRegs.erase(SrcReg);
++  }
+ }
+ 
+ /// If a physical register is clobbered, old entries mapped to it should be
+@@ -596,7 +611,7 @@
+ 
+   for (const MachineOperand &MO : MI->operands()) {
+     if (MO.isRegMask()) {
+-      removeMapRegEntry(MO, SrcRegMap);
++      removeMapRegEntry(MO);
+       continue;
+     }
+     if (!MO.isReg() || !MO.isDef())
+@@ -604,7 +619,7 @@
+     Register Reg = MO.getReg();
+     if (!Reg || Reg.isVirtual())
+       continue;
+-    removeMapRegEntry(MO, SrcRegMap);
++    removeMapRegEntry(MO);
+   }
+ }
+ 
+@@ -748,7 +763,7 @@
+   MCRegister FromRegC = getMappedReg(RegC, SrcRegMap);
+   if (FromRegC) {
+     Register RegA = MI->getOperand(DstIdx).getReg();
+-    SrcRegMap[RegA] = FromRegC;
++    setSrcRegMapping(RegA, FromRegC);
+   }
+ 
+   return true;
+@@ -816,6 +831,7 @@
+ 
+   // Update source and destination register maps.
+   SrcRegMap.erase(RegA);
++  PhysicalSrcRegs.erase(RegA);
+   DstRegMap.erase(RegB);
+   return true;
+ }
+@@ -842,7 +858,7 @@
+       VirtRegPairs.push_back(NewReg);
+       break;
+     }
+-    SrcRegMap[NewReg] = Reg;
++    setSrcRegMapping(NewReg, Reg);
+     VirtRegPairs.push_back(NewReg);
+     Reg = NewReg;
+   }
+@@ -886,7 +902,12 @@
+   if (IsDstPhys && !IsSrcPhys) {
+     DstRegMap.insert(std::make_pair(SrcReg, DstReg));
+   } else if (!IsDstPhys && IsSrcPhys) {
+-    bool isNew = SrcRegMap.insert(std::make_pair(DstReg, SrcReg)).second;
++    auto Mapping = SrcRegMap.insert(std::make_pair(DstReg, SrcReg));
++    bool isNew = Mapping.second;
++    if (!Mapping.first->second.isVirtual())
++      PhysicalSrcRegs.insert(DstReg);
++    else
++      PhysicalSrcRegs.erase(DstReg);
+     if (!isNew)
+       assert(SrcRegMap[DstReg] == SrcReg &&
+              "Can't map to two src physical registers!");
+@@ -1702,7 +1723,7 @@
+     }
+ 
+     if (RemovedKillFlag && RemainingUses.none())
+-      SrcRegMap[LastCopiedReg] = RegB;
++      setSrcRegMapping(LastCopiedReg, RegB);
+ 
+     // Update LiveIntervals.
+     if (LIS) {
+@@ -1852,6 +1873,7 @@
+     unsigned Dist = 0;
+     DistanceMap.clear();
+     SrcRegMap.clear();
++    PhysicalSrcRegs.clear();
+     DstRegMap.clear();
+     Processed.clear();
+     for (MachineBasicBlock::iterator mi = MBB->begin(), me = MBB->end();

@@ -1,0 +1,84 @@
+diff --git a/llvm/include/llvm/CodeGen/ScheduleDAGInstrs.h b/llvm/include/llvm/CodeGen/ScheduleDAGInstrs.h
+--- a/llvm/include/llvm/CodeGen/ScheduleDAGInstrs.h
++++ b/llvm/include/llvm/CodeGen/ScheduleDAGInstrs.h
+@@ -167,6 +167,9 @@
+     /// of inside BuildSchedGraph to avoid the need for it to be initialized and
+     /// destructed for each block.
+     RegUnit2SUnitsMap Defs;
++    // Dead definitions need output dependencies only on non-dead definitions.
++    // Keep that subset separate to avoid scanning long runs of dead flags.
++    RegUnit2SUnitsMap NonDeadDefs;
+     RegUnit2SUnitsMap Uses;
+ 
+     /// Tracks the last instruction(s) in this region defining each virtual
+diff --git a/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp b/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp
+--- a/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp
++++ b/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp
+@@ -329,8 +329,11 @@
+   // TODO: Using a latency of 1 here for output dependencies assumes
+   //       there's no cost for reusing registers.
+   SDep::Kind Kind = MO.isUse() ? SDep::Anti : SDep::Output;
++  RegUnit2SUnitsMap &RelevantDefs =
++      MO.isDef() && MO.isDead() ? NonDeadDefs : Defs;
+   for (MCRegUnit Unit : TRI->regunits(Reg)) {
+-    for (RegUnit2SUnitsMap::iterator I = Defs.find(Unit); I != Defs.end();
++    for (RegUnit2SUnitsMap::iterator I = RelevantDefs.find(Unit);
++         I != RelevantDefs.end();
+          ++I) {
+       SUnit *DefSU = I->SU;
+       if (DefSU == &ExitSU)
+@@ -366,8 +369,10 @@
+     // Clear previous uses and defs of this register and its subregisters.
+     for (MCRegUnit Unit : TRI->regunits(Reg)) {
+       Uses.eraseAll(Unit);
+-      if (!MO.isDead())
++      if (!MO.isDead()) {
+         Defs.eraseAll(Unit);
++        NonDeadDefs.eraseAll(Unit);
++      }
+     }
+ 
+     if (MO.isDead() && SU->isCall) {
+@@ -384,14 +389,21 @@
+           isBegin = (--I) == B;
+           if (!I->SU->isCall)
+             break;
++          // A non-dead definition clears earlier definitions of this unit,
++          // so its removal also empties the non-dead subset.
++          if (!I->SU->getInstr()->getOperand(I->OpIdx).isDead())
++            NonDeadDefs.eraseAll(Unit);
+           I = Defs.erase(I);
+         }
+       }
+     }
+ 
+     // Defs are pushed in the order they are visited and never reordered.
+-    for (MCRegUnit Unit : TRI->regunits(Reg))
++    for (MCRegUnit Unit : TRI->regunits(Reg)) {
+       Defs.insert(PhysRegSUOper(SU, OperIdx, Unit));
++      if (!MO.isDead())
++        NonDeadDefs.insert(PhysRegSUOper(SU, OperIdx, Unit));
++    }
+   }
+ }
+ 
+@@ -808,9 +820,10 @@
+   DbgValues.clear();
+   FirstDbgValue = nullptr;
+ 
+-  assert(Defs.empty() && Uses.empty() &&
++  assert(Defs.empty() && NonDeadDefs.empty() && Uses.empty() &&
+          "Only BuildGraph should update Defs/Uses");
+   Defs.setUniverse(TRI->getNumRegs());
++  NonDeadDefs.setUniverse(TRI->getNumRegs());
+   Uses.setUniverse(TRI->getNumRegs());
+ 
+   assert(CurrentVRegDefs.empty() && "nobody else should use CurrentVRegDefs");
+@@ -1042,6 +1055,7 @@
+     FirstDbgValue = DbgMI;
+ 
+   Defs.clear();
++  NonDeadDefs.clear();
+   Uses.clear();
+   CurrentVRegDefs.clear();
+   CurrentVRegUses.clear();
