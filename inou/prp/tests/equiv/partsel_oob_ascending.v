@@ -1,4 +1,6 @@
-// FIXME tracker -- an OUT-OF-RANGE part-select on an ASCENDING (big-endian)
+// FIXED 2026-10-04: inou/slang resolves an entirely out-of-range dynamic select to X.
+// (Historical description follows.)
+// Tracker -- an OUT-OF-RANGE part-select on an ASCENDING (big-endian)
 // vector is a hard compile error where Verilog defines the result as X.
 //
 // `wire [0:24] x` indexes left-to-right, so declared index i sits at

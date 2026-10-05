@@ -7,8 +7,10 @@
 //
 // Stage `a` hangs on the module's REFERENCE clock (no clock_pin: one tick IS
 // one period of it, so it commits every tick). Stage `b` hangs on `clkb`, a
-// SECOND clock the testbench drives as data — so it commits only on a detected
-// RISING EDGE of clkb, i.e. a level change between ticks. Before M6 this design
+// SECOND domain: the reference clock gated by `en_b` (`Clock(clock_pin=, enable=)`,
+// the Pyrope spelling of a second clock under the `Clock` type -- a test cannot
+// drive a second Clock as a waveform, but it can drive its enable) — so it
+// commits only on the ticks where `en_b` lets the clock through. Before M6 this design
 // was REFUSED outright (`multi-clock-unsupported`), and before M0 it was
 // silently mis-simulated: every clock was advanced as if it were the one clock,
 // so `b` loaded every tick and only the first net reached the VCD.
@@ -27,7 +29,8 @@
 // Note b=28 at k=2 (a's k=1 value), NOT 45 — that single number is the whole
 // coincident-edge property, and a model that committed b from post-tick state
 // would read 45 here.
-pub mod two_dom(clkb:Bool, d:U8) -> (qa:U8@[1], qb:U8@[2]) {
+pub mod two_dom(clk:Clock, en_b:Bool, d:U8) -> (qa:U8@[1], qb:U8@[2]) {
+  const clkb = Clock(clock_pin=clk, enable=en_b)  // the second domain: clk gated by en_b
   reg a:U8 = 0
   reg b:U8:[clock_pin=clkb] = 0
   qa = a
@@ -40,7 +43,7 @@ test two_dom.independent_domains {
   mut acc = two_dom
   tick 6 {
     acc.d    = 11 + (17 * clock)     // distinct every tick (max 96, fits U8)
-    acc.clkb = (clock == 2) or (clock == 4)
+    acc.en_b = (clock == 2) or (clock == 4)
     step
     assert(acc.qa == 11 + (17 * clock), "the reference-clock stage commits every tick")
     // b holds across every tick with no clkb rise, and on a rise takes the

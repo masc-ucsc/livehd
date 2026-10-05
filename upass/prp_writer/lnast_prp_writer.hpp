@@ -573,6 +573,7 @@ private:
     std::vector<Lnast_nid> enables;  // the enable operands
     std::vector<Lnast_nid> ands;     // the folded `bit_and` temps
     std::vector<Lnast_nid> latch_nodes;  // enable latch absorbed into Clock(...)
+    bool                   invert = false;  // the active-low flavour `clk | ~en_latch` (Clock(..., invert=true))
   };
   // The clock gates of `u` below `stmts`, by store def-key (get_class_index).
   [[nodiscard]] static absl::flat_hash_map<int64_t, Clock_gate> clock_gates(const Lnast& u, Lnast_nid stmts,

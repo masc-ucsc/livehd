@@ -1,0 +1,12 @@
+/*
+:name: clock_gate_invert_unknown_arg
+:type: error
+:error: `Clock\(\.\.\.\)` gates a clock and takes the named arguments
+*/
+// Only `clock_pin`, `enable` and the literal `invert` are arguments of a gate.
+pub mod clock_gate_invert_unknown_arg(clk:Clock, en:Bool, d:U8) -> (q:U8@[1]) {
+  const g = Clock(clock_pin=clk, enable=en, divide=2)
+  reg f:U8:[clock_pin=g] = 0
+  f = d
+  q = f
+}

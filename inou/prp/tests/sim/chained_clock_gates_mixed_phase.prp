@@ -24,10 +24,12 @@
 // conjunction and applied it to both endpoints would hold `qp` at 6 as well —
 // wrong, and wrong silently.
 //
-// Cell B's active-low flavour is spelled as a gate on the INVERTED clock
-// (`not ga`, then AND) rather than as `ga or not e2`: upass.tolg accepts only
-// `and` gating and `not` inversion as clock operations, and the two forms are
-// the same cell by De Morgan.
+// Cell B's active-low flavour is `Clock(clock_pin=ga, enable=e2, invert=true)`
+// (docs 04b-attributes.md): the gate idles HIGH, its enable latch is transparent
+// while `ga` is high, and its flop commits on the falling edge (`posclk=false`).
+// The same cell was once spelled as a gate on the INVERTED clock (`not ga`, then
+// AND) -- the two have the same events by De Morgan -- but a Clock is never
+// inverted under the `Clock` type, so the flavour is an argument of the gate.
 //
 // GOLDEN, from Icarus on the netlist LiveHD itself emits (enables changed while
 // clk is low; values read at END of period, which is what `step` settles):
@@ -35,38 +37,24 @@
 //   qn  = 5, 6,  6,  6, 88, 88
 //   ctl = d every cycle.
 //
-// STATUS: still `gated-clock-unsupported` after step 1b (2026-08-05), and for
-// the RIGHT reason now. The chain resolves — `resolve_icg` walks it and returns
-// clock=clk with `clock_inverted`, guards=[e2l] — and `Cgen_sim::icg_guards`
-// then refuses it, because a per-tick fold commits at the RISE and this cell
-// gates the FALL. Accepting it would move the commit half a period silently.
-// The edge belongs to the phase plan (step 2); the c2 row is what step 2 must
-// not fold away afterwards.
-pub mod mixphase(clk:Bool, e1:Bool, e2:Bool, d:U8) -> (qp:U8@[1], qn:U8@[1], ctl:U8@[1]) {
-  // CELL A — ORDINARY flavour. Enable latch transparent while `clk` is LOW, so
-  // it closes (samples e1) at the RISE; the gate is an AND with the clock.
-  reg e1l:Bool:[latch=true]
-  if !clk {
-    e1l = e1
-  }
-  wire ga:Bool = nil
-  ga = clk and e1l
+// STATUS: passes (2026-10-05). It used to refuse with `gated-clock-unsupported`
+// ("Cgen_sim::icg_guards refuses it: a per-tick fold commits at the RISE and this
+// cell gates the FALL"); the phase plan has since taken that edge, and the c2 row
+// is what any later folding of the guards must not collapse.
+pub mod mixphase(clk:Clock, e1:Bool, e2:Bool, d:U8) -> (qp:U8@[1], qn:U8@[1], ctl:U8@[1]) {
+  // CELL A -- ORDINARY flavour. The enable latch is transparent while `clk` is
+  // LOW, so it closes (samples e1) at the RISE; the gate is an AND with the clock.
+  const ga = Clock(clock_pin=clk, enable=e1)
   reg fp:U8:[clock_pin=ga] = 0
   fp = d
   qp = fp
 
-  // CELL B — ACTIVE-LOW flavour, on the ALREADY GATED clock. Its clock input is
-  // `not ga`, so its enable latch is transparent while `ga` is HIGH and samples
-  // e2 at the FALL — a different phase from cell A, in the same chain.
-  reg e2l:Bool:[latch=true]
-  if ga {
-    e2l = e2
-  }
-  wire nga:Bool = nil
-  nga = not ga
-  wire gb:Bool = nil
-  gb = nga and e2l
-  reg fn:U8:[clock_pin=gb] = 0
+  // CELL B -- ACTIVE-LOW flavour (`invert=true`), on the ALREADY GATED clock. Its
+  // enable latch is transparent while `ga` is HIGH and samples e2 at the FALL: a
+  // different phase from cell A, in the same chain. The flop on it commits on the
+  // gated clock's FALLING edge (`posclk=false`).
+  const gb = Clock(clock_pin=ga, enable=e2, invert=true)
+  reg fn:U8:[clock_pin=gb, posclk=false] = 0
   fn = d
   qn = fn
 

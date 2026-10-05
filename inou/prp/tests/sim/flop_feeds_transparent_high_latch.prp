@@ -10,15 +10,13 @@
 // //lhd/tests:sim_color_latch_oracle checks that this shape selects the
 // color-direct schedule; with LHD_EXTERNAL_SIM=1 it also runs the matching
 // independent always_ff/always_latch Icarus oracle.
-pub mod flop_high_latch(clk:Bool, d:U8) -> (qf:U8@[1], qh:U8@[1]) {
+pub mod flop_high_latch(clk:Clock, d:U8) -> (qf:U8@[1], qh:U8@[1]) {
   reg f:U8:[clock_pin=clk] = 0
-  reg h:U8:[latch=true] = 0
+  reg h:U8:[latch=true, enable=clk] = 0
   qf = f
   qh = h
   f = d
-  if clk {
-    h = f
-  }
+  h = f
 }
 
 test flop_high_latch.post_rise_value_flows_through_open_latch {

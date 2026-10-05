@@ -12,16 +12,15 @@ package stp_pkg;
   } stp_dest_t;
 endpackage
 
-module stp_kid(input logic clk, input logic rst_ni,
-               input stp_pkg::stp_dest_t din, output stp_pkg::stp_dest_t dout);
-  always_ff @(posedge clk) begin
-    if (!rst_ni) dout <= '0;
-    else         dout <= din;
-  end
-endmodule
-
 module struct_top_port(input logic clk, input logic rst_ni,
                        input  stp_pkg::stp_dest_t din,
                        output stp_pkg::stp_dest_t dout);
-  stp_kid u(.clk(clk), .rst_ni(rst_ni), .din(din), .dout(dout));
+  // The register lives in the top itself (the .prp's `dout_q`): the point of
+  // this golden is the packed struct on the TOP interface, not a sub-instance.
+  stp_pkg::stp_dest_t dout_q;
+  always_ff @(posedge clk) begin
+    if (!rst_ni) dout_q <= '0;
+    else         dout_q <= din;
+  end
+  assign dout = dout_q;
 endmodule

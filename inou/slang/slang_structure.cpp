@@ -6229,6 +6229,13 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     return true;
   };
 
+  // Registers that already took an async rung in THIS process: a flop has ONE
+  // reset_pin/initial slot, so a second rung on the same register (async SET plus
+  // async RESET) has nowhere to go and must be refused by name, not left to
+  // upass.attributes' generic "attribute is already set" conflict.
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> async_rung_regs;
+  absl::flat_hash_set<std::pair<const slang::ast::ValueSymbol*, int64_t>> async_rung_bits;
+
   while (edges.size() > 1) {
     if (body->kind == StatementKind::Block) {
       body = &body->as<slang::ast::BlockStatement>().body;
@@ -6462,6 +6469,46 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
                        "unsupported-async-load",
                        "the async-reset arm requires whole-register nonblocking loads or constant reset slices");
       return;
+    }
+    {
+      // Whole-register rungs conflict per register; a per-bit rung (independently
+      // clocked vector bits) only conflicts with the same bit or a whole-register rung.
+      std::vector<const slang::ast::ValueSymbol*> rung_syms;
+      for (const auto& store : arm.bit_stores) {
+        if (async_rung_regs.contains(store.sym)
+            || async_rung_bits.contains(std::make_pair(store.sym, static_cast<int64_t>(store.bit)))) {
+          emit_unsupported(cond_stmt.ifTrue.sourceRange,
+                           "dual-async-reset",
+                           std::string("register '") + std::string(store.sym->name)
+                               + "' has two asynchronous reset/set rungs (an async set AND an async reset): a flop has one reset_pin",
+                           "keep one asynchronous rung and make the other synchronous, or split the state");
+          return;
+        }
+      }
+      for (const auto& [sym, init_text] : reset_stores) {
+        rung_syms.push_back(sym);
+      }
+      for (const auto& [sym, expr] : async_loads) {
+        rung_syms.push_back(sym);
+      }
+      for (const auto* sym : rung_syms) {
+        bool bit_overlap = false;
+        for (const auto& [bsym, bit] : async_rung_bits) {
+          bit_overlap = bit_overlap || bsym == sym;
+        }
+        if (async_rung_regs.contains(sym) || bit_overlap) {
+          emit_unsupported(cond_stmt.ifTrue.sourceRange,
+                           "dual-async-reset",
+                           std::string("register '") + std::string(sym->name)
+                               + "' has two asynchronous reset/set rungs (an async set AND an async reset): a flop has one reset_pin",
+                           "keep one asynchronous rung and make the other synchronous, or split the state");
+          return;
+        }
+      }
+      async_rung_regs.insert(rung_syms.begin(), rung_syms.end());
+      for (const auto& store : arm.bit_stores) {
+        async_rung_bits.insert(std::make_pair(store.sym, static_cast<int64_t>(store.bit)));
+      }
     }
     for (const auto& store : arm.bit_stores) {
       emit_reg_reset_attrs(*store.sym, store.value, reset_ref_name, edge_pos, false, true, store.bit);
@@ -7276,6 +7323,77 @@ void Slang_context::lower_comb_process(const slang::ast::Statement& body) {
   proc_kind_ = Proc_kind::none;
 }
 
+// A COMPILE-TIME selection of one clock out of a bus of clocks is not a derived
+// clock: `wire [0:2] clks = {clk & en2, clk & en1, clk & en0}` followed by
+// `always @(negedge clks[2-bw])` (a generate loop, a constant index) just PICKS
+// which of the existing clocks a register uses, and a per-lane gate written as a
+// vector AND (`{en2, en1, en0} & {3{clk}}`) distributes over that bit. Resolve
+// the pick here, in the reader, so the register is clocked by the lane's own
+// `clk & en` exactly as if it had been written as a scalar `always @(negedge
+// gclk0)`: the emitted LNAST then carries the plain gate, which the idiom check
+// and the Pyrope writer both already recognize. A runtime index, a mux or any
+// other logic on the bus is a real derived clock and stays unresolved ("").
+std::string Slang_context::lower_clock_bus_lane(const slang::ast::Expression& expr, int64_t bit, int depth) {
+  if (depth > 8 || bit < 0 || !expr.type->isIntegral() || bit >= static_cast<int64_t>(expr.type->getBitWidth())) {
+    return {};
+  }
+  switch (expr.kind) {
+    case ExpressionKind::Conversion: {
+      const auto& op = expr.as<slang::ast::ConversionExpression>().operand();
+      // A widening conversion keeps the low bits; bits above the operand are
+      // extension, which is no clock.
+      return op.type->isIntegral() && bit < static_cast<int64_t>(op.type->getBitWidth()) ? lower_clock_bus_lane(op, bit, depth + 1)
+                                                                                         : std::string{};
+    }
+    case ExpressionKind::Concatenation: {
+      int64_t off = 0;  // LSB-first walk: operands are written MSB-first
+      const auto ops = expr.as<slang::ast::ConcatenationExpression>().operands();
+      for (auto it = ops.rbegin(); it != ops.rend(); ++it) {
+        const auto w = static_cast<int64_t>((*it)->type->getBitWidth());
+        if (bit < off + w) {
+          return lower_clock_bus_lane(**it, bit - off, depth + 1);
+        }
+        off += w;
+      }
+      return {};
+    }
+    case ExpressionKind::Replication: {
+      const auto& inner = expr.as<slang::ast::ReplicationExpression>().concat();
+      const auto  w     = static_cast<int64_t>(inner.type->getBitWidth());
+      return w > 0 ? lower_clock_bus_lane(inner, bit % w, depth + 1) : std::string{};
+    }
+    case ExpressionKind::BinaryOp: {
+      const auto& b = expr.as<slang::ast::BinaryExpression>();
+      if (b.op != slang::ast::BinaryOperator::BinaryAnd) {
+        break;
+      }
+      const auto l = lower_clock_bus_lane(b.left(), bit, depth + 1);
+      const auto r = lower_clock_bus_lane(b.right(), bit, depth + 1);
+      return l.empty() || r.empty() ? std::string{} : builder_.create_bit_and_stmts(l, r);
+    }
+    case ExpressionKind::NamedValue: {
+      const auto& sym = expr.as<slang::ast::NamedValueExpression>().symbol;
+      if (expr.type->getBitWidth() == 1) {
+        break;  // a scalar clock: the plain read below
+      }
+      // A bus NET with ONE whole driver (initializer or `assign`): look through it.
+      // A variable's initializer is only a power-on value, never a driver.
+      if (sym.kind != slang::ast::SymbolKind::Net) {
+        return {};
+      }
+      if (const auto census = net_driver_census(sym); census.whole == 1 && !census.part) {
+        if (const auto* driver = whole_net_driver(sym)) {
+          return lower_clock_bus_lane(*driver, bit, depth + 1);
+        }
+      }
+      return {};
+    }
+    default: break;
+  }
+  // A one-bit leaf: the clock expression itself (`clk & en`, a port, a gate wire).
+  return expr.type->getBitWidth() == 1 ? lower_rvalue(expr) : std::string{};
+}
+
 void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
                                      std::vector<const slang::ast::Statement*>& prologue,
                                      const std::vector<std::string>&            inactive_async_guards) {
@@ -7311,7 +7429,11 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
         if (it == refs.end()) {
           auto name = unique_suffixed(lname_of(*clk_sym), absl::StrCat("__clock_bit", lv.const_off));
           builder_.create_declare_stmts(name, "wire", "1", "0");
-          builder_.create_assign_stmts(name, lower_rvalue(*clock_expr));
+          // A compile-time pick of one clock of a bus resolves to that clock's own
+          // gate (lower_clock_bus_lane); anything else reads the selected bit.
+          auto lane = select.value().kind == ExpressionKind::NamedValue ? lower_clock_bus_lane(select.value(), lv.const_off, 0)
+                                                                        : std::string{};
+          builder_.create_assign_stmts(name, lane.empty() ? lower_rvalue(*clock_expr) : lane);
           it = refs.emplace(lv.const_off, std::move(name)).first;
         }
         clock_ref = it->second;

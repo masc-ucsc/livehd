@@ -18,7 +18,15 @@ module bit_selected_clocks (
   input [2:0] data, enable,
   output reg [2:0] q
 );
-  wire [0:2] collision_clk = {gate2, gate1, gate0} & {3{clk & gate}};
+  // One ICG per bit: each enable latch is transparent while clk is low, and the
+  // vector AND with the clock gates each lane. Selecting collision_clk[2-bw] in
+  // the generate loop is a compile-time pick of one of those gated clocks, not a
+  // derived clock (the reader resolves the pick: Slang_context::lower_clock_bus_lane).
+  reg en0, en1, en2;
+  always_latch if (!clk) en0 = gate0 & gate;
+  always_latch if (!clk) en1 = gate1 & gate;
+  always_latch if (!clk) en2 = gate2 & gate;
+  wire [0:2] collision_clk = {en2, en1, en0} & {clk, clk, clk};
   for (genvar bw = 0; bw < 3; bw = bw + 1) begin : bits
     if (bw == 1) begin : falling
       always @(negedge collision_clk[2-bw] or negedge clr_)

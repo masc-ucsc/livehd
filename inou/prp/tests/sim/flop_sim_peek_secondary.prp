@@ -36,7 +36,8 @@
 // The companion fixture inou/prp/tests/sim/multiclock_two_domain.prp is the
 // SAME design shape WITHOUT a pre-step read, and it passes — that pair is the
 // proof that the read is what breaks it.
-pub mod pksec(clkb:Bool, d:U8) -> (qa:U8@[1], qb:U8@[2]) {
+pub mod pksec(clk:Clock, en_b:Bool, d:U8) -> (qa:U8@[1], qb:U8@[2]) {
+  const clkb = Clock(clock_pin=clk, enable=en_b)  // second domain: clk gated by en_b
   reg a:U8 = 0
   reg b:U8:[clock_pin=clkb] = 0
   qa = a
@@ -50,7 +51,7 @@ test pksec.pre_step_read_must_not_consume_a_clock_edge {
   mut pre = 0
   tick 4 {
     acc.d    = 11 + (17 * clock)
-    acc.clkb = (clock == 2)          // one rise, at tick 2
+    acc.en_b = (clock == 2)          // one gated clock pulse, at tick 2
     // THE TRIGGER: an output read BEFORE `step`. Each such read is a peek(),
     // and peek() advances the second domain's previous-level bit without
     // restoring it. The read must be UNCONDITIONAL -- an `implies` guard

@@ -1,0 +1,14 @@
+/*
+:name: partsel_oob_descending
+:type: equiv
+:verilog_top: partsel_oob_descending
+:pyrope_top: partsel_oob_descending
+*/
+//
+// Descending twin of partsel_oob_ascending: a dynamic part-select whose base is
+// 31..38 on a 25-bit vector can never land inside it, so every bit of `y` is
+// unknown (IEEE 1800 11.5.1). Before 2026-10-04 the descending form lowered to a
+// positive shift that returned 0 instead of X.
+pub comb partsel_oob_descending::[timecheck=false](a:U25, s:U3) -> (y:U4) {
+  y = 0ub????
+}

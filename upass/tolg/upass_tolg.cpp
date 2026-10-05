@@ -3680,9 +3680,12 @@ private:
   }
 
   // A glitch-free clock gate. `en` is sampled by the backend on the inactive
-  // clock phase; div=1/invert=false are explicit so every consumer sees the
-  // same v1 contract rather than relying on implicit pin defaults.
-  [[nodiscard]] Pin clock_gate(const Pin& clk, const Pin& en) {
+  // clock phase; div=1 and the `invert` flavour are explicit so every consumer
+  // sees the same v1 contract rather than relying on implicit pin defaults.
+  // `invert` is the ACTIVE-LOW flavour (`clk | ~en_latch`: the output idles high,
+  // the enable latch is transparent while the clock is HIGH, and the gated event
+  // is the fall).
+  [[nodiscard]] Pin clock_gate(const Pin& clk, const Pin& en, bool invert = false) {
     if (clk.is_invalid() || en.is_invalid()) {
       return clk;
     }
@@ -3690,7 +3693,7 @@ private:
     setup_sink_by_name(cell, "clk_ref").connect_driver(clk);
     setup_sink_by_name(cell, "div").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     setup_sink_by_name(cell, "en").connect_driver(nonzero1(en));
-    setup_sink_by_name(cell, "invert").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    setup_sink_by_name(cell, "invert").connect_driver(create_const(*g_, *Dlop::create_integer(invert ? 1 : 0)));
     auto out = cell.create_driver_pin(0);
     set_ubits(out, 1);
     return out;
@@ -7953,6 +7956,7 @@ private:
     Pin              en;
     int32_t          en_mw = 0;
     std::string_view clk_txt;
+    bool             invert = false;
     for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
       const auto key = Lnast_ntype::is_store(lnast_->get_type(a)) ? lnast_->get_first_child(a) : Lnast_nid{};
       const auto val = key.is_invalid() ? key : lnast_->get_sibling_next(key);
@@ -7966,6 +7970,8 @@ private:
         const auto v = leaf(val);
         en           = v.pin;
         en_mw        = v.mw;
+      } else if (lnast_->get_name(key) == "invert") {
+        invert = lnast_->get_name(val) == "true";  // prp2lnast: a literal true/false
       }
     }
     if (clk.is_invalid() || en.is_invalid()) {
@@ -7986,7 +7992,7 @@ private:
     } else if (!check_clock_pin_class(nid, "the clock gate `Clock(...)`", clk_txt, clk)) {
       return;
     }
-    bind_result(lnast_->get_name(dst), clock_gate(clk, en), 1);
+    bind_result(lnast_->get_name(dst), clock_gate(clk, en, invert), 1);
   }
 
   // func_call(dst_tmp, callee_name, args...) → an Ntype_op::Sub

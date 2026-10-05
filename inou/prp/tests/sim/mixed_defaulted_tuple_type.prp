@@ -1,0 +1,35 @@
+/*
+:name: mixed_defaulted_tuple_type
+:type: simulation
+*/
+// A tuple type that MIXES a field carrying a default with one that does not,
+// used as register state (03-bundle.md: a named field may have a type and/or a
+// default, `const field2:String = nil`). It used to fail with
+//   upass.tolg: tuple/field store to 'r' has no hardware lowering
+// while both uniform spellings worked (all-defaulted ../equiv/defaulted_tuple.prp,
+// none-defaulted ../equiv/reg_named_tuple_type.prp). FIXED 2026-10-04 in
+// prp2lnast: the bare field `mut state:U2` was lowered as a positional slot and
+// its `U2` appeared nowhere in the LNAST, so the detupler (rightly) declined to
+// publish a partial layout. A bare field of a tuple that also has valued fields
+// is now an explicit `state = nil` row carrying its type and `mut` marker.
+
+type D = (mut flag:Bool = false, mut state:U2)
+
+pub mod mixed_defaulted_tuple_type(clk:Clock, f:Bool, s:U2) -> (of:Bool@[], os:U2@[]) {
+  reg r:D = nil
+  r.flag  = f
+  r.state = s
+  of = r.flag
+  os = r.state
+}
+
+test mixed_defaulted_tuple_type.both_fields_are_state {
+  mut acc = mixed_defaulted_tuple_type
+  tick 6 {
+    acc.f = (clock & 1) == 1
+    acc.s = clock & 3
+    step
+    assert(acc.of == ((clock & 1) == 1), "the defaulted Bool field is its own flop")
+    assert(acc.os == (clock & 3), "the undefaulted U2 field is its own flop")
+  }
+}

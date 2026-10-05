@@ -598,6 +598,9 @@ private:
   // not per instance — XS-scale designs instantiate one SRAM macro x100s).
   absl::flat_hash_set<std::string> unknown_warned_;
   void lower_continuous_assign(const slang::ast::ContinuousAssignSymbol& ca, const std::string* precomputed_rhs = nullptr);
+  // Bit `bit` (0 = LSB) of a clock BUS expression, resolved at compile time to the
+  // clock it picks; "" when the bus is not a plain concat/replication/AND shape.
+  std::string lower_clock_bus_lane(const slang::ast::Expression& expr, int64_t bit, int depth);
   void declare_value_symbol(const slang::ast::ValueSymbol& sym, bool force_reg);
   void declare_reg(const slang::ast::ValueSymbol& sym);
 

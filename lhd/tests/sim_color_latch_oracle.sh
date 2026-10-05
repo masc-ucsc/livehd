@@ -18,9 +18,8 @@ SIM_SRC="${SIM_SRC:-inou/prp/tests/sim/flop_feeds_transparent_high_latch.prp}"
 oracle_tmp="$(mktemp -d "${TMPDIR:-/tmp}/lhd-sim-color-latch.XXXXXX")"
 trap 'rm -rf "$oracle_tmp"' EXIT
 
-# LATCH_DUT=verilog: the Verilog stand-in (lhd/tests/sim_flop_high_latch_standin.v
-# + its tb, assertions included) while the Pyrope fixture waits on the clock
-# lane (its target is fixme).
+# LATCH_DUT=verilog: the Verilog-origin twin (lhd/tests/sim_flop_high_latch_standin.v
+# + its tb, assertions included) through slang -> lg.
 SIM_ARGS=("$SIM_SRC")
 if [ "${LATCH_DUT:-prp}" = verilog ]; then
   "$LHD" compile lhd/tests/sim_flop_high_latch_standin.v --reader slang --emit-dir lg:"$oracle_tmp/lg/" \

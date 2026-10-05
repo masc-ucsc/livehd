@@ -178,15 +178,6 @@ _SV_SOURCES = glob(
     ],
 )
 
-# PENDING (clock lane, 2026-09-30): the emitted Pyrope does not recompile under
-# the `Clock` type until ruling 81's "map what fits" half lands (the writer
-# turning a Verilog ICG gate cell into `Clock(clock_pin=, enable=)` and a
-# bit-selected bus clock into a Clock port).
-_SV_FIXME = [
-    "tests/sv/bit_selected_clocks_vector.v",
-    "tests/sv/writer_icg_order.sv",
-]
-
 # Fixtures with a `// :lec_solver: lgyosys` header: they shell out to lgcheck.
 _SV_LGYOSYS = [
     "tests/sv/memory_sync_reset.v",
@@ -220,7 +211,7 @@ _SV_LGYOSYS = [
     # `lhd sim` finds the host C++ compiler (and LHD_EXTERNAL_SIM iverilog) on PATH.
     env_inherit = ["PATH"],
     # Keep bounded formal checks from oversubscribing frontend/solver capacity.
-    tags = ["cpu:4"] + (["fixme"] if src in _SV_FIXME else []),
+    tags = ["cpu:4"],
 ) for src in _SV_SOURCES]
 
 sh_test(

@@ -1,0 +1,12 @@
+/*
+:name: vector_io_ports_bare_type
+:type: error
+:error: a tuple-type entry must be named
+*/
+// A tuple TYPE is all-named (`v:(a:U4, b:U8)`) or all-anonymous
+// (`v:(_:U4, _:U8)`); a bare type entry such as `U4` is neither, so it is a
+// compile error (it used to be silently dropped, leaving a port with no leaves).
+// The positional spellings that ARE legal are in pyrope/vector_io_ports.prp.
+pub comb vector_io(v:(U4, U8)) -> (o:U12) {  // locate_error_here
+  o = v[0] + v[1]
+}

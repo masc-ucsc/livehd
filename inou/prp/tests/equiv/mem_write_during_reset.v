@@ -1,4 +1,6 @@
-// FIXME tracker -- a MEMORY write is not gated by the async reset (LEC-refuted).
+// FIXED 2026-10-04: the .prp now gates the write by `not rst`, as the reader and writer do.
+// (Historical description follows.)
+// Tracker -- a MEMORY write is not gated by the async reset (LEC-refuted).
 // In `always @(posedge clk or posedge rst) if (rst) <resets> else <body>`, a clock
 // edge taken while `rst` is asserted runs the RESET branch, so the else-body -- and
 // the `m[a] <= din` in it -- does NOT execute. The reset structure is absorbed into

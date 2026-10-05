@@ -170,18 +170,20 @@ http_archive(
 # on the ../tree-sitter-pyrope working tree, and the build then depends on that
 # tree. @tree_sitter_pyrope below unzips the SAME archive, so both blocks swap
 # together.
-http_archive(
+# LOCAL co-development (2026-10-05, `_:T` anonymous tuple-type entry in the lexer):
+# RE-PIN to the http_archive below BEFORE COMMIT once the sibling change is pushed.
+new_local_repository(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-SeHH0KuFyDYsJ9EseIrsdvMo12un6QY7xEQ2OpAosPE=",
-    strip_prefix = "tree-sitter-pyrope-66dda7f312f582ab1831623a2982558dc4a6e3fe/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/66dda7f312f582ab1831623a2982558dc4a6e3fe.zip"],
+    path = "../tree-sitter-pyrope/prpparse",
 )
-# For local co-development swap the http_archive above for:
-# new_local_repository(
+# Pinned form (restore this after the sibling commit lands, with its new commit/integrity):
+# http_archive(
 #     name = "prpparse",
 #     build_file = "//packages:prpparse.BUILD",
-#     path = "../tree-sitter-pyrope/prpparse",
+#     integrity = "sha256-SeHH0KuFyDYsJ9EseIrsdvMo12un6QY7xEQ2OpAosPE=",
+#     strip_prefix = "tree-sitter-pyrope-66dda7f312f582ab1831623a2982558dc4a6e3fe/prpparse",
+#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/66dda7f312f582ab1831623a2982558dc4a6e3fe.zip"],
 # )
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
@@ -211,18 +213,20 @@ http_archive(
 # prpfmt/ts_symbols.h (gitignored); //packages:prpfmt.BUILD regenerates it from
 # src/parser.c via a genrule, so no local checkout is required. Bump the pin per
 # the @prpparse note above (recompute integrity).
-http_archive(
+# LOCAL co-development (2026-10-05, `_:T` in grammar.js/src/parser.c): RE-PIN to the
+# http_archive below BEFORE COMMIT once the sibling change is pushed.
+new_local_repository(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-SeHH0KuFyDYsJ9EseIrsdvMo12un6QY7xEQ2OpAosPE=",
-    strip_prefix = "tree-sitter-pyrope-66dda7f312f582ab1831623a2982558dc4a6e3fe",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/66dda7f312f582ab1831623a2982558dc4a6e3fe.zip"],
+    path = "../tree-sitter-pyrope",
 )
-# For local co-development swap the http_archive above for:
-# new_local_repository(
+# Pinned form:
+# http_archive(
 #     name = "tree_sitter_pyrope",
 #     build_file = "//packages:prpfmt.BUILD",
-#     path = "../tree-sitter-pyrope",
+#     integrity = "sha256-SeHH0KuFyDYsJ9EseIrsdvMo12un6QY7xEQ2OpAosPE=",
+#     strip_prefix = "tree-sitter-pyrope-66dda7f312f582ab1831623a2982558dc4a6e3fe",
+#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/66dda7f312f582ab1831623a2982558dc4a6e3fe.zip"],
 # )
 
 # OpenTimer

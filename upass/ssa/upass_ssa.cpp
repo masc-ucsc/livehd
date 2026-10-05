@@ -780,6 +780,13 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
       return;
     }
     auto leaf_name = std::string(lnast->get_name(name_nid));
+    // prp2lnast carries an anonymous tuple-type entry (`v:(_:U4, _:U8)`) as the
+    // marker `__pos<N>`: its leaf is the POSITION (`v.0`, `v.1`), which is how a
+    // constant-index read `v[0]` and a positional call actual find it.
+    if (!prefix.empty() && leaf_name.size() > 5 && leaf_name.starts_with("__pos")
+        && std::all_of(leaf_name.begin() + 5, leaf_name.end(), [](char c) { return c >= '0' && c <= '9'; })) {
+      leaf_name = leaf_name.substr(5);
+    }
     auto full      = prefix.empty() ? leaf_name : prefix + "." + leaf_name;
 
     auto rhs_nid  = lnast->get_sibling_next(name_nid);

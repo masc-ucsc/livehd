@@ -1,0 +1,13 @@
+/*
+:name: clock_gate_invert_nonliteral
+:type: error
+:error: `Clock\(\.\.\.\)` gates a clock and takes the named arguments
+*/
+// `invert` picks the gate's flavour (active-low) at compile time: a literal
+// `true` or `false`, never a signal.
+pub mod clock_gate_invert_nonliteral(clk:Clock, en:Bool, flip:Bool, d:U8) -> (q:U8@[1]) {
+  const g = Clock(clock_pin=clk, enable=en, invert=flip)
+  reg f:U8:[clock_pin=g] = 0
+  f = d
+  q = f
+}

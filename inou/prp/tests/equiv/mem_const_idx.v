@@ -6,15 +6,15 @@ module \mem_const_idx.cidx (
   output     [7:0] z
 );
 
-  reg [7:0] data[1:0];
+  reg [7:0] t[1:0];
 
   always @(posedge clock) begin
     if (we) begin
-      data[0] <= a;
-      data[1] <= b;
+      t[0] <= a;
+      t[1] <= b;
     end
   end
 
-  assign z = we ? b : data[1];
+  assign z = we ? b : t[1];
 
 endmodule

@@ -5,22 +5,25 @@
 :pyrope_top: mem_write_during_reset
 */
 //
-// FIXME tracker -- a MEMORY write is not gated by the async reset (LEC-refuted).
-// In `always @(posedge clk or posedge rst) if (rst) <resets> else <body>`, a clock
-// edge taken while `rst` is asserted runs the RESET branch, so the else-body -- and
-// the `m[a] <= din` in it -- does NOT execute. The reset structure is absorbed into
-// the flops' `reset_pin=/async=true` attributes, but the memory has no reset
-// attribute and simply LOSES the implicit `~rst` on its write enable: look at the
-// Pyrope below, `if we != 0 { m[a] = din }` with no `rst` anywhere. The array is
-// therefore written while the design is held in reset. Two corpus shapes (a scalar
-// reset next to a memory write, and a counter next to a memory write).
+// A MEMORY write is gated by the async reset. In
+// `always @(posedge clk or posedge rst) if (rst) <resets> else <body>`, a clock
+// edge taken while `rst` is asserted runs the RESET branch, so the else-body --
+// and the `m[a] <= din` in it -- does NOT execute. The flop's reset is the
+// `reset_pin=/async=true` attribute, but a memory has no reset attribute, so the
+// source spells the implicit `~rst` on the write enable (`if not rst`),
+// which is exactly what the Verilog reader and the writer emit. This file used to
+// be the writer's broken output pasted in (no `rst` anywhere on the write), so
+// the pair refuted although the reader and writer were right. FIXED/PROMOTED
+// 2026-10-04. Two corpus shapes (a scalar reset next to a memory write, and a
+// counter next to a memory write).
 pub mod mem_write_during_reset::[timecheck=false](clk:Clock, rst:Reset, we:U1, a:U2, din:U4) -> (ack:U4@[], dout:U4@[]) {
   reg ack:U4:[initial=0, reset_pin=rst, async=true]
   reg m:[4]U4:[ordering="old"]
-  dout = 0ub????
-  if we != 0 {
-    m[a] = din
+  if not rst {
+    if we != 0 {
+      m[a] = din
+    }
+    ack = din
   }
-  ack = din
   dout = m[a]
 }

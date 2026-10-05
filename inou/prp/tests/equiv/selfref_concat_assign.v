@@ -1,4 +1,6 @@
-// FIXME tracker -- a SELF-REFERENTIAL whole-vector assign is never solved
+// FIXED 2026-10-04: the .prp now reads a `wire p` in its own definition, as the reader and writer do.
+// (Historical description follows.)
+// Tracker -- a SELF-REFERENTIAL whole-vector assign is never solved
 // (LEC-refuted). `assign p = { A[3]^p[2], A[2]^p[1], A[1]^p[0], A[0] };` is the
 // classic prefix/ripple idiom and is perfectly legal: every bit depends only on
 // STRICTLY LOWER bits, so the net settles in one pass. The reader never

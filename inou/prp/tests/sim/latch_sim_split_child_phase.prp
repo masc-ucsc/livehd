@@ -8,19 +8,17 @@
 // PRE-rise state; the negedge register then commits at the fall.  Treating the
 // whole child as "negedge-only" delays its latch until after the parent posedge
 // and admits a newly-launched enable one period early.
-mod preview_commit(clk:Bool, en_next:Bool, d:U8) -> (q:U8@[0]) {
-  reg en_q:Bool:[latch=true]
+mod preview_commit(clk:Clock, en_next:Bool, d:U8) -> (q:U8@[0]) {
+  reg en_q:Bool:[latch=true, enable=clk, enable_high=false] = nil
   reg data_q:U8:[clock_pin=clk, posclk=false] = 0
   q = data_q
-  if !clk {
-    en_q = en_next
-  }
+  en_q = en_next
   if en_q {
     data_q = d
   }
 }
 
-pub mod split_child_top(clk:Bool, launch:Bool, d:U8)
+pub mod split_child_top(clk:Clock, launch:Bool, d:U8)
         -> (q:U8@[0], launch_q_o:Bool@[]) {
   reg launch_q:Bool:[clock_pin=clk] = false
   launch_q = launch

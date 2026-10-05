@@ -4,30 +4,27 @@
 */
 
 // Reduced from Minion's resettable opposite-phase accumulator pairs. A closed
-// ICG leaves the low latch open: clock level is not a compile-time constant,
-// but the low/high data windows can never be open together. Reset is expressed
-// as data/control muxes, as in the imported core.
-pub mod gated_feedback(clk:Bool, run:Bool, clear:Bool, d:U8) -> (low:U8@[], high:U8@[], sampled:U8@[1], observed:U8@[]) {
-  reg gate:Bool:[latch=true] = nil
-  reg lo:U8:[latch=true] = nil
-  reg hi:U8:[latch=true] = nil
+// ICG leaves the low latch open (`enable_high=false` on the gated clock), and
+// the low/high data windows can never be open together. Reset is the latches'
+// async `reset_pin` (the form the Verilog/Pyrope writers emit).
+//
+// SIM BUG TRACKER (fixme, 2026-10-04). Ported from the pre-`Clock`-type Bool
+// form. `local_clock` is a `Clock_cell`; the two latches are enabled by it. The
+// emitted Verilog is right (iverilog: `high` holds at 3 while `run` is low,
+// ticks 5..7), but `lhd sim` ignores the gate for a latch whose enable is a
+// gated Clock built in the SAME module: `high` keeps advancing (4,5,6) while
+// `run` is 0. Moving the two latches into a child module that receives the gated
+// clock as a port (see clock_cell_gated_pair_ring.prp) fixes `high`, but then the
+// negedge `observer` still reads one step ahead (5, expected 4).
+pub mod gated_feedback(clk:Clock, clear:Bool, run:Bool, d:U8) -> (low:U8@[], high:U8@[], sampled:U8@[1], observed:U8@[]) {
+  const local_clock = Clock(clock_pin=clk, enable=run)
+  reg lo:U8:[latch=true, enable=local_clock, enable_high=false, reset_pin=clear, async=true, initial=0]
+  reg hi:U8:[latch=true, enable=local_clock, reset_pin=clear, async=true, initial=0]
   reg sample:U8:[clock_pin=clk] = 0
   reg observer:U8:[clock_pin=clk, posclk=false] = 0
   const shared_next = (hi + 1) & 255
-  if not clk {
-    gate = run
-  }
-  const local_clock = clk and gate
-  if clear {
-    lo = 0
-  } elif not local_clock {
-    lo = shared_next
-  }
-  if clear {
-    hi = 0
-  } elif local_clock {
-    hi = lo
-  }
+  lo = shared_next
+  hi = lo
   sample = d
   observer = shared_next
   low = lo
@@ -65,19 +62,15 @@ test gated_feedback.reset_and_pause {
 // The alternating edge/settle sequence: each low latch sees the newly
 // committed negedge flop, and each high latch sees the newly committed
 // posedge flop. A posedge reader samples the preceding low window.
-pub mod alternating_phases(clk:Bool, d:U8) -> (fall_q:U8@[], low_q:U8@[], rise_q:U8@[], high_q:U8@[]) {
+pub mod alternating_phases(clk:Clock, d:U8) -> (fall_q:U8@[], low_q:U8@[], rise_q:U8@[], high_q:U8@[]) {
   reg falling:U8:[clock_pin=clk, posclk=false] = 0
-  reg low_latch:U8:[latch=true] = 0
+  reg low_latch:U8:[latch=true, enable=clk, enable_high=false] = 0
   reg rising:U8:[clock_pin=clk] = 0
-  reg high_latch:U8:[latch=true] = 0
+  reg high_latch:U8:[latch=true, enable=clk] = 0
   falling = d
-  if not clk {
-    low_latch = falling
-  }
+  low_latch = falling
   rising = low_latch
-  if clk {
-    high_latch = rising
-  }
+  high_latch = rising
   fall_q = falling
   low_q = low_latch
   rise_q = rising

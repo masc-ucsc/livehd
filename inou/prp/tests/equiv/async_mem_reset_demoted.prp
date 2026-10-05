@@ -4,30 +4,13 @@
 :verilog_top: async_mem_reset_demoted
 :pyrope_top: async_mem_reset_demoted
 */
-//
-// FIXME tracker -- an ASYNC reset OF a memory is demoted to a synchronous clear.
-// The reset arm clears every element (`for (i=0;i<4;i=i+1) mem[i] <= 0`), which is
-// a real asynchronous reset of the array. The Pyrope below keeps it as an ordinary
-// `if rstn == 0 { mem[0] = 0 ... }` in the clocked body -- i.e. SYNCHRONOUS -- so
-// the array only clears on the next clock edge instead of immediately.
-// Native `lhd lec` PROVES this pair under its cycle model: inou.slang demotes the
-// golden's unpeelable array rung to a sync reset (async-reset-as-sync) and LEC
-// lands a reset on the clock edge. Ruled 2026-09-28: LEC treats async and sync
-// reset as equivalent (pass/lec/lec.md, Flop) -- no intra-cycle model, no UNKNOWN
-// for a reader-demoted reset -- so the native PROVEN stays. The yosys oracle
-// (lgyosys: rstn=0 between edges, the comb read q=mem[a] shows 0 on the golden)
-// refutes the pair -- that is the only leg that fails, and why this stays fixme.
-// Distinct from mem_write_during_reset: there the memory has no reset at all
-// and loses its write GATING; here the memory's own reset loses its ASYNC-ness.
+// Asynchronous active-low reset clears every memory entry immediately.
+// Keep the independent Verilog golden's reset edge semantics: a synchronous
+// clear in the clocked body would pass native cycle LEC but fail the Yosys oracle.
 pub mod async_mem_reset_demoted::[timecheck=false](clk:Clock, rstn:U1, we:U1, a:U2, d:U4) -> (q:U4@[]) {
-  reg mem:[4]U4:[ordering="old"]
+  reg mem:[4]U4:[ordering="old", reset_pin=rstn, negreset=true, async=true] = 0
   q = 0ub????
-  if rstn == 0 {
-    mem[0] = 0
-    mem[1] = 0
-    mem[2] = 0
-    mem[3] = 0
-  } elif we != 0 {
+  if rstn != 0 and we != 0 {
     mem[a] = d
   }
   q = mem[a]

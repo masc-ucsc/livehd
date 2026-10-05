@@ -9937,6 +9937,7 @@ TSNode Prp2lnast::tuple_type_inner(TSNode type_cast_node) const {
 }
 
 void Prp2lnast::emit_tuple_type_field_specs(std::string_view path, TSNode tuple_node) {
+  size_t anon_pos = 0;  // `_:T` entries are stamped by position (`path.0`, `path.1`)
   for (TSNode item : ts_node_named_children(tuple_node)) {
     if (std::string_view(ts_node_type(item)) != "typed_field") {
       continue;
@@ -9946,7 +9947,8 @@ void Prp2lnast::emit_tuple_type_field_specs(std::string_view path, TSNode tuple_
     if (ts_node_is_null(fid) || ts_node_is_null(ftc)) {
       continue;
     }
-    const std::string fname{canonical_escaped_ident(trim(get_text(fid)))};
+    const std::string fname = trim(get_text(fid)) == "_" ? std::to_string(anon_pos++)
+                                                         : std::string{canonical_escaped_ident(trim(get_text(fid)))};
     // The parser supplies one identifier here. A dot can only be inside an
     // escaped field name; retain its backticks in the qualified path.
     if (fname.empty()) {
@@ -10967,9 +10969,22 @@ void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) 
         continue;
       }
       auto tup_idx = lnast->add_child(assign_parent, Lnast_ntype::create_tuple_add());
+      size_t anon_entries = 0;  // `_:T` entries seen: the position of the next one
+      bool   named_entry  = false;
       for (TSNode item : ts_node_named_children(inner)) {
         std::string_view it(ts_node_type(item));
+        if (it == "identifier") {
+          // A bare type entry (`v:(U4, U8)`) has no name and no `_:` marker.
+          report_error(item,
+                       "unnamed-tuple-type-field",
+                       "type",
+                       std::format("a tuple-type entry must be named (`name:T`) or anonymous (`_:T`): a bare `{}` is neither",
+                                   trim(get_text(item))),
+                       "write `_:T` for a positional entry (`v:(_:U4, _:U8)`), or `v:[]` for any tuple or array");
+          continue;
+        }
         if (it == "typed_identifier") {
+          named_entry = true;
           emit_arg_assign(tup_idx, item, TSNode{}, /*is_ref_mod=*/false);
         } else if (it == "typed_field") {
           // Bare `name:type` field (identifier: name, type: type_cast). Emit
@@ -10980,8 +10995,31 @@ void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) 
           if (ts_node_is_null(arg)) {
             continue;
           }
+          // `_:T` is the anonymous POSITIONAL entry: it is carried as the marker
+          // `__pos<N>` (upass.ssa flattens it to the leaf `port.<N>`, read as `v[N]`).
+          const bool anon = trim(get_text(arg)) == "_";
+          if (anon) {
+            if (named_entry) {
+              report_error(item,
+                           "mixed-tuple-type-fields",
+                           "type",
+                           "a tuple type is all-named or all-unnamed: `_:T` cannot be mixed with named entries",
+                           "name every entry (`a:T, b:U`) or none (`_:T, _:U`)");
+            }
+          } else {
+            named_entry = true;
+            if (anon_entries != 0) {
+              report_error(item,
+                           "mixed-tuple-type-fields",
+                           "type",
+                           "a tuple type is all-named or all-unnamed: a named entry cannot follow `_:T`",
+                           "name every entry (`a:T, b:U`) or none (`_:T, _:U`)");
+            }
+          }
           auto aidx = lnast->add_child(tup_idx, Lnast_ntype::create_store());
-          lnast->add_child(aidx, Lnast_node::create_ref(canonical_escaped_ident(trim(get_text(arg)))));
+          lnast->add_child(aidx,
+                           Lnast_node::create_ref(anon ? std::format("__pos{}", anon_entries++)
+                                                       : std::string(canonical_escaped_ident(trim(get_text(arg))))));
           lnast->add_child(aidx, Lnast_node::create_const("nil"));
           if (!ts_node_is_null(ty)) {
             defer_port_bound(tc, aidx);
@@ -10995,6 +11033,7 @@ void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) 
           if (ts_node_is_null(lv)) {
             continue;
           }
+          named_entry = true;
           if (std::string_view(ts_node_type(lv)) == "typed_identifier") {
             emit_arg_assign(tup_idx, lv, rv, /*is_ref_mod=*/false);
           }
@@ -13014,25 +13053,34 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   if (clock_gate) {
     bool has_clock  = false;
     bool has_enable = false;
+    bool has_invert = false;
     bool bad        = !generic_args.empty();
     for (auto& a : call_args) {
       if (!a.is_assign && !a.is_ref && !a.is_spread && !a.is_ufcs && a.value.is_ref()) {
         a.is_assign  = true;  // `enable` for `enable=enable`
         a.assign_key = std::string(a.value.get_name());
       }
-      bool* seen = a.assign_key == "clock_pin" ? &has_clock : a.assign_key == "enable" ? &has_enable : nullptr;
+      bool* seen = a.assign_key == "clock_pin" ? &has_clock
+                   : a.assign_key == "enable"  ? &has_enable
+                   : a.assign_key == "invert"  ? &has_invert
+                                               : nullptr;
       if (!a.is_assign || a.is_ref || seen == nullptr || *seen) {
         bad = true;
       } else {
         *seen = true;
+      }
+      // `invert` picks the gate flavour at compile time: a literal `true`/`false`.
+      if (a.is_assign && a.assign_key == "invert" && !(a.value.is_const() && (a.value.get_name() == "true" || a.value.get_name() == "false"))) {
+        bad = true;
       }
     }
     if (bad || !has_clock || !has_enable) {
       report_error(n,
                    "clock-gate-args",
                    "type",
-                   "`Clock(...)` gates a clock and takes exactly the named arguments `clock_pin` and `enable`",
-                   "write `Clock(clock_pin=clk, enable=en)`: `clk` a `Clock`, `en` a `Bool` enable");
+                   "`Clock(...)` gates a clock and takes the named arguments `clock_pin` and `enable` (and optionally a literal `invert=true`)",
+                   "write `Clock(clock_pin=clk, enable=en)`: `clk` a `Clock`, `en` a `Bool` enable; "
+                   "`invert=true` makes it an active-low gate");
     }
   }
 
@@ -13383,11 +13431,21 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/, bool field_typ
           // tuple slot's positional value (initial value is undefined).
           TSNode id = child_by_field(next, "identifier");
           if (!ts_node_is_null(id)) {
-            it.value = identifier_to_node(id, true);
+            it.value      = identifier_to_node(id, true);
+            it.assign_key = trim(get_text(id));
           } else {
             it.value = builder.mint_tmp_ref();
           }
           it.declares_field = true;
+          // Keep the field's type and `mut` marker: a tuple TYPE that mixes
+          // defaulted and undefaulted fields (`(mut flag:Bool = false, mut state:U2)`)
+          // turns these into `name = nil` rows below, and `state`'s `U2` would
+          // otherwise appear nowhere in the LNAST.
+          if (!ts_node_is_null(child_by_field(next, "type"))) {
+            it.type_cast_node = child_by_field(next, "type");
+            it.has_type_cast  = true;
+          }
+          it.is_mut = trim(get_text(c)).starts_with("mut");
         } else {
           it.value = expr_to_node(next);
         }
@@ -13442,7 +13500,11 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/, bool field_typ
         }
       }
       Item it;
-      if (t == "typed_field" && field_types_on_target) {
+      if (t == "typed_field" && trim(get_text(child_by_field(c, "identifier"))) == "_") {
+        // An anonymous tuple-type entry `_:T`: a POSITIONAL slot of the shape seed
+        // (its type is stamped on `target.<position>` by emit_tuple_type_field_specs).
+        it.value = Lnast_node::create_const("nil");
+      } else if (t == "typed_field" && field_types_on_target) {
         // emit_type_spec already stamped target.field. This shape seed only
         // carries labels: typing the bare field here would re-type an
         // unrelated local with the same name (NewCSR's mtopi instance).
@@ -13451,6 +13513,28 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/, bool field_typ
         it.value = expr_to_node(c);
       }
       items.push_back(std::move(it));
+    }
+  }
+
+  // A tuple type that MIXES defaulted fields with bare TYPED declared ones
+  // (`(mut flag:Bool = false, mut state:U2)`; an untyped `mut c` stays the
+  // positional read of the outer `c`): lower each bare field as an
+  // explicit `name = nil` row (a named field with a type and no default,
+  // 03-bundle.md `const field2:String = nil`) so it carries its name, type and
+  // `mut` marker like its defaulted siblings. A tuple whose fields are ALL bare
+  // keeps the positional-slot lowering.
+  {
+    bool any_valued = false;
+    for (const auto& it : items) {
+      any_valued = any_valued || (it.is_assign && !Lnast::is_tmp(it.assign_key));
+    }
+    if (any_valued) {
+      for (auto& it : items) {
+        if (it.declares_field && !it.is_assign && it.has_type_cast && !it.assign_key.empty()) {
+          it.is_assign = true;
+          it.value     = Lnast_node::create_const("nil");
+        }
+      }
     }
   }
 
