@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Unate Register-Rooted Synthesis (pass.usyn)</title>
-<meta name="description" content="Methodology of pass.usyn: register-rooted unate/DOMINO selection, native residual optimization, CMOS expansion, literal-network extraction and mapping-only technology mapping, compared with the LiveHD ABC flow.">
+<title>Register-Rooted Unate Synthesis for DOMINO and CMOS</title>
+<meta name="description" content="Register-rooted functional synthesis with exact bounded Boolean analysis, care-aware divisor search, sharing-aware endpoint selection and literal-network extraction for DOMINO and CMOS.">
 <style>
 :root {
   --bg: #fdfdfb;
@@ -178,14 +178,16 @@ a { color: var(--accent); }
 <body>
 
 <h1>Register-Rooted Unate Synthesis<br>for DOMINO and CMOS</h1>
-<p class="subtitle">Methodology of <code>pass.usyn</code> (<code>synth.mapper=usyn</code>) and how it differs from the LiveHD ABC flow of <a href="synthesis.html">synthesis.html</a> (cited below as [S&nbsp;&sect;<var>n</var>])</p>
+<p class="subtitle">Bounded functional decomposition and shared-cost optimization at sequential boundaries</p>
 
 <!-- ===================================================================== -->
-<h2><span class="secnum">1</span>Goal and Organization</h2>
+<h2><span class="secnum">1</span>Motivation and Contribution</h2>
 
-<p>A DOMINO gate [1] evaluates a <em>unate</em> function through one series-parallel pull-down stack; a DOMINO latch additionally holds the value as the cycle's state. If every register's next-state function, or a small decomposition of it, fits such a gate, the logic between registers collapses into one or two dynamic stages. Earlier DOMINO synthesis makes a network unate by output-phase assignment and then maps it [2, 3]. <code>pass.usyn</code> instead starts at each register, searches for a decomposition of its <em>whole</em> next-state cone into at most two DOMINO stages, and optimizes the remaining static logic natively, without ABC's logic synthesis.</p>
+<p>A DOMINO gate [1] evaluates a function that is monotone in its supplied rails through a series-parallel pull-down network; a DOMINO latch additionally holds the value as the cycle's state. Absorbing a register's next-state logic into one or two such stages creates an opportunity that ordinary combinational covering does not explicitly target. Output-phase assignment and DOMINO mapping [2, 3], and earlier unate decomposition [12, 13], provide the foundations. Here the synthesis objective is the complete mixed static/DOMINO implementation of each next-state cone, including the logic it shares with other consumers.</p>
 
-<p>Physical DOMINO emission is not implemented yet (<code>target=cmos</code> is the only accepted target). The DOMINO selection is a logical model: it is frozen, then <em>expanded</em> back into static CMOS, cleaned, and technology-mapped. Today's output is therefore a CMOS netlist whose structure follows the register-rooted selection. Fig. 1 contrasts the two flows; Table I summarizes the differences.</p>
+<p>The method combines three decisions: where to place an endpoint's functional boundary, how to realize its exact function under DOMINO constraints, and which shared static logic must remain. Exact bounded truth tables let the search move beyond the XAG's current factoring; divisor-image care sets expose alternative endpoint functions; coordinated endpoint selection captures gains unavailable to independent choices. Residual optimization feeds changed interfaces back into selection. Literal-network extraction further explores using stable controls to simplify the function evaluated in the dynamic phase (Section 6). These contributions concern the organization and target objective of the search; cut enumeration, unate covers and resubstitution build on established methods.</p>
+
+<p>The current realization, <code>pass.usyn</code>, evaluates this logical selection by expanding it into static CMOS and technology-mapping it. Physical DOMINO cells and characterization remain future work; transistor cost and stage count therefore express logical objectives, not measured DOMINO area or timing. Fig. 1 and Table I contrast the method with the LiveHD ABC flow. Shared infrastructure is described in <a href="synthesis.html">synthesis.html</a> (cited as [S&nbsp;&sect;<var>n</var>]); implementation options are documented in the <a href="../pass/usyn/README.md">USYN reference</a>.</p>
 
 <figure>
 <svg viewBox="0 0 800 210" role="img" aria-label="Both flows share coloring, preparation, partitioning and Lnet translation. The ABC flow then runs ABC synthesis and mapping per region. The usyn flow imports each region into an XAG, selects DOMINO endpoints, runs residual optimization, freezes, expands to CMOS, optionally extracts literal networks, cleans up, and maps with the ABC provider in mapping-only mode.">
@@ -233,17 +235,15 @@ a { color: var(--accent); }
 
 <div class="scroll">
 <table>
-<caption>Table I<span class="tcap">pass.usyn compared with the LiveHD ABC flow</span></caption>
+<caption>Table I<span class="tcap">Synthesis objectives and search boundaries</span></caption>
 <thead><tr><th>Aspect</th><th>pass.abc</th><th>pass.usyn</th></tr></thead>
 <tbody>
-<tr><td>Coloring</td><td>ABC profile, &Gamma;-bounded regions [S &sect;2.4]</td><td>flop-to-flop profile: every combinational path inside one color</td></tr>
-<tr><td>Arithmetic</td><td>ware modules, architecture trials [S &sect;3.2, &sect;4.5]</td><td>blasted inline (prefix adders &ge; 16 b, prefix compare &ge; 8 b, CSA multipliers); no trials</td></tr>
-<tr><td>Memories</td><td>native unless <code>memory</code> lowers them</td><td>always native</td></tr>
-<tr><td>State translation</td><td>Liberty-aware: async reset, ICG, latch cells [S &sect;3.3]</td><td><code>logical_state</code>: every register bit is a free variable; ICGs, latches, memories and opaque instances are native barriers</td></tr>
-<tr><td>Logic optimization</td><td>ABC area or delay flow (Table II of [S])</td><td>native: endpoint selection, pairs, residual rewriting, CMOS cleanup; no SAT/SMT</td></tr>
-<tr><td>Mapping, sizing</td><td><code>&amp;nf</code>, tail, budget ladder, boundary phases, area candidate</td><td>same <code>&amp;nf</code>, tail, ladder and boundary phases; no area candidate</td></tr>
-<tr><td>Alternatives</td><td>area candidate per region; architecture trials</td><td>two whole-design trials (base, choice-rich), best mapped gate count</td></tr>
-<tr><td>Reuse</td><td>region cache [S &sect;3.5]</td><td>logical-region cache plus the mapping cache of the provider</td></tr>
+<tr><td>Search unit</td><td>&Gamma;-bounded combinational regions [S &sect;2.4]</td><td>register-rooted next-state cones inside flop-to-flop regions</td></tr>
+<tr><td>Logical objective</td><td>ABC area or delay flow [S Table II]</td><td>mixed static/DOMINO transistor proxy with cell-legality constraints</td></tr>
+<tr><td>Functional alternatives</td><td>ABC rewriting and structural choices</td><td>exact bounded endpoint functions, divisor-image completions and one/two-phase realizations</td></tr>
+<tr><td>Shared logic</td><td>DAG-aware combinational optimization</td><td>outside-consumer cost ledger and coordinated endpoint interfaces/divisors</td></tr>
+<tr><td>Technology mapping</td><td>Boolean synthesis followed by mapping and sizing [S &sect;4]</td><td>native logical selection followed by CMOS expansion and mapping-only trials</td></tr>
+<tr><td>Reuse</td><td>mapped-region cache [S &sect;3.5]</td><td>separate logical decisions and mapped realizations</td></tr>
 </tbody>
 </table>
 </div>
@@ -251,7 +251,9 @@ a { color: var(--accent); }
 <!-- ===================================================================== -->
 <h2><span class="secnum">2</span>Regions and the Logical Network</h2>
 
-<p>Coloring, the private copy and the cut are those of the ABC flow [S &sect;2, &sect;3], with the flop-to-flop profile so that no register's next-state cone is split across regions. Each region is translated to a RAW Lnet [S &sect;3.3] in <code>logical_state</code> mode: Liberty, QN encoding and ICG absorption are ignored, every register bit and pipeline stage becomes an Lnet latch, and asynchronous resets, dynamic clocks and initial values become protected control outputs. The Lnet is imported into an <em>XAG</em>, a structurally hashed AND/XOR graph with complemented edges, sized against the budget before any search.</p>
+<p>The shared region construction [S &sect;2, &sect;3] uses a flop-to-flop profile to keep each register's next-state cone together. Logical translation preserves every original register bit and pipeline stage independently of library cell selection. Reset, clock and initialization semantics are protected; memories, clock gates, latches and opaque instances remain native barriers. Each region supplies an <em>XAG</em>, a structurally hashed AND/XOR graph with complemented edges.</p>
+
+<p>The XAG supplies dependencies and reusable signals; a selected boundary supplies the variables of an exact Boolean function. Moving that boundary can hide a complex subfunction behind one input, expose unateness or change which logic the endpoint absorbs. Inside an admitted window, synthesis uses the truth table rather than preserving the original AND/XOR factoring. Functional resubstitution can also use divisor sets that are not structural cuts, provided they determine the endpoint exactly. Structural bias thus remains in bounded window and divisor discovery, but does not constrain the subsequent realization to the original subgraph.</p>
 
 <div class="def">
 <p><span class="lead">Definition 1 (Endpoint).</span> An <em>endpoint</em> is a bit of a positive-edge register in a known clock domain whose next-state function <var>F</var><sub>q</sub> is computed inside the region. Its cone is the XAG transitive fan-in of <var>F</var><sub>q</sub> up to region inputs and register outputs. Negative-edge and unknown-edge registers are not endpoints; their cones stay static.</p>
@@ -261,7 +263,7 @@ a { color: var(--accent); }
 <h2><span class="secnum">3</span>Register-Rooted Endpoint Selection</h2>
 
 <div class="def">
-<p><span class="lead">Definition 2 (Cells).</span> A <em>DominoLatch</em> computes <var>F</var><sub>q</sub> and stores it as the endpoint's state; a <em>Domino</em> cell is a phase-1 stage that feeds a DominoLatch; a <em>Static</em> cell is ordinary CMOS. A DOMINO formula is legal when it reads at most 8 logical inputs (<var>x</var> and &not;<var>x</var> count once, both rails being free), has a series stack of at most 4 and at most 10 factored parallel branches. Both polarities may be read, so binate functions are legal without phase assignment.</p>
+<p><span class="lead">Definition 2 (Cells).</span> A <em>DominoLatch</em> computes <var>F</var><sub>q</sub> and stores it as the endpoint's state; a <em>Domino</em> cell is a phase-1 stage that feeds a DominoLatch; a <em>Static</em> cell is ordinary CMOS. A DOMINO formula is legal when it reads at most 8 logical inputs (<var>x</var> and &not;<var>x</var> count once), has a series stack of at most 4 and at most 10 factored parallel branches. The logical cell model supplies both output rails; complementary static inputs require a charged inverter unless already available. A function binate in a logical variable can therefore use both rails in a formula monotone in its rail inputs, without first making the entire network unate by output-phase assignment. This is a Boolean rail model; physical monotonicity and clocking require a characterized implementation.</p>
 </div>
 
 <p>Selection minimizes a transistor proxy, used consistently by every search and acceptance test:</p>
@@ -269,6 +271,8 @@ a { color: var(--accent); }
 <div class="eq"><span class="eq-body">cost = 2&middot;#AND + 4&middot;#XOR + #NOT (static) &nbsp;+&nbsp; &Sigma;<sub>cells</sub> ( |formula| + 5 [Domino] + 8 [DominoLatch] )</span><span class="eq-num">(1)</span></div>
 
 <p>where |formula| is the transistor count of the pull-down network and static logic and inverters shared between cells are counted once. Each region starts from an <em>identity baseline</em>: one DominoLatch per endpoint fed by its unchanged static cone, which is always legal. Every endpoint then searches, under its own work slice, for a cheaper realization (Algorithm 1), and keeps the baseline if the search fails or runs out of work.</p>
+
+<p><b>Exactness boundary.</b> For a fully specified unate function, normalizing its input polarities gives a positive monotone function whose minimal true points determine the unique irredundant monotone SOP cover. This cover is exact; minimizing the transistors of a factored series-parallel network is a separate problem. Factoring, signed covers for binate functions, boundary discovery and decomposition encoding are bounded searches. Every retained formula is checked exactly, but failure to find one does not establish infeasibility or optimality.</p>
 
 <div class="algo">
 <div class="algo-title"><b>Algorithm 1</b> S<small>ELECT</small>E<small>NDPOINT</small>(<var>q</var>) &mdash; tiers in order, each bounded</div>
@@ -282,12 +286,18 @@ a { color: var(--accent); }
 </ol>
 </div>
 
-<p>Functional decomposition over a bound set follows Ashenhurst&ndash;Curtis [4]; the covers are verified against truth tables of up to 16 inputs, simulated 64 assignments at a time. After all endpoints, <em>pair</em> and <em>joint</em> reselection revisit endpoints that share logic: a gate reaching exactly two endpoints in one clock domain seeds trials that re-select both together (both new, either alone), followed by sweeps over interface choices, private fanout-free windows, joint divisors and joint recoding; a trial commits only on a strict total-cost gain.</p>
+<p><b>Care-aware divisor search.</b> For divisors <var>D</var>(<var>x</var>) on one admitted independent-input basis, a top function exists exactly when <var>D</var>(<var>x</var>) = <var>D</var>(<var>y</var>) implies <var>F</var>(<var>x</var>) = <var>F</var>(<var>y</var>). Its care set is the image of <var>D</var>; unreachable combinations are free to complete. For a chosen input polarity, upward closure of the required true points yields the least monotone completion, or proves that polarity impossible if it reaches a required zero. The search tries bounded polarity and completion alternatives and checks their composition against <var>F</var>. A dependence conflict provides two assignments that a further divisor must separate, guiding search beyond structural cuts. These are local combinational don't-cares, not assumptions about reachable sequential states.</p>
+
+<p>New functional divisors follow Ashenhurst&ndash;Curtis decomposition [4]. All functions and compositions are checked over truth tables of up to 16 inputs. Candidate cost includes the endpoint, any first-phase cells, the remaining static cones and demanded inverse rails. An unchanged outside consumer protects its cone from removal credit: absorbing a shared subfunction into one endpoint cannot make its still-needed static implementation disappear.</p>
+
+<p><b>Coordinated endpoints.</b> If two endpoints share a static cone, changing either alone may add DOMINO cost while leaving that cone live; changing both can remove it and become profitable. <em>Pair</em> and <em>joint</em> reselection therefore compare complete regional cost, including interface alternatives that lose individually. Shared gates reaching exactly two endpoints in one clock domain seed pair trials; joint search can also use shared source inputs. Bounded private fanout-free windows preserve outside readers, while common functional divisors and joint recoding explore shared first-phase implementations. Every affected endpoint must remain legal and exactly equivalent; only a strict total-cost gain commits. The search is procedural and bounded, without a global optimality claim.</p>
 
 <!-- ===================================================================== -->
 <h2><span class="secnum">4</span>Residual Optimization</h2>
 
-<p>Logic not absorbed into cells &mdash; primary outputs, unselected next-state inputs and the static inputs of selected cells &mdash; is optimized natively in a fixed order of guarded trials: multiplexer-chain balancing (accepted only if critical depth drops, no output deepens and cost grows &le; 25%), 4-cut rewriting against all 222 NPN classes with an area and a depth template each, in the manner of ABC's <code>rewrite</code> [5], and windowed resubstitution (8 inputs, 32 divisors, &le; 2 new nodes), the counterpart of <code>resub</code> [6]. Rewrites may not raise cost (1); an equal-cost rewrite must lower depth. Optional exact sweeping and AND/XOR balancing are off by default. The region is replaced only if its total cost does not rise, after which one <em>feedback</em> round re-selects the endpoints whose static inputs changed. ABC's <code>dc2</code>, <code>&amp;dch</code>, <code>&amp;fraig</code> and <code>&amp;mfs</code> [S Table II] have no usyn equivalent; no step uses a SAT or SMT solver.</p>
+<p>Logic not absorbed into cells is a shared multiple-output network: its boundaries include primary outputs, unselected next states, selected-cell inputs and protected control ports. Bounded rewriting [5], resubstitution [6] and balancing preserve these functions and use nonzero AND/XOR costs with depth guards. These are established combinational operators; their role here is to improve the residual network under the same regional objective as endpoint selection.</p>
+
+<p>The region is replaced only if its total cost (1) does not rise. One <em>feedback</em> round then re-selects endpoints whose static inputs changed, because a better residual implementation can expose a different absorption boundary or alter sharing costs. Endpoint and residual synthesis are thus coupled through their interfaces before freezing, rather than treating selected cells as permanently fixed barriers. Native search uses exact bounded Boolean checks without a SAT or SMT solver; independent whole-design LEC remains a separate validation step.</p>
 
 <!-- ===================================================================== -->
 <h2><span class="secnum">5</span>Freeze, CMOS Expansion and Cleanup</h2>
@@ -324,16 +334,27 @@ a { color: var(--accent); }
 <!-- ===================================================================== -->
 <h2><span class="secnum">7</span>Technology Mapping and Trials</h2>
 
-<p>The logical design is mapped by a registered provider (<code>pass.usyn.tmap=abc|none</code>). Its contract is mapping only: it may neither re-synthesize logic nor treat proposed DOMINO boundaries as barriers. The ABC provider re-partitions the logical design without flattening, colors high-fanout scalar cones (&le; 128 nodes, &le; 6 sources, fan-out &ge; <code>tmap_sharing_fanout</code> = 16) as their own partitions so that mapping does not duplicate them, and runs the region driver of [S &sect;3.4] with a hook that maps every region with the map-only flow of [S Table II]. Sizing, the budget ladder and the boundary environment are identical to the ABC flow [S &sect;4.2&ndash;4.4]; the area candidate, ware trials and memory lowering are off.</p>
+<p>CMOS expansion is followed by mapping only, so the backend does not replace native selection with another Boolean synthesis recipe. Proposed DOMINO boundaries impose no barriers on static mapping, while high-fanout static cones receive separate partitions to preserve sharing. The current ABC provider uses the mapping, sizing and boundary environment of [S &sect;3.4, &sect;4.2&ndash;4.4]; its Boolean-synthesis and architecture trials are disabled.</p>
 
-<p>Because the static cost (1) only approximates mapped area, <code>tmap_trials=2</code> runs the whole design twice: the base options, and a choice-rich variant (light cleanup before selection plus <code>multi_rep</code>). Each trial gets half of the remaining budget, minus 1/16 reserved for publication, and the winner is the design with fewer mapped gates (weighted by instance count), then smaller area, then lower maximum region delay. There is no silent fallback to ABC's synthesis flows.</p>
+<p>The static cost (1) approximates mapped area. Two bounded whole-design trials therefore compare the base selection with a choice-rich variant using light preselection cleanup and multiple representations. The winner has fewer mapped gates (weighted by instance count), then smaller area, then lower maximum region delay. This measures the consequence of native structural choices through a common mapping backend; it does not establish a characterized DOMINO benefit.</p>
 
 <!-- ===================================================================== -->
 <h2><span class="secnum">8</span>Budgets, Reuse and Determinism</h2>
 
-<p>One deterministic work budget (<code>work</code>, 4&times;10<sup>9</sup>) is split into a structural ledger (preparation, import, baseline, freeze, emission) and a search remainder passed from region to region; each tier, endpoint and trial takes a slice and returns what it leaves, so results do not depend on wall-clock or lane count. A region larger than <code>max_nodes</code> (8&times;10<sup>6</sup> XAG nodes) or exceeding the memory budget is refused with the option to raise; large cores (e.g. minion) need higher limits. Selections are cached per region under a key covering the RAW Lnet, source semantics, names and policies, but not credits or mapping options; a row is reused only when the current credits are at least the recorded floor, so a hit replays the same search. Mapped regions use the provider's cache, as in [S &sect;3.5].</p>
+<p>Structural work (preparation, baseline, validation and publication) and optional search have separate deterministic ledgers, each bounded by the configured <code>work</code> allowance. Search exhaustion preserves a complete legal incumbent; structural or process-resource refusal publishes no result. This distinguishes bounded exploration from evidence that an endpoint cannot be realized.</p>
 
-<p><b>Status.</b> No physical DOMINO cells or characterization; negative-edge registers are not endpoints; the XAG is append-only (no in-place replacement or MFFC accounting); one feedback round. In mapped gate count usyn is still behind the ABC flow on several control-heavy designs (arbiters, comparators); progress is tracked in <code>pass/usyn/usyn2.md</code>.</p>
+<p>Logical decisions are reused independently of Liberty and mapping settings. Reuse also preserves a cold run's budget-dependent decisions: a search independent of its exact initial credits can replay at or above its recorded floor; a credit-bound search requires exactly the original credits. Hits replay recorded charges so later regions receive the same allowance. Mapping reuse follows [S &sect;3.5]. These conditions support reproducible bounded experiments; a warm cache is not an additional search heuristic.</p>
+
+<p><b>Scope of the evidence.</b> Native function and composition checks certify local replacements; independent LEC tests the emitted design. CMOS gate-count results remain behind the ABC flow on several control-heavy designs, including arbiters and comparators. Physical DOMINO timing, wire-aware cost and placement-driven retiming remain open evaluation questions.</p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">9</span>Positioning Relative to Prior Work</h2>
+
+<p>Output-phase assignment [2] and DOMINO technology mapping [3] address polarity and covering; unate decomposition [12] and its application to dynamic CMOS [13] already establish that binate functions can be realized through unate blocks. Our distinction is the mandatory register-rooted endpoint objective, with mixed static/DOMINO cost and preserved source state. Exact unate covers and decomposition supply established foundations for this objective.</p>
+
+<p>Priority cuts [14] bound structural boundary exploration. Here a retained boundary is judged by constrained functional realization and surviving shared logic, rather than support size alone. Care-aware decomposition has also been studied for LUT mapping [17]; the endpoint search applies divisor-image completions to static and first-phase interfaces under DOMINO legality and rail cost.</p>
+
+<p>AnySyn [15] motivates evaluating transformations with the target cost rather than graph size. Multiple-node Boolean optimization [16] demonstrates the value of coordinated changes to shared logic. Our specialization couples these ideas to sequential endpoints: outside consumers protect live cones, interface alternatives are priced jointly, and common divisors must respect the endpoint clock domain and phase order. Residual rewriting [5, 6] and structural choices [8] remain conventional machinery. The proposed combination, and the literal-selection opportunity of Section 6, are the focus of the method.</p>
 
 <!-- ===================================================================== -->
 <h2>References</h2>
@@ -349,6 +370,12 @@ a { color: var(--accent); }
 <li>M. Austin et al. A scalable mixed synthesis framework for heterogeneous networks. <i>DATE</i>, 2020.</li>
 <li>J. Hu et al. Mixed structural choice operator: Enhancing technology mapping with heterogeneous representations. 2025.</li>
 <li>M. Alidina, J. Monteiro, S. Devadas, A. Ghosh, M. Papaefthymiou. Precomputation-based sequential logic optimization for low power. <i>IEEE TVLSI</i>, 2(4), 1994.</li>
+<li>J. Jacob, A. Mishchenko. <a href="https://people.eecs.berkeley.edu/~alanmi/publications/2001/iwls01_unate.pdf">Unate decomposition of Boolean functions.</a> <i>IWLS</i>, pp. 66&ndash;71, 2001.</li>
+<li>D. Samanta, N. Sinha, A. Pal. <a href="https://doi.org/10.1109/ASPDAC.2002.994892">Synthesis of high performance low power dynamic CMOS circuits.</a> <i>ASP-DAC / VLSI Design</i>, pp. 99&ndash;104, 2002.</li>
+<li>A. Mishchenko, S. Cho, S. Chatterjee, R. Brayton. <a href="https://doi.org/10.1109/ICCAD.2007.4397290">Combinational and sequential mapping with priority cuts.</a> <i>ICCAD</i>, 2007.</li>
+<li>H. Wang, S.-Y. Lee, G. De Micheli. <a href="https://arxiv.org/abs/2311.14721">AnySyn: A cost-generic logic synthesis framework with customizable cost functions.</a> <i>IWLS</i>, 2022; arXiv:2311.14721, 2023.</li>
+<li>A. Tempia Calvino, A. Xess, A. Prasad, J. Minz, E. Testa, W. Lau Neto, A. Mishchenko, G. De Micheli, P. Vuillod, L. Amaru. <a href="https://63dac.conference-program.com/presentation/?id=RESEARCH3091&amp;sess=sess172">Shared logic unleashed: Multiple-node Boolean optimization for next-gen synthesis.</a> <i>DAC</i>, 2026.</li>
+<li>B. Hien, M. Walter, A. Tempia Calvino, A. Mishchenko, R. Wille. <a href="https://www.cda.cit.tum.de/files/eda/2025_iwls_acd_decomposition_using_dcs.pdf">Ashenhurst-Curtis decomposition using don't cares.</a> <i>IWLS</i>, 2025.</li>
 </ol>
 
 </body>

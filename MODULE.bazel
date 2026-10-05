@@ -164,27 +164,25 @@ http_archive(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-# The pinned archive (pin 66dda7f3; parser and formatter share it) keeps
+# The pinned archive (pin 98073908; parser and formatter share it) keeps
 # livehd self-contained: a fresh clone builds with no sibling checkout. For
 # parser co-development the http_archive is swapped for a new_local_repository
 # on the ../tree-sitter-pyrope working tree, and the build then depends on that
 # tree. @tree_sitter_pyrope below unzips the SAME archive, so both blocks swap
 # together.
-# LOCAL co-development (2026-10-05, `_:T` anonymous tuple-type entry in the lexer):
-# RE-PIN to the http_archive below BEFORE COMMIT once the sibling change is pushed.
-new_local_repository(
-    name = "prpparse",
-    build_file = "//packages:prpparse.BUILD",
-    path = "../tree-sitter-pyrope/prpparse",
-)
-# Pinned form (restore this after the sibling commit lands, with its new commit/integrity):
-# http_archive(
+# LOCAL co-development (swap both parser and formatter blocks together):
+# new_local_repository(
 #     name = "prpparse",
 #     build_file = "//packages:prpparse.BUILD",
-#     integrity = "sha256-SeHH0KuFyDYsJ9EseIrsdvMo12un6QY7xEQ2OpAosPE=",
-#     strip_prefix = "tree-sitter-pyrope-66dda7f312f582ab1831623a2982558dc4a6e3fe/prpparse",
-#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/66dda7f312f582ab1831623a2982558dc4a6e3fe.zip"],
+#     path = "../tree-sitter-pyrope/prpparse",
 # )
+http_archive(
+    name = "prpparse",
+    build_file = "//packages:prpparse.BUILD",
+    integrity = "sha256-Opu+k+ImJOsqecwynHYDsNIN7F0Y5XCbbCBi60rAJnU=",
+    strip_prefix = "tree-sitter-pyrope-9807390890f3ec324f2ebdebd2c2bb585dbff411/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/9807390890f3ec324f2ebdebd2c2bb585dbff411.zip"],
+)
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
 # Only the Pyrope *formatter* (`lhd pyrope fmt`, @tree_sitter_pyrope//:prpfmt)
@@ -213,21 +211,19 @@ http_archive(
 # prpfmt/ts_symbols.h (gitignored); //packages:prpfmt.BUILD regenerates it from
 # src/parser.c via a genrule, so no local checkout is required. Bump the pin per
 # the @prpparse note above (recompute integrity).
-# LOCAL co-development (2026-10-05, `_:T` in grammar.js/src/parser.c): RE-PIN to the
-# http_archive below BEFORE COMMIT once the sibling change is pushed.
-new_local_repository(
-    name = "tree_sitter_pyrope",
-    build_file = "//packages:prpfmt.BUILD",
-    path = "../tree-sitter-pyrope",
-)
-# Pinned form:
-# http_archive(
+# LOCAL co-development (swap both parser and formatter blocks together):
+# new_local_repository(
 #     name = "tree_sitter_pyrope",
 #     build_file = "//packages:prpfmt.BUILD",
-#     integrity = "sha256-SeHH0KuFyDYsJ9EseIrsdvMo12un6QY7xEQ2OpAosPE=",
-#     strip_prefix = "tree-sitter-pyrope-66dda7f312f582ab1831623a2982558dc4a6e3fe",
-#     urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/66dda7f312f582ab1831623a2982558dc4a6e3fe.zip"],
+#     path = "../tree-sitter-pyrope",
 # )
+http_archive(
+    name = "tree_sitter_pyrope",
+    build_file = "//packages:prpfmt.BUILD",
+    integrity = "sha256-Opu+k+ImJOsqecwynHYDsNIN7F0Y5XCbbCBi60rAJnU=",
+    strip_prefix = "tree-sitter-pyrope-9807390890f3ec324f2ebdebd2c2bb585dbff411",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/9807390890f3ec324f2ebdebd2c2bb585dbff411.zip"],
+)
 
 # OpenTimer
 http_archive(
