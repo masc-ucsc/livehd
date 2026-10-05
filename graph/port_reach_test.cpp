@@ -104,3 +104,48 @@ TEST(PortReach, CalleeHookReplacesTheCalleeWalk) {
   EXPECT_EQ(hooked.callee_of(child_io->get_graph()).out2ins.at(3), (Pids{0, 1}));
   EXPECT_TRUE(hooked.of(child_io->get_graph()).input_independent(3)) << "of() walks the graph it is handed";
 }
+
+TEST(PortReach, WideInstanceKeepsAllDriversAndSkipsUnconnectedPorts) {
+  hhds::GraphLibrary lib;
+  constexpr unsigned count    = 128;
+  auto               child_io = lib.create_io("wide_child");
+  for (unsigned i = 0; i < count; ++i) {
+    child_io->add_input("in" + std::to_string(i), i);
+  }
+  constexpr unsigned outputs = 16;
+  for (unsigned i = 0; i < outputs; ++i) {
+    child_io->add_output("out" + std::to_string(i), count + i);
+  }
+  auto child = child_io->create_graph();
+  auto join  = gu::create_typed_node(*child, Ntype_op::Or);
+  for (unsigned i = 0; i < count; ++i) {
+    child->get_input_pin("in" + std::to_string(i)).connect_sink(join.create_sink_pin(i));
+  }
+  for (unsigned i = 0; i < outputs; ++i) {
+    join.create_driver_pin(0).connect_sink(child->get_output_pin("out" + std::to_string(i)));
+  }
+
+  auto parent_io = lib.create_io("wide_parent");
+  parent_io->add_input("a", 0);
+  parent_io->add_input("b", 1);
+  parent_io->add_input("c", 2);
+  parent_io->add_output("out", 3);
+  auto parent = parent_io->create_graph();
+  auto sub    = gu::create_typed_node(*parent, Ntype_op::Sub);
+  sub.set_subnode(child_io);
+  // Carry-input shape: both drivers must reach the caller's support.
+  parent->get_input_pin("a").connect_sink(sub.create_sink_pin(0));
+  parent->get_input_pin("b").connect_sink(sub.get_sink_pin(0));
+  for (unsigned i = 1; i + 1 < count; ++i) {
+    parent->get_input_pin("c").connect_sink(sub.create_sink_pin(i));
+  }
+  // The last declared child input is deliberately unconnected.
+  auto collect = gu::create_typed_node(*parent, Ntype_op::Or);
+  for (unsigned i = 0; i < outputs; ++i) {
+    sub.create_driver_pin(count + i).connect_sink(collect.create_sink_pin(i));
+  }
+  collect.create_driver_pin(0).connect_sink(parent->get_output_pin("out"));
+
+  pr::Cache cache;
+  EXPECT_EQ(cache.of(parent).out2ins.at(3), (Pids{0, 1, 2}));
+}

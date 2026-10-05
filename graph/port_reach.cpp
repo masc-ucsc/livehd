@@ -411,10 +411,35 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       }
       return mi;
     };
+    // Wide instances are revisited for each output (and each packed slice).
+    // Index their connected sinks once instead of scanning every sink for
+    // every input in the callee's support. Keep the sink, rather than its first
+    // driver: compact-loop carry inputs can legitimately have two drivers.
+    using Sub_inputs = absl::flat_hash_map<uint32_t, hhds::Pin_class>;
+    absl::node_hash_map<hhds::Node_class, Sub_inputs> sub_inputs;
+    auto                                              sub_inputs_of = [&](const hhds::Node_class& sub) -> const Sub_inputs& {
+      const auto [it, fresh] = sub_inputs.try_emplace(sub);
+      if (fresh) {
+        for (auto sink : sub.inp_sorted_pins()) {
+          it->second.emplace(static_cast<uint32_t>(sink.get_port_id()), sink);
+        }
+      }
+      return it->second;
+    };
     auto run_walk = [&](const std::vector<hhds::Pin_class>& seeds, std::vector<In_atom>& atoms) {
       absl::flat_hash_set<hhds::Class_index> seen_pins;
       absl::flat_hash_set<hhds::Node_class>  expanded;
-      std::vector<hhds::Pin_class>           stk = seeds;
+      std::vector<hhds::Pin_class>           stk;
+      // Mark at enqueue time. Reconvergent instance outputs can otherwise
+      // queue the same large support thousands of times before it is popped.
+      auto                                   enqueue = [&](const hhds::Pin_class& pin) {
+        if (!pin.is_invalid() && !pin.is_const() && seen_pins.insert(pin.get_class_index()).second) {
+          stk.push_back(pin);
+        }
+      };
+      for (const auto& seed : seeds) {
+        enqueue(seed);
+      }
       while (!stk.empty()) {
         auto d = stk.back();
         stk.pop_back();
@@ -423,9 +448,6 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         }
         if (gu::is_graph_input_pin(d)) {
           add_atom(atoms, static_cast<uint32_t>(d.get_port_id()), 0, 0);
-          continue;
-        }
-        if (!seen_pins.insert(d.get_class_index()).second) {
           continue;
         }
         if (input_atom_of(d, atoms)) {
@@ -463,7 +485,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
             // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
             for (auto e_sink : m.inp_sorted_pins()) {
               for (auto e_drv : e_sink.get_driver_pins()) {
-                stk.push_back(e_drv);
+                enqueue(e_drv);
               }
             }
           }
@@ -476,7 +498,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
               // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
               for (auto e_sink : m.inp_sorted_pins()) {
                 for (auto e_drv : e_sink.get_driver_pins()) {
-                  stk.push_back(e_drv);  // body-less blackbox: depend on everything connected
+                  enqueue(e_drv);  // body-less blackbox: depend on everything connected
                 }
               }
             }
@@ -484,13 +506,11 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           }
           const auto& cr = callee_of(cg);  // memoized; hierarchy is a DAG
           if (auto it = cr.out2ins.find(static_cast<uint32_t>(d.get_port_id())); it != cr.out2ins.end()) {
+            const auto& inputs = sub_inputs_of(m);
             for (const uint32_t ipid : it->second) {
-              // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
-              for (auto e_sink : m.inp_sorted_pins()) {
-                for (auto e_drv : e_sink.get_driver_pins()) {
-                  if (static_cast<uint32_t>(e_sink.get_port_id()) == ipid) {
-                    stk.push_back(e_drv);
-                  }
+              if (auto input = inputs.find(ipid); input != inputs.end()) {
+                for (auto driver : input->second.get_driver_pins()) {
+                  enqueue(driver);
                 }
               }
             }
@@ -512,9 +532,9 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           if (want_pid == Ntype::Memory_readall_pid) {
             handled = true;
             if (!mp_info.has_clock) {
-              stk.push_back(update);
+              enqueue(update);
               for (const auto& w : wr_cones) {
-                stk.push_back(w);
+                enqueue(w);
               }
             }
           } else {
@@ -529,8 +549,8 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
               if (static_cast<hhds::Port_id>(n_wr + rd) == want_pid) {
                 handled = true;
                 if (mp_info.mtype != 1) {
-                  stk.push_back(mp.addr);
-                  stk.push_back(mp.en);
+                  enqueue(mp.addr);
+                  enqueue(mp.en);
                   // Write cones flow into a SAME-CYCLE read in two cases:
                   // explicit forwarding, or an UNCLOCKED memory — a pure comb
                   // array is a mux tree, its contents are current-cycle
@@ -539,9 +559,9 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
                   // zeroed a split callee's whole-array data input —
                   // tests/sim/whole_array_in_split_callee.prp).
                   if (mp_info.fwd_nonzero || !mp_info.has_clock) {
-                    stk.push_back(update);
+                    enqueue(update);
                     for (const auto& w : wr_cones) {
-                      stk.push_back(w);
+                      enqueue(w);
                     }
                   }
                 }
@@ -554,7 +574,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
             // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
             for (auto e_sink : m.inp_sorted_pins()) {
               for (auto e_drv : e_sink.get_driver_pins()) {
-                stk.push_back(e_drv);
+                enqueue(e_drv);
               }
             }
           }
@@ -564,7 +584,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
           for (auto e_sink : m.inp_sorted_pins()) {
             for (auto e_drv : e_sink.get_driver_pins()) {
-              stk.push_back(e_drv);
+              enqueue(e_drv);
             }
           }
         }
