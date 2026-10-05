@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Synthesis Partitioning and Mapping</title>
-<meta name="description" content="Methodology of LiveHD synthesis: cone partitioning (pass.color synth), the shared region pipeline (pass/synth) and the ABC mapping and sizing backend (pass/abc).">
+<title>Shared Synthesis Flow: ABC and uSyn</title>
+<meta name="description" content="Shared LiveHD synthesis infrastructure, ABC and uSyn logical optimization choices, and the technology-mapping handoff.">
 <style>
 :root {
   --bg: #fdfdfb;
@@ -176,8 +176,8 @@ a { color: var(--accent); }
 </head>
 <body>
 
-<h1>Cone Partitioning and<br>Region-Based Technology Mapping</h1>
-<p class="subtitle">Methodology of LiveHD synthesis: <code>pass.color synth</code>, the shared region pipeline of <code>pass/synth</code>, and the ABC backend of <code>pass.abc</code>. The unate/DOMINO mapper <code>pass.usyn</code> reuses this infrastructure and is described in <a href="synth_usyn.html">synth_usyn.html</a>.</p>
+<h1>Shared Synthesis Flow:<br>Partition, Optimize and Technology Map</h1>
+<p class="subtitle">Common region infrastructure and the optimization-to-mapping handoff for <a href="synth_abc.html">ABC</a> and <a href="synth_usyn.html">uSyn</a></p>
 
 <!-- ===================================================================== -->
 <h2><span class="secnum">1</span>Flow and Organization</h2>
@@ -188,10 +188,10 @@ a { color: var(--accent); }
 <p><span class="lead">Definition 1 (Coloring, region).</span> Let <var>V<sub>p</sub></var> &sube; <var>V</var> be the partitionable nodes (all but graph IO and constants). A coloring <var>c</var> : <var>V<sub>p</sub></var> &rarr; &#8469; assigns a color to every partitionable node; the <em>region</em> of color <var>k</var> is <var>R<sub>k</sub></var> = { <var>v</var> : <var>c</var>(<var>v</var>) = <var>k</var> }. Every region becomes a module <code>&lt;d&gt;__c&lt;k&gt;</code> that is optimized and technology-mapped on its own.</p>
 </div>
 
-<p>A good coloring bounds every region's time and memory, keeps logic that benefits from joint optimization together, cuts where cones share little, and is deterministic and stable under edits so mapped regions can be reused. <code>pass.color</code> computes it (Section 2). Everything between the colored graph and a mapped region is shared, backend-independent infrastructure in <code>pass/synth</code> (Section 3): a private copy of the design, simplification, extraction of arithmetic and memory modules, the cut into regions, the translation of each region into a flat LUT network (the <em>Lnet</em>), and the read-back of a mapped cell netlist. A <em>backend</em> maps one Lnet to cells and owns whatever whole-design sizing it offers; <code>pass/abc</code> is the ABC [2] backend (Section 4) and is the only code that calls ABC. <code>lhd synth</code> selects the mapper with <code>synth.mapper=abc|usyn</code>. Unate synthesis (<code>pass.usyn</code>) is <em>not</em> a variant of the ABC flow: it reuses the private copy, the partitioner and the Lnet translation, optimizes every region natively into a complete logical CMOS design, and then hands that design to a registered technology-mapping provider; the ABC provider runs the region driver of Section 3.4 in a mapping-only mode (no logic optimization). Regions are compiled incrementally in the spirit of LiveSynth and SMatch [3, 4]: a region whose body and recipe are unchanged is not re-synthesized (Section 3.5).</p>
+<p>A good coloring bounds region time and memory, keeps useful shared logic together, cuts where cones share little, and stays deterministic under edits so synthesis results can be reused. <code>pass.color</code> computes it (Section 2). Backend-independent infrastructure in <code>pass/synth</code> (Section 3) supplies the private design copy, preparation, module and memory handling, region construction, logical translation and cell-netlist read-back. <code>lhd synth</code> selects logical optimization with <code>synth.mapper=abc|usyn</code> (Section 4), then technology-maps the result (Section 5). The ABC optimizer [2] and the native uSyn optimizer share these seams but use different search algorithms; their details live in <a href="synth_abc.html">synth_abc.html</a> and <a href="synth_usyn.html">synth_usyn.html</a>. Region results are compiled incrementally in the spirit of LiveSynth and SMatch [3, 4] (Section 3.5).</p>
 
 <figure>
-<svg viewBox="0 0 800 300" role="img" aria-label="Flow: compile, pass.color cone coloring, then pass/synth: private copy, simplification, ware and memory extraction, partition, per-region Lnet translation, then the pass/abc backend: replay, flow and sizing, cell netlist, then the pass/synth writer, boundary refinement and trials.">
+<svg viewBox="0 0 800 300" role="img" aria-label="Flow: compile, pass.color cone coloring, then pass/synth: private copy, simplification, ware and memory extraction, partition, per-region Lnet translation, then ABC or uSyn logical optimization, technology mapping, cell netlist read-back, boundary refinement and backend-specific trials.">
   <defs>
     <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="var(--fig-stroke)"/>
@@ -217,16 +217,16 @@ a { color: var(--accent); }
     <line x1="564" y1="54" x2="582" y2="54" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
     <path d="M682,75 L682,100 L110,100 L110,130" fill="none" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
     <rect x="10" y="112" width="780" height="92" rx="8" fill="none" stroke="var(--fig-stroke)" stroke-dasharray="5 4"/>
-    <text x="210" y="127" font-size="11" fill="var(--muted)">for every region: parallel lanes, incremental reuse (&#167;3.5)</text>
+    <text x="210" y="127" font-size="11" fill="var(--muted)">per-region work, backend-specific scheduling and reuse (&#167;3.5)</text>
     <rect x="30" y="134" width="160" height="56" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
     <text x="110" y="156" text-anchor="middle">Translate to Lnet</text>
     <text x="110" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">pass/synth (&#167;3.3)</text>
     <rect x="222" y="134" width="150" height="56" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
-    <text x="297" y="156" text-anchor="middle">Region hook</text>
-    <text x="297" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">optional (tmap: map only)</text>
+    <text x="297" y="156" text-anchor="middle">Optimize ABC / uSyn</text>
+    <text x="297" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">logical network (&#167;4)</text>
     <rect x="404" y="134" width="190" height="56" rx="6" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
-    <text x="499" y="156" text-anchor="middle">ABC map and size</text>
-    <text x="499" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">pass/abc backend (&#167;4)</text>
+    <text x="499" y="156" text-anchor="middle">Technology mapping</text>
+    <text x="499" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">cover, buffer, size (&#167;5)</text>
     <rect x="626" y="134" width="150" height="56" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
     <text x="701" y="156" text-anchor="middle">Write cells</text>
     <text x="701" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">pass/synth (&#167;3.4)</text>
@@ -235,25 +235,25 @@ a { color: var(--accent); }
     <line x1="594" y1="162" x2="624" y2="162" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
     <path d="M701,204 L701,226 L430,226 L430,240" fill="none" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
     <rect x="290" y="242" width="280" height="46" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
-    <text x="430" y="262" text-anchor="middle">Boundary refinement (&#167;4.3),</text>
-    <text x="430" y="279" text-anchor="middle">architecture trials (&#167;4.5)</text>
+    <text x="430" y="262" text-anchor="middle">Boundary refinement (&#167;5),</text>
+    <text x="430" y="279" text-anchor="middle">backend-specific trials</text>
     <rect x="610" y="242" width="180" height="46" rx="6" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
     <text x="700" y="262" text-anchor="middle">Mapped hierarchical</text>
     <text x="700" y="279" text-anchor="middle">cell netlist</text>
     <line x1="570" y1="265" x2="608" y2="265" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
   </g>
 </svg>
-<figcaption class="cap"><b>Fig. 1.</b> Synthesis flow and where each step lives.</figcaption>
+<figcaption class="cap"><b>Fig. 1.</b> Both optimizer paths share region construction and reconstruction; logical optimization precedes cell mapping. Native uSyn may emit logical CMOS directly when tmap is disabled.</figcaption>
 </figure>
 
 <!-- ===================================================================== -->
 <h2><span class="secnum">2</span>Cone Partitioning</h2>
 
-<p>A forward partitioning that propagates a region id along fan-out fixes the region shape by connectivity alone: inheriting an id from every fan-in welds a register's data cone to the cone of its enable, and following fan-out re-merges cones where they reconverge. On a flattened processor either rule put more than 99% of the nodes into one region. The cones algorithm grows one <em>backward</em> cone per state input, decides size while it decides shape, and merges cones by the amount of logic they share (Algorithm 1), so boundaries fall where register cones share little logic.</p>
+<p>A forward partitioning that propagates a region id along fan-out fixes the region shape by connectivity alone: inheriting an id from every fan-in welds a register's data cone to the cone of its enable, and following fan-out re-merges cones where they reconverge. These rules can transitively join otherwise distinct state cones and create a region whose size is governed by reconvergence rather than a chosen resource bound. The cones algorithm grows one <em>backward</em> cone per state input, decides size while it decides shape, and merges cones by the amount of logic they share (Algorithm 1), so boundaries fall where register cones share little logic.</p>
 
 <h3><span class="secnum">2.1</span>Cost Model</h3>
 
-<p>Every size decision uses one unit: &pi;(<var>v</var>), the predicted number of two-input AIG nodes the bit-blaster (Section 3.3) creates for a node, calibrated per operator (Table I); &pi;(<var>S</var>) sums over a set and saturates. Gate equivalents mispredict mapped cells by a median factor of 1.8 in both directions; &pi; over-counts by a stable factor and tracks ABC's runtime. A color's soft size target is &Gamma; = 30,000 predicted nodes (<code>pass.color.max_gate</code>; 0 yields raw cones without merging). Unlike min-cut hypergraph partitioning [5], the partition is driven by register cones and shared logic, not by cut size.</p>
+<p>Every size decision uses one unit: &pi;(<var>v</var>), the predicted number of two-input AIG nodes the bit-blaster (Section 3.3) creates for a node, calibrated per operator (Table I); &pi;(<var>S</var>) sums over a set and saturates. The predictor counts the bit-level construction induced by each operator, so region sizing uses a common structural estimate before a backend creates its working network. A color's soft size target is &Gamma; = 30,000 predicted nodes (<code>pass.color.max_gate</code>; 0 yields raw cones without merging). Unlike min-cut hypergraph partitioning [5], the partition is driven by register cones and shared logic, not by cut size.</p>
 
 <div class="scroll">
 <table>
@@ -391,7 +391,7 @@ a { color: var(--accent); }
 
 <h3><span class="secnum">3.2</span>Modules, Memories and the Cut</h3>
 
-<p>Under the ABC profile (<code>ware_arith</code>, <code>ware_cmp</code>, <code>ware_shift</code>) every arithmetic-boundary operator is enclosed in its own <em>ware</em> definition keyed by its kind, port widths, signedness, constants and color, so equal realizations share one module; a dynamic word select keeps its affine amount inside the module and only the narrow index on the port. With <code>pass.abc.memory=auto</code> (default) a memory is lowered to flops in isolation when it has at most <code>memory_max_bits</code> (1024) bits or more than three ports; <code>memory=true|false</code> forces either, and a memory written from more than one clock always stays native. Experiments that compare mappers keep memories native (<code>memory=false</code>), which is what <code>pass.usyn</code> always does. Loop bodies without carried state are mapped once and replicated; carry-dependent loops are unrolled (<code>unroll_carry</code>) after their carry-independent logic is lifted into a shared body, and the physical occurrences are stitched after mapping.</p>
+<p>Under the ABC profile (<code>ware_arith</code>, <code>ware_cmp</code>, <code>ware_shift</code>) every arithmetic-boundary operator is enclosed in its own <em>ware</em> definition keyed by its kind, port widths, signedness, constants and color, so equal realizations share one module; a dynamic word select keeps its affine amount inside the module and only the narrow index on the port. With <code>pass.abc.memory=auto</code> (default) a memory is lowered to flops in isolation when it has at most <code>memory_max_bits</code> (1024) bits or more than three ports; <code>memory=true|false</code> forces either, and a memory written from more than one clock always stays native. The native uSyn path retains memories as barriers, separating storage semantics from combinational optimization. Under ABC, loop bodies without carried state are mapped once and replicated; carry-dependent loops can be unrolled (<code>pass.abc.unroll_carry</code>) after carry-independent logic is lifted into a shared body. Native uSyn keeps compact loops rolled. The shared preparation and reconstruction honor the selected path's loop policy.</p>
 
 <p>The colored source is then cut: one region per color (or per connected component of a color when the colors are local). Every crossing driver becomes an output port of its region and an input port of each reader, deduplicated per driver. Ports are named and ordered by structural signatures from a Kahn traversal (the producer shape with operands grouped by role, and the multiset of uses), so cold and warm runs produce the same network; a region whose input keys tie is not reusable, since a genuine automorphism could stitch a cached body onto permuted ports. A multi-region definition becomes a wrapper of unnamed region instances, which keeps hierarchical names transparent to equivalence checking and timing.</p>
 
@@ -413,7 +413,7 @@ a { color: var(--accent); }
 
 <h3><span class="secnum">3.4</span>The Driver and Backend Seam</h3>
 
-<p>The <em>region driver</em> owns everything around a mapping (Algorithm 3, Fig. 3): per-region options, the region cache, the translation, the optional region hook, parallel lanes, the read-back and the architecture trials. A backend implements one interface: start and stop a session per lane, contribute its recipe to the cache key, map an Lnet (or the hook's rewrite of it) into a <em>cell netlist</em> &mdash; library cells in topological order over the Lnet's boundary, one signal per output, latches with their initial values &mdash; and refine and score the stitched design. The region writer turns the cell netlist into the region body, keeping every name equivalence checking relies on (register roots, pipeline stages, aggregate attributes); an identity buffer that only feeds outputs is aliased away, and every gate is attributed to the source location of the first output whose cone reaches it.</p>
+<p>The <em>region driver</em>, used by the full ABC path and by the mapping-only provider after native uSyn optimization, owns everything around a mapping (Algorithm 3, Fig. 3): per-region options, the region cache, the translation, the optional region hook, parallel lanes, the read-back and the architecture trials. A backend implements one interface: start and stop a session per lane, contribute its recipe to the cache key, map an Lnet (or the hook's rewrite of it) into a <em>cell netlist</em> &mdash; library cells in topological order over the Lnet's boundary, one signal per output, latches with their initial values &mdash; and refine and score the stitched design. The region writer turns the cell netlist into the region body, keeping every name equivalence checking relies on (register roots, pipeline stages, aggregate attributes); an identity buffer that only feeds outputs is aliased away, and every gate is attributed to the source location of the first output whose cone reaches it.</p>
 
 <div class="algo">
 <div class="algo-title"><b>Algorithm 3</b> M<small>AP</small>R<small>EGION</small>(<var>R</var>) in the region driver</div>
@@ -422,7 +422,7 @@ a { color: var(--accent); }
 <li><span class="kw">if</span> <var>R</var> is reusable <span class="kw">and</span> the cache holds a structurally identical body with an identical recipe <span class="kw">then</span> reuse it; <span class="kw">return</span></li>
 <li><var>L</var> &larr; blast(<var>R</var>) as a RAW Lnet, with native boundaries <span class="cm">&#9655; &sect;3.3, memory-admitted</span></li>
 <li>rewrite &larr; hook(<var>L</var>) <span class="kw">if</span> a hook is set <span class="kw">else</span> none <span class="cm">&#9655; e.g. mapping-only (tmap), or refused</span></li>
-<li>cells &larr; backend.map(<var>L</var>, rewrite) <span class="cm">&#9655; &sect;4</span></li>
+<li>cells &larr; backend.map(<var>L</var>, rewrite) <span class="cm">&#9655; &sect;4&ndash;5</span></li>
 <li>write cells into the region body; store pre- and post-mapping bodies in the cache</li>
 </ol>
 </div>
@@ -444,7 +444,7 @@ a { color: var(--accent); }
     <text x="259" y="61" text-anchor="middle">Blaster</text>
     <text x="259" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">RAW Lnet</text>
     <rect x="364" y="40" width="150" height="50" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
-    <text x="439" y="61" text-anchor="middle">Region hook</text>
+    <text x="439" y="61" text-anchor="middle">Optimize ABC / uSyn</text>
     <text x="439" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">rewrite (optional)</text>
     <rect x="194" y="118" width="130" height="50" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
     <text x="259" y="139" text-anchor="middle">Region writer</text>
@@ -456,10 +456,10 @@ a { color: var(--accent); }
     <line x1="324" y1="65" x2="362" y2="65" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
     <line x1="194" y1="143" x2="156" y2="143" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
     <rect x="570" y="40" width="210" height="128" rx="8" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
-    <text x="675" y="62" text-anchor="middle">Backend (pass/abc)</text>
-    <text x="675" y="84" text-anchor="middle" font-size="11" fill="var(--muted)">replay Lnet into ABC</text>
-    <text x="675" y="102" text-anchor="middle" font-size="11" fill="var(--muted)">flow, budget ladder, sizing</text>
-    <text x="675" y="120" text-anchor="middle" font-size="11" fill="var(--muted)">ABC network &#8594; cell netlist</text>
+    <text x="675" y="62" text-anchor="middle">Mapping backend</text>
+    <text x="675" y="84" text-anchor="middle" font-size="11" fill="var(--muted)">consume selected logic</text>
+    <text x="675" y="102" text-anchor="middle" font-size="11" fill="var(--muted)">cover, physical budget, sizing</text>
+    <text x="675" y="120" text-anchor="middle" font-size="11" fill="var(--muted)">mapped gates &#8594; cell netlist</text>
     <text x="675" y="138" text-anchor="middle" font-size="11" fill="var(--muted)">refine and score the design</text>
     <line x1="514" y1="65" x2="568" y2="65" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
     <text x="550" y="58" text-anchor="middle" font-size="11" fill="var(--muted)">Lnet</text>
@@ -467,72 +467,39 @@ a { color: var(--accent); }
     <text x="470" y="166" text-anchor="middle" font-size="11" fill="var(--muted)">cell netlist</text>
   </g>
 </svg>
-<figcaption class="cap"><b>Fig. 3.</b> The seam between the shared region driver and a backend. Only the Lnet goes in and only a cell netlist comes out; no backend object crosses it. The hook selects how a region is mapped (full flow, a given flow, mapping only, or refused); the technology-mapping provider used by <code>pass.usyn</code> sets it to mapping only.</figcaption>
+<figcaption class="cap"><b>Fig. 3.</b> The seam between the shared region driver and a backend. Only the Lnet goes in and only a cell netlist comes out; no backend object crosses it. The hook selects the mapping policy (full flow, a given flow, mapping only, or refused); the technology-mapping provider used by <code>pass.usyn</code> sets it to mapping only.</figcaption>
 </figure>
 
 <h3><span class="secnum">3.5</span>Reuse and Parallel Lanes</h3>
 
-<p>A mapped body is reused in place when the new pre-mapping body is structurally identical to the stored one, by an exact node bijection, and the resolved recipe (flow, options, per-region budget and hook settings) is byte-identical. Hashes only find candidates; the cache is never an oracle. Code salts &mdash; <code>pass/synth</code> with the passes it builds on, folded by each backend (ABC also folds its pin and patch) &mdash; invalidate rows when the code that produced them changes; a hook adds its recipe to the key, and its evidence is re-checked on a hit. Regions are mapped by parallel lanes, each with its own backend session, and published in partition order, so the output does not depend on the number of lanes. A lane is admitted only if its projected memory fits below min(half of physical memory, the process budget), a region whose measured growth exceeds <code>memory_budget_mb</code> (16 GiB) is refused, and freed heap is returned to the system at a bounded rate (every 64 regions, or near the ceiling).</p>
+<p>A mapped body is reusable when the new pre-mapping body is structurally identical to the stored one, by an exact node bijection, and the resolved recipe agrees. Hashes index candidate artifacts; structural matching and recipe checks authorize reuse. Producer versions and relevant library contents invalidate artifacts when their assumptions change. Independent regions use private backend sessions and are published in deterministic partition order. Admission accounts for projected worker storage, outstanding reservations and process memory before concurrent work starts; a region exceeding its time or memory allowance is refused.</p>
 
 <!-- ===================================================================== -->
-<h2><span class="secnum">4</span>ABC as the Mapping and Sizing Backend</h2>
+<h2 id="optimization"><span class="secnum">4</span>Optimize Before Technology Mapping</h2>
 
-<p>The ABC backend replays the RAW Lnet into an ABC netlist in creation order, so the network is object-for-object the one the blaster would have built directly and its size is known before any ABC object exists. Region inputs and outputs are paired with the Lnet's creation order, which ABC preserves through its flows.</p>
-
-<h3><span class="secnum">4.1</span>Flows</h3>
-
-<p>The delay and area flows (Table II) combine AIG rewriting and choice computation [8, 9], don't-care resynthesis [10] and SOP balancing [11], and end in <code>&amp;nf</code> on a unit-delay gate library, so the mapper minimizes depth on the smallest cells and every physical decision is left to gate sizing with the Liberty timing model. No flow retimes: moving registers would break the register-name correspondence of equivalence checking and could change latency. <code>&amp;put -o</code> shares a gate that drives several outputs through output-only buffers, which the read-back removes again.</p>
-
+<p><b>Choose the logical optimizer first.</b> Selecting ABC or uSyn determines both the coloring profile and the logical optimization path. Both paths use the preparation, partitioning and logical translation of Sections 2&ndash;3, then realize their selected logic with a technology mapper. ABC being used for the final cell mapping does not imply that ABC did the preceding Boolean optimization.</p>
 <div class="scroll">
 <table>
-<caption>Table II<span class="tcap">Built-in ABC flows</span></caption>
-<thead><tr><th>Flow</th><th>Commands</th><th>Used when</th></tr></thead>
+<caption>Table II<span class="tcap">Optimizer choice and the technology-mapping handoff</span></caption>
+<thead><tr><th>Choice</th><th>Optimization before tmap</th><th>Realization and final mapping</th></tr></thead>
 <tbody>
-<tr><td>Area</td><td><code>strash; &amp;get -n; &amp;fraig -x -C 500; &amp;put; dc2; strash; &amp;get -n; &amp;dch -f -C 500; &amp;nf {D}; &amp;put -o</code></td><td>No delay target; the area candidate</td></tr>
-<tr><td>Delay</td><td><code>strash; &amp;get -n; &amp;sweep</code>; two rounds of <code>&amp;synch2 -K 6 -C 500; &amp;if -m -K 6; &amp;mfs; &amp;save; &amp;dch -C 500; &amp;if -m -K 6; &amp;mfs; &amp;save; &amp;load; &amp;st</code> with <code>&amp;sopb -R 10 -C 4</code> between them; then <code>&amp;nf {D}; &amp;put -o</code></td><td>A delay target is set and no user flow</td></tr>
-<tr><td>Large</td><td><code>strash; &amp;get -n; &amp;nf {D}; &amp;put</code></td><td>Region of at least <code>large_ge</code> (200,000) GE; no area candidate</td></tr>
-<tr><td>Map only</td><td><code>strash; &amp;get -n; [&amp;st;] &amp;nf {D}; &amp;put -o</code></td><td>tmap provider (<code>pass.usyn</code>); <code>&amp;st</code> only when the remap of Alg. 4 applies</td></tr>
-<tr><td>Tail</td><td><code>buffer -N {F}; dnsize {B}</code> (<code>upsize {B}</code> before <code>dnsize</code> in the timed area candidate)</td><td>After every built-in, large or map-only flow, when <code>max_fanout</code> <var>F</var> (16) &ne; 0 and the library has NLDM tables; never after a user <code>flow</code></td></tr>
+<tr><td><code>synth.mapper=abc</code></td><td>AIG rewriting, equivalent structural choices, and LUT/SOP restructuring inside &Gamma;-bounded regions. Area and delay recipes compete under their configured budget.</td><td>ABC standard-cell covering, buffering, sizing and boundary refinement. Automatic arithmetic architecture trials can rebuild and re-optimize a region.</td></tr>
+<tr><td><code>synth.mapper=usyn</code></td><td>Native XAG cleanup, register-rooted DOMINO endpoint selection, residual optimization and feedback. After validation and CMOS expansion, native cleanup can compare SOP, BDD and decomposition topologies.</td><td>A complete CMOS network is given to the optional provider. The ABC provider performs mapping, buffering and sizing; uSyn compares at most two native profiles using their mapped results.</td></tr>
 </tbody>
 </table>
 </div>
-
-<h3><span class="secnum">4.2</span>Per-Region Budget</h3>
-
-<p>With a delay target <var>T</var>, a region with registers must also absorb the launch clock-to-output delay and the capture setup time, which ABC's combinational timer does not see. The region budget is</p>
-
-<div class="eq"><span class="eq-body"><var>B</var> = &lfloor;<var>T</var> &minus; <var>m</var>&rfloor; if <var>R</var> has registers, &nbsp; &lfloor;<var>T</var>&rfloor; otherwise, &nbsp;&nbsp; <var>m</var> = <var>t</var><sub>clk&rarr;Q</sub> + <var>t</var><sub>setup</sub> of the flip-flop cell (<code>reg_margin=auto</code>)</span><span class="eq-num">(4)</span></div>
-
-<p>The ladder needs a tool-owned flow, an NLDM library and <var>B</var> &gt; 0; the area candidate additionally needs the built-in flow, a region below <code>large_ge</code> and <code>area_flow</code> &ne; <code>none</code>. A budget is not "as fast as possible": after the flow, a budget ladder spends measured slack on area (Algorithm 4), with an area-recovery remap only when the slack <var>s</var> = 100(<var>B</var>/<var>d</var> &minus; 1) is at least 25% (relaxation min(<var>s</var>, 200)). Every flow option can be overridden per color from source annotations or the command line; an unknown key is an error.</p>
-
-<div class="algo">
-<div class="algo-title"><b>Algorithm 4</b> Budget ladder and area candidate; <var>d</var>(<var>N</var>), <var>a</var>(<var>N</var>) = timed delay and area</div>
-<ol class="algo-body">
-<li><span class="kw">if</span> the area candidate applies <span class="kw">then</span> <var>N</var><sub>0</sub> &larr; copy of the unmapped network</li>
-<li><var>N</var> &larr; flow(network); <span class="kw">if</span> no budget <span class="kw">then return</span> <var>N</var></li>
-<li><span class="kw">if</span> <var>d</var>(<var>N</var>) &gt; <var>B</var> <span class="kw">then</span> size up and down within <var>B</var>; if still late, size without a bound</li>
-<li><span class="kw">else if</span> the flow is remappable <span class="kw">and</span> <var>s</var> &ge; 25 <span class="kw">then</span> undo the map; remap with relaxation; buffer; size down within <var>B</var>; repair by up/down sizing if late</li>
-<li><span class="kw">if</span> <var>N</var><sub>0</sub> exists <span class="kw">and</span> <var>d</var>(<var>N</var>) &le; <var>B</var> <span class="kw">then</span> <var>N<sub>A</sub></var> &larr; area flow(<var>N</var><sub>0</sub>); keep it iff <var>d</var>(<var>N<sub>A</sub></var>) &le; <var>B</var> and <var>a</var>(<var>N<sub>A</sub></var>) &lt; <var>a</var>(<var>N</var>)</li>
-</ol>
-</div>
-
-<h3><span class="secnum">4.3</span>Partition-Boundary Environment</h3>
-
-<p>Mapped in isolation, a region's outputs drive no load and its inputs come from ideal drivers, so regions report paths far shorter than a whole-design timer finds. Every region therefore gets a boundary environment in two phases. <em>Phase A</em>, before mapping, is a pure function of the source graph and the library: an output port <var>p</var> sees</p>
-
-<div class="eq"><span class="eq-body">load(<var>p</var>) = ext(<var>p</var>) &middot; <span style="text-decoration:overline">C</span> + [<var>p</var> drives a primary output] &middot; <var>C</var><sub>io</sub></span><span class="eq-num">(5)</span></div>
-
-<p>where ext(<var>p</var>) counts sinks outside the region and <span style="text-decoration:overline">C</span> is the mean input capacitance of small cells, and every input is driven by a stand-in small buffer that also drives the fanout trees built for inputs. <em>Phase B</em> runs once every region is mapped, when a delay target exists and the library has NLDM tables: the exact load of every crossing net (the sum of the pin capacitances it drives, followed across instance ports) and its real driving cell replace the estimates, and each region is re-sized in place within its budget. Further rounds propagate arrivals across the hierarchy; one round makes the loads and drivers exact. Phase B is skipped when every region was reused.</p>
-
-<h3><span class="secnum">4.4</span>Read-Back</h3>
-
-<p>ABC's mapped network is converted into the backend-neutral cell netlist: every gate is a cell instance with its fanins in pin order, an unreadable gate is a hard error, and a flop cell with only an inverted output absorbs the inversion (the latch stores &not;<var>D</var> under the built-in flows, or the root gate is swapped for its inverting twin). Each crossing latch becomes a flip-flop sized from its output fanout, because fanout buffering never buffers a register output; the clear/preset flops, ICGs and latch cells of Section 3.3 are emitted from the library's state-cell ladders, and per-bit cells keep the names <code>reg[i]</code> that equivalence checking matches. The region writer (Section 3.4) does the rest.</p>
-
-<h3><span class="secnum">4.5</span>Architecture Trials</h3>
-
-<p>After the whole design is mapped, regions with automatic adders, multipliers or shifters (and wide comparisons) re-map their pre-mapping body under the alternative lowerings (at most eleven trials: 3 adders &times; 2 multipliers &times; 2 barrels, minus the baseline) and re-score the design: area over every instance and, under a delay target, the endpoint delays of a network stitched across region boundaries. Under a target only regions on the worst stitched path are tried. A candidate is kept if its sorted endpoint delays are lexicographically better (differences below 0.1% tie), or if they tie and its area is smaller. Because every trial re-scores the whole design, the step is skipped when the design exceeds <code>ware_max_cells</code> (200,000 mapped cells) and stops at the first time or memory refusal; regions above <code>large_ge</code> are not tried. Trials reuse retained pre-mapping snapshots (bounded per region and in total) and their own cache rows, never the baseline's. The tmap provider turns trials off.</p>
+<p>The detailed algorithms follow parallel descriptions in <a href="synth_abc.html">ABC synthesis</a> and <a href="synth_usyn.html">uSyn synthesis</a>. Shared here means the surrounding region infrastructure and the optimization-to-mapping contract; each optimizer retains its own algorithms and acceptance objective.</p>
+<h3>Algorithmic choices at the optimization boundary</h3>
+<p>The optimizer choice determines the region profile, the network representation and the selection objective. ABC uses combinational rewriting and covering, with an area-oriented or delay-oriented recipe. uSyn uses exact bounded endpoint realization followed by residual optimization and complete CMOS topology extraction. Native preselection cleanup, post-expansion cleanup and multi-representation exploration are independently selectable stages; mapped profile selection compares complete combinations of these stages.</p>
+<p>Technology mapping is a separate choice. A native logical CMOS network may be retained directly, or passed to a provider for cell covering, buffering and sizing. Compile-time proof-backed simplification precedes either optimizer and does not change the distinction between native search and technology mapping. The public selector is <code>synth.mapper=abc|usyn</code>; command syntax and implementation settings belong to the <a href="../pass/abc/README.md">ABC</a> and <a href="../pass/usyn/README.md">uSyn</a> references.</p>
 
 <!-- ===================================================================== -->
+<h2 id="mapping"><span class="secnum">5</span>Technology Mapping and Physical Budgets</h2>
+
+<p>Technology mapping covers the selected Boolean network with legal library cells. Buffering and sizing then repair fanout and spend or recover physical slack; partition-boundary refinement replaces isolated-region estimates with the loads and drivers of the stitched design. The shared driver and writer own the handoff and reconstruction (Section 3.4). The ABC provider implements the cell covering and physical algorithms described in <a href="synth_abc.html#selection">ABC &sect;4&ndash;6</a>.</p>
+<p>In the full ABC path, the backend's built-in recipe performs logic optimization before <code>&amp;nf</code>. In the uSyn path, <code>pass/synth/tmap.hpp</code> accepts a complete native CMOS design and selects a mapping-only region hook: <code>strash; &amp;get -n; &amp;nf; &amp;put -o</code>, with applicable buffering, sizing and mapping-only slack recovery. It runs neither FRAIG/don't-care synthesis nor ABC's alternate area or arithmetic recipes. Native topology choices have already been extracted; no choice classes cross this seam.</p>
+<p>Both mapped paths use the same kinds of physical constraints: a delay target, launch/capture register overhead, a fanout limit, slack-to-area recovery and a partition-boundary environment. Logic levels and native cost proxies guide logical search; library cell area and timing guide covering and physical refinement. The handoff preserves source-state correspondence so the reconstructed netlist can be checked independently.</p>
+<p>ABC mapped regions and uSyn logical selections/mapped realizations have separate reuse identities. A reusable artifact must agree with the current input structure, effective transformation recipe, producer version and all library or timing assumptions that affect it. Separate identities allow physical remapping without repeating a library-independent native search.</p>
 <h2>References</h2>
 <ol class="tight refs">
 <li>S.-H. Wang, R. T. Possignolo, H. Skinner, J. Renau. LiveHD: A productive live hardware development flow. <i>IEEE Micro</i>, 40(4), 2020.</li>
@@ -542,10 +509,6 @@ a { color: var(--accent); }
 <li>G. Karypis, R. Aggarwal, V. Kumar, S. Shekhar. Multilevel hypergraph partitioning: Applications in VLSI domain. <i>DAC</i>, 1997.</li>
 <li>A. Mishchenko, S. Chatterjee, R. Jiang, R. Brayton. FRAIGs: A unifying representation for logic synthesis and verification. ERL Tech. Rep., UC Berkeley, 2005.</li>
 <li>H. Barbosa et al. cvc5: A versatile and industrial-strength SMT solver. <i>TACAS</i>, 2022.</li>
-<li>A. Mishchenko, S. Chatterjee, R. Brayton. DAG-aware AIG rewriting: A fresh look at combinational logic synthesis. <i>DAC</i>, 2006.</li>
-<li>S. Chatterjee, A. Mishchenko, R. Brayton, X. Wang, T. Kam. Reducing structural bias in technology mapping. <i>IEEE TCAD</i>, 25(12), 2006.</li>
-<li>A. Mishchenko, R. Brayton, J.-H. R. Jiang, S. Jang. Scalable don't-care-based logic optimization and resynthesis. <i>FPGA</i>, 2009.</li>
-<li>A. Mishchenko, R. Brayton, S. Jang, V. Kravets. Delay optimization using SOP balancing. <i>ICCAD</i>, 2011.</li>
 </ol>
 
 </body>
