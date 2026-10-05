@@ -4,6 +4,8 @@
 # binaries of in-flight experiments -- is touched.
 #
 #   OPT=-O2 ROOT=/abs/path bash scripts/build-opt.sh scripts/total_probe.lean
+# OPT may carry several flags, e.g. OPT="-O2 -g -fno-omit-frame-pointer"
+# for a profiling build that keeps -O2 but can be unwound.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 OPT=${OPT:--O2}
@@ -37,11 +39,11 @@ for m in "${MODULES[@]}"; do
   flat=${m//\//_}
   lean -o "$OUT/LeanSemanticPrimitives/$m.olean" -c "$NAT/$flat.c" \
        "LeanSemanticPrimitives/$m.lean" || exit 1
-  leanc "$OPT" -c -o "$NAT/$flat.o" "$NAT/$flat.c" || exit 1
+  leanc $OPT -c -o "$NAT/$flat.o" "$NAT/$flat.c" || exit 1
   OBJS+=("$NAT/$flat.o")
 done
 PROBE=${1:?probe source}; pb=$(basename "$PROBE" .lean)
 lean -o "$NAT/$pb.olean" -c "$NAT/$pb.c" "$PROBE" || exit 1
-leanc "$OPT" -c -o "$NAT/$pb.o" "$NAT/$pb.c" || exit 1
-leanc "$OPT" -o "$NAT/$pb" "$NAT/$pb.o" "${OBJS[@]}" || exit 1
+leanc $OPT -c -o "$NAT/$pb.o" "$NAT/$pb.c" || exit 1
+leanc $OPT -o "$NAT/$pb" "$NAT/$pb.o" "${OBJS[@]}" || exit 1
 echo "built $NAT/$pb at $OPT"

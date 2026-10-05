@@ -179,7 +179,36 @@ same-size {szOf HR == szOf FR} | host chk {hchk} ref {href} | fork chk {fchk} re
         IO.println s!"  {ns}: host-ok {a.toOption.isSome} fork-ok {b.toOption.isSome}"; ok := false
   return ok
 
-def main : IO UInt32 := do
+/-- P2: ONE case -- the PROVED path at 4,096 sources -- so a `perf` sample is
+not diluted by the other ladder points or by the fork runs. -/
+def p2Only : IO UInt32 := do
+  let D := srcD 4096 64
+  IO.println "P2: PROVED mixDriver + hwAPVarT, srcD 4096 sources / 64 nodes"
+  let t0 ← IO.monoMsNow
+  let r ← IO.lazyPure (fun _ => mixDriver 200000 2000 hwAPVarT [encDesign D])
+  let d ← IO.lazyPure (fun _ => match r with | .ok p => szOf p | .error _ => 0)
+  IO.println s!"  residual terms {d}"
+  let t1 ← IO.monoMsNow
+  IO.println s!"  specialize {t1 - t0} ms"
+  match r with
+  | .error e => do IO.println s!"  FAILED {repr e}"; return 1
+  | .ok R => do
+      let i := mkInputFor D 1
+      let st := mkStateFor D 1
+      let want := encResult (interpretDesign D (allEdges D) i st)
+      match Hw.checkResidual R with
+      | none => do IO.println "  checker REJECTED"; return 1
+      | some b =>
+          let ok := match evalFuel b R []
+                      (.call R.entry [.lit (encEdges (allEdges D)), .lit (encInput i),
+                                      .lit (encState st)]) with
+                    | .value v => (decResult v).map encResult == some want
+                    | _        => false
+          IO.println s!"  checker bound {b}  reference-equal {ok}"
+          return (if ok then 0 else 1)
+
+def main (args : List String) : IO UInt32 := do
+  if args.contains "p2" then p2Only else do
   IO.println "backend: PROVED mixDriver + hwAPVarT (TOTAL variant), fixtures only"
   let a ← seqChecks
   let b ← ladder

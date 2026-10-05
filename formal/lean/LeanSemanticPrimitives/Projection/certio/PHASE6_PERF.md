@@ -2251,3 +2251,87 @@ than cosmetic.
 quadratic term to `prepare` / `PVal.toPRes` / `PVal.shift` by call chain rather
 than by self-sample.  `nsrc = 4096` takes 232 s on the host, which is long
 enough to sample properly.
+
+## 23. P1 re-run with semantic checks; P2 attributes the cost by call chain
+
+### 23.1 P1, with the gap closed
+
+The first P1 source ladder compared residual SIZE only.  Identical term counts
+are not agreement -- two different programs can have the same count.  Both
+residuals now pass, at every ladder point and OUTSIDE the timed sections, the
+fragment checker AND a run at their OWN checked bound against `interpretDesign`:
+
+    nsrc   host ms   fork ms   terms        host chk/ref   fork chk/ref
+      16        57        20   796/796      true / true    true / true
+      64       142        32   988/988      true / true    true / true
+     256     1,111       122   1756/1756    true / true    true / true
+    1024    14,300       507   4828/4828    true / true    true / true
+    4096   234,782     2,607   17116/17116  true / true    true / true
+
+Timings reproduce the first run closely (58/145/1128/14190/231974).  Durable
+artifacts: `.perfwork/P1-ladder.log` and `.perfwork/P1-ladder-capture.json`
+(binary, probe-source and object hashes, git rev, flags, the documented
+interpreter difference, and the fixture limits).  The earlier run left a table
+in this file and no artifact; that is fixed.
+
+### 23.2 P2 -- call-chain attribution on the PROVED path
+
+    perf record -F 99 --call-graph fp -- timeout 180 p2build/nat/ab_probe p2
+    17,820 samples, frame-pointer unwinding, 180 s cap on a ~235 s case
+    input: srcD 4,096 sources / 64 nodes, budgets 200000/2000
+
+The profiling build is `-O2 -g -fno-omit-frame-pointer`, deliberately NOT the
+build P1 timed: stacks have to be unwindable, and frame pointers cost some
+performance, so absolute times here are not P1's.
+
+**SELF time** (children not folded in):
+
+    27.34%  PVal.shift          12.79%  lean_dec_ref_cold
+    17.50%  PVal.toPRes          9.08%  mi_free
+    15.65%  prepare              7.43%  lean_dec_ref_known
+                                 5.17%  mi_malloc_small
+                                 1.87%  lean_inc_heartbeat
+
+**INCLUSIVE time** -- a DIFFERENT accounting; these overlap and must never be
+summed, and must not be compared with the self column above:
+
+    43.05% / 15.65% self   prepare
+    29.46% / 27.34%        PVal.shift
+    21.88% / 17.50%        PVal.toPRes
+    16.57% /  0.20%        mixTerm
+    16.13% /  0.10%        mixPArgs
+
+**RESULT: H3 is now attributed, not merely consistent.**  The three
+environment-handling functions carry **60.49% of SELF time**, and `prepare`'s
+INCLUSIVE cost is 43.05%.  The remaining self time is allocator and
+reference-count work -- `lean_dec_ref_cold`, `mi_free`, `mi_malloc_small`,
+`lean_dec_ref_known` -- which is downstream of building and discarding those
+structures, though this profile does not prove that attribution for the
+allocator time itself.
+
+Incidental confirmation of section 17: at `-O2` the Lean accessor helpers
+appear as `(inlined)` entries with 0% self, where the `-O0` sample had them as
+real symbols taking ~60%.
+
+### 23.3 Smallest representation change, SELECTED not implemented
+
+`PVal.shift` is the single largest self cost at 27.34%, and its call chain is
+deeply self-recursive -- it walks spines.
+
+The smallest change with a proof ALREADY IN HAND is the zero-shift fast path on
+the PROVED `PartialEvaluator`: add `| 0, v => v` to `PVal.shift` and
+`| 0, env => env` to `PEnv.shiftBy`.  `PartialEvaluatorCorrect.lean:76`
+(`PVal.shift_zero`) and `:88` (`PEnv.shiftBy_zero`) state exactly those
+equations for the current definitions, so the obligation is only that the new
+definition agrees with the old -- which those lemmas give, by induction, with
+no new bridge.  Contrast obligation A's `PRes.val`, which has no bridge at all.
+
+**What is NOT yet measured, and decides whether this is worth doing:** how much
+of the 27.34% is `k = 0`.  This profile does not split shift calls by argument.
+That split is the next bounded measurement (P3), and it is cheap -- a counter,
+not a profile.  Doing the change before P3 would be optimizing on an assumption.
+
+Scope caution for any extrapolation to the ALU: this fixture holds NODES at 64
+with ONE operator and makes all but two sources CONSTANT.  `rt_alu_gate` has
+6,597 nodes, 6,135 consts and 15 operators up to arity 65.  The ladder isolates
+one axis; it is not a model of that design.
