@@ -2,6 +2,7 @@
 
 #include "pass_lnastfmt.hpp"
 
+#include <algorithm>
 #include <format>
 #include <set>
 #include <string>
@@ -88,9 +89,17 @@ template <typename... Args>
 // most often a `get_text(lvalue)` that swallowed surrounding syntax (type
 // cast, comma list, brackets) or a stale escape that wasn't stripped at
 // lowering time.
-static bool is_valid_ref_text(std::string_view name) {
+//
+// A NON-FIRST path segment may also be a bare decimal POSITION (`v.0`, `x.1`):
+// the leaf of an unnamed tuple entry. The first segment never is (`0` alone is a
+// literal, not a name).
+static bool is_valid_ref_text(std::string_view name, bool numeric_segment_ok = false) {
   if (name.empty()) {
     return false;
+  }
+  if (numeric_segment_ok && name.front() != '%' && name.find('.') == std::string_view::npos
+      && std::all_of(name.begin(), name.end(), [](char c) { return c >= '0' && c <= '9'; })) {
+    return true;
   }
   // A tuple path may contain escaped segments, e.g. io.`a.b`. Split only
   // outside backticks so the field's dot remains part of its identity.
@@ -102,7 +111,8 @@ static bool is_valid_ref_text(std::string_view name) {
         quoted = !quoted;
       } else if (name[pos] == '.' && !quoted) {
         const auto rest = name.substr(pos + 1);
-        return is_valid_ref_text(name.substr(0, pos)) && !rest.empty() && rest.front() != '%' && is_valid_ref_text(rest);
+        return is_valid_ref_text(name.substr(0, pos), numeric_segment_ok) && !rest.empty() && rest.front() != '%'
+               && is_valid_ref_text(rest, /*numeric_segment_ok=*/true);
       }
     }
   }

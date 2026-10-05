@@ -1,0 +1,9 @@
+/*
+:name: tuple_type_mixed_anon_named
+:type: error
+:error: all-named or all-unnamed
+*/
+// `_:T` (anonymous) cannot be mixed with a named entry in one tuple type.
+pub comb mixed(w:(a:U4, _:U8)) -> (o:U12) {  // locate_error_here
+  o = 1
+}

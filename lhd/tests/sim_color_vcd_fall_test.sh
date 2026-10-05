@@ -13,8 +13,8 @@ fail() {
   exit 1
 }
 
-# NEGSOLE=verilog: the Verilog stand-in (lhd/tests/sim_negsole_standin.v) while
-# the Pyrope fixture waits on the clock lane (its target is fixme).
+# NEGSOLE=verilog: the Verilog twin (lhd/tests/sim_negsole_standin.v), the original
+# two-port pclk/rclk form of the Pyrope fixture.
 SIM_ARGS=("$PRP")
 if [ "${NEGSOLE:-prp}" = verilog ]; then
   "$LHD" compile lhd/tests/sim_negsole_standin.v --reader slang --emit-dir lg:"$work/lg/" --workdir "$work/lgw" -q \

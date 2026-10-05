@@ -5,21 +5,22 @@
 :pyrope_top: reg_decl_init_dropped
 */
 //
-// FIXME tracker -- a declaration-time register initializer is DROPPED.
-// `reg internal_full_n = 1'b1;` gives the flop a power-on value of 1; the Pyrope
-// below declares a bare `reg internal_full_n:U1` with no `initial=`, so the emitted
-// netlist powers up at 0. yosys' miter starts both sides from their declared
-// initial values, so this refutes. 3 corpus files (HLS-generated FIFOs, where the
+// A declaration-time register initializer must reach the netlist.
+// `reg internal_full_n = 1'b1;` gives the flop a power-on value of 1, so the
+// Pyrope side spells it `reg internal_full_n:U1 = 1` (the initial value; the
+// module's implicit reset loads it, which is how inou.slang models an
+// initial-without-reset register). This file used to be the writer's broken
+// output pasted in -- a bare `reg internal_full_n:U1` that powers up at 0 -- so
+// the pair refuted although the slang reader and the writer were right.
+// FIXED/PROMOTED 2026-10-04. 3 corpus files (HLS-generated FIFOs, where the
 // `full_n` handshake bit is exactly this idiom).
 pub mod reg_decl_init_dropped::[timecheck=false](clk:Clock, we:U1, a:U2, d:U4) -> (q:U4@[], full_n:U1@[]) {
   reg mem:[4]U4:[ordering="old"]
-  reg internal_full_n:U1
-  full_n = 0ub?
-  q = 0ub????
+  reg internal_full_n:U1 = 1
   if we != 0 {
     mem[a] = d
   }
   internal_full_n = we
-  full_n = internal_full_n
   q = mem[a]
+  full_n = internal_full_n
 }

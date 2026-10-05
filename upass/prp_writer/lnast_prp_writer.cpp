@@ -3348,6 +3348,8 @@ absl::flat_hash_map<int64_t, Lnast_prp_writer::Clock_gate> Lnast_prp_writer::clo
   }
   absl::flat_hash_map<std::string_view, int>       refs;  // every ref occurrence (the def included)
   absl::flat_hash_map<std::string_view, Lnast_nid> ands;  // temp -> its one `bit_and` def
+  absl::flat_hash_map<std::string_view, Lnast_nid> ors;   // temp -> its one `bit_or` def (active-low gates)
+  absl::flat_hash_map<std::string_view, Lnast_nid> nots;  // temp -> its one `bit_not` def
   std::vector<Lnast_nid>                           stores;
   for (const auto& nid : u.depth_preorder(stmts)) {
     const auto t = u.get_type(nid);
@@ -3357,6 +3359,14 @@ absl::flat_hash_map<int64_t, Lnast_prp_writer::Clock_gate> Lnast_prp_writer::clo
       const auto dst = u.get_first_child(nid);
       if (!dst.is_invalid() && Lnast_ntype::is_ref(u.get_type(dst)) && Lnast::is_tmp(u.get_name(dst))) {
         if (const auto [it, fresh] = ands.try_emplace(u.get_name(dst), nid); !fresh) {
+          it->second = Lnast_nid{};  // several defs: not a temp tree
+        }
+      }
+    } else if (t == Lnast_ntype::Lnast_ntype_bit_or || t == Lnast_ntype::Lnast_ntype_bit_not) {
+      const auto dst = u.get_first_child(nid);
+      if (!dst.is_invalid() && Lnast_ntype::is_ref(u.get_type(dst)) && Lnast::is_tmp(u.get_name(dst))) {
+        auto& table = t == Lnast_ntype::Lnast_ntype_bit_or ? ors : nots;
+        if (const auto [it, fresh] = table.try_emplace(u.get_name(dst), nid); !fresh) {
           it->second = Lnast_nid{};  // several defs: not a temp tree
         }
       }
@@ -3446,6 +3456,71 @@ absl::flat_hash_map<int64_t, Lnast_prp_writer::Clock_gate> Lnast_prp_writer::clo
       }
     };
     flat(u.get_name(u.get_sibling_next(u.get_first_child(store))));
+    // The ACTIVE-LOW gate `clk | ~en_latch` (minion's prim_clk_gate_n): the enable
+    // latch is transparent while the clock is HIGH and the gate idles high, so it
+    // spells `Clock(clock_pin=clk, enable=en, invert=true)`. The temp tree is
+    // `store out <- And(Or(clk, Not(latch)), 1)`; the latch must be absorbable
+    // (one unconditional write, no reset, only read by the Not).
+    if (!(ok && !g.clock.empty())) {
+      Clock_gate lo;
+      lo.output = g.output;
+      const auto kids = [&](Lnast_nid n) {
+        std::vector<Lnast_nid> v;
+        for (auto c = u.get_sibling_next(u.get_first_child(n)); !c.is_invalid(); c = u.get_sibling_next(c)) {
+          v.push_back(c);
+        }
+        return v;
+      };
+      std::string_view cur = u.get_name(u.get_sibling_next(u.get_first_child(store)));
+      bool             good = true;
+      if (const auto it = ands.find(cur); it != ands.end() && !it->second.is_invalid() && refs[cur] == 2) {
+        const auto ks = kids(it->second);
+        if (ks.size() == 2 && Lnast_ntype::is_ref(u.get_type(ks[0])) && Lnast_ntype::is_const(u.get_type(ks[1]))
+            && u.get_name(ks[1]) == "1") {
+          lo.ands.push_back(it->second);
+          cur = u.get_name(ks[0]);
+        } else {
+          good = false;
+        }
+      }
+      const auto ot = ors.find(cur);
+      good          = good && ot != ors.end() && !ot->second.is_invalid() && refs[cur] == 2;
+      if (good) {
+        const auto oks = kids(ot->second);
+        good           = oks.size() == 2 && Lnast_ntype::is_ref(u.get_type(oks[0])) && Lnast_ntype::is_ref(u.get_type(oks[1]));
+        if (good) {
+          const int ci = clock_in(u.get_name(oks[0])) ? 0 : clock_in(u.get_name(oks[1])) ? 1 : -1;
+          const auto neg = ci < 0 ? std::string_view{} : u.get_name(oks[1 - ci]);
+          const auto nt  = ci < 0 ? nots.end() : nots.find(neg);
+          good           = ci >= 0 && nt != nots.end() && !nt->second.is_invalid() && refs[neg] == 2;
+          if (good) {
+            const auto nks = kids(nt->second);
+            good           = !nks.empty() && Lnast_ntype::is_ref(u.get_type(nks[0]));
+            const auto lit = good ? enable_latches.find(std::string(u.get_name(nks[0]))) : enable_latches.end();
+            const auto ck  = std::string(u.get_name(oks[static_cast<size_t>(ci)]));
+            good           = good && lit != enable_latches.end() && lit->second.gate == ck && !lit->second.low && !lit->second.reset
+                   && lit->second.writes == 1 && lit->second.unconditional
+                   && refs[u.get_name(nks[0])] == static_cast<int>(lit->second.definitions.size()) + 1
+                   // an output port is observable: it cannot be folded away
+                   && u.io_meta().find(u.get_name(nks[0])) == nullptr;
+            if (good) {
+              lo.clock  = ck;
+              lo.invert = true;
+              lo.enables.push_back(lit->second.value);
+              lo.latch_nodes = lit->second.definitions;
+              lo.ands.push_back(ot->second);
+              lo.ands.push_back(nt->second);
+            }
+          }
+        }
+      }
+      if (good && !lo.clock.empty()) {
+        if (nets.contains(lo.output) || !lo.latch_nodes.empty()) {
+          gates.emplace(store.get_class_index().value, std::move(lo));
+        }
+        continue;
+      }
+    }
     if (ok && !g.clock.empty()) {
       // Clock(...) already contains the low-transparent enable latch. Feed
       // its original D, not that latch's Q: otherwise Verilog re-emission
@@ -3457,7 +3532,8 @@ absl::flat_hash_map<int64_t, Lnast_prp_writer::Clock_gate> Lnast_prp_writer::clo
         const auto it = enable_latches.find(std::string(u.get_name(enable)));
         if (it != enable_latches.end() && it->second.gate == g.clock && it->second.low && !it->second.reset
             && it->second.writes == 1 && it->second.unconditional) {
-          if (refs[u.get_name(enable)] == static_cast<int>(it->second.definitions.size()) + 1) {
+          if (refs[u.get_name(enable)] == static_cast<int>(it->second.definitions.size()) + 1
+              && u.io_meta().find(u.get_name(enable)) == nullptr) {
             g.latch_nodes.insert(g.latch_nodes.end(), it->second.definitions.begin(), it->second.definitions.end());
           }
           enable = it->second.value;
@@ -5907,7 +5983,7 @@ void Lnast_prp_writer::write_store() {
       enable = std::format("({})#[0] != 0", enable);
     }
     print(decl_prefix(lhs));
-    print(std::format("{} = Clock(clock_pin={}, enable={})", lhs, strip_prefix(g.clock), enable));
+    print(std::format("{} = Clock(clock_pin={}, enable={}{})", lhs, strip_prefix(g.clock), enable, g.invert ? ", invert=true" : ""));
     move_to_parent();
     return;
   }

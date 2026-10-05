@@ -2,12 +2,14 @@
 # Import resolution precedence: what a plain `import("unit")` binds to when that
 # same unit is ALSO supplied as a pre-built IR input.
 #
-# The contract, in three cases:
+# The contract, in two cases:
 #   1. no ln:/lg: input   -> re-parse the sibling .prp into a fresh LNAST
 #   2. ln: input          -> reuse that LNAST; do NOT re-parse the sibling
-#   3. lg: input (with or without ln:) -> call the LGraph directly; neither
-#      re-parse the source nor elaborate an LNAST for it. Same as any other
-#      lgraph call site — there is nothing left to parse to build the top.
+# A plain `import("unit")` is the SOURCE (07-typesystem.md: an import behaves
+# like cut and paste of the imported code), so a `lg:` input never replaces it:
+# a compiled lgraph is reached with the explicit `import("lg:unit")` form
+# (prp-import-lg). The old "lg: input wins a plain import" rule was dropped
+# 2026-10-05 (the docs never specified it).
 #
 # What makes reuse observable: the ln: and lg: artifacts are built from a
 # DIFFERENT definition of the same unit than the .prp sitting next to the
@@ -16,13 +18,12 @@
 #
 #   sibling .prp on disk :  8 bits
 #   the ln: artifact     : 16 bits
-#   the lg: artifact     : 32 bits
 #
 # Each case also asserts on `--result-json` `inputs`, which lists every source
 # the front-end actually read: the sibling appearing there IS the re-parse.
 #
-# Usage: ir_import_precedence_test.sh [case...]   (default: all four)
-# Cases: no_ir ln_only lg_only ln_and_lg
+# Usage: ir_import_precedence_test.sh [case...]   (default: all)
+# Cases: no_ir ln_only
 set -u
 
 if   [ -x ./bazel-bin/lhd/lhd ]; then LHD=./bazel-bin/lhd/lhd
@@ -34,7 +35,7 @@ trap 'rm -rf "$W"' EXIT
 rc=0
 fail() { echo "FAIL: $*"; rc=1; }
 
-mkdir -p "$W/main" "$W/altln" "$W/altlg"
+mkdir -p "$W/main" "$W/altln"
 
 # The importer, plus the sibling definition importer-directory discovery finds.
 cat > "$W/main/lib_thing.prp" <<'EOF'
@@ -45,18 +46,13 @@ const lib_thing = import("lib_thing")
 pub mod use_top(a:U8) -> (o:U32@[0]) { o = lib_thing.thing(a=a).o }
 EOF
 
-# Same unit name, deliberately different definitions, built into IR artifacts.
+# Same unit name, a deliberately different definition, built into an IR artifact.
 cat > "$W/altln/lib_thing.prp" <<'EOF'
 pub mod thing(a:U8) -> (o:U16@[0]) { o = a }
-EOF
-cat > "$W/altlg/lib_thing.prp" <<'EOF'
-pub mod thing(a:U8) -> (o:U32@[0]) { o = a }
 EOF
 
 $LHD compile "$W/altln/lib_thing.prp" --emit-dir "ln:$W/LN" --workdir "$W/w_ln" -q \
   || { echo "FAIL: could not build the ln: artifact"; exit 3; }
-$LHD compile "$W/altlg/lib_thing.prp" --emit-dir "lg:$W/LG" --workdir "$W/w_lg" -q \
-  || { echo "FAIL: could not build the lg: artifact"; exit 3; }
 
 # width of `lib_thing.thing`'s output pin in the emitted library == which
 # definition the importer ended up instantiating
@@ -98,13 +94,11 @@ run_case() {
 }
 
 cases=("$@")
-[ ${#cases[@]} -eq 0 ] && cases=(no_ir ln_only lg_only ln_and_lg)
+[ ${#cases[@]} -eq 0 ] && cases=(no_ir ln_only)
 for c in "${cases[@]}"; do
   case $c in
   no_ir)     run_case no_ir      8  yes ;;
   ln_only)   run_case ln_only   16  no  "ln:$W/LN" ;;
-  lg_only)   run_case lg_only   32  no  "lg:$W/LG" ;;
-  ln_and_lg) run_case ln_and_lg 32  no  "ln:$W/LN" "lg:$W/LG" ;;
   *) echo "FAIL: unknown case '$c'"; exit 3 ;;
   esac
 done

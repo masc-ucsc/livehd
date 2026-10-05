@@ -1,0 +1,8 @@
+/*
+:name: tuple_type_mixed_named_anon
+:type: error
+:error: all-named or all-unnamed
+*/
+pub comb mixed(w:(_:U4, a:U8)) -> (o:U12) {  // locate_error_here
+  o = 1
+}

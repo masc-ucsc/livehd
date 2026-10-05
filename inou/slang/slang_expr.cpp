@@ -1675,6 +1675,49 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   std::optional<int64_t> const_low;
   std::string            dyn_low;               // 0-based element index expression
   bool                   comptime_dyn = false;  // dyn_low is a COMPTIME pkg-param expression
+  bool                   provably_oob = false;  // a dynamic select that can never land inside the vector
+
+  // Closed interval of an integral expression, for the one question the dynamic
+  // select asks: can the selected elements ever overlap the declared range?
+  // Constants, +/- and value-preserving conversions are tracked; anything else
+  // is bounded by its type. nullopt = unknown (never claims out-of-range).
+  using Ival = std::optional<std::pair<int64_t, int64_t>>;
+  std::function<Ival(const slang::ast::Expression&)> interval = [&](const slang::ast::Expression& e) -> Ival {
+    if (auto c = try_eval_int(e)) {
+      return std::make_pair(*c, *c);
+    }
+    if (!e.type->isIntegral() || e.type->getBitWidth() > 62) {
+      return std::nullopt;
+    }
+    const int64_t w      = e.type->getBitWidth();
+    const Ival    by_typ = e.type->isSigned() ? Ival(std::make_pair(-(int64_t{1} << (w - 1)), (int64_t{1} << (w - 1)) - 1))
+                                              : Ival(std::make_pair(int64_t{0}, (int64_t{1} << w) - 1));
+    auto          fits   = [&](const Ival& v) { return v && v->first >= by_typ->first && v->second <= by_typ->second; };
+    if (e.kind == ExpressionKind::Conversion) {
+      const auto& op = e.as<slang::ast::ConversionExpression>().operand();
+      if (op.type->isIntegral() && (op.type->isSigned() == e.type->isSigned() || !op.type->isSigned())) {
+        if (auto v = interval(op); fits(v)) {
+          return v;
+        }
+      }
+      return by_typ;
+    }
+    if (e.kind == ExpressionKind::BinaryOp) {
+      const auto& b = e.as<slang::ast::BinaryExpression>();
+      if (b.op == slang::ast::BinaryOperator::Add || b.op == slang::ast::BinaryOperator::Subtract) {
+        auto l = interval(b.left());
+        auto r = interval(b.right());
+        if (l && r) {
+          Ival v = b.op == slang::ast::BinaryOperator::Add ? Ival(std::make_pair(l->first + r->first, l->second + r->second))
+                                                           : Ival(std::make_pair(l->first - r->second, l->second - r->first));
+          if (fits(v)) {
+            return v;
+          }
+        }
+      }
+    }
+    return by_typ;
+  };
 
   auto normalize = [&](const slang::ast::Expression& idx,
                        int64_t                       width_down,
@@ -1690,6 +1733,21 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
         return {bottom, {}};
       }
       comptime_dyn = true;
+    }
+    if (auto iv = interval(idx)) {
+      // Elements [bottom, bottom + span - 1], 0-based from the LSB end, for every
+      // selector value in the interval. Entirely outside the vector is X
+      // (IEEE 1800 11.5.1), never a negative shift amount.
+      const int64_t span   = std::max(width_down, width_up);
+      const int64_t b_a    = range.isDescending() ? iv->first - range.lower() - (width_down - 1)
+                                                  : range.upper() - (width_up - 1) - iv->first;
+      const int64_t b_b    = range.isDescending() ? iv->second - range.lower() - (width_down - 1)
+                                                  : range.upper() - (width_up - 1) - iv->second;
+      const int64_t b_low  = std::min(b_a, b_b);
+      const int64_t b_high = std::max(b_a, b_b);
+      if (b_high + span - 1 < 0 || b_low >= static_cast<int64_t>(range.width())) {
+        provably_oob = true;
+      }
     }
     auto v = to_int_value(lower_rvalue(idx));  // selector value (settled rules apply)
     if (range.isDescending()) {
@@ -1725,6 +1783,11 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
         std::tie(const_low, dyn_low) = normalize(rs.left(), w, 1);
       }
     }
+  }
+
+  if (provably_oob) {
+    emit_warning(expr.sourceRange, "select-out-of-range", "bitwidth", "select is entirely outside the declared range: reads X");
+    return absl::StrCat("0ub", std::string(static_cast<size_t>(sel_bits), '?'));
   }
 
   if (const_low) {

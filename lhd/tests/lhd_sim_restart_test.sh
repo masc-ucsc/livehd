@@ -24,16 +24,18 @@ fail() {
 
 # `total` accumulates across cycles -> only a restored testbench frame reproduces
 # its final value after a restart. A FINAL line reports it for comparison.
-# RESTART_CLKB=1 adds a secondary clock `clkb` the testbench drives as a Bool
-# waveform (the __clkprev_clkb restore check). The Pyrope `Clock` type rejects
-# that until the sim-multiclock lane lands, so that leg is its own fixme target.
+# RESTART_CLKB=1 adds a second clock domain `clkb`: the reference clock gated by
+# an enable the testbench drives (`Clock(clock_pin=clk, enable=en_b)`; under the
+# `Clock` type a test cannot drive a second Clock as a waveform). A restart must
+# restore that domain's edge state (the __clkprev_clkb restore check).
 if [ "${RESTART_CLKB:-0}" = 1 ]; then
 cat > "$W/cr.prp" <<'EOF'
 /*
 :name: cr
 :type: simulation
 */
-mod cnt(enable:Bool, clkb:Bool) -> (value:U8@[0], bvalue:U8@[1]) {
+mod cnt(clk:Clock, enable:Bool, en_b:Bool) -> (value:U8@[0], bvalue:U8@[1]) {
+  const clkb = Clock(clock_pin=clk, enable=en_b)
   reg count:U8 = 0
   reg b:U8:[clock_pin=clkb] = 0
   value = count
@@ -49,9 +51,9 @@ test cnt.run {
   tick 20 {
     acc.enable = true
     acc.reset  = clock < 2
-    // One secondary-clock rise at cycle 10, then hold high across ckp12.
-    // A restart that loses __clkprev_clkb invents a second rise at cycle 12.
-    acc.clkb   = (clock >= 10) and (clock <= 13)
+    // One secondary-clock pulse, at cycle 10; the restart from ckp12 must not
+    // invent a second one.
+    acc.en_b   = clock == 10
     step
     v = acc.value
     bv = acc.bvalue

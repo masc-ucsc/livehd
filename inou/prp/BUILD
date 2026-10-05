@@ -323,61 +323,16 @@ sh_test(
     for prp_file in glob(["tests/style/*.prp"])
 ]
 
-# TBD-feature trackers (tests/fixme/): each `.prp` exercises a documented but
-# NOT-yet-implemented Pyrope feature, or a known BUG on valid code. The compile
-# FAILS by design, so each is tagged `fixme` and `.bazelrc` (`-fixme`) keeps
-# `bazel test //...` green; run one with the tag filter cleared to see it:
-#   bazel test //inou/prp:prp-tbd-vector_io_ports --test_tag_filters=
-# When one flips green, drop it from this list and move the file into the
-# normal glob above (tests/pyrope/, or tests/sim/ for `:type: simulation`).
-#
-# PROMOTED 2026-09-06 (docs<->impl consistency audit, see fixes_pyrope.md):
-# temporal_past, testbench_step, input_default and the six generic_* trackers
-# all pass, so the 15-tbd.md rows claiming generics / input defaults are TBD
-# were stale. The three 2f-latch verify twins (latch_verify_{hold,low},
-# flop_verify_posneg) had already lost their `fixme` tag at M8 and moved too.
-# testbench_step was additionally rewritten for the sigref removal: reads are
-# bare dotted access, `regref` is the one way to DRIVE a cell.
-[
-    sh_test(
-        name = "prp-tbd-%s" % base,
-        srcs = ["tests/pyrope_test.py"],
-        args = [
-            "-i",
-            "$(location //inou/prp:tests/fixme/%s.prp)" % base,
-        ],
-        data = [
-            "//inou/prp:tests/lec.py",
-            "//inou/prp:tests/prplib.py",
-            "//inou/prp:tests/pyrope_test.py",
-            "//inou/prp:tests/fixme/%s.prp" % base,
-            "//lhd",
-        ] + glob(
-            ["tests/fixme/%s.v" % base],  # an `:type: equiv` tracker's golden
-            allow_empty = True,
-        ),
-        tags = ["fixme"],
-    )
-    for base in [
-        # Standard library `import("prp")` — the 13-stdlib.md wish-list chapter.
-        "stdlib_import",
-        # A VECTOR port (unnamed/positional tuple, or an array) has no lowering
-        # in either direction. Counterpart of tests/sim/tuple_io_ports.prp,
-        # which covers the NAMED tuple and passes: a named tuple's field order
-        # is not guaranteed so its leaves may only be addressed by name, while
-        # an unnamed entry is the one aggregate with a defined order and so the
-        # only one that could be indexed/packed as a vector. NOT listed in
-        # 15-tbd.md — add a row (fixes_pyrope_future.md F3).
-        "vector_io_ports",
-        # Known BUG tracker (not TBD): a tuple type MIXING a defaulted field
-        # with a plain one cannot be register state, though both UNIFORM
-        # spellings work (equiv/defaulted_tuple.prp, equiv/reg_named_tuple_type.prp).
-        # prp2lnast under-describes the mixed form -- the plain field's type
-        # never reaches LNAST -- so the detupler declines rather than publish a
-        # layout that would silently drop a flop. See the fixture header.
-        "mixed_defaulted_tuple_type",
-    ]
-]
+# TBD-feature trackers (tests/fixme/): NONE at the moment (2026-10-05). A
+# documented-but-unimplemented feature, or a known BUG on valid code, is added
+# here as a `.prp` under tests/fixme/ plus a `prp-tbd-<name>` sh_test over it
+# tagged `fixme` (`.bazelrc` filters `-fixme`, so `bazel test //...` stays green;
+# run one with `--test_tag_filters=`). The last two occupants left the list:
+# stdlib_import (the `import("prp")` wish-list chapter) was deleted, and
+# vector_io_ports was split into tests/errors/vector_io_ports_bare_type.prp (`v:(U4, U8)` is
+# a compile error), tests/pyrope/vector_io_ports.prp and tests/sim/
+# vector_io_ports_runtime.prp (the legal positional spellings `v:(_:U4, _:U8)`
+# and `v:[]`). mixed_defaulted_tuple_type went to tests/sim/ (2026-10-04).
 
 # Import tests (2f-lnimport): multi-file — an importer plus the unit(s) it
 # imports. Each test names its inputs via the `:files:` header; every .prp in
@@ -418,18 +373,16 @@ sh_test(
 )
 
 # What a PLAIN `import("unit")` binds to when that same unit is ALSO supplied as
-# a pre-built IR input — distinct from prp-import-lg above, which covers the
+# a pre-built IR input -- distinct from prp-import-lg above, which covers the
 # EXPLICIT `import("lg:name")` form. The contract:
 #   no ln:/lg: input -> re-parse the sibling .prp into a fresh LNAST
 #   ln: input        -> reuse that LNAST, do NOT re-parse the sibling
-#   lg: input        -> call the compiled LGraph directly (nothing to parse)
-# The ln:/lg: artifacts are built from a DIFFERENT definition of the same unit,
-# each with a distinct output width, so the width the importer instantiates says
-# which definition actually won; `--result-json` inputs says whether the sibling
-# was re-parsed. Split into two targets so the half lhd already honours is
-# enforced on every run, while the lg: half stays visible and runnable on demand
-# without breaking the build: today a lg: input does not resolve a plain import
-# at all, and the compile silently falls back to re-parsing the sibling source.
+# The ln: artifact is built from a DIFFERENT definition of the same unit with a
+# distinct output width, so the width the importer instantiates says which
+# definition won; `--result-json` inputs says whether the sibling was re-parsed.
+# A `lg:` input does NOT override a plain import (the docs define an import as
+# the source; a compiled lgraph is reached by `import("lg:unit")`): the
+# "lg: wins" half was dropped 2026-10-05.
 sh_test(
     name = "prp-import-ir-precedence",
     srcs = ["tests/imports/ir_import_precedence_test.sh"],
@@ -438,17 +391,6 @@ sh_test(
         "ln_only",
     ],
     data = ["//lhd"],
-)
-
-sh_test(
-    name = "prp-import-ir-precedence-lg",
-    srcs = ["tests/imports/ir_import_precedence_test.sh"],
-    args = [
-        "lg_only",
-        "ln_and_lg",
-    ],
-    data = ["//lhd"],
-    tags = ["fixme"],
 )
 
 # Simulation tests (tests/sim/*.prp, `:type: simulation`): a synthesizable DUT
@@ -492,32 +434,16 @@ cc_direct_headers(
 # high window reading earlier latches' `_din`). Kept as an empty list so the
 # next known-failing fixture has a place to land.
 _SIM_FIXME = [
-    # gate_on_named_clock_port was PROMOTED out of this list (2026-09-30): its
-    # gates are the Clock_cell `Clock(clock_pin=, enable=)` now, which folds
-    # whatever the clock port is called.
+    # chained_clock_gates_mixed_phase was PROMOTED out (2026-10-05): the active-low
+    # cell is `Clock(clock_pin=, enable=, invert=true)` now.
     #
-    # PENDING a user decision (clock lane, 2026-09-30). These fixtures use the
-    # clock LEVEL as data -- a latch transparent while `clk` is high/low
-    # (`if !clk { l = d }`, the L1/L2 buffers, the ICG preview latch), an
-    # inverted gated clock -- or a second clock the testbench drives as a Bool
-    # waveform (`acc.clkb = clock == 2`). Under the `Clock` type (qa.md
-    # Appendix 6: a Clock only drives clock pins, a Clock_cell or a Clock port;
-    # no clock-as-data; no derived clocks) neither is expressible in Pyrope,
-    # and a clock_pin naming a Bool is an error. Whether a latch may be gated
-    # by a Clock, and how a test drives a second Clock (ruling 57, lane
-    # sim-multiclock), is open; the sim machinery they cover still serves
-    # Verilog-origin designs.
-    "chained_clock_gates_mixed_phase",
-    "flop_feeds_transparent_high_latch",
-    "flop_sim_negedge_sole_clock",
-    "flop_sim_peek_secondary",
-    "flop_sim_secondary_negedge",
+    # latch_gated_feedback is a genuine `lhd sim` BUG (2026-10-04 pass): a latch
+    # enabled by a same-module gated Clock ignores the gate (iverilog on the
+    # emitted Verilog holds, the sim keeps advancing). Every other former occupant
+    # was ported to the `Clock` type (a latch gated by the clock LEVEL is
+    # `enable=clk, enable_high=false`; a second domain is
+    # `Clock(clock_pin=clk, enable=en)` with the testbench driving `en`).
     "latch_gated_feedback",
-    "latch_sim_clockgate_high",
-    "latch_sim_l1_buffer",
-    "latch_sim_nonref_clock_window",
-    "latch_sim_split_child_phase",
-    "multiclock_two_domain",
 ]
 
 [
@@ -585,11 +511,9 @@ _SIM_FIXME = [
 # fired = the driven trace re-fires the assert; no-refire = the loud
 # free-initial-state warning). The replay compiles a sim driver, hence the
 # sim_runtime_hdrs data dep. Distinct `prp-verify-` prefix.
-# PENDING the clock-phase latch decision (see _SIM_FIXME): a latch transparent
-# while `clk` is low reads the Clock as data.
-_VERIFY_FIXME = [
-    "latch_negedge_enable",
-]
+# latch_negedge_enable was PROMOTED out of this list (2026-10-04): the latch is
+# `enable=clk, enable_high=false` on a `Clock` port.
+_VERIFY_FIXME = []
 
 [
     sh_test(
@@ -776,31 +700,27 @@ _EQUIV_SIM = [
             # files are the real source form of each shape, and all three
             # directions prove. The writer half of both is pinned as a TEXT gate
             # by //pass/prp_writer:prp_writer_decl_emit_test.sh.
-            # partsel_oob_ascending (2026-08-02 chimera sweep): the golden does
-            # not even READ -- an out-of-range select on an ascending vector
-            # lowers to a negative shift -- so there is no forward direction to
-            # run until inou/slang resolves the select to X.
-            "tests/equiv/partsel_oob_ascending.prp",
             # latch_rule_a / latch_rule_b / reg_clock_from_logic MOVED to
             # tests/errors/ (2026-08-08): all three are COMPILE REFUSALS (latch
             # contract rules A and B; the tolg clock whitelist), so there is no
             # equivalence to check and an equiv target could only ever be a
             # fixme placeholder. The errors tier asserts the refusal itself.
-            "tests/equiv/dual_async_set_reset.prp",
-            "tests/equiv/mem_write_during_reset.prp",
-            "tests/equiv/async_mem_reset_demoted.prp",
-            "tests/equiv/reg_decl_init_dropped.prp",
-            "tests/equiv/selfref_concat_assign.prp",
             # Phase-aware default LEC handles the promoted phase_* pairs.
-            # ...and the five LEC-REFUTED trackers: these round-trip fine, so
-            # the failure is a SILENT MISCOMPILE the miter catches.
+            # The five LEC-REFUTED trackers (mem_write_during_reset,
+            # async_mem_reset_demoted, reg_decl_init_dropped,
+            # selfref_concat_assign, partsel_oob_ascending) were PROMOTED out of
+            # this list (2026-10-04): the first four references were the writer's
+            # own broken output pasted in (the reader and writer were right; each
+            # `.prp` is now the real source form), and partsel_oob_ascending was
+            # a genuine reader bug (an entirely out-of-range dynamic select now
+            # reads X instead of lowering to a negative shift).
             # divided_clock_decl_order MOVED to tests/errors/ (2026-09-30):
             # ruling 81 makes a register used as a clock a derived clock, an
             # error in Pyrope and in the Verilog reader.
-            # bit_selected_clocks{,_1}: PENDING (clock lane, 2026-09-30) -- see
-            # the fixme list below.
-            "tests/equiv/bit_selected_clocks.prp",
-            "tests/equiv/bit_selected_clocks_1.prp",
+            # bit_selected_clocks{,_1} were PROMOTED out (2026-10-04/05): the `.prp`
+            # gates each bit clock with `Clock(clock_pin=, enable=)` and the golden
+            # spells real ICGs (_1 gathers them into a clock bus and picks one per
+            # bit at compile time, which the reader resolves).
             # comb_array_const_index_read is the same shape of exclusion: it is
             # a MEMORY design, and lgcheck's bounded miter does not run to
             # completion on it (INCONCLUSIVE, not refuted). What it regresses --
@@ -1043,6 +963,7 @@ _STATEMATCH_COMB = [
     "packed_field_partial_default",
     "packed_variable_modifiers",
     "partsel_oob_ascending",
+    "partsel_oob_descending",
     "port_named_like_module",
     "range_step_value",
     "ready_signal_chain",
@@ -1148,29 +1069,21 @@ _STATEMATCH_COMB = [
     "xor_neg_one_unsigned_ctx",
 ]
 
-_STATEMATCH_FIXME = [
-    "bit_selected_clocks",  # PENDING the clock lane's ICG/bit-clock mapping (see the equiv fixme list)
-    "bit_selected_clocks_1",  # same
-    "dual_async_set_reset",  # `lhd compile` refuses the .v (attr-conflict: two async rungs on one Q slot)
-    "mem_const_idx",  # mems: only 0/1 paired
-    "mem_fwd_selfwrite",  # ref memory vs golden two-flop representation
-    "mem_pending_sync_init",  # ref memory vs golden output flop representation
-    "phase_two_clock_ports",  # regs: only 0/2 paired
-    # A narrower Pyrope flop vs the LIVE SLICE of a wider golden flop, on
-    # purpose: the fixtures pin lec's state windows (prp-equiv proves them
-    # unbounded); semdiff pairs state by name AND width, so nothing pairs here.
+# State-name pairing cannot apply to these pairs BY DESIGN (README "gap class 4",
+# different representation): the pair pins a memory vs the golden's named flops
+# (mem_fwd_selfwrite, mem_pending_sync_init) or a narrower flop vs the live slice
+# of a wider golden flop (state_window_*, pinned by prp-equiv's lec windows:
+# semdiff pairs state by name AND width, so nothing can pair). Excluded
+# (2026-10-04) rather than left as permanent fixme placeholders; prp-equiv-* /
+# prp-v2prp2v-* carry the real claim.
+_STATEMATCH_BY_DESIGN = [
+    "mem_fwd_selfwrite",
+    "mem_pending_sync_init",
     "state_window_delay",
     "state_window_valid_next",
     "state_window_valid_next_mut",
-    "struct_top_port",  # regs: only 0/1 paired
-    "type_alias_generic_attr",  # regs: only 0/1 paired -- the reg lives in the GENERIC CHILD instance
-    # (`add<Elem_T>`), the hand-written golden is flat, and the harness
-    # compares TOP-level state only, so a hierarchical golden reports
-    # "golden has 0" instead. prp-equiv + prp-v2prp2v both PROVE, which is
-    # the fixture's actual claim (a named alias through a generic keeps its
-    # width on the specialized ports and for `a.[bits]`).
-    "wire_reg",  # regs: only 0/1 paired
 ]
+
 
 [
     sh_test(
@@ -1193,9 +1106,6 @@ _STATEMATCH_FIXME = [
             [prp_file[:-len(".prp")] + "/*.prp"],
             allow_empty = True,
         ),
-        tags = ["fixme"] if (
-            prp_file.split("/")[-1].split(".")[0] in _STATEMATCH_FIXME
-        ) else [],
     )
     for prp_file in glob(
         ["tests/equiv/*.prp"],
@@ -1204,7 +1114,7 @@ _STATEMATCH_FIXME = [
             "tests/equiv/*_tb.prp",
             # no header, no golden .v
             "tests/equiv/accum.prp",
-        ] + _PRPLEC_SKIP + ["tests/equiv/%s.prp" % s for s in _STATEMATCH_COMB],
+        ] + _PRPLEC_SKIP + ["tests/equiv/%s.prp" % s for s in _STATEMATCH_COMB + _STATEMATCH_BY_DESIGN],
     )
 ]
 
@@ -1213,96 +1123,10 @@ _STATEMATCH_FIXME = [
 # also never actually carried the `fixme` tag its comment claimed, so it had been
 # running -- and failing -- in the default `bazel test //...` all along.
 
-[
-    sh_test(
-        name = "prp-equiv-%s" % base,
-        srcs = ["tests/pyrope_test.py"],
-        args = [
-            "-i",
-            "$(location //inou/prp:tests/equiv/%s.prp)" % base,
-        ],
-        data = [
-            "//inou/prp:tests/lec.py",
-            "//inou/prp:tests/prplib.py",
-            "//inou/prp:tests/pyrope_test.py",
-            "//inou/prp:tests/equiv/%s.prp" % base,
-            "//inou/prp:tests/equiv/%s.v" % base,
-            "//lhd",
-        ],
-        tags = ["fixme"],
-        deps = ["//inou/yosys:scripts"],
-    )
-    for base in [
-        # async_reset_enable was PROMOTED out of this list (2026-07-03): the
-        # slang reader demotes an edge-triggered reset with no extractable
-        # async rung to a synchronous one (async-reset-as-sync; sound because
-        # LEC/sim observe state only after clock updates), and the pair runs
-        # as :type: equiv_slang since yosys read_verilog hard-errors on the
-        # compound `if (reset || arst)` guard (proc_dff multi-edge).
-        # The six latch_* pairs were PROMOTED out of this list (2026-07-20):
-        # rewritten to `pub mod` + the shipped `reg NAME:TYPE:[latch=true]`
-        # spelling (latch_enable_hold included); they use default native LEC.
-        # struct_init_whole_read / instance_conn_struct_ident /
-        # struct_selfref_pattern / instance_out_struct_ident were PROMOTED out
-        # of this list (2026-07-03); native Slang reads their goldens in
-        # ordinary prp-equiv-* tests.
-        #
-        # The three comb-array store-loss trackers (array_store_stale_rhs,
-        # arr_comb_mux_const, arr_comb_tmp) were PROMOTED out of this list
-        # (2026-07-27). One root cause covered all three: upass.ssa cleared
-        # has_dest for a >=3-child (tuple_set) store — correct, its DEST must
-        # not be versioned — but then let the node fall through to the
-        # structural verbatim copy, so its INDEX and VALUE operands never
-        # followed rename_map. A reassigned `mut` therefore reached the store
-        # din on its stale base name, constprop folded that to the declaration
-        # value and DCE deleted the real write. upass_ssa.cpp now routes such a
-        # store through the same target-verbatim/operands-renamed arm as
-        # tuple_get/tuple_add/attr_*. All three prove; arr_comb_tmp also left
-        # _V2PRP2V_VERILOG_FIXME. Surfaced by lhdsuite //bench:minion_lec
-        # (minion_dcache_tensor_load{,_p1}); see lhdsuite fixme.md 1h.
-        #
-        # ── corpus-mined category trackers (2026-07-29) ──────────────────────
-        # One minimal repro per remaining hard-failure category found by the
-        # ChiGen/ChiBench sweep. Each .v is <= 25 lines with 1-4 bit signals and
-        # (where an array is needed) at most 4 entries of 4 bits, so the whole
-        # set costs well under a second. Every one FAILS today -- run them with
-        #   bazel test //inou/prp:prp-equiv-latch_rule_b --test_tag_filters=
-        # The root cause is written at the top of each .v/.prp pair.
-        # latch_rule_a / latch_rule_b MOVED to tests/errors/ (2026-08-08) — a
-        # compile REFUSAL has no equivalence to check, so the errors tier
-        # asserts the diagnostic instead of a fixme equiv placeholder.
-        "dual_async_set_reset",  # a flop needs TWO async rungs; the cell has one slot
-        # The three pure prp_writer trackers were all PROMOTED out (2026-07-29) --
-        # writer_undefined_mux (undeclared `_mux_N`), tolg_field_read_zero (the
-        # nested-mut hoist dropped an array's type AND its `initial` contents) and
-        # writer_bad_char (module names were not backtick-escaped). Each proves in
-        # all three directions now; the writer half of the last two is pinned as a
-        # TEXT gate by //pass/prp_writer:prp_writer_decl_emit_test.sh.
-        # reg_clock_from_logic MOVED to tests/errors/ (2026-08-08), same reason.
-        # LEC-REFUTED categories (these COMPILE clean -- the miscompile is silent):
-        "mem_write_during_reset",  # memory write not gated by the async reset
-        "async_mem_reset_demoted",  # async reset OF a memory demoted to sync
-        "reg_decl_init_dropped",  # `reg x = 1'b1;` power-on value dropped
-        "selfref_concat_assign",  # self-referential whole-vector assign never driven
-        # ── corpus-mined category tracker (2026-08-02 chimera sweep) ─────────
-        "partsel_oob_ascending",  # out-of-range select on a `[0:N]` vector: negative shift, not X
-        # PENDING (clock lane, 2026-09-30): the Pyrope side clocks flops by
-        # `(clk & gate0) & gate` over `U1` data, which the `Clock` type rejects
-        # (a clock_pin names a Clock). The Pyrope form of these Verilog idioms
-        # -- a bit of a clock bus as a Clock port, the gate as
-        # `Clock(clock_pin=, enable=)` -- is ruling 81's unimplemented "map
-        # what fits" half, and a raw AND gate is not an ICG (a Clock_cell
-        # latches its enable), so the goldens change with it.
-        "bit_selected_clocks",
-        "bit_selected_clocks_1",
-        # The three formal phase-scheduler trackers (phase_latch_flop_edges,
-        # phase_hier_latch_neg, phase_clock_gate_chain) were PROMOTED out of
-        # this list (2f-lec / 2f-latch M10): the encoder now schedules latches
-        # and negedge endpoints over four microsteps per source period, so all
-        # three PROVE. See the equiv-glob note above for why they run under
-        # the default native LEC solver.
-    ]
-]
+# The explicit `fixme` list of equiv trackers (one `prp-equiv-<name>` per entry)
+# is EMPTY (2026-10-05): the last occupant, bit_selected_clocks_1, passes (the
+# reader resolves a compile-time pick of one clock of a clock bus). A new
+# known-failing equiv pair would be listed here again with `tags = ["fixme"]`.
 
 # Native-Pyrope check within v2prp2v. The slang reader lowers each golden
 # <name>.v to Pyrope (upass/prp_writer); `lhd lec` recompiles that Pyrope and
@@ -1383,31 +1207,14 @@ _V2PRP2V_NATIVE_FIXME = [
     # latch_rule_a / latch_rule_b / reg_clock_from_logic dropped 2026-08-08:
     # both halves moved to tests/errors/, so `tests/equiv/*.v` no longer globs a
     # target for them.
-    "dual_async_set_reset",
     # negative_array_index PROMOTED out (2026-08-06): prp-v2prp2v-negative_array_index
     # passes — the round trip proves against the golden.
-    "blocking_ff_state",
-    # 2026-08-02 chimera sweep: the golden does not READ (out-of-range select on
-    # an ascending vector lowers to a negative shift), so neither leg can run.
-    "partsel_oob_ascending",
-    # PENDING (clock lane, 2026-09-30). The emitted Pyrope does not recompile
-    # under the `Clock` type: a clock_pin must name a Clock, and a Clock is not
-    # data. Ruling 81's "map what fits" half -- the writer (and reader) turning
-    # a Verilog ICG (`clk & en`, a latch + AND gate cell) into
-    # `Clock(clock_pin=clk, enable=en)` and a bit-selected bus clock into a
-    # Clock port -- is not implemented yet:
-    "bit_selected_clocks",
-    "bit_selected_clocks_1",
-    "conditional_state_call",
-    "mclk_derived",
-    "phase_clock_gate_chain",
-    # ...an active-low (`clk | ~en`) gate cell (a Clock_cell with `invert`),
-    # which `Clock(clock_pin=, enable=)` cannot spell yet:
-    "phase_clock_gate_invert",
-    # ...and clock-phase latches (`always_latch if (!clk)`) read the Clock as
-    # data, PENDING the user decision noted at _SIM_FIXME:
-    "phase_hier_latch_neg",
-    "phase_latch_flop_edges",
+    # The reader/writer map a Verilog ICG (`clk & en`, a latch + AND gate cell) to
+    # `Clock(clock_pin=clk, enable=en)`, the active-low gate (`clk | ~en_latch`,
+    # transparent while the clock is high) to `Clock(..., invert=true)`,
+    # clock-phase latches to `enable=clk, enable_high=false`, and a compile-time
+    # pick of one clock of a bus to that clock. phase_clock_gate_invert was
+    # PROMOTED out of this list (2026-10-05).
 ]
 
 # Two goldens cannot be checked against their original Verilog: both available
@@ -1493,19 +1300,10 @@ _V2PRP2V_VERILOG_FIXME = [
     # latch_rule_a / latch_rule_b / reg_clock_from_logic dropped 2026-08-08:
     # both halves moved to tests/errors/, so `tests/equiv/*.v` no longer globs a
     # target for them.
-    "dual_async_set_reset",
     # negative_array_index PROMOTED out (2026-08-06): the round trip proves.
-    "blocking_ff_state",
-    # The five LEC-REFUTED trackers. This is the only direction that catches
-    # them: they COMPILE clean both ways, so the native Pyrope check trivially
-    # passes, and prp-equiv-* only sees four of the five.
-    "mem_write_during_reset",
-    "async_mem_reset_demoted",
-    "async_reset_pin_wire",
-    "reg_decl_init_dropped",
-    "selfref_concat_assign",
-    # 2026-08-02 chimera sweep (see _V2PRP2V_NATIVE_FIXME for the root cause).
-    "partsel_oob_ascending",
+    # The LEC-REFUTED trackers (mem_write_during_reset, async_mem_reset_demoted,
+    # async_reset_pin_wire, reg_decl_init_dropped, selfref_concat_assign) were
+    # all PROMOTED out (2026-10-04); see the equiv-glob note above.
 ]
 
 [

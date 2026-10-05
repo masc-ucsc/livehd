@@ -1,4 +1,6 @@
-// FIXME tracker -- a declaration-time register initializer is DROPPED.
+// FIXED 2026-10-04: the .prp now declares `reg internal_full_n:U1 = 1`.
+// (Historical description follows.)
+// Tracker -- a declaration-time register initializer is DROPPED.
 // `reg internal_full_n = 1'b1;` gives the flop a power-on value of 1; the Pyrope
 // below declares a bare `reg internal_full_n:u1` with no `init=`, so the emitted
 // netlist powers up at 0. yosys' miter starts both sides from their declared

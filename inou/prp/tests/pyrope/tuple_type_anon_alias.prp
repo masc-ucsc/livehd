@@ -1,0 +1,22 @@
+/*
+:name: tuple_type_anon_alias
+:type: parsing lnast comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// `_:T` anonymous entries also work in a named tuple type and in a typed
+// declaration: entries are read by position.
+type Pair = (_:U4, _:U8)
+
+pub comb sum_pair(v:Pair) -> (o:U12) {
+  o = v[0] + v[1]
+}
+
+pub comb local_pair() -> (o:U12) {
+  mut x:(_:U4, _:U8) = (3, 54)
+  o = x[0] + x[1]
+}
+
+cassert(sum_pair(3, 54) == 57)
+cassert(sum_pair(v=(3, 54)) == 57)
+cassert(local_pair() == 57)

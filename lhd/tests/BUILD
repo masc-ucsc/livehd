@@ -266,15 +266,6 @@ sh_test(
 # Keep each fixture/backend under the test runtime budget. The Slop leg also
 # checks the backend-independent LEC proof and, with LHD_EXTERNAL_SIM=1 (see
 # AGENTS.md), the external Verilator twin.
-# TODO(clock lane, ruling 57): re-enable these fixme targets when the Pyrope
-# clock lane lands -- sim_rtl_roundtrip_{gated_latch_pair,latch_window}_{slop,llvm},
-# lhd_sim_explicit_clock_edges, lhd_sim_restart_clkb_test, sim_color_latch_oracle,
-# sim_color_vcd_fall_test (the *_v Verilog stand-ins cover them meanwhile).
-_ROUNDTRIP_CLOCK_LATCH_CASES = [
-    "gated_latch_pair",
-    "latch_window",
-]
-
 _ROUNDTRIP_CASES = [
     "latch_window",
     "cache_control",
@@ -301,10 +292,6 @@ _ROUNDTRIP_CASES = [
             backend,
         ],
         data = ["//lhd"],
-        # PENDING (clock lane, 2026-09-30): the generated Pyrope of a latch
-        # gated by the clock level reads the Clock as data (see
-        # inou/prp/BUILD _SIM_FIXME).
-        tags = ["fixme"] if case in _ROUNDTRIP_CLOCK_LATCH_CASES else [],
     )
     for case in _ROUNDTRIP_CASES
     for backend in [
@@ -333,14 +320,10 @@ sh_test(
         "//inou/prp:tests/sim/flop_sim_negedge_sole_clock.prp",
         "//lhd",
     ],
-    # PENDING (clock lane, 2026-09-30): the design uses the clock LEVEL as data
-    # (a latch gated by `clk`) or drives a second clock as a Bool waveform,
-    # which the Pyrope `Clock` type rejects; see inou/prp/BUILD _SIM_FIXME.
-    tags = ["fixme"],
 )
 
-# The Verilog stand-in of flop_sim_negedge_sole_clock (same flops, latch and
-# assertions) keeps the sole-explicit-negedge-clock coverage running meanwhile.
+# The Verilog twin of flop_sim_negedge_sole_clock (the original two-port
+# pclk/rclk form: same flops, latch and assertions).
 sh_test(
     name = "lhd_sim_explicit_clock_edges_v",
     size = "small",
@@ -453,17 +436,13 @@ sh_test(
     data = ["//lhd"],
 )
 
-# The same restart checks with a secondary clock `clkb` the testbench drives as
-# a Bool waveform: a restart must restore __clkprev_clkb (no invented rise).
+# The same restart checks with a second clock domain (the clock gated by an
+# enable the testbench drives): a restart must restore its edge state.
 sh_test(
     name = "lhd_sim_restart_clkb_test",
     srcs = ["lhd_sim_restart_test.sh"],
     data = ["//lhd"],
     env = {"RESTART_CLKB": "1"},
-    # PENDING (clock lane, 2026-09-30): the design uses the clock LEVEL as data
-    # (a latch gated by `clk`) or drives a second clock as a Bool waveform,
-    # which the Pyrope `Clock` type rejects; see inou/prp/BUILD _SIM_FIXME.
-    tags = ["fixme"],
 )
 
 # `lhd sim --vcd-on-fail` (sim_checkpoint_debug_plan, Stage D): on an assert fire,
@@ -1068,14 +1047,10 @@ sh_test(
         "//inou/prp:tests/sim/flop_feeds_transparent_high_latch.prp",
         "//lhd",
     ],
-    # PENDING (clock lane, 2026-09-30): the design uses the clock LEVEL as data
-    # (a latch gated by `clk`) or drives a second clock as a Bool waveform,
-    # which the Pyrope `Clock` type rejects; see inou/prp/BUILD _SIM_FIXME.
-    tags = ["fixme"],
 )
 
-# The Verilog stand-in (posedge flop -> transparent-high latch, the fixture's
-# post-rise assertions in its tb) keeps the schedule gate running meanwhile.
+# The Verilog-origin twin (posedge flop -> transparent-high latch, the fixture's
+# post-rise assertions in its tb): same schedule gate through slang -> lg.
 sh_test(
     name = "sim_color_latch_oracle_v",
     srcs = ["sim_color_latch_oracle.sh"],
@@ -1108,10 +1083,6 @@ sh_test(
         "//inou/prp:tests/sim/flop_sim_negedge_sole_clock.prp",
         "//lhd",
     ],
-    # PENDING (clock lane, 2026-09-30): the design uses the clock LEVEL as data
-    # (a latch gated by `clk`) or drives a second clock as a Bool waveform,
-    # which the Pyrope `Clock` type rejects; see inou/prp/BUILD _SIM_FIXME.
-    tags = ["fixme"],
 )
 
 sh_test(

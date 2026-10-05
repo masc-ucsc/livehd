@@ -1,0 +1,35 @@
+/*
+:name: vector_io_ports_runtime
+:type: simulation
+*/
+// Runtime values through a positional tuple port, in a comb (inlined) and in a
+// mod (a real instance whose ports are the leaves `v.0` / `v.1`), with the four
+// binding spellings.
+pub comb vector_io(v:(_:U4, _:U8)) -> (o:U12) {
+  o = v[0] + v[1]
+}
+
+pub mod vector_mod(v:(_:U4, _:U8)) -> (o:U12@[0]) {
+  o = v[0] + v[1]
+}
+
+pub mod top(a:U4, b:U8) -> (o1:U12@[0], o2:U12@[0], o3:U12@[0], o4:U12@[0], m1:U12@[0], m2:U12@[0]) {
+  o1 = vector_io(v=(a, b))
+  o2 = vector_io((a, b))
+  o3 = vector_io([a, b])
+  o4 = vector_io(a, b)
+  m1 = vector_mod(v=(a, b))
+  m2 = vector_mod(a, b)
+}
+
+test top.sums {
+  mut acc = top
+  tick 4 {
+    acc.a = clock
+    acc.b = 50 + clock
+    step
+    const want = 50 + 2 * clock
+    assert(acc.o1 == want and acc.o2 == want and acc.o3 == want and acc.o4 == want, "comb forms")
+    assert(acc.m1 == want and acc.m2 == want, "mod forms")
+  }
+}

@@ -7751,8 +7751,33 @@ bool uPass_runner::try_inline_func_call() {
       return;
     }
     const std::size_t first = io.inputs.front().name == "self" ? 1 : 0;
-    if (io.inputs.size() != first + 1 || args.size() <= first + 1 || io.inputs[first].is_ref
-        || (io.inputs[first].kind != Io_kind::none && io.inputs[first].array_size == 0)
+    // The sole parameter is ONE input, or a positional tuple port
+    // `v:(_:U4, _:U8)` flattened to the leaves `v.0`, `v.1`, ... (digit-only
+    // suffixes of one prefix; a named-tuple group keeps its named-argument rule).
+    const auto sole_anon_group = [&]() {
+      if (io.inputs.size() < first + 2) {
+        return false;
+      }
+      std::string prefix;
+      for (std::size_t i = first; i < io.inputs.size(); ++i) {
+        const auto& nm  = io.inputs[i].name;
+        const auto  dot = nm.find('.');
+        if (dot == std::string::npos || dot == 0 || dot + 1 >= nm.size() || io.inputs[i].is_ref || io.inputs[i].is_varargs
+            || !std::all_of(nm.begin() + static_cast<std::ptrdiff_t>(dot) + 1, nm.end(), [](char c) { return c >= '0' && c <= '9'; })) {
+          return false;
+        }
+        const auto pre = nm.substr(0, dot);
+        if (i == first) {
+          prefix = pre;
+        } else if (pre != prefix) {
+          return false;
+        }
+      }
+      return true;
+    };
+    const bool single_entry = io.inputs.size() == first + 1 && !io.inputs[first].is_ref
+                              && !(io.inputs[first].kind != Io_kind::none && io.inputs[first].array_size == 0);
+    if (!(single_entry || sole_anon_group()) || args.size() <= first + 1
         || std::any_of(args.begin(), args.end(), [](const Actual& a) { return a.is_named || a.is_ref_pass; })) {
       return;
     }

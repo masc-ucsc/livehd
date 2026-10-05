@@ -5,17 +5,16 @@
 :pyrope_top: selfref_concat_assign
 */
 //
-// FIXME tracker -- a SELF-REFERENTIAL whole-vector assign is never solved
-// (LEC-refuted). `assign p = { A[3]^p[2], A[2]^p[1], A[1]^p[0], A[0] };` is the
-// classic prefix/ripple idiom and is perfectly legal: every bit depends only on
-// STRICTLY LOWER bits, so the net settles in one pass. The reader never
-// materializes it -- look at the Pyrope below, `p` is left at `0ub????` and the
-// output expression reads that poison instead of the settled value.
-// Distinct from selfref_slice_assign: there several separate `assign w[i] =`
-// statements are SEQUENCED in source order; here a single whole-vector assign is
-// simply never driven at all.
+// A SELF-REFERENTIAL whole-vector assign. `assign p = { A[3]^p[2], A[2]^p[1],
+// A[1]^p[0], A[0] };` is the classic prefix/ripple idiom and is perfectly legal:
+// every bit depends only on STRICTLY LOWER bits, so the net settles in one pass.
+// The Pyrope spelling is a `wire` read in its own definition (the slang reader
+// and the writer emit exactly this). This file used to leave `p` at `0ub????`, so
+// the output read that poison instead of the settled value and the pair refuted.
+// FIXED/PROMOTED 2026-10-04. Distinct from selfref_slice_assign: there several
+// separate `assign w[i] =` statements are SEQUENCED in source order.
 pub comb selfref_concat_assign::[timecheck=false](A:U4) -> (O:U4) {
-  mut p = 0
-  p = 0ub????
-  O = (A & 1) | ((((A >> 1) & 1) ^ (p & 1)) << 1) | ((((A >> 2) & 1) ^ ((p >> 1) & 1)) << 2) | ((((A >> 3) & 1) ^ ((p >> 2) & 1)) << 3)
+  wire p:U4 = nil
+  p = (((A#[3..<4] ^ p#[2..<3]) & 1) << 3) | (((A#[2..<3] ^ p#[1..<2]) & 1) << 2) | (((A#[1..<2] ^ (p & 1)) & 1) << 1) | (A & 1)
+  O = p
 }

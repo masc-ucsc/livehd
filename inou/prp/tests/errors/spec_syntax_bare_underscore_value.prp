@@ -1,0 +1,9 @@
+/*
+:name: spec_syntax_bare_underscore_value
+:type: error
+:error: `_` alone is not a name
+*/
+// `_:T` is an anonymous entry only inside a tuple TYPE (`(_:U4, _:U8)`); a lone
+// `_` as a value or an argument stays reserved.
+comb f(a:U8) -> (o:U8) { o = a }
+const x = f(_)  // locate_error_here

@@ -1,0 +1,6 @@
+/*
+:name: tuple_type_bare_decl
+:type: error
+:error: a tuple-type field must be named
+*/
+mut y:(U4, U8) = (3, 54)  // locate_error_here

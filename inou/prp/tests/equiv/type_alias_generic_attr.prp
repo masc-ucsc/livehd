@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: type_alias_generic_attr
 :pyrope_top: type_alias_generic_attr
+:name_match_only: false
 */
 
 // A named scalar alias passed through a generic must preserve the input

@@ -1,0 +1,30 @@
+/*
+:name: vector_io_ports
+:type: parsing lnast comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// A positional tuple port. `v:(_:U4, _:U8)` names only the entry TYPES (`_:T` is
+// an anonymous positional entry), `v:[]` is the unsized array type that accepts
+// any tuple or array, and the single parameter may be bound four ways:
+//   f(v=(3,54))  f((3,54))  f([3,54])  f(3,54)
+// (the last folds the positional arguments into the sole parameter). All give 57.
+pub comb vector_io(v:(_:U4, _:U8)) -> (o:U12) {
+  o = v[0] + v[1]
+}
+
+pub comb vector_any(v:[]) -> (o:U12) {
+  o = v[0] + v[1]
+}
+
+const a = vector_io(v=(3, 54))
+const b = vector_io((3, 54))
+const c = vector_io([3, 54])
+const d = vector_io(3, 54)
+cassert(a == 57 and b == 57 and c == 57 and d == 57)
+
+const e = vector_any(v=(3, 54))
+const f = vector_any((3, 54))
+const g = vector_any([3, 54])
+const h = vector_any(3, 54)
+cassert(e == 57 and f == 57 and g == 57 and h == 57)

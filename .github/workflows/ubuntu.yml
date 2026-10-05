@@ -6,7 +6,7 @@ on:
 
 jobs:
   test-opt:
-    name: Build everything
+    name: Optimized regression
     runs-on: macos-26
     env:
       CC: clang
@@ -31,79 +31,11 @@ jobs:
           "$CC" --version
           "$CXX" --version
 
-      - name: Install Verilog simulator
-        run: |
-          brew install icarus-verilog
-          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
-          command -v iverilog vvp
-
-      - run: bazel test -c dbg --test_output=errors //...
+      - name: Run self-contained regression
+        run: bazel test -c opt --test_output=errors //...
 
       # A full build is expensive and failures tend to happen late. Keep
       # successfully produced Bazel outputs for the next run either way.
-      - name: Save Bazel cache
-        if: always()
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: |
-            ~/Library/Caches/bazel
-          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
-
-  coverage:
-    name: Gather coverage metrics
-    runs-on: macos-26
-    env:
-      CC: clang
-      CXX: clang++
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v7
-
-      - name: Restore Bazel cache
-        id: bazel-cache
-        uses: actions/cache/restore@v6.1.0
-        with:
-          path: |
-            ~/Library/Caches/bazel
-          key: bazel-coverage-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-${{ github.run_attempt }}
-          restore-keys: |
-            bazel-coverage-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-
-            bazel-coverage-${{ runner.os }}-${{ runner.arch }}-clang21-
-
-      - name: Print the list of targets
-        run: bazel query --output label_kind //...
-
-      - name: Show compiler selection
-        run: |
-          "$CC" --version
-          "$CXX" --version
-
-      - name: Install Verilog simulator
-        run: |
-          brew install icarus-verilog
-          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
-          command -v iverilog vvp
-
-      # continue-on-error so partial coverage is still uploaded when some
-      # tests fail (the failure is re-raised after the upload below).
-      - id: coverage
-        continue-on-error: true
-        # Same instrumentation filter as scripts/getcov.sh so the dashboard
-        # measures the main packages only (no third_party / helper tooling).
-        run: bazel coverage --keep_going --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all --instrumentation_filter='^//(core|graph|lnast|parser|inou|lhd|lsp|pass|upass|ware|simlib|packages)(/|:)' //...
-
-      - uses: codecov/codecov-action@v7
-        with:
-          slug: masc-ucsc/livehd
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./bazel-out/_coverage/_coverage_report.dat
-          disable_search: true
-
-      - name: Propagate test failures
-        if: steps.coverage.outcome == 'failure'
-        run: exit 1
-
       - name: Save Bazel cache
         if: always()
         uses: actions/cache/save@v6.1.0

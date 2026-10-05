@@ -51,13 +51,11 @@
 // design with NO register on the implicit reference clock gets no edge detection
 // at all). Here the parent supplies a proper reference clock and the child is an
 // ordinary instance -- only the latch's gating port is the odd one out.
-mod prevrf(preview_clk:Bool, rf_clk:Bool, wr_en_next:Bool, d:U8) -> (q:U8@[0]) {
-  reg en_q:Bool:[latch=true]                        // transparent while preview_clk is LOW
+mod prevrf(preview_clk:Clock, rf_clk:Clock, wr_en_next:Bool, d:U8) -> (q:U8@[0]) {
+  reg en_q:Bool:[latch=true, enable=preview_clk, enable_high=false] = nil                        // transparent while preview_clk is LOW
   reg mem:U8:[clock_pin=rf_clk, posclk=false] = 0
   q = mem
-  if !preview_clk {
-    en_q = wr_en_next
-  }
+  en_q = wr_en_next
   if en_q {
     mem = d
   }
@@ -67,7 +65,7 @@ mod prevrf(preview_clk:Bool, rf_clk:Bool, wr_en_next:Bool, d:U8) -> (q:U8@[0]) {
 // minion_frontend_thread_buffer does (`preview_clk_i(clock_gated)`,
 // `rf_clk_i(clk_i)`, one net at every instantiation site). `clk` is the tick --
 // the testbench never drives it, just as minion's never drives clk_i.
-mod pvtop(clk:Bool, wr_en_next:Bool, d:U8) -> (q:U8@[0]) {
+mod pvtop(clk:Clock, wr_en_next:Bool, d:U8) -> (q:U8@[0]) {
   q = prevrf(preview_clk=clk, rf_clk=clk, wr_en_next=wr_en_next, d=d)
 }
 

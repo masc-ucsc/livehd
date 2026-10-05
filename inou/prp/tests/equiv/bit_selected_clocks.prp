@@ -5,10 +5,10 @@
 :pyrope_top: bit_selected_clocks
 */
 // Scalar reference for independently clocked bits of a packed register.
-pub mod bit_selected_clocks(clk:U1, gate0:U1, gate1:U1, gate2:U1, gate:U1, clr_:Reset, data:U3, enable:U3) -> (q:U3@[]) {
-  wire c0:U1 = (clk & gate0) & gate
-  wire c1:U1 = (clk & gate1) & gate
-  wire c2:U1 = (clk & gate2) & gate
+pub mod bit_selected_clocks(clk:Clock, gate0:U1, gate1:U1, gate2:U1, gate:U1, clr_:Reset, data:U3, enable:U3) -> (q:U3@[]) {
+  const c0 = Clock(clock_pin=clk, enable=(gate0 & gate) != 0)
+  const c1 = Clock(clock_pin=clk, enable=(gate1 & gate) != 0)
+  const c2 = Clock(clock_pin=clk, enable=(gate2 & gate) != 0)
   reg q__bit0:U1:[clock_pin=c0, reset_pin=clr_, async=true, negreset=true] = 0
   reg q__bit1:U1:[clock_pin=c1, posclk=false, reset_pin=clr_, async=true, negreset=true] = 1
   reg q__bit2:U1:[clock_pin=c2, reset_pin=clr_, async=true, negreset=true] = 0
