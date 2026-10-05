@@ -2335,3 +2335,41 @@ Scope caution for any extrapolation to the ALU: this fixture holds NODES at 64
 with ONE operator and makes all but two sources CONSTANT.  `rt_alu_gate` has
 6,597 nodes, 6,135 consts and 15 operators up to arity 65.  The ladder isolates
 one axis; it is not a model of that design.
+
+## 24. The two long `-O0` ALU probes ended with NO RESULT
+
+Both have exited.  Neither produced a result, and the cause is not established.
+
+    PID 2877239  proto_probe --host-var  -O0   log 272 B, last line `[host-specialize ...`
+    PID 3238710  total_probe             -O0   log 451 B, last line `[specialize+check ...`
+
+**Neither log carries an exit trailer**, so `/usr/bin/time` never ran its epilogue
+and the processes did not return normally.  Recorded in `experiments.jsonl`
+with `exit: null` and
+`exit_evidence: "MISSING -- the log carries no exit evidence; status is UNKNOWN"`.
+**Not inferred as success and not inferred as failure.**
+
+Cause: undetermined.  The only OOM line in `dmesg` is a `python3` process
+(PID 4166348, Oct 4 22:13), not either probe.  Load average was high (40 at one
+point).  Nothing in the evidence identifies what ended them, and no claim is
+made.
+
+What they would have contributed had they finished, for the record:
+
+* **2877239** -- three seeds, NO trace and NO control.  Feasibility evidence
+  for the proved `mixDriver` with the OLD `hwAPVar`.  Its binary also predates
+  the checker-rejection gate fix, so a rejection would have carried the old
+  exit status.
+* **3238710** -- full acceptance on `mixDriver` + `hwAPVarT` at `-O0`.  This was
+  the `-O0` half of the same-source `-O0`/`-O2` pair, so **that controlled
+  comparison on the real ALU is still missing.**
+
+The `-O2` run of the same configuration DID finish (section 18, 61,330 s,
+exit 0), so the covered backend has one complete real-design result.  What is
+absent is its `-O0` counterpart, which is why section 18.2 still calls the
+fork-vs-covered ratio confounded.
+
+**Not relaunched.**  Section 18 already records the `-O2` result for this
+configuration and design, and the plan's rule is not to spend another
+multi-hour run merely to obtain another timing.  The controlled `-O0`/`-O2`
+question is better answered on the P1 ladder, which runs in minutes.
