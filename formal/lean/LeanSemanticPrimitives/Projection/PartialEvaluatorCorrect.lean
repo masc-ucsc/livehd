@@ -74,10 +74,8 @@ theorem findAlt_eraseAlts : ∀ (as : List AAlt) (tag : Nat) (a : AAlt),
 
 /-! ## Shifting the partial environment -/
 
-@[simp] theorem PVal.shift_zero : ∀ v : PVal, PVal.shift 0 v = v
-  | .stat _   => rfl
-  | .dyn _    => by simp [PVal.shift]
-  | .cons a b => by simp [PVal.shift, PVal.shift_zero a, PVal.shift_zero b]
+-- `PVal.shift_zero` MOVED to `PartialEvaluator.lean` -- the `@[csimp]` fast
+-- path needs it there.  Still `@[simp]`, still in this namespace.
 
 theorem PVal.shift_succ : ∀ (n : Nat) (v : PVal),
     PVal.shift 1 (PVal.shift n v) = PVal.shift (n + 1) v
@@ -85,9 +83,7 @@ theorem PVal.shift_succ : ∀ (n : Nat) (v : PVal),
   | n, .dyn _    => by simp [PVal.shift]; omega
   | n, .cons a b => by simp [PVal.shift, PVal.shift_succ n a, PVal.shift_succ n b]
 
-@[simp] theorem PEnv.shiftBy_zero : ∀ env : PEnv, PEnv.shiftBy 0 env = env
-  | []        => rfl
-  | _ :: rest => by simp [PEnv.shiftBy, PEnv.shiftBy_zero rest]
+-- `PEnv.shiftBy_zero` MOVED to `PartialEvaluator.lean` for the same reason.
 
 theorem PEnv.shiftBy_succ : ∀ (n : Nat) (env : PEnv),
     PEnv.shiftBy 1 (PEnv.shiftBy n env) = PEnv.shiftBy (n + 1) env

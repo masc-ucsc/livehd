@@ -414,3 +414,36 @@ The residual still carries a per-design residue (`tl` 65 on `rt_alu_gate`,
 8.7.  Neither is a reason to open another optimization increment: the gap
 between the experiments and a theorem is A and B, not another factor on
 residual size.
+
+## Update 2026-10-05 -- the fork's CHANGE 2 is promoted; Obligation A now carries the whole asymptotic case
+
+`ProtoFast` carries TWO changes, and they have now been separated by
+measurement rather than by argument.
+
+**CHANGE 2 -- the `k = 0` shift arms -- is promoted and no longer a reason to
+prefer the fork.**  `PartialEvaluator.lean` now has `PVal.shiftFast` and
+`PEnv.shiftByFast` behind `@[csimp]` theorems `PVal.shift_eq_shiftFast` and
+`PEnv.shiftBy_eq_shiftByFast`.  `ProtoFast`'s own comment called this "the
+cheapest possible bridge if it ever earns promotion"; the `csimp` route is
+cheaper still than what it anticipated, because it does not change the
+definition at all -- the compiled code is replaced under a PROVED equality
+rather than by editing `PVal.shift`.  Both equalities are in `Audit.lean`.
+
+It bought **1.26×** on the host at 4,096 sources (P4, `PHASE6_PERF.md` §26) and
+narrowed the host/fork ratio from 90.1× to 70.5×.
+
+**What that leaves is Obligation A, and the measurement now says A is where the
+asymptotics live.**  The host's scaling exponent between 1,024 and 4,096
+sources was 2.019 before the promotion and 2.003 after -- unchanged.  So:
+
+* CHANGE 2 was a constant factor, and it is now in the proved path.
+* CHANGE 1 -- `PRes` gaining `| val : PVal → PRes`, so the `var` rule and
+  `prepare` stop copying the spine -- is the one that can move the exponent,
+  and it is exactly Obligation A.
+
+This sharpens the earlier text above, which treated A and B as alternatives
+ordered by convenience.  They are not interchangeable: **B cannot change the
+curve and A can.**  Nothing in the earlier argument is withdrawn -- B is still
+the smaller proof -- but the reason to do A is no longer "the fork is faster",
+it is "the fork is asymptotically better and we have measured which of its two
+changes is responsible".

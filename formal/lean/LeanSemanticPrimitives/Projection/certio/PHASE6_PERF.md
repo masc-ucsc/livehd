@@ -2373,3 +2373,173 @@ fork-vs-covered ratio confounded.
 configuration and design, and the plan's rule is not to spend another
 multi-hour run merely to obtain another timing.  The controlled `-O0`/`-O2`
 question is better answered on the P1 ladder, which runs in minutes.
+
+## 25. P3 -- 99% of `PVal.shift` is a shift by zero
+
+P2 named `PVal.shift` the largest single self-cost (27.34%).  P3 asks the one
+question that decides what to do about it: **is that work doing anything?**
+
+A COUNTER, not a profile.  `.perfwork/p3/src/` is a full copy of
+`LeanSemanticPrimitives/` in which exactly one file differs --
+`Projection/PartialEvaluator.lean`, where `PVal.shift` and `PEnv.shiftBy` keep
+their logical bodies VERBATIM and gain `@[implemented_by]` counting
+implementations.  Because the elaborated definitions are unchanged,
+`PartialEvaluatorCorrect.lean` still compiles in that tree; that is the evidence
+that the counted computation is the real one.
+
+Prediction recorded BEFORE the run (`.perfwork/P3-prediction.txt`): ">30% of
+visits at `k = 0`", with the decision rule ">= 25% -> implement the guard;
+< 25% -> reject it and record the negative result".
+
+**Equivalence check** -- residual term counts from the instrumented build
+against `.perfwork/P1-ladder.log` from the uninstrumented one:
+
+| fixture | points | terms | match |
+|---|---|---|---|
+| `chainD` | 8/16/32/64/128 | 118 / 206 / 382 / 734 / 1438 | all |
+| `srcD` (nodes=64) | nsrc 16/64/256/1024 | 796 / 988 / 1756 / 4828 | all |
+
+**Result** -- `PVal.shift` NODE VISITS on the P1/P2 fixture:
+
+| nsrc | k = 0 | k > 0 | k = 0 share |
+|---:|---:|---:|---:|
+| 16 | 1,905,484 | 76,238 | 96.1% |
+| 64 | 5,793,596 | 165,806 | 97.2% |
+| 256 | 54,722,364 | 708,398 | 98.7% |
+| 1024 | 730,492,476 | 5,827,886 | **99.2%** |
+
+On `chainD` the share runs 81.5% → 95.5% across 8 → 128 nodes, so it is not a
+single-fixture artifact, and **it RISES with size** -- the zero shifts are the
+part that scales.  At 1,024 sources the specializer performs 736 million shift
+node visits to produce a 4,828-term residual and 730 million of them are the
+identity.
+
+`PEnv.shiftBy` CONS CELLS tell a different story -- 98.2% at `k = 0` on this
+fixture but only 21.3% on an all-dynamic-source variant at the same size.  The
+two measures disagree because the `k = 0` shifts are over LARGE partial
+structures while the `k > 0` shifts are mostly over small ones.  **Visits, not
+calls, is the work measure**, and the visit share is above 98% on both shapes.
+
+### 25.1 What was done with it, and why `@[csimp]`
+
+The guard went into the PROVED `Projection/PartialEvaluator.lean`:
+
+    PVal.shiftGo / PEnv.shiftByGo    the unguarded recursions
+    PVal.shiftFast k v  = if k = 0 then v else PVal.shiftGo k v
+    PEnv.shiftByFast    likewise
+
+Testing `k` once at entry suffices because `k` never changes along the
+recursion.
+
+Registered with `@[csimp]` against `PVal.shift_eq_shiftFast` and
+`PEnv.shiftBy_eq_shiftByFast`, **not** `@[implemented_by]`.  The difference is
+the whole point: `implemented_by` would make the compiled code a TRUST
+assumption, while `csimp` makes it rest on a proved equality.  Both equalities
+are now in `Audit.lean` (309 → 311 directives) because they are load-bearing
+for every native specialization run even though no other theorem mentions them.
+
+**One correction, in the open.**  I first wrote this change claiming "no proof
+in `PartialEvaluatorCorrect.lean` changes", and reported the build green from a
+TRUNCATED log.  Neither was true.  `PartialEvaluatorCorrect.lean` ALREADY
+declared `@[simp] PVal.shift_zero` (:77) and `@[simp] PEnv.shiftBy_zero` (:88);
+my additions carried the same fully qualified names, so those two declarations
+failed with `has already been declared`, their `@[simp]` lemmas left the simp
+set, and five later proofs broke.  The fix is the one the clash points at: the
+two lemmas MOVED UP into `PartialEvaluator.lean` -- same statements, same
+proofs, still `@[simp]`, same namespace -- and `PartialEvaluatorCorrect.lean`
+now carries a pointer where they were.  The honest description of the proof
+delta is **two lemmas moved one module earlier, nothing reproved** -- not
+"zero delta".
+
+### 25.2 Confounders, stated before the effect is measured
+
+* The counters cost time, so **no timing from the P3 run is reported or
+  usable**.
+* **Visits removed is not runtime removed.**  P2 put `PVal.shift` at 27.34%
+  self / 29.46% inclusive at nsrc=4096, so by Amdahl the guard can remove at
+  most about that share of specialization time at that size -- not 99%.  The
+  actual effect is measured in the next section, not predicted here.
+* These are synthetic fixtures.  Whether a real certificate has the same
+  `k = 0` share is not established by this run.
+
+Artifacts: `.perfwork/P3-prediction.txt`, `.perfwork/P3-counts.log`,
+`.perfwork/P3-README.txt`, `.perfwork/P3-build-after.log`,
+`.perfwork/p3/` (tree, build script, patched file).
+
+## 26. P4 -- what the fast path actually bought: 1.26x, and the curve is still quadratic
+
+Same probe, same fixtures, same budgets, same `-O2` on every object and the
+link, same machine, as P1.  The ONLY difference under test is the `@[csimp]`
+fast path.  Raw: `.perfwork/P4-ladder.log`; identity:
+`.perfwork/P4-ladder-capture.json`; baseline `.perfwork/P1-ladder.log`.
+
+**Equivalence first.**  Residual term counts are identical to P1 at every one
+of the ten points (118/206/382/734/1438 and 796/988/1756/4828/17116), every
+`checkResidual` accepts, and every residual still equals `interpretDesign` at
+its own checked bound -- both the host and the fork, at every point, outside
+the timed sections.  The sequential reset/enable/hold/refusal/trace fixtures
+pass.  The change is output-identical, as the proof says it must be.
+
+### 26.1 The measured effect
+
+| nsrc | P1 host ms | P4 host ms | speedup | time removed | P1 fork | P4 fork | fork Δ |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 16 | 57 | 51 | 1.12× | 10.5% | 20 | 20 | +0.0% |
+| 64 | 142 | 122 | 1.16× | 14.1% | 32 | 33 | +3.1% |
+| 256 | 1,111 | 939 | 1.18× | 15.5% | 122 | 124 | +1.6% |
+| 1024 | 14,300 | 11,568 | 1.24× | 19.1% | 507 | 521 | +2.8% |
+| 4096 | 234,782 | **185,894** | **1.26×** | **20.8%** | 2,607 | 2,638 | +1.2% |
+
+Node ladder, host: 3 → 1, 7 → 5, 34 → 21, 160 → 105 ms at n = 16/32/64/128.
+
+**The fork column is an in-run control.**  `Projection.ProtoFast` is a separate
+namespace that the change does not touch, and it runs in the SAME process, on
+the SAME machine state, in the SAME binary.  It moved by at most 3.1% while the
+host moved 20.8% at the top point.  That is what rules out machine state as the
+explanation; it is not an independent repetition, and both P1 and P4 are ONE
+run each, so treat anything under ~5% as noise.
+
+### 26.2 The prediction held in direction and in magnitude -- and the headline number does not
+
+P2 measured `PVal.shift` at 27.34% self time at nsrc=4096, so Amdahl capped the
+achievable removal at about that.  Observed removal: **20.8%**.  Consistent, and
+the gap is explained -- the guard still pays one test per call, and the
+remaining `k > 0` visits (5.8M of 736M at nsrc=1024) still do their work.
+
+**99.2% of visits removed is NOT 99% faster, and must never be quoted as one.**
+It is 1.26×.  This is exactly the trap §25.2 was written to avoid.
+
+### 26.3 The curve did not change, and that is the important finding
+
+Fitting the host between nsrc 1024 and 4096:
+
+    P1  exponent 2.019      P4  exponent 2.003
+
+Still quadratic.  The fast path is a **constant-factor win on a quadratic
+curve**, not a complexity fix.  The quadratic lives in the work P2 attributed to
+`prepare` (15.65% self / 43.05% inclusive) and `PVal.toPRes` (17.50% self), not
+in the shifting.
+
+Host/fork ratio at nsrc=4096 fell from **90.1× to 70.5×**, so the fast path is
+worth about a fifth of the host-vs-fork gap.  The rest is the fork's CHANGE 1 --
+`PRes` gaining a `val` constructor so the `var` rule and `prepare` stop copying
+the spine, O(n) → O(1).  **That** is the change that would move the exponent,
+and it is Obligation A, still unproved.
+
+### 26.4 Where this leaves the plan
+
+* H3 ("repeated environment traversal and rebuilding is the dominant
+  algorithmic cost") is now supported in a specific, narrow sense: environment
+  SHIFTING was a measurable constant factor, removed.  It was NOT the source of
+  the quadratic, so H3 as stated is only partly borne out and the plan's H3
+  decision rule -- "a representation change proceeds only when the measured
+  hotspot and predicted complexity reduction agree" -- is still unmet for the
+  remaining cost.
+* H4 (`-O2` matters) is untouched by this run.
+* The next candidate is the `PRes.val` representation (Obligation A), which is
+  a PROOF task, not a measurement task.  No further multi-hour run is warranted
+  to re-measure what P2 and P4 already locate.
+
+Machine: wall 202.24 s (P1: 254.85 s), peak RSS 15,012 KB (P1: 14,684 KB) --
+RSS unchanged, which is expected: the guard avoids allocation, it does not
+change live-set size.

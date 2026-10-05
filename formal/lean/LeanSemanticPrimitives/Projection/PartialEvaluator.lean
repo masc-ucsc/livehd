@@ -110,6 +110,78 @@ def PEnv.shiftBy (k : Nat) : PEnv → PEnv
   | []              => []
   | v :: rest       => PVal.shift k v :: PEnv.shiftBy k rest
 
+/-! ### A PROVED `k = 0` fast path
+
+Measured, not guessed.  `.perfwork/P3-counts.log` counts NODE VISITS inside
+`PVal.shift` on the same fixtures P1 and P2 measured, using a patched copy of
+this file in which the two definitions keep their logical bodies and gain
+`@[implemented_by]` counters.  On `srcD` at 1,024 sources, 730,492,476 of
+736,320,362 visits -- 99.21% -- are at `k = 0`, and the share RISES with size
+(81.5% at the smallest point).  A shift by zero is the identity, so every one
+of those visits rebuilds a structure it does not change.
+
+`PVal.shiftGo` and `PEnv.shiftByGo` are the unguarded recursions; the `Fast`
+wrappers test `k` ONCE at entry.  Testing only at entry is sufficient because
+`k` never changes along the recursion.
+
+Registered with `@[csimp]`, NOT `@[implemented_by]`: the replacement rests on a
+PROVED equality, so the compiled code is justified rather than trusted, and the
+logical definitions above are untouched -- nothing in
+`PartialEvaluatorCorrect.lean` changes. -/
+
+def PVal.shiftGo (k : Nat) : PVal → PVal
+  | .stat v   => .stat v
+  | .dyn i    => .dyn (i + k)
+  | .cons a b => .cons (PVal.shiftGo k a) (PVal.shiftGo k b)
+
+theorem PVal.shiftGo_eq (k : Nat) (v : PVal) : PVal.shiftGo k v = PVal.shift k v := by
+  induction v with
+  | stat _ => rfl
+  | dyn _  => rfl
+  | cons a b ha hb => simp [PVal.shiftGo, PVal.shift, ha, hb]
+
+/-- MOVED UP from `PartialEvaluatorCorrect.lean`, unchanged: the `@[csimp]`
+equality below needs it, and it must stay `@[simp]` because proofs downstream
+rely on `simp` normalising `PVal.shift 0`. -/
+@[simp] theorem PVal.shift_zero : ∀ v : PVal, PVal.shift 0 v = v
+  | .stat _   => rfl
+  | .dyn _    => by simp [PVal.shift]
+  | .cons a b => by simp [PVal.shift, PVal.shift_zero a, PVal.shift_zero b]
+
+def PVal.shiftFast (k : Nat) (v : PVal) : PVal :=
+  if k = 0 then v else PVal.shiftGo k v
+
+@[csimp] theorem PVal.shift_eq_shiftFast : @PVal.shift = @PVal.shiftFast := by
+  funext k v
+  simp only [PVal.shiftFast]
+  split
+  · next h => subst h; exact PVal.shift_zero v
+  · next => exact (PVal.shiftGo_eq k v).symm
+
+def PEnv.shiftByGo (k : Nat) : PEnv → PEnv
+  | []        => []
+  | v :: rest => PVal.shiftGo k v :: PEnv.shiftByGo k rest
+
+theorem PEnv.shiftByGo_eq (k : Nat) (e : PEnv) : PEnv.shiftByGo k e = PEnv.shiftBy k e := by
+  induction e with
+  | nil => rfl
+  | cons v rest ih => simp [PEnv.shiftByGo, PEnv.shiftBy, PVal.shiftGo_eq, ih]
+
+/-- MOVED UP from `PartialEvaluatorCorrect.lean`, unchanged.  See above. -/
+@[simp] theorem PEnv.shiftBy_zero : ∀ env : PEnv, PEnv.shiftBy 0 env = env
+  | []        => rfl
+  | _ :: rest => by simp [PEnv.shiftBy, PEnv.shiftBy_zero rest]
+
+def PEnv.shiftByFast (k : Nat) (e : PEnv) : PEnv :=
+  if k = 0 then e else PEnv.shiftByGo k e
+
+@[csimp] theorem PEnv.shiftBy_eq_shiftByFast : @PEnv.shiftBy = @PEnv.shiftByFast := by
+  funext k e
+  simp only [PEnv.shiftByFast]
+  split
+  · next h => subst h; exact PEnv.shiftBy_zero e
+  · next => exact (PEnv.shiftByGo_eq k e).symm
+
 /-- `let e₀ in let e₁ in … let e_{k-1} in body`. -/
 def wrapLets : List Term → Term → Term
   | [],      body => body

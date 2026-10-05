@@ -48,6 +48,11 @@ namespace Projection
 #print axioms erase_annT
 #print axioms eraseProgram_fn
 #print axioms findAlt_eraseAlts
+-- The `@[csimp]` fast path: these two equalities are what justifies the
+-- COMPILED `PVal.shift` / `PEnv.shiftBy`, so they are load-bearing for every
+-- native specialization run even though no other theorem mentions them.
+#print axioms PVal.shift_eq_shiftFast
+#print axioms PEnv.shiftBy_eq_shiftByFast
 #print axioms Compat_shift
 #print axioms Compat_fields_dyn
 #print axioms Compat_fields_stat
