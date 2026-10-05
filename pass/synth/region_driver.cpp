@@ -143,7 +143,7 @@ void Region_driver::ensure_dff_cells() {
   if (!startup_opts_.map_register || dff_preset_) {
     return;
   }
-  auto sel    = liberty::resolve_dff_cells(startup_opts_.library, startup_opts_.dff_cell);
+  auto sel          = liberty::resolve_dff_cells(startup_opts_.library, startup_opts_.dff_cell);
   dff_              = sel.base;
   dff_ladder_       = sel.ladder;
   areset_ladder_[0] = sel.areset_ladder[0];
@@ -434,7 +434,8 @@ void qor_src_of_output(const livehd::partition::Region_body& rb, size_t po, Regi
 //   projected_translation = rss_before + growth_so_far * total / blasted
 // The projection can reject a clearly hopeless translation early, while the
 // repeated exact samples and process backstop police later ABC network forms.
-bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total, uint64_t pending_bytes) {
+bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, size_t blasted, size_t total,
+                                uint64_t pending_bytes) {
   const uint64_t budget = cost::budget_bytes(opts_.memory_budget_mb);
   if (budget == 0 || blasted == 0) {
     return false;  // unknown host and no explicit budget: unenforceable, do not gate
@@ -540,7 +541,8 @@ bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, si
       total,
       100.0 * fraction,
       mib(rss),
-      pending_bytes ? std::format(" (incl. {} MiB estimated for the ABC netlist not yet built)", mib(pending_bytes)) : std::string{},
+      pending_bytes ? std::format(" (incl. {} MiB estimated for the ABC netlist not yet built)", mib(pending_bytes))
+                    : std::string{},
       mib(rss_before),
       coordinator_ ? "process" : "color",
       mib(grown),
@@ -705,8 +707,8 @@ void Region_driver::map_regions(std::span<const livehd::partition::Region_body> 
               worker->latch_ladder_[low][kind] = latch_ladder_[low][kind];
             }
           }
-          worker->dff_preset_        = dff_preset_;
-          lane.driver                = worker.get();
+          worker->dff_preset_ = dff_preset_;
+          lane.driver         = worker.get();
           parallel_drivers_.push_back(std::move(worker));
         }
         // Creating the worker's graph state may have waited for translation
@@ -1003,14 +1005,14 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
                rb.module_name,
                !rb.reuse_eligible ? "INELIGIBLE" : (pre_g == nullptr ? "REBUILD-FAIL" : (hit ? "HIT" : "MISS")));
     Region_qor q;
-    q.module       = rb.module_name;
-    q.color        = rb.color;
-    q.ctrl         = rb.ctrl;
-    q.input_nodes  = input_nodes;
-    q.input_ge     = input_ge;
-    q.pred_aig     = pred_aig;
-    q.cache        = hit ? "hit" : "miss";
-    q.resynth      = !hit;
+    q.module      = rb.module_name;
+    q.color       = rb.color;
+    q.ctrl        = rb.ctrl;
+    q.input_nodes = input_nodes;
+    q.input_ge    = input_ge;
+    q.pred_aig    = pred_aig;
+    q.cache       = hit ? "hit" : "miss";
+    q.resynth     = !hit;
     qor_.push_back(std::move(q));
     report_completion(qor_.back());
     return;
@@ -1023,7 +1025,17 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
         evidence = incr_->read_evidence(*res.row);
         res.hit  = evidence && opts_.evidence_valid(res.row->module, *evidence);
       }
-      if (res.hit && incr_->reuse_hit(rb, res, outlib_)) {
+      const bool incr_dbg = std::getenv("ABC_INCR_DEBUG") != nullptr;
+      if (incr_dbg && res.hit && opts_.evidence_valid && !evidence) {
+        std::print("[abc-incr] MISS {} -- cached evidence unreadable\n", rb.module_name);
+      } else if (incr_dbg && res.row != nullptr && !res.hit) {
+        std::print("[abc-incr] MISS {} -- evidence rejected\n", rb.module_name);
+      }
+      const bool reused = res.hit && incr_->reuse_hit(rb, res, outlib_);
+      if (incr_dbg && res.hit && !reused) {
+        std::print("[abc-incr] MISS {} -- reuse_hit refused the cached body\n", rb.module_name);
+      }
+      if (reused) {
         if (opts_.evidence_replay && evidence) {
           opts_.evidence_replay(rb.module_name, res.row->module, *evidence);
         }
@@ -1037,6 +1049,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
         q.gates        = res.row->gates;
         q.area         = res.row->area;
         q.delay        = res.row->delay;
+        q.delay_ps     = res.row->delay_ps;
         q.logic_depth  = res.row->logic_depth;
         q.crit_src     = res.row->crit_src;
         q.crit_output  = res.crit_output;
@@ -1049,7 +1062,12 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
         return;
       }
     }
+    if (pre_g == nullptr && std::getenv("ABC_INCR_DEBUG") != nullptr) {
+      std::print("[abc-incr] MISS {} -- no pre-abc body\n", rb.module_name);
+    }
     incr_->note_miss();
+  } else if (incr_ != nullptr && std::getenv("ABC_INCR_DEBUG") != nullptr) {
+    std::print("[abc-incr] MISS {} -- reuse-ineligible region\n", rb.module_name);
   }
 
   resynthesized = true;
@@ -1126,18 +1144,18 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // Registers on a latch+AND clock gate cross as latches clocked by an
   // integrated clock-gate cell -- under a latch-preserving flow, for the same
   // per-latch attribution reason as the async cells.
-  blast_options.icg         = dff_.has_value() && plan.preserves_latches && !icg_ladder_.empty();
-  blast_options.icg_flow_ok = plan.preserves_latches;
+  blast_options.icg            = dff_.has_value() && plan.preserves_latches && !icg_ladder_.empty();
+  blast_options.icg_flow_ok    = plan.preserves_latches;
   // Level-sensitive latches never cross ABC (they stay boundaries), so any
   // flow may map them onto the Liberty's latch cells.
   for (int low = 0; low < 2; ++low) {
     for (int kind = 0; kind < 3; ++kind) {
-      const auto& l                           = latch_ladder_[low][kind];
-      blast_options.latch_cell[low][kind]      = l.empty() ? static_cast<int8_t>(-1) : static_cast<int8_t>(l.front().q_inverted ? 1 : 0);
+      const auto& l                       = latch_ladder_[low][kind];
+      blast_options.latch_cell[low][kind] = l.empty() ? static_cast<int8_t>(-1) : static_cast<int8_t>(l.front().q_inverted ? 1 : 0);
       blast_options.latch_reset_low[low][kind] = !l.empty() && kind != 0 && l.front().reset_low(kind == 2);
     }
   }
-  blast_options.verbose        = opts_.verbose;
+  blast_options.verbose = opts_.verbose;
   Blast_hooks hooks;
   hooks.stage      = trace_stage;
   hooks.elapsed_ms = since;
@@ -1187,7 +1205,8 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     ~Graph_pause() { resume(); }
   } graph_pause{graph_lock, coordinator_};
   if (!opts_.allow_oversize) {
-    ctx.fits = [&](uint64_t rss_before, size_t done, size_t total) { return !over_budget(rb.module_name, rss_before, done, total); };
+    ctx.fits
+        = [&](uint64_t rss_before, size_t done, size_t total) { return !over_budget(rb.module_name, rss_before, done, total); };
   }
   ctx.admission = [&](std::string_view stage) {
     if (opts_.admission && !opts_.admission(stage)) {
@@ -1241,9 +1260,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   qor_.push_back(std::move(q));
 
   // --- read back: the mapped cells -> the region body ---
-  Region_writer::Counts          counts{qor_.back().gates, qor_.back().area, qor_.back().bypassed};
-  const Region_writer::Registers registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1],
-                                           &icg_ladder_, &latch_ladder_};
+  Region_writer::Counts counts{qor_.back().gates, qor_.back().area, qor_.back().bypassed};
+  const Region_writer::Registers
+      registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1], &icg_ladder_, &latch_ladder_};
   writer_.set_outlib(outlib_);
   writer_.set_flat(flat_);
   if (!writer_.write(rb, blast, *cells, backend_->cells(), registers, counts, trace_stage)) {
@@ -1272,8 +1291,10 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   qor_.back().color_peak_rss_kb = coordinator_ == nullptr && color_peak > rss_entry ? (color_peak - rss_entry) >> 10 : 0;
   backend_->end_region();  // release the region's workspace, keep the session
   if (opts_.time_budget_ms != 0 && qor_.back().ms > static_cast<double>(opts_.time_budget_ms)) {
-    time_refusal_
-        = std::format("region '{}' took {:.0f} ms in synthesis (soft limit {} ms)", rb.module_name, qor_.back().ms, opts_.time_budget_ms);
+    time_refusal_ = std::format("region '{}' took {:.0f} ms in synthesis (soft limit {} ms)",
+                                rb.module_name,
+                                qor_.back().ms,
+                                opts_.time_budget_ms);
   }
   // Publish the completed color before allocator housekeeping: a pressure scan
   // can itself take time, and the heartbeat should identify the finished work
@@ -1412,13 +1433,25 @@ void Region_driver::remember_ware(const livehd::partition::Region_body& rb, cons
     }
     w.rb.src = w.source.get();
   }
-  // Small extracted primitives retain their original pre-map snapshot for
-  // candidate reuse. Inlined regions keep the bounded baseline-only policy.
-  if (rb.src->get_input_node().attr(attrs::ware_module).has() && rb.pre_body && rb.pre_lib
-      && ware_pre_.copy_from(*rb.pre_lib, rb.pre_name)) {
+  // A retained pre-map snapshot lets the trial candidates hit their per-key
+  // caches. Small extracted primitives always keep one. Inlined regions keep
+  // one too, within a per-region and a total node bound: without it every
+  // warm run (even an unchanged one) re-mapped all ware trials of the design's
+  // datapath region -- picorv32's comment-only rerun spent 5.5 s of an 8.1 s
+  // cold map on them, failing lhdsuite's synth_incremental gate.
+  constexpr uint64_t kTrialPreRegionNodes = 200000;
+  constexpr uint64_t kTrialPreTotalNodes  = 2000000;
+  const bool         primitive            = rb.src->get_input_node().attr(attrs::ware_module).has();
+  const uint64_t     region_nodes         = rb.nodes.size();
+  const bool         keep_pre
+      = primitive || (region_nodes <= kTrialPreRegionNodes && ware_pre_inlined_nodes_ + region_nodes <= kTrialPreTotalNodes);
+  if (keep_pre && rb.pre_body && rb.pre_lib && ware_pre_.copy_from(*rb.pre_lib, rb.pre_name)) {
     w.rb.pre_name = rb.pre_name;
     w.rb.pre_lib  = &ware_pre_;
     w.rb.pre_body = ware_pre_.find_io(rb.pre_name)->get_graph().get();
+    if (!primitive) {
+      ware_pre_inlined_nodes_ += region_nodes;
+    }
   }
   w.options   = options;
   w.overrides = overrides;
@@ -1436,6 +1469,22 @@ void Region_driver::remember_ware(const livehd::partition::Region_body& rb, cons
 void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view top) {
   if (ware_regions_.empty()) {
     return;
+  }
+  if (startup_opts_.ware_max_cells > 0) {
+    uint64_t cells = 0;
+    for (const auto& q : qor_) {
+      cells += static_cast<uint64_t>(std::max(q.gates, 0));
+    }
+    if (cells > startup_opts_.ware_max_cells) {
+      // Every trial below re-imports and re-times the WHOLE stitched design, so
+      // the loop costs trials x design: minion (~600k cells, ~1000 trials)
+      // spent over an hour here against a 5-minute baseline map.
+      std::print("[pass.abc] ware: {} mapped cells exceed ware_max_cells={}; skipping {} ware trial region(s)\n",
+                 cells,
+                 startup_opts_.ware_max_cells,
+                 ware_regions_.size());
+      return;
+    }
   }
   const float global_target = ware_delay_target(startup_opts_.delay);
   auto        score         = score_ware(outlib, top);
@@ -1573,8 +1622,9 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
                                       o.block_size,
                                       static_cast<int>(o.multiplier),
                                       o.reverse_barrel);
-        candidate_cache = std::make_unique<Region_cache>(saved_cache->dir() + "/ware/" + name + "/" + key, saved_cache->salt(), true);
-        incr_           = candidate_cache.get();
+        candidate_cache
+            = std::make_unique<Region_cache>(saved_cache->dir() + "/ware/" + name + "/" + key, saved_cache->salt(), true);
+        incr_ = candidate_cache.get();
       }
       map_region(w.rb);
       // Persist the independent mapped candidate before selection/rollback.

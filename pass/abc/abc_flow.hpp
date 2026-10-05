@@ -17,6 +17,10 @@ struct Flow_plan {
   // Empty flow accepts an already mapped network for cell sizing only.
   std::string flow, size_to_budget, map_step, remap_post, area_flow;
   bool        ladder = false, remappable = false, area_candidate = false;
+  // With an empty flow: the caller already ran exactly the mapping-only
+  // `map_step` (after `&st`) and `remap_post`, so area recovery may `&undo`
+  // and re-run that mapper. No Boolean restructuring is involved.
+  bool        mapped_remap   = false;
   float       budget         = 0;
   uint32_t    area_relax_pct = 0;
 };

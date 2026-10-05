@@ -137,6 +137,10 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "inclusive synthesis-GE threshold for large_flow (0 disables it); default protects wide indivisible "
                        "operations from unbounded &dch choice synthesis",
                        "200000");
+  m.add_label_optional("ware_max_cells",
+                       "mapped-cell size above which the ware (adder/multiplier/shifter) trials are skipped: every trial "
+                       "re-scores the whole stitched design, so their cost grows as trials x design (0: no limit)",
+                       "200000");
   m.add_label_optional("register",
                        "true|false map flops to Liberty DFF cells (true, falls back to native flops when the library has no "
                        "DFF cell) vs keep them native as `always @(posedge)` (false)",
@@ -412,14 +416,16 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j             += "\"schema_version\":1,\"kind\":\"abc-map\",";
   j             += std::format("\"top\":\"{}\",", jesc(top));
   j             += std::format("\"library\":\"{}\",", jesc(opts.library));
-  j += std::format("\"register\":{},\"memory\":\"{}\",", opts.map_register ? "true" : "false", livehd::synth::memory_fold_name(opts.memory_fold));
+  j             += std::format("\"register\":{},\"memory\":\"{}\",",
+                               opts.map_register ? "true" : "false",
+                               livehd::synth::memory_fold_name(opts.memory_fold));
   // The per-region register guard (0 = every flop maps), so a QoR reader can
   // tell "kept native by limit" from "kept native by contract" (an
   // asynchronous reset) without the diagnostics stream.
-  j += std::format("\"register_max_bits\":{},", opts.register_max_bits);
+  j             += std::format("\"register_max_bits\":{},", opts.register_max_bits);
   // The `auto` fold threshold, so a QoR reader can tell a memory kept native by
   // size from one kept native by contract (memory=false) without the diagnostics.
-  j += std::format("\"memory_max_bits\":{},", opts.memory_max_bits);
+  j             += std::format("\"memory_max_bits\":{},", opts.memory_max_bits);
   if (opts.map_register && dff_sel.base.has_value()) {
     // The register cell(s) the netlist was written with, and how many of each
     // it holds (PHYSICAL, weighted by instantiation like `gates`): counted off
@@ -428,7 +434,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     // inversion lives in the D cones (or, under a user flow, in explicit
     // inverters) and an area/timing reader comparing against yosys's Q-side
     // INV needs to know which encoding it is looking at.
-    std::map<std::string, uint64_t> dff_count;  // ladder rung -> instances (std::map: stable JSON order)
+    std::map<std::string, uint64_t> dff_count;                         // ladder rung -> instances (std::map: stable JSON order)
     for (const auto& c : livehd::liberty::selection_cells(dff_sel)) {  // plain ladder + async clear/preset cells
       dff_count.emplace(c.name, 0);
     }
@@ -451,17 +457,17 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       j += std::format("{}\"{}\"", i != 0 ? "," : "", jesc(dff_sel.ladder[i].name));
     }
     // The asynchronous clear/preset picks (empty: that reset value stays native).
-    j += std::format("],\"clear\":\"{}\",\"preset\":\"{}\"",
-                     dff_sel.areset_ladder[0].empty() ? "" : jesc(dff_sel.areset_ladder[0].front().name),
-                     dff_sel.areset_ladder[1].empty() ? "" : jesc(dff_sel.areset_ladder[1].front().name));
+    j          += std::format("],\"clear\":\"{}\",\"preset\":\"{}\"",
+                              dff_sel.areset_ladder[0].empty() ? "" : jesc(dff_sel.areset_ladder[0].front().name),
+                              dff_sel.areset_ladder[1].empty() ? "" : jesc(dff_sel.areset_ladder[1].front().name));
     // The integrated clock-gate pick (empty: gated-clock registers stay native).
-    j += std::format(",\"icg\":\"{}\"", dff_sel.icg_ladder.empty() ? "" : jesc(dff_sel.icg_ladder.front().name));
+    j          += std::format(",\"icg\":\"{}\"", dff_sel.icg_ladder.empty() ? "" : jesc(dff_sel.icg_ladder.front().name));
     // The transparent data-latch picks, active-high / active-low enable
     // (empty: that latch polarity maps through the other one plus an inverter,
     // or stays native without either).
-    j += std::format(",\"latch\":\"{}\",\"latch_n\":\"{}\"",
-                     dff_sel.latch_ladder[0][0].empty() ? "" : jesc(dff_sel.latch_ladder[0][0].front().name),
-                     dff_sel.latch_ladder[1][0].empty() ? "" : jesc(dff_sel.latch_ladder[1][0].front().name));
+    j          += std::format(",\"latch\":\"{}\",\"latch_n\":\"{}\"",
+                              dff_sel.latch_ladder[0][0].empty() ? "" : jesc(dff_sel.latch_ladder[0][0].front().name),
+                              dff_sel.latch_ladder[1][0].empty() ? "" : jesc(dff_sel.latch_ladder[1][0].front().name));
     j          += ",\"cells\":{";
     bool first  = true;
     for (const auto& [name, n] : dff_count) {
@@ -751,6 +757,17 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
       return;
     }
   }
+  uint64_t ware_max_cells = 0;
+  {
+    const auto text = std::string{var.get("ware_max_cells", "200000")};
+    auto [p, ec]    = std::from_chars(text.data(), text.data() + text.size(), ware_max_cells);
+    if (ec != std::errc{} || p != text.data() + text.size()) {
+      livehd::diag::err("pass.abc", "bad-ware-max-cells", "io")
+          .msg("pass.abc: ware_max_cells must be a non-negative integer, got '{}'", text)
+          .fatal();
+      return;
+    }
+  }
   uint64_t large_ge = 0;
   {
     auto* b      = large_ge_s.data();
@@ -881,21 +898,22 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   }
 
   livehd::abc::Map_options opts;
-  opts.flow            = flow;
-  opts.boundary        = boundary;
-  opts.boundary_buffer = boundary_buffer;
-  opts.boundary_rounds = boundary_rounds;
-  opts.boundary_drive  = boundary_drive;
-  opts.io_load         = io_load;
-  opts.max_fanout      = static_cast<uint32_t>(max_fanout);
-  opts.area_relax_pct  = static_cast<uint32_t>(area_relax_pct);
-  opts.area_flow       = area_flow;
-  opts.reg_margin      = reg_margin;
-  opts.large_flow      = large_flow;
-  opts.large_ge        = large_ge;
-  opts.map_register    = map_register;
-  opts.memory_fold     = *memory_fold;
-  opts.memory_max_bits = memory_max_bits;
+  opts.flow              = flow;
+  opts.boundary          = boundary;
+  opts.boundary_buffer   = boundary_buffer;
+  opts.boundary_rounds   = boundary_rounds;
+  opts.boundary_drive    = boundary_drive;
+  opts.io_load           = io_load;
+  opts.max_fanout        = static_cast<uint32_t>(max_fanout);
+  opts.area_relax_pct    = static_cast<uint32_t>(area_relax_pct);
+  opts.area_flow         = area_flow;
+  opts.reg_margin        = reg_margin;
+  opts.large_flow        = large_flow;
+  opts.large_ge          = large_ge;
+  opts.ware_max_cells    = ware_max_cells;
+  opts.map_register      = map_register;
+  opts.memory_fold       = *memory_fold;
+  opts.memory_max_bits   = memory_max_bits;
   opts.register_max_bits = register_max_bits;
   opts.dff_cell          = std::string{var.get("dff_cell", "")};
   opts.delay             = delay;
@@ -1044,13 +1062,13 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   // mismatch (edited Liberty, different mapping mode) starts cold before any
   // region is digested. The out dir is wiped by the kernel every run, so a cache
   // living inside it would self-destruct -- refuse the overlap.
-  auto                                     cache_dir = std::string{var.get("cache_dir", "")};
+  auto                                         cache_dir = std::string{var.get("cache_dir", "")};
   std::shared_ptr<livehd::synth::Region_cache> incr;
   // The register cell is resolved HERE, once, rather than in Mapper::start():
   // the cache salt below needs the resolved pick (not the raw, usually empty,
   // `dff_cell` option) before any region is digested, and abc.json reports it
   // even on an all-hit run that never starts ABC. The mapper takes it as-is.
-  livehd::liberty::Dff_selection           dff_sel;
+  livehd::liberty::Dff_selection               dff_sel;
   if (map_register) {
     dff_sel = livehd::liberty::resolve_dff_cells(opts.library, opts.dff_cell);
   }
@@ -1085,10 +1103,14 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     // an unknown `dff_cell` name) falls back to the raw option so the two
     // failure shapes stay distinct keys too.
     const std::string dff_desc = livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell);
-    incr                       = std::make_shared<livehd::synth::Region_cache>(
-        cache_dir,
-        livehd::synth::Region_cache::make_salt(livehd::abc::kAbcSrcSalt, opts.library, opts.map_register, opts.memory_fold, opts.memory_max_bits, dff_desc),
-        false);
+    incr = std::make_shared<livehd::synth::Region_cache>(cache_dir,
+                                                         livehd::synth::Region_cache::make_salt(livehd::abc::kAbcSrcSalt,
+                                                                                                opts.library,
+                                                                                                opts.map_register,
+                                                                                                opts.memory_fold,
+                                                                                                opts.memory_max_bits,
+                                                                                                dff_desc),
+                                                         false);
   }
 
   // A whole-design flatten maps ONE region and its netlist must hold exactly one
@@ -1222,15 +1244,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     std::print("pass.abc cache: {} hit(s), {} miss(es) ({})\n", incr->hits(), incr->misses(), incr->dir());
   }
 
-  emit_qor(mapper.qor(),
-           top,
-           opts,
-           qor_path,
-           incr.get(),
-           mapper.backend_started(),
-           hier,
-           dff_sel,
-           mapper.parallel_stats());
+  emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.backend_started(), hier, dff_sel, mapper.parallel_stats());
   if (const auto* refusal = mapper.time_refusal()) {
     livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
         .msg("{}", *refusal)

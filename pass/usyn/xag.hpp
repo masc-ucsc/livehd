@@ -90,6 +90,17 @@ Xag_window collect_subwindow(const Xag& graph, Xsignal root, std::span<const Id>
 // for distinct new signals. This is not a guarantee of optimal boundary inputs.
 Xag_window grow_window(const Xag& graph, Xsignal root, const Window_limits& limits, Budget& work);
 
+struct Priority_windows {
+  Status                  status = Status::invalid;
+  std::vector<Xag_window> windows;
+  bool                    exhausted = false;
+};
+// Bounded alternative cuts, ranked by covered interior and support size. The
+// reconvergence-aware greedy seed is always retained. Enumeration admits at
+// most 128 distinct frontiers; all emitted windows are independently collected.
+// This is a heuristic, not exhaustive enumeration or an optimal cut claim.
+Priority_windows priority_windows(const Xag& graph, Xsignal root, const Window_limits& limits, Budget& work, uint32_t max_cuts = 8);
+
 struct Window_function {
   Status      status = Status::invalid;
   Truth_table table;

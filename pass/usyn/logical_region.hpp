@@ -61,6 +61,7 @@ struct Logical_options {
   uint32_t         pair_choices      = 4;   // additional interface pool per endpoint (0 disables, maximum 8)
   uint32_t         pair_inputs       = 16;  // common independent basis, not per-endpoint support
   uint64_t         pair_work         = 16000000;
+  bool             pre_optimize      = false;
   bool             optimize_residual = true;
   bool             feedback          = true;
 };
@@ -93,13 +94,14 @@ struct Pair_report {
 // No translation, freeze, I/O or tmap.
 struct Logical_work {
   bool     operator==(const Logical_work&) const = default;
-  uint64_t admission = 0, selection = 0, pairs = 0, residual = 0, feedback = 0, cleanup = 0;
-  uint64_t total() const { return admission + selection + pairs + residual + feedback + cleanup; }
+  uint64_t admission = 0, p1 = 0, selection = 0, pairs = 0, residual = 0, feedback = 0, cleanup = 0;
+  uint64_t total() const { return admission + p1 + selection + pairs + residual + feedback + cleanup; }
 };
 
 struct Logical_report {
   bool                         operator==(const Logical_report&) const = default;
   std::vector<Endpoint_report> initial;
+  Residual_report              p1;
   Residual_report              residual;
   Pair_report                  pairs;
   Logical_work                 work;

@@ -416,8 +416,7 @@ bool Abc_backend::start_session() {
     if (lib_has_nldm_timing(static_cast<SC_Lib*>(Abc_FrameReadLibScl()))) {
       scl_timing_ok_ = true;
     } else {
-      std::print("[pass.abc] delay target: '{}' has no 2-D slew/load NLDM tables; ABC cannot size or time cells\n",
-                 base_.library);
+      std::print("[pass.abc] delay target: '{}' has no 2-D slew/load NLDM tables; ABC cannot size or time cells\n", base_.library);
     }
   }
 
@@ -466,13 +465,13 @@ void Abc_backend::stop() {
 }
 
 synth::Region_plan Abc_backend::plan(const synth::Region_ctx& ctx) {
-  timing_requested_ = ctx.timing_requested;
+  timing_requested_                            = ctx.timing_requested;
   // The region's ABC options: the run level, the driver's resolved region
   // options, then this backend's own per-region choices.
-  region_                                     = base_;
+  region_                                      = base_;
   static_cast<synth::Driver_options&>(region_) = ctx.options;
   // A ware trial re-maps a remembered region: its flow is the one recorded.
-  tool_owned_flow_ = ctx.ware_trial ? ctx.flow.value_or(base_.flow).empty() : base_.flow.empty();
+  tool_owned_flow_                             = ctx.ware_trial ? ctx.flow.value_or(base_.flow).empty() : base_.flow.empty();
   // A coarse size tier is intentionally selected before color-keyed overrides:
   // a user naming one specific region always has the final say. `input_ge` is
   // invariant source-logic cost, unlike mapped gates, so cache recipes and
@@ -515,26 +514,27 @@ synth::Region_plan Abc_backend::plan(const synth::Region_ctx& ctx) {
   // may retime (`dretime`) or sequentially sweep (`scorr`/`lcorr`). The QN
   // AIG-side encoding (Seq_flop::d_inverted) is exact only under combinational
   // transformations, so it is gated on THIS flag, not on flow ownership.
-  const bool custom_area = region_.flow.empty() && region_.delay.empty() && !region_.area_flow.empty() && region_.area_flow != "none";
-  builtin_flow_          = region_.flow.empty() && !custom_area;
+  const bool custom_area
+      = region_.flow.empty() && region_.delay.empty() && !region_.area_flow.empty() && region_.area_flow != "none";
+  builtin_flow_ = region_.flow.empty() && !custom_area;
   if (custom_area) {
     tool_owned_flow_ = false;
   }
 
   synth::Region_plan plan;
-  plan.preserves_latches = builtin_flow_;
-  plan.recipe            = resolve_recipe(ctx);
-  plan.recipe += ctx.rb.ctrl ? "|ctrl=1" : "|ctrl=0";
+  plan.preserves_latches  = builtin_flow_;
+  plan.recipe             = resolve_recipe(ctx);
+  plan.recipe            += ctx.rb.ctrl ? "|ctrl=1" : "|ctrl=0";
   // The frame's driving cell (resolve_boundary_defaults) makes `buffer` tree
   // every input's fanout out of band of the flow string: spell the decision.
   // From the OPTIONS, not the frame -- an all-hit run never starts ABC, and
   // the resolved cell is a function of the library (in the cache salt) and
   // `boundary_drive` alone.
-  plan.recipe += "|pi_drive=";
-  plan.recipe += (region_.boundary_buffer && region_.max_fanout != 0)
-                     ? (region_.boundary_drive.empty() ? "auto" : region_.boundary_drive)
-                     : "none";
-  plan.recipe += region_.map_register ? "\n# livehd-register=abc" : "\n# livehd-register=native";
+  plan.recipe            += "|pi_drive=";
+  plan.recipe            += (region_.boundary_buffer && region_.max_fanout != 0)
+                                ? (region_.boundary_drive.empty() ? "auto" : region_.boundary_drive)
+                                : "none";
+  plan.recipe            += region_.map_register ? "\n# livehd-register=abc" : "\n# livehd-register=native";
   return plan;
 }
 
@@ -652,10 +652,10 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
   // that already dominates), it is switched off by `area_flow=none`, and it
   // skips the dummy-PO sentinel (nothing to compare on a region with no real
   // outputs).
-  const bool        ladder_on = tool_owned_flow_ && scl_timing_ok_ && budget > 0.0f;
-  const std::string area_cmd  = area_flow();
-  const bool        candidate_on
-      = ladder_on && builtin_flow_ && !area_cmd.empty() && !has_dummy_po && (region_.large_ge == 0 || ctx.input_ge <= region_.large_ge);
+  const bool        ladder_on    = tool_owned_flow_ && scl_timing_ok_ && budget > 0.0f;
+  const std::string area_cmd     = area_flow();
+  const bool        candidate_on = ladder_on && builtin_flow_ && !area_cmd.empty() && !has_dummy_po
+                                   && (region_.large_ge == 0 || ctx.input_ge <= region_.large_ge);
   // Regions are independent synthesis jobs, not interactive ABC undo steps.
   // SetCurrentNetwork links the previous (potentially enormous) region as a
   // backup; carrying that network into every later job caused tiny regions to
@@ -718,22 +718,28 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
   const std::string remap_post = put_step + (tail_on ? flow_tail : "");
   const bool        remappable = tool_owned_flow_ && flow.ends_with(map_step + remap_post);
   Flow_plan         plan;
-  plan.flow                 = flow;
-  plan.size_to_budget       = std::format("upsize {0}; dnsize {0}", budget_flag_);
-  plan.map_step             = map_step;
-  plan.remap_post           = remap_post;
-  plan.area_flow            = area_cmd;
-  plan.ladder               = ladder_on;
-  plan.remappable           = remappable;
-  plan.area_candidate       = candidate_on;
-  plan.budget               = budget;
-  plan.area_relax_pct       = region_.area_relax_pct;
+  plan.flow                  = flow;
+  plan.size_to_budget        = std::format("upsize {0}; dnsize {0}", budget_flag_);
+  plan.map_step              = map_step;
+  plan.remap_post            = remap_post;
+  plan.area_flow             = area_cmd;
+  plan.ladder                = ladder_on;
+  plan.remappable            = remappable;
+  plan.area_candidate        = candidate_on;
+  plan.budget                = budget;
+  plan.area_relax_pct        = region_.area_relax_pct;
   const auto& flow_admission = ctx.admission;
   // A region hook's rewrite (pass/usyn) replaces the region's logic: in the
   // region's own PI/PO/latch skeleton, as the flow's input, or technology-
   // mapped only (`&nf`, no restructuring). A tmap result only gets the
-  // fanout/sizing tail (buffering and gate sizing), like every built-in flow.
-  bool rewrite_mapped = false;
+  // fanout/sizing tail (buffering and gate sizing), like every built-in flow,
+  // then the budget ladder: sizing to the budget and slack-to-area re-mapping.
+  bool        rewrite_mapped = false;
+  // A tmap result may still convert measured slack into area by re-running the
+  // same mapping-only `&nf` with ABC's relaxation ratio (`area_relax`); `&st`
+  // saves the GIA that `&undo` restores. It needs the sizing ladder's budget.
+  const bool  tmap_remap     = rewrite.map == synth::Region_rewrite::Map::tmap && ladder_on && region_.area_relax_pct > 0;
+  const auto  tmap_nf        = region_.delay.empty() ? std::string{"&nf"} : std::format("&nf -D {}", region_.delay);
   if (rewrite.map != synth::Region_rewrite::Map::region) {
     auto* logic = static_cast<Abc_Ntk_t*>(lnet_into_logic(rewrite.logic, Abc_FrameReadNtk(frame)));
     if (logic == nullptr) {
@@ -745,8 +751,10 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
     Abc_FrameReplaceCurrentNetwork(frame, logic);
   }
   if (rewrite.map == synth::Region_rewrite::Map::tmap) {
-    const auto nf = region_.delay.empty() ? std::string{"&nf"} : std::format("&nf -D {}", region_.delay);
-    for (const auto* command : {"strash", "&get -n", nf.c_str(), "&put -o"}) {
+    for (const auto* command : {"strash", "&get -n", "&st", tmap_nf.c_str(), "&put -o"}) {
+      if (std::string_view{command} == "&st" && !tmap_remap) {
+        continue;
+      }
       if (flow_admission && !flow_admission(command)) {
         return std::nullopt;
       }
@@ -763,7 +771,9 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
     auto* current  = Abc_FrameReadNtk(frame);
     rewrite_mapped = current != nullptr && Abc_NtkIsMappedLogic(current);
     if (!rewrite_mapped) {
-      livehd::diag::err("pass.abc", "abc-tmap", "internal").msg("ABC left no mapped network for region '{}'", rb.module_name).fatal();
+      livehd::diag::err("pass.abc", "abc-tmap", "internal")
+          .msg("ABC left no mapped network for region '{}'", rb.module_name)
+          .fatal();
       return std::nullopt;
     }
     if (tail_on) {
@@ -798,9 +808,14 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
     // sizing ladder: the mapping-only branch used to stop after downsizing,
     // even when its weak cells missed the region's timing budget.
     plan.flow.clear();
-    plan.remappable     = false;
+    plan.remappable     = tmap_remap;
+    plan.mapped_remap   = tmap_remap;
     plan.area_candidate = false;
-    flow_result         = execute_flow(frame, plan, flow_admission);
+    if (tmap_remap) {
+      plan.map_step   = tmap_nf;
+      plan.remap_post = put_step + (tail_on ? flow_tail : "");
+    }
+    flow_result = execute_flow(frame, plan, flow_admission);
   }
   if (flow_result.status == Flow_status::refused) {
     if (flow_result.refusal == Flow_refusal::time) {
@@ -869,8 +884,9 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
         // resulting network with those cells' actual NLDM surfaces, matching
         // ABC's `stime` (the same timer the budget ladder judged by).
         if (const auto phys = physical_flow_qor(pMappedLogic)) {
-          q.delay = phys->first;
-          q.area  = phys->second;
+          q.delay    = phys->first;
+          q.area     = phys->second;
+          q.delay_ps = true;
         }
       }
       // Worst-arrival REGION output (the delay trace leaves per-node arrivals

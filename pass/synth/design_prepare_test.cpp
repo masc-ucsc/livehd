@@ -203,4 +203,38 @@ TEST(DesignPrepare, SharedOpaqueDeclarationIsAdmittedOnlyOnce) {
   EXPECT_EQ(library.find_io("opaque"), opaque);
 }
 
+TEST(DesignPrepare, ClockExpansionRefusalDiscardsPrivateCopyAndPreservesSource) {
+  hhds::GraphLibrary library;
+  auto               io = library.create_io("gated");
+  io->add_input("clk", 1);
+  io->add_input("en", 2);
+  io->add_output("gclk", 3);
+  auto graph = io->create_graph();
+  auto clock = graph_util::create_typed_node(*graph, Ntype_op::Clock_cell);
+  graph->get_input_pin("clk").connect_sink(graph_util::setup_sink_by_name(clock, "clk_ref"));
+  graph->get_input_pin("en").connect_sink(graph_util::setup_sink_by_name(clock, "en"));
+  auto output = clock.create_driver_pin(0);
+  graph_util::set_ubits(output, 1);
+  output.connect_sink(graph->get_output_pin("gclk"));
+  const std::array sources{graph};
+  for (std::string_view stop : {"clock-cell-scan", "clock-cell-expand", "clock-cell-reader", "clock-cell-rewire"}) {
+    SCOPED_TRACE(stop);
+    Preparation_budget budget;
+    bool               hit = false;
+    budget.admission       = [&](std::string_view stage, uint64_t) {
+      hit |= stage == stop;
+      return stage != stop;
+    };
+    EXPECT_FALSE(prepare_design(sources, false, "pass.usyn", &budget));
+    EXPECT_TRUE(hit);
+    EXPECT_TRUE(budget.refused);
+    EXPECT_EQ(graph->get_output_pin("gclk").get_driver_pin(), output);
+    EXPECT_EQ(graph_util::type_op_of(clock), Ntype_op::Clock_cell);
+  }
+  auto prepared = prepare_design(sources, false, "pass.usyn");
+  ASSERT_TRUE(prepared);
+  EXPECT_EQ(graph_util::type_op_of(prepared->roots[0]->get_output_pin("gclk").get_driver_pin().get_master_node()), Ntype_op::And);
+  EXPECT_EQ(graph->get_output_pin("gclk").get_driver_pin(), output);
+}
+
 }  // namespace livehd::synth

@@ -8,14 +8,23 @@
 namespace livehd::usyn {
 
 struct Design_options {
-  Logical_options          logical;
-  synth::arith::Adder_kind adder            = synth::arith::Adder_kind::rca;
-  bool                     auto_sum_adder   = true;
-  int                      adder_block      = 0;
-  synth::arith::Mult_kind  multiplier       = synth::arith::Mult_kind::csa;
-  uint64_t                 max_source_nodes = 2000000;
-  partition::Flatten_mode  flatten          = partition::Flatten_mode::automatic;
-  Logical_cache_options    cache{};
+  Logical_options                          logical;
+  synth::arith::Adder_kind                 adder          = synth::arith::Adder_kind::rca;
+  bool                                     auto_sum_adder = true;
+  int                                      adder_block    = 0;
+  synth::arith::Mult_kind                  multiplier     = synth::arith::Mult_kind::csa;
+  bool                                     mux_tree       = false;
+  bool                                     sop_tree       = false;
+  bool                                     cmos_cleanup   = false;
+  bool                                     multi_rep      = false;
+  bool                                     gate_objective = true;
+  std::shared_ptr<const Native_cost_model> cost_model{};
+  std::string                              cost_policy      = "proxy";
+  uint64_t                                 cost_model_work  = 0;
+  bool                                     eq_balance       = false;
+  uint64_t                                 max_source_nodes = 2000000;
+  partition::Flatten_mode                  flatten          = partition::Flatten_mode::automatic;
+  Logical_cache_options                    cache{};
 };
 
 struct Design_region {
@@ -31,6 +40,9 @@ struct Design_region {
   // or rebuild, freezing), replayed on a hit. Translation and emission are
   // charged outside it.
   uint64_t        structural_work = 0;
+  Residual_report cmos_cleanup{};
+  Credit_floor    cmos_search{};
+  Choice_report   choices{};
 };
 
 struct Logical_design {

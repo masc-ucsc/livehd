@@ -45,10 +45,10 @@ public:
 
   // The backend session: started lazily by the first region that needs a
   // mapping. stop() releases this driver's session only (lanes keep theirs).
-  void stop();
-  void map_region(const livehd::partition::Region_body& rb);
-  void map_regions(std::span<const livehd::partition::Region_body> regions);
-  void finish_parallel();
+  void                                stop();
+  void                                map_region(const livehd::partition::Region_body& rb);
+  void                                map_regions(std::span<const livehd::partition::Region_body> regions);
+  void                                finish_parallel();
   [[nodiscard]] const Parallel_stats& parallel_stats() const { return parallel_stats_; }
 
   // Trial only colors on a stitched mapped-cell critical path. No physical
@@ -88,7 +88,7 @@ public:
     areset_ladder_[1] = sel.areset_ladder[1];
     icg_ladder_       = sel.icg_ladder;
     copy_latch_ladders(sel);
-    dff_preset_       = true;
+    dff_preset_ = true;
   }
 
   // QoR rows accumulated by map_region, one per successfully mapped region.
@@ -132,13 +132,15 @@ private:
     Backend_overrides              overrides;
     bool                           add = false, mult = false, barrel = false;
   };
-  Ware_score               score_ware(hhds::GraphLibrary& outlib, std::string_view top);
-  Design_ctx               design_ctx();
-  void                     remember_ware(const livehd::partition::Region_body& rb, const Driver_options& options,
-                                         const Backend_overrides& overrides);
+  Ware_score score_ware(hhds::GraphLibrary& outlib, std::string_view top);
+  Design_ctx design_ctx();
+  void remember_ware(const livehd::partition::Region_body& rb, const Driver_options& options, const Backend_overrides& overrides);
   std::vector<Ware_region> ware_regions_;
   hhds::GraphLibrary       ware_shells_, ware_sources_, ware_pre_;
-  bool                     ware_trial_ = false;
+  // Nodes of INLINED regions whose pre-map snapshot ware_pre_ retains for trial
+  // cache reuse (extracted primitives are not counted): bounds that copy.
+  uint64_t                 ware_pre_inlined_nodes_ = 0;
+  bool                     ware_trial_             = false;
   Backend_overrides        trial_overrides_;  // a ware trial's recorded region overrides
   std::string              refusal_;
   std::string              time_refusal_;
@@ -183,13 +185,13 @@ private:
       }
     }
   }
-  bool                             dff_preset_     = false;
-  hhds::GraphLibrary*              outlib_         = nullptr;  // where blackbox cell defs are declared
-  Region_cache*                    incr_           = nullptr;  // optional region cache (2opt-incr)
-  std::vector<Region_qor>          qor_;
-  uint32_t                         next_region_id_ = 1;  // report-only key stamped on mapped region graphs
-  Region_opts_map                  region_opts_cli_;
-  std::map<std::string, float>     region_delay_targets_;
+  bool                                          dff_preset_ = false;
+  hhds::GraphLibrary*                           outlib_     = nullptr;  // where blackbox cell defs are declared
+  Region_cache*                                 incr_       = nullptr;  // optional region cache (2opt-incr)
+  std::vector<Region_qor>                       qor_;
+  uint32_t                                      next_region_id_ = 1;  // report-only key stamped on mapped region graphs
+  Region_opts_map                               region_opts_cli_;
+  std::map<std::string, float>                  region_delay_targets_;
   // coloring_info "region_opts" parse cache, one entry per source graph.
   std::map<const hhds::Graph*, Region_opts_map> graph_region_opts_;
   // The same coloring_info carries the three ware-family switches. A large

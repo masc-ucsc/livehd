@@ -2,6 +2,7 @@
 #pragma once
 
 #include "artifact.hpp"
+#include "cmos_cleanup.hpp"
 #include "semantic_region.hpp"
 
 namespace livehd::usyn {
@@ -22,6 +23,8 @@ struct Logical_module_result {
   Status                          status = Status::invalid;
   std::unique_ptr<Logical_module> module;
   std::string                     reason;
+  Residual_report                 cmos_cleanup{};
+  Choice_report                   choices{};
 };
 
 // Emit the complete behavioral CMOS expansion, retaining every original
@@ -32,7 +35,7 @@ struct Logical_module_result {
 // Refusal destroys the private partial module and publishes no graph.
 // max_nodes bounds the input and a conservative emitted-node reservation.
 Logical_module_result write_logical_module(const Stateful_region& region, std::string_view name, Budget& work,
-                                           uint32_t max_nodes = 2000000);
+                                           uint32_t max_nodes = 2000000, const Cmos_cleanup* cleanup = nullptr);
 // Replay a validated standalone artifact. The output is behavioral CMOS even
 // when the recorded target is DOMINO; this is not a physical cell emitter.
 Logical_module_result write_logical_module(const Frozen_region& region, Budget& work, uint32_t max_nodes = 2000000);

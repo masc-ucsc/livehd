@@ -243,6 +243,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     if (!split.io->get_graph()) {  // a re-declared def carries the IO only
       auto split_body = split.io->create_graph();
       auto input      = split_body->get_input_pin("a");
+      gu::set_bits(input, width);  // consumers read the body pin, not the IO decl
       for (int b = width - 1; b >= 0; --b) {
         auto output = std::format("b{}", b);
         auto shift  = gu::create_typed_node(*split_body, Ntype_op::SRA);

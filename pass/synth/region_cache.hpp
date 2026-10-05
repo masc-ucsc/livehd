@@ -49,24 +49,25 @@ struct Region_qor;  // region_qor.hpp
 class Region_cache {
 public:
   struct Row {
-    std::string                        module;  // cache-lib name of the mapped body (== module_name)
-    std::string                        pre;     // cache-lib name of the pre-abc body ("p_"+module_name)
+    std::string                        module;   // cache-lib name of the mapped body (== module_name)
+    std::string                        pre;      // cache-lib name of the pre-abc body ("p_"+module_name)
     std::string                        recipe;   // verbatim resolved ABC recipe (the recipe gate)
     std::vector<std::string>           in, out;  // cached module port names (existence-checked on reuse)
     int                                gates       = 0;
     double                             area        = 0.0;
     int                                logic_depth = -1;
     float                              delay       = -1.0f;
+    bool                               delay_ps    = false;
     std::string                        crit_output;  // region output port with the worst arrival (a name)
     std::string                        crit_src;
-    int                                div_blackbox = 0;
-    uint64_t                           digest0      = 0;
-    uint64_t                           digest1      = 0;
-    bool                               digest_valid = false;
+    int                                div_blackbox    = 0;
+    uint64_t                           digest0         = 0;
+    uint64_t                           digest1         = 0;
+    bool                               digest_valid    = false;
     // Stored by THIS run: the mapped body still lives only in the output
     // library, because the copy into the cache library is deferred to save()
     // (see store()). Never persisted -- a loaded row's body is in lib().
-    bool                               in_outlib    = false;
+    bool                               in_outlib       = false;
     // Stored by THIS run (store/store_pre): its cached pre-body's Sub child
     // decls are the ones this run declared. A row loaded from disk is only
     // trusted while none of the child decls its pre-body instantiates has been
@@ -150,12 +151,10 @@ public:
   [[nodiscard]] uint64_t           salt() const { return salt_; }
 
   // Salt for the whole cache: the global inputs the per-region compare does not
-  // see. The caller's engine salt (its backend's generated source hash), library CONTENT, sequential-mapping mode, the RESOLVED DFF cell
-  // (liberty::dff_descriptor -- name:d:clk:q:inverted -- of the auto-pick, not
-  // the raw `dff_cell` option, which is empty by default: a cached mapped body
-  // names its DFF Sub decl and reads its QN pin as Q, so a different pick must
-  // be a different key), plus a schema tag bumped when the mapper's read-back
-  // or the cache shape changes.
+  // see. The caller's engine salt (its backend's generated source hash), library CONTENT, sequential-mapping mode, the RESOLVED DFF
+  // cell (liberty::dff_descriptor -- name:d:clk:q:inverted -- of the auto-pick, not the raw `dff_cell` option, which is empty by
+  // default: a cached mapped body names its DFF Sub decl and reads its QN pin as Q, so a different pick must be a different key),
+  // plus a schema tag bumped when the mapper's read-back or the cache shape changes.
   [[nodiscard]] static uint64_t make_salt(uint64_t engine_salt, std::string_view library_path, bool map_register,
                                           Memory_fold memory_fold, uint64_t memory_max_bits, std::string_view dff_desc);
 
@@ -175,7 +174,7 @@ private:
   // unchanged specialization is visited under a new name. Keep a lazy,
   // private view of the saved generation for exact cross-name comparison.
   // It is never written and is discarded before mapped bodies are frozen.
-  std::unique_ptr<Region_cache>                                loaded_snapshot_;
+  std::unique_ptr<Region_cache>                              loaded_snapshot_;
   bool                                                       saved_generation_readable_ = true;
   // Canonical digest + recipe -> previously mapped region names. The digest is
   // only a discovery index: every candidate still passes the exact structural

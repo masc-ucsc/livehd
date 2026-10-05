@@ -123,7 +123,8 @@ Flow_result execute_flow(void* opaque, const Flow_plan& plan, const std::functio
   if (!admit("entry")) {
     return result;
   }
-  if (plan.flow.empty() && (!Abc_NtkIsMappedLogic(Abc_FrameReadNtk(frame)) || plan.remappable || plan.area_candidate)) {
+  if (plan.flow.empty()
+      && (!Abc_NtkIsMappedLogic(Abc_FrameReadNtk(frame)) || (plan.remappable && !plan.mapped_remap) || plan.area_candidate)) {
     result.status = Flow_status::failed;
     result.stage  = "invalid-mapped-sizing-plan";
     return result;

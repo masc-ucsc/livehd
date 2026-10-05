@@ -53,6 +53,25 @@ std::string lib(const std::string& cells) {
 
 }  // namespace
 
+TEST(LibertyDff, CombinationalInventoryKeepsPinOrderAndExcludesUnsupportedCells) {
+  const auto cell = [](const std::string& name, const std::string& extra, const std::string& output) {
+    return "cell(" + name + ") { area: 2; " + extra
+           + " pin(B) {direction:input;} pin(A) {direction:input;} pin(Y) {direction:output; function:\"A*!B\"; " + output + "} }";
+  };
+  auto path
+      = write_lib("comb.lib",
+                  lib(cell("ANDN", "", "") + cell("DISABLED", "dont_use:true;", "") + cell("TRISTATE", "", "three_state:\"A\";")
+                      + cell("MULTI", "pin(Z) {direction:output; function:\"B\";}", "") + q_cell("STATE", 0.1)));
+  const auto cells = livehd::liberty::scan_comb_cells(path);
+  ASSERT_EQ(cells.size(), 2U);
+  EXPECT_EQ(cells[0].name, "INVx1");
+  EXPECT_EQ(cells[1].name, "ANDN");
+  EXPECT_EQ(cells[1].inputs, (std::vector<std::string>{"B", "A"}));
+  EXPECT_EQ(cells[1].output, "Y");
+  EXPECT_EQ(cells[1].function, "A*!B");
+  EXPECT_DOUBLE_EQ(cells[1].area, 2);
+}
+
 TEST(LibertyDff, Asap7ShapedQnFamilyIsPickedByArea) {
   // DFFHQx4 (Q, 0.3645) vs DFFHQNx1/x2/x3 (QN, 0.2916/0.30618/0.32076) plus the
   // negedge DFFLQNx1 (cheapest of all, clocked_on "!CLK") and an async-reset cell.
@@ -64,7 +83,7 @@ TEST(LibertyDff, Asap7ShapedQnFamilyIsPickedByArea) {
                                     "}\n    pin(D) { direction : input; }\n    pin(RESETN) { direction : input; }\n    "
                                     "pin(SETN) { direction : input; }\n    pin(QN) { direction : output; function : "
                                     "\"IQN\"; }\n  }\n"));
-  auto sel = livehd::liberty::resolve_dff_cells(path);
+  auto       sel  = livehd::liberty::resolve_dff_cells(path);
   ASSERT_TRUE(sel.base.has_value());
   EXPECT_EQ(sel.base->name, "DFFHQNx1");
   EXPECT_EQ(sel.base->d_pin, "D");
@@ -93,25 +112,25 @@ TEST(LibertyDff, Asap7ShapedQnFamilyIsPickedByArea) {
 TEST(LibertyDff, Sky130ShapedPrefersQOnlyDfxtp) {
   // dfxtp_1 (Q, 20.02) < dfxtp_2 (21.27) < dfxbp_1 (Q + Q_N, 23.77); quoted
   // names/directions the way the sky130 text spells them.
-  const std::string dfxbp =
-      "  cell (\"sky130_fd_sc_hd__dfxbp_1\") {\n    area : 23.772800;\n    ff (\"IQ\",\"IQ_N\") {\n      clocked_on : "
-      "\"CLK\";\n      next_state : \"D\";\n    }\n    pin (\"CLK\") { direction : \"input\"; }\n    pin (\"D\") { "
-      "direction : \"input\"; }\n    pin (\"Q\") { direction : \"output\"; function : \"IQ\"; }\n    pin (\"Q_N\") { "
-      "direction : \"output\"; function : \"IQ_N\"; }\n  }\n";
-  const std::string dfxtp1 =
-      "  cell (\"sky130_fd_sc_hd__dfxtp_1\") {\n    area : 20.019200;\n    ff (\"IQ\",\"IQ_N\") {\n      clocked_on : "
-      "\"CLK\";\n      next_state : \"D\";\n    }\n    pin (\"CLK\") { direction : \"input\"; }\n    pin (\"D\") { "
-      "direction : \"input\"; }\n    pin (\"Q\") { direction : \"output\"; function : \"IQ\"; }\n  }\n";
-  const std::string dfxtp2 =
-      "  cell (\"sky130_fd_sc_hd__dfxtp_2\") {\n    area : 21.270400;\n    ff (\"IQ\",\"IQ_N\") {\n      clocked_on : "
-      "\"CLK\";\n      next_state : \"D\";\n    }\n    pin (\"CLK\") { direction : \"input\"; }\n    pin (\"D\") { "
-      "direction : \"input\"; }\n    pin (\"Q\") { direction : \"output\"; function : \"IQ\"; }\n  }\n";
+  const std::string dfxbp
+      = "  cell (\"sky130_fd_sc_hd__dfxbp_1\") {\n    area : 23.772800;\n    ff (\"IQ\",\"IQ_N\") {\n      clocked_on : "
+        "\"CLK\";\n      next_state : \"D\";\n    }\n    pin (\"CLK\") { direction : \"input\"; }\n    pin (\"D\") { "
+        "direction : \"input\"; }\n    pin (\"Q\") { direction : \"output\"; function : \"IQ\"; }\n    pin (\"Q_N\") { "
+        "direction : \"output\"; function : \"IQ_N\"; }\n  }\n";
+  const std::string dfxtp1
+      = "  cell (\"sky130_fd_sc_hd__dfxtp_1\") {\n    area : 20.019200;\n    ff (\"IQ\",\"IQ_N\") {\n      clocked_on : "
+        "\"CLK\";\n      next_state : \"D\";\n    }\n    pin (\"CLK\") { direction : \"input\"; }\n    pin (\"D\") { "
+        "direction : \"input\"; }\n    pin (\"Q\") { direction : \"output\"; function : \"IQ\"; }\n  }\n";
+  const std::string dfxtp2
+      = "  cell (\"sky130_fd_sc_hd__dfxtp_2\") {\n    area : 21.270400;\n    ff (\"IQ\",\"IQ_N\") {\n      clocked_on : "
+        "\"CLK\";\n      next_state : \"D\";\n    }\n    pin (\"CLK\") { direction : \"input\"; }\n    pin (\"D\") { "
+        "direction : \"input\"; }\n    pin (\"Q\") { direction : \"output\"; function : \"IQ\"; }\n  }\n";
   // dfrtp: async reset (`clear`), must be rejected; dfrtn: negedge + reset.
-  const std::string dfrtp =
-      "  cell (\"sky130_fd_sc_hd__dfrtp_1\") {\n    area : 25.0;\n    ff (\"IQ\",\"IQ_N\") {\n      clear : "
-      "\"!RESET_B\";\n      clocked_on : \"CLK\";\n      next_state : \"D\";\n    }\n    pin (\"CLK\") { direction : "
-      "\"input\"; }\n    pin (\"D\") { direction : \"input\"; }\n    pin (\"RESET_B\") { direction : \"input\"; }\n    pin "
-      "(\"Q\") { direction : \"output\"; function : \"IQ\"; }\n  }\n";
+  const std::string dfrtp
+      = "  cell (\"sky130_fd_sc_hd__dfrtp_1\") {\n    area : 25.0;\n    ff (\"IQ\",\"IQ_N\") {\n      clear : "
+        "\"!RESET_B\";\n      clocked_on : \"CLK\";\n      next_state : \"D\";\n    }\n    pin (\"CLK\") { direction : "
+        "\"input\"; }\n    pin (\"D\") { direction : \"input\"; }\n    pin (\"RESET_B\") { direction : \"input\"; }\n    pin "
+        "(\"Q\") { direction : \"output\"; function : \"IQ\"; }\n  }\n";
   const auto path = write_lib("sky130.lib", lib(dfxbp + dfxtp2 + dfrtp + dfxtp1));
   auto       sel  = livehd::liberty::resolve_dff_cells(path);
   ASSERT_TRUE(sel.base.has_value());
@@ -154,7 +173,13 @@ TEST(LibertyDff, QnOnlyWithPlainNextStateIsInvertedOnce) {
 
 TEST(LibertyDff, NextStateSpellings) {
   // `D'`, `(!D)`, `!(D)` and `( D )` all parse; scan-mux / enable forms do not.
-  for (const auto& [next, inv] : {std::pair{"D'", true}, {"(!D)", true}, {"!(D)", true}, {"( D )", false}, {"(D)'", true}}) {
+  for (const auto& [next, inv] : {
+           std::pair{   "D'",  true},
+           { "(!D)",  true},
+           { "!(D)",  true},
+           {"( D )", false},
+           { "(D)'",  true}
+  }) {
     const auto path = write_lib("next.lib", lib(qn_cell("X", 1, next)));
     auto       dff  = livehd::liberty::find_dff_cell(path);
     ASSERT_TRUE(dff.has_value()) << next;
@@ -218,8 +243,9 @@ TEST(LibertyDff, AreaReadsTheCellNotAPinGroup) {
 }
 
 TEST(LibertyDff, PreferNamesOneCellAndLadderIsThatCell) {
-  const auto path = write_lib("prefer.lib", lib(qn_cell("DFFHQNx1", 0.2916) + qn_cell("DFFHQNx2", 0.30618) + q_cell("DFFHQx4", 0.3645)));
-  auto       sel  = livehd::liberty::resolve_dff_cells(path, "DFFHQNx2");
+  const auto path
+      = write_lib("prefer.lib", lib(qn_cell("DFFHQNx1", 0.2916) + qn_cell("DFFHQNx2", 0.30618) + q_cell("DFFHQx4", 0.3645)));
+  auto sel = livehd::liberty::resolve_dff_cells(path, "DFFHQNx2");
   ASSERT_TRUE(sel.base.has_value());
   EXPECT_EQ(sel.base->name, "DFFHQNx2");
   ASSERT_EQ(sel.ladder.size(), 1U);
@@ -242,9 +268,10 @@ TEST(LibertyDff, TestLibsKeepTheirPicks) {
   // DFFNLx1 (4), with DFFNx2 as the second rung.
   const auto t = write_lib("test.lib", lib(q_cell("DFFx1", 6)));
   EXPECT_EQ(livehd::liberty::find_dff_cell(t)->name, "DFFx1");
-  const auto tq = write_lib("test_qn.lib",
-                            lib(q_cell("DFFx1", 6) + qn_cell("DFFNx1", 5) + qn_cell("DFFNx2", 5.5) + qn_cell("DFFNLx1", 4, "!D", "!CLK")));
-  auto       sel = livehd::liberty::resolve_dff_cells(tq);
+  const auto tq
+      = write_lib("test_qn.lib",
+                  lib(q_cell("DFFx1", 6) + qn_cell("DFFNx1", 5) + qn_cell("DFFNx2", 5.5) + qn_cell("DFFNLx1", 4, "!D", "!CLK")));
+  auto sel = livehd::liberty::resolve_dff_cells(tq);
   ASSERT_TRUE(sel.base.has_value());
   EXPECT_EQ(sel.base->name, "DFFNx1");
   EXPECT_TRUE(sel.base->q_inverted);
@@ -358,7 +385,8 @@ std::string async_cell(const std::string& name, double area, const std::string& 
   if (dont_use) {
     s += "    dont_use : true;\n";
   }
-  s += "    ff (" + head + ") {\n      clocked_on : \"" + clk + "\";\n      next_state : \"" + next + "\";\n" + ff_attrs + "    }\n";
+  s += "    ff (" + head + ") {\n      clocked_on : \"" + clk + "\";\n      next_state : \"" + next + "\";\n" + ff_attrs
+       + "    }\n";
   s += "    pin (CLK) { direction : input; clock : true; }\n    pin (D) { direction : input; }\n";
   for (const auto& p : pins) {
     s += "    pin (" + p + ") { direction : input; }\n";
@@ -385,7 +413,7 @@ TEST(LibertyDff, Asap7AsyncCellIsStatedInQnTerms) {
                                                "QN",
                                                "IQN",
                                                "!D")));
-  auto sel = livehd::liberty::resolve_dff_cells(path);
+  auto       sel  = livehd::liberty::resolve_dff_cells(path);
   ASSERT_TRUE(sel.base.has_value());
   EXPECT_EQ(sel.base->name, "DFFHQNx1");  // the async cell never becomes the plain pick
   EXPECT_FALSE(sel.base->is_async());
@@ -417,22 +445,22 @@ TEST(LibertyDff, Sky130AsyncPicksClearAndPresetCellsByArea) {
   const std::string ff_clear  = "      clear : \"!RESET_B\";\n";
   const std::string ff_preset = "      preset : \"!SET_B\";\n";
   const std::string head      = "\"IQ\",\"IQ_N\"";
-  const auto        path      = write_lib(
-      "sky130_async.lib",
-      lib(q_cell("dfxtp_1", 20.02) + async_cell("dfrtp_1", 25.02, head, ff_clear, {"RESET_B"}, "Q", "IQ")
-          + async_cell("dfrtp_2", 26.0, head, ff_clear, {"RESET_B"}, "Q", "IQ")
-          + async_cell("dfstp_1", 26.28, head, ff_preset, {"SET_B"}, "Q", "IQ")
-          + async_cell("dfbbp_1",
-                       32.5,
-                       head,
-                       ff_clear + ff_preset + "      clear_preset_var1 : \"H\";\n      clear_preset_var2 : \"L\";\n",
-                       {"RESET_B", "SET_B"},
-                       "Q",
-                       "IQ")
-          + async_cell("dfrtp_cheap", 10.0, head, ff_clear, {"RESET_B"}, "Q", "IQ", "D", /*dont_use=*/true)
-          + async_cell("dfrtn_1", 9.0, head, ff_clear, {"RESET_B"}, "Q", "IQ", "D", false, "!CLK")
-          + async_cell("dfgated_1", 8.0, head, "      clear : \"!RESET_B & EN\";\n", {"RESET_B", "EN"}, "Q", "IQ")
-          + async_cell("dfrbn_1", 25.5, head, ff_clear, {"RESET_B"}, "Q_N", "IQ_N")));
+  const auto        path
+      = write_lib("sky130_async.lib",
+                  lib(q_cell("dfxtp_1", 20.02) + async_cell("dfrtp_1", 25.02, head, ff_clear, {"RESET_B"}, "Q", "IQ")
+                      + async_cell("dfrtp_2", 26.0, head, ff_clear, {"RESET_B"}, "Q", "IQ")
+                      + async_cell("dfstp_1", 26.28, head, ff_preset, {"SET_B"}, "Q", "IQ")
+                      + async_cell("dfbbp_1",
+                                   32.5,
+                                   head,
+                                   ff_clear + ff_preset + "      clear_preset_var1 : \"H\";\n      clear_preset_var2 : \"L\";\n",
+                                   {"RESET_B", "SET_B"},
+                                   "Q",
+                                   "IQ")
+                      + async_cell("dfrtp_cheap", 10.0, head, ff_clear, {"RESET_B"}, "Q", "IQ", "D", /*dont_use=*/true)
+                      + async_cell("dfrtn_1", 9.0, head, ff_clear, {"RESET_B"}, "Q", "IQ", "D", false, "!CLK")
+                      + async_cell("dfgated_1", 8.0, head, "      clear : \"!RESET_B & EN\";\n", {"RESET_B", "EN"}, "Q", "IQ")
+                      + async_cell("dfrbn_1", 25.5, head, ff_clear, {"RESET_B"}, "Q_N", "IQ_N")));
   auto sel = livehd::liberty::resolve_dff_cells(path);
   ASSERT_TRUE(sel.base.has_value());
   EXPECT_EQ(sel.base->name, "dfxtp_1");
@@ -471,7 +499,7 @@ TEST(LibertyDff, AsyncDualCellServesBothValues) {
                                                {"RN", "S"},
                                                "Q",
                                                "IQ")));
-  auto sel = livehd::liberty::resolve_dff_cells(path);
+  auto       sel  = livehd::liberty::resolve_dff_cells(path);
   for (int v = 0; v < 2; ++v) {
     ASSERT_EQ(sel.areset_ladder[v].size(), 1U) << v;
     const auto& c = sel.areset_ladder[v].front();
@@ -534,10 +562,10 @@ TEST(LibertyDff, Asap7IcgLadderByArea) {
   for (int i = 0; i < 5; ++i) {
     cells += icg_cell("ICGx" + std::to_string(i + 1) + "_ASAP7_75t_R", areas[i], "latch_posedge_precontrol", "ENA", "SE");
   }
-  cells += icg_cell("ICGx4DC_ASAP7_75t_R", 0.69984, "latch_posedge_precontrol", "ENA", "SE");
-  cells += icg_cell("ICGx8DC_ASAP7_75t_R", 0.69984, "latch_posedge_precontrol", "ENA", "SE");
-  const auto path = write_lib("asap7_icg.lib", lib(qn_cell("DFFHQNx1", 0.2916) + cells));
-  auto       sel  = livehd::liberty::resolve_dff_cells(path);
+  cells           += icg_cell("ICGx4DC_ASAP7_75t_R", 0.69984, "latch_posedge_precontrol", "ENA", "SE");
+  cells           += icg_cell("ICGx8DC_ASAP7_75t_R", 0.69984, "latch_posedge_precontrol", "ENA", "SE");
+  const auto path  = write_lib("asap7_icg.lib", lib(qn_cell("DFFHQNx1", 0.2916) + cells));
+  auto       sel   = livehd::liberty::resolve_dff_cells(path);
   ASSERT_EQ(sel.icg_ladder.size(), 5U);
   const auto& c = sel.icg_ladder.front();
   EXPECT_EQ(c.name, "ICGx1_ASAP7_75t_R");
@@ -607,7 +635,7 @@ std::string latch_cell(const std::string& name, double area, const std::string& 
     const std::string o     = outs.substr(b, e - b);
     const auto        colon = o.find(':');
     s += "    pin (" + o.substr(0, colon) + ") { direction : output; function : \"" + o.substr(colon + 1) + "\"; }\n";
-    b = e + 1;
+    b  = e + 1;
   }
   return s + "  }\n";
 }
@@ -660,11 +688,11 @@ TEST(LibertyDff, Sky130LatchPicksSkipDontUseIsolationScanAndClockGates) {
   // A cheaper dont_use latch, an isolation latch, a scan latch (an extra
   // input), an ICG built on a latch group and a latch whose only output is
   // gated never qualify.
-  const std::string icg_latch =
-      "  cell (dlclkp_1) {\n    area : 1;\n    clock_gating_integrated_cell : \"latch_posedge\";\n    latch (IQ, IQN) { "
-      "data_in : \"GATE\"; enable : \"!CLK\"; }\n    pin (CLK) { direction : input; clock_gate_clock_pin : true; }\n    pin "
-      "(GATE) { direction : input; clock_gate_enable_pin : true; }\n    pin (GCLK) { direction : output; clock_gate_out_pin : "
-      "true; function : \"IQ & CLK\"; }\n  }\n";
+  const std::string icg_latch
+      = "  cell (dlclkp_1) {\n    area : 1;\n    clock_gating_integrated_cell : \"latch_posedge\";\n    latch (IQ, IQN) { "
+        "data_in : \"GATE\"; enable : \"!CLK\"; }\n    pin (CLK) { direction : input; clock_gate_clock_pin : true; }\n    pin "
+        "(GATE) { direction : input; clock_gate_enable_pin : true; }\n    pin (GCLK) { direction : output; clock_gate_out_pin : "
+        "true; function : \"IQ & CLK\"; }\n  }\n";
   const auto path = write_lib(
       "sky130_latch.lib",
       lib(q_cell("dfxtp_1", 20.02) + latch_cell("sky130_fd_sc_hd__dlxbp_1", 18.77, "GATE", "", {}, "Q:IQ,Q_N:IQN")
@@ -707,7 +735,7 @@ TEST(LibertyDff, LatchQnOnlyCellIsInvertedWithResetsInPinTerms) {
   const auto path = write_lib("qn_latch.lib",
                               lib(latch_cell("LQN", 3, "!CLK", " clear : \"!RN\";", {"RN"}, "QN:IQN", "", "IQN, IQNN", "!D")
                                   + latch_cell("LQNP", 3, "CLK", " preset : \"S\";", {"S"}, "QN:IQN", "", "IQN, IQNN", "!D")));
-  auto sel = livehd::liberty::resolve_dff_cells(path);
+  auto       sel  = livehd::liberty::resolve_dff_cells(path);
   ASSERT_EQ(sel.latch_ladder[1][1].size(), 1U);
   const auto& c = sel.latch_ladder[1][1][0];
   EXPECT_EQ(c.name, "LQN");

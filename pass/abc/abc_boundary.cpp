@@ -1493,8 +1493,9 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
           q.boundary_area_pre  = before->second;
         }
         if (after) {
-          q.delay = after->first;
-          q.area  = after->second;
+          q.delay    = after->first;
+          q.area     = after->second;
+          q.delay_ps = true;
         }
         if (design.cache != nullptr) {
           design.cache->refresh_qor(d.name, q);  // the cached body is the refined one

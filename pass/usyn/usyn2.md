@@ -1,9 +1,11 @@
 # USYN2 — native multi-representation logic optimization for pass.usyn
 
-Status: reviewed plan (2026-10-03); no implementation authorized by this review.
+Status: core M0–M9 implementation and rollout complete (2026-10-04), authorized
+after the 2026-10-03 planning review. Optional M6b MIG and later M10 timing
+resynthesis remain separately scoped follow-ups.
 USYN already has endpoint selection, residual rewriting/resubstitution and one
-feedback round. USYN2 proposes extensions and replacements described below;
-file names and new options are provisional until their milestone is implemented.
+feedback round. USYN2 implements the core extensions and replacements described
+below; optional future milestones retain their planning status.
 
 Summary: USYN keeps one shared XAG as its working network. Each admitted cone is
 re-expressed in up to four local representations (XAG, bounded mux/BDD, SOP,
@@ -33,6 +35,300 @@ Ground rules carried over from the [USYN redesign](../../todo/livehd/2u-usyn.htm
   input, options and work credits.
 - Compact loops stay rolled (ruling 2026-10-03); this plan works on the
   per-region logical network and never expands a loop.
+
+Implementation checkpoint (2026-10-03; historical ablations below):
+
+- Goal active: implement the core milestones, then reduce mapped combinational
+  gate count against LiveHD ABC using matched lhdtrack runs. M6b and M10 retain
+  their optional/later scope. No new commits or pushes are authorized.
+- Frozen six-design ASAP7 baseline: lhdtrack run `20261003T210453`, binary
+  `db93f8d592941665`; 12/12 mappings and both checkers proved all emissions.
+- M0 exposes already-existing residual window/candidate/rejection/limit counters
+  in JSON and verifies their warm-cache replay. Balanced equality is implemented
+  as an explicit experiment; all signed-extension/guard comparisons remain.
+  It is not enabled by default: run `20261003T211419` increased ABC arbiter
+  combinational cells from 151/158 to 210/209, with little native gate benefit.
+  This shared-flow regression must not inflate the ABC comparison baseline.
+- M1/M8 has an explicit `pass.usyn.mux_lowering=decode|tree` experiment, preserving
+  sparse/aliased indexed arms, wide two-arm predicates and constant-arm pruning.
+  Selectors wider than 32 bits retain decode. No mapping barriers are added.
+  Run `20261003T211641` proved all six emissions but changed no gate counts:
+  `br_mux_bin` is explicitly decoded OR-of-products in its source, not an indexed
+  Mux IR node. Its optimization therefore needs symbolic factoring/choices, not
+  merely a change to the Mux blaster.
+- M3 has a bounded immutable-snapshot AND/XOR balancing trial (`balance=true`),
+  retaining computed leaves, source order and shared/protected boundaries. The
+  incumbent survives a refused trial; only whole-network nonincreasing cost and
+  nonincreasing output depth allow publication. It stays off pending ablation.
+- M4 has exact functional hashing on up to six ordered primary boundary inputs,
+  with irrelevant-variable removal and explicit complementary phases. Larger
+  supports remain structural; neither sampling nor a solver authorizes merges.
+  All 256 three-input functions and generated reconvergent graphs are checked
+  exhaustively. The trial is explicit (`sweep=true`) pending mapped evidence.
+- Balance-only ASAP7 run `20261003T213235` proved all six emissions in both
+  checkers, with zero synthesis/proof timeouts. Gates changed from baseline
+  370/388/786/1572/45/63 to 379/381/786/1572/43/64 (arb_rr/flow_arb_rr/mux/
+  mux_array/comparator/icmp). Area/depth improvements do not justify enabling
+  this trial globally when the requested gate metric regresses.
+- M5 has a generated complete NPN4 class library: 222 representatives, two
+  bounded Shannon/Davio area/depth templates per class, with exhaustive checks
+  of all 65,536 functions and dependent/complemented ordered leaves. Priority
+  cut enumeration retains the greedy seed and up to 8 cuts (configurable 1–32),
+  explores at most 128 frontiers, and reports its bound. The generated data is
+  included in the producer salt. This is complete coverage, not optimal synthesis.
+  The trial is explicit (`npn4=true`) pending mapped evidence.
+- NPN4-only ASAP7 run `20261003T214852` proved all six emissions in both
+  checkers, with no synthesis/proof timeouts. Gates were 331/362/786/1572/45/63
+  against the frozen 370/388/786/1572/45/63 USYN baseline; the ABC baseline stays
+  151/158/308/680/30/41. Arbiter gate gains are real but the large gap remains.
+- P2-C is being integrated as a private final CMOS expansion pass after frozen
+  model validation. Its search has a separate reported credit floor but uses
+  the same design-wide remaining credits; selection-cache hits re-run this pass
+  from the validated expansion. Original state/control ports stay protected.
+- P2-C plus NPN4 ASAP7 run `20261003T215814` proved all six emissions in both
+  checkers, with no synthesis/proof timeouts. Gates were 330/345/786/1572/45/60,
+  improving the two arbiters and icmp while leaving mux/comparator counts fixed.
+- M6 now has an explicit symbolic decoded-SOP/mux alternative (`sop_tree=true`),
+  using bounded Shannon cofactoring of repeated literals on an independent
+  symbolic basis. It preserves computed atoms and the incumbent snapshot, and
+  does not require a wide sampled truth table. Its native cost may grow; mapped
+  evidence must decide whether it deserves retention/selection. Bounds are 64
+  terms, 16 literals/product, 256 expansions and 8 controls, with reported refusal.
+- Arithmetic, compare, mux, report/cache and cone-accelerator OPT checks pass.
+  Full USYN2 integration, the full corpus and simulation gates are still pending.
+
+Further implementation/evidence (2026-10-03):
+
+- M2 uses the permitted immutable-snapshot fallback: retained functions never
+  mutate saved endpoint windows. Ownership is distinct from selected liveness;
+  insertion proves total equality on one ordered basis and rejects old-root /
+  transitive-fanout dependencies. Extraction checks overlap-induced cycles,
+  preserves all sources/ports and publishes only complete rebuilt networks.
+- P1 is an explicit bounded cleanup before unate selection (`p1=true`), limited
+  to one million credits and at most 1/16 of remaining search credits. It uses
+  balance, exact sweep and positive-gain NPN4, without resubstitution. A semantic
+  regression checks factoring, every output assignment and unchanged RAW state
+  correspondence/names, including a memory-named state bit.
+- M1's optional `tmap_sharing_fanout=16` admits complete small decoder fan-in
+  closures in the provider's private graph. Constant shift / bit-selection
+  wiring and inversions remain in the closure; variable shifts and native state
+  are excluded. PDK mapping stays mapping/buffering/sizing only. Run
+  `20261003T225003` reduced mux gates 786→373 and mux-array 1572→752, versus
+  the frozen ABC 308/680, and both checkers proved both emissions without timeout.
+  Final whole-design STA and buffering/sizing are included in the ledger.
+- M6/M7 has native signed SOPs and a reduced ordered BDD on ≤8 independent
+  inputs, exhaustive candidate validation, an incumbent plus up to two retained
+  area/depth members per class, two initial extractions and at most eight global
+  sharing-recovery trials. SOP bounds are 64 literals; BDD bounds are 128 nodes.
+  `multi_rep=true` applies this to P2-C and reports candidates, ownership,
+  extractions, cycles, scratch nodes and bounds. All 256 three-input functions,
+  computed dependent leaves, phases and generated multi-output graphs are tested.
+- M7a has an ABC-free scalar Liberty inventory and explicit `cost_mode=proxy|
+  cells|area`. Legal four-input cell covers account for pin phases, output
+  inversions and shared demanded rails; direct primitive cuts remain available
+  when higher-coverage cuts cannot map to a single cell. Unsupported/bounded
+  estimates retain the incumbent. Cost tables are built from the exact content
+  snapshot hashed into the native cache context, together with policy/version
+  and requested delay; changing a library at the same path invalidates reuse.
+  These are covering/ranking proxies, not STA or optimal physical estimates.
+- P1+NPN4+P2-C+sharing run `20261003T225356` had gates 261/284/373/752/43/64;
+  all six mappings and both checkers passed, with no timeouts. `multi_rep=true`
+  proxy run `20261003T232139` changed flow_arb_rr 284→277; all other counts
+  were unchanged and both checkers passed all six. Corrected cell ranking run
+  `20261003T232750` predicted an arbiter gain but mapped 261→262 gates (depth
+  8→7); the other counts were unchanged. This does not justify a default
+  library-aware ranking policy. The frozen ABC arbiter counts remain 151/158.
+- Full ASAP7 Verilog pilot `20261003T225349` is still proving its netlists:
+  190 synthesis slots passed, five were explicitly skipped, no synthesis failed
+  or timed out. Independent-oracle timeouts are retained; they do not become
+  proofs. Matched weak-case/sky130 experiments, default rollout, Pyrope,
+  simulation and final full-suite gates remain pending. No commit or push.
+
+Rollout checkpoint (2026-10-04; supersedes pending/default notes above):
+
+- Default CMOS flow now enables NPN4, final native CMOS cleanup, bounded
+  sharing boundaries (`tmap_sharing_fanout=16`), and at most two mapped profiles.
+  The incumbent profile competes with P1 plus multi-representation choices;
+  actual hierarchy-weighted combinational gate count selects the winner, with
+  area and region delay as stable tie-breakers. Artifacts, correspondence and
+  mapped output move together. Optional refusal retains the complete incumbent.
+  Equal fixed native credit shares reserve publication work; mapping trials,
+  structural/search consumption, bounds and decisions are reported separately.
+- Native candidates include positive/negative SOP, reduced ordered BDD and
+  bounded disjoint-support decomposition on at most eight independent inputs.
+  A candidate that aliases another computed boundary leaf is rejected on the
+  total independent basis; other valid candidates remain eligible. This is a
+  bounded decomposition search, not a canonical or complete DSD algorithm.
+- Exact sweep supports up to sixteen inputs with a bounded table-word budget;
+  pipeline defaults stay at six. Optional shared critical-path balancing has
+  a four-gate per-cone bound and explicit total duplication limit (default zero),
+  protects published endpoints and still requires whole-network cost/depth
+  acceptance. No sampling or solver is used by these native optimizations.
+- Mapping profiles have isolated generations: the incumbent keeps the existing
+  `usyn_cache/tmap/current` publication, the optional profile uses `tmap/choices`.
+  This prevents a second cold trial from masquerading as warm-cache reuse.
+  Explicit whole-module flattening suppresses optional sharing boundaries.
+  Cache-disabled runs touch neither profile; only the workdir incremental
+  switch controls persistent reuse. Selection artifact version is now 24.
+- The strict ABC-removed CLI audit passes with the ABC source/package actually
+  absent. The formal salt no longer depends on `abc.patch` in that configuration.
+  Native optimization remains ABC-free; the optional provider performs technology
+  mapping, buffering and sizing. Domino clock phases remain two by default.
+- Bounded-profile ASAP7 cohort `20261004T000155` passed all 28 mappings and
+  28 native/independent LEC rows. Keeping the incumbent avoided the measured
+  `br_multi_xfer_reg_fwd` choice regression (451 versus 521 gates).
+  Exact retained-netlist smoke `20261004T001535` proved both Pyrope references
+  and matched both full-cycle simulation checksums. Sky130 default cohort
+  `20261004T001907` passed all twelve mappings and both checkers for all twelve.
+- Completed first full ASAP7 pilot `20261003T225349`: 190 synthesis successes,
+  five declared synthesis skips and zero synthesis failures/timeouts. The final
+  ledger has 188 native proofs and two native timeouts (`fma_share_sgn`,
+  `sqr_sgn`), 153 independent lgcheck proofs and 37 independent timeouts.
+  There are no refutes. Timeout rows are unknown, regardless of runner status.
+- All five cache/flatten/report rollout integration checks pass. Both complete
+  OPT and DBG builds pass; the OPT suite reports 4,580 passes and two skips, and
+  all thirteen focused DBG checks pass. A chained option insertion in the new
+  public-entry fixture was corrected to avoid invalidated flat-map references;
+  its assertions are unchanged and both build modes pass.
+- Final producer `2974ed6dd6441ca8` is frozen in lhdtrack. Full matched ASAP7
+  run `20261004T011423` completed all 780 rows with unchanged synthesis/proof
+  limits. Sky130 cohort `20261004T011427` completed all 24 rows;
+  both checkers prove all twelve emissions. Gates (ABC/USYN) are 168/271,
+  171/303, 310/340, 704/680, 32/36 and 51/45 in the six-design baseline order.
+- Exact retained-netlist Pyrope and full-cycle simulation validation runs in
+  completed-synthesis waves. Validation uses pinned Liberty models and pinned
+  LiveHD memory RTL, with each emitted netlist's recorded SHA-256. Native and
+  independent simulator legs are distinct observations; correctness validation
+  uses one full recorded execution rather than performance repetitions. Five
+  independent simulator setup failures from a missing memory include path are
+  retained in history; all five corrected rechecks pass without netlist changes.
+- Final ASAP7 synthesis is complete: 190 USYN successes, five declared skips,
+  no failures or synthesis timeouts. ABC has 184 successes, five declared skips
+  and six unchanged 660-second synthesis timeouts: `fma/bw32`, `fmaa/bw24`,
+  `mul_add_sgn/bw24`, `mul_three/bw32`, `sqr_sgn/bw26`, `sqr_uns/bw28`.
+- All 190 retained USYN netlists pass independent Verilator simulation with
+  the full manifest cycle counts and recorded checksums. Four native LiveHD
+  simulator checks (arbiter, comparator, FIFO and CPU) also pass their complete
+  recorded executions. No checksum mismatches remain.
+- Pyrope LEC on those exact netlists has 180 unbounded proofs, eight bounded
+  proofs and two timeouts, plus five declared skips. The unknowns are
+  `br_flow_xbar_rr/npf4_npf4_rdo0_rpo0_w32` and `sqr_sgn/bw26`; neither is a
+  refutation. The crossbar has differently named repeated `last_grant` state
+  between the Pyrope and Verilog hierarchies, so ambiguous leaf matches remain
+  rejected. The square is a combinational arithmetic proof limit. Do not relabel
+  bounded checks as unbounded equivalence, or timeouts as successful proofs.
+- Final ASAP7 gates in the frozen six-design order are 261/284/373/752/43/60,
+  versus previous USYN 370/388/786/1572/45/63 and unchanged ABC
+  151/158/308/680/30/41. Individual USYN reductions are
+  29.5%/26.8%/52.5%/52.2%/4.4%/4.8%. These are matched diagnostic cases,
+  not a language-wide aggregate. The report retains every measured ratio below
+  0.8 and distinguishes proof coverage from synthesis success.
+- The older full matched run `20261004T001900` was superseded after its complete
+  synthesis phase and 56 proof rows, preventing duplicate host-report writers.
+  All 446 recorded rows remain in the ledger; remaining proofs were cancelled,
+  not proven or timed out. Its ABC synthesis has six fixed-limit timeouts.
+- Final USYN Verilog LEC has 189 unbounded proofs and one timeout
+  (`sqr_sgn/bw26`), plus five declared skips. Independent lgcheck has 112
+  unbounded proofs, 43 bounded proofs and 35 timeouts. Neither checker refutes
+  any emission. ABC's 184 successful emissions have 183 unbounded native
+  proofs and one bounded native proof; lgcheck has 110 unbounded proofs,
+  38 bounded proofs and 36 timeouts. Its six synthesis timeouts produce no
+  retained netlist, so their LEC slots are skipped rather than counted as proofs.
+- All 180 positive gate-count pairs have exact-emission proof coverage. Their
+  diagnostic ABC/USYN gate geomean is 1.264727; this includes automatically
+  translated sources and is not a Pyrope language headline. The 24 qualifying
+  idiomatic Pyrope cases, proved against their exact USYN emissions with both
+  Verilog emissions also proved, have geomean 1.199671 (about 16.6% fewer USYN
+  gates). Individual regressions remain visible; timing and area are separate
+  measurements and are not implied by this gate-count result.
+- Seven measured ABC/USYN gate ratios remain below 0.8: `br_flow_arb_rr`,
+  `br_arb_rr`, `br_multi_xfer_reg_fwd`, `icmp`, `comparator`, `br_flow_fork`
+  and `br_enc_priority_dynamic`. The report records each ratio, profile
+  decision and bounded-search evidence. Larger shared state/predicate cones,
+  common wide comparison relations and bus/prefix/decode sharing are follow-up
+  hypotheses. The 451-gate forward-transfer incumbent beats its 521-gate
+  alternative; retaining it is intentional, not an unmeasured optimization gain.
+- The final full Verilog native/independent proof sweep is complete.
+  Proof concurrency increased from eight workers after 72 recorded proof rows
+  to sixteen; interrupted unrecorded attempts were archived and restarted in
+  fresh workdirs. Solver and wall limits are unchanged. Earlier snapshots are
+  retained as evidence and must not be labeled validation of the final binary.
+  [The final host report](../../../lhdtrack/target/report-satsuma.html) contains
+  synthesis, exact-netlist Pyrope/Verilog LEC, simulation, gate comparisons and
+  all timeouts/skips. No timeout increase, commit or push was made.
+
+Code review checkpoint (2026-10-04; after the rollout above):
+
+- The tmap hand-off now carries every physical-only option pass.abc has, with
+  the same meaning and defaults: `pass.usyn.max_fanout`, `area_relax`,
+  `reg_margin`, `boundary`, `boundary_buffer`, `boundary_drive`,
+  `boundary_rounds` and `io_load`, plus the existing `delay`. These are
+  mapping, buffering and sizing techniques independent of logic synthesis, so
+  they stay within the ABC ruling. The exact partition-boundary re-size now runs
+  for USYN, and the `&nf -R` slack-to-area recovery can run on the mapping-only
+  branch. All of them enter the per-region recipe (`logical-tmap-v2`) and the
+  tmap cache salt.
+- Measured on the frozen six designs (ASAP7, delay 400 ps), new defaults vs.
+  boundary/area recovery off: icmp 60 → 52 gates (area 4.65 → 3.73 µm²),
+  comparator 43 → 42 (3.51 → 3.28 µm²), flow_arb_rr 281 → 279, arb_rr,
+  mux and mux-array unchanged; delays rise but stay under the budget, which is
+  what area recovery is for. The frozen numbers above predate this change.
+- Untimed maps report `"delay": null` with `delay_unit`, never ABC's unit-delay
+  level count as picoseconds. lhdtrack's `qor_endpoint.py` reads that as no
+  critical-path value.
+- Liberty function parsing (`native_cost.cpp`) now binds XOR tighter than AND,
+  as Liberty and OpenSTA's grammar do (`A^B*C` is `(A^B)*C`). Only
+  `cost_mode=cells|area` read cell functions; the default `proxy` is unaffected.
+- Also fixed: balance rebuilt already-absorbed nodes as their own groups
+  (super-linear candidate growth); the choice dependency check charged the whole
+  graph size per call; the second mapped profile ran even when the incumbent's
+  mapped cost was unavailable; `cost_mode` had no own diagnostic.
+- Open against this plan: no `mux` node kind, fanout edge lists, in-place
+  `replace` or MFFC (the documented immutable-snapshot fallback). Remaining
+  ABC/USYN gate ratios below 0.8 are the arbiters, comparator and icmp.
+
+Mux balancing and sweep width (2026-10-04):
+
+- `balance_mux_chains` (`xag_balance.cpp`) recognizes 2:1 muxes in both XAG
+  encodings, the XOR form `Xag::mux` builds, `f ^ (s & (t ^ f))`, and the
+  AND/OR form the Lnet import produces, `~(~(s & t) & ~(~s & f))`, with every
+  edge phase folded into the arms. A priority chain
+  `c1 ? v1 : (c2 ? v2 : ... d)` continues through an arm that is a mux owned
+  only by the chain (exact reader count per encoding: the XOR form reads its
+  else arm twice), on either arm (the select is complemented to keep the chain
+  on the else side). It is rebuilt with the associative pair rule
+  `(c1, v1) . (c2, v2) = (c1 | c2, c1 ? v1 : v2)`, an order-preserving tree that
+  merges the earliest-ready adjacent pair first, using AND/OR muxes (two levels,
+  no XOR). The rewrite is an exact identity whatever the conditions; tests check
+  every phase of both encodings exhaustively and 12-arm chains by random
+  vectors (depth more than halved).
+- `pass.usyn.mux_balance` (default true) runs it in P1, the residual pass and
+  the CMOS cleanup. It trades about one OR per arm for depth, so its guard is a
+  strict critical-depth gain, no deeper output, and estimated-cost growth of at
+  most `mux_balance_area_pct` (default 25). `mux_balance_min_arms` (default 3)
+  sets the shortest chain. Reports carry `mux_chains`, `mux_arms`, `mux_wins`
+  per section (p1, residual, cmos_cleanup).
+- Exact sweep width is `pass.usyn.sweep_inputs` (default 16) with an explicit
+  `sweep_table_words` budget (default 1,048,576 words, 8 MiB): at the old fixed
+  65,536 words a 16-input sweep could retain only about 32 full-width tables.
+  P1 has its own `p1_sweep_inputs` (default 6): at 16 P1's sweep consumed its
+  whole stage budget before NPN4 ran on br_arb_rr (P1 native cost 864 → 1214,
+  mapped 241 → 293 gates), while br_flow_arb_rr gained (279 → 267).
+- Measured on 15 designs (ASAP7, 400 ps): sweep width is neutral with P1 at six;
+  mux_balance changes only br_cdc_fifo_ctrl_push_1r1w (236 → 230 gates,
+  area 19.29 → 19.14 µm², delay 492 → 461 ps), from 5 chains / 15 arms in P1.
+  Priority logic in the bedrock designs is mostly AND-chain or OR-of-products
+  shaped, not nested muxes, so chains are rare. All options enter the artifact
+  identity (selection artifact version 25).
+- Corpus check (all 195 lhdtrack tests, ASAP7, 400 ps; 186 mapped in every
+  configuration, the same four logic-free packages/mocks fail in all), geomean
+  vs. base for gates / area / delay:
+  `mux_balance=true` 0.9998 / 0.9999 / 0.9989, 5 better and 2 worse (at most
+  +4 gates: br_amba_axi_isolate_sub); `sweep=true` at 16 inputs 0.9997 /
+  1.0008 / 1.0018, 17 better and 17 worse (br_arb_weighted_lru +195);
+  `p1_sweep_inputs=16` 1.0047 / 1.0040 / 1.0063, 23 better and 33 worse
+  (br_arb_rr +52, cpu −210). So mux_balance is on by default, the full sweep
+  stays opt-in at width 16, and P1 stays at six.
 
 ## 1. The problem, measured
 
@@ -160,7 +456,7 @@ alongside the frozen baseline, not substitution of one for the other.
 | I1 | tmap maps with `strash; &nf` only: no rewrite, sweep, choices or delay resynthesis, and no area/delay candidate pair | `pass/abc/abc_tmap.cpp`; USYN lacks comparable breadth | abcbare ≈ usyn (§1.1); ablation (§1.2) | M3–M7 |
 | I2 | `arith::build_eq` folds bit compares left-deep; strash merges `x[k-1:0]==0` prefixes into one serial chain | `pass/synth/arith.hpp:589` (shared by both flows) | push_ready[k] depth = k; arb_rr input lev 37, `balance` 14 | M0 (source), M3 (balance) |
 | I3 | audit compare lowering for redundant extensions; do not assume guard bits are redundant | `pass/synth/blast.hpp` EQ/LT lowering | `fraig` reductions motivate an audit, not proof that width is wrong | M0 (source), M4 (sweep) |
-| I4 | indexed multi-arm mux uses decode-AND-OR; suspected loss of shared decode during flat mapping (NAND5 per data bit in br_mux_bin) | `pass/synth/blast.hpp` Mux lowering; USYN single-region tmap | br_mux_bin 786 gates vs 375 for the same function; 682 even area-only; `dc2` leaves it at 1020 ANDs, `&dch` choices recover 33.8 µm² | M0, M1, M2, M7, M8 |
+| I4 | decoded OR-of-products (including source-written br_mux_bin) may lose shared decode during flat mapping (NAND5 per data bit in br_mux_bin) | `pass/synth/blast.hpp` Mux lowering; USYN single-region tmap | br_mux_bin 786 gates vs 375 for the same function; 682 even area-only; `dc2` leaves it at 1020 ANDs, `&dch` choices recover 33.8 µm² | M0, M1, M2, M7, M8 |
 | I5 | the sampled endpoint-free designs report 0 rewrite / 0 resub wins | `pass/usyn/residual.cpp` | comparator: 5.7M work, 0 wins, while `dc2` finds -43% | M2 + M5 replace it; M0 adds the missing counters |
 | I6 | the XAG is append-only with external ledger pricing; test whether mutable liveness enables better search within the same bounds | `pass/usyn/xag.hpp` | `rewrite_root` takes one window per root; 4-input templates only | M2 |
 | I7 | current AND/XOR/mux proxy costs may misrank CMOS candidates; calibrate against legal target cells | `Residual_options` | cell ratios depend on legal drive, phase and load; verify with Liberty-derived tables | M2, M9 |

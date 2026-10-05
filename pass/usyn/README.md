@@ -3,8 +3,8 @@
 `pass.usyn` builds a native XAG, selects register-rooted dual-rail functions,
 optimizes their shared residual logic, and emits a complete logical CMOS design.
 It retains the original register semantics. The optional ABC provider only
-technology-maps that selected network; USYN does not call ABC optimization,
-compare ABC candidates, or fall back to ABC synthesis.
+technology-maps native-created networks; USYN does not call ABC logic
+optimization or fall back to ABC synthesis.
 
 ```
 lhd synth design.v --top top --set synth.mapper=usyn --set pass.usyn.tmap=none --workdir W
@@ -16,6 +16,32 @@ lhd pass usyn lg:source --top top --set pass.usyn.tmap=none --emit-dir lg:net --
 OpenTimer in that mode; explicitly requesting STA is an error. The default
 `tmap=abc` requires Liberty and the registered optional provider, and maps the
 whole selected logical network. An unavailable provider produces a diagnostic.
+
+USYN2 defaults enable NPN4 rewriting, final CMOS cleanup and complete shared-cone
+mapping boundaries at fanout 16. With mapping, `tmap_trials=2` compares the base
+native network with a second network using P1 cleanup and bounded SOP/DSD/BDD/XAG
+choices. Both use the same mapping provider, Liberty and constraints. Selection
+minimizes actual combinational gate count weighted by hierarchy instances, then
+cell area and maximum region delay. Whole-design STA is measured afterwards;
+the region-delay tie-break is not a whole-design timing guarantee.
+
+The two searches split the existing structural and search work allowances,
+reserve publication credits and share process/time admission. Reports retain
+both costs, work, elapsed time, refusal reasons and the chosen profile. A refused
+optional trial keeps the complete incumbent; process/resource refusal prevents
+publication. Native artifacts always belong to the mapped winner. Incremental
+reuse follows the existing workdir switch for both profiles.
+The incumbent publishes under `usyn_cache/tmap`; the optional profile uses
+`usyn_cache/tmap/choices`, so its first mapping cannot read the incumbent's
+cold stores. Explicit whole-module flattening disables sharing boundaries.
+
+`tmap_trials=1` runs exactly the requested base flags. `p1` and `multi_rep` default
+false in that base; the second trial explicitly enables both. `tmap=none` runs
+one native network, regardless of `tmap_trials`, with no mapping or Liberty.
+Balanced equality, wide symbolic SOP trees, standalone sweep/balance and native
+Liberty cost modes remain explicit experiments. Shared critical-cone duplication
+is bounded by `balance_dup_limit` (default 0), preserves protected outputs, and
+still requires nonincreasing whole-network cost/depth before acceptance.
 
 `synth.mapper=usyn` selects the register-to-register USYN coloring profile.
 Configure the pass with `pass.usyn.*`; ABC options are not inherited.
@@ -98,7 +124,7 @@ Reports count existing-boundary care attempts and partial images separately
 from newly synthesized divisors. Functional search also reports single-divisor
 and parallel-divisor realization attempts and peak deferred-table bytes; these
 are attempted encodings, not final selected cell counts. The selection-cache
-envelope is version 17 to retain decomposition, both boundary-ranking rounds,
+envelope is version 25 to retain native optimization evidence, decomposition, both boundary-ranking rounds,
 pair gain-screen, bounded-window, joint-choice, fanout-free-window and logical-stage
 work evidence, including joint functional-divisor generation, care completion and recoding,
 plus the search's credit floor, the region's structural work and its identity
@@ -555,6 +581,8 @@ All options below use the `pass.usyn.` prefix.
 | `tmap`, `target` | `abc`, `cmos`; `tmap=none` emits logical CMOS |
 | `adder` | `auto`; prefix carry trees for Sum cells at least 16 bits wide and the final multiplier addition, balanced comparison trees at least 8 bits wide, ripple for narrow sums/comparisons and division. Explicit `rca`, `cska`, `cla`, `prefix` apply throughout arithmetic |
 | `adder_block` | 0; derive CSKA/CLA group width from operating width |
+| `eq_balance` | false; experimental balanced equality reductions; retains all extension/guard bits. The default keeps shared prefixes after a gate-count regression in the first controlled ablation |
+| `mux_lowering` | `decode`; experimental `tree` for indexed selectors up to 32 bits, preserving sparse/aliased arms. Two-arm predicates keep nonzero semantics; wider selectors retain decode |
 | `multiplier` | `csa`; carry-save partial-product compression with one final addition. `array` uses serial additions; `tree` uses balanced carry-propagating additions |
 | `logical_inputs`, `stack`, `branches` | 8, 4, 10; gate legality |
 | `cut_inputs`, `window_nodes`, `boundaries` | 16, 100000, 32; analysis limits and retained frontier (at most 12×boundaries+2 move trials; one phase: 8×boundaries+1) |
@@ -563,16 +591,27 @@ All options below use the `pass.usyn.` prefix.
 | `local_divisors`, `local_candidates` | 32, 64; retained local signals (1..256) and witness-guided set trials (0 disables, maximum 4096) |
 | `fast_accept` | true; false continues bounded improvement after a competitive full-cone result |
 | `clock_phases` | 2; accepts 1 or 2, with parallel cells; adds no CMOS state |
-| `work`, `endpoint_work`, `max_nodes` | 4000000000, 16000000, 2000000; deterministic admission (`work` is both the structural allowance, which also pays every region's mandatory import/identity-selection/freeze steps, and the search remainder that region searches share in order, see "Work accounting") |
+| `work`, `endpoint_work`, `max_nodes` | 4000000000, 16000000, 8000000; deterministic admission (`work` is both the structural allowance, which also pays every region's mandatory import/identity-selection/freeze steps, and the search remainder that region searches share in order, see "Work accounting") |
 | `pair_candidates`, `pair_inputs`, `pair_work` | 32, 16, 16000000; pair retention (0 disables, maximum 4096), joint input cap (1..16), regional pair work |
 | `pair_choices` | 4; distinct static-interface candidates retained per paired endpoint after the initial pair sweep (0 disables, maximum 8) |
 | `pair_trials` | 64; total pair candidates visited, including affected retries and admission failures (1..4096) |
 | `static_and`, `static_xor`, `static_not` | 2, 4, 1; positive provisional costs |
+| `p1`, `multi_rep` | false in the incumbent; the optional mapped trial enables both. P1 cleanup before endpoint selection is capped at 1M work and 1/16 of remaining search credits; multi-representation SOP/DSD/BDD choices preserve the incumbent |
+| `tmap_trials` | 2; bounded mapped incumbent/choices comparison; 1 runs only the requested profile |
+| `tmap_sharing_fanout` | 16; shared scalar-cone mapping boundary, 0 disables, otherwise threshold 2..4096; suppressed by explicit whole-module flattening; no DOMINO boundaries are pinned |
+| `sop_tree` | false; explicit symbolic decoded-SOP/mux alternative, implying final CMOS cleanup. May increase native cost; judge mapped evidence |
+| `cmos_cleanup` | true; optimize the private validated behavioral CMOS expansion after endpoint freeze, using the remaining design search allowance |
+| `npn4`, `rewrite_cuts` | true, 8 cuts (1..32); generated complete NPN4 class coverage with area/depth candidates. Not an optimal library claim |
+| `sweep` | false; exact functional hashing on up to six ordered boundary inputs in the pipeline; the internal API admits at most sixteen with an explicit table-word cap |
+| `balance`, `balance_dup_limit` | false, 0; bounded native AND/XOR snapshot balancing and optional shared-cone duplication (0..1024 gates), with whole-network area and output-depth guards |
+| `cost_mode` | proxy; experimental cells/area modes use an ABC-free bounded legal-cell inventory from the exact Liberty snapshot |
 | `residual`, `feedback` | true, true; one residual round and affected-endpoint feedback |
 | `residual_inputs`, `residual_divisors`, `residual_inserted` | 8, 32, 2; residual search bounds |
 | `residual_depth_slack` | 0; no residual depth growth |
 | `flatten` | auto; follows coloring, or explicitly true/false |
-| `delay` | 0; optional tmap timing target in ps |
+| `delay` | 0; optional tmap timing budget in ps, passed to the provider whenever set. Untimed mapped reports give `logic_depth` levels and `"delay": null`, never a level count as ps |
+| `max_fanout`, `area_relax`, `reg_margin` | 16, 200, auto; physical-only tmap knobs with pass.abc's meanings: `buffer -N` cap plus sizing to the budget, mapping-only `&nf -R` slack-to-area re-map, register overhead off the budget |
+| `boundary`, `boundary_buffer`, `boundary_drive`, `boundary_rounds`, `io_load` | true, true, empty, 1, -1; tmap partition-boundary environment, exact boundary re-size (needs `delay` and an NLDM Liberty), and input buffering, as in pass.abc. All enter the tmap cache identity |
 | `memory_budget_mb`, `time_budget_ms` | 16384, 0; memory-growth and elapsed-time admission |
 
 Old cover options such as `support`, `literals`, `series`, `domino_levels`,
@@ -588,7 +627,12 @@ comparison. These policies change the imported Lnet and its logical cache keys.
 Optional technology mapping repairs timing misses through physical cell sizing
 only; it does not run ABC Boolean optimization, area candidates or logical remapping.
 
-`<qor>.usyn.json` is the schema-5 endpoint/residual decision report. It includes
+`<qor>.usyn.json` is the schema-5 endpoint/residual decision report. Residual
+evidence includes exact sweep confirmations, accepted sweep/balance trials,
+before/after proxy cost, window counts, candidate counts, depth
+and cost rejections, reference visits, exhaustion and individual limits. These
+counters are serialized in the selection cache and replayed on hits.
+Arithmetic evidence records the explicit mux/equality lowering policy. It includes
 selected cell formulas and bindings, search limits, new-divisor attempt counts, cost estimates, preserved
 register counts, and input provenance. Each region also reports its
 `search_credits`, its search's `credit_floor` (`work`, `floor`, `bound` and,
@@ -703,7 +747,7 @@ source spans, local node numbers (only their equalities are kept) and every
 other region-boundary net spelling. A definition's own ports are such nets; only
 regions of the top definition bind design IO (the partitioner names the scratch
 definition of a whole-design flatten through `partition::flatten_scratch_name`).
-Each entry (selection record version 17) owns its frozen netlist and decision
+Each entry (selection record version 25) owns its frozen netlist and decision
 evidence plus the search's credit floor: its consumed work, floor, whether it
 was bound and, when bound, its exact credits; and the region's structural
 work. Loading checks integrity, semantic consistency, that floor record, that

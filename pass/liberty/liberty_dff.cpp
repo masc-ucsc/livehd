@@ -125,9 +125,9 @@ std::string scalar_attr(const std::string& body, std::string_view key) {
     if (p == std::string::npos) {
       return {};
     }
-    from                = p + 1;
-    bool word_boundary  = (p == 0 || !ident_char(body[p - 1]));
-    size_t after        = p + key.size();
+    from                 = p + 1;
+    bool   word_boundary = (p == 0 || !ident_char(body[p - 1]));
+    size_t after         = p + key.size();
     if (!word_boundary) {
       continue;
     }
@@ -145,8 +145,8 @@ std::string scalar_attr(const std::string& body, std::string_view key) {
     }
     std::string v = body.substr(c, end - c);
     // trim whitespace and surrounding quotes
-    size_t b = 0;
-    size_t e = v.size();
+    size_t      b = 0;
+    size_t      e = v.size();
     while (b < e && std::isspace(static_cast<unsigned char>(v[b]))) {
       ++b;
     }
@@ -283,7 +283,7 @@ double time_unit_ps(std::string_view value) {
       v.push_back(c);
     }
   }
-  double       n     = 1;
+  double n           = 1;
   auto [p, ec]       = std::from_chars(v.data(), v.data() + v.size(), n);
   std::string_view u = v;
   if (ec == std::errc{}) {
@@ -386,7 +386,7 @@ std::optional<double> table_entry(const std::string& table_body, Table_pick pick
   if (rows.empty()) {
     return std::nullopt;
   }
-  const size_t r = pick == Table_pick::center ? rows.size() / 2 : 0;
+  const size_t r   = pick == Table_pick::center ? rows.size() / 2 : 0;
   const auto&  row = rows[r];
   return row[row.size() / 2];
 }
@@ -400,7 +400,8 @@ double pin_timing_max(const std::string& pin_body, std::string_view related, std
                       std::initializer_list<std::string_view> keys) {
   double      best = 0;
   std::string args;
-  for (size_t t = find_group(pin_body, "timing", 0, args); t != std::string::npos; t = find_group(pin_body, "timing", t + 1, args)) {
+  for (size_t t = find_group(pin_body, "timing", 0, args); t != std::string::npos;
+       t        = find_group(pin_body, "timing", t + 1, args)) {
     const size_t tclose = match_brace(pin_body, t);
     if (tclose == std::string::npos) {
       break;
@@ -488,8 +489,8 @@ std::optional<Dff_cell> parse_cell(const std::string& name, const std::string& b
     }
     return -1;
   };
-  const int both_state  = cp_value(scalar_attr(ff_body, "clear_preset_var1"));
-  const int both_nstate = cp_value(scalar_attr(ff_body, "clear_preset_var2"));
+  const int   both_state  = cp_value(scalar_attr(ff_body, "clear_preset_var1"));
+  const int   both_nstate = cp_value(scalar_attr(ff_body, "clear_preset_var2"));
   // ff state vars: the first head arg is the stored state, the second its
   // complement. An output whose function is the state var is a Q candidate,
   // one that reads the complement is a QN candidate.
@@ -504,15 +505,15 @@ std::optional<Dff_cell> parse_cell(const std::string& name, const std::string& b
 
   // Walk every `pin (NAME) { ... }` group; collect the Q / QN candidates (fall
   // back to the sole output), and confirm D/CLK exist as inputs.
-  std::string q_pin;
-  std::string qn_pin;
-  std::string sole_output;
-  int         n_output = 0;
-  bool        has_d    = false;
-  bool        has_clk  = false;
-  bool        has_clr  = clear_pin.empty();
-  bool        has_pre  = preset_pin.empty();
-  double      setup    = 0;
+  std::string                                 q_pin;
+  std::string                                 qn_pin;
+  std::string                                 sole_output;
+  int                                         n_output = 0;
+  bool                                        has_d    = false;
+  bool                                        has_clk  = false;
+  bool                                        has_clr  = clear_pin.empty();
+  bool                                        has_pre  = preset_pin.empty();
+  double                                      setup    = 0;
   // Per output pin: its clk->Q first-entry delay, resolved once the Q/QN choice
   // below is made (the overhead is the pin the netlist actually uses).
   std::vector<std::pair<std::string, double>> out_clk_to_q;
@@ -581,10 +582,10 @@ std::optional<Dff_cell> parse_cell(const std::string& name, const std::string& b
     return std::nullopt;
   }
   Dff_cell c;
-  c.name    = name;
-  c.d_pin   = next_pin;
-  c.clk_pin = clocked_on;
-  c.q_pin   = out_pin;
+  c.name       = name;
+  c.d_pin      = next_pin;
+  c.clk_pin    = clocked_on;
+  c.q_pin      = out_pin;
   // The two signs compose: ASAP7 DFFHQNx1 stores !D and shows the state
   // (inverted once); a hypothetical `ff(IQ,IQN){next_state:"D"}` with only a
   // QN=IQN output is inverted once too; dfxtp/dfxbp (D, Q=IQ) not at all.
@@ -729,7 +730,7 @@ std::optional<Icg_cell> parse_icg_cell(const std::string& name, const std::strin
 // / level-shifter / clock-gate cells hold a latch too but are not data
 // latches, and never qualify.
 std::optional<Dff_cell> parse_latch_cell(const std::string& name, const std::string& body) {
-  const std::string top = top_level_only(body);
+  const std::string top     = top_level_only(body);
   auto              is_true = [](std::string v) {
     v = unquote_trim(v);
     std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -926,7 +927,7 @@ struct Cell_scan {
 // and the dont_use set (the one-time report) come from the same read, since
 // a full PDK library is tens of MB.
 Cell_scan scan_cells(const std::string& lib_files) {
-  std::string text = strip_comments(read_files(lib_files));
+  std::string                            text = strip_comments(read_files(lib_files));
   // `time_unit` is a library-header attribute; several files may be
   // concatenated here, so each cell takes the unit of the nearest header
   // before it (a file without one gets the Liberty default, 1ns).
@@ -956,8 +957,7 @@ Cell_scan scan_cells(const std::string& lib_files) {
   };
   Cell_scan   out;
   std::string cell_args;
-  for (size_t p = find_group(text, "cell", 0, cell_args); p != std::string::npos;
-       p        = find_group(text, "cell", p + 1, cell_args)) {
+  for (size_t p = find_group(text, "cell", 0, cell_args); p != std::string::npos; p = find_group(text, "cell", p + 1, cell_args)) {
     size_t cclose = match_brace(text, p);
     if (cclose == std::string::npos) {
       break;
@@ -980,6 +980,71 @@ Cell_scan scan_cells(const std::string& lib_files) {
 }
 
 }  // namespace
+
+std::vector<Comb_cell> scan_comb_cells_text(const std::string& contents) {
+  const auto             text = strip_comments(contents);
+  std::vector<Comb_cell> cells;
+  std::string            args;
+  for (size_t open = find_group(text, "cell", 0, args); open != std::string::npos;
+       open        = find_group(text, "cell", open + 1, args)) {
+    const auto close = match_brace(text, open);
+    if (close == std::string::npos) {
+      break;
+    }
+    const auto  body = text.substr(open + 1, close - open - 1);
+    std::string ignored;
+    if (cell_is_dont_use(body) || find_group(body, "ff", 0, ignored) != std::string::npos
+        || find_group(body, "latch", 0, ignored) != std::string::npos
+        || find_group(body, "ff_bank", 0, ignored) != std::string::npos
+        || find_group(body, "latch_bank", 0, ignored) != std::string::npos
+        || find_group(body, "statetable", 0, ignored) != std::string::npos
+        || !scalar_attr(top_level_only(body), "clock_gating_integrated_cell").empty()) {
+      continue;
+    }
+    Comb_cell cell;
+    cell.name         = unquote_trim(args);
+    cell.area         = parse_area(body);
+    bool        legal = cell.area > 0;
+    std::string pins;
+    for (size_t pin = find_group(body, "pin", 0, pins); pin != std::string::npos; pin = find_group(body, "pin", pin + 1, pins)) {
+      const auto end = match_brace(body, pin);
+      if (end == std::string::npos) {
+        legal = false;
+        break;
+      }
+      const auto attrs     = top_level_only(body.substr(pin + 1, end - pin - 1));
+      const auto direction = scalar_attr(attrs, "direction");
+      auto       name      = unquote_trim(pins);
+      if (!is_bare_ident(name)) {
+        legal = false;
+        break;
+      }
+      if (direction == "input") {
+        if (std::find(cell.inputs.begin(), cell.inputs.end(), name) != cell.inputs.end() || name == cell.output) {
+          legal = false;
+          break;
+        }
+        cell.inputs.push_back(std::move(name));
+      } else if (direction == "output" && cell.output.empty() && scalar_attr(attrs, "three_state").empty()) {
+        if (std::find(cell.inputs.begin(), cell.inputs.end(), name) != cell.inputs.end()) {
+          legal = false;
+          break;
+        }
+        cell.output   = std::move(name);
+        cell.function = scalar_attr(attrs, "function");
+      } else {
+        legal = false;
+        break;
+      }
+    }
+    if (legal && !cell.inputs.empty() && cell.inputs.size() <= 6 && !cell.output.empty() && !cell.function.empty()) {
+      cells.push_back(std::move(cell));
+    }
+  }
+  return cells;
+}
+
+std::vector<Comb_cell> scan_comb_cells(const std::string& lib_files) { return scan_comb_cells_text(read_files(lib_files)); }
 
 std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files) { return scan_cells(lib_files).dffs; }
 
@@ -1151,15 +1216,15 @@ std::string dff_selection_descriptor(const Dff_selection& sel, std::string_view 
     if (sel.areset_ladder[v].empty()) {
       continue;
     }
-    const auto& c = sel.areset_ladder[v].front();
-    d += std::format("|areset{}={}:r0={}{}:r1={}{}:b{}",
-                     v,
-                     dff_descriptor(c),
-                     c.reset0_pin,
-                     c.reset0_low ? "/L" : "",
-                     c.reset1_pin,
-                     c.reset1_low ? "/L" : "",
-                     c.both_value);
+    const auto& c  = sel.areset_ladder[v].front();
+    d             += std::format("|areset{}={}:r0={}{}:r1={}{}:b{}",
+                                 v,
+                                 dff_descriptor(c),
+                                 c.reset0_pin,
+                                 c.reset0_low ? "/L" : "",
+                                 c.reset1_pin,
+                                 c.reset1_low ? "/L" : "",
+                                 c.both_value);
   }
   for (size_t i = 0; i < sel.icg_ladder.size(); ++i) {
     d += std::format("{}{}", i == 0 ? "|icg=" : ",", icg_descriptor(sel.icg_ladder[i]));
@@ -1211,9 +1276,9 @@ void emit_icg_model(hhds::GraphLibrary& outlib, const Icg_cell& icg) {
     gu::set_unsign(p);
     return p;
   };
-  auto clk = body->get_input_pin(icg.clk_pin);
+  auto            clk = body->get_input_pin(icg.clk_pin);
   // The latched value: the enable, forced on by the (active-high) test pin.
-  hhds::Pin_class d = body->get_input_pin(icg.en_pin);
+  hhds::Pin_class d   = body->get_input_pin(icg.en_pin);
   if (!icg.test_pin.empty()) {
     auto o = gu::create_typed_node(*body, Ntype_op::Or);
     d.connect_sink(gu::setup_sink_pid(o, 0));
@@ -1275,7 +1340,7 @@ void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff) {
   // init; else if (en) q <= d;`).
   const Ntype_op state_op = dff.latch ? Ntype_op::Latch : Ntype_op::Flop;
   auto           F        = gu::create_typed_node(*body, state_op);
-  auto Fq = F.create_driver_pin(0);
+  auto           Fq       = F.create_driver_pin(0);
   gu::set_bits(Fq, 1);
   gu::set_unsign(Fq);
   if (!dff.latch) {

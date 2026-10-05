@@ -153,6 +153,54 @@ TEST_F(SemanticRegion, CmosPreservesSpecialStateAndNegativeEdgesWithoutAbsorptio
   }
 }
 
+TEST_F(SemanticRegion, PreUnateCleanupFactorsLogicAndPreservesRawStateCorrespondence) {
+  const auto a = net.add_input("a"), b = net.add_input("b"), c = net.add_input("c");
+  const auto d = net.add_lut({net.add_lut({a, b}, Lnet::kOr2), net.add_lut({a, c}, Lnet::kOr2)}, Lnet::kAnd2);
+  state("pipe.r[0]", d);
+  state("memory.bank[2]", d, State_role::memory);
+  net.add_output(net.latch(0).q, "q");
+  net.add_output(d, "d");
+  std::reverse(table.bits.begin(), table.bits.end());
+  const auto      original = table;
+  Logical_options options;
+  options.pre_optimize = true;
+  Budget structural{100000000}, search{100000000};
+  auto   result = synthesize_stateful_region(net, table, State_target::cmos, options, structural, search);
+  ASSERT_TRUE(result.region) << result.reason;
+  ASSERT_TRUE(result.region->frozen);
+  EXPECT_GT(result.report.work.p1, 0U);
+  EXPECT_LT(result.report.p1.cost_after, result.report.p1.cost_before);
+  EXPECT_EQ(result.region->state_bits, (std::vector<uint32_t>{1, 0}));
+  ASSERT_EQ(result.region->selected.logic.state.size(), 2U);
+  EXPECT_EQ(result.region->selected.logic.state[0].name, "pipe.r[0]");
+  EXPECT_EQ(result.region->selected.logic.state[1].name, "memory.bank[2]");
+  ASSERT_EQ(result.region->source.bits.size(), original.bits.size());
+  ASSERT_EQ(result.region->source.sources.size(), original.sources.size());
+  for (size_t i = 0; i < original.bits.size(); ++i) {
+    const auto& before = original.bits[i];
+    const auto& after  = result.region->source.bits[i];
+    EXPECT_EQ(after.name, before.name);
+    EXPECT_EQ(after.source, before.source);
+    EXPECT_EQ(after.latch, before.latch);
+    EXPECT_EQ(after.q.node, before.q.node);
+    EXPECT_EQ(after.d.node, before.d.node);
+    EXPECT_EQ(after.d.inverted, before.d.inverted);
+  }
+  for (size_t i = 0; i < original.sources.size(); ++i) {
+    EXPECT_EQ(result.region->source.sources[i].name, original.sources[i].name);
+    EXPECT_EQ(result.region->source.sources[i].node, original.sources[i].node);
+    EXPECT_EQ(result.region->source.sources[i].role, original.sources[i].role);
+    EXPECT_EQ(result.region->source.sources[i].translated_bits, original.sources[i].translated_bits);
+  }
+  for (uint32_t assignment = 0; assignment < 32; ++assignment) {
+    const bool f = bool(assignment & 1) || (bool(assignment & 2) && bool(assignment & 4));
+    EXPECT_EQ(evaluate(result.region->selected.logic, assignment), (std::vector<bool>{f, f, bool(assignment & 8), f}));
+  }
+  EXPECT_EQ(table.bits[0].name, original.bits[0].name);
+  EXPECT_EQ(table.bits[0].d.node, original.bits[0].d.node);
+  EXPECT_EQ(net.latch(0).name, "encoded_pipe.r[0]");
+}
+
 TEST_F(SemanticRegion, DominoRejectsSourceClockAndLatchWithOriginalLocations) {
   const auto a = net.add_input("a");
   state("negative", a);

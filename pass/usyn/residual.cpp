@@ -6,10 +6,17 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "npn4.hpp"
+#include "xag_balance.hpp"
+#include "xag_sweep.hpp"
+
 namespace livehd::usyn {
 bool valid_residual_options(const Residual_options& o) {
-  return o.and_cost > 0 && o.xor_cost > 0 && o.max_nodes > 0 && o.windows > 0 && o.window_nodes > 0 && o.resub_inputs > 0
-         && o.resub_inputs <= 8 && o.divisors > 0 && o.divisors <= 64 && o.inserted <= 2 && o.window_work > 0 && o.stage_work > 0;
+  return o.and_cost > 0 && o.xor_cost > 0 && o.max_nodes > 0 && o.windows > 0 && o.rewrite_cuts > 0 && o.rewrite_cuts <= 32
+         && o.window_nodes > 0 && o.resub_inputs > 0 && o.resub_inputs <= 8 && o.divisors > 0 && o.divisors <= 64 && o.inserted <= 2
+         && o.window_work > 0 && o.stage_work > 0 && o.balance_dup_limit <= 1024 && o.sweep_inputs >= 1 && o.sweep_inputs <= 16
+         && o.p1_sweep_inputs >= 1 && o.p1_sweep_inputs <= 16 && o.sweep_table_words >= 2 && o.mux_balance_min_arms >= 2
+         && o.mux_balance_min_arms <= 256 && o.mux_balance_area_pct <= 1000;
 }
 
 namespace {
@@ -347,7 +354,8 @@ private:
     // Equal-area rewrites can shorten a critical cone. Keep the live-reference
     // price (including outside consumers), and require strictly lower depth
     // when the area proxy ties so successive candidates cannot oscillate.
-    if (ledger.cost > before || (ledger.cost == before && g.node(candidate.id).level >= g.node(chosen.id).level)) {
+    if (ledger.cost > before
+        || (ledger.cost == before && (!o.zero_gain || g.node(candidate.id).level >= g.node(chosen.id).level))) {
       ++r.cost_rejections;
       ledger.rollback();
       return false;
@@ -362,6 +370,48 @@ private:
   }
 
   void rewrite_root(Xsignal root, Budget& work) {
+    if (o.npn4) {
+      const auto cuts = priority_windows(g, root, {4, o.window_nodes}, work, o.rewrite_cuts);
+      if (cuts.status != Status::feasible) {
+        limited(r, "NPN4 cut admission");
+        return;
+      }
+      if (cuts.exhausted) {
+        limited(r, "NPN4 cut enumeration bound");
+      }
+      if (cuts.windows.size() > 1) {
+        r.rewrite_windows += cuts.windows.size() - 1;
+      }
+      for (const auto& window : cuts.windows) {
+        const auto truth = window_function(g, window, work);
+        if (truth.status != Status::feasible) {
+          limited(r, "NPN4 truth-table budget");
+          return;
+        }
+        const auto n      = static_cast<uint32_t>(window.leaves.size());
+        const auto target = static_cast<uint32_t>(truth.table.words[0]);
+        uint16_t   full   = 0;
+        for (uint32_t x = 0; x < 16; ++x) {
+          full |= ((target >> (x & ((1U << n) - 1))) & 1) << x;
+        }
+        std::array<Xsignal, 4> inputs{};
+        for (uint32_t i = 0; i < n; ++i) {
+          inputs[i] = {window.leaves[i], false};
+        }
+        if (!room(20)) {
+          return;
+        }
+        const auto candidates = npn4_candidates(g, full, inputs, work, o.max_nodes - remaining_nodes);
+        if (candidates.status != Status::feasible) {
+          limited(r, "NPN4 template budget");
+          return;
+        }
+        for (auto signal : candidates.signals) {
+          consider(signal, work);
+        }
+      }
+      return;
+    }
     const auto window = grow_window(g, root, {4, o.window_nodes}, work);
     if (window.status != Status::feasible) {
       limited(r, "rewrite window admission");
@@ -667,6 +717,136 @@ Residual_result optimize_residual(const Xag& graph, std::span<const Residual_out
     return refuse();
   }
   result.report.skipped = before->order.empty();
+  if (options.sweep && !result.report.skipped) {
+    std::vector<Xsignal> roots;
+    for (const auto& output : current->outputs) {
+      roots.push_back(output.signal);
+    }
+    auto trial_work = work.slice(options.stage_work, 1, 16 * current->graph.size() + 32);
+    auto trial = sweep_xag(current->graph, roots, trial_work, options.max_nodes, options.sweep_inputs, options.sweep_table_words);
+    work.absorb(trial_work);
+    result.report.sweep_confirmations = trial.confirmations;
+    if (trial.limited) {
+      limited(result.report, "exact sweep support/table-word limit");
+    }
+    if (trial.status == Status::feasible) {
+      std::vector<Residual_output> trial_outputs;
+      for (size_t i = 0; i < roots.size(); ++i) {
+        trial_outputs.push_back({trial.outputs[i], current->outputs[i].endpoint_input});
+      }
+      auto next = compact(trial.graph, trial_outputs, current->affected, options, work);
+      if (!next) {
+        return refuse();
+      }
+      bool depth_ok = true, improved_depth = false;
+      for (size_t i = 0; i < outputs.size(); ++i) {
+        const auto old_depth  = current->graph.node(current->outputs[i].signal.id).level;
+        const auto new_depth  = next->graph.node(next->outputs[i].signal.id).level;
+        depth_ok             &= new_depth <= old_depth;
+        improved_depth       |= new_depth < old_depth;
+      }
+      if (next->estimated_cost <= current->estimated_cost && depth_ok
+          && (next->estimated_cost < current->estimated_cost || improved_depth)) {
+        std::fill(next->affected.begin(), next->affected.end(), true);
+        current = std::move(next);
+        ++result.report.sweep_wins;
+      } else if (!depth_ok) {
+        ++result.report.depth_rejections;
+      } else {
+        ++result.report.cost_rejections;
+      }
+    } else {
+      limited(result.report, "exact sweep trial budget");
+    }
+  }
+  if (options.balance && !result.report.skipped) {
+    std::vector<Xsignal> roots;
+    for (const auto& output : current->outputs) {
+      roots.push_back(output.signal);
+    }
+    // Search has a private slice; leave enough credits to rebuild the incumbent
+    // even when the trial reaches its own bound. A complete trial is compacted
+    // and priced using only selected-network references, never dead candidates.
+    auto trial_work = work.slice(options.stage_work, 1, 16 * current->graph.size() + 32);
+    auto trial      = balance_xag(current->graph, roots, trial_work, options.max_nodes, 128, options.balance_dup_limit);
+    work.absorb(trial_work);
+    result.report.balance_groups     = trial.groups;
+    result.report.balance_duplicates = trial.duplications;
+    if (trial.status == Status::feasible) {
+      std::vector<Residual_output> trial_outputs;
+      for (size_t i = 0; i < roots.size(); ++i) {
+        trial_outputs.push_back({trial.outputs[i], current->outputs[i].endpoint_input});
+      }
+      auto next = compact(trial.graph, trial_outputs, current->affected, options, work);
+      if (!next) {
+        return refuse();
+      }
+      bool depth_ok = true, improved_depth = false;
+      for (size_t i = 0; i < outputs.size(); ++i) {
+        const auto old_depth  = current->graph.node(current->outputs[i].signal.id).level;
+        const auto new_depth  = next->graph.node(next->outputs[i].signal.id).level;
+        depth_ok             &= new_depth <= old_depth;
+        improved_depth       |= new_depth < old_depth;
+      }
+      if (next->estimated_cost <= current->estimated_cost && depth_ok
+          && (next->estimated_cost < current->estimated_cost || improved_depth)) {
+        std::fill(next->affected.begin(), next->affected.end(), true);
+        current = std::move(next);
+        ++result.report.balance_wins;
+      } else if (!depth_ok) {
+        ++result.report.depth_rejections;
+      } else {
+        ++result.report.cost_rejections;
+      }
+    } else {
+      limited(result.report, "balance trial budget");
+    }
+  }
+  if (options.mux_balance && !result.report.skipped) {
+    std::vector<Xsignal> roots;
+    for (const auto& output : current->outputs) {
+      roots.push_back(output.signal);
+    }
+    auto trial_work = work.slice(options.stage_work, 1, 16 * current->graph.size() + 32);
+    auto trial      = balance_mux_chains(current->graph, roots, trial_work, options.max_nodes, options.mux_balance_min_arms);
+    work.absorb(trial_work);
+    result.report.mux_chains = trial.chains;
+    result.report.mux_arms   = trial.arms;
+    if (trial.status == Status::feasible && trial.chains) {
+      std::vector<Residual_output> trial_outputs;
+      for (size_t i = 0; i < roots.size(); ++i) {
+        trial_outputs.push_back({trial.outputs[i], current->outputs[i].endpoint_input});
+      }
+      auto next = compact(trial.graph, trial_outputs, current->affected, options, work);
+      if (!next) {
+        return refuse();
+      }
+      // Unlike AND/XOR balance this trades area for depth (about one OR per
+      // arm), so the guard is a depth gain on the critical output, no output
+      // deeper, and a bounded relative cost increase.
+      bool     depth_ok = true;
+      uint32_t old_max = 0, new_max = 0;
+      for (size_t i = 0; i < outputs.size(); ++i) {
+        const auto old_depth  = current->graph.node(current->outputs[i].signal.id).level;
+        const auto new_depth  = next->graph.node(next->outputs[i].signal.id).level;
+        depth_ok             &= new_depth <= old_depth;
+        old_max               = std::max(old_max, old_depth);
+        new_max               = std::max(new_max, new_depth);
+      }
+      const auto cost_cap = current->estimated_cost + current->estimated_cost * options.mux_balance_area_pct / 100;
+      if (depth_ok && new_max < old_max && next->estimated_cost <= cost_cap) {
+        std::fill(next->affected.begin(), next->affected.end(), true);
+        current = std::move(next);
+        ++result.report.mux_wins;
+      } else if (!depth_ok || new_max >= old_max) {
+        ++result.report.depth_rejections;
+      } else {
+        ++result.report.cost_rejections;
+      }
+    } else if (trial.status != Status::feasible) {
+      limited(result.report, "mux balance trial budget");
+    }
+  }
   for (bool rewriting : {true, false}) {
     if (result.report.skipped || (rewriting ? !options.rewrite : !options.resubstitute)) {
       continue;

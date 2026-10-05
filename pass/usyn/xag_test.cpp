@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "xag.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <stdexcept>
 
@@ -147,5 +148,39 @@ TEST(Xag, DivisorFunctionsKeepCommonBasisOrderAndUnusedInputs) {
   const auto combined = basis_function(g, g.lxor(ab, c), basis, {}, work);
   ASSERT_EQ(combined.status, Status::feasible);
   EXPECT_EQ(combined.table.words[0], 6U);
+}
+TEST(Xag, PriorityWindowsRetainGreedyAndShallowComputedBasis) {
+  Xag        graph;
+  const auto a = graph.input("a"), b = graph.input("b"), c = graph.input("c");
+  const auto ab = graph.land(a, b), ac = graph.land(a, c), root = graph.lxor(ab, ac);
+  Budget     work{100000}, replay{100000};
+  const auto cuts     = priority_windows(graph, root, {4, 100}, work, 8);
+  const auto repeated = priority_windows(graph, root, {4, 100}, replay, 8);
+  ASSERT_EQ(cuts.status, Status::feasible);
+  ASSERT_FALSE(cuts.windows.empty());
+  EXPECT_LE(cuts.windows.size(), 8U);
+  ASSERT_EQ(cuts.windows.size(), repeated.windows.size());
+  EXPECT_EQ(work.credit_floor(), replay.credit_floor());
+  bool shallow = false, whole = false;
+  for (size_t i = 0; i < cuts.windows.size(); ++i) {
+    const auto& cut = cuts.windows[i];
+    EXPECT_EQ(cut.leaves, repeated.windows[i].leaves);
+    const auto function = window_function(graph, cut, work);
+    ASSERT_EQ(function.status, Status::feasible);
+    if (cut.leaves == std::vector<Id>{ab.id, ac.id}) {
+      shallow = true;
+      EXPECT_EQ(function.table.words[0], 6U);
+    }
+    if (cut.leaves == std::vector<Id>{a.id, b.id, c.id}) {
+      whole = true;
+      EXPECT_EQ(function.table.words[0], 0x28U);
+    }
+    EXPECT_FALSE(std::binary_search(cut.leaves.begin(), cut.leaves.end(), root.id));
+  }
+  EXPECT_TRUE(shallow);
+  EXPECT_TRUE(whole);
+  Budget none{0};
+  EXPECT_EQ(priority_windows(graph, root, {4, 100}, none).status, Status::search_exhausted);
+  EXPECT_EQ(priority_windows(graph, root, {4, 100}, work, 0).status, Status::invalid);
 }
 }  // namespace livehd::usyn

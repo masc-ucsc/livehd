@@ -15,8 +15,8 @@
 #include "file_output.hpp"
 #include "hhds/graph.hpp"
 #include "hhds/index.hpp"
-#include "latch_contract.hpp"  // Design_clocks — the shared clock-role analysis
-#include "sim_color_plan.hpp"  // Color_plan::Site (the sim.tune support hook below)
+#include "latch_contract.hpp"   // Design_clocks — the shared clock-role analysis
+#include "sim_color_plan.hpp"   // Color_plan::Site (the sim.tune support hook below)
 #include "sim_tune_vector.hpp"  // livehd::sim::Tune_vector -- the ONE spelling of the sim.tune.* codegen knobs
 
 // Cgen_sim — lower one hhds::Graph to a C++ Slop<N> struct over the ../hlop
@@ -104,10 +104,10 @@ private:
   // would otherwise silently substitute `create_integer(0)` for an unschedulable
   // back-edge sink, producing a WRONG simulation with no diagnostic. These flags
   // turn that into a loud, located build failure.
-  bool        cycle_unresolved_ = false;  // hit an unschedulable comb-cycle back-edge this graph
-  size_t      unresolved_operands_ = 0;  // operand() 0-fallbacks emitted; a canonical kernel must add none
-  bool        cycle_reported_   = false;  // a located error was already emitted for this graph
-  std::string cycle_first_label_;         // first offending value (for the generic message)
+  bool        cycle_unresolved_    = false;  // hit an unschedulable comb-cycle back-edge this graph
+  size_t      unresolved_operands_ = 0;      // operand() 0-fallbacks emitted; a canonical kernel must add none
+  bool        cycle_reported_      = false;  // a located error was already emitted for this graph
+  std::string cycle_first_label_;            // first offending value (for the generic message)
 
   static std::string     cpp_id(std::string_view name);  // sanitize to a valid C++ identifier
   // C++ access path of a PORT. A tuple/struct-packed port flattens to dotted
@@ -153,21 +153,45 @@ private:
     std::string              digest;
     std::vector<std::string> files;  // basenames under odir, sorted
   };
-  uint64_t                                     sim_graph_digest(hhds::Graph* g);
-  uint64_t                                     hier_graph_digest(hhds::Graph* g);
+
+public:
+  // ONE generation index per emission run, shared by every Cgen_sim (probe and
+  // emitter alike): gen_digests.json is read once and written once, and the
+  // output directory is listed once. Per instance, each of G module emitters
+  // re-read and re-wrote the whole index and re-listed the whole directory to
+  // sweep its stale color artifacts -- O(G x files), 30+ minutes of pure I/O
+  // codegen on a 476k-cell minion gate netlist. Recording a clean emission is
+  // deferred to flush_generation_index(): an unflushed record is simply absent
+  // (or keeps an old, self-invalidating key), so a crash only costs a rebuild.
+  // The repair retraction in generation_current() still writes immediately.
+  struct Generation_index {
+    absl::flat_hash_map<std::string, Gen_record> digests;
+    bool                                         loaded = false;
+    bool                                         dirty  = false;
+    std::optional<std::vector<std::string>>      files;  // sorted regular-file basenames of odir, as of first use
+  };
+
+private:
+  uint64_t                                      sim_graph_digest(hhds::Graph* g);
+  uint64_t                                      hier_graph_digest(hhds::Graph* g);
   // The full generation key: the hierarchical body hash folded with every
   // option that changes what is emitted. Deliberately does NOT fold the color
   // plan — the plan is DERIVED from exactly these inputs, and its report()
   // degenerates to summary counts past 100k version sites, so it is both
   // redundant and too weak to key on.
-  std::string                                  generation_key(hhds::Graph* g, bool color_root);
-  void                                         load_gen_digests();
-  void                                         save_gen_digests();
-  absl::flat_hash_map<std::string, Gen_record> gen_digests_;
-  absl::flat_hash_map<hhds::Gid, uint64_t>     hier_digest_memo_;
-  absl::flat_hash_map<hhds::Gid, uint64_t>*    shared_digest_memo_ = nullptr;
-  std::string                                  gen_key_;  // this module's key, recorded on a clean emission
-  bool                                         gen_digests_loaded_ = false;
+  std::string                                   generation_key(hhds::Graph* g, bool color_root);
+  void                                          load_gen_digests();
+  void                                          save_gen_digests(bool now = false);
+  absl::flat_hash_map<std::string, Gen_record>  gen_digests_;
+  Generation_index*                             shared_gen_ = nullptr;
+  absl::flat_hash_map<std::string, Gen_record>& digests() { return shared_gen_ != nullptr ? shared_gen_->digests : gen_digests_; }
+  bool&                    digests_loaded() { return shared_gen_ != nullptr ? shared_gen_->loaded : gen_digests_loaded_; }
+  // Regular-file basenames of odir starting with `prefix` (the shared snapshot when one is installed).
+  std::vector<std::string> odir_files_with_prefix(std::string_view prefix);
+  absl::flat_hash_map<hhds::Gid, uint64_t>  hier_digest_memo_;
+  absl::flat_hash_map<hhds::Gid, uint64_t>* shared_digest_memo_ = nullptr;
+  std::string                               gen_key_;  // this module's key, recorded on a clean emission
+  bool                                      gen_digests_loaded_ = false;
 
   // Every generated file this module owns, in emission order. `open_out` is
   // the only way the emitter creates one, so the manifest cannot drift from
@@ -319,6 +343,9 @@ public:
   // the graphs must not be structurally rewritten while it is in use — which
   // holds, because prepare_graph() runs over the whole library first.
   void share_digest_memo(absl::flat_hash_map<hhds::Gid, uint64_t>* memo) { shared_digest_memo_ = memo; }
+
+  void        share_generation_index(Generation_index* index) { shared_gen_ = index; }
+  static void flush_generation_index(std::string_view odir, Generation_index& index);
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
            bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = false, bool _debug = false,
@@ -382,7 +409,7 @@ private:
   // so its wide inputs carry no trustworthy change version: never forward
   // them by version (see "Versioned wide inputs" in do_from_graph).
   bool                           dut_            = false;
-  uint32_t                       unroll_sites_   = kDefaultUnrollSites;  // sim.unroll_sites: flat-cost ceiling for unrolling a compact loop
+  uint32_t unroll_sites_ = kDefaultUnrollSites;  // sim.unroll_sites: flat-cost ceiling for unrolling a compact loop
 
   // ---- sim.tune codegen knobs (sim_profile.md §3; sim.tune.dirty / fence /
   // live_words / backend). `tune_` is the CANONICAL vector of the constructor

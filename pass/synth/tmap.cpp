@@ -2,6 +2,7 @@
 #include "tmap.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -59,8 +60,18 @@ Tmap_result technology_map(std::string_view name, const std::shared_ptr<hhds::Gr
     provider = found->second;
   }
   if (!top || !top->get_io() || !top->get_io()->get_library() || options.library.empty() || !std::isfinite(options.delay_ps)
-      || options.delay_ps < 0 || options.delay_ps > std::numeric_limits<int>::max() || options.memory_budget_mb <= 0) {
+      || options.delay_ps < 0 || options.delay_ps > std::numeric_limits<int>::max() || options.memory_budget_mb <= 0
+      || !std::isfinite(options.io_load) || options.boundary_rounds < 1 || options.boundary_rounds > 64
+      || (options.sharing_fanout && (options.sharing_fanout < 2 || options.sharing_fanout > 4096))) {
     return {Tmap_status::invalid, {}, "invalid technology-mapping source, library or limits"};
+  }
+  if (options.reg_margin != "auto") {
+    double      margin = 0;
+    const auto* end    = options.reg_margin.data() + options.reg_margin.size();
+    const auto  parsed = std::from_chars(options.reg_margin.data(), end, margin);
+    if (parsed.ec != std::errc{} || parsed.ptr != end || !std::isfinite(margin) || margin < 0) {
+      return {Tmap_status::invalid, {}, "invalid technology-mapping register margin"};
+    }
   }
   auto result = provider(top, options);
   if (result.status == Tmap_status::mapped) {

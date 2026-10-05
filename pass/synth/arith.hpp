@@ -586,18 +586,38 @@ inline std::vector<Bit> build_mul(Mult_kind kind, Adder_kind adder, int block_si
 
 // All operands equal the first, bitwise (n-ary ==). Operands equal length.
 template <class Bit, class Ops>
-inline Bit build_eq(Ops& ops, const std::vector<std::vector<Bit>>& operands) {
+inline Bit build_eq(Ops& ops, const std::vector<std::vector<Bit>>& operands, bool balanced = false) {
   if (operands.size() <= 1) {
     return ops.one();
   }
-  int w  = static_cast<int>(operands[0].size());
-  Bit eq = ops.one();
+  const int w = static_cast<int>(operands[0].size());
+  if (!balanced) {
+    Bit eq = ops.one();
+    for (size_t k = 1; k < operands.size(); ++k) {
+      for (int b = 0; b < w; ++b) {
+        eq = ops.and_(eq, ops.inv(ops.xor_(operands[k][b], operands[0][b])));
+      }
+    }
+    return eq;
+  }
+  std::vector<Bit> matches;
   for (size_t k = 1; k < operands.size(); ++k) {
     for (int b = 0; b < w; ++b) {
-      eq = ops.and_(eq, ops.inv(ops.xor_(operands[k][b], operands[0][b])));
+      matches.push_back(ops.inv(ops.xor_(operands[k][b], operands[0][b])));
     }
   }
-  return eq;
+  // Keep all bit comparisons, including the caller's signed-extension/guard
+  // bits. Only regroup the associative conjunction, avoiding a serial path
+  // through every bit and operand before native optimization or mapping.
+  while (matches.size() > 1) {
+    std::vector<Bit> next;
+    next.reserve((matches.size() + 1) / 2);
+    for (size_t i = 0; i < matches.size(); i += 2) {
+      next.push_back(i + 1 < matches.size() ? ops.and_(matches[i], matches[i + 1]) : matches[i]);
+    }
+    matches = std::move(next);
+  }
+  return matches.empty() ? ops.one() : matches.front();
 }
 
 }  // namespace livehd::synth::arith

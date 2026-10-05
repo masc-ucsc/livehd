@@ -440,6 +440,50 @@ TEST(abc_arith, eq_nary) {
   EXPECT_EQ(build_eq<B>(ops, {to_bits(7, 8), to_bits(7, 8), to_bits(8, 8)}), 0);  // one differs
 }
 
+TEST(abc_arith, eq_nary_exhaustive_small_widths) {
+  ByteOps ops;
+  for (int width : {0, 1, 2, 3}) {
+    for (int a = 0; a < (1 << width); ++a) {
+      for (int b = 0; b < (1 << width); ++b) {
+        for (int c = 0; c < (1 << width); ++c) {
+          for (bool balanced : {false, true}) {
+            EXPECT_EQ(build_eq<B>(ops, {to_bits(a, width), to_bits(b, width), to_bits(c, width)}, balanced) != 0, a == b && b == c);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(abc_arith, eq_has_logarithmic_depth_without_extra_comparisons) {
+  struct Signal {
+    uint32_t depth = 0;
+  };
+  struct Depth_ops {
+    uint32_t comparisons = 0, conjunctions = 0;
+    Signal   one() { return {}; }
+    Signal   inv(Signal a) { return a; }
+    Signal   xor_(Signal a, Signal b) {
+      ++comparisons;
+      return {1 + std::max(a.depth, b.depth)};
+    }
+    Signal and_(Signal a, Signal b) {
+      ++conjunctions;
+      return {1 + std::max(a.depth, b.depth)};
+    }
+  };
+  for (uint32_t width : {1, 3, 16, 33, 64}) {
+    for (uint32_t operands : {2, 3, 5}) {
+      Depth_ops  ops;
+      const auto result = build_eq<Signal>(ops, std::vector<std::vector<Signal>>(operands, std::vector<Signal>(width)), true);
+      const auto bits   = width * (operands - 1);
+      EXPECT_EQ(ops.comparisons, bits);
+      EXPECT_EQ(ops.conjunctions, bits - 1);
+      EXPECT_EQ(result.depth, 1 + std::bit_width(bits - 1));
+    }
+  }
+}
+
 TEST(abc_arith, reverse_barrel_and_tree_multiplier) {
   ByteOps ops;
   for (int w : {1, 3, 4, 7, 8}) {

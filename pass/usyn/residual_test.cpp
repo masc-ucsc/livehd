@@ -138,6 +138,30 @@ TEST(Residual, EqualAreaRewriteBalancesAndAndXorChains) {
   }
 }
 
+TEST(Residual, DedicatedBalanceStagePreservesCostAndProtectedOutputs) {
+  Xag  g;
+  auto root = g.input("0");
+  for (uint32_t i = 1; i < 8; ++i) {
+    root = g.lxor(root, g.input(std::to_string(i)));
+  }
+  const std::array outputs{
+      Residual_output{ root,  true},
+      Residual_output{~root, false}
+  };
+  Residual_options options;
+  options.balance = true;
+  options.rewrite = options.resubstitute = false;
+  Budget     work{10000000};
+  const auto result = optimize_residual(g, outputs, options, work);
+  check(g, outputs, result, options);
+  ASSERT_TRUE(result.network);
+  EXPECT_EQ(result.network->graph.node(result.network->outputs[0].signal.id).level, 3U);
+  EXPECT_EQ(result.report.balance_wins, 1U);
+  EXPECT_GT(result.report.balance_groups, 0U);
+  EXPECT_EQ(result.report.rewrite_wins, 0U);
+  EXPECT_EQ(result.report.resub_wins, 0U);
+}
+
 TEST(Residual, BalancingDoesNotDuplicateProtectedIntermediateLogic) {
   Xag              g;
   const auto       a = g.input("a"), b = g.input("b"), c = g.input("c"), d = g.input("d");
@@ -358,6 +382,42 @@ TEST(Residual, SmallReconvergentMultioutputNetworksPreserveFunctionsAndCost) {
     SCOPED_TRACE(trial);
     const auto result = optimize_residual(g, outputs, o, work);
     check(g, outputs, result, o);
+  }
+}
+TEST(Residual, NativeNpn4PriorityCutsPreserveSharedAndComplementedFunctions) {
+  for (uint32_t seed = 0; seed < 32; ++seed) {
+    Xag                  graph;
+    std::vector<Xsignal> nodes;
+    for (uint32_t i = 0; i < 6; ++i) {
+      nodes.push_back(graph.input(std::to_string(i)));
+    }
+    uint32_t   random = seed + 412;
+    const auto next   = [&] {
+      random = random * 1664525U + 1013904223U;
+      return random;
+    };
+    for (uint32_t i = 0; i < 24; ++i) {
+      auto a = nodes[next() % nodes.size()], b = nodes[next() % nodes.size()];
+      if (next() & 4) {
+        a = ~a;
+      }
+      if (next() & 8) {
+        b = ~b;
+      }
+      nodes.push_back((next() & 16) ? graph.land(a, b) : graph.lxor(a, b));
+    }
+    const std::array outputs{
+        Residual_output{nodes.back(),  true},
+        Residual_output{  ~nodes[20], false},
+        Residual_output{   nodes[25], false}
+    };
+    Residual_options options;
+    options.npn4  = true;
+    options.sweep = options.balance = true;
+    options.rewrite_cuts            = 8;
+    Budget     work{10000000};
+    const auto result = optimize_residual(graph, outputs, options, work);
+    check(graph, outputs, result, options);
   }
 }
 }  // namespace livehd::usyn

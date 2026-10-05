@@ -16,7 +16,6 @@
 #include <utility>
 #include <vector>
 
-#include "region_qor.hpp"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"  // Ntype_op
@@ -27,6 +26,7 @@
 #include "json_util.hpp"
 #include "node_util.hpp"
 #include "rapidjson/document.h"
+#include "region_qor.hpp"
 #include "semdiff.hpp"  // structural_identical
 
 namespace livehd::synth {
@@ -217,6 +217,9 @@ Region_cache::Region_cache(std::string dir, uint64_t salt, bool scoped_libraries
     if (auto m = v.FindMember("delay"); m != v.MemberEnd() && m->value.IsNumber()) {
       row.delay = static_cast<float>(m->value.GetDouble());
     }
+    if (auto m = v.FindMember("delay_ps"); m != v.MemberEnd() && m->value.IsBool()) {
+      row.delay_ps = m->value.GetBool();
+    }
     if (auto m = v.FindMember("logic_depth"); m != v.MemberEnd() && m->value.IsInt()) {
       row.logic_depth = m->value.GetInt();
     }
@@ -261,7 +264,7 @@ hhds::GraphLibrary& Region_cache::cached_pre_lib() {
 }
 
 Region_cache::Compare_result Region_cache::lookup_compare(const livehd::partition::Region_body& rb, hhds::Graph* pre_body,
-                                                      std::string_view recipe) {
+                                                          std::string_view recipe) {
   Compare_result res;
   auto           dbg = [&](const char* why) {
     if (incr_debug()) {
@@ -565,7 +568,7 @@ void Region_cache::copy_mapped_children(std::string_view module_name, hhds::Grap
 }
 
 bool Region_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
-                       const Region_qor& q, std::string_view recipe, hhds::GraphLibrary* outlib) {
+                         const Region_qor& q, std::string_view recipe, hhds::GraphLibrary* outlib) {
   // The pre-abc body (in pre_lib under pre_name) is copied NOW, into the
   // SEPARATE pre-body library: `pre_lib` is a per-region throwaway the
   // partitioner destroys the moment this callback returns. The two cache
@@ -609,6 +612,7 @@ bool Region_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLi
   row.gates        = q.gates;
   row.area         = q.area;
   row.delay        = q.delay;
+  row.delay_ps     = q.delay_ps;
   row.logic_depth  = q.logic_depth;
   row.crit_output  = q.crit_output;
   row.crit_src     = q.crit_src;
@@ -618,9 +622,9 @@ bool Region_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLi
   }
   const auto digest
       = livehd::semdiff::canonical_digest(rb.pre_body, {}, livehd::semdiff::Sub_fold::interface, /*matching_io_names=*/false);
-  row.digest0      = digest.h0;
-  row.digest1      = digest.h1;
-  row.digest_valid = digest.valid;
+  row.digest0         = digest.h0;
+  row.digest1         = digest.h1;
+  row.digest_valid    = digest.valid;
   row.in_outlib       = true;  // body still only in `outlib`; save() flushes it
   row.stored_this_run = true;
 
@@ -634,7 +638,7 @@ bool Region_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLi
 }
 
 bool Region_cache::store_pre(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
-                           std::string_view recipe) {
+                             std::string_view recipe) {
   if (!cached_pre_lib().copy_from(pre_lib, std::string{pre_name})) {
     return false;
   }
@@ -729,10 +733,11 @@ void Region_cache::refresh_qor(std::string_view module, const Region_qor& q) {
   if (it == rows_.end() || !it->second.in_outlib) {
     return;
   }
-  it->second.area  = q.area;
-  it->second.delay = q.delay;
-  it->second.gates = q.gates;
-  dirty_           = true;
+  it->second.area     = q.area;
+  it->second.delay    = q.delay;
+  it->second.delay_ps = q.delay_ps;
+  it->second.gates    = q.gates;
+  dirty_              = true;
 }
 
 void Region_cache::freeze_pending() {
@@ -866,12 +871,14 @@ void Region_cache::save_to(const std::string& directory, bool strict) {
       out += std::format("{}\"{}\"", i != 0 ? "," : "", json_util::escape(r.out[i]));
     }
     out += std::format(
-        "],\"gates\":{},\"area\":{},\"delay\":{},\"logic_depth\":{},\"crit_output\":\"{}\",\"crit_src\":\"{}\",\"div_blackbox\":{},"
+        "],\"gates\":{},\"area\":{},\"delay\":{},\"delay_ps\":{},\"logic_depth\":{},\"crit_output\":\"{}\",\"crit_src\":\"{}\","
+        "\"div_blackbox\":{},"
         "\"digest\":\"{:"
         "016x}{:016x}\",\"evidence_file\":\"{}\",\"evidence_bytes\":{},\"evidence_hash\":\"{:016x}\"}}",
         r.gates,
         r.area,
         r.delay,
+        r.delay_ps,
         r.logic_depth,
         json_util::escape(r.crit_output),
         json_util::escape(r.crit_src),

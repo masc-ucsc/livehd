@@ -8,6 +8,7 @@
 #include <format>
 #include <optional>
 #include <print>
+#include <span>
 #include <vector>
 
 #include "absl/container/btree_map.h"
@@ -35,6 +36,10 @@ struct Blast_options {
   int                              block_size       = 0;  // CSKA skip-block / CLA group width; 0 = auto from the operating width
   arith::Mult_kind                 multiplier       = arith::Mult_kind::array;
   bool                             reverse_barrel   = false;
+  // Native mux-lowering experiment. Indexed muxes only; two-arm predicates
+  // retain their nonzero-selector semantics. The default shared flow is decode.
+  bool                             mux_tree         = false;
+  bool                             eq_balance       = false;
   // Flops cross as latches (register mapping); false keeps every flop a native
   // boundary.
   bool                             map_register     = true;
@@ -394,6 +399,43 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
                                                 : abc_mux(*condition, abc_bit(data.at(1), b), abc_bit(data.at(0), b));
         continue;
       }
+      if (opts_.mux_tree && sel_bits <= 32) {
+        using Arm = std::pair<int, hhds::Pin_class>;
+        std::vector<Arm> arms(data.begin(), data.end());
+        const auto       tree = [&](auto&& self, std::span<const Arm> group, int sb) -> Bit {
+          if (group.empty()) {
+            return abc_const0();
+          }
+          if (sb < 0) {
+            // Preserve the decode cover if arm indices alias in a narrow
+            // selector: every matching arm contributes, rather than choosing
+            // an arbitrary one. Normally this is a single data arm.
+            auto result = abc_const0();
+            for (const auto& arm : group) {
+              result = abc_bin(result, abc_bit(arm.second, b), '|');
+            }
+            return result;
+          }
+          const auto       select = abc_bit(sel, sb);
+          std::vector<Arm> lo, hi;
+          for (const auto& arm : group) {
+            (((static_cast<uint32_t>(arm.first) >> sb) & 1U) ? hi : lo).push_back(arm);
+          }
+          // Do not recursively demand syntactic self-hold data on an arm
+          // excluded by a constant selector; this matches decode lowering.
+          if (select == abc_const0()) {
+            return self(self, lo, sb - 1);
+          }
+          if (select == abc_const1()) {
+            return self(self, hi, sb - 1);
+          }
+          const auto when_false = self(self, lo, sb - 1);
+          const auto when_true  = self(self, hi, sb - 1);
+          return abc_mux(select, when_true, when_false);
+        };
+        slots[b] = tree(tree, arms, sel_bits - 1);
+        continue;
+      }
       std::vector<Bit> products;
       products.reserve(data.size());
       for (const auto& [v, drv] : data) {
@@ -586,7 +628,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
           operands[k][i] = abc_bit(ds[k], i);
         }
       }
-      slots[0] = arith::build_eq(ops, operands);
+      slots[0] = arith::build_eq(ops, operands, opts_.eq_balance);
     }
     for (int b = 1; b < out_bits; ++b) {
       slots[b] = abc_const_bit(false);
@@ -775,8 +817,8 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         if (const auto chain = affine_chain(b_d); chain && gu::is_unsign(chain->index)) {
           const int iw    = eff_width(chain->index);
           bool      valid = iw > 0 && iw <= 16
-                       && (uint64_t{1} << iw) * static_cast<uint64_t>(demand_w)
-                              < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1));
+                            && (uint64_t{1} << iw) * static_cast<uint64_t>(demand_w)
+                                   < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1));
           for (size_t i = 0; valid && i < chain->links.size(); ++i) {
             valid = region.contains(chain->links[i].first);
           }

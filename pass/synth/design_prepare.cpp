@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "design_prepare.hpp"
 
+#include <optional>
 #include <unordered_set>
 
 #include "diag.hpp"
@@ -8,6 +9,88 @@
 #include "pass_partition.hpp"
 
 namespace livehd::synth {
+
+namespace {
+
+namespace gu = livehd::graph_util;
+
+// A plain `Clock_cell` (div 1, no invert) is a clock gate whose enable is
+// sampled at the reference clock's active edge -- exactly what an integrated
+// clock-gate cell does with its transparent-low enable latch. The mappers
+// only recognize (and map onto a Liberty ICG) the structural spelling
+// `clk & latch(en, transparent while clk low)`, so a Clock_cell -- what a
+// Pyrope `Clock(clock_pin=, enable=)` lowers to -- reached the netlist as an
+// unmapped native node and the STA refused it. Spell it structurally, on the
+// private copies only. Divided/inverted flavours stay native (no ICG maps them).
+std::optional<uint64_t> expand_plain_clock_cells(hhds::Graph* g, Preparation_budget* budget) {
+  std::vector<hhds::Node_class> cells;
+  for (auto n : g->body().nodes()) {
+    if (!admit_preparation(budget, "clock-cell-scan")) {
+      return {};
+    }
+    if (gu::type_op_of(n) == Ntype_op::Clock_cell) {
+      cells.push_back(n);
+    }
+  }
+  uint64_t done = 0;
+  for (auto n : cells) {
+    if (!admit_preparation(budget, "clock-cell-expand", 16)) {
+      return {};
+    }
+    const auto clk = gu::get_driver_of_sink_name(n, "clk_ref");
+    const auto en  = gu::get_driver_of_sink_name(n, "en");
+    const auto div = gu::get_driver_of_sink_name(n, "div");
+    const auto inv = gu::get_driver_of_sink_name(n, "invert");
+    if (clk.is_invalid() || clk.is_const()) {
+      continue;
+    }
+    if (!div.is_invalid() && !(div.is_const() && gu::const_of(div).is_just_i64() && gu::const_of(div).to_just_i64() == 1)) {
+      continue;
+    }
+    if (!inv.is_invalid() && !inv.is_known_false()) {
+      continue;
+    }
+    const auto out = n.get_driver_pin(0);
+    if (out.is_invalid()) {
+      continue;
+    }
+    hhds::Pin_class gclk = clk;  // an unset enable is always-on
+    if (!en.is_invalid()) {
+      auto latch = gu::create_typed_node(*g, Ntype_op::Latch);
+      clk.connect_sink(gu::setup_sink_by_name(latch, "enable"));
+      en.connect_sink(gu::setup_sink_by_name(latch, "din"));
+      gu::create_const(*g, *Dlop::create_integer(0)).connect_sink(gu::setup_sink_by_name(latch, "posclk"));
+      auto q = latch.create_driver_pin(0);
+      gu::set_bits(q, 1);
+      gu::set_unsign(q);
+      auto gate = gu::create_typed_node(*g, Ntype_op::And);
+      clk.connect_sink(gate.create_sink_pin(0));
+      q.connect_sink(gate.create_sink_pin(1));
+      gclk = gate.create_driver_pin(0);
+      gu::set_bits(gclk, 1);
+      gu::set_unsign(gclk);
+    }
+    // SNAPSHOT the fan-out: connect_sink mutates the storage out_edges walks.
+    std::vector<hhds::Pin_class> readers;
+    for (auto e : out.out_edges()) {
+      if (!admit_preparation(budget, "clock-cell-reader")) {
+        return {};
+      }
+      readers.push_back(e.sink);
+    }
+    for (const auto& reader : readers) {
+      if (!admit_preparation(budget, "clock-cell-rewire")) {
+        return {};
+      }
+      gclk.connect_sink(reader);
+    }
+    n.del_node();
+    ++done;
+  }
+  return done;
+}
+
+}  // namespace
 
 std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<hhds::Graph>> sources, bool unroll_carry,
                                                 std::string_view from_pass, Preparation_budget* budget) {
@@ -146,6 +229,19 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     return {};
   }
   result->definitions.insert(result->definitions.end(), result->loops.shared_bodies.begin(), result->loops.shared_bodies.end());
+  uint64_t clock_cells = 0;
+  for (const auto& graph : result->definitions) {
+    const auto expanded = expand_plain_clock_cells(graph.get(), budget);
+    if (!expanded) {
+      return {};
+    }
+    clock_cells += *expanded;
+  }
+  if (clock_cells > 0) {
+    livehd::diag::info(from_pass, "clock-cell-expanded", "progress")
+        .msg("{}: spelled {} clock gate(s) as `clk & latch` for ICG mapping", from_pass, clock_cells)
+        .emit();
+  }
   result->resolve_graphs = result->roots;
   std::unordered_set<hhds::Gid> listed;
   for (const auto& graph : result->roots) {

@@ -31,6 +31,26 @@ TEST(Tmap, RejectsDuplicateRegistrationAndInvalidRequestsBeforeCallingProvider) 
   EXPECT_EQ(technology_map("validation", top, options).status, Tmap_status::invalid);
   EXPECT_EQ(*calls, 0U);
   options.delay_ps = 0;
+  const auto valid = options;
+  for (auto rounds : {0, 65}) {
+    options.boundary_rounds = rounds;
+    EXPECT_EQ(technology_map("validation", top, options).status, Tmap_status::invalid);
+  }
+  options = valid;
+  for (auto fanout : {1U, 4097U}) {
+    options.sharing_fanout = fanout;
+    EXPECT_EQ(technology_map("validation", top, options).status, Tmap_status::invalid);
+  }
+  options         = valid;
+  options.io_load = std::numeric_limits<float>::infinity();
+  EXPECT_EQ(technology_map("validation", top, options).status, Tmap_status::invalid);
+  options = valid;
+  for (auto margin : {"", "-1", "nan", "inf", "1ps"}) {
+    options.reg_margin = margin;
+    EXPECT_EQ(technology_map("validation", top, options).status, Tmap_status::invalid);
+  }
+  EXPECT_EQ(*calls, 0U);
+  options = valid;
   EXPECT_EQ(technology_map("validation", top, options).status, Tmap_status::refused);
   EXPECT_EQ(*calls, 1U);
 }

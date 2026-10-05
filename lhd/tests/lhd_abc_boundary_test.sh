@@ -26,17 +26,18 @@
 # round (case 1b pins what that alone does), so a run without $ROUNDS below is
 # testing the default, not this contract.
 #
-# MAPPER=usyn: native USYN has no partition-boundary environment of its own.
-# Its optional ABC tmap maps the selected network under the USYN timing target
-# `pass.usyn.delay` (abc.* options are not inherited) and reports the budget it
-# applied per region. The scoreboard, the rounds, the NAND2x1 -> NAND2x2 upsize,
-# the abc.boundary / abc.boundary_buffer switches and pass.abc's dont-use
-# diagnostic are pass.abc facts, gated on MAPPER=abc. What USYN keeps: the timing
-# target reaches every mapped region, a timing-only change remaps without
-# invalidating native selection, a primary input's 64-sink fanout is still
-# tree-buffered, a dont_use cell never maps, the mapped netlist is
-# LEC-equivalent to the partition twin, and an all-hit re-run reuses both the
-# native selection and the mapped bodies byte-identically.
+# MAPPER=usyn: native USYN's optional ABC tmap maps the selected network under
+# the USYN timing target `pass.usyn.delay` (abc.* options are not inherited) and
+# applies the same PHYSICAL-only techniques under pass.usyn spellings: the
+# boundary environment and exact re-size (`pass.usyn.boundary`,
+# `boundary_rounds`), fanout buffering (`max_fanout`, `boundary_buffer`) and
+# sizing to the budget. So the NAND2x1 -> NAND2x2 upsize and both switches hold
+# for USYN too. The qor.json scoreboard and pass.abc's dont-use diagnostic are
+# pass.abc report facts, gated on MAPPER=abc. USYN also keeps: a timing-only
+# change remaps without invalidating native selection, a dont_use cell never
+# maps, the mapped netlist is LEC-equivalent to the partition twin, and an
+# all-hit re-run reuses both the native selection and the mapped bodies
+# byte-identically.
 set -u
 
 # One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
@@ -57,7 +58,7 @@ if [ "$MAPPER" = abc ]; then
   ROUNDS="--set abc.boundary_rounds=3"
   DELAY="--set abc.delay=25"
 else
-  ROUNDS=""
+  ROUNDS="--set pass.usyn.boundary_rounds=3"
   DELAY="--set pass.usyn.delay=25"
 fi
 
@@ -115,8 +116,8 @@ assert c1["gates"] >= 1 and c1["delay"] > 0, c1
 PY
 fi
 run compile lg:"$W/net_on" --top "$TOP" --emit-dir verilog:"$W/v_on" --workdir "$W/wv_on"
+grep -q "NAND2x2" "$W/v_on/${TOP}__c1.v" || fail "boundary=true left the crossing driver on NAND2x1"
 if [ "$MAPPER" = abc ]; then
-  grep -q "NAND2x2" "$W/v_on/${TOP}__c1.v" || fail "boundary=true left the crossing driver on NAND2x1"
   grep -q "pass.abc boundary: .* cell(s) re-sized" "$W/w_on/logs/"*_lhd_pass_${MAPPER}.log \
     || fail "no boundary refinement summary in the pass log"
 fi
@@ -160,22 +161,22 @@ assert all(r["cache_reused"] for r in n["regions"]), n["regions"]
 PY
 fi
 
-# 2. boundary off: the old behaviour, load-free ports (pass.abc switch; USYN
-# has no boundary environment to switch off)
+# 2. boundary off: the old behaviour, load-free ports (both mappers' switch)
+PREFIX=$([ "$MAPPER" = abc ] && echo abc || echo pass.usyn)
+run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_off" --set synth.liberty="$LIB" \
+    $DELAY $ROUNDS --set "$PREFIX.boundary=false" --workdir "$W/w_off"
 if [ "$MAPPER" = abc ]; then
-  run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_off" --set synth.liberty="$LIB" \
-      --set abc.delay=25 --set abc.boundary=false --workdir "$W/w_off"
   grep -q '"boundary"' "$W/w_off/qor.json" && fail "boundary=false still reports a boundary scoreboard"
-  run compile lg:"$W/net_off" --top "$TOP" --emit-dir verilog:"$W/v_off" --workdir "$W/wv_off"
-  grep -q "NAND2x2" "$W/v_off/${TOP}__c1.v" && fail "boundary=false sized the crossing driver up"
 fi
+run compile lg:"$W/net_off" --top "$TOP" --emit-dir verilog:"$W/v_off" --workdir "$W/wv_off"
+grep -q "NAND2x2" "$W/v_off/${TOP}__c1.v" && fail "boundary=false sized the crossing driver up"
 
 # 2b. a primary input's fanout is tree-buffered: ABC's `buffer` only trees an
 # input that has a driving cell, and pass.abc declares its stand-in as one
 # (boundary_buffer, independent of `boundary`). 64 sinks on `en` need >= 4
 # buffers under max_fanout=16; boundary_buffer=false leaves the port bare.
 # The tree is required of the USYN tmap too (it maps under the same default
-# fanout cap); the boundary_buffer switch is a pass.abc option.
+# fanout cap and exposes the same boundary_buffer switch).
 PRP2=inou/prp/tests/pyrope/abc_pi_fanout.prp
 TOP2=abc_pi_fanout.abc_pi_fanout
 [ -f "$PRP2" ] || fail "missing fixture $PRP2"
@@ -184,12 +185,10 @@ run pass "$MAPPER" --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_fan" --set sy
 run compile lg:"$W/net_fan" --top "$TOP2" --emit-dir verilog:"$W/v_fan" --workdir "$W/wv_fan"
 n=$(cat "$W/v_fan/"*.v | grep -cE '^\s*BUFx1\s')
 [ "$n" -ge 4 ] || fail "primary input with fanout 64 got $n buffer(s), expected a tree of >= 4"
-if [ "$MAPPER" = abc ]; then
-  run pass "$MAPPER" --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_fan_off" --set synth.liberty="$LIB" \
-      --set abc.boundary_buffer=false --workdir "$W/w_fan_off"
-  run compile lg:"$W/net_fan_off" --top "$TOP2" --emit-dir verilog:"$W/v_fan_off" --workdir "$W/wv_fan_off"
-  cat "$W/v_fan_off/"*.v | grep -qE '^\s*BUFx1\s' && fail "boundary_buffer=false still buffered the primary input"
-fi
+run pass "$MAPPER" --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_fan_off" --set synth.liberty="$LIB" \
+    --set "$PREFIX.boundary_buffer=false" --workdir "$W/w_fan_off"
+run compile lg:"$W/net_fan_off" --top "$TOP2" --emit-dir verilog:"$W/v_fan_off" --workdir "$W/wv_fan_off"
+cat "$W/v_fan_off/"*.v | grep -qE '^\s*BUFx1\s' && fail "boundary_buffer=false still buffered the primary input"
 
 # 2c. a Liberty cell marked dont_use never maps (both mappers), and pass.abc
 # reports it ONCE per run (its own `dont-use` diagnostic; the USYN tmap
@@ -271,11 +270,11 @@ run compile lg:"$I/net2" --top "$TOP" --emit-dir verilog:"$I/v2" --workdir "$I/w
 for f in "$I/v1/"*.v; do
   cmp -s "$f" "$I/v2/$(basename "$f")" || fail "all-hit run emitted a different netlist: $(basename "$f")"
 done
-[ "$MAPPER" != abc ] || grep -q "NAND2x2" "$I/v2/${TOP}__c1.v" || fail "the cached body lost the boundary re-size"
+grep -q "NAND2x2" "$I/v2/${TOP}__c1.v" || fail "the cached body lost the boundary re-size"
 echo "PASS: all-hit incremental run reuses the refined bodies without ABC"
 
 if [ "$MAPPER" = abc ]; then
   echo "PASS: pass.abc partition-boundary environment"
 else
-  echo "PASS: pass.usyn timing target, mapped-netlist LEC and two-tier reuse on the boundary fixture"
+  echo "PASS: pass.usyn timing target, boundary re-size/buffering, mapped-netlist LEC and two-tier reuse"
 fi

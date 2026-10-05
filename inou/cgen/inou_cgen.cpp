@@ -167,26 +167,26 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
 void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   TRACE_EVENT("inou", "sim_gen");
 
-  Inou_cgen pp(var);
-  auto      dir               = pp.get_odir(var);
-  auto      vcd_out           = var.get("vcd");
-  auto      top               = var.get("top");
-  auto      fakedelay         = var.get("vcd_fake_delay");
-  auto      observe_s         = var.get("observe");
-  auto      runtime_support_s = var.get("runtime_support");
-  auto      slop_u_s          = var.get("slop_u");
-  auto      color_dirty_s     = var.get("color_dirty");
-  auto      debug_s           = var.get("debug");
-  auto      unknown_zero_s    = var.get("unknown_zero");
-  auto      live_words_s      = var.get("live_words");
-  auto      fence_ratio_s     = var.get("fence_ratio");
-  auto      backend_s         = var.get("backend");
-  auto      unroll_sites_s    = var.get("unroll_sites");
+  Inou_cgen  pp(var);
+  auto       dir               = pp.get_odir(var);
+  auto       vcd_out           = var.get("vcd");
+  auto       top               = var.get("top");
+  auto       fakedelay         = var.get("vcd_fake_delay");
+  auto       observe_s         = var.get("observe");
+  auto       runtime_support_s = var.get("runtime_support");
+  auto       slop_u_s          = var.get("slop_u");
+  auto       color_dirty_s     = var.get("color_dirty");
+  auto       debug_s           = var.get("debug");
+  auto       unknown_zero_s    = var.get("unknown_zero");
+  auto       live_words_s      = var.get("live_words");
+  auto       fence_ratio_s     = var.get("fence_ratio");
+  auto       backend_s         = var.get("backend");
+  auto       unroll_sites_s    = var.get("unroll_sites");
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
   // but these labels are also reachable directly).
-  bool       bad_flag = false;
-  const auto flag_on  = [&bad_flag](std::string_view label, std::string_view v) {
+  bool       bad_flag          = false;
+  const auto flag_on           = [&bad_flag](std::string_view label, std::string_view v) {
     if (!v.empty() && v != "true" && v != "1" && v != "on" && v != "false" && v != "0" && v != "off") {
       livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("{} expects true|false, got '{}'", label, v).emit();
       bad_flag = true;
@@ -219,7 +219,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   const auto backend_knob = knob("sim.tune.backend", livehd::sim::parse_tune_backend(backend_s));
   // sim.unroll_sites: a plain whole number (0 = never unroll). Not a tune
   // knob: it is applied, never trialed, so it is not part of the tune vector.
-  uint32_t unroll_sites = Cgen_sim::kDefaultUnrollSites;
+  uint32_t   unroll_sites = Cgen_sim::kDefaultUnrollSites;
   if (!unroll_sites_s.empty()) {
     uint64_t    parsed = 0;
     const char* end    = unroll_sites_s.data() + unroll_sites_s.size();
@@ -245,14 +245,14 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // Whatever was left `auto` takes the built-in default. The fence default
   // FOLLOWS dirty (none with it off -- fences only serve dirty-bit gating, and
   // without it they are pure boundary cost -- the built-in ratio with it on).
-  const auto tune = livehd::sim::resolve_tune_defaults(dirty_knob, fence_knob, live_words_knob, backend_knob);
-  const bool llvm = tune.llvm;
+  const auto         tune = livehd::sim::resolve_tune_defaults(dirty_knob, fence_knob, live_words_knob, backend_knob);
+  const bool         llvm = tune.llvm;
   // Simulator lowering still performs backend-specific structural rewrites
   // (the clock-gate-cell fold and compact-loop realization -- `sim.flatten` is
   // gone). Build those into a private output library: the EPRP input
   // graphs remain native and read-only, and every pre-scan/emission handle
   // below belongs to the same scratch bodies it measures.
-  hhds::GraphLibrary                        sim_library;
+  hhds::GraphLibrary sim_library;
   std::vector<std::shared_ptr<hhds::Graph>> sim_graphs;
   sim_graphs.reserve(var.graphs.size());
   for (const auto& source : var.graphs) {
@@ -296,6 +296,23 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   for (const auto gid : sim_library.all_gids()) {
     if (auto g = sim_library.get_graph(gid)) {
       sim_graphs.push_back(std::move(g));
+    }
+  }
+  // Every planner/emitter site reads a value's width from its pin. A writer may
+  // stamp only the IO declaration (older pass.synth `__livehd_abc_input_bits_<W>`
+  // splitters did); an unstamped graph input then read as 1 bit and every bit
+  // select of the bus returned 0. Stamp widths only: a declaration's
+  // `unsign=false` also means "unspecified", so it cannot set the sign.
+  for (const auto& g : sim_graphs) {
+    const auto io = g->get_io();
+    if (io == nullptr) {
+      continue;
+    }
+    for (const auto& decl : io->get_input_pin_decls()) {
+      const auto pin = g->get_input_pin(decl.name);
+      if (!pin.is_invalid() && decl.bits > 0 && livehd::graph_util::bits_of(pin) == 0) {
+        livehd::graph_util::set_bits(pin, static_cast<int32_t>(decl.bits));
+      }
     }
   }
 
@@ -402,6 +419,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // repetition. Safe because prepare_graph() has already run over the whole
   // library, so no body changes shape while the memo is alive.
   absl::flat_hash_map<hhds::Gid, uint64_t> digest_memo;
+  Cgen_sim::Generation_index               gen_index;  // one gen_digests.json read/write + odir listing per run
   const auto                               is_selected_root = [&](std::string_view full, std::string_view entity) {
     return !top.empty() ? (top == full || top == entity) : !instantiated.contains(std::string(full));
   };
@@ -466,6 +484,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     const bool root  = is_selected_root(full, entity) || (llvm && compact_kernel_defs.contains(g.get()));
     auto       probe = probe_for(g);
     probe.share_digest_memo(&digest_memo);
+    probe.share_generation_index(&gen_index);
     if (!probe.generation_current(g.get(), root)) {
       continue;
     }
@@ -532,6 +551,8 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     const auto* plan    = plan_it == root_color_plans.end() ? nullptr : &plan_it->second;
     auto        p       = cgen_for(g, plan);
     p.share_digest_memo(&digest_memo);
+    p.share_generation_index(&gen_index);
     p.do_from_graph(g);
   }
+  Cgen_sim::flush_generation_index(dir, gen_index);
 }

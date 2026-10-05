@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -350,6 +351,94 @@ Xag_window grow_window(const Xag& g, Xsignal root, const Window_limits& limits, 
   }
   std::sort(leaves.begin(), leaves.end());
   return collect_window(g, root, leaves, limits, work);
+}
+
+Priority_windows priority_windows(const Xag& g, Xsignal root, const Window_limits& limits, Budget& work, uint32_t max_cuts) {
+  Priority_windows result;
+  if (!valid_limits(limits) || root.id >= g.size() || !max_cuts || max_cuts > 32) {
+    return result;
+  }
+  auto seed = grow_window(g, root, limits, work);
+  if (seed.status != Status::feasible) {
+    result.status    = seed.status;
+    result.exhausted = seed.status == Status::search_exhausted;
+    return result;
+  }
+  result.windows.push_back(seed);
+  if (max_cuts == 1 || root.id == 0 || g.node(root.id).kind == Xag::Kind::source) {
+    result.status = Status::feasible;
+    return result;
+  }
+  std::vector<Id> initial;
+  for (auto input : g.node(root.id).inputs) {
+    if (input.id) {
+      initial.push_back(input.id);
+    }
+  }
+  std::sort(initial.begin(), initial.end());
+  initial.erase(std::unique(initial.begin(), initial.end()), initial.end());
+  std::vector<std::vector<Id>> frontiers{initial};
+  std::set<std::vector<Id>>    seen{initial};
+  std::vector<Xag_window>      alternatives;
+  for (size_t cursor = 0; cursor < frontiers.size(); ++cursor) {
+    if (!work.spend(frontiers[cursor].size() + 1)) {
+      result.exhausted = true;
+      break;
+    }
+    const auto basis = frontiers[cursor];  // expanding may reallocate the queue
+    if (basis != seed.leaves) {
+      auto window = collect_window(g, root, basis, limits, work);
+      if (window.status == Status::feasible) {
+        alternatives.push_back(std::move(window));
+      } else if (window.status == Status::search_exhausted) {
+        result.exhausted = true;
+      }
+    }
+    if (work.exhausted) {
+      break;
+    }
+    for (size_t i = 0; i < basis.size(); ++i) {
+      const auto& node = g.node(basis[i]);
+      if (node.kind == Xag::Kind::source) {
+        continue;
+      }
+      auto next = basis;
+      next.erase(next.begin() + static_cast<ptrdiff_t>(i));
+      for (auto input : node.inputs) {
+        if (input.id) {
+          next.push_back(input.id);
+        }
+      }
+      std::sort(next.begin(), next.end());
+      next.erase(std::unique(next.begin(), next.end()), next.end());
+      if (next.size() > limits.inputs || seen.contains(next)) {
+        continue;
+      }
+      if (frontiers.size() >= 128) {
+        result.exhausted = true;
+        continue;
+      }
+      seen.insert(next);
+      frontiers.push_back(std::move(next));
+    }
+  }
+  std::sort(alternatives.begin(), alternatives.end(), [](const auto& a, const auto& b) {
+    if (a.interior.size() != b.interior.size()) {
+      return a.interior.size() > b.interior.size();
+    }
+    if (a.leaves.size() != b.leaves.size()) {
+      return a.leaves.size() < b.leaves.size();
+    }
+    return a.leaves < b.leaves;
+  });
+  for (auto& window : alternatives) {
+    if (result.windows.size() >= max_cuts) {
+      break;
+    }
+    result.windows.push_back(std::move(window));
+  }
+  result.status = Status::feasible;
+  return result;
 }
 
 Window_function window_function(const Xag& g, const Xag_window& w, Budget& work) {

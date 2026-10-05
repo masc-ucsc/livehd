@@ -17,19 +17,19 @@
 #include <string_view>
 #include <vector>
 
-#include "region_qor.hpp"
 #include "cell.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "hhds/attrs/name.hpp"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
+#include "region_qor.hpp"
 
-using livehd::synth::Region_cache;
-using livehd::synth::Region_qor;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::set_bits;
 using livehd::partition::Region_body;
+using livehd::synth::Region_cache;
+using livehd::synth::Region_qor;
 
 namespace {
 
@@ -156,10 +156,11 @@ TEST(AbcIncr, StructuralEqualReuse) {
   ASSERT_NE(pre1, nullptr);
 
   Region_cache c1("lgdb_p2_cache", 7);
-  Region_qor q;
+  Region_qor   q;
   q.gates       = 5;
   q.area        = 2.0;
   q.delay       = 1.5;
+  q.delay_ps    = true;
   q.logic_depth = 3;
   ASSERT_TRUE(c1.store(f1.rb, *f1.slib, f1.src_name, q, "R", &out1));
   c1.save();
@@ -171,10 +172,11 @@ TEST(AbcIncr, StructuralEqualReuse) {
   ASSERT_NE(pre2, nullptr);
 
   Region_cache c2("lgdb_p2_cache", 7);  // reloads the saved cache
-  auto       res = c2.lookup_compare(f2.rb, pre2, "R");
+  auto         res = c2.lookup_compare(f2.rb, pre2, "R");
   ASSERT_TRUE(res.hit) << "identical region under new nids must reuse";
   ASSERT_NE(res.row, nullptr);
   EXPECT_EQ(res.row->logic_depth, 3);
+  EXPECT_TRUE(res.row->delay_ps);
   EXPECT_EQ(c2.hits(), 0);
   ASSERT_TRUE(c2.reuse_hit(f2.rb, res, &out2));
   EXPECT_EQ(c2.hits(), 1);
@@ -222,7 +224,7 @@ TEST(AbcIncr, SameNamesWithChangedInputOrOutputPortIdsDoNotReuse) {
                                              {},
                                              input_permutation,
                                              !input_permutation);
-    Region_cache         cache("lgdb_port_layout_cache", 7, true);
+    Region_cache       cache("lgdb_port_layout_cache", 7, true);
     EXPECT_FALSE(cache.lookup_compare(changed.rb, changed.src.get(), "R").hit);
     EXPECT_TRUE(cache.lookup_compare(original.rb, original.src.get(), "R").hit);
   }
@@ -232,7 +234,7 @@ TEST(AbcIncr, ChangedNameOwnerDoesNotEvictThePreviousDefinitionBeforeRenamedReus
   hhds::GraphLibrary original_out;
   auto               original = make_region("lgdb_name_owner_original", original_out, "lane", Ntype_op::Xor);
   Region_qor         original_qor;
-  original_qor.area                 = 17;
+  original_qor.area          = 17;
   original_qor.hook_evidence = std::make_shared<const std::string>("original witness");
   {
     Region_cache cache("lgdb_name_owner_cache", 7, true);
@@ -242,10 +244,10 @@ TEST(AbcIncr, ChangedNameOwnerDoesNotEvictThePreviousDefinitionBeforeRenamedReus
   hhds::GraphLibrary current_out;
   auto               changed = make_region("lgdb_name_owner_changed", current_out, "lane", Ntype_op::Or);
   auto               renamed = make_region("lgdb_name_owner_renamed", current_out, "lane_p1", Ntype_op::Xor);
-  Region_cache         cache("lgdb_name_owner_cache", 7, true);
+  Region_cache       cache("lgdb_name_owner_cache", 7, true);
   ASSERT_FALSE(cache.lookup_compare(changed.rb, changed.src.get(), "R").hit);
   Region_qor changed_qor;
-  changed_qor.area                 = 23;
+  changed_qor.area          = 23;
   changed_qor.hook_evidence = std::make_shared<const std::string>("changed witness");
   ASSERT_TRUE(cache.store(changed.rb, *changed.slib, changed.src_name, changed_qor, "R", &current_out));
   auto hit = cache.lookup_compare(renamed.rb, renamed.src.get(), "R");
@@ -267,8 +269,8 @@ TEST(AbcIncr, ChangedNameOwnerDoesNotEvictThePreviousDefinitionBeforeRenamedReus
   ASSERT_TRUE(cache.store(renamed.rb, *renamed.slib, renamed.src_name, original_qor, "R", &current_out));
   cache.save();
   Region_cache reloaded("lgdb_name_owner_cache", 7, true);
-  auto       old_result = reloaded.lookup_compare(renamed.rb, renamed.src.get(), "R");
-  auto       new_result = reloaded.lookup_compare(changed.rb, changed.src.get(), "R");
+  auto         old_result = reloaded.lookup_compare(renamed.rb, renamed.src.get(), "R");
+  auto         new_result = reloaded.lookup_compare(changed.rb, changed.src.get(), "R");
   ASSERT_TRUE(old_result.hit);
   ASSERT_TRUE(new_result.hit);
   EXPECT_EQ(old_result.row->module, "lane_p1");
@@ -286,9 +288,9 @@ TEST(AbcIncr, RecipeMismatchMiss) {
   ASSERT_TRUE(c1.store(f1.rb, *f1.slib, f1.src_name, Region_qor{}, "R_add", &out1));
   c1.save();
 
-  auto&      out2 = livehd::Hhds_graph_library::instance("lgdb_p2b_o2");
-  auto       f2   = make_region("lgdb_p2b_s2", out2, "top__c1");
-  auto*      pre2 = f2.src.get();
+  auto&        out2 = livehd::Hhds_graph_library::instance("lgdb_p2b_o2");
+  auto         f2   = make_region("lgdb_p2b_s2", out2, "top__c1");
+  auto*        pre2 = f2.src.get();
   Region_cache c2("lgdb_p2b_cache", 7);
   EXPECT_FALSE(c2.lookup_compare(f2.rb, pre2, "R_mul").hit) << "recipe gate";
   EXPECT_TRUE(c2.lookup_compare(f2.rb, pre2, "R_add").hit) << "same recipe hits";
@@ -303,9 +305,9 @@ TEST(AbcIncr, EditMiss) {
   ASSERT_TRUE(c1.store(f1.rb, *f1.slib, f1.src_name, Region_qor{}, "R", &out1));
   c1.save();
 
-  auto&      out2 = livehd::Hhds_graph_library::instance("lgdb_p2c_o2");
-  auto       f2   = make_region("lgdb_p2c_s2", out2, "top__c1", Ntype_op::Or);  // edited op
-  auto*      pre2 = f2.src.get();
+  auto&        out2 = livehd::Hhds_graph_library::instance("lgdb_p2c_o2");
+  auto         f2   = make_region("lgdb_p2c_s2", out2, "top__c1", Ntype_op::Or);  // edited op
+  auto*        pre2 = f2.src.get();
   Region_cache c2("lgdb_p2c_cache", 7);
   EXPECT_FALSE(c2.lookup_compare(f2.rb, pre2, "R").hit) << "an edited region must not reuse";
 }
@@ -322,17 +324,16 @@ TEST(AbcIncr, ReuseIneligibleMiss) {
   auto& out2           = livehd::Hhds_graph_library::instance("lgdb_p2d_o2");
   auto  f2             = make_region("lgdb_p2d_s2", out2, "top__c1");
   f2.rb.reuse_eligible = false;  // partitioner refused the boundary
-  auto*      pre2      = f2.src.get();
+  auto*        pre2    = f2.src.get();
   Region_cache c2("lgdb_p2d_cache", 7);
   EXPECT_FALSE(c2.lookup_compare(f2.rb, pre2, "R").hit) << "reuse-ineligible region must not reuse";
 }
 
-
 // Publication-gated clients freeze before context-specific final transforms,
 // then commit only after whole-design proof and output replacement succeed.
 TEST(AbcIncr, FrozenPrivateRowsStayUnpublishedUntilSave) {
-  auto&      out = livehd::Hhds_graph_library::instance("lgdb_frozen_out");
-  auto       f   = make_region("lgdb_frozen_src", out, "top__c1");
+  auto&        out = livehd::Hhds_graph_library::instance("lgdb_frozen_out");
+  auto         f   = make_region("lgdb_frozen_src", out, "top__c1");
   Region_cache pending("lgdb_frozen_cache", 7, true);
   ASSERT_TRUE(pending.store(f.rb, *f.slib, f.src_name, Region_qor{}, "R", &out));
   const auto frozen_nodes = node_count(f.rb.body);
@@ -351,18 +352,18 @@ TEST(AbcIncr, FrozenPrivateRowsStayUnpublishedUntilSave) {
   }
   pending.save();
   Region_cache committed("lgdb_frozen_cache", 7, true);
-  auto       hit = committed.lookup_compare(f.rb, f.src.get(), "R");
+  auto         hit = committed.lookup_compare(f.rb, f.src.get(), "R");
   ASSERT_TRUE(hit.hit);
   ASSERT_TRUE(committed.reuse_hit(f.rb, hit, &out));
   EXPECT_EQ(node_count(f.rb.body), frozen_nodes);
 }
 
 TEST(AbcIncr, EvidenceFollowsExactRowThroughRenameAndPrivateSnapshot) {
-  auto&      out     = livehd::Hhds_graph_library::instance("lgdb_evidence_out");
-  auto       first   = make_region("lgdb_evidence_src", out, "original", Ntype_op::Xor, "st", 8, "_a");
-  auto       renamed = make_region("lgdb_evidence_new", out, "renamed", Ntype_op::Xor, "st", 8, "_b");
+  auto&        out     = livehd::Hhds_graph_library::instance("lgdb_evidence_out");
+  auto         first   = make_region("lgdb_evidence_src", out, "original", Ntype_op::Xor, "st", 8, "_a");
+  auto         renamed = make_region("lgdb_evidence_new", out, "renamed", Ntype_op::Xor, "st", 8, "_b");
   Region_cache cache("lgdb_evidence_cache", 19, true);
-  Region_qor q;
+  Region_qor   q;
   q.hook_evidence = std::make_shared<const std::string>("original decision and witnesses");
   ASSERT_TRUE(cache.store(first.rb, *first.slib, first.src_name, q, "R", &out));
   auto hit = cache.lookup_compare(renamed.rb, renamed.src.get(), "R");
@@ -408,8 +409,8 @@ TEST(AbcIncr, EvidenceFollowsExactRowThroughRenameAndPrivateSnapshot) {
   ASSERT_TRUE(committed.stage_snapshot("lgdb_evidence_mixed"));
   std::filesystem::remove_all("lgdb_evidence_cache");
   Region_cache mixed("lgdb_evidence_mixed", 19, true);
-  auto       old_hit = mixed.lookup_compare(first.rb, first.src.get(), "R");
-  auto       new_hit = mixed.lookup_compare(renamed.rb, renamed.src.get(), "R");
+  auto         old_hit = mixed.lookup_compare(first.rb, first.src.get(), "R");
+  auto         new_hit = mixed.lookup_compare(renamed.rb, renamed.src.get(), "R");
   ASSERT_TRUE(old_hit.hit);
   ASSERT_TRUE(new_hit.hit);
   ASSERT_NE(mixed.read_evidence(*old_hit.row), nullptr);
@@ -543,9 +544,13 @@ struct Generation {
   Parent             top, alt, side;
   explicit Generation(const Kid_out& kid_out)
       : kids(declare_children(pre_lib, kid_out))
-      , top(make_parent(pre_lib, outlib, "top", {{"a", &kids.c1, "u1", "z"}, {"b", &kids.c2, "u2", "y"}}))
-      , alt(make_parent(pre_lib, outlib, "alt", {{"b", &kids.c2, "u2", "y"}}))
-      , side(make_parent(pre_lib, outlib, "side", {{"c", &kids.c1, "u3", "w"}})) {}
+      , top(make_parent(pre_lib, outlib, "top",
+                        {
+                            {"a", &kids.c1, "u1", "z"},
+                            {"b", &kids.c2, "u2", "y"}
+  })),
+      alt(make_parent(pre_lib, outlib, "alt", {{"b", &kids.c2, "u2", "y"}})),
+      side(make_parent(pre_lib, outlib, "side", {{"c", &kids.c1, "u3", "w"}})) {}
   bool store(Region_cache& cache, Parent& p) { return cache.store(p.rb, pre_lib, p.rb.pre_name, Region_qor{}, "R", &outlib); }
 };
 

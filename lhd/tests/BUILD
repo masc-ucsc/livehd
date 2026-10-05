@@ -1627,6 +1627,18 @@ _ICG_CASES = [
     tests = [":lhd_abc_icg_test" + suffix + "_" + tag for tag, _case, _check in _ICG_CASES],
 ) for suffix, _mapper in _MAPPERS]
 
+# A Pyrope `Clock()` gate (a Clock_cell) is spelled `clk & latch` before
+# mapping, so abc maps it onto the ICG cell and no Clock_cell reaches STA.
+sh_test(
+    name = "lhd_clock_cell_icg_test",
+    size = "medium",
+    srcs = ["lhd_clock_cell_icg_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_icg_q.lib",
+        "//inou/prp:tests/sim/chained_clock_gates.prp",
+    ],
+)
+
 # Level-sensitive data latches map onto the Liberty's transparent latch cells
 # (both enable polarities, a QN-only cell, clear/preset reset latches or a
 # folded reset, latches enabled by an ICG output) with sky130- and
@@ -2078,6 +2090,15 @@ sh_test(
     name = "lhd_abc_fraig_test",
     size = "large",
     srcs = ["lhd_abc_fraig_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+# Gate-level sim of a mapped netlist that reads a wide bus through the shared
+# pass.synth input splitter (an unstamped splitter input once simulated as 0).
+sh_test(
+    name = "lhd_gate_sim_wide_bus_test",
+    size = "medium",
+    srcs = ["lhd_gate_sim_wide_bus_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 

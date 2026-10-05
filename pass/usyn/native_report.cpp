@@ -47,7 +47,7 @@ void cost(Writer& w, const char* key, const Logical_cost& c) {
 }  // namespace
 std::string native_report(const Logical_design& design, const Design_options& options, std::string_view tmap, double elapsed_ms,
                           uint64_t peak_bytes, std::string_view provenance_directory, std::string_view provenance,
-                          std::span<const std::string> artifact_paths) {
+                          std::span<const std::string> artifact_paths, std::span<const Mapping_trial> trials) {
   rapidjson::StringBuffer buffer;
   Writer                  w(buffer);
   w.StartObject();
@@ -66,6 +66,31 @@ std::string native_report(const Logical_design& design, const Design_options& op
   text(w, "definition-regions");
   w.Key("output");
   text(w, tmap == "none" ? "logical-cmos" : "mapped-cmos");
+  w.Key("mapping_trials");
+  w.StartArray();
+  for (const auto& trial : trials) {
+    w.StartObject();
+    flag(w, "p1", trial.p1);
+    flag(w, "multi_rep", trial.multi_rep);
+    flag(w, "selected", trial.selected);
+    number(w, "work_limit", trial.work_limit);
+    number(w, "work_used", trial.work_used);
+    number(w, "search_used", trial.search_used);
+    w.Key("elapsed_ms");
+    w.Double(trial.elapsed_ms);
+    w.Key("reason");
+    text(w, trial.reason);
+    if (trial.cost) {
+      number(w, "physical_logic_gates", trial.cost->gates);
+      w.Key("physical_logic_area");
+      w.Double(trial.cost->area);
+      // An untimed map's delay is a unit-delay level count, never picoseconds.
+      w.Key(trial.cost->delay_ps ? "maximum_region_delay_ps" : "maximum_region_logic_levels");
+      w.Double(trial.cost->maximum_region_delay);
+    }
+    w.EndObject();
+  }
+  w.EndArray();
   w.Key("cache");
   w.StartObject();
   flag(w, "available", true);
@@ -100,6 +125,34 @@ std::string native_report(const Logical_design& design, const Design_options& op
   number(w, "adder_block", static_cast<uint64_t>(options.adder_block));
   w.Key("multiplier");
   text(w, multiplier_name(options.multiplier));
+  w.Key("mux_lowering");
+  text(w, options.mux_tree ? "tree" : "decode");
+  flag(w, "eq_balance", options.eq_balance);
+  w.EndObject();
+  w.Key("native_optimization");
+  w.StartObject();
+  flag(w, "p1", options.logical.pre_optimize);
+  flag(w, "sop_tree", options.sop_tree);
+  flag(w, "multi_rep", options.multi_rep);
+  flag(w, "cmos_cleanup", options.cmos_cleanup || options.sop_tree || options.multi_rep);
+  w.Key("cost_mode");
+  text(w, options.cost_policy);
+  number(w, "cost_model_work", options.cost_model_work);
+  if (options.cost_model) {
+    number(w, "legal_cells", options.cost_model->admitted_cells);
+    number(w, "unsupported_cell_functions", options.cost_model->skipped_cells);
+  }
+  flag(w, "npn4", options.logical.residual.npn4);
+  flag(w, "sweep", options.logical.residual.sweep);
+  flag(w, "balance", options.logical.residual.balance);
+  number(w, "balance_dup_limit", options.logical.residual.balance_dup_limit);
+  number(w, "sweep_inputs", options.logical.residual.sweep_inputs);
+  number(w, "sweep_table_words", options.logical.residual.sweep_table_words);
+  number(w, "p1_sweep_inputs", options.logical.residual.p1_sweep_inputs);
+  flag(w, "mux_balance", options.logical.residual.mux_balance);
+  number(w, "mux_balance_min_arms", options.logical.residual.mux_balance_min_arms);
+  number(w, "mux_balance_area_pct", options.logical.residual.mux_balance_area_pct);
+  number(w, "rewrite_cuts", options.logical.residual.rewrite_cuts);
   w.EndObject();
   w.Key("endpoint_search");
   w.StartObject();
@@ -181,12 +234,14 @@ std::string native_report(const Logical_design& design, const Design_options& op
     w.Key("work");
     w.StartObject();
     number(w, "admission", r.work.admission);
+    number(w, "p1", r.work.p1);
     number(w, "selection", r.work.selection);
     number(w, "pairs", r.work.pairs);
     number(w, "residual", r.work.residual);
     number(w, "feedback", r.work.feedback);
     number(w, "cleanup", r.work.cleanup);
-    number(w, "total", r.work.total());
+    number(w, "cmos_cleanup", region.cmos_search.work);
+    number(w, "total", r.work.total() + region.cmos_search.work);
     w.EndObject();
     w.Key("pairs");
     w.StartObject();
@@ -239,12 +294,109 @@ std::string native_report(const Logical_design& design, const Design_options& op
     number(w, "joint_recode_wins", r.pairs.joint_recode_wins);
     flag(w, "exhausted", r.pairs.exhausted);
     w.EndObject();
+    w.Key("p1");
+    w.StartObject();
+    number(w, "cost_before", r.p1.cost_before);
+    number(w, "cost_after", r.p1.cost_after);
+    number(w, "rewrite_wins", r.p1.rewrite_wins);
+    number(w, "sweep_wins", r.p1.sweep_wins);
+    number(w, "balance_wins", r.p1.balance_wins);
+    number(w, "sweep_confirmations", r.p1.sweep_confirmations);
+    number(w, "mux_chains", r.p1.mux_chains);
+    number(w, "mux_arms", r.p1.mux_arms);
+    number(w, "mux_wins", r.p1.mux_wins);
+    number(w, "work", r.work.p1);
+    flag(w, "exhausted", r.p1.exhausted);
+    w.Key("limits");
+    w.StartArray();
+    for (const auto& limit : r.p1.limits) {
+      text(w, limit);
+    }
+    w.EndArray();
+    w.EndObject();
+    w.Key("cmos_cleanup");
+    w.StartObject();
+    number(w, "sop_roots", region.cmos_cleanup.sop_roots);
+    number(w, "sop_cofactors", region.cmos_cleanup.sop_cofactors);
+    number(w, "cost_before", region.cmos_cleanup.cost_before);
+    number(w, "cost_after", region.cmos_cleanup.cost_after);
+    number(w, "rewrite_wins", region.cmos_cleanup.rewrite_wins);
+    number(w, "resub_wins", region.cmos_cleanup.resub_wins);
+    number(w, "balance_wins", region.cmos_cleanup.balance_wins);
+    number(w, "sweep_confirmations", region.cmos_cleanup.sweep_confirmations);
+    number(w, "mux_chains", region.cmos_cleanup.mux_chains);
+    number(w, "mux_arms", region.cmos_cleanup.mux_arms);
+    number(w, "mux_wins", region.cmos_cleanup.mux_wins);
+    number(w, "sweep_wins", region.cmos_cleanup.sweep_wins);
+    number(w, "work", region.cmos_search.work);
+    number(w, "credit_floor", region.cmos_search.floor);
+    flag(w, "credit_bound", region.cmos_search.bound);
+    number(w, "credits", region.cmos_search.credits);
+    flag(w, "exhausted", region.cmos_cleanup.exhausted);
+    w.Key("limits");
+    w.StartArray();
+    for (const auto& limit : region.cmos_cleanup.limits) {
+      text(w, limit);
+    }
+    w.EndArray();
+    w.EndObject();
+    w.Key("multi_rep");
+    w.StartObject();
+    number(w, "classes", region.choices.classes);
+    number(w, "candidates", region.choices.candidates);
+    number(w, "rejected", region.choices.rejected);
+    number(w, "retained", region.choices.retained);
+    number(w, "extractions", region.choices.extractions);
+    number(w, "selections", region.choices.selections);
+    number(w, "cycles_rejected", region.choices.cycles);
+    number(w, "bdd_nodes", region.choices.bdd_nodes);
+    number(w, "dsd_blocks", region.choices.dsd_blocks);
+    number(w, "sop_cubes", region.choices.sop_cubes);
+    number(w, "scratch_nodes", region.choices.scratch_nodes);
+    flag(w, "limited", region.choices.limited);
+    w.Key("estimate_status_before");
+    text(w, status_name(region.choices.before.status));
+    w.Key("estimate_status_after");
+    text(w, status_name(region.choices.after.status));
+    flag(w, "estimate_limited", region.choices.before.limited || region.choices.after.limited);
+    w.Key("estimate_kind");
+    text(w, options.cost_model ? "legal-cell-covering-proxy" : "weighted-live-xag");
+    number(w, "gates_before", region.choices.before.gates);
+    number(w, "gates_after", region.choices.after.gates);
+    w.Key("area_before");
+    w.Double(region.choices.before.area);
+    w.Key("area_after");
+    w.Double(region.choices.after.area);
+    w.EndObject();
     w.Key("residual");
     w.StartObject();
     flag(w, "skipped", r.residual.skipped);
     flag(w, "accepted", r.residual_accepted);
+    number(w, "sweep_confirmations", r.residual.sweep_confirmations);
+    number(w, "sweep_wins", r.residual.sweep_wins);
+    number(w, "balance_groups", r.residual.balance_groups);
+    number(w, "balance_wins", r.residual.balance_wins);
+    number(w, "balance_duplicates", r.residual.balance_duplicates);
+    number(w, "mux_chains", r.residual.mux_chains);
+    number(w, "mux_arms", r.residual.mux_arms);
+    number(w, "mux_wins", r.residual.mux_wins);
+    number(w, "cost_before", r.residual.cost_before);
+    number(w, "cost_after", r.residual.cost_after);
+    number(w, "rewrite_windows", r.residual.rewrite_windows);
     number(w, "rewrite_wins", r.residual.rewrite_wins);
+    number(w, "resub_windows", r.residual.resub_windows);
     number(w, "resub_wins", r.residual.resub_wins);
+    number(w, "candidates", r.residual.candidates);
+    number(w, "depth_rejections", r.residual.depth_rejections);
+    number(w, "cost_rejections", r.residual.cost_rejections);
+    number(w, "reference_visits", r.residual.reference_visits);
+    flag(w, "exhausted", r.residual.exhausted);
+    w.Key("limits");
+    w.StartArray();
+    for (const auto& limit : r.residual.limits) {
+      text(w, limit);
+    }
+    w.EndArray();
     number(w, "feedback_rounds", r.feedback_rounds);
     number(w, "feedback_attempts", r.feedback_attempts);
     number(w, "feedback_wins", r.feedback_wins);
@@ -363,11 +515,12 @@ std::string native_report(const Logical_design& design, const Design_options& op
   return buffer.GetString();
 }
 
-std::string mapping_report(const synth::Mapped_design& design, std::string_view provider, std::string_view library) {
+std::string mapping_report(const synth::Mapped_design& design, std::string_view provider, const synth::Tmap_options& options) {
   rapidjson::StringBuffer buffer;
   Writer                  w(buffer);
   w.StartObject();
   number(w, "schema_version", 1);
+  number(w, "sharing_fanout", options.sharing_fanout);
   w.Key("kind");
   text(w, "technology-map");
   w.Key("provider");
@@ -375,7 +528,25 @@ std::string mapping_report(const synth::Mapped_design& design, std::string_view 
   w.Key("top");
   text(w, design.top->get_name());
   w.Key("library");
-  text(w, library);
+  text(w, options.library);
+  w.Key("delay_target_ps");
+  w.Double(options.delay_ps);
+  w.Key("delay_unit");
+  text(w, design.delay_ps ? "ps" : "logic-levels");
+  w.Key("physical");
+  w.StartObject();
+  number(w, "max_fanout", options.max_fanout);
+  flag(w, "boundary", options.boundary);
+  flag(w, "boundary_buffer", options.boundary_buffer);
+  w.Key("boundary_drive");
+  text(w, options.boundary_drive);
+  w.Key("io_load");
+  w.Double(options.io_load);
+  number(w, "boundary_rounds", static_cast<uint64_t>(options.boundary_rounds));
+  w.Key("reg_margin");
+  text(w, options.reg_margin);
+  number(w, "area_relax", options.area_relax_pct);
+  w.EndObject();
   w.Key("scope");
   text(w, "definition-regions");
   uint64_t hits = 0, misses = 0;
@@ -417,8 +588,13 @@ std::string mapping_report(const synth::Mapped_design& design, std::string_view 
     w.Double(row.budget);
     w.Key("area");
     w.Double(row.area);
+    // Untimed ABC delay is the unit-delay GENLIB trace (logic levels), never ps.
     w.Key("delay");
-    w.Double(row.delay);
+    if (design.delay_ps && row.delay >= 0) {
+      w.Double(row.delay);
+    } else {
+      w.Null();
+    }
     w.Key("logic_depth");
     w.Int(row.logic_depth);
     w.EndObject();

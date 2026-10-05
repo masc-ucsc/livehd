@@ -70,17 +70,17 @@
 #include "diag.hpp"       // livehd::diag::err — Stage 0 comb-loop safety net
 #include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
 #include "hash_util.hpp"
+#include "inline_sub.hpp"      // //graph — splice a small loop's replicas into the body that held the loop
 #include "latch_contract.hpp"  // //graph — clock_op_of (the ONE shared ICG recognizer)
 #include "node_util.hpp"
-#include "inline_sub.hpp"              // //graph — splice a small loop's replicas into the body that held the loop
 #include "occurrence_materialize.hpp"  // //graph — realize native loop groups in the private simulator library
-#include "sim_specialize.hpp"          // refold_private_body: cprop/bitwidth over a body a splice just changed
 #include "sim_color_plan.hpp"
 #include "sim_plusargs_rt.hpp"
 #include "sim_program.hpp"
-#include "sim_tune_rt.hpp"    // kUnknownLiteralHelper / kTuneHashHelper — generated runtime text shared with prp_sim
-#include "split_selfref.hpp"  // //graph — word-level cycle analysis for scheduling
-#include "str_tools.hpp"      // str_tools::ends_with
+#include "sim_specialize.hpp"  // refold_private_body: cprop/bitwidth over a body a splice just changed
+#include "sim_tune_rt.hpp"     // kUnknownLiteralHelper / kTuneHashHelper — generated runtime text shared with prp_sim
+#include "split_selfref.hpp"   // //graph — word-level cycle analysis for scheduling
+#include "str_tools.hpp"       // str_tools::ends_with
 
 using livehd::graph_util::bits_of;
 using livehd::graph_util::const_of;
@@ -1627,7 +1627,12 @@ std::string Cgen_sim::raw_operand(const hhds::Pin_class& dpin, int fallback_bits
   if (binding_width != slop_u_binding_width_.end() && binding_width->second + 1 > fallback_bits) {
     return absl::StrCat("(", it->second, ").zext_to<", fallback_bits, ">()");
   }
-  if (!canonical_.contains(dpin.get_class_index()) || (is_unsign(dpin) && !slop_u_values_.contains(dpin.get_class_index()))) {
+  // A Slop_u carrier bound to a SIGNED pin (a canonical unsigned color slot
+  // read by a signed consumer input, e.g. a Liberty cell model's `A`) is not
+  // the pin's own type: bare, it would feed a W-bit Slop_u into a W-bit signed
+  // operation, which HLOP rejects (an unsigned W-bit operand needs W+1).
+  const bool u_carrier = slop_u_values_.contains(dpin.get_class_index());
+  if (!canonical_.contains(dpin.get_class_index()) || (is_unsign(dpin) != u_carrier)) {
     // A boundary value (module input, memory read, sub output) may hold a
     // non-canonical word for its declared width, so it still needs the
     // declared-width re-interpretation. The scheduler's `canonical_` bit means
@@ -2124,8 +2129,8 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
                        : (is_unsign(v) && wbits_of(v) > 0 && wbits_of(v) <= width))) {
             continue;
           }
-          const int bw    = wbits_of(base);
-          const int vw    = v.is_const() ? static_cast<int>(const_of(v).get_signed_bits()) : wbits_of(v);
+          const int bw = wbits_of(base);
+          const int vw = v.is_const() ? static_cast<int>(const_of(v).get_signed_bits()) : wbits_of(v);
           if (bw <= 0 || vw <= 0 || vw > bw) {
             continue;
           }
@@ -2531,7 +2536,10 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         const auto binding = pin2var.find(e[0].get_driver_pin().get_class_index());
         I(binding != pin2var.end());
         slop_u_expr_ = slop_u_values_.contains(e[0].get_driver_pin().get_class_index());
-        return binding->second;
+        // A plain Slop lane is as narrow as the extracted field; the unsigned
+        // mask result lands one bit wider (eval width), and Slop has no
+        // implicit widening (nor a sign-correct one for a set msb).
+        return slop_u_expr_ ? binding->second : append_zext(binding->second, wbits);
       }
       // value (e[0]) + optional mask (e[1]). The unary form is the common tolg
       // width-adjust; lower it to a plain zext.
@@ -3708,7 +3716,7 @@ static std::string gen_schema_tag() { return absl::StrCat(kSimGenVersion, "-", a
 // a JSON dependency to the emitter is not worth it. Anything that does not
 // parse is treated as a cold start, never as a partial record.
 void Cgen_sim::load_gen_digests() {
-  gen_digests_loaded_ = true;
+  digests_loaded() = true;
   std::ifstream ifs(absl::StrCat(std::string(odir), "/gen_digests.json"));
   if (!ifs) {
     return;
@@ -3771,23 +3779,40 @@ void Cgen_sim::load_gen_digests() {
     // A record with no artifact list is from an older schema (or truncated):
     // drop it rather than let an empty list read as "nothing to check".
     if (!record.files.empty()) {
-      gen_digests_[module] = std::move(record);
+      digests()[module] = std::move(record);
     }
     p = end + 1;
   }
 }
 
-void Cgen_sim::save_gen_digests() {
+void Cgen_sim::flush_generation_index(std::string_view odir, Generation_index& index) {
+  if (odir.empty() || !index.dirty) {
+    return;
+  }
+  Cgen_sim writer(odir, "", "", "");
+  writer.shared_gen_ = &index;
+  writer.save_gen_digests(/*now=*/true);
+}
+
+void Cgen_sim::save_gen_digests(bool now) {
+  if (shared_gen_ != nullptr && !now) {
+    shared_gen_->dirty = true;  // flush_generation_index() writes it once
+    return;
+  }
+  if (shared_gen_ != nullptr) {
+    shared_gen_->dirty = false;
+  }
+  const auto&              gen_digests = digests();
   std::vector<std::string> keys;
-  keys.reserve(gen_digests_.size());
-  for (const auto& [k, _] : gen_digests_) {
+  keys.reserve(gen_digests.size());
+  for (const auto& [k, _] : gen_digests) {
     keys.push_back(k);
   }
   std::sort(keys.begin(), keys.end());  // stable file bytes
   std::string text  = absl::StrCat("{\"gen\":\"", gen_schema_tag(), "\",\"modules\":{");
   bool        first = true;
   for (const auto& k : keys) {
-    const auto& record = gen_digests_.at(k);
+    const auto& record = gen_digests.at(k);
     absl::StrAppend(&text, first ? "" : ",", "\"", k, "\":{\"d\":\"", record.digest, "\",\"f\":[");
     for (size_t i = 0; i < record.files.size(); ++i) {
       absl::StrAppend(&text, i ? ",\"" : "\"", record.files[i], "\"");
@@ -3872,18 +3897,51 @@ bool Cgen_sim::tune_dirty() const {
   return tune_.dirty;
 }
 
+std::vector<std::string> Cgen_sim::odir_files_with_prefix(std::string_view prefix) {
+  const auto list = [&] {
+    std::vector<std::string> names;
+    std::error_code          ec;
+    for (const auto& entry : std::filesystem::directory_iterator(std::string(odir), ec)) {
+      // The error_code overload: a concurrent `lhd sim` (or the user) removing
+      // an entry between enumeration and stat must not throw out of generation.
+      if (entry.is_regular_file(ec)) {
+        names.push_back(entry.path().filename().string());
+      }
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+  };
+  std::vector<std::string>        local;
+  const std::vector<std::string>* names = &local;
+  if (shared_gen_ != nullptr) {
+    // A snapshot is enough: the sweeps only remove artifacts left by EARLIER
+    // runs, and this run never writes a name a later sweep is asked to remove.
+    if (!shared_gen_->files) {
+      shared_gen_->files = list();
+    }
+    names = &*shared_gen_->files;
+  } else {
+    local = list();
+  }
+  std::vector<std::string> out;
+  for (auto it = std::lower_bound(names->begin(), names->end(), prefix); it != names->end() && it->starts_with(prefix); ++it) {
+    out.push_back(*it);
+  }
+  return out;
+}
+
 bool Cgen_sim::generation_current(hhds::Graph* g, bool color_root) {
   if (odir.empty()) {
     return false;
   }
-  if (!gen_digests_loaded_) {
+  if (!digests_loaded()) {
     load_gen_digests();
   }
   const std::string gname(g->get_name());
   gen_key_ = generation_key(g, color_root);
 
-  auto it = gen_digests_.find(gname);
-  if (it != gen_digests_.end() && it->second.digest == gen_key_) {
+  auto it = digests().find(gname);
+  if (it != digests().end() && it->second.digest == gen_key_) {
     std::error_code ec;
     const bool      complete = std::ranges::all_of(it->second.files, [&](const std::string& f) {
       return std::filesystem::exists(absl::StrCat(odir, "/", f), ec);
@@ -3898,10 +3956,10 @@ bool Cgen_sim::generation_current(hhds::Graph* g, bool color_root) {
     // repair path that needs an extra index write, and it is rare — the
     // ordinary miss leaves a record whose key already differs from the one the
     // next run computes, which is self-invalidating.
-    gen_digests_.erase(gname);
-    save_gen_digests();
+    digests().erase(gname);
+    save_gen_digests(/*now=*/true);
   }
-  gen_digests_.erase(gname);  // re-recorded only after a clean emission
+  digests().erase(gname);  // re-recorded only after a clean emission
   return false;
 }
 
@@ -4445,19 +4503,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // evaluator. The host builder enumerates generated sources/bitcode, so stale
   // color artifacts would otherwise keep both backends in the same build.
   if (!odir.empty() && !color_root) {
+    // Every color artifact of this module shares the `<fstem>.color-` prefix.
     std::error_code ec;
-    for (const auto& entry : std::filesystem::directory_iterator(std::string(odir), ec)) {
-      const auto filename = entry.path().filename().string();
-      // The error_code overload: a concurrent `lhd sim` (or the user) removing
-      // an entry between enumeration and stat must not throw out of generation.
-      if (!entry.is_regular_file(ec)) {
-        continue;
-      }
+    for (const auto& filename : odir_files_with_prefix(fstem + ".color-")) {
       if (filename.starts_with(fstem + ".color-kernel-") || filename.starts_with(fstem + ".color-eval-")
           || filename.starts_with(fstem + ".color-commit-") || filename.starts_with(fstem + ".color-bind-")
           || filename == fstem + ".color-runtime.hpp" || filename == fstem + ".color-kernels.hpp"
           || filename == fstem + ".color-plan.txt") {
-        std::filesystem::remove(entry.path(), ec);
+        std::filesystem::remove(absl::StrCat(odir, "/", filename), ec);  // a concurrent removal is fine
       }
     }
   }
@@ -5818,13 +5871,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (!s.loop) {
       continue;
     }
-    const auto& loop          = *s.loop;
-    auto        sio           = s.node.get_subnode_io();
-    const auto  storage_shape = loop_storage_shape(s.node.get_subnode_graph());
+    const auto& loop                             = *s.loop;
+    auto        sio                              = s.node.get_subnode_io();
+    const auto  storage_shape                    = loop_storage_shape(s.node.get_subnode_graph());
     const bool  pure_loop                        = pure_graph(s.node.get_subnode_graph().get());
     pure_loop_structs_[s.node.get_class_index()] = s.loop_struct;
     const bool shared_lane   = !vcd_on && loop.count != 0 && storage_shape.stateless && (!storage_shape.nested_loop || pure_loop);
-    const auto  carry_out_for = [&](std::string_view out) -> const std::string* {
+    const auto carry_out_for = [&](std::string_view out) -> const std::string* {
       for (const auto& [in_name, out_name] : s.carries) {
         if (out_name == out) {
           return &in_name;
@@ -6185,7 +6238,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         entry_args += pure_argument(absl::StrCat("__in.", cpp_port_path(d.name)), d);
       }
-    hout->append("  void __compact_publish() {\n");
+      hout->append("  void __compact_publish() {\n");
       emit_loop_gate("publish", "");
       hout->append("    const auto value = __pure_eval(", entry_args, ");\n");
       for (const auto& d : sio->get_output_pin_decls()) {
@@ -15892,7 +15945,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               // sim_color_plan.cpp), and the slot carries the bare activation:
               // a commit guard that falls back to this slot would otherwise read
               // 0 and never commit.
-              const bool level_phase = (version.version == livehd::sim::Color_plan::State_version::post_rise) != cone->clock_inverted;
+              const bool level_phase
+                  = (version.version == livehd::sim::Color_plan::State_version::post_rise) != cone->clock_inverted;
               if (direct_data_read[version.base_site] && level_phase) {
                 const auto level = operand(cone->clock, 1);
                 enabled = combine_activation(enabled,
@@ -17487,7 +17541,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   if (!odir.empty() && !cycle_reported_ && !livehd::diag::sink().has_errors()) {
     std::sort(emitted_files_.begin(), emitted_files_.end());
     emitted_files_.erase(std::unique(emitted_files_.begin(), emitted_files_.end()), emitted_files_.end());
-    gen_digests_[std::string(gname)] = Gen_record{gen_key_, std::move(emitted_files_)};
+    digests()[std::string(gname)] = Gen_record{gen_key_, std::move(emitted_files_)};
     save_gen_digests();
   }
 }

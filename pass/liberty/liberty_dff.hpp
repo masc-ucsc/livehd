@@ -16,19 +16,36 @@
 // Liberty text directly — that is what find_dff_cell does.
 namespace livehd::liberty {
 
+// ABC-free scalar combinational inventory for native cost estimates. Keep the
+// pin order explicit; function syntax is validated by the consumer. Excludes
+// dont_use, state, tri-state and multi-output cells, matching the mapper's
+// supported-cell policy. Areas are from the same cell as the function; no delay
+// or timing guarantee is inferred from this inventory.
+struct Comb_cell {
+  std::string              name;
+  std::vector<std::string> inputs;
+  std::string              output;
+  std::string              function;
+  double                   area = 0;
+};
+std::vector<Comb_cell> scan_comb_cells(const std::string& lib_files);
+// Parse an owned content snapshot so a cost table and its cache digest cannot
+// observe different bytes if a library file is replaced during an invocation.
+std::vector<Comb_cell> scan_comb_cells_text(const std::string& contents);
+
 struct Dff_cell {
-  std::string name;     // Liberty cell name (e.g. sky130_fd_sc_hd__dfxtp_1)
-  std::string d_pin;    // data input pin  (Liberty ff `next_state`, sign stripped)
-  std::string clk_pin;  // clock input pin (Liberty ff `clocked_on`, posedge)
-  std::string q_pin;    // output pin used as Q (see q_inverted)
+  std::string                      name;     // Liberty cell name (e.g. sky130_fd_sc_hd__dfxtp_1)
+  std::string                      d_pin;    // data input pin  (Liberty ff `next_state`, sign stripped)
+  std::string                      clk_pin;  // clock input pin (Liberty ff `clocked_on`, posedge)
+  std::string                      q_pin;    // output pin used as Q (see q_inverted)
   // Cell semantics: q_pin(t+1) = q_inverted ? !d_pin(t) : d_pin(t). ASAP7's only
   // plain posedge flops below the x4 drive are the QN family (`ff (IQN,IQNN)
   // {next_state : "!D"}` + `pin (QN) {function : "IQN"}`): DFFHQNx1 is 0.2916
   // um^2 against DFFHQx4's 0.3645, -20% per flop suite-wide, so the inverted
   // output has to be a first-class pick and the read-back owns the inversion.
-  bool        q_inverted = false;
-  double      area       = 0;  // Liberty `area` (0 when the cell body has none)
-  int         n_out      = 0;  // output-pin count (1 for a Q-only dfxtp, 2 for a Q/Q_N dfxbp)
+  bool                             q_inverted  = false;
+  double                           area        = 0;  // Liberty `area` (0 when the cell body has none)
+  int                              n_out       = 0;  // output-pin count (1 for a Q-only dfxtp, 2 for a Q/Q_N dfxbp)
   // The register overhead a mapped region's combinational delay has to leave
   // room for, in PICOSECONDS (scaled from the library's `time_unit`), read off
   // the cell's own `timing()` groups: `clk_to_q_ps` = the larger of the Q pin's
@@ -41,8 +58,8 @@ struct Dff_cell {
   // 250-440. Zero when the cell has no such tables (the hermetic test
   // Liberties): no margin is then subtracted. pass.abc's `reg_margin=auto` =
   // clk_to_q_ps + setup_ps.
-  double      clk_to_q_ps = 0;
-  double      setup_ps    = 0;
+  double                           clk_to_q_ps = 0;
+  double                           setup_ps    = 0;
   // Asynchronous clear/preset, stated in terms of the OUTPUT pin the netlist
   // uses as Q (q_pin), never in the Liberty's clear/preset vocabulary: when
   // asserted, `reset0_pin` forces q_pin to 0 and `reset1_pin` forces it to 1.
@@ -51,14 +68,14 @@ struct Dff_cell {
   // therefore reset0=SETN, reset1=RESETN, both active low; sky130 dfrtp_1
   // (`clear:"!RESET_B"`, Q=IQ) is reset0=RESET_B. `*_low` = asserted at 0.
   // Empty on a plain flop (scan_dff_cells / resolve_dff_cells base+ladder).
-  std::string reset0_pin;
-  bool        reset0_low = false;
-  std::string reset1_pin;
-  bool        reset1_low = false;
+  std::string                      reset0_pin;
+  bool                             reset0_low = false;
+  std::string                      reset1_pin;
+  bool                             reset1_low = false;
   // q_pin while BOTH pins are asserted (clear_preset_var1/2 of the var q_pin
   // shows: L=0, H=1), -1 when the library leaves it unstated or N/T/X.
   // pass.abc never asserts both; the model (emit_dff_model) needs a value.
-  int         both_value = -1;
+  int                              both_value = -1;
   // A transparent LATCH cell (a Liberty `latch(IQ,IQN) {data_in; enable}`
   // group) rather than a flop: `clk_pin` is then its ENABLE pin, `d_pin` its
   // data_in, and the cell is transparent while clk_pin is 1 (`en_low` false:
@@ -67,9 +84,9 @@ struct Dff_cell {
   // flop meaning (q_pin shows !D while transparent; a reset pin forces q_pin
   // to 0 / 1 with priority over the enable). The same IO port convention
   // (create_dff_io: d=1, enable=2, q=3, reset0=4, reset1=5) applies.
-  bool        latch  = false;
-  bool        en_low = false;
-  [[nodiscard]] bool is_async() const { return !reset0_pin.empty() || !reset1_pin.empty(); }
+  bool                             latch      = false;
+  bool                             en_low     = false;
+  [[nodiscard]] bool               is_async() const { return !reset0_pin.empty() || !reset1_pin.empty(); }
   [[nodiscard]] const std::string& reset_pin(bool value) const { return value ? reset1_pin : reset0_pin; }
   [[nodiscard]] bool               reset_low(bool value) const { return value ? reset1_low : reset0_low; }
 };
@@ -103,13 +120,13 @@ std::vector<Icg_cell> scan_icg_cells(const std::string& lib_files);
 // `next_state` a bare pin or its complement (`!D`, `D'`, `(!D)`; no scan/enable
 // logic), no async clear/preset, exactly one data + one clock input, and a Q
 // (preferred) or QN output. File order; unranked.
-std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files);
+std::vector<Dff_cell>    scan_dff_cells(const std::string& lib_files);
 // Every posedge D-flop that is plain except for an asynchronous clear and/or
 // preset -- each a bare input pin or its complement (`!RESET_B`, `RN'`),
 // distinct from D and CLK -- with a Q/QN output whose function names a state
 // var (so which pin forces which output value is known). File order; unranked;
 // dont_use cells excluded.
-std::vector<Dff_cell> scan_async_dff_cells(const std::string& lib_files);
+std::vector<Dff_cell>    scan_async_dff_cells(const std::string& lib_files);
 // The names of every cell marked `dont_use : true` (a separate full read;
 // resolve_dff_cells fills Dff_selection::dont_use from the same pass).
 std::vector<std::string> scan_dont_use_cells(const std::string& lib_files);
@@ -135,8 +152,8 @@ std::vector<Dff_cell> find_dff_ladder(const std::string& lib_files, const Dff_ce
 // One scan, both answers. With an explicit `prefer` the ladder is just that
 // cell: a user naming a drive strength gets exactly it.
 struct Dff_selection {
-  std::optional<Dff_cell> base;
-  std::vector<Dff_cell>   ladder;
+  std::optional<Dff_cell>  base;
+  std::vector<Dff_cell>    ladder;
   // Every cell marked `dont_use : true`, in file order: the set ABC's reader
   // skips (so no rung above names one); pass.abc reports it once per run.
   std::vector<std::string> dont_use;
@@ -146,14 +163,14 @@ struct Dff_selection {
   // QN, name); front() is the pick, the rest its same-shaped drive ladder.
   // Empty = the library has no such cell, and those register bits stay native
   // flops. Independent of `prefer` (which names the plain register cell).
-  std::vector<Dff_cell> areset_ladder[2];
+  std::vector<Dff_cell>    areset_ladder[2];
   // The integrated clock-gate cells a latch+AND clock gate maps onto: the
   // smallest-area cell (a test-pin-less one on an area tie), then its
   // same-pinned drive ladder by strictly increasing area (at most five rungs;
   // the read-back picks one per doubling of the clocked bits past 8). Empty =
   // the library has none, and gated
   // registers stay native flops. Independent of `prefer`.
-  std::vector<Icg_cell> icg_ladder;
+  std::vector<Icg_cell>    icg_ladder;
   // The transparent data-latch cells (Dff_cell::latch) a level-sensitive LATCH
   // maps onto: latch_ladder[en_low][kind], kind 0 = a plain latch, 1 = one
   // whose reset forces q_pin to 0 (reset0_pin), 2 = to 1 (reset1_pin). Each is
@@ -162,8 +179,8 @@ struct Dff_selection {
   // area. dont_use, isolation / level-shifter / clock-gate cells, and any cell
   // with an input beyond data, enable and bare clear/preset pins never
   // qualify. Empty = that latch shape stays native. Independent of `prefer`.
-  std::vector<Dff_cell> latch_ladder[2][3];
-  [[nodiscard]] bool    has_latch_cells() const {
+  std::vector<Dff_cell>    latch_ladder[2][3];
+  [[nodiscard]] bool       has_latch_cells() const {
     for (const auto& pol : latch_ladder) {
       for (const auto& l : pol) {
         if (!l.empty()) {

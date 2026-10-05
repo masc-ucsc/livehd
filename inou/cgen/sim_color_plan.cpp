@@ -1699,10 +1699,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
     // Every latch gets its window: a clock-window latch is not a settle target
     // itself, but it can still be a closed SOURCE for one (see closed_during).
-    const auto& node         = plan.sites_[base].node;
-    latch_open_terms[base]   = gate_formula(lc::sink_driver_hier(node, "enable"),
-                                          !lc::sink_driver_hier(node, "posclk").is_known_false(),
-                                          0);
+    const auto& node = plan.sites_[base].node;
+    latch_open_terms[base]
+        = gate_formula(lc::sink_driver_hier(node, "enable"), !lc::sink_driver_hier(node, "posclk").is_known_false(), 0);
     latch_demand_terms[base] = latch_open_terms[base];
     const auto reset         = lc::sink_driver_hier(node, "reset_pin");
     if (!reset.is_invalid()) {
@@ -1801,8 +1800,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       const auto gate   = lc::control_root(enable);
       // With multiple input clocks the slot alone does not determine this
       // net's level; its secondary-clock protocol must retain the held read.
-      if (!held_read && clocks.n_clock_inputs() == 1 && !gate.net.is_invalid() && gu::is_graph_input_pin(gate.net) && clocks.is_clock(gate.net)
-          && gate.inverted == (version != State_version::post_rise)) {
+      if (!held_read && clocks.n_clock_inputs() == 1 && !gate.net.is_invalid() && gu::is_graph_input_pin(gate.net)
+          && clocks.is_clock(gate.net) && gate.inverted == (version != State_version::post_rise)) {
         role = Version_role::data;
       }
     }
@@ -2026,9 +2025,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         // flavour and dividers have other level laws; leave those unknown.
         const auto invert = gu::get_driver_of_sink_name(node.base_node(), "invert");
         const auto divide = gu::get_driver_of_sink_name(node.base_node(), "div");
-        const bool plain  = (invert.is_invalid() || invert.is_known_false())
-                           && (divide.is_invalid() || (divide.is_const() && gu::const_of(divide).is_just_i64()
-                                                       && gu::const_of(divide).to_just_i64() == 1));
+        const bool plain
+            = (invert.is_invalid() || invert.is_known_false())
+              && (divide.is_invalid()
+                  || (divide.is_const() && gu::const_of(divide).is_just_i64() && gu::const_of(divide).to_just_i64() == 1));
         if (plain) {
           if (const auto reference = phase_boolean(lc::sink_driver_hier(node, "clk_ref"), high); reference && !*reference) {
             result = false;
@@ -2140,7 +2140,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     const auto node   = driver.get_master_node();
     const auto invert = gu::get_driver_of_sink_name(node.base_node(), "invert");
     const auto divide = gu::get_driver_of_sink_name(node.base_node(), "div");
-    const bool plain  = (invert.is_invalid() || invert.is_known_false())
+    const bool plain = (invert.is_invalid() || invert.is_known_false())
                        && (divide.is_invalid()
                            || (divide.is_const() && gu::const_of(divide).is_just_i64() && gu::const_of(divide).to_just_i64() == 1));
     if (!plain) {
@@ -2677,17 +2677,22 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                 }
                 if (const auto leaf = find_body_site(child.get(), producer_path, slice.leaf.get_master_node());
                     leaf && plan.sites_[*leaf].live) {
-                  rebound         = true;
-                  producer_base   = *leaf;
-                  producer_port   = slice.leaf.get_port_id();
-                  producer_shift  = position_in_whole ? surface_shift + (!slice.shifted ? slice.lo : 0) : 0;
-                  // The selected producer is the LSB-aligned leaf, so retain
-                  // the requested range in that leaf's coordinates. The old
-                  // ABI shifted the leaf back into the packed word and let the
-                  // consumer extract it again; the lane ABI below extracts at
-                  // the producer and transports only the useful bits.
-                  lo             -= static_cast<int>(slice.lo);
-                  hi             -= static_cast<int>(slice.lo);
+                  rebound        = true;
+                  producer_base  = *leaf;
+                  producer_port  = slice.leaf.get_port_id();
+                  producer_shift = position_in_whole ? surface_shift + (!slice.shifted ? slice.lo : 0) : 0;
+                  // A concat leaf is LSB-aligned: retain the requested range
+                  // in that leaf's coordinates. The old ABI shifted the leaf
+                  // back into the packed word and let the consumer extract it
+                  // again; the lane ABI below extracts at the producer and
+                  // transports only the useful bits. A SHIFTED slice's leaf is
+                  // the callee's whole bundle pin (Out_slice::shifted), already
+                  // in word coordinates: rebasing it read bit k-lo instead of
+                  // bit k (a mapped dino's fetched rs/rd fields all read bit 0).
+                  if (!slice.shifted) {
+                    lo -= static_cast<int>(slice.lo);
+                    hi -= static_cast<int>(slice.lo);
+                  }
                   if (!position_in_whole) {
                     producer_width = static_cast<uint32_t>(std::max<int32_t>(1, gu::bits_of(slice.leaf)));
                   }

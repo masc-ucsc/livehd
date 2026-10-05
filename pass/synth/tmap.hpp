@@ -14,8 +14,20 @@ namespace livehd::synth {
 
 struct Tmap_options {
   std::string                           library;
-  double                                delay_ps         = 0;      // zero: no timing target
-  int                                   memory_budget_mb = 16384;  // per-region growth; process ceiling is shared
+  uint32_t                              sharing_fanout  = 0;  // experimental; zero keeps unrestricted mapping
+  double                                delay_ps        = 0;  // zero: no timing target
+  // Physical-only mapping knobs, with pass.abc's meanings and defaults. They
+  // buffer and size mapped cells against the delay budget and the partition
+  // environment; none restructures the Boolean network the caller hands over.
+  uint32_t                              max_fanout      = 16;       // `buffer -N` cap; 0 disables buffering
+  bool                                  boundary        = true;     // static + exact boundary re-size
+  bool                                  boundary_buffer = true;     // tree region inputs past max_fanout
+  std::string                           boundary_drive;             // empty: smallest buffer; `none`: ideal driver
+  float                                 io_load          = -1.0f;   // fF on primary outputs; <0: typical input pin
+  int                                   boundary_rounds  = 1;       // exact re-size rounds, 1..64
+  std::string                           reg_margin       = "auto";  // `auto` or non-negative ps
+  uint32_t                              area_relax_pct   = 200;     // slack-to-area `&nf -R` remap cap; 0 disables
+  int                                   memory_budget_mb = 16384;   // per-region growth; process ceiling is shared
   uint64_t                              time_budget_ms   = 0;
   std::string                           cache_directory;  // internal; empty disables mapped reuse
   std::function<bool(std::string_view)> admission;        // optional cancellation/resource admission
@@ -27,6 +39,10 @@ struct Mapped_design {
   std::vector<Region_qor>      regions;
   bool                         cache_enabled = false;
   uint64_t                     cache_invalid = 0, cache_store_failed = 0;
+  // Region `delay` rows are picoseconds only under a delay target (the SCL
+  // timer of an NLDM Liberty; a scalar Liberty is reported by the provider).
+  // Untimed mapping reports unit-delay logic levels, which are not ps.
+  bool                         delay_ps = false;
 };
 
 enum class Tmap_status { mapped, unavailable, invalid, refused };

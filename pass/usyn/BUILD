@@ -25,6 +25,7 @@ filegroup(
         [
             "*.cpp",
             "*.hpp",
+            "*.inc",
         ],
         exclude = [
             "usyn_salt.hpp",
@@ -63,8 +64,14 @@ cc_library(
         "function.cpp",
         "joint_endpoint.cpp",
         "residual.cpp",
+        "npn4.cpp",
+        "sop_factor.cpp",
         "unate.cpp",
         "xag.cpp",
+        "xag_balance.cpp",
+        "xag_choice.cpp",
+        "xag_representations.cpp",
+        "xag_sweep.cpp",
     ],
     hdrs = [
         "decomposition.hpp",
@@ -73,8 +80,15 @@ cc_library(
         "function.hpp",
         "joint_endpoint.hpp",
         "residual.hpp",
+        "npn4.hpp",
+        "sop_factor.hpp",
+        "npn4_data.inc",
         "unate.hpp",
         "xag.hpp",
+        "xag_balance.hpp",
+        "xag_choice.hpp",
+        "xag_representations.hpp",
+        "xag_sweep.hpp",
     ],
     copts = COPTS,
     includes = ["."],
@@ -96,20 +110,76 @@ cc_library(
     "function_test",
     "joint_endpoint_test",
     "residual_test",
+    "npn4_test",
+    "sop_factor_test",
     "unate_test",
     "xag_test",
+    "xag_balance_test",
+    "xag_choice_test",
+    "xag_representations_test",
+    "xag_sweep_test",
 ]]
+
+cc_library(
+    name = "native_cost",
+    srcs = ["native_cost.cpp"],
+    hdrs = ["native_cost.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":usyn_logic",
+        "//pass/liberty:liberty_dff",
+    ],
+)
+
+cc_test(
+    name = "native_cost_test",
+    srcs = ["native_cost_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":native_cost",
+        ":usyn_logic",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "xag_opt",
+    srcs = ["xag_opt.cpp"],
+    hdrs = ["xag_opt.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":native_cost",
+        ":usyn_logic",
+    ],
+)
+
+cc_test(
+    name = "xag_opt_test",
+    srcs = ["xag_opt_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":xag_opt",
+        ":usyn_logic",
+        "@googletest//:gtest_main",
+    ],
+)
 
 cc_library(
     name = "usyn_lnet",
     srcs = [
         "endpoint_lnet.cpp",
+        "cmos_cleanup.cpp",
         "endpoint_netlist.cpp",
         "logical_region.cpp",
         "xag_lnet.cpp",
     ],
     hdrs = [
         "endpoint_lnet.hpp",
+        "cmos_cleanup.hpp",
         "endpoint_netlist.hpp",
         "logical_region.hpp",
         "xag_lnet.hpp",
@@ -119,7 +189,19 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":usyn_logic",
+        ":xag_opt",
         "//pass/synth:lnet",
+    ],
+)
+
+cc_test(
+    name = "cmos_cleanup_test",
+    srcs = ["cmos_cleanup_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":usyn_lnet",
+        ":usyn_logic",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -315,6 +397,7 @@ cc_library(
             "measure_synth.cpp",
             "design_synth.cpp",
             "artifact.cpp",
+            "cmos_cleanup.cpp",
             "decomposition.cpp",
             "endpoint.cpp",
             "endpoint_lnet.cpp",
@@ -322,14 +405,22 @@ cc_library(
             "endpoint_pairs.cpp",
             "function.cpp",
             "joint_endpoint.cpp",
+            "native_cost.cpp",
+            "npn4.cpp",
             "logical_region.cpp",
             "logical_cache.cpp",
             "logical_writer.cpp",
             "region_emit.cpp",
             "residual.cpp",
             "semantic_region.cpp",
+            "sop_factor.cpp",
             "unate.cpp",
             "xag.cpp",
+            "xag_balance.cpp",
+            "xag_choice.cpp",
+            "xag_representations.cpp",
+            "xag_opt.cpp",
+            "xag_sweep.cpp",
             "xag_lnet.cpp",
         ] + LEGACY_SRCS,
     ),
@@ -341,6 +432,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        ":native_cost",
         ":usyn_lnet",
         ":usyn_logic",
         ":usyn_semantic",
@@ -454,6 +546,20 @@ cc_test(
 cc_test(
     name = "pass_usyn_test",
     srcs = ["pass_usyn_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":pass_usyn",
+        "//core",
+        "//graph",
+        "//pass/synth",
+        "@googletest//:gtest_main",
+        "@rapidjson",
+    ],
+)
+
+cc_test(
+    name = "pass_usyn_choices_smoke",
+    srcs = ["pass_usyn_choices_smoke.cpp"],
     copts = COPTS,
     deps = [
         ":pass_usyn",

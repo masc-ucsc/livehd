@@ -7,6 +7,8 @@
 #include <map>
 #include <tuple>
 
+#include "cmos_cleanup.hpp"
+
 namespace livehd::usyn {
 
 Semantic_result import_semantic_region(const synth::Lnet& net, const synth::Source_state_table& source, synth::State_target target,
@@ -178,10 +180,50 @@ Stateful_result synthesize_stateful_region(const synth::Lnet& net, const synth::
                                              semantic.logic.outputs.size());
   auto       bounded  = options;
   bounded.max_nodes   = std::min(options.max_nodes, cap);
-  auto selected       = synthesize_logical_region(semantic.logic, semantic.eligible, bounded, structural, search, semantic.domains);
+  Residual_report p1_report;
+  const auto      p1_before = search.consumed;
+  if (options.pre_optimize && bounded.max_nodes) {
+    auto light      = options.residual;
+    light.max_nodes = bounded.max_nodes;
+    light.and_cost  = options.endpoint.cost.static_and;
+    light.xor_cost  = options.endpoint.cost.static_xor;
+    light.sweep = light.balance = light.npn4 = true;
+    // P1 is light and has its own sweep width (p1_sweep_inputs, default six). A
+    // 16-input table costs up to 1024 words per gate: on br_arb_rr width 16
+    // spent P1's whole stage budget before NPN4 could run (P1 cost 1846 -> 1214
+    // vs 864 at six; mapped 293 vs 241 gates), while br_flow_arb_rr gained
+    // (279 -> 267). The full residual pass uses sweep_inputs.
+    light.sweep_inputs                       = light.p1_sweep_inputs;
+    light.zero_gain                          = false;
+    light.resubstitute                       = false;
+    light.rewrite_cuts                       = std::min(light.rewrite_cuts, 4U);
+    light.window_nodes                       = std::min(light.window_nodes, 64U);
+    light.window_work                        = std::min(light.window_work, uint64_t{10000});
+    light.stage_work                         = std::min(light.stage_work, uint64_t{1000000});
+    auto trial_work                          = search.slice(light.stage_work, 16);
+    auto trial                               = clean_cmos_expansion(semantic.logic, light, trial_work);
+    search.absorb(trial_work);
+    p1_report = std::move(trial.report);
+    if (trial.status == Status::invalid) {
+      result.status = Status::invalid;
+      result.reason = "P1 preparation: " + trial.reason;
+      return result;
+    }
+    if (trial.region) {
+      semantic.logic = std::move(*trial.region);
+    } else {
+      p1_report.exhausted = true;
+      p1_report.limits.push_back("P1 snapshot retained");
+    }
+  }
+  const auto p1_work  = search.consumed - p1_before;
+  auto       selected = synthesize_logical_region(semantic.logic, semantic.eligible, bounded, structural, search, semantic.domains);
   result.status       = selected.status;
   result.reason       = std::move(selected.reason);
   result.report       = std::move(selected.report);
+  result.report.p1    = std::move(p1_report);
+  result.report.work.p1    = p1_work;
+  result.report.exhausted |= result.report.p1.exhausted;
   if (selected.region) {
     auto frozen = freeze_endpoint_netlist(*selected.region, options, structural, semantic.domains);
     if (!frozen.netlist) {

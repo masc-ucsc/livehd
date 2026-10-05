@@ -7,8 +7,10 @@
 namespace livehd::usyn {
 
 struct Region_emission {
-  Status      status = Status::invalid;
-  std::string reason;
+  Status          status = Status::invalid;
+  std::string     reason;
+  Residual_report cmos_cleanup{};
+  Choice_report   choices{};
 };
 
 // Fill a fresh partition body with the independent CMOS expansion and its
@@ -19,6 +21,7 @@ struct Region_emission {
 // Serialize graph access. On refusal the caller must discard its fresh output
 // library; like partition's other body builders, this may leave a partial body.
 Region_emission emit_logical_region(const partition::Region_body& region, const synth::Region_blast& blast,
-                                    const Stateful_region& selected, Budget& work, uint32_t max_nodes = 2000000);
+                                    const Stateful_region& selected, Budget& work, uint32_t max_nodes = 2000000,
+                                    const Cmos_cleanup* cleanup = nullptr);
 
 }  // namespace livehd::usyn

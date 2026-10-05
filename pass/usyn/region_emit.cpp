@@ -11,7 +11,8 @@ namespace livehd::usyn {
 namespace gu = graph_util;
 
 Region_emission emit_logical_region(const partition::Region_body& rb, const synth::Region_blast& blast,
-                                    const Stateful_region& selected, Budget& work, uint32_t max_nodes) {
+                                    const Stateful_region& selected, Budget& work, uint32_t max_nodes,
+                                    const Cmos_cleanup* cleanup) {
   const auto invalid   = [](std::string reason) { return Region_emission{Status::invalid, std::move(reason)}; };
   const auto exhausted = [] { return Region_emission{Status::search_exhausted, "region emission budget"}; };
   if (!rb.body || !rb.src || rb.body == rb.src || !blast.logical_state || blast.status != synth::Region_blast::Status::blasted
@@ -39,9 +40,9 @@ Region_emission emit_logical_region(const partition::Region_body& rb, const synt
       return invalid("region output is not declared on the destination");
     }
   }
-  auto logical = write_logical_module(selected, "__usyn_logical", work, max_nodes);
+  auto logical = write_logical_module(selected, "__usyn_logical", work, max_nodes, cleanup);
   if (!logical.module) {
-    return {logical.status, std::move(logical.reason)};
+    return {logical.status, std::move(logical.reason), std::move(logical.cmos_cleanup), std::move(logical.choices)};
   }
   auto& module = *logical.module;
   if (module.inputs.size() != blast.lnet.inputs().size() || module.outputs.size() != blast.lnet.outputs().size()) {
@@ -361,7 +362,7 @@ Region_emission emit_logical_region(const partition::Region_body& rb, const synt
     }
     value.connect_sink(body.get_output_pin(port.name));
   }
-  return {Status::feasible, {}};
+  return {Status::feasible, {}, std::move(logical.cmos_cleanup), std::move(logical.choices)};
 }
 
 }  // namespace livehd::usyn

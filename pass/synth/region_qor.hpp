@@ -66,7 +66,7 @@ std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::str
 // boundaries are invisible here (pass.opentimer is the whole-design scorer).
 struct Region_qor {
   std::shared_ptr<const std::string> hook_evidence;  // Region_rewrite::evidence
-  std::string                        module;  // region module name (<top>__c<color>)
+  std::string                        module;         // region module name (<top>__c<color>)
   int                                color       = 0;
   bool                               ctrl        = false;
   int                                ware_trials = 0;
@@ -89,6 +89,7 @@ struct Region_qor {
   int                                bypassed    = 0;
   int         logic_depth = -1;     // mapped ABC gate levels between region/state boundaries, before read-back buffer bypass
   float       delay       = -1.0f;  // critical arrival (unit-delay depth, or ps with an NLDM GENLIB); <0 => unavailable
+  bool        delay_ps    = false;  // true only when a physical timer produced this delay
   std::string crit_output;          // region output port with the worst arrival
   std::string crit_src;             // "file:line" of that output's original driver (may be empty)
   // The mapping-objective decision (map_region's budget ladder), diagnostic

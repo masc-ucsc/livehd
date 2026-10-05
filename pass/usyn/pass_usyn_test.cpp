@@ -79,17 +79,24 @@ TEST_F(PassSynth, PublicLogicalEntryEmitsStateWithoutAbcOrLibertyAndReleasesScra
   Registry::Scoped_instance scope(output);
   Eprp_var                  var;
   var.graphs.push_back(source);
-  var.dict["top"]                 = "top";
-  var.dict["tmap"]                = "none";
-  var.dict["out"]                 = output;
-  var.dict["qor"]                 = root + "/qor.json";
-  var.dict["cache_dir"]           = root + "/cache";
+  var.dict["top"]       = "top";
+  var.dict["tmap"]      = "none";
+  var.dict["out"]       = output;
+  var.dict["qor"]       = root + "/qor.json";
+  var.dict["cache_dir"] = root + "/cache";
+  // Insertion can rehash the option dictionary and invalidate the reference
+  // returned by a preceding assignment. Keep each insertion independent.
+  for (const auto flag : {"npn4", "sweep", "balance", "cmos_cleanup", "sop_tree", "p1", "multi_rep"}) {
+    var.dict[flag] = "true";
+  }
   size_t                instances = 0;
   std::string           first_artifact;
   std::vector<uint64_t> first_work;
+  std::vector<uint64_t> first_residual;
   for (unsigned i = 0; i < 3; ++i) {
     run(var);
-    ASSERT_FALSE(livehd::diag::sink().has_halting_errors());
+    const auto& diagnostics = livehd::diag::sink().records();
+    ASSERT_FALSE(livehd::diag::sink().has_halting_errors()) << (diagnostics.empty() ? "" : diagnostics.back().message);
     if (i == 0) {
       instances = Registry::registered_instances();
     }
@@ -116,7 +123,9 @@ TEST_F(PassSynth, PublicLogicalEntryEmitsStateWithoutAbcOrLibertyAndReleasesScra
       const auto& region = report["regions"][0];
       EXPECT_EQ(region["search_credits"].GetUint64(), 4000000000U);
       const auto& floor = region["credit_floor"];
-      EXPECT_EQ(floor["work"].GetUint64(), region["work"]["total"].GetUint64() - region["work"]["admission"].GetUint64());
+      EXPECT_EQ(floor["work"].GetUint64(),
+                region["work"]["total"].GetUint64() - region["work"]["admission"].GetUint64()
+                    - region["work"]["cmos_cleanup"].GetUint64());
       EXPECT_GE(floor["floor"].GetUint64(), floor["work"].GetUint64());
       EXPECT_FALSE(floor["bound"].GetBool());
       EXPECT_EQ(floor["credits"].GetUint64(), 0U);
@@ -125,12 +134,21 @@ TEST_F(PassSynth, PublicLogicalEntryEmitsStateWithoutAbcOrLibertyAndReleasesScra
       EXPECT_EQ(report["cache"]["replayed_structural_work"].GetUint64(), i == 0 ? 0U : region["structural_work"].GetUint64());
       EXPECT_EQ(report["cache"]["replayed_search_work"].GetUint64(), i == 0 ? 0U : floor["work"].GetUint64());
     }
+    EXPECT_TRUE(report["native_optimization"]["p1"].GetBool());
+    EXPECT_TRUE(report["native_optimization"]["multi_rep"].GetBool());
+    EXPECT_TRUE(report["regions"][0].HasMember("multi_rep"));
+    EXPECT_TRUE(report["native_optimization"]["sop_tree"].GetBool());
+    EXPECT_TRUE(report["native_optimization"]["cmos_cleanup"].GetBool());
+    EXPECT_TRUE(report["native_optimization"]["npn4"].GetBool());
+    EXPECT_TRUE(report["native_optimization"]["sweep"].GetBool());
+    EXPECT_TRUE(report["native_optimization"]["balance"].GetBool());
+    EXPECT_EQ(report["regions"][0]["cmos_cleanup"]["work"].GetUint64(), report["regions"][0]["work"]["cmos_cleanup"].GetUint64());
     EXPECT_EQ(report["endpoint_search"]["pair_choices"].GetUint(), 4U);
     EXPECT_TRUE(report["regions"][0]["pairs"].HasMember("choice_combinations"));
     const auto&           charges = report["regions"][0]["work"];
     std::vector<uint64_t> stages;
     uint64_t              total = 0;
-    for (auto key : {"admission", "selection", "pairs", "residual", "feedback", "cleanup"}) {
+    for (auto key : {"admission", "p1", "selection", "pairs", "residual", "feedback", "cleanup", "cmos_cleanup"}) {
       stages.push_back(charges[key].GetUint64());
       total += stages.back();
     }
@@ -140,6 +158,29 @@ TEST_F(PassSynth, PublicLogicalEntryEmitsStateWithoutAbcOrLibertyAndReleasesScra
       first_work = stages;
     }
     EXPECT_EQ(stages, first_work);  // Warm evidence describes the original search.
+    const auto&           residual = report["regions"][0]["residual"];
+    std::vector<uint64_t> residual_counts;
+    for (auto key : {"cost_before",
+                     "cost_after",
+                     "rewrite_windows",
+                     "rewrite_wins",
+                     "resub_windows",
+                     "resub_wins",
+                     "candidates",
+                     "depth_rejections",
+                     "cost_rejections",
+                     "reference_visits"}) {
+      ASSERT_TRUE(residual.HasMember(key)) << key;
+      ASSERT_TRUE(residual[key].IsUint64()) << key;
+      residual_counts.push_back(residual[key].GetUint64());
+    }
+    EXPECT_GE(residual["cost_before"].GetUint64(), residual["cost_after"].GetUint64());
+    ASSERT_TRUE(residual["exhausted"].IsBool());
+    ASSERT_TRUE(residual["limits"].IsArray());
+    if (i == 0) {
+      first_residual = residual_counts;
+    }
+    EXPECT_EQ(residual_counts, first_residual);  // A hit preserves rejection evidence too.
     const auto& endpoints = report["regions"][0]["endpoints"];
     ASSERT_EQ(endpoints.Size(), 1U);
     EXPECT_STREQ(endpoints[0]["name"].GetString(), "state");
@@ -161,6 +202,44 @@ TEST_F(PassSynth, PublicLogicalEntryEmitsStateWithoutAbcOrLibertyAndReleasesScra
     const auto replayed = livehd::usyn::write_logical_module(*loaded.region, work);
     ASSERT_TRUE(replayed.module) << replayed.reason;
     EXPECT_EQ(replayed.module->state.size(), 1U);
+  }
+}
+
+TEST_F(PassSynth, NativeCellCostModeUsesLibertyContentsAndInvalidatesWarmSelection) {
+  hhds::GraphLibrary input;
+  Eprp_var           var;
+  var.graphs.push_back(design(input));
+  var.dict["tmap"]         = "none";
+  var.dict["out"]          = root + "/cost-net";
+  var.dict["qor"]          = root + "/cost.json";
+  var.dict["cache_dir"]    = root + "/cost-cache";
+  var.dict["cost_mode"]    = "cells";
+  var.dict["library"]      = root + "/cost.lib";
+  const auto write_library = [&](double area) {
+    std::ofstream out(var.dict["library"]);
+    out << R"LIB(library(t) {
+      cell(INV) {area:0.2; pin(A) {direction:input;} pin(Y) {direction:output; function:"!A";} }
+      cell(NAND) {area:)LIB"
+        << area << R"LIB(; pin(A) {direction:input;} pin(B) {direction:input;}
+        pin(Y) {direction:output; function:"!(A B)";} }
+    })LIB";
+  };
+  write_library(0.8);
+  for (unsigned iteration = 0; iteration < 3; ++iteration) {
+    if (iteration == 2) {
+      write_library(1.2);
+    }
+    run(var);
+    ASSERT_FALSE(livehd::diag::sink().has_halting_errors());
+    const auto report = read(root + "/cost.json.usyn.json");
+    ASSERT_FALSE(report.HasParseError());
+    EXPECT_STREQ(report["native_optimization"]["cost_mode"].GetString(), "cells");
+    EXPECT_TRUE(report["native_optimization"]["multi_rep"].GetBool());
+    EXPECT_GT(report["native_optimization"]["cost_model_work"].GetUint64(), 0U);
+    EXPECT_EQ(report["cache"]["reused"].GetUint64(), iteration == 1 ? 1U : 0U);
+    EXPECT_EQ(report["cache"]["stored"].GetUint64(), iteration == 1 ? 0U : 1U);
+    ASSERT_EQ(report["regions"].Size(), 1U);
+    EXPECT_STREQ(report["regions"][0]["multi_rep"]["estimate_kind"].GetString(), "legal-cell-covering-proxy");
   }
 }
 
@@ -192,17 +271,41 @@ TEST_F(PassSynth, PublicSearchControlsReachNativeSelectionAndRejectInvalidSettin
     }
   }
   for (const auto& [key, value] : {
-           std::pair{     "fast_accept", "sometimes"},
-           std::pair{           "adder",       "bad"},
-           std::pair{      "multiplier",       "bad"},
-           std::pair{     "adder_block",        "-1"},
-           std::pair{  "local_divisors",         "0"},
-           std::pair{"local_candidates",      "4097"},
-           std::pair{ "pair_candidates",      "4097"},
-           std::pair{     "pair_inputs",        "17"},
-           std::pair{    "pair_choices",         "9"},
-           std::pair{       "pair_work",         "0"},
-           std::pair{     "pair_trials",         "0"}
+           std::pair{        "fast_accept", "sometimes"},
+           std::pair{              "adder",       "bad"},
+           std::pair{         "multiplier",       "bad"},
+           std::pair{       "mux_lowering",       "bad"},
+           std::pair{         "eq_balance",       "bad"},
+           std::pair{       "cmos_cleanup",       "bad"},
+           std::pair{           "sop_tree",       "bad"},
+           std::pair{          "multi_rep",       "bad"},
+           std::pair{          "cost_mode",       "bad"},
+           std::pair{"tmap_sharing_fanout",         "1"},
+           std::pair{"tmap_sharing_fanout",      "4097"},
+           std::pair{               "npn4",       "bad"},
+           std::pair{              "sweep",       "bad"},
+           std::pair{            "balance",       "bad"},
+           std::pair{  "balance_dup_limit",      "1025"},
+           std::pair{         "max_fanout",        "-1"},
+           std::pair{         "area_relax",       "bad"},
+           std::pair{    "boundary_rounds",         "0"},
+           std::pair{    "boundary_rounds",        "65"},
+           std::pair{            "io_load",       "nan"},
+           std::pair{         "reg_margin",        "-3"},
+           std::pair{           "boundary",     "maybe"},
+           std::pair{    "boundary_buffer",     "maybe"},
+           std::pair{        "tmap_trials",         "0"},
+           std::pair{        "tmap_trials",         "3"},
+           std::pair{       "rewrite_cuts",         "0"},
+           std::pair{       "rewrite_cuts",        "33"},
+           std::pair{        "adder_block",        "-1"},
+           std::pair{     "local_divisors",         "0"},
+           std::pair{   "local_candidates",      "4097"},
+           std::pair{    "pair_candidates",      "4097"},
+           std::pair{        "pair_inputs",        "17"},
+           std::pair{       "pair_choices",         "9"},
+           std::pair{          "pair_work",         "0"},
+           std::pair{        "pair_trials",         "0"}
   }) {
     var.dict.erase("fast_accept");
     var.dict[key]   = value;

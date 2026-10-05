@@ -153,13 +153,15 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     }
     return result;
   }
-  auto output                        = std::make_unique<Logical_design>();
-  auto cache_options                 = options.cache;
-  cache_options.limits.nodes         = options.logical.max_nodes;
-  cache_options.limits.formula_nodes = options.logical.endpoint.functions.max_formula_nodes;
-  output->cache.enabled              = !cache_options.directory.empty();
-  bool       failed                  = false;
-  const auto fail                    = [&](Status status, std::string reason) {
+  auto output                         = std::make_unique<Logical_design>();
+  auto cache_options                  = options.cache;
+  cache_options.context              += options.mux_tree ? "/mux-tree" : "/mux-decode";
+  cache_options.context              += options.eq_balance ? "/eq-balanced" : "/eq-shared";
+  cache_options.limits.nodes          = options.logical.max_nodes;
+  cache_options.limits.formula_nodes  = options.logical.endpoint.functions.max_formula_nodes;
+  output->cache.enabled               = !cache_options.directory.empty();
+  bool       failed                   = false;
+  const auto fail                     = [&](Status status, std::string reason) {
     failed        = true;
     result.status = status;
     result.reason = std::move(reason);
@@ -176,6 +178,8 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     blast_options.adder      = options.adder;
     blast_options.block_size = options.adder_block;
     blast_options.multiplier = options.multiplier;
+    blast_options.mux_tree   = options.mux_tree;
+    blast_options.eq_balance = options.eq_balance;
     if (options.auto_sum_adder) {
       // The native mapper has no subsequent Boolean restructuring to remove
       // a ripple carry chain. Keep narrow sums and divider internals compact;
@@ -197,9 +201,16 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       return !work.spend();
     };
     auto blast = synth::blast_region(rb, blast_options, hooks);
+    if (blast.status == synth::Region_blast::Status::over_budget) {
+      // Name the limit: a silent "translation failed" on a large region reads
+      // as a source bug, while the fix is a larger pass.usyn.max_nodes.
+      fail(Status::search_exhausted,
+           "logical translation of " + rb.module_name + " exceeds the node/memory admission limit (pass.usyn.max_nodes="
+               + std::to_string(options.logical.max_nodes) + ")");
+      return;
+    }
     if (blast.status != synth::Region_blast::Status::blasted || !blast.source_state) {
-      fail(blast.status == synth::Region_blast::Status::over_budget ? Status::search_exhausted : Status::invalid,
-           "logical translation failed for " + rb.module_name);
+      fail(Status::invalid, "logical translation failed for " + rb.module_name);
       return;
     }
     // Validate fresh source semantics before any reuse. Cached metadata cannot
@@ -219,13 +230,13 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     if (output->cache.enabled) {
       const auto names = identity_names(rb, blast, top->get_name(), io);
       cached           = probe_logical_cache(cache_options,
-                                   rb.module_name,
-                                   blast.lnet,
-                                   *blast.source_state,
-                                   names,
-                                   options.logical,
-                                   credits,
-                                   io);
+                                             rb.module_name,
+                                             blast.lnet,
+                                             *blast.source_state,
+                                             names,
+                                             options.logical,
+                                             credits,
+                                             io);
     }
     if (io.resource_exhausted) {
       work.resource_exhausted = work.exhausted = true;
@@ -283,7 +294,26 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       fail(selected.status, rb.module_name + ": " + selected.reason);
       return;
     }
-    auto emitted = emit_logical_region(rb, blast, *selected.region, work, options.logical.max_nodes);
+    // P2-C always starts from the freshly validated behavioral expansion, even
+    // on a selection-cache hit. Its search is separate from cached selection,
+    // but consumes the same design-wide remainder before later regions run.
+    Budget cmos_search{search_left};
+    cmos_search.admission          = work.admission;
+    cmos_search.admission_interval = work.admission_interval;
+    const Cmos_cleanup cleanup{options.logical.residual,
+                               &cmos_search,
+                               options.sop_tree,
+                               options.multi_rep,
+                               options.cost_model.get(),
+                               options.gate_objective};
+    auto emitted  = emit_logical_region(rb,
+                                        blast,
+                                        *selected.region,
+                                        work,
+                                        options.logical.max_nodes,
+                                        options.cmos_cleanup || options.sop_tree || options.multi_rep ? &cleanup : nullptr);
+    search_left  -= std::min(search_left, cmos_search.consumed);
+
     if (emitted.status != Status::feasible) {
       fail(emitted.status, rb.module_name + ": " + emitted.reason);
       return;
@@ -317,7 +347,10 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
                                std::move(cached.key),
                                credits,
                                credit,
-                               structural});
+                               structural,
+                               std::move(emitted.cmos_cleanup),
+                               cmos_search.credit_floor(),
+                               std::move(emitted.choices)});
   };
   const auto partition_admission = [&](std::string_view, uint64_t amount) {
     if (failed) {

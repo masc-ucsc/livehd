@@ -14,6 +14,7 @@ exports_files([
     "tests/pyrope/proc_lambda.prp",
     "tests/pyrope/simple.prp",
     "tests/comptime/trivial_if.prp",
+    "tests/sim/chained_clock_gates.prp",
     "tests/sim/flop_feeds_transparent_high_latch.prp",
     "tests/sim/flop_sim_negedge_sole_clock.prp",
     "tests/sim/mem_color_direct.prp",

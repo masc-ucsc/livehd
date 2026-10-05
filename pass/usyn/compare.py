@@ -35,10 +35,16 @@ def native_summary(report):
             "wider_endpoints": sum(len(e["cells"]) > 2 for e in endpoints),
             "initial_endpoint_work": work,
             "logical_work": {key: sum(r["work"][key] for r in regions) for key in
-                             ("admission", "selection", "pairs", "residual", "feedback", "cleanup", "total")},
+                             ("admission", "p1", "selection", "pairs", "residual", "feedback", "cleanup", "cmos_cleanup", "total")},
+            "native_optimization": report.get("native_optimization", {}),
+            "mapping_trials": report.get("mapping_trials", []),
             "pair_work": sum(r["pairs"]["work"] for r in regions),
             "residual": {key: sum(r["residual"][key] for r in regions) for key in
-                         ("rewrite_wins", "resub_wins", "feedback_rounds", "feedback_attempts", "feedback_wins")},
+                         ("cost_before", "cost_after", "rewrite_windows", "rewrite_wins",
+                          "resub_windows", "resub_wins", "candidates", "depth_rejections",
+                          "cost_rejections", "reference_visits", "balance_groups", "balance_wins", "sweep_confirmations", "sweep_wins",
+                          "feedback_rounds",
+                          "feedback_attempts", "feedback_wins")},
             "search_exhausted_regions": sum(r["search_exhausted"] for r in regions),
             # Endpoints published as their credit-free identity (starved searches).
             "identity_fallback_endpoints": sum(r["identity_fallbacks"] for r in regions)}

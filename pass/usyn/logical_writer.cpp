@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "logical_writer.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <format>
@@ -16,7 +17,7 @@ namespace gu = graph_util;
 namespace {
 Logical_module_result write_module(const synth::Source_state_table& source, std::span<const uint32_t> state_bits,
                                    const Endpoint_netlist* frozen, const Xag_region* legacy, std::string_view name, Budget& work,
-                                   uint32_t max_nodes) {
+                                   uint32_t max_nodes, const Cmos_cleanup* cleanup) {
   Logical_module_result result;
   const auto            invalid = [&](std::string reason) {
     result.reason = std::move(reason);
@@ -49,7 +50,40 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
       return invalid(std::move(expanded.reason));
     }
   }
-  auto exported = export_lnet(frozen ? expanded : *legacy, work, max_nodes);
+  if (cleanup && cleanup->search) {
+    if (!frozen) {
+      expanded = *legacy;
+    }
+    auto options      = cleanup->options;
+    options.max_nodes = std::min(options.max_nodes,
+                                 logical_search_nodes(max_nodes,
+                                                      expanded.state.size(),
+                                                      source.controls.size(),
+                                                      expanded.inputs.size(),
+                                                      expanded.outputs.size()));
+    if (options.max_nodes) {
+      auto trial          = clean_cmos_expansion(expanded,
+                                                 options,
+                                                 *cleanup->search,
+                                                 cleanup->sop_tree,
+                                                 cleanup->multi_rep,
+                                                 cleanup->cost_model,
+                                                 cleanup->gate_objective);
+      result.cmos_cleanup = std::move(trial.report);
+      result.choices      = std::move(trial.choices);
+      if (trial.status == Status::invalid || cleanup->search->resource_exhausted) {
+        result.status = trial.status == Status::invalid ? Status::invalid : Status::search_exhausted;
+        return invalid(std::move(trial.reason));
+      }
+      if (trial.region) {
+        expanded = std::move(*trial.region);
+      }
+    } else {
+      result.cmos_cleanup.exhausted = true;
+      result.cmos_cleanup.limits.push_back("CMOS cleanup node reservation");
+    }
+  }
+  auto exported = export_lnet(frozen || (cleanup && cleanup->search) ? expanded : *legacy, work, max_nodes);
   if (!exported.net) {
     result.status = exported.status;
     return invalid(std::move(exported.reason));
@@ -329,18 +363,20 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
 
 }  // namespace
 
-Logical_module_result write_logical_module(const Stateful_region& region, std::string_view name, Budget& work, uint32_t max_nodes) {
+Logical_module_result write_logical_module(const Stateful_region& region, std::string_view name, Budget& work, uint32_t max_nodes,
+                                           const Cmos_cleanup* cleanup) {
   return write_module(region.source,
                       region.state_bits,
                       region.frozen ? &*region.frozen : nullptr,
                       &region.selected.logic,
                       name,
                       work,
-                      max_nodes);
+                      max_nodes,
+                      cleanup);
 }
 
 Logical_module_result write_logical_module(const Frozen_region& region, Budget& work, uint32_t max_nodes) {
-  return write_module(region.source, region.state_bits, &region.netlist, nullptr, region.module_name, work, max_nodes);
+  return write_module(region.source, region.state_bits, &region.netlist, nullptr, region.module_name, work, max_nodes, nullptr);
 }
 
 }  // namespace livehd::usyn

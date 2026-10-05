@@ -596,7 +596,9 @@ constexpr uint32_t selection_magic   = 0x43595355;  // USYC
 // Version 16 replaces the bare search work by the search's credit floor;
 // version 17 adds the structural work replayed on a hit and the identity
 // fallback count.
-constexpr uint32_t selection_version = 17;
+// Version 23 adds P1 policy, bounded preparation evidence and its work.
+// Version 25 adds mux-balancing options and evidence.
+constexpr uint32_t selection_version = 25;
 
 template <class A, class T>
 void costs(A& a, T& c) {
@@ -640,13 +642,40 @@ void decisions(A& a, T& endpoints) {
   });
 }
 template <class A, class T>
+void residual_evidence(A& a, T& s) {
+  fields(a,
+         s.cost_before,
+         s.cost_after,
+         s.sop_roots,
+         s.sop_cofactors,
+         s.sweep_confirmations,
+         s.sweep_wins,
+         s.balance_groups,
+         s.balance_wins,
+         s.balance_duplicates,
+         s.mux_chains,
+         s.mux_arms,
+         s.mux_wins,
+         s.rewrite_windows,
+         s.rewrite_wins,
+         s.resub_windows,
+         s.resub_wins,
+         s.candidates,
+         s.depth_rejections,
+         s.cost_rejections,
+         s.reference_visits,
+         s.skipped,
+         s.exhausted);
+  strings(a, s.limits);
+}
+template <class A, class T>
 void evidence(A& a, T& r) {
   costs(a, r.before);
   costs(a, r.after_pairs);
   costs(a, r.after_residual);
   costs(a, r.after);
   fields(a, r.feedback_attempts, r.feedback_wins, r.feedback_rounds, r.residual_accepted, r.exhausted, r.identity_fallbacks);
-  fields(a, r.work.admission, r.work.selection, r.work.pairs, r.work.residual, r.work.feedback, r.work.cleanup);
+  fields(a, r.work.admission, r.work.p1, r.work.selection, r.work.pairs, r.work.residual, r.work.feedback, r.work.cleanup);
   auto& p = r.pairs;
   fields(a,
          p.candidates,
@@ -696,21 +725,8 @@ void evidence(A& a, T& r) {
          p.joint_recode_combinations,
          p.joint_recode_wins,
          p.exhausted);
-  auto& s = r.residual;
-  fields(a,
-         s.cost_before,
-         s.cost_after,
-         s.rewrite_windows,
-         s.rewrite_wins,
-         s.resub_windows,
-         s.resub_wins,
-         s.candidates,
-         s.depth_rejections,
-         s.cost_rejections,
-         s.reference_visits,
-         s.skipped,
-         s.exhausted);
-  strings(a, s.limits);
+  residual_evidence(a, r.p1);
+  residual_evidence(a, r.residual);
   a.sequence(r.initial, a.limits.nodes, [&](auto& e) {
     fields(a,
            e.whole_admitted,
@@ -791,6 +807,13 @@ void options(Writer& a, const Logical_options& o) {
          r.xor_cost,
          r.depth_slack,
          r.max_nodes,
+         r.rewrite_cuts,
+         r.balance_dup_limit,
+         r.sweep_inputs,
+         r.sweep_table_words,
+         r.p1_sweep_inputs,
+         r.mux_balance_min_arms,
+         r.mux_balance_area_pct,
          r.windows,
          r.window_nodes,
          r.resub_inputs,
@@ -799,6 +822,11 @@ void options(Writer& a, const Logical_options& o) {
          r.inserted,
          r.window_work,
          r.stage_work,
+         r.zero_gain,
+         r.npn4,
+         r.sweep,
+         r.balance,
+         r.mux_balance,
          r.rewrite,
          r.resubstitute);
   fields(a,
@@ -809,6 +837,7 @@ void options(Writer& a, const Logical_options& o) {
          o.pair_choices,
          o.pair_inputs,
          o.pair_work,
+         o.pre_optimize,
          o.optimize_residual,
          o.feedback);
 }

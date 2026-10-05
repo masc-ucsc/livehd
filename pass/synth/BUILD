@@ -186,6 +186,19 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "blast_mux_smoke",
+    size = "small",
+    srcs = ["blast_mux_smoke.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
+        "//pass/partition:pass_partition",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Functional unit test for the backend-agnostic adder/comparator builders
 # (arith.hpp), instantiated with a software bit model.
 cc_test(
@@ -258,5 +271,27 @@ cc_test(
         "@abseil-cpp//absl/container:flat_hash_map",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
+    ],
+)
+
+cc_test(
+    name = "sharing_hint_test",
+    srcs = ["sharing_hint_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "mapped_cost_test",
+    srcs = ["mapped_cost_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
+        "@googletest//:gtest_main",
     ],
 )

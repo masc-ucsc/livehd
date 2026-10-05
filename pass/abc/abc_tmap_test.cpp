@@ -3,7 +3,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
+#include <vector>
 
 #include "design_synth.hpp"
 #include "flatten.hpp"
@@ -263,6 +265,48 @@ TEST_F(AbcTmap, CacheInvalidationCorruptionAndDisabledReuse) {
   options.cache_directory = cache;
   EXPECT_EQ(current(), first);
   map(true, false);
+}
+
+TEST_F(AbcTmap, PhysicalOptionsEnterCacheIdentityAndUntimedDelayIsNotPs) {
+  synth::Tmap_options options;
+  options.library         = "inou/prp/tests/abc/test.lib";
+  options.cache_directory = directory + "/mapping";
+  unsigned commands       = 0;
+  options.admission       = [&](std::string_view stage) {
+    commands += stage.starts_with("&nf");
+    return true;
+  };
+  const auto map = [&](bool hit) {
+    commands    = 0;
+    auto result = synth::technology_map("abc", top, options);
+    EXPECT_EQ(result.status, synth::Tmap_status::mapped) << result.reason;
+    if (result.design) {
+      EXPECT_EQ(commands == 0, hit);
+      // This fixture has scalar timing only, so a requested budget cannot
+      // turn the provider's unit-delay levels into picoseconds, cold or warm.
+      EXPECT_FALSE(result.design->delay_ps);
+    }
+  };
+  map(false);
+  map(true);
+  // Each physical-only knob changes buffering/sizing, so none may reuse a
+  // body mapped under another setting.
+  const std::vector<std::function<void()>> changes{
+      [&] { options.max_fanout = 4; },
+      [&] { options.boundary = false; },
+      [&] { options.boundary_buffer = false; },
+      [&] { options.boundary_drive = "none"; },
+      [&] { options.io_load = 2.5f; },
+      [&] { options.boundary_rounds = 2; },
+      [&] { options.reg_margin = "10"; },
+      [&] { options.area_relax_pct = 0; },
+      [&] { options.delay_ps = 1000; },
+  };
+  for (const auto& change : changes) {
+    change();
+    map(false);
+    map(true);
+  }
 }
 
 TEST_F(AbcTmap, CacheAdmissionAndIoFailurePreservePriorSnapshot) {

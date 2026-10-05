@@ -120,6 +120,25 @@ TEST_F(AbcFlow, MappedSizingRefusesUnmappedInputAndResynthesisPlans) {
   EXPECT_EQ(execute_flow(frame, plan).status, Flow_status::failed);
 }
 
+TEST_F(AbcFlow, MappedRemapRecoversAreaWithoutRunningABooleanFlow) {
+  // The tmap branch runs exactly this mapping-only prefix itself.
+  ASSERT_EQ(Cmd_CommandExecute(frame, "strash; &get -n; &st; &nf; &put -o"), 0);
+  plan.flow.clear();
+  plan.ladder = plan.remappable = plan.mapped_remap = true;
+  plan.area_relax_pct                               = 200;
+  std::vector<std::string> stages;
+  const auto               result = execute_flow(frame, plan, [&](auto stage) {
+    stages.emplace_back(stage);
+    return true;
+  });
+  ASSERT_EQ(result.status, Flow_status::completed);
+  EXPECT_EQ(std::count(stages.begin(), stages.end(), "mapping"), 0);
+  EXPECT_EQ(std::count(stages.begin(), stages.end(), "area-recovery"), 2);
+  ASSERT_TRUE(result.delay_qor);
+  EXPECT_LE(result.delay_qor->first, plan.budget);
+  EXPECT_TRUE(Abc_NtkIsMappedLogic(Abc_FrameReadNtk(frame)));
+}
+
 TEST_F(AbcFlow, AreaCandidateTieKeepsDelayMapping) {
   plan.ladder = plan.area_candidate = true;
   const auto result                 = execute_flow(frame, plan);
