@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "logical_writer.hpp"
 
+#include "literal_stats.hpp"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -17,7 +19,7 @@ namespace gu = graph_util;
 namespace {
 Logical_module_result write_module(const synth::Source_state_table& source, std::span<const uint32_t> state_bits,
                                    const Endpoint_netlist* frozen, const Xag_region* legacy, std::string_view name, Budget& work,
-                                   uint32_t max_nodes, const Cmos_cleanup* cleanup) {
+                                   uint32_t max_nodes, const Cmos_cleanup* cleanup, std::span<const Literal_rewrite> literal = {}) {
   Logical_module_result result;
   const auto            invalid = [&](std::string reason) {
     result.reason = std::move(reason);
@@ -48,6 +50,15 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
     if (expanded.status != Status::feasible) {
       result.status = expanded.status;
       return invalid(std::move(expanded.reason));
+    }
+    // EXPERIMENT (pass.usyn.literal_extract): rebuild verified next states as
+    // literal network + template before the final CMOS optimization. Function
+    // preserving; the replaced cones go dead and export drops them.
+    if (!literal.empty()) {
+      std::vector<Xsignal> d;
+      for (const auto& s : expanded.state) d.push_back(s.d);
+      result.literal_rewrites = apply_literal_rewrites(expanded.graph, d, literal);
+      for (size_t i = 0; i < d.size(); ++i) expanded.state[i].d = d[i];
     }
   }
   if (cleanup && cleanup->search) {
@@ -364,7 +375,7 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
 }  // namespace
 
 Logical_module_result write_logical_module(const Stateful_region& region, std::string_view name, Budget& work, uint32_t max_nodes,
-                                           const Cmos_cleanup* cleanup) {
+                                           const Cmos_cleanup* cleanup, std::span<const Literal_rewrite> literal) {
   return write_module(region.source,
                       region.state_bits,
                       region.frozen ? &*region.frozen : nullptr,
@@ -372,7 +383,8 @@ Logical_module_result write_logical_module(const Stateful_region& region, std::s
                       name,
                       work,
                       max_nodes,
-                      cleanup);
+                      cleanup,
+                      literal);
 }
 
 Logical_module_result write_logical_module(const Frozen_region& region, Budget& work, uint32_t max_nodes) {

@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include "tmap.hpp"
+
 #include "arith.hpp"
 #include "logical_cache.hpp"
 #include "region_emit.hpp"
@@ -18,6 +20,10 @@ struct Design_options {
   bool                                     cmos_cleanup   = false;
   bool                                     multi_rep      = false;
   bool                                     gate_objective = true;
+  std::string                              literal_stats;  // EXPERIMENT: JSON-lines path (literal_stats.hpp)
+  std::shared_ptr<synth::Tmap_options>     literal_tmap;   // EXPERIMENT: map the literal-network cones too
+  std::string                              literal_tmap_provider;
+  uint32_t                                 literal_extract = 0;  // EXPERIMENT: 0 off, 1..3 literal-network depth
   std::shared_ptr<const Native_cost_model> cost_model{};
   std::string                              cost_policy      = "proxy";
   uint64_t                                 cost_model_work  = 0;

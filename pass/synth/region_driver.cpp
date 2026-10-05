@@ -1306,7 +1306,22 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // heap pages at the color boundary so the next color's 16-GiB admission
   // check measures live state, not reusable pages retained by malloc arenas.
   // QoR's peak sample is intentionally taken before this trim.
-  (void)malloc_trim(0);
+  //
+  // Rate-limited like the Darwin path below: malloc_trim(0) walks the WHOLE
+  // heap, so trimming after every color costs colors x heap. A usyn design that
+  // mapped thousands of colors under a ~9 GB live heap spent hours in madvise.
+  // Trim every 64 colors, or whenever the process is near its memory ceiling.
+  {
+    constexpr uint64_t kTrimInterval = 64;
+    const uint64_t     ceiling       = cost::configured_budget_bytes();
+    const bool         due   = !pressure_relief_done_ || completed_regions_ - last_pressure_relief_region_ >= kTrimInterval;
+    const bool         tight = ceiling != 0 && cost::process_footprint_bytes() > ceiling - ceiling / 4;
+    if (due || tight) {
+      (void)malloc_trim(0);
+      last_pressure_relief_region_ = completed_regions_;
+      pressure_relief_done_        = true;
+    }
+  }
 #elif defined(__APPLE__)
   // Darwin's allocator has the same retained-page behavior, exposed more
   // directly by TASK_VM_INFO.phys_footprint. Do not scan every malloc zone

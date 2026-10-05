@@ -257,6 +257,7 @@ cc_library(
     srcs = [
         "artifact.cpp",
         "design_synth.cpp",
+        "literal_stats.cpp",
         "logical_cache.cpp",
         "logical_writer.cpp",
         "region_emit.cpp",
@@ -265,6 +266,7 @@ cc_library(
     hdrs = [
         "artifact.hpp",
         "design_synth.hpp",
+        "literal_stats.hpp",
         "logical_cache.hpp",
         "logical_writer.hpp",
         "region_emit.hpp",

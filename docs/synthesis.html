@@ -177,18 +177,18 @@ a { color: var(--accent); }
 <body>
 
 <h1>Cone Partitioning and<br>Region-Based Technology Mapping</h1>
-<p class="subtitle">Methodology of LiveHD synthesis: <code>pass.color synth</code>, the shared region pipeline of <code>pass/synth</code>, and the ABC backend of <code>pass.abc</code></p>
+<p class="subtitle">Methodology of LiveHD synthesis: <code>pass.color synth</code>, the shared region pipeline of <code>pass/synth</code>, and the ABC backend of <code>pass.abc</code>. The unate/DOMINO mapper <code>pass.usyn</code> reuses this infrastructure and is described in <a href="synth_usyn.html">synth_usyn.html</a>.</p>
 
 <!-- ===================================================================== -->
 <h2><span class="secnum">1</span>Flow and Organization</h2>
 
-<p>The input is a hierarchical word-level netlist graph (<em>LGraph</em>). Each definition <var>d</var> is a directed graph <var>G<sub>d</sub></var> = (<var>V</var>, <var>E</var>) of typed operations &mdash; logic, arithmetic, comparisons, shifts, multiplexers (<code>Mux</code>, and the one-hot <code>Hotmux</code>), wiring, state and instances &mdash; whose edges carry a width and a signedness.</p>
+<p>The input is a hierarchical word-level netlist graph (<em>LGraph</em>) of LiveHD [1]. Each definition <var>d</var> is a directed graph <var>G<sub>d</sub></var> = (<var>V</var>, <var>E</var>) of typed operations &mdash; logic, arithmetic, comparisons, shifts, multiplexers (<code>Mux</code>, and the one-hot <code>Hotmux</code>), wiring, state and instances &mdash; whose edges carry a width and a signedness.</p>
 
 <div class="def">
 <p><span class="lead">Definition 1 (Coloring, region).</span> Let <var>V<sub>p</sub></var> &sube; <var>V</var> be the partitionable nodes (all but graph IO and constants). A coloring <var>c</var> : <var>V<sub>p</sub></var> &rarr; &#8469; assigns a color to every partitionable node; the <em>region</em> of color <var>k</var> is <var>R<sub>k</sub></var> = { <var>v</var> : <var>c</var>(<var>v</var>) = <var>k</var> }. Every region becomes a module <code>&lt;d&gt;__c&lt;k&gt;</code> that is optimized and technology-mapped on its own.</p>
 </div>
 
-<p>A good coloring bounds every region's time and memory, keeps logic that benefits from joint optimization together, cuts where cones share little, and is deterministic and stable under edits so mapped regions can be reused. <code>pass.color</code> computes it (Section 2). Everything between the colored graph and a mapped region is shared, backend-independent infrastructure in <code>pass/synth</code> (Section 3): a private copy of the design, simplification, extraction of arithmetic and memory modules, the cut into regions, the translation of each region into a flat LUT network (the <em>Lnet</em>), and the read-back of a mapped cell netlist. A <em>backend</em> maps one Lnet to cells and owns whatever whole-design sizing it offers; <code>pass/abc</code> is the ABC backend (Section 4) and is the only code that calls ABC. Unate synthesis (<code>pass.usyn</code>) is a region hook on the same pipeline that covers each region with domino gates before handing it to the ABC backend.</p>
+<p>A good coloring bounds every region's time and memory, keeps logic that benefits from joint optimization together, cuts where cones share little, and is deterministic and stable under edits so mapped regions can be reused. <code>pass.color</code> computes it (Section 2). Everything between the colored graph and a mapped region is shared, backend-independent infrastructure in <code>pass/synth</code> (Section 3): a private copy of the design, simplification, extraction of arithmetic and memory modules, the cut into regions, the translation of each region into a flat LUT network (the <em>Lnet</em>), and the read-back of a mapped cell netlist. A <em>backend</em> maps one Lnet to cells and owns whatever whole-design sizing it offers; <code>pass/abc</code> is the ABC [2] backend (Section 4) and is the only code that calls ABC. <code>lhd synth</code> selects the mapper with <code>synth.mapper=abc|usyn</code>. Unate synthesis (<code>pass.usyn</code>) is <em>not</em> a variant of the ABC flow: it reuses the private copy, the partitioner and the Lnet translation, optimizes every region natively into a complete logical CMOS design, and then hands that design to a registered technology-mapping provider; the ABC provider runs the region driver of Section 3.4 in a mapping-only mode (no logic optimization). Regions are compiled incrementally in the spirit of LiveSynth and SMatch [3, 4]: a region whose body and recipe are unchanged is not re-synthesized (Section 3.5).</p>
 
 <figure>
 <svg viewBox="0 0 800 300" role="img" aria-label="Flow: compile, pass.color cone coloring, then pass/synth: private copy, simplification, ware and memory extraction, partition, per-region Lnet translation, then the pass/abc backend: replay, flow and sizing, cell netlist, then the pass/synth writer, boundary refinement and trials.">
@@ -207,8 +207,8 @@ a { color: var(--accent); }
     <rect x="352" y="12" width="438" height="70" rx="8" fill="none" stroke="var(--fig-stroke)" stroke-dasharray="5 4"/>
     <text x="362" y="27" font-size="11" fill="var(--muted)">pass/synth (&#167;3)</text>
     <rect x="364" y="33" width="200" height="42" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
-    <text x="464" y="50" text-anchor="middle">Private copy, dead logic,</text>
-    <text x="464" y="66" text-anchor="middle">SAT simplification</text>
+    <text x="464" y="50" text-anchor="middle">Private copy, loop prep,</text>
+    <text x="464" y="66" text-anchor="middle">clock cells, dead logic</text>
     <rect x="584" y="33" width="196" height="42" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
     <text x="682" y="50" text-anchor="middle">Ware / memory modules,</text>
     <text x="682" y="66" text-anchor="middle">cut into regions</text>
@@ -223,7 +223,7 @@ a { color: var(--accent); }
     <text x="110" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">pass/synth (&#167;3.3)</text>
     <rect x="222" y="134" width="150" height="56" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
     <text x="297" y="156" text-anchor="middle">Region hook</text>
-    <text x="297" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">optional (pass.usyn)</text>
+    <text x="297" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">optional (tmap: map only)</text>
     <rect x="404" y="134" width="190" height="56" rx="6" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
     <text x="499" y="156" text-anchor="middle">ABC map and size</text>
     <text x="499" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">pass/abc backend (&#167;4)</text>
@@ -253,18 +253,19 @@ a { color: var(--accent); }
 
 <h3><span class="secnum">2.1</span>Cost Model</h3>
 
-<p>Every size decision uses one unit: &pi;(<var>v</var>), the predicted number of two-input AIG nodes the bit-blaster (Section 3.3) creates for a node, calibrated per operator (Table I); &pi;(<var>S</var>) sums over a set and saturates. Gate equivalents mispredict mapped cells by a median factor of 1.8 in both directions; &pi; over-counts by a stable factor and tracks ABC's runtime. A color's soft size target is &Gamma; = 30,000 predicted nodes.</p>
+<p>Every size decision uses one unit: &pi;(<var>v</var>), the predicted number of two-input AIG nodes the bit-blaster (Section 3.3) creates for a node, calibrated per operator (Table I); &pi;(<var>S</var>) sums over a set and saturates. Gate equivalents mispredict mapped cells by a median factor of 1.8 in both directions; &pi; over-counts by a stable factor and tracks ABC's runtime. A color's soft size target is &Gamma; = 30,000 predicted nodes (<code>pass.color.max_gate</code>; 0 yields raw cones without merging). Unlike min-cut hypergraph partitioning [5], the partition is driven by register cones and shared logic, not by cut size.</p>
 
 <div class="scroll">
 <table>
 <caption>Table I<span class="tcap">Predicted AIG size &pi;(<var>v</var>); <var>w</var> = output width, <var>t</var> = operands, <var>W</var>* = widest operand</span></caption>
 <thead><tr><th>Operation</th><th>&pi;(<var>v</var>)</th></tr></thead>
 <tbody>
-<tr><td>Wiring, <code>Not</code>, constant shift; memory, instance, latch</td><td>0 (wiring, or a native boundary)</td></tr>
+<tr><td>Wiring, <code>Not</code>, constant shift or slice; memory, instance, clock cell, latch</td><td>0 (wiring, a native boundary, or a Liberty cell outside the AIG)</td></tr>
 <tr><td><code>And</code>, <code>Or</code> / <code>Xor</code></td><td><var>w</var>(<var>t</var>&minus;1) / 3<var>w</var>(<var>t</var>&minus;1)</td></tr>
 <tr><td><code>Mux</code> (<var>n</var> arms) / <code>Hotmux</code></td><td>3<var>w</var>(<var>n</var>&minus;1) / 2<var>wn</var></td></tr>
 <tr><td><code>Sum</code> / <code>LT</code>, <code>GT</code> / <code>EQ</code></td><td>8<var>w</var>(<var>t</var>&minus;1) / 5<var>W</var>* / 4<var>W</var>*(<var>t</var>&minus;1)</td></tr>
-<tr><td><code>Mult</code> / <code>Div</code></td><td>array over the running product width / 16<var>W</var>(<var>W</var>+1)</td></tr>
+<tr><td><code>Mult</code> / <code>Div</code></td><td>&Sigma; 9 &middot; (running product width) &middot; (operand width) / 16<var>W</var>(<var>W</var>+1)</td></tr>
+<tr><td><code>Rxor</code> / <code>Popcount</code> (<var>n</var> input bits); runtime <code>Get_mask</code>, <code>Set_mask</code></td><td>3<var>n</var> / 7<var>n</var>; <var>w</var></td></tr>
 <tr><td><code>SHL</code>, <code>SRA</code> (runtime amount)</td><td>3 &times; the 2:1 muxes of the demanded barrel</td></tr>
 <tr><td>Flop</td><td>3<var>b</var> per enable and per reset (<var>b</var> bits &times; stages)</td></tr>
 </tbody>
@@ -288,8 +289,9 @@ a { color: var(--accent); }
 <li class="in1">walk back from <var>r</var>: claim unowned nodes, add shared ones to &omega;(own(<var>n</var>), <var>r</var>), stop past &Gamma;</li>
 <li>Place registers into their data-input color; root and walk leftovers <span class="cm">&#9655; totality</span></li>
 <li>Overlap merge (Algorithm 2); forward merge across registers with the budget left</li>
-<li>Absorb colors with |<var>C</var>| &lt; <var>N</var><sub>min</sub> and &pi;(<var>C</var>) &le; &Gamma;/64 into their largest-overlap neighbor</li>
+<li>Absorb colors with |<var>C</var>| &lt; <var>N</var><sub>min</sub> (12) and &pi;(<var>C</var>) &le; &Gamma;/64 into their largest-overlap data neighbor</li>
 <li>Renumber deterministically; isolate every arithmetic boundary no control group claims <span class="cm">&#9655; &sigma;</span></li>
+<li>Dead nodes join a colored fan-in; move each clock-gate latch into the color of its <code>And</code> <span class="cm">&#9655; ICG stays whole</span></li>
 </ol>
 </div>
 
@@ -366,30 +368,30 @@ a { color: var(--accent); }
 </ol>
 </div>
 
-<p>The heap order is total, so the result never depends on hash iteration, and folding the smaller adjacency keeps merges into hubs such as a reset cone from turning quadratic (O(<var>P</var> log <var>P</var>) for <var>P</var> pairs). A second, forward phase merges a register's color with the colors that read its output through their data inputs, smallest union first, using only the budget the backward merge left.</p>
+<p>The heap order is total, so the result never depends on hash iteration, and folding the smaller adjacency keeps merges into hubs such as a reset cone from turning quadratic (O(<var>P</var> log <var>P</var>) for <var>P</var> pairs). A second, forward phase merges a register's color with the colors that read its output through their data inputs, smallest union first, using only the budget the backward merge left. Under the flop-to-flop profile the &Gamma; test of line 4 is skipped.</p>
 
 <h3><span class="secnum">2.4</span>Boundary Profiles: ABC Regions and Flop-to-Flop Regions</h3>
 
-<p>An <em>arithmetic boundary</em> is a multiplier, divider, adder over 8 bits, magnitude comparison over 8 bits or runtime shift over 8 bits. Two default profiles, chosen by the mapper, differ in how they treat boundaries and control. The <strong>ABC profile</strong> keeps ABC's regions small: every boundary operator is isolated into its own color (the merges fuse its operand cone with its consumers, and the operator becomes a width-specialized module, Section 3.2), multiplexers group with control, and control groups stay separate. The <strong>flop-to-flop profile</strong> (the unate mapper's) turns boundaries, control groups and arithmetic modules off and walks every cone to the register boundary, merging all overlapping cones whatever &Gamma; says, so every combinational path lies inside one color and &Gamma; only bounds the forward merge. Any explicit setting overrides either profile.</p>
+<p>An <em>arithmetic boundary</em> is a multiplier, divider, adder with a result over 8 bits, magnitude comparison with an operand over 8 bits, or runtime shift of a non-constant value with a result over 8 bits. Two default profiles (<code>pass.color.mapper=abc|usyn</code>, set from <code>synth.mapper</code>) differ in how they treat boundaries and control. The <strong>ABC profile</strong> (<code>stop_mux</code>, <code>stop_arith</code>, <code>stop_cmp</code>, <code>stop_shift</code>, <code>ctrl_cones</code> and <code>ware_*</code> on) keeps ABC's regions small: every boundary operator is isolated into its own color (the merges fuse its operand cone with its consumers, and the operator becomes a width-specialized module, Section 3.2), multiplexers group with control, and control groups stay separate. The <strong>flop-to-flop profile</strong> (the unate mapper's: all of the above off, <code>flop_to_flop</code> on) turns boundaries, control groups and arithmetic modules off and walks every cone to the register boundary, merging all overlapping cones whatever &Gamma; says, so every combinational path lies inside one color and &Gamma; only bounds the forward merge. Any explicit setting overrides either profile.</p>
 
-<p>A non-recursive hierarchy is colored as a virtual flat view, so module boundaries are not forced region boundaries: the design is flattened into a scratch definition, colored, and the colors are written back per instance path; the partitioner flattens again before cutting. Every phase except the control split is linear in |<var>V</var>| + |<var>E</var>|.</p>
+<p>A non-recursive hierarchy is colored as a virtual flat view, so module boundaries are not forced region boundaries: the design is flattened into a scratch definition, colored, and the colors are written back per instance path; the partitioner flattens again before cutting. An optional <code>synth.reduce</code> step first extracts repeated subgraphs into shared definitions. Every phase except the control split is linear in |<var>V</var>| + |<var>E</var>|.</p>
 
 <!-- ===================================================================== -->
 <h2><span class="secnum">3</span>The Shared Region Pipeline</h2>
 
 <p><code>pass/synth</code> never modifies the input library: it copies the design's callee closure into a private library and transforms only the copy. The steps are ordered so each prepares the next.</p>
 
-<h3><span class="secnum">3.1</span>Simplification</h3>
+<h3><span class="secnum">3.1</span>Preparation</h3>
 
-<p>Combinational nodes without consumers are deleted transitively, then the satopt engine (<code>pass/satopt</code>) runs its synthesis profile. Every proof is combinational: inputs, register outputs and memory read data are free symbols, so a proven fact holds in every state; an unsupported or out-of-budget proof yields no fact. Word-level simulation (corner and seeded random patterns, plus every solver counterexample) only nominates candidates. cvc5 decides <em>constant selectors</em> (a <code>Mux</code> select, a <code>Hotmux</code> control, a one-bit flop enable), <em>constant values</em> and <em>memory port relations</em>, each rewritten exactly. <em>Per-bit multiplexer facts</em> recover correlations a partition hides when a select and its arms land in different colors:</p>
+<p>Loop bodies are prepared for reuse, and every plain clock cell (division 1, not inverted) is rewritten on the copy into the latch-based clock gate it denotes,</p>
 
-<div class="eq"><span class="eq-body">&forall;<var>x</var> : sel<sub><var>i</var></sub>(<var>x</var>) &rArr; <var>a<sub>i</sub></var>[<var>b</var>](<var>x</var>) = &kappa;(<var>x</var>), &nbsp;&nbsp; &kappa; &isin; { 0, 1, <var>a<sub>j</sub></var>[<var>b</var>], &not;<var>a<sub>j</sub></var>[<var>b</var>] }</span><span class="eq-num">(2)</span></div>
+<div class="eq"><span class="eq-body">gclk = clk &and; Latch(din = en, enable = clk, transparent while clk = 0)</span><span class="eq-num">(2)</span></div>
 
-<p>Each candidate becomes one output sel<sub><var>i</var></sub> &and; (<var>a<sub>i</sub></var>[<var>b</var>] &oplus; &kappa;) of a single proof Lnet, which the backend sweeps (ABC: <code>&amp;fraig</code>); a proven fact rewrites only that arm's input. Proofs are cached per definition under an exact source descriptor, the code identity and the proof options, and one deterministic budget bounds the whole engine. Its optional stages (equivalence, complement, observability, resubstitution) and the compile-time profile are described in <code>pass/satopt/README.md</code>.</p>
+<p>so that it maps onto an integrated clock-gate (ICG) cell (Section 3.3); divided or inverted clock cells stay native. Combinational nodes without consumers are then deleted transitively. The pipeline itself proves nothing: proof-backed simplification (<code>pass/satopt</code>: constant selectors, equivalences, observability, per-bit multiplexer facts swept by <code>&amp;fraig</code> [6] with cvc5 [7] for the rest) is an opt-in compile step (<code>pass.satopt=true</code>, off by default) that, when enabled, has already rewritten the graph the mapper receives; see <code>pass/satopt/README.md</code>.</p>
 
 <h3><span class="secnum">3.2</span>Modules, Memories and the Cut</h3>
 
-<p>Under the ABC profile every arithmetic-boundary operator is enclosed in its own definition keyed by its kind, port widths, signedness, constants and color, so equal realizations share one module. A memory stays a native instance unless it has at most 1024 bits or more than three ports, in which case it is lowered to flops in isolation. Loop bodies without carried state are mapped once and replicated.</p>
+<p>Under the ABC profile (<code>ware_arith</code>, <code>ware_cmp</code>, <code>ware_shift</code>) every arithmetic-boundary operator is enclosed in its own <em>ware</em> definition keyed by its kind, port widths, signedness, constants and color, so equal realizations share one module; a dynamic word select keeps its affine amount inside the module and only the narrow index on the port. With <code>pass.abc.memory=auto</code> (default) a memory is lowered to flops in isolation when it has at most <code>memory_max_bits</code> (1024) bits or more than three ports; <code>memory=true|false</code> forces either, and a memory written from more than one clock always stays native. Experiments that compare mappers keep memories native (<code>memory=false</code>), which is what <code>pass.usyn</code> always does. Loop bodies without carried state are mapped once and replicated; carry-dependent loops are unrolled (<code>unroll_carry</code>) after their carry-independent logic is lifted into a shared body, and the physical occurrences are stitched after mapping.</p>
 
 <p>The colored source is then cut: one region per color (or per connected component of a color when the colors are local). Every crossing driver becomes an output port of its region and an input port of each reader, deduplicated per driver. Ports are named and ordered by structural signatures from a Kahn traversal (the producer shape with operands grouped by role, and the multiset of uses), so cold and warm runs produce the same network; a region whose input keys tie is not reusable, since a genuine automorphism could stitch a cached body onto permuted ports. A multi-region definition becomes a wrapper of unnamed region instances, which keeps hierarchical names transparent to equivalence checking and timing.</p>
 
@@ -401,7 +403,13 @@ a { color: var(--accent); }
 
 <div class="eq"><span class="eq-body"><var>D</var> = rst&prime; ? rval : ( en&prime; ? din : <var>Q</var> ), &nbsp;&nbsp; en&prime; = &or;<sub><var>i</var></sub> en[<var>i</var>], &nbsp; rst&prime; = &or;<sub><var>i</var></sub> rst[<var>i</var>] &oplus; neg</span><span class="eq-num">(3)</span></div>
 
-<p>so a synchronous reset has priority over the enable and the result maps to a plain D flip-flop. A flop with an asynchronous reset or a derived clock, every level-sensitive latch, every instance and memory, and wide or cyclic wiring stay <em>native boundaries</em>, reconnected around the mapped logic. Only a true power-on value becomes a latch initial state.</p>
+<p>so a synchronous reset has priority over the enable and the result maps to a plain D flip-flop. State that does not fold into <var>D</var> is still mapped onto Liberty cells, but outside the AIG:</p>
+<ul class="tight">
+<li><b>Asynchronous reset.</b> The register crosses with <var>D</var> = en&prime; ? din : <var>Q</var>; its reset is traced to a region input (or exported as an extra output) and wired to a clear or preset flop chosen per bit by its reset value.</li>
+<li><b>Clock gate.</b> clk &and; <var>Q</var> of a one-bit latch transparent while clk is low, as in (2), is absorbed into an ICG cell; its enable is exported and the gated clock is read back as an input, so the registers it clocks map to flops clocked by the ICG.</li>
+<li><b>Data latch.</b> A level-sensitive latch maps onto a Liberty latch cell per enable polarity, with clear/preset or a folded reset.</li>
+</ul>
+<p>Each falls back to a <em>native boundary</em> with a named reason (<code>reset-native</code>, <code>icg-native</code>, <code>latch-native</code>) when the library has no suitable cell or the flow is a user command list. Instances, memories, divided or inverted clocks and other derived clocks, cyclic logic and pure wiring of at least 4096 bits always stay native, reconnected around the mapped logic; a region that is a single constant shift is rebuilt as wiring without a mapper. Only a true power-on value becomes a latch initial state. A <code>logical_state</code> mode, used by <code>pass.usyn</code>, translates every register bit independently of the Liberty file.</p>
 
 <h3><span class="secnum">3.4</span>The Driver and Backend Seam</h3>
 
@@ -413,7 +421,7 @@ a { color: var(--accent); }
 <li>resolve per-region options; recipe &larr; backend.plan(<var>R</var>) (+ the hook's recipe)</li>
 <li><span class="kw">if</span> <var>R</var> is reusable <span class="kw">and</span> the cache holds a structurally identical body with an identical recipe <span class="kw">then</span> reuse it; <span class="kw">return</span></li>
 <li><var>L</var> &larr; blast(<var>R</var>) as a RAW Lnet, with native boundaries <span class="cm">&#9655; &sect;3.3, memory-admitted</span></li>
-<li>rewrite &larr; hook(<var>L</var>) <span class="kw">if</span> a hook is set <span class="kw">else</span> none <span class="cm">&#9655; unate synthesis</span></li>
+<li>rewrite &larr; hook(<var>L</var>) <span class="kw">if</span> a hook is set <span class="kw">else</span> none <span class="cm">&#9655; e.g. mapping-only (tmap), or refused</span></li>
 <li>cells &larr; backend.map(<var>L</var>, rewrite) <span class="cm">&#9655; &sect;4</span></li>
 <li>write cells into the region body; store pre- and post-mapping bodies in the cache</li>
 </ol>
@@ -459,12 +467,12 @@ a { color: var(--accent); }
     <text x="470" y="166" text-anchor="middle" font-size="11" fill="var(--muted)">cell netlist</text>
   </g>
 </svg>
-<figcaption class="cap"><b>Fig. 3.</b> The seam between the shared region driver and a backend. Only the Lnet goes in and only a cell netlist comes out; no backend object crosses it. Unate synthesis is a region hook: it covers the Lnet with domino gates and hands the cover network to the same backend.</figcaption>
+<figcaption class="cap"><b>Fig. 3.</b> The seam between the shared region driver and a backend. Only the Lnet goes in and only a cell netlist comes out; no backend object crosses it. The hook selects how a region is mapped (full flow, a given flow, mapping only, or refused); the technology-mapping provider used by <code>pass.usyn</code> sets it to mapping only.</figcaption>
 </figure>
 
 <h3><span class="secnum">3.5</span>Reuse and Parallel Lanes</h3>
 
-<p>A mapped body is reused in place when the new pre-mapping body is structurally identical to the stored one, by an exact node bijection, and the resolved recipe (flow, options, per-region budget and hook settings) is byte-identical. Hashes only find candidates; the cache is never an oracle. Code salts in three layers &mdash; <code>pass/synth</code> with the passes it builds on, then each backend, then the hook &mdash; invalidate rows when the code that produced them changes. Regions are mapped by parallel lanes, each with its own backend session, and published in partition order, so the output does not depend on the number of lanes. A lane is admitted only if its projected memory fits below half of physical memory, and a region whose measured growth would exhaust the host is refused.</p>
+<p>A mapped body is reused in place when the new pre-mapping body is structurally identical to the stored one, by an exact node bijection, and the resolved recipe (flow, options, per-region budget and hook settings) is byte-identical. Hashes only find candidates; the cache is never an oracle. Code salts &mdash; <code>pass/synth</code> with the passes it builds on, folded by each backend (ABC also folds its pin and patch) &mdash; invalidate rows when the code that produced them changes; a hook adds its recipe to the key, and its evidence is re-checked on a hit. Regions are mapped by parallel lanes, each with its own backend session, and published in partition order, so the output does not depend on the number of lanes. A lane is admitted only if its projected memory fits below min(half of physical memory, the process budget), a region whose measured growth exceeds <code>memory_budget_mb</code> (16 GiB) is refused, and freed heap is returned to the system at a bounded rate (every 64 regions, or near the ceiling).</p>
 
 <!-- ===================================================================== -->
 <h2><span class="secnum">4</span>ABC as the Mapping and Sizing Backend</h2>
@@ -473,7 +481,7 @@ a { color: var(--accent); }
 
 <h3><span class="secnum">4.1</span>Flows</h3>
 
-<p>The delay and area flows (Table II) end in <code>&amp;nf</code> on a unit-delay gate library, so the mapper minimizes depth on the smallest cells and every physical decision is left to gate sizing with the Liberty timing model. No flow retimes: moving registers would break the register-name correspondence of equivalence checking and could change latency. <code>&amp;put -o</code> shares a gate that drives several outputs through output-only buffers, which the read-back removes again.</p>
+<p>The delay and area flows (Table II) combine AIG rewriting and choice computation [8, 9], don't-care resynthesis [10] and SOP balancing [11], and end in <code>&amp;nf</code> on a unit-delay gate library, so the mapper minimizes depth on the smallest cells and every physical decision is left to gate sizing with the Liberty timing model. No flow retimes: moving registers would break the register-name correspondence of equivalence checking and could change latency. <code>&amp;put -o</code> shares a gate that drives several outputs through output-only buffers, which the read-back removes again.</p>
 
 <div class="scroll">
 <table>
@@ -481,9 +489,10 @@ a { color: var(--accent); }
 <thead><tr><th>Flow</th><th>Commands</th><th>Used when</th></tr></thead>
 <tbody>
 <tr><td>Area</td><td><code>strash; &amp;get -n; &amp;fraig -x -C 500; &amp;put; dc2; strash; &amp;get -n; &amp;dch -f -C 500; &amp;nf {D}; &amp;put -o</code></td><td>No delay target; the area candidate</td></tr>
-<tr><td>Delay</td><td>two rounds of <code>&amp;synch2 -K 6</code>, <code>&amp;if -K 6</code>, <code>&amp;mfs</code>, <code>&amp;dch</code>, <code>&amp;sopb</code>; then <code>&amp;st; &amp;nf {D}; &amp;put -o</code></td><td>A delay target is set</td></tr>
-<tr><td>Large</td><td><code>strash; &amp;get -n; &amp;nf {D}; &amp;put</code></td><td>Region of at least 200,000 GE (ABC mapper only)</td></tr>
-<tr><td>Tail</td><td><code>buffer -N 16; dnsize {B}</code></td><td>After every built-in flow, when the library has NLDM tables</td></tr>
+<tr><td>Delay</td><td><code>strash; &amp;get -n; &amp;sweep</code>; two rounds of <code>&amp;synch2 -K 6 -C 500; &amp;if -m -K 6; &amp;mfs; &amp;save; &amp;dch -C 500; &amp;if -m -K 6; &amp;mfs; &amp;save; &amp;load; &amp;st</code> with <code>&amp;sopb -R 10 -C 4</code> between them; then <code>&amp;nf {D}; &amp;put -o</code></td><td>A delay target is set and no user flow</td></tr>
+<tr><td>Large</td><td><code>strash; &amp;get -n; &amp;nf {D}; &amp;put</code></td><td>Region of at least <code>large_ge</code> (200,000) GE; no area candidate</td></tr>
+<tr><td>Map only</td><td><code>strash; &amp;get -n; [&amp;st;] &amp;nf {D}; &amp;put -o</code></td><td>tmap provider (<code>pass.usyn</code>); <code>&amp;st</code> only when the remap of Alg. 4 applies</td></tr>
+<tr><td>Tail</td><td><code>buffer -N {F}; dnsize {B}</code> (<code>upsize {B}</code> before <code>dnsize</code> in the timed area candidate)</td><td>After every built-in, large or map-only flow, when <code>max_fanout</code> <var>F</var> (16) &ne; 0 and the library has NLDM tables; never after a user <code>flow</code></td></tr>
 </tbody>
 </table>
 </div>
@@ -492,9 +501,9 @@ a { color: var(--accent); }
 
 <p>With a delay target <var>T</var>, a region with registers must also absorb the launch clock-to-output delay and the capture setup time, which ABC's combinational timer does not see. The region budget is</p>
 
-<div class="eq"><span class="eq-body"><var>B</var> = &lfloor;<var>T</var> &minus; <var>m</var>&rfloor; if <var>R</var> has registers, &nbsp; &lfloor;<var>T</var>&rfloor; otherwise, &nbsp;&nbsp; <var>m</var> = <var>t</var><sub>clk&rarr;Q</sub> + <var>t</var><sub>setup</sub> of the flip-flop cell</span><span class="eq-num">(4)</span></div>
+<div class="eq"><span class="eq-body"><var>B</var> = &lfloor;<var>T</var> &minus; <var>m</var>&rfloor; if <var>R</var> has registers, &nbsp; &lfloor;<var>T</var>&rfloor; otherwise, &nbsp;&nbsp; <var>m</var> = <var>t</var><sub>clk&rarr;Q</sub> + <var>t</var><sub>setup</sub> of the flip-flop cell (<code>reg_margin=auto</code>)</span><span class="eq-num">(4)</span></div>
 
-<p>A budget is not "as fast as possible": after the flow, a budget ladder spends measured slack on area (Algorithm 4), with an area-recovery remap only when the slack <var>s</var> = 100(<var>B</var>/<var>d</var> &minus; 1) is at least 25% (relaxation min(<var>s</var>, 200)). Every flow option can be overridden per color from source annotations or the command line; an unknown key is an error.</p>
+<p>The ladder needs a tool-owned flow, an NLDM library and <var>B</var> &gt; 0; the area candidate additionally needs the built-in flow, a region below <code>large_ge</code> and <code>area_flow</code> &ne; <code>none</code>. A budget is not "as fast as possible": after the flow, a budget ladder spends measured slack on area (Algorithm 4), with an area-recovery remap only when the slack <var>s</var> = 100(<var>B</var>/<var>d</var> &minus; 1) is at least 25% (relaxation min(<var>s</var>, 200)). Every flow option can be overridden per color from source annotations or the command line; an unknown key is an error.</p>
 
 <div class="algo">
 <div class="algo-title"><b>Algorithm 4</b> Budget ladder and area candidate; <var>d</var>(<var>N</var>), <var>a</var>(<var>N</var>) = timed delay and area</div>
@@ -502,7 +511,7 @@ a { color: var(--accent); }
 <li><span class="kw">if</span> the area candidate applies <span class="kw">then</span> <var>N</var><sub>0</sub> &larr; copy of the unmapped network</li>
 <li><var>N</var> &larr; flow(network); <span class="kw">if</span> no budget <span class="kw">then return</span> <var>N</var></li>
 <li><span class="kw">if</span> <var>d</var>(<var>N</var>) &gt; <var>B</var> <span class="kw">then</span> size up and down within <var>B</var>; if still late, size without a bound</li>
-<li><span class="kw">else if</span> the flow is remappable <span class="kw">and</span> <var>s</var> &ge; 25 <span class="kw">then</span> undo the map; remap with relaxation; buffer; size down within <var>B</var></li>
+<li><span class="kw">else if</span> the flow is remappable <span class="kw">and</span> <var>s</var> &ge; 25 <span class="kw">then</span> undo the map; remap with relaxation; buffer; size down within <var>B</var>; repair by up/down sizing if late</li>
 <li><span class="kw">if</span> <var>N</var><sub>0</sub> exists <span class="kw">and</span> <var>d</var>(<var>N</var>) &le; <var>B</var> <span class="kw">then</span> <var>N<sub>A</sub></var> &larr; area flow(<var>N</var><sub>0</sub>); keep it iff <var>d</var>(<var>N<sub>A</sub></var>) &le; <var>B</var> and <var>a</var>(<var>N<sub>A</sub></var>) &lt; <var>a</var>(<var>N</var>)</li>
 </ol>
 </div>
@@ -513,15 +522,31 @@ a { color: var(--accent); }
 
 <div class="eq"><span class="eq-body">load(<var>p</var>) = ext(<var>p</var>) &middot; <span style="text-decoration:overline">C</span> + [<var>p</var> drives a primary output] &middot; <var>C</var><sub>io</sub></span><span class="eq-num">(5)</span></div>
 
-<p>where ext(<var>p</var>) counts sinks outside the region and <span style="text-decoration:overline">C</span> is the mean input capacitance of small cells, and every input is driven by a stand-in small buffer that also drives the fanout trees built for inputs. <em>Phase B</em> runs once every region is mapped, when a delay target exists and the library has NLDM tables: the exact load of every crossing net (the sum of the pin capacitances it drives, followed across instance ports) and its real driving cell replace the estimates, and each region is re-sized in place within its budget. Further rounds propagate arrivals across the hierarchy; one round makes the loads and drivers exact.</p>
+<p>where ext(<var>p</var>) counts sinks outside the region and <span style="text-decoration:overline">C</span> is the mean input capacitance of small cells, and every input is driven by a stand-in small buffer that also drives the fanout trees built for inputs. <em>Phase B</em> runs once every region is mapped, when a delay target exists and the library has NLDM tables: the exact load of every crossing net (the sum of the pin capacitances it drives, followed across instance ports) and its real driving cell replace the estimates, and each region is re-sized in place within its budget. Further rounds propagate arrivals across the hierarchy; one round makes the loads and drivers exact. Phase B is skipped when every region was reused.</p>
 
 <h3><span class="secnum">4.4</span>Read-Back</h3>
 
-<p>ABC's mapped network is converted into the backend-neutral cell netlist: every gate is a cell instance with its fanins in pin order, an unreadable gate is a hard error, and a flop cell with only an inverted output absorbs the inversion (the latch stores &not;<var>D</var> under the built-in flows, or the root gate is swapped for its inverting twin). Each crossing latch becomes a flip-flop sized from its output fanout, because fanout buffering never buffers a register output. The region writer (Section 3.4) does the rest.</p>
+<p>ABC's mapped network is converted into the backend-neutral cell netlist: every gate is a cell instance with its fanins in pin order, an unreadable gate is a hard error, and a flop cell with only an inverted output absorbs the inversion (the latch stores &not;<var>D</var> under the built-in flows, or the root gate is swapped for its inverting twin). Each crossing latch becomes a flip-flop sized from its output fanout, because fanout buffering never buffers a register output; the clear/preset flops, ICGs and latch cells of Section 3.3 are emitted from the library's state-cell ladders, and per-bit cells keep the names <code>reg[i]</code> that equivalence checking matches. The region writer (Section 3.4) does the rest.</p>
 
 <h3><span class="secnum">4.5</span>Architecture Trials</h3>
 
-<p>After the whole design is mapped, regions with automatic adders, multipliers or shifters re-map their pre-mapping body under the alternative lowerings (at most eleven trials) and re-score the design: area over every instance and, under a delay target, the endpoint delays of a network stitched across region boundaries. A candidate is kept if its sorted endpoint delays are lexicographically better, or if they tie and its area is smaller.</p>
+<p>After the whole design is mapped, regions with automatic adders, multipliers or shifters (and wide comparisons) re-map their pre-mapping body under the alternative lowerings (at most eleven trials: 3 adders &times; 2 multipliers &times; 2 barrels, minus the baseline) and re-score the design: area over every instance and, under a delay target, the endpoint delays of a network stitched across region boundaries. Under a target only regions on the worst stitched path are tried. A candidate is kept if its sorted endpoint delays are lexicographically better (differences below 0.1% tie), or if they tie and its area is smaller. Because every trial re-scores the whole design, the step is skipped when the design exceeds <code>ware_max_cells</code> (200,000 mapped cells) and stops at the first time or memory refusal; regions above <code>large_ge</code> are not tried. Trials reuse retained pre-mapping snapshots (bounded per region and in total) and their own cache rows, never the baseline's. The tmap provider turns trials off.</p>
+
+<!-- ===================================================================== -->
+<h2>References</h2>
+<ol class="tight refs">
+<li>S.-H. Wang, R. T. Possignolo, H. Skinner, J. Renau. LiveHD: A productive live hardware development flow. <i>IEEE Micro</i>, 40(4), 2020.</li>
+<li>R. Brayton, A. Mishchenko. ABC: An academic industrial-strength verification tool. <i>CAV</i>, 2010.</li>
+<li>R. T. Possignolo, J. Renau. LiveSynth: Towards an interactive synthesis flow. <i>DAC</i>, 2017.</li>
+<li>R. T. Possignolo, J. Renau. SMatch: Structural matching for fast resynthesis in FPGAs. <i>DAC</i>, 2019.</li>
+<li>G. Karypis, R. Aggarwal, V. Kumar, S. Shekhar. Multilevel hypergraph partitioning: Applications in VLSI domain. <i>DAC</i>, 1997.</li>
+<li>A. Mishchenko, S. Chatterjee, R. Jiang, R. Brayton. FRAIGs: A unifying representation for logic synthesis and verification. ERL Tech. Rep., UC Berkeley, 2005.</li>
+<li>H. Barbosa et al. cvc5: A versatile and industrial-strength SMT solver. <i>TACAS</i>, 2022.</li>
+<li>A. Mishchenko, S. Chatterjee, R. Brayton. DAG-aware AIG rewriting: A fresh look at combinational logic synthesis. <i>DAC</i>, 2006.</li>
+<li>S. Chatterjee, A. Mishchenko, R. Brayton, X. Wang, T. Kam. Reducing structural bias in technology mapping. <i>IEEE TCAD</i>, 25(12), 2006.</li>
+<li>A. Mishchenko, R. Brayton, J.-H. R. Jiang, S. Jang. Scalable don't-care-based logic optimization and resynthesis. <i>FPGA</i>, 2009.</li>
+<li>A. Mishchenko, R. Brayton, S. Jang, V. Kravets. Delay optimization using SOP balancing. <i>ICCAD</i>, 2011.</li>
+</ol>
 
 </body>
 </html>

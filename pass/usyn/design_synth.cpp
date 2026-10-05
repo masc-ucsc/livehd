@@ -4,9 +4,12 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <fstream>
 #include <unordered_map>
 
 #include "design_prepare.hpp"
+#include "diag.hpp"
+#include "literal_stats.hpp"
 #include "node_util.hpp"
 
 namespace livehd::usyn {
@@ -297,6 +300,21 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     // P2-C always starts from the freshly validated behavioral expansion, even
     // on a selection-cache hit. Its search is separate from cached selection,
     // but consumes the same design-wide remainder before later regions run.
+    std::vector<Literal_rewrite> literal_plan;
+    if (!options.literal_stats.empty() || options.literal_extract) {
+      const auto line = literal_stats_region(rb,
+                                             blast,
+                                             selected.region->selected,
+                                             options.logical.endpoint,
+                                             options.literal_stats.empty() ? nullptr : options.literal_tmap.get(),
+                                             options.literal_tmap_provider,
+                                             options.literal_extract ? &literal_plan : nullptr,
+                                             options.literal_extract);
+      if (!options.literal_stats.empty()) {
+        std::ofstream stats(options.literal_stats, std::ios::app);
+        stats << line << "\n";
+      }
+    }
     Budget cmos_search{search_left};
     cmos_search.admission          = work.admission;
     cmos_search.admission_interval = work.admission_interval;
@@ -311,8 +329,15 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
                                         *selected.region,
                                         work,
                                         options.logical.max_nodes,
-                                        options.cmos_cleanup || options.sop_tree || options.multi_rep ? &cleanup : nullptr);
+                                        options.cmos_cleanup || options.sop_tree || options.multi_rep ? &cleanup : nullptr,
+                                        literal_plan);
     search_left  -= std::min(search_left, cmos_search.consumed);
+    if (options.literal_extract && !literal_plan.empty()) {
+      livehd::diag::info("pass.usyn", "literal-extract", "progress")
+          .msg("{}: rebuilt {} next state(s) as literal network (depth {}) + template", rb.module_name, literal_plan.size(),
+               options.literal_extract)
+          .emit();
+    }
 
     if (emitted.status != Status::feasible) {
       fail(emitted.status, rb.module_name + ": " + emitted.reason);

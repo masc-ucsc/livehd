@@ -12,7 +12,7 @@ namespace gu = graph_util;
 
 Region_emission emit_logical_region(const partition::Region_body& rb, const synth::Region_blast& blast,
                                     const Stateful_region& selected, Budget& work, uint32_t max_nodes,
-                                    const Cmos_cleanup* cleanup) {
+                                    const Cmos_cleanup* cleanup, std::span<const Literal_rewrite> literal) {
   const auto invalid   = [](std::string reason) { return Region_emission{Status::invalid, std::move(reason)}; };
   const auto exhausted = [] { return Region_emission{Status::search_exhausted, "region emission budget"}; };
   if (!rb.body || !rb.src || rb.body == rb.src || !blast.logical_state || blast.status != synth::Region_blast::Status::blasted
@@ -40,7 +40,7 @@ Region_emission emit_logical_region(const partition::Region_body& rb, const synt
       return invalid("region output is not declared on the destination");
     }
   }
-  auto logical = write_logical_module(selected, "__usyn_logical", work, max_nodes, cleanup);
+  auto logical = write_logical_module(selected, "__usyn_logical", work, max_nodes, cleanup, literal);
   if (!logical.module) {
     return {logical.status, std::move(logical.reason), std::move(logical.cmos_cleanup), std::move(logical.choices)};
   }

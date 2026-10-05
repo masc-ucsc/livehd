@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <span>
+
 #include "artifact.hpp"
 #include "cmos_cleanup.hpp"
 #include "semantic_region.hpp"
@@ -25,6 +27,7 @@ struct Logical_module_result {
   std::string                     reason;
   Residual_report                 cmos_cleanup{};
   Choice_report                   choices{};
+  uint32_t                        literal_rewrites = 0;
 };
 
 // Emit the complete behavioral CMOS expansion, retaining every original
@@ -34,8 +37,10 @@ struct Logical_module_result {
 // logical control interface, not a legacy mapping-dependent source snapshot.
 // Refusal destroys the private partial module and publishes no graph.
 // max_nodes bounds the input and a conservative emitted-node reservation.
+struct Literal_rewrite;  // literal_stats.hpp (EXPERIMENT: pass.usyn.literal_extract)
 Logical_module_result write_logical_module(const Stateful_region& region, std::string_view name, Budget& work,
-                                           uint32_t max_nodes = 2000000, const Cmos_cleanup* cleanup = nullptr);
+                                           uint32_t max_nodes = 2000000, const Cmos_cleanup* cleanup = nullptr,
+                                           std::span<const Literal_rewrite> literal = {});
 // Replay a validated standalone artifact. The output is behavioral CMOS even
 // when the recorded target is DOMINO; this is not a physical cell emitter.
 Logical_module_result write_logical_module(const Frozen_region& region, Budget& work, uint32_t max_nodes = 2000000);

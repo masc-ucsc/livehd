@@ -236,13 +236,11 @@ private:
   void report_completion(const Region_qor& q);
 
   uint64_t completed_regions_ = 0;
-#if defined(__APPLE__)
-  // Maximal malloc-zone relief walks every Darwin allocator zone. Repeating it
-  // for each of thousands of tiny colors fragments virtual address space even
-  // when physical footprint is safe, so map_region rate-limits pressure scans.
+  // Allocator housekeeping is rate-limited per completed color: Darwin's
+  // maximal malloc-zone relief walks every zone (fragmenting address space when
+  // repeated), and glibc's malloc_trim(0) walks the whole heap.
   uint64_t last_pressure_relief_region_ = 0;
   bool     pressure_relief_done_        = false;
-#endif
 };
 
 }  // namespace livehd::synth

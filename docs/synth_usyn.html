@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unate Register-Rooted Synthesis (pass.usyn)</title>
+<meta name="description" content="Methodology of pass.usyn: register-rooted unate/DOMINO selection, native residual optimization, CMOS expansion, literal-network extraction and mapping-only technology mapping, compared with the LiveHD ABC flow.">
+<style>
+:root {
+  --bg: #fdfdfb;
+  --fg: #1d1d1f;
+  --muted: #5c5c63;
+  --rule: #b9b9bf;
+  --soft: #eeeeea;
+  --accent: #1f4e8c;
+  --code-bg: #f1f1ee;
+  --fig-fill: #f3f5f9;
+  --fig-fill-2: #e3eaf5;
+  --fig-fill-3: #f7ecdf;
+  --fig-stroke: #3a3a40;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17181b;
+    --fg: #e6e6e3;
+    --muted: #a3a3aa;
+    --rule: #4a4b52;
+    --soft: #24252a;
+    --accent: #8fb4ec;
+    --code-bg: #25262b;
+    --fig-fill: #22252c;
+    --fig-fill-2: #26324a;
+    --fig-fill-3: #3a2f22;
+    --fig-stroke: #c9c9cf;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17181b;
+  --fg: #e6e6e3;
+  --muted: #a3a3aa;
+  --rule: #4a4b52;
+  --soft: #24252a;
+  --accent: #8fb4ec;
+  --code-bg: #25262b;
+  --fig-fill: #22252c;
+  --fig-fill-2: #26324a;
+  --fig-fill-3: #3a2f22;
+  --fig-stroke: #c9c9cf;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.58 "Charter", "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  max-width: 50rem;
+  margin: 0 auto;
+  padding: 2.5rem 16px 4rem;
+  overflow-x: hidden;
+}
+p, li { hyphens: auto; }
+@media (min-width: 640px) { p { text-align: justify; } }
+h1 {
+  font-size: 1.65rem;
+  line-height: 1.25;
+  text-align: center;
+  margin: 0 0 .4rem;
+  font-weight: 600;
+}
+.subtitle { text-align: center; color: var(--muted); font-style: italic; margin: 0 0 2.2rem; }
+h2 {
+  font: 600 1.02rem/1.3 -apple-system, "Segoe UI", Roboto, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin: 2.6rem 0 .8rem;
+  padding-top: .6rem;
+  border-top: 1px solid var(--rule);
+}
+h3 {
+  font: 600 1rem/1.3 -apple-system, "Segoe UI", Roboto, sans-serif;
+  margin: 1.8rem 0 .5rem;
+}
+h4 { font-size: 1rem; font-style: italic; font-weight: 600; margin: 1.2rem 0 .3rem; }
+.secnum { color: var(--accent); margin-right: .45em; }
+code, .mono {
+  font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: .86em;
+  background: var(--code-bg);
+  padding: .05em .28em;
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+var { font-style: italic; }
+.def, .prop {
+  margin: 1rem 0;
+  padding: .1rem 0 .1rem .9rem;
+  border-left: 3px solid var(--accent);
+}
+.def p, .prop p { margin: .35rem 0; }
+.def .lead, .prop .lead { font-weight: 600; font-style: normal; }
+.def em.b, .prop em.b { font-style: italic; }
+.eq {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: .9rem 0;
+  overflow-x: auto;
+}
+.eq-body { flex: 1; text-align: center; white-space: nowrap; font-size: 1.02em; }
+.eq-num { color: var(--muted); }
+.cap { font-size: .9em; color: var(--fg); margin: .5rem 0 0; text-align: left; }
+.cap b { font-variant: small-caps; letter-spacing: .02em; }
+figure { margin: 1.6rem 0; }
+figure svg { width: 100%; height: auto; display: block; }
+.scroll { overflow-x: auto; margin: 1rem 0; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: .9em;
+  line-height: 1.4;
+}
+caption {
+  caption-side: top;
+  font-variant: small-caps;
+  letter-spacing: .03em;
+  padding-bottom: .45rem;
+  text-align: center;
+}
+caption .tcap { display: block; font-variant: normal; letter-spacing: 0; font-style: italic; margin-top: .1rem; }
+thead th { border-top: 1.5px solid var(--fg); border-bottom: 1px solid var(--fg); font-weight: 600; }
+tbody tr:last-child td { border-bottom: 1.5px solid var(--fg); }
+th, td { padding: .32rem .55rem; text-align: left; vertical-align: top; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+.algo {
+  margin: 1.3rem 0;
+  border-top: 1.5px solid var(--fg);
+  border-bottom: 1.5px solid var(--fg);
+  font-size: .92em;
+}
+.algo-title { padding: .35rem 0; border-bottom: 1px solid var(--fg); }
+.algo-title b { margin-right: .4em; }
+.algo-body {
+  margin: 0;
+  padding: .4rem 0 .5rem 2.4rem;
+  counter-reset: line;
+  overflow-x: auto;
+}
+.algo-body li {
+  list-style: none;
+  counter-increment: line;
+  position: relative;
+  white-space: pre-wrap;
+  text-align: left;
+  hyphens: none;
+}
+.algo-body li::before {
+  content: counter(line);
+  position: absolute;
+  left: -2.1rem;
+  width: 1.6rem;
+  text-align: right;
+  color: var(--muted);
+  font-size: .85em;
+}
+.algo-body .in1 { padding-left: 1.4em; }
+.algo-body .in2 { padding-left: 2.8em; }
+.algo-body .in3 { padding-left: 4.2em; }
+.kw { font-weight: 700; }
+.cm { color: var(--muted); font-style: italic; }
+.io { font-size: .92em; padding: .25rem 0; border-bottom: 1px solid var(--rule); }
+ul.tight, ol.tight { margin: .4rem 0; padding-left: 1.4rem; }
+ul.tight li, ol.tight li { margin: .15rem 0; }
+.note { color: var(--muted); font-size: .92em; }
+a { color: var(--accent); }
+.refs li { font-size: .95em; }
+</style>
+</head>
+<body>
+
+<h1>Register-Rooted Unate Synthesis<br>for DOMINO and CMOS</h1>
+<p class="subtitle">Methodology of <code>pass.usyn</code> (<code>synth.mapper=usyn</code>) and how it differs from the LiveHD ABC flow of <a href="synthesis.html">synthesis.html</a> (cited below as [S&nbsp;&sect;<var>n</var>])</p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">1</span>Goal and Organization</h2>
+
+<p>A DOMINO gate [1] evaluates a <em>unate</em> function through one series-parallel pull-down stack; a DOMINO latch additionally holds the value as the cycle's state. If every register's next-state function, or a small decomposition of it, fits such a gate, the logic between registers collapses into one or two dynamic stages. Earlier DOMINO synthesis makes a network unate by output-phase assignment and then maps it [2, 3]. <code>pass.usyn</code> instead starts at each register, searches for a decomposition of its <em>whole</em> next-state cone into at most two DOMINO stages, and optimizes the remaining static logic natively, without ABC's logic synthesis.</p>
+
+<p>Physical DOMINO emission is not implemented yet (<code>target=cmos</code> is the only accepted target). The DOMINO selection is a logical model: it is frozen, then <em>expanded</em> back into static CMOS, cleaned, and technology-mapped. Today's output is therefore a CMOS netlist whose structure follows the register-rooted selection. Fig. 1 contrasts the two flows; Table I summarizes the differences.</p>
+
+<figure>
+<svg viewBox="0 0 800 210" role="img" aria-label="Both flows share coloring, preparation, partitioning and Lnet translation. The ABC flow then runs ABC synthesis and mapping per region. The usyn flow imports each region into an XAG, selects DOMINO endpoints, runs residual optimization, freezes, expands to CMOS, optionally extracts literal networks, cleans up, and maps with the ABC provider in mapping-only mode.">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--fig-stroke)"/>
+    </marker>
+  </defs>
+  <g font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="12" fill="var(--fg)">
+    <rect x="10" y="70" width="150" height="66" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="85" y="92" text-anchor="middle">Shared [S &#167;2&#8211;3]</text>
+    <text x="85" y="109" text-anchor="middle" font-size="11" fill="var(--muted)">coloring, private copy,</text>
+    <text x="85" y="124" text-anchor="middle" font-size="11" fill="var(--muted)">partition, Lnet</text>
+    <rect x="200" y="14" width="590" height="44" rx="6" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
+    <text x="495" y="33" text-anchor="middle">pass.abc: ABC synthesis + &amp;nf per region, sizing, boundary, architecture trials [S &#167;4]</text>
+    <text x="495" y="49" text-anchor="middle" font-size="11" fill="var(--muted)">&#915;-bounded regions; ware modules</text>
+    <path d="M160,90 L180,90 L180,36 L198,36" fill="none" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <path d="M160,116 L180,116 L180,160 L198,160" fill="none" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <rect x="200" y="132" width="96" height="56" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="248" y="155" text-anchor="middle">XAG import</text>
+    <text x="248" y="172" text-anchor="middle" font-size="11" fill="var(--muted)">&#167;2</text>
+    <rect x="312" y="132" width="110" height="56" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="367" y="150" text-anchor="middle">Endpoint</text>
+    <text x="367" y="165" text-anchor="middle">selection</text>
+    <text x="367" y="180" text-anchor="middle" font-size="11" fill="var(--muted)">&#167;3, pairs</text>
+    <rect x="438" y="132" width="96" height="56" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="486" y="155" text-anchor="middle">Residual</text>
+    <text x="486" y="172" text-anchor="middle" font-size="11" fill="var(--muted)">&#167;4, feedback</text>
+    <rect x="550" y="132" width="120" height="56" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="610" y="150" text-anchor="middle">Freeze, expand,</text>
+    <text x="610" y="165" text-anchor="middle">literal net, clean</text>
+    <text x="610" y="180" text-anchor="middle" font-size="11" fill="var(--muted)">&#167;5&#8211;6</text>
+    <rect x="686" y="132" width="104" height="56" rx="6" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
+    <text x="738" y="155" text-anchor="middle">tmap</text>
+    <text x="738" y="172" text-anchor="middle" font-size="11" fill="var(--muted)">map only, &#167;7</text>
+    <line x1="296" y1="160" x2="310" y2="160" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <line x1="422" y1="160" x2="436" y2="160" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <line x1="534" y1="160" x2="548" y2="160" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <line x1="670" y1="160" x2="684" y2="160" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <text x="200" y="124" font-size="11" fill="var(--muted)">pass.usyn: native, per definition region, no ABC logic optimization</text>
+  </g>
+</svg>
+<figcaption class="cap"><b>Fig. 1.</b> The ABC flow (top) and <code>pass.usyn</code> (bottom) share the front end; usyn replaces ABC's logic synthesis with register-rooted selection and keeps ABC only as a mapper.</figcaption>
+</figure>
+
+<div class="scroll">
+<table>
+<caption>Table I<span class="tcap">pass.usyn compared with the LiveHD ABC flow</span></caption>
+<thead><tr><th>Aspect</th><th>pass.abc</th><th>pass.usyn</th></tr></thead>
+<tbody>
+<tr><td>Coloring</td><td>ABC profile, &Gamma;-bounded regions [S &sect;2.4]</td><td>flop-to-flop profile: every combinational path inside one color</td></tr>
+<tr><td>Arithmetic</td><td>ware modules, architecture trials [S &sect;3.2, &sect;4.5]</td><td>blasted inline (prefix adders &ge; 16 b, prefix compare &ge; 8 b, CSA multipliers); no trials</td></tr>
+<tr><td>Memories</td><td>native unless <code>memory</code> lowers them</td><td>always native</td></tr>
+<tr><td>State translation</td><td>Liberty-aware: async reset, ICG, latch cells [S &sect;3.3]</td><td><code>logical_state</code>: every register bit is a free variable; ICGs, latches, memories and opaque instances are native barriers</td></tr>
+<tr><td>Logic optimization</td><td>ABC area or delay flow (Table II of [S])</td><td>native: endpoint selection, pairs, residual rewriting, CMOS cleanup; no SAT/SMT</td></tr>
+<tr><td>Mapping, sizing</td><td><code>&amp;nf</code>, tail, budget ladder, boundary phases, area candidate</td><td>same <code>&amp;nf</code>, tail, ladder and boundary phases; no area candidate</td></tr>
+<tr><td>Alternatives</td><td>area candidate per region; architecture trials</td><td>two whole-design trials (base, choice-rich), best mapped gate count</td></tr>
+<tr><td>Reuse</td><td>region cache [S &sect;3.5]</td><td>logical-region cache plus the mapping cache of the provider</td></tr>
+</tbody>
+</table>
+</div>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">2</span>Regions and the Logical Network</h2>
+
+<p>Coloring, the private copy and the cut are those of the ABC flow [S &sect;2, &sect;3], with the flop-to-flop profile so that no register's next-state cone is split across regions. Each region is translated to a RAW Lnet [S &sect;3.3] in <code>logical_state</code> mode: Liberty, QN encoding and ICG absorption are ignored, every register bit and pipeline stage becomes an Lnet latch, and asynchronous resets, dynamic clocks and initial values become protected control outputs. The Lnet is imported into an <em>XAG</em>, a structurally hashed AND/XOR graph with complemented edges, sized against the budget before any search.</p>
+
+<div class="def">
+<p><span class="lead">Definition 1 (Endpoint).</span> An <em>endpoint</em> is a bit of a positive-edge register in a known clock domain whose next-state function <var>F</var><sub>q</sub> is computed inside the region. Its cone is the XAG transitive fan-in of <var>F</var><sub>q</sub> up to region inputs and register outputs. Negative-edge and unknown-edge registers are not endpoints; their cones stay static.</p>
+</div>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">3</span>Register-Rooted Endpoint Selection</h2>
+
+<div class="def">
+<p><span class="lead">Definition 2 (Cells).</span> A <em>DominoLatch</em> computes <var>F</var><sub>q</sub> and stores it as the endpoint's state; a <em>Domino</em> cell is a phase-1 stage that feeds a DominoLatch; a <em>Static</em> cell is ordinary CMOS. A DOMINO formula is legal when it reads at most 8 logical inputs (<var>x</var> and &not;<var>x</var> count once, both rails being free), has a series stack of at most 4 and at most 10 factored parallel branches. Both polarities may be read, so binate functions are legal without phase assignment.</p>
+</div>
+
+<p>Selection minimizes a transistor proxy, used consistently by every search and acceptance test:</p>
+
+<div class="eq"><span class="eq-body">cost = 2&middot;#AND + 4&middot;#XOR + #NOT (static) &nbsp;+&nbsp; &Sigma;<sub>cells</sub> ( |formula| + 5 [Domino] + 8 [DominoLatch] )</span><span class="eq-num">(1)</span></div>
+
+<p>where |formula| is the transistor count of the pull-down network and static logic and inverters shared between cells are counted once. Each region starts from an <em>identity baseline</em>: one DominoLatch per endpoint fed by its unchanged static cone, which is always legal. Every endpoint then searches, under its own work slice, for a cheaper realization (Algorithm 1), and keeps the baseline if the search fails or runs out of work.</p>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 1</b> S<small>ELECT</small>E<small>NDPOINT</small>(<var>q</var>) &mdash; tiers in order, each bounded</div>
+<ol class="algo-body">
+<li>incumbent &larr; identity cell; admit a window: the whole cone or a reconvergence-driven window of &le; 16 inputs</li>
+<li><b>one cell</b>: the whole window in one DominoLatch; unate &rArr; exact minimal cover, else a bounded signed cover, series-parallel factored</li>
+<li><b>decompose</b> <var>F</var>(<var>B</var>, <var>R</var>) = <var>H</var>(<var>G</var><sub>0</sub>(<var>B</var>) &hellip; <var>G</var><sub><var>k</var></sub>(<var>B</var>), <var>R</var>): new phase-1 divisors <var>G<sub>i</sub></var> as Domino cells</li>
+<li><b>boundaries</b>: enumerate cut frontiers (&le; 32) with contraction and growth moves; existing-divisor two-cell covers; wide-boundary round</li>
+<li><b>two-phase</b> general tier; <b>residual removal</b> with care completion over &le; 16 phases; witness-guided <b>local divisors</b></li>
+<li>validate the best candidate exactly; commit iff its total cost (1) is lower</li>
+</ol>
+</div>
+
+<p>Functional decomposition over a bound set follows Ashenhurst&ndash;Curtis [4]; the covers are verified against truth tables of up to 16 inputs, simulated 64 assignments at a time. After all endpoints, <em>pair</em> and <em>joint</em> reselection revisit endpoints that share logic: a gate reaching exactly two endpoints in one clock domain seeds trials that re-select both together (both new, either alone), followed by sweeps over interface choices, private fanout-free windows, joint divisors and joint recoding; a trial commits only on a strict total-cost gain.</p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">4</span>Residual Optimization</h2>
+
+<p>Logic not absorbed into cells &mdash; primary outputs, unselected next-state inputs and the static inputs of selected cells &mdash; is optimized natively in a fixed order of guarded trials: multiplexer-chain balancing (accepted only if critical depth drops, no output deepens and cost grows &le; 25%), 4-cut rewriting against all 222 NPN classes with an area and a depth template each, in the manner of ABC's <code>rewrite</code> [5], and windowed resubstitution (8 inputs, 32 divisors, &le; 2 new nodes), the counterpart of <code>resub</code> [6]. Rewrites may not raise cost (1); an equal-cost rewrite must lower depth. Optional exact sweeping and AND/XOR balancing are off by default. The region is replaced only if its total cost does not rise, after which one <em>feedback</em> round re-selects the endpoints whose static inputs changed. ABC's <code>dc2</code>, <code>&amp;dch</code>, <code>&amp;fraig</code> and <code>&amp;mfs</code> [S Table II] have no usyn equivalent; no step uses a SAT or SMT solver.</p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">5</span>Freeze, CMOS Expansion and Cleanup</h2>
+
+<p>The selection is frozen into an <em>endpoint netlist</em> of Static, Domino and DominoLatch cells with their functions, formulas, rails, phases and source-state correspondence; identical phase-1 cells in one clock domain are shared, and the whole artifact is validated (functions, legality, shared cost, phase order, clock domains) or nothing is published. It is then <em>expanded</em> into behavioral CMOS: one native register per original bit and stage, each cell's formula as static logic, no phase-1 storage. Expansion is structural and checked exactly against every register's reference next state.</p>
+
+<p>The expansion is cleaned on a private copy with the residual optimizer of Section 4 over all outputs and next states, now across the former cell boundaries. With <code>multi_rep</code> (on in the second trial, Section 7), windows of &le; 8 inputs also receive alternative representations &mdash; positive and negative SOP, a reduced ordered BDD [7], a bounded disjoint-support decomposition and NPN4 templates &mdash; kept as structural choices [8] and extracted for area and for depth, in the spirit of mixed-representation synthesis [9, 10]. The result is exported as an Lnet and reconnected to packed ports and native memory, ICG, instance and loop boundaries.</p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">6</span>Literal-Network Extraction (experimental)</h2>
+
+<p>In a DOMINO pipeline a register's output is stable during the first half of the cycle, while DOMINO gates evaluate in the second. Logic controlled only by registered signals can therefore settle in the otherwise idle first half and <em>choose the literals</em> a DOMINO gate reads, as precomputation does for power [11]. This is a step between expansion and the final cleanup (<code>pass.usyn.literal_extract=</code><var>n</var>, <var>n</var> &isin; {1, 2, 3}, default 0).</p>
+
+<div class="def">
+<p><span class="lead">Definition 3 (Literal network).</span> Let a selected cell compute <var>F</var>(<var>c</var>, <var>r</var>) with <var>n</var> controls <var>c</var> driven by register outputs or primary inputs. Shannon expansion gives <var>F</var> = &or;<sub><var>v</var></sub> [<var>c</var> = <var>v</var>] &middot; <var>F<sub>v</sub></var>(<var>r</var>). A <em>template</em> <var>T</var>(<var>s</var><sub>1</sub>&hellip;<var>s<sub>m</sub></var>) realizes all cofactors if for every <var>v</var> there is a substitution &lambda;<sub><var>v</var></sub> mapping each slot to a literal of <var>r</var>, its complement or a constant with <var>F<sub>v</sub></var> = <var>T</var> &#8728; &lambda;<sub><var>v</var></sub>. The <em>literal network</em> realizes each slot as a balanced tree of 2:1 multiplexers over <var>c</var> (depth <var>n</var>) selecting &lambda;<sub><var>v</var></sub>(<var>s<sub>j</sub></var>).</p>
+</div>
+
+<p>The cell then implements <var>T</var> instead of <var>F</var>; any template costs at least max<sub><var>v</var></sub> cost(<var>F<sub>v</sub></var>), which bounds the gain. For every cell with &le; 8 inputs, every control subset of size <var>n</var> is tried; the template is a cofactor's own gate, and an exact bounded search with ternary-simulation pruning finds the substitutions. Every accepted rewrite is re-verified over all input assignments. In the DOMINO flow the DOMINO cells and their literal networks are kept and only the remaining logic is re-optimized; in the CMOS flow (implemented today) the rewritten next states are passed with everything else to cleanup and tmap. Only the cell function is rewritten (mode a, the default). Cofactoring upstream cones (mode b) is reserved for time-critical cones once placement feedback exists, and admitting previous-phase DOMINO outputs as controls is a place-and-route recovery option; both add DOMINO stages or area.</p>
+
+<div class="scroll">
+<table>
+<caption>Table II<span class="tcap">Literal-network statistics, lhdsuite Pyrope cores, asap7 at 1000 ps (<a href="usyn_literal_network.html">full report</a>)</span></caption>
+<thead><tr><th>Controls</th><th><var>n</var></th><th>DOMINO cost (1) of affected cells</th><th>series stack</th></tr></thead>
+<tbody>
+<tr><td>registered</td><td>1</td><td>&minus;7 to &minus;14%</td><td>&minus;15 to &minus;37%</td></tr>
+<tr><td>registered</td><td>3</td><td>&minus;15 to &minus;31%</td><td>&minus;20 to &minus;67%</td></tr>
+<tr><td>static logic over registered</td><td>3</td><td>&minus;30 to &minus;37%</td><td>&minus;58 to &minus;69%</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Mapped alone, the literal networks settle in 29&ndash;120 ps, well inside the 500 ps first half, but cost 1.0&ndash;3.0&times; the static area of the cells they serve. The gain is in DOMINO stack depth, which static CMOS cannot see: in the CMOS flow, extraction changes mapped area between &minus;2.5% and +18% depending on the design, so it stays off by default until a DOMINO cost model or custom mux/DOMINO cells can price it. All templates verified with zero mismatches. Latch-driven signals are not controls: on the cores studied, latches implement clock gating and stay ordinary CMOS.</p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">7</span>Technology Mapping and Trials</h2>
+
+<p>The logical design is mapped by a registered provider (<code>pass.usyn.tmap=abc|none</code>). Its contract is mapping only: it may neither re-synthesize logic nor treat proposed DOMINO boundaries as barriers. The ABC provider re-partitions the logical design without flattening, colors high-fanout scalar cones (&le; 128 nodes, &le; 6 sources, fan-out &ge; <code>tmap_sharing_fanout</code> = 16) as their own partitions so that mapping does not duplicate them, and runs the region driver of [S &sect;3.4] with a hook that maps every region with the map-only flow of [S Table II]. Sizing, the budget ladder and the boundary environment are identical to the ABC flow [S &sect;4.2&ndash;4.4]; the area candidate, ware trials and memory lowering are off.</p>
+
+<p>Because the static cost (1) only approximates mapped area, <code>tmap_trials=2</code> runs the whole design twice: the base options, and a choice-rich variant (light cleanup before selection plus <code>multi_rep</code>). Each trial gets half of the remaining budget, minus 1/16 reserved for publication, and the winner is the design with fewer mapped gates (weighted by instance count), then smaller area, then lower maximum region delay. There is no silent fallback to ABC's synthesis flows.</p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">8</span>Budgets, Reuse and Determinism</h2>
+
+<p>One deterministic work budget (<code>work</code>, 4&times;10<sup>9</sup>) is split into a structural ledger (preparation, import, baseline, freeze, emission) and a search remainder passed from region to region; each tier, endpoint and trial takes a slice and returns what it leaves, so results do not depend on wall-clock or lane count. A region larger than <code>max_nodes</code> (8&times;10<sup>6</sup> XAG nodes) or exceeding the memory budget is refused with the option to raise; large cores (e.g. minion) need higher limits. Selections are cached per region under a key covering the RAW Lnet, source semantics, names and policies, but not credits or mapping options; a row is reused only when the current credits are at least the recorded floor, so a hit replays the same search. Mapped regions use the provider's cache, as in [S &sect;3.5].</p>
+
+<p><b>Status.</b> No physical DOMINO cells or characterization; negative-edge registers are not endpoints; the XAG is append-only (no in-place replacement or MFFC accounting); one feedback round. In mapped gate count usyn is still behind the ABC flow on several control-heavy designs (arbiters, comparators); progress is tracked in <code>pass/usyn/usyn2.md</code>.</p>
+
+<!-- ===================================================================== -->
+<h2>References</h2>
+<ol class="tight refs">
+<li>R. H. Krambeck, C. M. Lee, H.-F. S. Law. High-speed compact circuits with CMOS. <i>IEEE JSSC</i>, 17(3), 1982.</li>
+<li>R. Puri, A. Bjorksten, T. E. Rosser. Logic optimization by output phase assignment in dynamic logic synthesis. <i>ICCAD</i>, 1996.</li>
+<li>M. Zhao, S. S. Sapatnekar. Technology mapping algorithms for domino logic. <i>ACM TODAES</i>, 7(2), 2002.</li>
+<li>R. L. Ashenhurst. The decomposition of switching functions. <i>Proc. Int. Symp. Theory of Switching</i>, 1957; H. A. Curtis. <i>A New Approach to the Design of Switching Circuits</i>. Van Nostrand, 1962.</li>
+<li>A. Mishchenko, S. Chatterjee, R. Brayton. DAG-aware AIG rewriting: A fresh look at combinational logic synthesis. <i>DAC</i>, 2006.</li>
+<li>A. Mishchenko, R. Brayton. Scalable logic synthesis using a simple circuit structure. <i>IWLS</i>, 2006.</li>
+<li>C. Yang, M. Ciesielski. BDS: A BDD-based logic optimization system. <i>IEEE TCAD</i>, 21(7), 2002.</li>
+<li>S. Chatterjee, A. Mishchenko, R. Brayton, X. Wang, T. Kam. Reducing structural bias in technology mapping. <i>IEEE TCAD</i>, 25(12), 2006.</li>
+<li>M. Austin et al. A scalable mixed synthesis framework for heterogeneous networks. <i>DATE</i>, 2020.</li>
+<li>J. Hu et al. Mixed structural choice operator: Enhancing technology mapping with heterogeneous representations. 2025.</li>
+<li>M. Alidina, J. Monteiro, S. Devadas, A. Ghosh, M. Papaefthymiou. Precomputation-based sequential logic optimization for low power. <i>IEEE TVLSI</i>, 2(4), 1994.</li>
+</ol>
+
+</body>
+</html>

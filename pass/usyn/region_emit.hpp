@@ -22,6 +22,6 @@ struct Region_emission {
 // library; like partition's other body builders, this may leave a partial body.
 Region_emission emit_logical_region(const partition::Region_body& region, const synth::Region_blast& blast,
                                     const Stateful_region& selected, Budget& work, uint32_t max_nodes = 2000000,
-                                    const Cmos_cleanup* cleanup = nullptr);
+                                    const Cmos_cleanup* cleanup = nullptr, std::span<const Literal_rewrite> literal = {});
 
 }  // namespace livehd::usyn

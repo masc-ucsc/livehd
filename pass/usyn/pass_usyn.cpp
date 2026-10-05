@@ -197,6 +197,18 @@ bool read_options(const Eprp_var& var, Options& options) {
   }
   options.design.max_source_nodes = logical.max_nodes;
   options.design.cost_policy      = std::string(var.get_stage("cost_mode", "proxy"));
+  // EXPERIMENT: literal-network statistics, one JSON line per region (literal_stats.hpp).
+  options.design.literal_stats = std::string(var.get_stage("literal_stats", ""));
+  {
+    const auto text = std::string(var.get_stage("literal_extract", "0"));
+    if (text != "0" && text != "1" && text != "2" && text != "3") {
+      return invalid_option("literal_extract", "0 (off) or a literal-network depth 1..3");
+    }
+    options.design.literal_extract = static_cast<uint32_t>(text[0] - '0');
+  }
+  if (!options.design.literal_stats.empty()) {
+    std::ofstream truncate(options.design.literal_stats, std::ios::trunc);
+  }
   if (options.design.cost_policy != "proxy" && options.design.cost_policy != "cells" && options.design.cost_policy != "area") {
     return invalid_option("cost_mode", "proxy|cells|area; cells/area need a Liberty and imply multi_rep");
   }
@@ -294,6 +306,14 @@ void Pass_usyn::setup() {
                        "16");
   m.add_label_optional("p1", "Bounded light native cleanup before unate endpoint selection", "false");
   m.add_label_optional("sop_tree", "Experimental symbolic SOP/mux alternative; implies final CMOS cleanup", "false");
+  m.add_label_optional("literal_extract",
+                       "EXPERIMENT: before the final CMOS optimization, rebuild verified DominoLatch next states whose "
+                       "literal-network controls are registered as balanced mux trees + a simpler template (0 off, 1..3 depth)",
+                       "0");
+  m.add_label_optional("literal_stats",
+                       "EXPERIMENT: write per-region literal-network (mux-controlled DOMINO input) statistics as JSON lines "
+                       "to this file; empty disables. Selection and output are unchanged",
+                       "");
   m.add_label_optional("multi_rep",
                        "Experimental bounded SOP/BDD/XAG choices and sharing-aware selection; implies CMOS cleanup",
                        "false");
@@ -510,6 +530,11 @@ void Pass_usyn::work(Eprp_var& var) {
       = options.tmap != "none" && options.tmap_trials == 2 && (!options.design.logical.pre_optimize || !options.design.multi_rep);
   const auto trial_cap   = compare ? (work.remaining - work.remaining / 16) / 2 : work.remaining;
   auto       native_work = work.slice(trial_cap);
+  if (!options.design.literal_stats.empty() && options.tmap != "none") {
+    options.design.literal_tmap          = std::make_shared<livehd::synth::Tmap_options>(options.mapping);
+    options.design.literal_tmap_provider = options.tmap;
+    options.design.literal_tmap->cache_directory.clear();  // the experiment's cones must not pollute the mapped cache
+  }
   auto       selected    = usyn::synthesize_cmos_design(top, options.design, native_work);
   work.absorb(native_work);
   if (!selected.design) {
