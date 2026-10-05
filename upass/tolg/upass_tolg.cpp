@@ -383,7 +383,7 @@ struct Clocked_state {
   livehd::diag::Span span{};          // its declaration, when its graph records one
   bool               memory = false;  // a memory port's clock, not a flop's
   int                port   = -1;     // that memory port, when its ports have their own clocks
-  std::string        enable_input{};    // the body input enabling that port ("" local): bound to 0, it is idle
+  std::string        enable_input{};  // the body input enabling that port ("" local): bound to 0, it is idle
 };
 
 // What the memory clock sink `clock_sink` clocks: the ports it drives (every
@@ -2773,7 +2773,7 @@ private:
       }
       return;
     }
-    // A bit-view or whole-value update of a combinational typed array is
+    // A bit-view or whole-value update of a typed array is
     // SSA-versioned (`r___ssa_N = packed_bus`). Keep that version as a scalar
     // packed alias with the original array layout. Subsequent bit reads use the
     // bus directly and element reads extract one declared-width lane.
@@ -2783,7 +2783,7 @@ private:
         std::optional<Array_scalar_view> view;
         if (auto ait = array_scalar_views_.find(base); ait != array_scalar_views_.end()) {
           view = ait->second;
-        } else if (auto mit = mem_map_.find(base); mit != mem_map_.end() && mit->second.is_array) {
+        } else if (auto mit = mem_map_.find(base); mit != mem_map_.end()) {
           view = Array_scalar_view{
               .size        = mit->second.size,
               .dims        = mit->second.dims,
@@ -2894,11 +2894,10 @@ private:
       if (auto ait = array_scalar_views_.find(rhs_name); ait != array_scalar_views_.end()) {
         auto view_copy                             = ait->second;
         array_scalar_views_[std::string(lhs_name)] = std::move(view_copy);
-      } else if (auto mit = mem_map_.find(rhs_name); mit != mem_map_.end() && mit->second.is_array) {
-        // A whole multi-dimensional `mut` array under another name (the
-        // binding of an inlined comb's `-> (r:[2][4]u8)` output): the packed
-        // read_all bus below, with the array's lane view so `t[i][j]` reads
-        // one element.
+      } else if (auto mit = mem_map_.find(rhs_name); mit != mem_map_.end()) {
+        // A whole array read is a packed snapshot, including a register
+        // array's read_all bus. Retain its layout when the snapshot is copied
+        // or updated through a bit view, so later element reads select lanes.
         array_scalar_views_[std::string(lhs_name)] = Array_scalar_view{
             .size        = mit->second.size,
             .dims        = mit->second.dims,
@@ -13296,7 +13295,7 @@ struct Stale_instance {
   std::string   callee;
   std::string   caller;
   hhds::Port_id pid = 0;
-  std::string   was{};// empty: the id was not declared
+  std::string   was{};  // empty: the id was not declared
   std::string   now;
   std::string   hint{};  // how to fix it, naming where `caller` came from (stale_instance_hint)
 };

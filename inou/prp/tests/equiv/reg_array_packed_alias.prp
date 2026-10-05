@@ -1,0 +1,16 @@
+/*
+:name: reg_array_packed_alias
+:type: equiv
+*/
+pub mod reg_array_packed_alias::[timecheck=false](
+  clock:Clock, reset:U1, enable:U1, addr:U2, data:U16
+) -> (y:U8@[]) {
+  reg bank:[4]U8:[ordering="old", reset_pin=reset, async=true] = 0
+  mut snapshot = bank
+  mut updated = snapshot
+  if enable != 0 {
+    updated#[8 ..+ 16] = data
+  }
+  bank = updated
+  y = updated[addr]
+}
