@@ -18,6 +18,10 @@ pub mod top::[timecheck=false](a:U8, b:U8) -> (s:U8@[0]) {
   const mul = multiply<FAST=true>(a=a)
   s = add_node<U8>(a=mul, b=b)
 }
+pub mod default_chain::[timecheck=false](a:U8, b:U8) -> (s:U8@[0]) {
+  const mul = multiply(a=a)
+  s = add_node<U8>(a=mul, b=b)
+}
 pub mod signed_chain::[timecheck=false](a:S4, b:S4) -> (s:S10@[0]) {
   const first = add_node<S10>(a=a, b=b)
   const second = add_node<S10>(a=first, b=first)
@@ -25,10 +29,14 @@ pub mod signed_chain::[timecheck=false](a:S4, b:S4) -> (s:S10@[0]) {
   s = add_node<S10>(a=third, b=third)
 }
 PRP
-"$LHD" compile "$W/templates.prp" --emit-dir "ln:$W/library" --workdir "$W/export"
+"$LHD" compile "$W/templates.prp" --emit-dir "ln:$W/library_first" --workdir "$W/export"
+"$LHD" compile "ln:$W/library_first" --emit-dir "ln:$W/library" --workdir "$W/republish"
 "$LHD" lec --impl "ln:$W/library" --ref "$W/templates.prp" --top top \
   --workdir "$W/reload" --result-json "$W/reload.json"
 grep -q '"verdict":"proven".*"bounded":false' "$W/reload.json"
+"$LHD" lec --impl "ln:$W/library" --ref "$W/templates.prp" --top default_chain \
+  --workdir "$W/default_chain" --result-json "$W/default_chain.json"
+grep -q '"verdict":"proven".*"bounded":false' "$W/default_chain.json"
 "$LHD" lec --impl "ln:$W/library" --ref "$W/templates.prp" --top signed_chain \
   --set formal.engine=ind --workdir "$W/signed_chain" --result-json "$W/signed_chain.json"
 grep -q '"verdict":"proven".*"bounded":false' "$W/signed_chain.json"
@@ -38,7 +46,8 @@ cat > "$W/consumer.prp" <<'PRP'
 const lib = import("templates")
 const add = import("templates.add_node")
 pub mod consumer::[timecheck=false](a:U8, b:U8) -> (s:U8@[0]) {
-  const mul = lib.multiply(a=a)
+  const plain = lib.multiply(a=a)
+  const mul = lib.multiply<FAST=true>(a=plain)
   s = add<U8>(a=mul, b=b)
 }
 PRP
@@ -46,7 +55,7 @@ cat > "$W/reference.prp" <<'PRP'
 pub mod consumer::[timecheck=false](a:U8, b:U8) -> (s:U8@[0]) {
   reg s_r:U8 = 0
   s = s_r
-  wrap s_r = a + b
+  wrap s_r = (a ^ 3) + b
 }
 PRP
 mv "$W/templates.prp" "$W/templates.hidden"

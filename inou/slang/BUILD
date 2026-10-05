@@ -68,6 +68,12 @@ sh_test(
 )
 
 sh_test(
+    name = "automatic_packed_local",
+    srcs = ["tests/automatic_packed_local.sh"],
+    data = ["//lhd"],
+)
+
+sh_test(
     name = "slang_test.sh",
     srcs = ["tests/slang_test.sh"],
     data = [

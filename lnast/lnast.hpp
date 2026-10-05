@@ -252,7 +252,7 @@ struct Lnast_io_entry {
   std::string          bound_min_text = {};
   [[nodiscard]] bool   has_deferred_bound() const noexcept { return !bound_max_text.empty() || !bound_min_text.empty(); }
   // `Clock`/`Reset`-typed port (kind stays boolean, see Io_sig).
-  Io_sig               sig            = Io_sig::none;
+  Io_sig               sig = Io_sig::none;
   [[nodiscard]] bool   is_clock() const noexcept { return sig == Io_sig::clock; }
   [[nodiscard]] bool   is_reset() const noexcept { return sig == Io_sig::reset; }
 };
@@ -507,12 +507,15 @@ public:
   // ── forest interchange (the lhd `ln:` directory = hhds::Forest::save) ───
   // Clone this Lnast's tree (attrs included) into `forest` as a tree named
   // by top_module_name, so N units can ride one Forest::save directory.
-  void                          export_into(hhds::Forest& forest) const;
+  // An explicit storage name permits a template and its default specialization
+  // to share a public module name without overwriting either forest body.
+  void                          export_into(hhds::Forest& forest, std::string_view storage_name = {}) const;
   // Wrap one tree of an externally loaded Forest (hhds::Forest::load). The
   // returned Lnast shares ownership of `forest`; replace_body() works (the
   // TreeIO is present). io_meta/bw_meta start empty — re-run the upasses.
   // Returns nullptr when `module_name` is not in the forest.
-  static std::shared_ptr<Lnast> adopt(std::shared_ptr<hhds::Forest> forest, std::string_view module_name);
+  static std::shared_ptr<Lnast> adopt(std::shared_ptr<hhds::Forest> forest, std::string_view module_name,
+                                      std::string_view storage_name = {});
 
   // ── tree access ─────────────────────────────────────────────────────────
   hhds::Tree&                          tree() noexcept { return *tree_; }

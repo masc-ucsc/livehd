@@ -31,7 +31,6 @@
 #include "hhds/graph.hpp"
 #include "hhds/tree.hpp"
 #include "lhd_kernel_internal.hpp"
-#include "satopt_stages.hpp"
 #include "lhd_sim_tune_session.hpp"
 #include "lnast.hpp"
 #include "log.hpp"
@@ -39,6 +38,7 @@
 #include "pass.hpp"
 #include "perf_tracing.hpp"
 #include "rapidjson/document.h"
+#include "satopt_stages.hpp"
 #include "str_tools.hpp"
 #include "woothash.hpp"
 
@@ -771,7 +771,7 @@ bool mapper_maps_cells(const Options& opts, std::string_view method) {
   }
   Eprp_var::Eprp_dict labels;
   merge_sets(opts, method, labels);
-  const auto it = labels.find("tmap");
+  const auto it   = labels.find("tmap");
   const auto mode = it == labels.end() ? std::string_view{"abc"} : std::string_view{it->second};
   if (mode != "none" && mode != "abc") {
     throw Lhd_error{"usage", "pass.usyn.tmap expects none|abc", ""};
@@ -1566,6 +1566,9 @@ void write_manifest(const std::string& dir, std::string_view kind, const std::ve
     }
     first = false;
     ofs << "{\"name\":\"" << json_escape_min(u.name) << "\"";
+    if (u.ln && u.name != u.ln->get_top_module_name()) {
+      ofs << ",\"module_name\":\"" << json_escape_min(u.ln->get_top_module_name()) << "\"";
+    }
     if (!ext.empty()) {
       // Every per-unit writer runs the unit name through the ONE long-name
       // policy (livehd::unit_file_stem): directory separators are collapsed (a
@@ -1634,17 +1637,53 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
 
   auto sorted = units;
   std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
-    return a->get_top_module_name() < b->get_top_module_name();
+    if (a->get_top_module_name() != b->get_top_module_name()) {
+      return a->get_top_module_name() < b->get_top_module_name();
+    }
+    return a->is_template() && !b->is_template();
   });
+
+  // Identity specializations deliberately retain the template's public name.
+  // Both bodies are needed: existing callers use the concrete body, while new
+  // callers can bind different generics. Give only this legal pair distinct
+  // forest keys; every other duplicate remains a configuration error.
+  absl::flat_hash_set<std::string> storage_names;
+  for (const auto& ln : sorted) {
+    storage_names.emplace(ln->get_top_module_name());
+  }
+  absl::flat_hash_map<const Lnast*, std::string> template_storage;
+  for (size_t i = 0; i < sorted.size();) {
+    size_t end = i + 1;
+    while (end < sorted.size() && sorted[end]->get_top_module_name() == sorted[i]->get_top_module_name()) {
+      ++end;
+    }
+    if (end - i > 1) {
+      const auto& tmpl      = sorted[i];
+      const bool  defaulted = !tmpl->get_generics().empty() && tmpl->get_generic_defaults().size() == tmpl->get_generics().size()
+                              && std::none_of(tmpl->get_generic_defaults().begin(),
+                                              tmpl->get_generic_defaults().end(),
+                                              [](const auto& value) { return value.empty(); });
+      if (end - i != 2 || !tmpl->is_template() || sorted[i + 1]->is_template() || !defaulted
+          || tmpl->get_lambda_kind() != sorted[i + 1]->get_lambda_kind()) {
+        throw Lhd_error{"config", std::format("duplicate LNAST unit name '{}'", tmpl->get_top_module_name()), ""};
+      }
+      auto key = std::format("{}.__ln_template", tmpl->get_top_module_name());
+      if (!storage_names.emplace(key).second) {
+        throw Lhd_error{"config", std::format("LNAST template storage name '{}' collides with another unit", key), ""};
+      }
+      template_storage.emplace(tmpl.get(), std::move(key));
+    }
+    i = end;
+  }
 
   auto                       forest = hhds::Forest::create();
   std::vector<Manifest_unit> manifest;
   for (const auto& ln : sorted) {
     std::string name{ln->get_top_module_name()};
-    if (!manifest.empty() && manifest.back().name == name) {
-      throw Lhd_error{"config", std::format("duplicate LNAST unit name '{}'", name), ""};
+    if (const auto it = template_storage.find(ln.get()); it != template_storage.end()) {
+      name = it->second;
     }
-    ln->export_into(*forest);
+    ln->export_into(*forest, name);
     std::ostringstream oss;
     ln->dump(oss);  // hash the canonical text form (deterministic)
     oss << ln->get_simulation_init();
@@ -1827,7 +1866,14 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
     if (!u.IsObject() || !u.HasMember("name") || !u["name"].IsString()) {
       throw Lhd_error{"config", std::format("malformed unit entry in {}/manifest.json", dir), ""};
     }
-    auto ln = Lnast::adopt(forest, u["name"].GetString());
+    std::string_view module_name = u["name"].GetString();
+    if (u.HasMember("module_name")) {
+      if (!u["module_name"].IsString() || u["module_name"].GetStringLength() == 0) {
+        throw Lhd_error{"config", std::format("malformed module name in {}/manifest.json", dir), ""};
+      }
+      module_name = u["module_name"].GetString();
+    }
+    auto ln = Lnast::adopt(forest, module_name, u["name"].GetString());
     if (!ln) {
       throw Lhd_error{"config", std::format("unit '{}' listed in manifest but missing from the forest", u["name"].GetString()), ""};
     }
@@ -1874,6 +1920,9 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
   if (out.empty()) {
     throw Lhd_error{"config", std::format("ln: directory {} holds no units", dir), ""};
   }
+  // The function registry resolves generics through the first body with a
+  // public name. Keep templates ahead of their identity specializations.
+  std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a->is_template() && !b->is_template(); });
   return out;
 }
 

@@ -1765,6 +1765,13 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
     // reg/latch state, so a dead arm's writes here become real hardware.
     wc.decided            = [this](const slang::ast::ConditionalStatement& s) { return const_cond_value(s); };
     pbs.getBody().visit(wc);
+    // Automatic locals are recreated on every process activation. A blocking
+    // assignment in a clocked block makes them scratch values, not flops or
+    // memories that survive to the next edge.
+    absl::erase_if(wc.blocking, [](const auto* sym) {
+      return sym->kind == SymbolKind::Variable
+             && sym->template as<slang::ast::VariableSymbol>().lifetime == slang::ast::VariableLifetime::Automatic;
+    });
     if (is_latch_block) {
       auto written = wc.nonblocking;
       written.insert(wc.blocking.begin(), wc.blocking.end());
@@ -3093,7 +3100,9 @@ bool Slang_context::is_packed_2d_array(const slang::ast::Type& type, int64_t& si
 // State regs declare once at module start, output regs included (ports sit
 // in declared_ from the io emission, hence the dedicated reg_declared_ set).
 void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
-  if (plusarg_vars_.contains(&sym)) return;
+  if (plusarg_vars_.contains(&sym)) {
+    return;
+  }
   if (reg_declared_.contains(&sym)) {
     return;
   }
@@ -5926,7 +5935,9 @@ void Slang_context::lower_continuous_assign(const slang::ast::ContinuousAssignSy
 static bool is_reset_like_name(std::string_view nm) { return str_tools::is_reset_like_name(nm); }
 
 void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) {
-  if (plusarg_blocks_.contains(&pbs)) return;
+  if (plusarg_blocks_.contains(&pbs)) {
+    return;
+  }
   using slang::ast::ProceduralBlockKind;
   using slang::ast::TimingControlKind;
 

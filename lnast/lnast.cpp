@@ -106,10 +106,13 @@ void Lnast::replace_body(const std::shared_ptr<Lnast>& staging) {
   dce_dead_stmts_ = std::move(staging->dce_dead_stmts_);
 }
 
-void Lnast::export_into(hhds::Forest& forest) const {
-  auto tio = forest.find_io(top_module_name);
+void Lnast::export_into(hhds::Forest& forest, std::string_view storage_name) const {
+  if (storage_name.empty()) {
+    storage_name = top_module_name;
+  }
+  auto tio = forest.find_io(storage_name);
   if (!tio) {
-    tio           = forest.create_io(top_module_name);
+    tio           = forest.create_io(storage_name);
     // Materialize the slot so it is Public and replace() below can swap it.
     auto writable = tio->create_tree();
   }
@@ -152,11 +155,12 @@ void Lnast::export_into(hhds::Forest& forest) const {
   tio->replace(std::move(body));
 }
 
-std::shared_ptr<Lnast> Lnast::adopt(std::shared_ptr<hhds::Forest> forest, std::string_view module_name) {
+std::shared_ptr<Lnast> Lnast::adopt(std::shared_ptr<hhds::Forest> forest, std::string_view module_name,
+                                    std::string_view storage_name) {
   if (!forest) {
     return nullptr;
   }
-  auto tio = forest->find_io(module_name);
+  auto tio = forest->find_io(storage_name.empty() ? module_name : storage_name);
   if (!tio) {
     return nullptr;
   }
