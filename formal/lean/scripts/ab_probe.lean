@@ -154,10 +154,27 @@ def srcLadder : IO Bool := do
     let (fres, tf) ← timedF "f" (fun _ => ProtoFast.mixDriver 200000 2000 hwAPVar [encDesign D])
       (fun r => match r with | .ok p => szOf p | .error _ => 0)
     match hres, fres with
-    | .ok HR, .ok FR =>
+    | .ok HR, .ok FR => do
+        -- Semantic checks OUTSIDE the timed sections, for BOTH outputs.
+        -- Identical residual SIZE is not agreement: two different programs can
+        -- have the same term count.  Each residual must pass the fragment
+        -- checker and then match `interpretDesign` at its own checked bound.
+        let i := mkInputFor D 1
+        let st := mkStateFor D 1
+        let want := encResult (interpretDesign D (allEdges D) i st)
+        let checkRun := fun (R : Program) =>
+          match Hw.checkResidual R with
+          | none   => (false, false)
+          | some b => (true, match evalFuel b R []
+                               (.call R.entry [.lit (encEdges (allEdges D)),
+                                               .lit (encInput i), .lit (encState st)]) with
+                             | .value v => (decResult v).map encResult == some want
+                             | _        => false)
+        let (hchk, href) := checkRun HR
+        let (fchk, fref) := checkRun FR
         IO.println s!"  {ns} | host {th} ms | fork {tf} ms | terms {szOf HR}/{szOf FR} \
-same-size {szOf HR == szOf FR}"
-        unless szOf HR == szOf FR do ok := false
+same-size {szOf HR == szOf FR} | host chk {hchk} ref {href} | fork chk {fchk} ref {fref}"
+        unless szOf HR == szOf FR && hchk && href && fchk && fref do ok := false
     | a, b => do
         IO.println s!"  {ns}: host-ok {a.toOption.isSome} fork-ok {b.toOption.isSome}"; ok := false
   return ok

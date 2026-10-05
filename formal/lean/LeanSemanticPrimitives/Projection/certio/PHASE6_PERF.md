@@ -2147,9 +2147,15 @@ through the same gated `-O2` `--file-ab` runner, binary
                     residual-runs 11,290 (6)  control 52,040
     wall 455.00 s   RSS 26,008 KB   exit 0
 
-So **all 8 counted blocks are now canonical-corpus runs.**  Residual
-2.68 s/cycle against the reference's 1.43 s/cycle -- 0.5x, i.e. SLOWER, on this
-certificate.
+So **all 8 counted blocks are now canonical-corpus runs.**
+
+Reference 16,086 ms / 6 = **2.681 s/cycle**; residual 11,290 ms / 6 =
+**1.882 s/cycle**; so the residual is **1.425x FASTER** here.
+
+(An earlier revision of this paragraph said "residual 2.68 against reference
+1.43 -- 0.5x, SLOWER".  That swapped the two columns AND invented the 1.43.
+The log's own `STAGE TIMES` line has `reference-runs 16086` and
+`residual-runs 11290`, and the larger number is the reference.)
 
 ### 22.2 Reset audit corrected to per-flop matching
 
@@ -2206,10 +2212,24 @@ identical at every point:
     1024    14,190       515   27.6x       1.83       1.03
     4096   231,974     2,616   88.7x       2.02       1.17
 
-**RESULT: the host is ~QUADRATIC in source count (exponent rising to 2.02);
-the fork is ~LINEAR (settling near 1.1).**  That is the measured mechanism
-behind the real-design gap: `rt_alu_gate` has 6,137 sources, where a
-quadratic-vs-linear difference is large.
+**RESULT, as finite-size scaling and no more: over 16 to 4,096 sources the
+host's fitted exponent rises to 2.02 and the fork's settles near 1.17.**
+
+What that is NOT, until P2 lands:
+
+* it is not "the measured mechanism behind the real-design gap".  These are
+  end-to-end timings; nothing here attributes the quadratic term to any
+  function.  Attribution needs CALL CHAINS, which the earlier `perf` sample
+  did not record;
+* it is not a "measured hotspot";
+* it is finite-size behaviour over five points, not an asymptotic bound;
+* extrapolating it to `rt_alu_gate` needs care beyond the source count.  This
+  fixture holds NODES AT 64 and makes all but two sources CONSTANT; the ALU has
+  6,597 nodes and 6,135 consts with 15 distinct operators up to arity 65.  The
+  shapes are not alike, and the ladder was built to isolate one axis, not to
+  model a real design.
+
+So this is SUPPORT FOR H3, pending P2.
 
 **Confounders, stated.**  One run per point; ms resolution makes `n = 8/16`
 unreliable; the interpreters differ as described; the source ladder checks
@@ -2218,11 +2238,13 @@ ladder checks both).  And this does NOT retroactively decontaminate the real
 ALU pair -- that one still differs in flags and source snapshots, so this
 ladder is the controlled evidence, not that.
 
-**Decision (plan H3 rule).**  The measured hotspot and the predicted complexity
-reduction agree, so a representation change is justified -- and the change is
-already written and measured: it is obligation A, the fork's `PRes.val` bridge.
-This strengthens the 18.2 conclusion from "B's practical sufficiency is
-doubtful" to a measured scaling difference in source count.
+**Decision (plan H3 rule).**  The rule requires the measured HOTSPOT and the
+predicted complexity reduction to agree.  Only half of that is in hand: the
+scaling difference is measured, the hotspot is not attributed.  So the decision
+is DEFERRED to P2 rather than taken here.  What P1 does establish is that the
+scaling difference between the two specializers is real at finite sizes on a
+controlled input, which is support for obligation A being load-bearing rather
+than cosmetic.
 
 **Next experiment (P2), not run:** vary source count on the PROVED path with a
 `perf` sample at the largest size that stays bounded, to attribute the
