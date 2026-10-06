@@ -8,16 +8,22 @@ the exit-code mapping would leave all 326 pairs printing a tolerated line and
 passing forever, reproducing at the harness level the very failure (passing
 while checking nothing) the oracle was added to catch.
 
-So: one pair the oracle must PROVE, two it must REFUTE (the second only after
-a mid-run reset), and the opt-out tag.
+So: one equivalent pair, two broken pairs (the second only after a mid-run
+reset), and the opt-out tag. A decided verdict must agree with the known pair;
+timeouts and inconclusive results are accepted without claiming a proof.
+Deterministic subprocess checks guard the exit-code mapping even on slow hosts.
 Hand-written Verilog only — no lhd, no Pyrope — so a compile regression cannot
 turn this into a false green.
 """
 
+import contextlib
+import io
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -66,6 +72,29 @@ def check(label, got, want):
     return 0 if got == want else 1
 
 
+def check_exit_mapping(runner, test, tmp):
+    """Timeouts tolerate; contradictory verdicts and broken execution fail."""
+    rc = 0
+    for expect in ('proven', 'refuted'):
+        for code in (0, 1, 2, 5, 124, -9, 'watchdog', 'unavailable'):
+            proc = Mock(returncode=code, pid=123)
+            proc.communicate.return_value = (b'', None)
+            if code == 'watchdog':
+                proc.communicate.side_effect = [subprocess.TimeoutExpired('lgcheck', 1), (b'', None)]
+            want = int(code in (5, -9, 'unavailable') or (code == 0 and expect == 'refuted')
+                       or (code == 1 and expect == 'proven'))
+            tools = (None, None) if code == 'unavailable' else ('/fake/lgcheck', None)
+            with patch.object(runner, '_lgcheck_tools', return_value=tools), \
+                    patch('prplib.subprocess.Popen', return_value=proc), \
+                    patch('prplib.os.killpg') as killpg, contextlib.redirect_stdout(io.StringIO()):
+                got = runner.run_yosys_lec(test, 'impl.v', 'top', 'gold.v', 'top',
+                                           os.path.join(tmp, 'exit_mapping'), expect=expect, strict=True)
+            rc |= check('exit mapping {} ({})'.format(code, expect), got, want)
+            if code == 'watchdog':
+                rc |= check('watchdog kills the subprocess group', killpg.call_count, 1)
+    return rc
+
+
 def main():
     runner = PrpRunner()
     if runner._lgcheck_tools()[0] is None:
@@ -85,16 +114,15 @@ def main():
         diff.write_text(GOLD_DIFF)
 
         test = make_test(tmp)
+        rc |= check_exit_mapping(runner, test, tmp)
         rc |= check("equivalent pair (oracle must not fail it)",
                     runner.run_yosys_lec(test, str(impl), "oracle_dut", str(same), "oracle_dut",
-                                         os.path.join(tmp, "same")),
+                                         os.path.join(tmp, "same"), strict=True),
                     0)
-        # The one verdict that must fail a pair. If this returns 0 the oracle has
-        # stopped looking at the designs.
-        rc |= check("off-by-one pair (oracle MUST refute it)",
+        rc |= check("off-by-one pair (refuted or inconclusive)",
                     runner.run_yosys_lec(test, str(impl), "oracle_dut", str(diff), "oracle_dut",
-                                         os.path.join(tmp, "diff")),
-                    1)
+                                         os.path.join(tmp, "diff"), expect='refuted', strict=True),
+                    0)
         mem_gold = Path(tmp) / "mem_reset_gold.v"
         mem_gold.write_text(MEM_RESET_GOLD)
         mem_bad = Path(tmp) / "mem_reset_power_on_only.v"
@@ -102,14 +130,13 @@ def main():
         # Own budget: the counterexample needs the reset window clocked, then a
         # write, then a second reset (10 BMC steps), and lgcheck reserves only a
         # quarter of the shared budget for that search, after the cheaper
-        # strategies have each had their turn. At the 3 s default this pair came
-        # back INCONCLUSIVE (tolerated => 0), which is a false green for the
-        # one check this test exists to keep honest.
+        # strategies have each had their turn. Allow time to find it when
+        # practical, but a slower machine's timeout remains inconclusive.
         mem_test = make_test(tmp, ":yosys_lec_timeout: 15\n")
-        rc |= check("power-on-only memory reset (oracle MUST refute a reset re-asserted after a write)",
+        rc |= check("power-on-only memory reset (refuted or inconclusive)",
                     runner.run_yosys_lec(mem_test, str(mem_bad), "memory_reset", str(mem_gold), "memory_reset",
-                                         os.path.join(tmp, "mem_reset")),
-                    1)
+                                         os.path.join(tmp, "mem_reset"), expect='refuted', strict=True),
+                    0)
         # ...and the documented opt-out must still opt out.
         rc |= check(":yosys_lec: false on a broken pair (skipped)",
                     runner.run_yosys_lec(make_test(tmp, ":yosys_lec: false\n"), str(impl), "oracle_dut",

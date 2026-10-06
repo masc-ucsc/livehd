@@ -778,11 +778,13 @@ class PrpRunner:
         with open(base, 'rb') as a, open(impl, 'rb') as b:
             return a.read() == b.read()
 
-    def run_yosys_lec(self, test, impl, impl_top, gold, gold_top, odir, expect='proven'):
-        """yosys `equiv` on (generated verilog, golden verilog). 1 only on a verdict against `expect`.
+    def run_yosys_lec(self, test, impl, impl_top, gold, gold_top, odir, expect='proven', strict=False):
+        """yosys `equiv` on (generated verilog, golden verilog). 1 on a verdict against `expect`.
 
         A `:lec_expect: refuted` pair fails only if yosys PROVES it: the native
         lec refuted it, so a proof means one of the two engines is wrong.
+        `strict` also fails on unavailable tools, setup errors and crashes,
+        but still accepts timeouts and inconclusive results without claiming proof.
         """
         name = test.params['name']
         if str(test.params.get('yosys_lec', 'true')).strip().lower() in ('false', 'off', '0', 'no'):
@@ -796,7 +798,7 @@ class PrpRunner:
             # Not a silent pass: say it, so a missing oracle is visible in the
             # log of every pair rather than looking like a clean cross-check.
             print('{} - lgyosys - unavailable (no inou/yosys/lgcheck; cross-check NOT run)'.format(name))
-            return 0
+            return 1 if strict else 0
 
         # `:yosys_lec_timeout: N` — yosys' own shared equivalence budget. Small
         # by default: a pair this oracle cannot decide quickly it will not decide
@@ -866,6 +868,9 @@ class PrpRunner:
         # Tolerated, never a proof. `bounded-clean` is the useful middle: the
         # miter WAS built and solved, just only to LGCHECK_BMC_STEPS depth.
         verdict = {2: 'inconclusive', 5: 'setup-failed', 124: 'timeout'}.get(rc, 'exit {}'.format(rc))
+        if strict and rc not in (2, 124):
+            print('{} - lgyosys - FAILED: oracle {}\n{}'.format(name, verdict, text))
+            return 1
         if rc == 2 and 'BMC: found no counterexample' in text:
             verdict = 'inconclusive (bounded-clean)'
         print('{} - lgyosys - {} - TOLERATED: yosys did not decide, and a non-decision is '

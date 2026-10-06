@@ -1,9 +1,0 @@
-Executing tests from //bench:xs_backend_lec_incremental
-CMD compile_ref: lhd compile verilog --top Backend --emit-dir lg:ref.lg --workdir cw_ref -- -F xs_backend/verilog/filelist.f -DSYNTHESIS --single-unit
-METRIC compile_ref_ms                        1494383 ms
-CMD compile_p1: lhd compile src/pyrope/Backend.prp --top Backend --emit-dir lg:impl1 --workdir cw_impl1 --set sim.jobs=32
-METRIC compile_p1_ms                         1706809 ms
-CMD lec_full: lhd lec --impl lg:impl1 --ref lg:ref.lg --top Backend --workdir LF --set formal.timeout=300 --set lhd.incremental=false
-METRIC lec_full_ms                            967285 ms
-METRIC lec_full_timeout                            1 bool
-PASS: lec_incremental reached the 300s budget on the full leg without refuting
