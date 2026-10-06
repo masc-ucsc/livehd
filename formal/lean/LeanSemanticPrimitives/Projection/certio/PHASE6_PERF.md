@@ -3746,3 +3746,114 @@ all-dynamic); the toy interpreters `interpA` and `interpA2P`; `twoArgA`;
 `twoFunA`; and **the second projection itself** -- mix specialized to the toy
 interpreter, 100 functions, where dynamic `caseT` puts fresh alternative
 binders (`mixAlts`, `freshDyns`) and nested function scopes everywhere.
+
+## 39. S3 results -- deferred shifting removes the shift quadratic; the walk is now the cost
+
+Measured S1 -> S2 -> S3 as the review asked.  S1 = the proved specializer at
+0f175676b; S2 = the proved specializer with the summary (3c175a4da); S3 = the
+UNPROVED deferred-shift prototype (`ProtoShift`, 38.4) on top of S2.  One probe
+(`scripts/s3_probe.lean`) built against an S1 tree and the S2 tree, the
+prototype in-process as the common control.  Artifacts: `.perfwork/s3m/`.
+
+### 39.1 Correctness evidence
+
+* **Residuals identical across S1, S2 and S3 everywhere compared**: 25 grid
+  points in both builds, `alu` and `decoder` every repeat, the counting runs,
+  and the 38.4 fixtures (toy interpreters, `twoArgA`, `twoFunA`, the second
+  projection's 100 functions).  Checker + `interpretDesign` pass at every grid
+  point; six stimuli + four-cycle trace pass on every real-design repeat.
+
+### 39.2 Time
+
+Grid (two builds; S3 is the mean of its two in-process runs):
+
+| point | S1 | S2 | S3 | S2 -> S3 |
+|---|---:|---:|---:|---:|
+| S=1024, N=256 | 1,909 ms | 138 ms | 35 ms | 4.0x |
+| N=1024 | 4,636 ms | 261 ms | 79 ms | 3.3x |
+| E=4096 | 3,695 ms | 183 ms | 79 ms | 2.3x |
+| S=N=1024 | 7,627 ms | 527 ms | 105 ms | 5.0x |
+| S=N=2048 | 30,634 ms | 2,205 ms | 353 ms | **6.2x** |
+| dyn S=256 | 241 ms | 149 ms | 145 ms | 1.0x |
+
+Top-doubling exponents, S1 / S2 / S3: S 1.01 / 1.04 / 0.59; N 1.71 / 1.47 / 1.23;
+E 1.00 / 0.83 / 0.87; **combined S=N 2.01 / 2.07 / 1.76**; dyn 1.39 / 1.86 / 1.88
+(the all-dynamic RESIDUAL is itself quadratic; no specializer change touches it).
+
+Real designs, full acceptance gate, three INTERLEAVED repeats in one session:
+
+| | S1 | S2 | S3 | S1 -> S3 |
+|---|---:|---:|---:|---:|
+| `alu` | 157.9 s | 14.1 s (11.2x) | **2.06 s** (6.9x) | **76.7x** |
+| `decoder` | 309.4 s | 25.2 s (12.3x) | **3.81 s** (6.6x) | **81.1x** |
+
+Peak RSS, specialize-only processes: `alu` 20.0 / 21.2 / 21.5 MB;
+`decoder` 24.2 / 26.7 / 27.1 MB -- a small, consistent rise at each step.
+
+### 39.3 Work counts -- the shift quadratic is gone
+
+Counting build (P3 method; `PartialEvaluatorCorrect.lean` compiles unchanged
+in the shadow; digests agree between S2 and S3 at every point):
+
+| | S2 eager shift node visits | S3 deferred shift ops | S3 hnf push-downs | walk cells (both) |
+|---|---:|---:|---:|---:|
+| S=N=64 | 165,806 | 1,276 | 256 | 16,384 |
+| S=N=512 | 10,500,270 | 10,236 | 2,048 | 1,048,576 |
+| S=N=2048 | 167,829,678 | 40,956 | 8,192 | 16,777,216 |
+| `alu` | 1,086,927,818 | **89,928** | 15,892 | 82,571,546 |
+| `decoder` | 1,820,285,668 | **112,196** | 19,044 | 162,789,418 |
+
+S3's shift work grows by exactly 2x per doubling -- LINEAR -- and is
+12,000-16,000x smaller on the real designs.  **The walk is unchanged and still
+quadratic** (4x per doubling).  Reification nodes are linear (16,386 at 2048).
+
+### 39.4 Allocations -- counted, not inferred
+
+37.2 noted that node visits are not physical allocations.  These are exact
+counts of calls to the allocator's small-object entry point (`mi_malloc_small`)
+under callgrind, in specialize-only processes:
+
+| | S1 | S2 | S3 |
+|---|---:|---:|---:|
+| S=N=256 | 14,446,964 | 2,151,797 | 476,608 |
+| S=N=512 | 56,846,450 | 7,614,580 | 856,255 |
+| growth on doubling | x3.93 | x3.54 | **x1.80** |
+| `alu` | -- | 644,497,505 | **10,181,895** |
+
+S1 under callgrind is infeasible on the real designs.  `mi_free` tracks
+`mi_malloc_small` within 14k calls everywhere.
+
+### 39.5 Attribution -- with call chains
+
+From callgrind's caller->callee arcs (exact inclusive instruction counts, not
+samples; instructions are not time, but the `perf` sample agrees -- 39.9%
+`walkHeadAt` self, 40.5% `lean_dec_ref_known` self):
+
+* **S2 on `alu`**: `PVal.shiftGo` is **62.3%** of all 124.6G instructions,
+  inclusive.  The shift was the cost.
+* **S3 on `alu`**: `walkHeadAt` is **81.5%** of all 14.9G instructions,
+  inclusive.  It also accounts for **88.1%** of `lean_dec_ref_known`'s cost --
+  165,114,660 calls, two per walk cell.  So the reference-count band in S3's
+  profile IS the walk's own traffic, now established by call chain.
+* Same picture at S=N=512: `walkHeadAt` 40.4% inclusive, 54.6% of the
+  `lean_dec_ref_known` cost.
+
+### 39.6 What this means
+
+1. **Deferred shifting is a scaling change, not only a constant**: shift work
+   and allocations go from quadratic to linear, and the combined exponent
+   drops from 2.07 to 1.76.  Not near-linear yet, and not claimed to be.
+2. **What remains quadratic is the walk** -- sum k cells, measured at 81.5% of
+   instructions on `alu`.  Under the amended rule (37.1) that attribution is
+   what reopens **indexed storage**: it is now the measured cost, which it was
+   not in 36.5.
+3. A smaller, separate constant: the walk does two reference-count operations
+   per cell, and ~150 instructions per cell in total.  A borrowed traversal
+   would cut that without touching the representation; it would not change the
+   exponent.
+4. **S3 is unproved.**  Integrating it adds a constructor to `PVal`, so
+   `PValOK`, `PVal.Scoped`, `Compat` and the shift lemmas gain a case, with the
+   intended meaning `shifted k v` holds in `rho` iff `v` holds in
+   `rho.drop k`.  The summary's contract was stated through `PValOK` (37.3)
+   precisely so that this needs a representation lemma for `walkHead`, not a
+   new argument about the interpreter.
