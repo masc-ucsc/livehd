@@ -3260,3 +3260,164 @@ The first and third counts did not move: the ceiling is unchanged, still set by
 the exporter reset defect on the 21 sequential blocks and by `aes` being
 unsupported.  What moved is the backend behind the eight -- from one covered
 run and seven fork runs, to eight covered runs.
+
+## 35. S2a specification -- written BEFORE the prototype is selected
+
+Scope: a PROTOTYPE of the restricted lookup summary, measured against S1
+(0f175676b) on identical certificates, flags and interpreter.  No change to the
+proved specializer and no proof repair until the prototype passes the gate in
+35.6.
+
+### 35.1 What the specializer actually sees at a lookup -- and why the restriction must change
+
+The annotated `nthD` in `hwAPVarT` is function 2:
+
+    params [dyn, stat]   ret dyn
+    body   ite _ (prim stat eqI [var 1, lit 0])
+                 (prim dyn hd [var 0])
+                 (ucall dyn 2 [prim dyn tl [var 0], prim stat subI [var 1, lit 1]])
+
+and `slot` (function 3) is `ucall dyn 2 [var 0, subI (subI (var 1) 1) (var 2)]`.
+
+**At lookup time essentially every spine leaf is `dyn`, not `stat`.**  `srcVal`
+returns `dyn` (inputs are dynamic, and BTA is monovariant), so its constant arm
+is `lift (bvMk w v)`: a constant enters `env0` as `.code (.lit v)`.  When the
+environment crosses `evalNodes`' dynamic parameter, `prepare` let-binds every
+non-variable code leaf -- so each constant becomes a residual `let` and its
+spine leaf becomes `.dyn j`.  That is where the ALU residual's ~16k `letIn`s
+come from.  The 94.82% "constant-targeted" depth of 32 is therefore depth that
+ends at a let-bound VARIABLE holding a constant, not at a static value.
+
+A static leaf could not even reach an `nthD` base case: `hd` would return
+`.stat v`, the dynamic unfold would see a static body, and `mixTerm` rejects
+that as `illAnnotated`.
+
+**Consequence: a summary restricted to static leaves would never fire on
+`I_hw`.**  The restriction is changed to the smallest one that does:
+
+> static, in-bounds index `k >= 0`; the list argument prepares to a KNOWN spine
+> of at least `k + 1` cons cells; the leaf at depth `k` is `.dyn j`.
+> A `.stat` leaf, a negative index, an unknown tail, or anything else FALLS BACK
+> to the existing unfold path, unchanged.
+
+Falling back on a `.stat` leaf keeps behaviour identical where the normal path
+errors.  The prototype COUNTS leaf kinds, so "every leaf is `dyn`" is measured,
+not assumed.
+
+### 35.2 The summary, exactly
+
+At `.ucall .dyn f [tl, ti]` where the callee is RECOGNISED (35.3):
+
+1. `mixTerm` the two arguments, in order, in the same environment as
+   `mixPArgs` would (a static argument's value does not depend on the shift).
+   Any error -> fall back (the normal path reproduces it).
+2. `ti` must give `.stat (.int k)`, `k >= 0`.
+3. `p := prepare r_l` -- EXACTLY what the first unfold's `mixPArgs` computes for
+   the list parameter.
+4. Walk `p.value` `k` cons cells; the head there must be `.dyn j`.
+5. Result: `.lets p.binds (.code (.var j))`, requests `rq_l ++ rq_i`.
+
+Why that is what `k + 1` unfolds compute.  Unfold 0 binds `p.binds` and puts
+`p.value` in the environment.  Every later unfold's list argument is
+`tl (var 0)` on a `.val` spine: `peelTl` answers it through `ofPVal`, which
+prepares to NO bindings, so no index ever shifts.  The base case's
+`hd (var 0)` answers `ofPVal (.dyn j) = .code (.var j)`.  The normal result is
+therefore `.lets p.binds (.lets [] (... (.code (.var j))))`; the summary drops
+the `k` inner empty packages.
+
+**Those empty packages are observationally inert**: `toCode`, `prepare`,
+`total` (false either way, since the outer `.lets p.binds` remains), the three
+peels and `allStatic` all give the same answer.  Residual identity against S1
+is checked by digest regardless -- an argument is not a measurement.
+
+**Failure and divergence obligations are retained**: the list argument's
+package `p.binds` is kept, both arguments are still specialized (and their
+requests kept), and every case the summary cannot answer goes through the
+unchanged path.  **Fuel is NOT preserved** -- `mixTerm`'s budget is a depth,
+and the summary removes `k + 1` levels of it.  The summary can therefore
+succeed where the normal path runs out of fuel, never the reverse.  The
+acceptance relation is semantic agreement, not fuel-identical traces.
+
+### 35.3 Recognition: the implementation, not the name
+
+The shortcut fires only if the callee's ANNOTATED definition is the list-index
+recursion itself:
+
+    isNthD f fd :=  fd.params = [dyn, stat]
+                 && fd.body matches  ite _ (prim stat eqI [var 1, lit (int 0)])
+                                           (prim dyn hd [var 0])
+                                           (ucall dyn g [prim dyn tl [var 0],
+                                                         prim stat subI [var 1, lit (int 1)]])
+                 && g = f
+
+A decidable structural match on the body, with the self-recursion checked.  It
+does not consult the surface name `"nthD"` or assume index 2: any function with
+this definition is recognised, and a function named `nthD` with any other body
+is not.  Every binding-time annotation the unfold path DEPENDS on is matched
+exactly; the `ite`'s own annotation is a wildcard because `mixTerm` ignores it
+and dispatches on `btOf` of the condition.
+
+This is also what makes the S2 lemma statable for an ARBITRARY program: for any
+`fd` passing `isNthD`, `k + 1` unfolds on a known spine equal the summary.
+
+### 35.4 The `MixProgram.lean` mirror -- specified now, not after
+
+* **`isNthDL fd f`** -- the same check on the ENCODED definition: build the
+  encoded template for `f` in the object language and compare with `eqV`.
+  During the second projection `A` is static, so this check is resolved when
+  the compiler is GENERATED and costs the generated compiler nothing.
+* **`nthSummaryL`** -- mixes the two arguments with the object `mixTerm`,
+  checks the static index, calls `prepareL`, walks the encoded `tagPCons` spine
+  `k` cells, requires `tagPDyn` at the head, returns
+  `some (pair (rLets binds (rCode (eVar j))) reqs)` or `none`.  The spine is
+  DYNAMIC data for the generated compiler, so the walk becomes residual code in
+  it -- which is the point: the compiler performs the cheap walk instead of
+  `k + 1` unfolds.
+* **The hook** -- in the `tagAUcall` dynamic branch, before `mixPArgsL`:
+  try the summary when `isNthDL` holds; fall back to the existing branch on
+  `none`.
+
+**Executable mirror checks**, as `#guard`s:
+
+1. host `isNthD` and object `isNthDL` AGREE on every function of `hwAPVarT`,
+   of `A_M` (mix itself) and of the toy interpreter;
+2. exactly ONE function of `hwAPVarT` is recognised, and it is `nthD`;
+3. the object specializer and the host produce the SAME residual on a small
+   hardware design -- run through `evalFuel`.  Nothing has ever run the object
+   specializer on `I_hw`, so this also tests S1's mirror there for the first
+   time.  It is done with the summary OFF and ON.
+
+### 35.5 What is counted, and how
+
+A counting build of the prototype, by the P3 shadow-tree method, records per
+run: summaries attempted; summaries that fired; fallbacks BY REASON (index not
+static, negative, spine unknown, out of bounds, `.stat` leaf, other leaf);
+`nthD` unfolds AVOIDED (`k + 1` per firing -- derived, and checked once against
+a direct unfold count with the summary disabled); and **spine cells visited by
+the helper** (`k + 1` per firing, counted).  A faster walk is still `O(k)`:
+cells visited is reported next to unfolds avoided, never instead of it.
+Timings come only from the uncounted build.
+
+### 35.6 Measurements and the gate
+
+Same probe, same certificates and flags as S1; S1's proved host and the
+prototype in ONE process.
+
+* residual DIGEST identity against S1 at every grid point, and on real designs;
+* checker + `interpretDesign` at every point, outside the timed section;
+* the S0.4 two-axis grid, plus `rt_alu_gate` and `decoder`, wall time and RSS,
+  three repeats;
+* fitted exponents on each axis, reported separately.
+
+**Gate to proceed to the S2 proof** (fixed now):
+residuals identical or every difference explained; semantics agree everywhere;
+the object mirror agrees on a hardware design.  "Faster" is necessary, not
+sufficient.
+
+**S2b decision** (fixed now):
+* combined-axis exponent still >= 1.5 with the summary, OR helper walk >= 25%
+  of specialization self time on `rt_alu_gate` -> the list walk is still the
+  cost; **combine the summary with indexed storage** (S2b);
+* otherwise -> **prove and integrate the simpler summary first**, and report
+  the range over which the remaining `O(sum k)` walk stays negligible --
+  because it is still there, with a smaller constant, and it IS quadratic.
