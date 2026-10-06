@@ -3076,3 +3076,187 @@ possible part of S2.**
   data-structure visits, grid scaling, ALU wall time and RSS, and semantic
   agreement -- with specialization time kept separate from simulator
   throughput.
+
+## 34. S1 -- `PRes.val` promoted into the PROVED specializer
+
+Decision recorded in 33.  Done as an IN-PLACE extension of
+`PartialEvaluator.lean`, not a bridge from the fork, so there is no erasure and
+no commutation obligation (`PROMOTION_OBLIGATIONS.md`, final update).
+
+### 34.1 What changed
+
+`PRes` gains `| val : PVal → PRes`.  Arms in `toCode` (via the new
+`PVal.toCode`), `total` (`true`), `prepare` (`⟨[], v⟩`), the three peels
+(answered from the spine, no guard walk), `allStatic`, `lift` and `letIn`
+(rejected, as `.cons` was).  The `var` rule returns `.val (.cons a b)` instead
+of copying the spine with `toPRes` -- the O(n) -> O(1) change.
+
+**One deliberate departure from the fork.**  Results are built through
+`PRes.ofPVal`, which is `toPRes` at the leaves and carries only genuine spines
+as `.val`.  The fork's peels return a raw `.val a`, which can build
+`.val (.stat v)`: `allStatic` rejects that where it accepts `.stat v`, and
+`primStruct`'s static fold misses it.  That is a latent new failure mode and a
+residual difference; `ofPVal` rules both out, and is what makes residual
+identity (34.3) a fair test.
+
+The peels end in `| _ => none`.  A wildcard would have silently swallowed `.val`
+-- sound, but losing the structural answer and therefore both the speedup and
+residual identity -- so the `.val` arms are explicit and precede it.
+
+### 34.2 Proofs
+
+Every `.val` case either closes by `simp` (an error arm, a `none`) or reduces to
+the `PVal` fact the existing `.cons`/`toPRes` case already uses.  New lemmas,
+each proved on `PVal` directly because `toPRes v` is not a structural subterm
+of `.val v`: `PVal.Scoped_toCode`, `PRes.Scoped_ofPVal`, `PValOK_toCode`,
+`PResOK_ofPVal`, `prepare_ofPVal`, `PValOK_of_evalFuel`, `PResSound_of_val`,
+`PValOK_of_PResOK_toPRes`, and two that state the change is pure
+representation:
+
+* `PResOK_val_iff_toPRes` -- `.val pv` and `pv.toPRes` mean the same values;
+* `PRes.toCode_toPRes` -- and reify to the same code.
+
+`mixDriver_iff`'s statement is unchanged.  Both directions
+(`mixDriver_sound`, `mixDriver_complete`) and the scope chain
+(`mixDriver_scoped`, `mixTerm_scoped`, `mixPArgs_scoped`, `prepare_scoped`,
+`generateFrom_scoped`, ...) are in `Audit.lean` and check.
+
+**Axiom audit, diffed per theorem against pristine HEAD** (both trees built
+from scratch; HEAD's two S1 files restored from git):
+
+    Audit.lean       311 entries   axiom sets IDENTICAL to HEAD
+    ProtoAudit.lean   46 entries   axiom sets IDENTICAL to HEAD
+    no sorryAx, no ofReduceBool, no new warnings
+
+Not merely "still within {propext, Quot.sound, Classical.choice}": no theorem
+picked up an axiom it did not already have.
+
+### 34.3 `MixProgram.lean` mirrored in the same increment
+
+`tagRVal = 74`; object `ofPVal` and `pvToCode`; `tagRVal` arms in `toCode`,
+`totalL`, `prepareL` and the three peels; the `var` arm calls `ofPVal`.
+`allStaticL`, `lift` and static `letIn` go through `presVal`, which matches only
+`tagRStat`, so they `typeError` on `.val` exactly as the host errors -- the
+file's no-error-plumbing convention mirrors the rejection for free.
+
+The object peels enumerate all four tags with no fallback, so WITHOUT the
+mirror an object-level `.val` would `typeError` where the host answers: the
+mirror is required, not cosmetic.
+
+`pvToPRes` was REMOVED, not left dead: the host's `var` rule no longer calls
+`PVal.toPRes` (it survives only in `Prepared.toPRes`, which no specializer
+function calls), so nothing in the object program should either.
+
+`Gate0` pins two sizes and both moved, measured before re-pinning:
+
+    mixProgram.funs.length   60 -> 61   (+ofPVal +pvToCode -pvToPRes)
+    compilerP.funs.length    99 -> 100  (mix specialized to the toy interpreter)
+
+Every OTHER `Gate0` guard is unchanged and passes, including the object
+specializer's agreement with the Lean one and the generated compiler's
+agreement with the interpreter; `Demo`'s `MixProgram_agrees` passes.  This is
+implementation alignment.  It does NOT prove `mixProgram_implements_mixHost`.
+
+### 34.4 Residuals are byte-identical, and the proved path now runs at the fork's speed
+
+`scripts/s1_identity.lean`: ONE source, built twice -- against pristine HEAD
+(the two S1 files restored from git into a copy of the tree) and against S1 --
+and run SEQUENTIALLY on the same machine.  Each prints, per point, the proved
+host's residual term count and a digest of its `repr`, with the unchanged fork
+as an in-process control.  Identity: `.perfwork/s1/S1-identity-capture.json`
+(binaries `7821e323...` HEAD, `a550b3a9...` S1); logs `run-base.log`,
+`run-s1.log`.
+
+**18 of 18 residuals IDENTICAL -- same term count AND same digest.**  18/18
+pass the fragment checker and `interpretDesign` at their own bound, on both
+builds.  The `ofPVal` design claim -- that carrying `.val` changes the cost of
+specialization and nothing else -- is confirmed on every fixture shape tried,
+including the all-dynamic one where `lets` packages are live.
+
+| point | HEAD host | S1 host | speedup | fork HEAD / S1 |
+|---|---:|---:|---:|---:|
+| `chainD` n=128 | 101 ms | 36 ms | 2.8x | 36 / 38 |
+| `srcD` nsrc=256 | 911 ms | 125 ms | 7.3x | 125 / 127 |
+| `srcD` nsrc=1024 | 11,365 ms | 502 ms | 22.6x | 520 / 521 |
+| `srcD` nsrc=4096 | 183,622 ms | 2,584 ms | **71.1x** | 2,595 / 2,642 |
+| `gridD` S=N=256 | 5,503 ms | 474 ms | 11.6x | 490 / 493 |
+| `gridD` S=N=512 | 42,475 ms | 1,876 ms | 22.6x | 1,935 / 1,940 |
+| `gridD` S=N=128, arity 8 | 2,906 ms | 463 ms | 6.3x | 476 / 484 |
+| `dynSrcD` nsrc=128 | 338 ms | 91 ms | 3.7x | 94 / 95 |
+
+The fork moved by at most 2% at every point above 100 ms, so the host's change
+is not machine drift.  The proved host now runs at the fork's speed -- in fact
+2-4% faster at the large points, consistently in sign but too small to
+attribute.
+
+**What the exponents say, and what they do not:**
+
+    source axis, nsrc 1024 -> 4096    HEAD 2.007   S1 1.182   fork 1.171
+    combined S = N, 256 -> 512        HEAD 2.948   S1 1.985
+
+S1 removed the term that made the host WORSE than quadratic in combined size,
+and the source axis now matches the fork.  **It did not make specialization
+near-linear.**  What remains on the combined axis is ~2.0 -- the
+sum-of-lookup-depths law of 28.1, which S1 was never going to touch and which
+is S2's target.  One run per build; anything under ~5% is noise.
+
+### 34.5 All eight counted blocks now run on the COVERED backend
+
+**Until now, 7 of the 8 counted blocks had only ever run on the FORK.**  E6-E12
+used `proto_probe --file-ab`, i.e. `ProtoFast.mixDriver` -- which the ledger
+labels "EXPERIMENTAL ... on an UNPROVED backend ... NOT theorem-covered".  Only
+`alu` had run on the covered backend, and that took 17 hours (section 18),
+which is why the fork was used for the rest.
+
+S1 makes the proved path fast enough to run them all.  `total_probe` (PROVED
+`mixDriver` + `hwAPVarT`), canonical corpus, `-O2`, one at a time, smallest
+first.  Every run pinned by a PRELAUNCH capture at `8d7e9225a` and recorded from
+its own `/usr/bin/time` trailer (`experiments.jsonl`, rows 15-22):
+
+| block | sources / nodes | specialize | residual terms | bound | stimuli | trace | control | wall | exit |
+|---|---|---:|---:|---:|---:|:-:|:-:|---:|:-:|
+| `instr_scan` | 1,235 / 1,264 | 6,691 ms | 48,439 | 5,711 | 6/6 | yes | yes | 15.7 s | 0 |
+| `commit_stage` | 1,193 / 1,283 | 6,383 ms | 44,052 | 5,448 | 6/6 | yes | yes | 45.1 s | 0 |
+| `compressed_decoder` | 1,913 / 2,022 | 16,189 ms | 41,508 | 8,962 | 6/6 | yes | yes | 23.4 s | 0 |
+| `pmp` | 2,881 / 3,213 | 37,246 ms | 51,517 | 14,277 | 6/6 | yes | yes | 52.3 s | 0 |
+| `pmp_data_if` | 4,062 / 4,505 | 72,595 ms | 81,408 | 19,743 | 6/6 | yes | yes | 103.5 s | 0 |
+| `alu_wrapper` | 6,134 / 6,595 | 169,332 ms | 89,961 | 28,889 | 6/6 | yes | yes | 225.7 s | 0 |
+| `alu` | 6,137 / 6,597 | 162,632 ms | 89,996 | 28,899 | 6/6 | yes | yes | 220.4 s | 0 |
+| `decoder` | 8,340 / 8,938 | 340,835 ms | 137,480 | 38,754 | 6/6 | yes | yes | 440.5 s | 0 |
+
+All six support fields true on every block.  **Every residual term count and
+every checker bound is identical to the block's earlier run** -- seven fork
+runs and the one old-host `alu` run -- which is the real-design counterpart of
+34.4's byte-identity.
+
+**`alu`: specialize 61,267,338 ms -> 162,632 ms on the same backend, same
+flags, same certificate.**  That is a HISTORICAL comparison spanning TWO
+changes -- the `@[csimp]` fast path (1.26x on the ladder, 26) and S1 -- not a
+measurement of S1 alone, and not a guaranteed current ratio.  What it does
+establish is that the covered backend now completes the full acceptance gate on
+the largest counted design in under four minutes.
+
+**What these runs are, in the ledger's own words**: EXPERIMENTAL EXECUTION on
+the COVERED backend, for which `IHwAdequate_varT`, `specializeDesign_varT_correct`
+and `simSound_varT` ARE proved; the concrete `hproj` is NOT kernel-certified
+(`mixDriver` does not kernel-reduce at nontrivial fuel), so each is a trusted
+native execution, and NONE is RTL equivalence.  Each certificate is a
+configured export wrapper of one module, not whole-core CVA6.
+
+Provenance note: the first run saw a clean tree; each later prelaunch shows
+`dirty_file_count 1`, which is `experiments.jsonl` itself -- the row the
+previous run had just appended.  No code was dirty, and the pinned
+`PartialEvaluator.lean` hash (`0bee866c...`) is the committed S1 blob.
+
+### 34.6 Counts
+
+| count | meaning | before S1 | after S1 |
+|---|---|---:|---:|
+| differential (any backend) | specialized, checker-accepted, agrees with `interpretDesign` on the recorded stimuli | 8 | 8 |
+| **differential on the COVERED backend** | the same, on proved `mixDriver` + `hwAPVarT` | **1** | **8** |
+| no known reset conflict | the above AND the per-flop reset scan is clean (vacuous at zero flops) | 8 | 8 |
+
+The first and third counts did not move: the ceiling is unchanged, still set by
+the exporter reset defect on the 21 sequential blocks and by `aes` being
+unsupported.  What moved is the backend behind the eight -- from one covered
+run and seven fork runs, to eight covered runs.
