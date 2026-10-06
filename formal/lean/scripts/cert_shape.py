@@ -29,6 +29,15 @@ SCOPE -- read this before quoting a number:
   * Memory sources are `bvMk 0 0` in `I_hw` -- defined-and-wrong, unsupported
     -- so they are counted as free and flagged.
 
+  * (B) is RESIDUAL `tl` in the regime where only the source prefix
+    residualizes.  It is NOT the number of `nthD` unfolds the specializer
+    performs: each unfold is a `.ucall .dyn` whether or not it leaves a `tl`,
+    and a dep read from node i costs `(ns + i) - 1 - d` unfolds, node-targeted
+    deps included.  On `rt_alu_gate` that is 41,271,557 against (B)'s
+    18,828,961, and the residual actually holds 65 `tl`.  Using (B) as a
+    specialization-time step count is exactly the error PHASE6_PERF.md 32
+    records.
+
   * The flop-state chain is reported separately as (C) and is only the
     `nthD fq idx` hold read; `flopD` residualises about TWICE that, so (C) is a
     lower bound, not a fit.

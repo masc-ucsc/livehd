@@ -2579,12 +2579,13 @@ qualifications, none of which reverse it:
   shows the two transforms produce the SAME `main` body by exact `BEq`.  That
   is evidence, not a theorem, and it is the same convention P1 and P4 used;
 * the fork binary carries `-g -fno-omit-frame-pointer`, which COSTS
-  performance, so 161,101 ms is an UPPER bound on the fork and 380x is a
-  LOWER bound on the ratio;
+  performance, so 161,101 ms probably overstates the fork.  That does NOT make 380x a
+  mathematical lower bound -- build flags are not a proof -- and the whole
+  comparison is HISTORICAL, not a guaranteed current speedup (see 32);
 * the host figure predates the `@[csimp]` fast path, worth 1.26x on the ladder
   (26.1).  If it carries over, the current ratio is nearer 300x.
 
-### 27.2 The profile: there is no hotspot
+### 27.2 The profile: no single function crosses the 20% threshold
 
 `perf record -F 99 --call-graph fp`, 150 s cap inside the 161 s specialize
 stage, so the window is pure specialization: 14,769 samples.  Raw artifacts
@@ -2620,8 +2621,11 @@ it implies; do not reach for a drafted option".
 
 **What it implies.**  The cost is spread almost evenly across traversal,
 allocation, field access and shifting -- which is the signature of ONE uniform
-operation repeated an enormous number of times, not of a slow function.  The
-fork does not have a hotspot; it has a STEP COUNT.  That makes
+operation repeated an enormous number of times, not of a slow function.  "No
+hotspot" means only that no single function crossed the 20% threshold -- NOT
+that nothing is expensive: repeated lookup can be THE expensive operation
+precisely by being spread across traversal, allocation and reference
+counting.  That makes
 "make a function faster" the wrong shape of fix and "perform fewer steps" the
 right one, which is a conclusion about S2's options, not about any of them in
 particular.
@@ -2742,23 +2746,29 @@ direction as the S0.3 prediction in 27.4: I have now underestimated the walk
 three times.  The grid is what settles it, because it varies the axes
 separately instead of reasoning about one of them.
 
-### 28.3 Extrapolating to the ALU -- where the law accounts for about a third
+### 28.3 Extrapolating to the ALU -- indicative only
 
-`cert_shape.py` puts the ALU's source-prefix walk at **18,828,964** steps.  At
-2.6 us that is **49 s**, against **161 s** measured (27.1), so the fixture law
-accounts for roughly **31%** of the real design.  The gap is not hidden and not
-explained away:
+**Corrected (32).**  The first version of this subsection extrapolated from
+`cert_shape.py`'s (B) term, 18,828,964, and got 49 s = 31%.  That was the
+wrong input.  (B) predicts RESIDUAL `tl` in the regime where only the source
+prefix residualizes (validated there within 0.015%), so it charges a source
+read `ns - 1 - d` and node-prefix walks nothing.  The fork's SPECIALIZATION-time
+cost is every `nthD` unfold, `n - 1 - d` per dependency with `n = ns + i` --
+the depth model 28.1 actually fits.  On `rt_alu_gate` that is:
 
-* `cert_shape.py`'s (B) term counts only reads that reach a SOURCE slot.  The
-  ALU's dependency targets are 648 input, 6,135 const and **7,433 node**, and
-  a read of a node slot also walks -- those steps are in neither number;
-* the ALU's residual is 89,996 terms against the grid's 1,000-22,000, so there
-  is far more non-walk work to do;
-* the ALU runs 15 operators at arities up to 65, where the grid runs one.
+    source-targeted, n-1-d         40,769,575
+    node-targeted,   n-1-d            501,982
+    TOTAL structural lookup depth  41,271,557   (one lookup per listed dep)
 
-Section 23.3's caution stands and is now quantified: **these fixtures are not a
-model of that design.**  What transfers is the LAW -- cost tracks the sum of
-lookup depths -- not the constant.
+At the grid constant (2.32-3.29 us, mean 2.63) that is **96 to 136 s, mean
+109 s, against 161 s measured** -- roughly 60% to 85%.  The first version
+blamed its gap on the 7,433 node-targeted reads; they are only 1.22% of the
+depth.  The gap was the missing `+ i`.
+
+**This is indicative, not a bound.**  Transferring a per-step constant from
+one-operator fixtures to a 15-operator design with arities up to 65 and a
+residual 4-90x larger does not establish a floor or a ceiling.  What transfers
+is the LAW -- cost tracks the sum of lookup depths -- not the constant.
 
 ## 29. S0.3 -- the walk, sized correctly at last
 
@@ -2766,9 +2776,11 @@ S0.3 asked how many `nthD` unfolds a real design performs and what one costs.
 Neither number needed a new counter in the end: the count is static and the
 cost falls out of the S0.4 regression.
 
-**How many.**  `cert_shape.py` on `rt_alu_gate.dcert` gives **18,828,964**
-source-prefix walk steps (plus 3 for the runtime-input vector).  The prediction
-file said 8,179,105; that number is wrong and is withdrawn.
+**How many.**  The total STRUCTURAL lookup depth on `rt_alu_gate.dcert` --
+`n - 1 - d` summed over every listed dependency -- is **41,271,557** (28.3).
+The first version of this section quoted `cert_shape.py`'s 18,828,964, which
+predicts residual `tl` in a different regime and is NOT the unfold count (32).
+The prediction file's 8,179,105 is withdrawn as well.
 
 **What one costs.**  Section 28.1 fits twenty grid points with a single
 constant of **~2.6 us per unit of lookup depth**, and one unit of lookup depth
@@ -2783,17 +2795,19 @@ are reported as they are:
 | evidence | what it says about the walk |
 |---|---|
 | grid regression (28.1) | the law accounts for the fixtures within 1.42x -- on the grid the walk is essentially ALL of it |
-| ALU, law extrapolated (28.3) | 18.83M x 2.6 us = 49 s of 161 s = **31%** |
+| ALU, law extrapolated (28.3) | 41.27M x 2.3-3.3 us = 96-136 s of 161 s, ~60-85% -- **indicative only** |
 | ALU, stack-depth profile (27.3) | **89%** of samples buried ~100 `mixTerm` frames deep |
 
-The 31% and the 89% bound the same quantity from opposite directions and the
-gap is explained in 28.3: `cert_shape.py` counts only reads that reach a SOURCE
-slot, and 7,433 of the ALU's dependencies target NODE slots, which also walk
-and are in neither figure.  So 31% is a floor, not an estimate.
+**Neither number is a bound** (corrected, 32).  Transferring a fixture's
+per-step constant to a different design does not establish one, and deep
+`mixTerm` stacks do not uniquely identify `nthD` -- `mkSources` and `evalNodes`
+recurse too.  The extrapolation and the profile point the same way, which is
+evidence; they are not a measured runtime fraction.
 
 **The decision rule fired.**  It read: unfolds x cost >= 25% of fork wall makes
 a verified lookup summary a candidate for S2; below 10% withdraws P-A and P-D
-outright.  The floor alone is 31%.
+outright.  Every indicator lands above 25%, but none is a bound, so the honest
+reading is that the rule fired on indicative evidence.
 
 **So the rule that would have withdrawn P-A and P-D did not fire -- the
 opposite one did.**  The prediction attached to it ("THE WALK DOES NOT
@@ -2874,9 +2888,13 @@ time.  `cert_shape.py` separates these as chain (A), runtime-vector, from
 chain (B), source-prefix -- and this is why that separation was worth making.
 
 The slot-environment walk (B) is a SPECIALIZATION-time cost that a lookup
-summary could remove.  The runtime-vector walk (A) is a RESIDUAL-size cost that
-no specializer change touches, because the index is genuinely unknown until run
-time.  **They must never be quoted as one number.**  On `rt_alu_gate`, (A) is 3
+summary could remove.  The runtime-vector walk (A) is a RESIDUAL-size cost.
+**CORRECTION (32): it is not unavoidable.**  The VALUE `inp` is dynamic, but the
+INDEX `idx` is static -- it comes out of the source descriptor -- so an indexed
+primitive or a shared traversal could collapse this walk too.  An earlier
+version said no specializer change touches it "because the index is genuinely
+unknown until run time", which confused the dynamic value with its static
+index.  **They must never be quoted as one number.**  On `rt_alu_gate`, (A) is 3
 steps and (B) is 18,828,961.
 
 ## 31. What S0 decided
@@ -2888,7 +2906,7 @@ before any of them ran.
 |---|---|---|---|
 | S0.1 | what dominates the fork? | named fn > 20% self, or allocator > 35% | **neither fired** -- max named 16.83%, allocator 30.55% |
 | S0.2 | is nested-`lets` append quadratic? | exponent >= 1.5 proceeds, < 1.2 refutes | **refuted** -- 0.50 to 0.83 |
-| S0.3 | does the walk dominate? | >= 25% makes a lookup summary a candidate | **fired** -- floor 31%, profile 89% |
+| S0.3 | does the walk dominate? | >= 25% makes a lookup summary a candidate | **fired**, on indicative evidence -- extrapolation ~60-85%, profile 89% |
 | S0.4 | is the fork quadratic in design size? | >= 1.5 justifies representation work | **fired** -- 1.98 |
 
 **Three of my four predictions were wrong, all in the same direction: I
@@ -2897,12 +2915,16 @@ underestimated the walk every time.**  The prediction file is what caught it.
 ### 31.1 The finding, in one sentence
 
 **Fork specialization time is the SUM OF LOOKUP DEPTHS over the design's slot
-reads, at about 2.6 us per step, with no hotspot anywhere -- and on
-`rt_alu_gate`, 99.9966% of those steps are reads that terminate at a CONSTANT
-whose value the specializer already knows.**
+reads, at about 2.6 us per step on the fixtures, with no single function above
+20% self time -- and on `rt_alu_gate`, 94.82% of the total STRUCTURAL lookup
+depth is reads that terminate at a CONSTANT whose value the specializer
+already knows.**  (Structural depth, assuming one lookup per listed
+dependency -- NOT a measured runtime fraction.)
 
-The last clause is the actionable one.  The ALU's walk is 18,828,961 steps;
-18,828,315 of them end at one of its 6,135 constant sources.  The specializer
+The last clause is the actionable one.  The ALU's total structural lookup
+depth is 41,271,557, of which 39,134,880 ends at one of its 6,135 constant
+sources.  (An earlier revision said "99.9966% of 18,828,961", which used only
+`cert_shape.py`'s source-prefix term, itself an undercount -- see 32.)  The specializer
 holds that constant as a `PVal.stat` the whole time and still walks the spine
 one `.ucall .dyn` at a time to reach it.
 
@@ -2914,19 +2936,20 @@ ONE step -- retaining every enclosing binding, and falling back otherwise.
 
 What the measurements add to that, beyond what the plan already said:
 
-* **It does not need the general case.**  Because 99.9966% of the ALU's steps
-  end at a constant, a summary restricted to a statically-known spine with a
-  `stat` leaf captures essentially the whole win.  That is a far smaller proof
+* **It does not need the general case.**  Because 94.82% of the ALU's structural
+  lookup depth ends at a constant, a summary restricted to a statically-known
+  spine with a `stat` leaf targets most of it -- an experiment worth running,
+  not a measured runtime share.  That is a far smaller proof
   obligation than a summary that also handles dynamic leaves, and it should be
   built first and measured before being generalised.
 * **It is specializer-side**, so `I_hw` and `IHwAdequate` are untouched.
 * **The acceptance relation must be semantic, not fuel-identical** -- skipping
   interpreter steps changes fuel consumption, so equality at matched budgets is
   the wrong criterion.
-* **Expected benefit on the real ALU is bounded, not promised**: a floor of 31%
-  from the law (28.3) and ~89% from the stack-depth profile (27.3).  The two
-  differ because `cert_shape.py` counts only source-targeted reads.  Quote the
-  range, never the top of it.
+* **Expected benefit on the real ALU is UNKNOWN until measured.**  The law
+  extrapolation (28.3) and the stack-depth profile (27.3) both point at most of
+  the run, but neither is a bound.  A prototype's own ALU wall time is the only
+  number that may be quoted.
 
 ### 31.3 The other three options, as the evidence now stands
 
@@ -2971,3 +2994,85 @@ reset defect and by `aes` being unsupported on `sources` and `ops`.
 Fixture experiments are NOT added to `experiments.jsonl`, which tracks
 real-certificate acceptance runs only; their identities are pinned in
 `.perfwork/S0-grid-capture.json` and `.perfwork/S0-prof-capture.json`.
+
+## 32. Corrections to 27-31, from review
+
+Four statements in sections 27-31 overstated the evidence, and one was wrong.
+Each has been fixed in place; this section records what changed and why, so
+that no reader takes the earlier wording from a diff or a quote.
+
+1. **"99.9966% of the ALU's walk ends at a constant" was the wrong quantity.**
+   It used `cert_shape.py`'s (B) term, which predicts RESIDUAL `tl` in the
+   regime where only the source prefix residualizes -- it charges a source read
+   `ns - 1 - d` and node-prefix walks nothing, and is validated for that within
+   0.015%.  The specializer's UNFOLD count is `n - 1 - d` per listed dependency
+   with `n = ns + i`.  Recomputed:
+
+       target   reads   structural depth    share
+       const    6,135        39,134,880    94.82%
+       input      648         1,634,695     3.96%
+       node     7,433           501,982     1.22%
+       total   14,216        41,271,557
+
+   **94.82% of structural lookup depth is constant-targeted**, assuming one
+   lookup per listed dependency.  That still supports a constant-focused
+   experiment; it is NOT a measured runtime fraction.  `cert_shape.py` itself
+   is not wrong and is unchanged in what it computes -- I used it for a
+   quantity it does not claim to compute, and its docstring now says so.
+
+2. **"31% is a floor" and "31%-89% bounds the walk" are withdrawn.**
+   Transferring a fixture's per-step cost does not establish a lower bound on a
+   different design, and deep `mixTerm` stacks do not uniquely identify `nthD`.
+   With the correct depth (item 1) the extrapolation reads ~60-85% instead of
+   31%; that changes the number and not its status, which is indicative only.
+   The first explanation of the gap -- node-targeted reads -- was also wrong;
+   they are 1.22% of depth, and the gap was the missing `+ i`.
+
+3. **"380x is a LOWER bound" is withdrawn.**  It is a HISTORICAL comparison:
+   the host figure predates the `@[csimp]` fast path, and a profiling build
+   being slower than a plain `-O2` build is not a mathematical bound on
+   anything.  The fork's 161,101 ms and the host's 61,267,338 ms are both real
+   measurements of the builds they name; their ratio is not a guaranteed
+   current speedup.
+
+4. **"No hotspot" means no single function crossed the chosen 20% threshold,
+   and nothing more.**  Repeated lookup can still be THE expensive operation,
+   precisely by being spread across traversal, allocation and reference
+   counting -- which is what 27.3 and 28.1 suggest it is.
+
+5. **The runtime-input/flop walk is NOT unavoidable (30.3 was wrong).**  The
+   VALUE in `inp` or `fq` is dynamic, but the INDEX is static -- it comes out
+   of the source descriptor.  An indexed primitive or a shared traversal could
+   collapse that walk too.  This matters for sequential coverage, where the
+   flop-vector walk is the one the residual pays every cycle.
+
+## 33. Decision after S0 (from review)
+
+**S1 now; S2 as the next measured optimization; indexed storage retained as a
+possible part of S2.**
+
+* **S1** -- promote `PRes.val` and the validated fast paths into the verified
+  specializer.  Repair and check BOTH correctness directions, the scope
+  guarantees and the axiom audit.  Mirror the representation and affected
+  operations in `MixProgram.lean` in the same integration increment.  That
+  preserves implementation alignment; it does NOT prove the outstanding
+  generic host/object equivalence.
+* **S2a** -- prototype the restricted lookup summary with explicit cost
+  accounting: static, in-bounds lookup returning a static leaf first; preserve
+  enclosing bindings; require the existing scope/totality conditions; fall back
+  otherwise; recognize the justified implementation, not a name.
+* **S2b** -- decide whether indexed storage is ALSO needed.  The distinction
+  31.3 missed:
+
+      interpreter unfolds nthD k times   -> expensive O(k)
+      Lean helper walks k cons cells     -> cheaper   O(k)
+      indexed summary selects directly   -> potentially O(1)
+
+  So P-A is withdrawn as a STANDALONE solution, not as a component of S2.  A
+  list-walking summary can be a large practical win while leaving the scaling
+  quadratic.  **Do not claim near-linear specialization from a summary that
+  still scans a list.**
+* **Gate before any S2 proof**: measure interpreter unfoldings and host
+  data-structure visits, grid scaling, ALU wall time and RSS, and semantic
+  agreement -- with specialization time kept separate from simulator
+  throughput.
