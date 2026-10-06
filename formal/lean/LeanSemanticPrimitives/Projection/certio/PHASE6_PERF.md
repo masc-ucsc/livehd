@@ -3421,3 +3421,184 @@ sufficient.
 * otherwise -> **prove and integrate the simpler summary first**, and report
   the range over which the remaining `O(sum k)` walk stays negligible --
   because it is still there, with a smaller constant, and it IS quadratic.
+
+## 36. S2a results -- the summary works, it is a constant factor, and what is left is SHIFTING, not the walk
+
+Specification: 35.  Baseline: S1 (0f175676b), same certificates, flags
+(`-O2`), interpreter (`hwAPVarT`) and budgets.  Nothing in the proved
+development changed.  Artifacts under `.perfwork/s2/`; identities in
+`S2a-time-capture.json` and `S2a-count-capture.json`.
+
+### 36.1 What was built
+
+* `Proto/PartialEvaluatorSummary.lean` (`ProtoSum`) -- S1's specializer
+  verbatim plus `isNthD`, `walkHead`, `nthLookup`, `nthSummary` and one hook in
+  the dynamic-unfold arm.  NOT proved.
+* `Proto/MixProgramSummary.lean` (`MixProgSum`) -- S1's object specializer
+  plus `isNthDL`, `walkHeadL`, `nthSummaryL` and the hook before `mixPArgsL`.
+  The object recognizer compares the encoded callee against `encATerm` of the
+  SAME template terms the host matches.  NOT proved.
+* `Proto/S2aMirrorCheck.lean` -- executable checks pinning the two together.
+* `scripts/s2a_probe.lean` -- the timing probe; a counting build in a shadow
+  tree by the P3 method.
+
+### 36.2 Correctness evidence
+
+* **Residuals identical to S1 everywhere they were compared**: 25 grid points
+  x 2 runs, `alu` x 3, `decoder` x 3 (structural digest), and every counting
+  run ON vs OFF.  **No residual changed.**
+* Fragment checker + `interpretDesign` at each residual's own bound, outside
+  the timed sections: all grid points, both backends, both runs.  `alu` and
+  `decoder`, every repeat, both backends: six width-aware stimuli at the
+  checked bound plus a four-cycle threaded trace, all agree.
+* **Recognizer**: exactly one function recognised in `hwAPVar`, `hwAPVarT` and
+  `hwAP` -- index 2, `nthD`; none of mix's own 61 functions (its `nthS`/`nthE`
+  have different binding times); none of the toy interpreter's.
+* **Mirror** (`S2aMirrorCheck`, as `#guard`s): host and object recognizers
+  agree function-by-function on all three programs; the shared template is
+  recognised and a wrong self-index is not; on four hardware designs the
+  OBJECT specializer with the summary yields the same residual as the host
+  prototype, which equals S1's.
+* **The object summary fires** -- agreement alone would not show it.  The
+  object specializer with the summary is 3.6x / 6.5x / 9.3x cheaper than S1's
+  object specializer on three `gridD` designs (interpreted via `lean --run`;
+  ratios only), with identical residuals.  So this is not another host-only
+  optimization.
+* **S1's mirror on `I_hw`, first evidence**: before this, the object
+  specializer had never been run on the hardware interpreter.  On `chainD`
+  1-16 it reproduces the host residual exactly (52/74/118/206 terms).
+
+### 36.3 Counts -- unfolds avoided AND cells walked
+
+Counting build, summary ON and OFF in one binary.  **The OFF baseline is
+counted directly, and checks**: every OFF run made 0 summary attempts, and at
+every point OFF `nthD` unfolds = ON `nthD` unfolds + avoided, exactly.
+
+| design | baseline unfolds (nthD) | with summary | summaries | AVOIDED | CELLS WALKED |
+|---|---:|---:|---:|---:|---:|
+| `gridD` S=N=1024 | 4,214,804 (4,194,312) | 20,500 | 4,096 | 4,194,304 | 4,194,304 |
+| `alu` | 82,691,080 (82,571,684) | 119,534 | 28,432 | 82,571,546 | 82,571,546 |
+| `decoder` | 162,956,514 (162,790,390) | 167,096 | 40,232 | 162,789,418 | 162,789,418 |
+
+* On `alu`, **99.86% of all dynamic unfolds were `nthD`**, and the summary
+  cuts total unfolds **692x**.  But the helper walks **82.6M cells** -- exactly
+  as many steps as before, each now a pointer hop instead of an unfold.  The
+  walk is still `O(sum k)`; one specializer call is NOT a constant-time lookup.
+* **Static leaves: 0, on every design.**  35.1 is measured, not argued.
+* **Lookups are 2x the listed dependencies** (28,432 vs 14,216 on `alu`), so
+  the walk is 82.6M cells, not the 41.3M structural estimate of 32 -- the "one
+  lookup per listed dependency" assumption undercounts by half.
+* Fallbacks are all "spine unknown": the runtime-input walk in `srcVal`
+  (`nthD` on `inp`, 138 on `alu`), which correctly is not summarised.
+
+### 36.4 Speed -- a constant factor, NOT a scaling change
+
+Grid, two independent runs (spread <= 6% at every point >= 100 ms):
+
+| sweep | point | S1 | prototype | speedup |
+|---|---|---:|---:|---:|
+| A (S) | S=1024 | 1,907 ms | 144 ms | 13.2x |
+| B (N) | N=1024 | 4,684 ms | 258 ms | 18.2x |
+| C (E) | E=4096 | 3,718 ms | 182 ms | 20.4x |
+| D (S=N) | 2048 | 30,762 ms | 2,138 ms | 14.4x |
+| dyn | S=256 | 246 ms | 214 ms | 1.1x |
+
+Top-doubling exponents, S1 -> prototype: A 1.012 -> 1.030; B 1.726 -> 1.401;
+C 0.974 -> 0.807; **D (combined) 2.007 -> 1.958**; dyn 1.396 -> 1.887 (the
+all-dynamic residual itself is quadratic; the summary falls back there).
+
+Real designs, three repeats each, one backend per process:
+
+| design | S1 specialize | prototype | speedup | RSS S1 / proto |
+|---|---:|---:|---:|---:|
+| `alu` | 160,069 ms (155,187-162,777) | 13,981 ms (13,633-14,507) | **11.4x** | 23.6 / 23.6 MB |
+| `decoder` | 317,722 ms (310,491-330,317) | 24,448 ms (23,844-25,527) | **13.0x** | 29.0 / 29.1 MB |
+
+**The summary is a ~11-20x constant-factor win with an unchanged exponent on
+the combined axis.**  It does not deliver near-linear specialization, and none
+is claimed.
+
+### 36.5 Attribution -- what is quadratic now
+
+Self time, prototype, `alu`, a window capped INSIDE the 14 s specialize stage
+(12,944 samples; `.perfwork/s2/proto-alu-spec.data`):
+
+    55.40%  PVal.shiftGo            (binder shifting, k > 0)
+    36.12%  allocator + refcount    (dec_ref_cold 18.46, mi_free 10.21, mi_malloc_small 7.45)
+     3.77%  walkHead                (the summary's list walk)
+
+Counted across the combined axis (`.perfwork/s2/dsweep.log`, summary ON):
+
+| S = N | walk cells | shift node visits | ratio |
+|---:|---:|---:|---:|
+| 64 | 16,384 | 165,806 | 10.1x |
+| 512 | 1,048,576 | 10,500,270 | 10.0x |
+| 2048 | 16,777,216 | 167,829,678 | 10.0x |
+| `alu` | 82,571,546 | 1,086,927,818 | 13.2x |
+
+**Both are quadratic** (exponent 2.0 each).  But shifting does 10-13x more node
+visits than the walk, and every shift visit ALLOCATES a node while a walk step
+is a pointer hop.  Mechanism: each `evalNodes` step conses a new node value
+onto the environment; `prepare` let-binds it, and the existing spine is shifted
+by one -- `O(S + N)` per node.  The `@[csimp]` k = 0 arm (26) removed 99% of
+shift VISITS when the walk dominated; the k > 0 remainder is what dominates now.
+
+### 36.6 The S2b decision -- the pre-registered rule fires, and its premise is false
+
+The rule fixed in 35.6: *combined exponent >= 1.5 OR helper walk >= 25% of
+self time -> "the list walk is still the cost; combine the summary with indexed
+storage"; otherwise prove and integrate the simpler summary first.*
+
+* Clause 1 **fired**: 1.958.
+* Clause 2 **did not**: the walk is **3.8%**.
+* Clause 1's conclusion assumes the remaining quadratic IS the walk.  **36.5
+  shows it is shifting.**  Indexed storage would speed up 3.8% of the time --
+  an Amdahl ceiling of ~1.04x on `alu` -- and leave both quadratic terms
+  standing, because shifting is independent of how lookup is stored.
+
+**Recommendation -- a deviation from the pre-registered rule, so it needs a
+decision rather than being taken silently:**
+
+1. **The summary has passed its own gate** (35.6): residuals identical,
+   semantics agree, mirror agrees and fires.  It is worth integrating.
+2. **The next measured optimization should be binder shifting, not indexed
+   storage**: P-B as the review framed it -- a suspended weakening (a bias on a
+   partial-value view, composed in O(1), applied only when a leaf is selected
+   or reified) or levels inside the specializer, never in `Eval`.  It targets
+   ~55% self plus most of the 36% allocator band on `alu`.
+3. **Indexed storage stays a candidate for AFTER that**: with shifting gone,
+   the walk (3.8% now) becomes a much larger share of a much smaller total,
+   and is still quadratic.  Re-measure, then decide.
+
+On ordering of the PROOF: integrating the summary now means proving it against
+today's `PVal`; a deferred-shift change would then touch `PVal` again.  Stating
+the summary lemma semantically (via `PResOK`, not `PRes` structure) keeps that
+reproof small, but the cheaper path is to prototype the shift change first and
+prove both against the final representation once.  That choice is open.
+
+### 36.7 Defects and corrections in this round
+
+* **First measurement run superseded** (`.perfwork/s2/run1-repr-digest/`).
+  Two bugs of mine: (1) the residual digest hashed `toString (repr R)`, and the
+  ~16k-deep `let` chain made pretty-printing quadratic -- **81 GB peak RSS** on
+  a shared machine, which also polluted every RSS and wall figure in those
+  processes; (2) the counting build's OFF switch was a closed term
+  (`unsafeBaseIO cFlag.get` never mentions its argument), which the compiler
+  may hoist and run once -- so "OFF" ran with the summary ON.  Both fixed
+  (structural digest; the switch now depends on its argument; OFF runs now
+  assert 0 attempts), and everything above is from the re-run.  The first
+  run's grid timings agree with the re-run within ~6%.
+* **Prototype inefficiency, kept visible**: on a fallback chain the summary is
+  re-attempted at EVERY recursion level (`dynSrcD` S=256: 66,050 attempts, 256
+  fired), each attempt specializing the arguments once more before the unfold
+  path does it again.  That is why the all-dynamic fixture gains only 1.1x.
+  Integration should attempt once, or pre-check the list argument cheaply.
+* **Fuel is not preserved** (35.2, by design): the summary removes `k + 1`
+  levels of `mixTerm`'s depth budget.
+
+### 36.8 Unchanged
+
+No proved definition touched; `Audit.lean` unchanged.  Coverage unchanged:
+8 differential, 8 on the covered backend, 8 with no known reset conflict.
+**The exporter reset defect remains its own coverage workstream** -- a faster
+specializer does not unblock the 21 sequential blocks.

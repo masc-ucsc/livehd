@@ -29,7 +29,8 @@ MODULES=(
   Projection/HardwareInterpreter Projection/HardwareAdequacy
   Projection/ProjectionCorrect Projection/ResidualFragment
   Projection/ProjectedStep Projection/CertLoad
-  Projection/Proto/PartialEvaluatorFast Projection/Proto/InterpreterVariant
+  Projection/Proto/PartialEvaluatorFast Projection/Proto/PartialEvaluatorSummary
+  Projection/Proto/InterpreterVariant
   Projection/Proto/VariantTransport Projection/Proto/RewriteTotal
   Projection/Proto/VariantAdequacy Projection/Proto/VariantExec
   Projection/Proto/RunnerSupport
