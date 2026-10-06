@@ -1,0 +1,16 @@
+Executing tests from //bench:matched_filter_verify_incremental
+CMD -: lhd formal verify src/pyrope/tap.prp matched_filter/verif/tap.verify.prp --top tap --list-tests
+CMD verify_full: lhd formal verify src/pyrope/tap.prp matched_filter/verif/tap.verify.prp --top tap --set formal.bound=2 --workdir FF --set lhd.incremental=false
+METRIC verify_full_ms                             44 ms
+METRIC verify_full_obligations                     3 asserts
+CMD verify_cold: lhd formal verify src/pyrope/tap.prp matched_filter/verif/tap.verify.prp --top tap --set formal.bound=2 --workdir FW
+METRIC verify_cold_ms                             55 ms
+METRIC verify_cold_obligations                     3 asserts
+CMD verify_warm: lhd formal verify src/pyrope/tap.prp matched_filter/verif/tap.verify.prp --top tap --set formal.bound=2 --workdir FW
+METRIC verify_warm_ms                             54 ms
+METRIC verify_warm_obligations                     3 asserts
+VARIANT comment1: overlaid tap.prp
+CMD verify_touch: lhd formal verify src/pyrope/tap.prp matched_filter/verif/tap.verify.prp --top tap --set formal.bound=2 --workdir FW
+METRIC verify_touch_ms                            53 ms
+METRIC verify_touch_obligations                    3 asserts
+PASS: cold/warm/comment-touch verify runs all PROVEN (3 obligations each)

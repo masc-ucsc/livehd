@@ -1,0 +1,44 @@
+Executing tests from //bench:cva6_sim_incremental
+METRIC sim_backend_llvm                            0 bool
+METRIC sim_ninja_present                           1 bool
+CMD sim_setup_full: lhd sim tree/cva6.prp tree/cva6_prog_tb.prp --setup-only --set sim.vcd=false --set sim.tune.profile=off --workdir SW --set sim.jobs=32 --set lhd.incremental=false
+METRIC sim_setup_full_ms                       57041 ms
+CMD sim_cc_full: lhd sim tree/cva6.prp tree/cva6_prog_tb.prp --run-only --set sim.compile_only=true --set sim.ninja=/var/tmp/lhdsuite-review-tools-20261005/ninja --set sim.tune.profile=off --diag-fmt pretty --workdir SW --set sim.jobs=32 --set lhd.incremental=false
+METRIC sim_cc_full_ms                          46054 ms
+METRIC workdir_bytes_full                  420732928 bytes
+CMD sim_exec_full: SW/sim/drv.bin --cycles 50000 --result-json SW/sim/exec_tests.json
+METRIC sim_exec_gate_ok                            1 bool
+CMD sim_setup_cold: lhd sim tree/cva6.prp tree/cva6_prog_tb.prp --setup-only --set sim.vcd=false --set sim.tune.profile=off --workdir SW --set sim.jobs=32
+METRIC sim_setup_cold_ms                       57540 ms
+CMD sim_cc_cold: lhd sim tree/cva6.prp tree/cva6_prog_tb.prp --run-only --set sim.compile_only=true --set sim.ninja=/var/tmp/lhdsuite-review-tools-20261005/ninja --set sim.tune.profile=off --diag-fmt pretty --workdir SW --set sim.jobs=32
+METRIC sim_cc_cold_ms                          46208 ms
+METRIC workdir_bytes_cold                  516382720 bytes
+CMD sim_exec_cold: SW/sim/drv.bin --cycles 50000 --result-json SW/sim/exec_tests.json
+METRIC sim_exec_cold_equals_full                   1 bool
+VARIANT comment-only: appended to alu.prp
+CMD sim_setup_comment: lhd sim tree/cva6.prp tree/cva6_prog_tb.prp --setup-only --set sim.vcd=false --set sim.tune.profile=off --workdir SW --set sim.jobs=32
+METRIC sim_setup_comment_ms                    18223 ms
+CMD sim_cc_comment: lhd sim tree/cva6.prp tree/cva6_prog_tb.prp --run-only --set sim.compile_only=true --set sim.ninja=/var/tmp/lhdsuite-review-tools-20261005/ninja --set sim.tune.profile=off --diag-fmt pretty --workdir SW --set sim.jobs=32
+METRIC sim_cc_comment_ms                         100 ms
+METRIC workdir_bytes_comment               516493312 bytes
+METRIC sim_rewritten_comment                       0 files
+METRIC sim_warm_equals_cold                        1 bool
+CMD sim_exec_comment: SW/sim/drv.bin --cycles 50000 --result-json SW/sim/exec_tests.json
+METRIC sim_exec_comment_equals_full                1 bool
+VARIANT bug1: alu.prp:   const adder_result__w1 = (((operand_a_bitmanip#[0..<0x40] << 1) | 1) + operand_b_neg__w1)#[1..<0x41] ->   const adder_result__w1 = operand_a__w1 - operand_b__w1
+CMD sim_setup_edit: lhd sim tree/cva6.prp tree/cva6_prog_tb.prp --setup-only --set sim.vcd=false --set sim.tune.profile=off --workdir SW --set sim.jobs=32
+METRIC sim_setup_edit_ms                       40099 ms
+CMD sim_cc_edit: lhd sim tree/cva6.prp tree/cva6_prog_tb.prp --run-only --set sim.compile_only=true --set sim.ninja=/var/tmp/lhdsuite-review-tools-20261005/ninja --set sim.tune.profile=off --diag-fmt pretty --workdir SW --set sim.jobs=32
+METRIC sim_cc_edit_ms                          28012 ms
+METRIC workdir_bytes_edit                  514854912 bytes
+METRIC sim_rewritten_edit                        107 files
+CMD sim_setup_oracle: lhd sim tree/cva6.prp tree/cva6_prog_tb.prp --setup-only --set sim.vcd=false --set sim.tune.profile=off --workdir SW_oracle --set sim.jobs=32 --set lhd.incremental=false
+METRIC sim_setup_oracle_ms                     56870 ms
+CMD sim_cc_oracle: lhd sim tree/cva6.prp tree/cva6_prog_tb.prp --run-only --set sim.compile_only=true --set sim.ninja=/var/tmp/lhdsuite-review-tools-20261005/ninja --set sim.tune.profile=off --diag-fmt pretty --workdir SW_oracle --set sim.jobs=32 --set lhd.incremental=false
+METRIC sim_cc_oracle_ms                        43872 ms
+METRIC workdir_bytes_oracle                417484800 bytes
+CMD sim_exec_oracle: SW_oracle/sim/drv.bin --cycles 50000 --result-json SW_oracle/sim/exec_tests.json
+CMD sim_exec_edit: SW/sim/drv.bin --cycles 50000 --result-json SW/sim/exec_tests.json
+METRIC sim_exec_edit_equals_oracle                 1 bool
+METRIC sim_edit_tree_equals_oracle                 1 bool
+PASS: sim_incremental built drv.bin for full/cold/no-change/edit; cold and no-change simulate exactly like the caches-off build, the edit exactly like a from-scratch build of the edited tree

@@ -1,0 +1,42 @@
+Executing tests from //bench:xs_backend_compile_incremental
+CMD compile_full: lhd compile tree/Backend.prp --top Backend --emit-dir lg:out_lg --workdir w --result-json compile_full.json --set sim.jobs=32 --set lhd.incremental=false
+METRIC compile_full_ms                       1607432 ms
+METRIC hits_full                                   0 units
+METRIC misses_full                                 0 units
+METRIC redone_ms_full                            0.0 ms
+METRIC refused_full                                0 units
+METRIC store_failed_full                           0 units
+METRIC workdir_bytes_full                     581632 bytes
+CMD compile_cold: lhd compile tree/Backend.prp --top Backend --emit-dir lg:out_lg --workdir w --result-json compile_cold.json --set sim.jobs=32
+METRIC compile_cold_ms                       1689782 ms
+METRIC hits_cold                                   0 units
+METRIC misses_cold                              1088 units
+METRIC redone_ms_cold                    1646875.287 ms
+METRIC refused_cold                                1 units
+METRIC store_failed_cold                           0 units
+METRIC workdir_bytes_cold                 1616564224 bytes
+VARIANT comment-only: appended to Backend.prp
+CMD compile_comment: lhd compile tree/Backend.prp --top Backend --emit-dir lg:out_lg --workdir w --result-json compile_comment.json --set sim.jobs=32
+METRIC compile_comment_ms                    1590365 ms
+METRIC hits_comment                             1087 units
+METRIC misses_comment                              1 units
+METRIC redone_ms_comment                 1561576.343 ms
+METRIC refused_comment                             1 units
+METRIC store_failed_comment                        0 units
+METRIC workdir_bytes_comment              1617137664 bytes
+CMD compile_comment: lhd tool diff lg:cold_lg lg:out_lg --structural -q
+VARIANT bug1: DelayN_6.prp:8   io_out = (`io.out`) ^ 1
+CMD compile_edit: lhd compile tree/Backend.prp --top Backend --emit-dir lg:out_lg --workdir w --result-json compile_edit.json --set sim.jobs=32
+METRIC compile_edit_ms                       1565682 ms
+METRIC hits_edit                                1087 units
+METRIC misses_edit                                 1 units
+METRIC redone_ms_edit                    1535218.464 ms
+METRIC refused_edit                                1 units
+METRIC store_failed_edit                           0 units
+METRIC workdir_bytes_edit                 1617715200 bytes
+CMD compile_edit: lhd compile tree/Backend.prp --top Backend --emit-dir lg:edit_cold_lg --workdir edit_cold_w --set lhd.incremental=false -q --result-json edit_cold.json --set sim.jobs=32
+CMD compile_edit: lhd tool diff lg:edit_cold_lg lg:out_lg --structural -q
+CMD compile_edit: lhd tool diff lg:cold_lg lg:edit_cold_lg --structural -q
+METRIC compile_edit_changes_cold                   1 bool
+METRIC compile_warm_equals_cold                    1 bool
+PASS: compile_incremental (cold/comment/edit over one workdir)

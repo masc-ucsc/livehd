@@ -1,0 +1,44 @@
+Executing tests from //bench:xs_renametable_sim_incremental
+METRIC sim_backend_llvm                            0 bool
+METRIC sim_ninja_present                           1 bool
+CMD sim_setup_full: lhd sim tree/RenameTableWrapper.prp tree/xs_renametable_tb.prp --setup-only --set sim.vcd=false --set sim.tune.profile=off --set sim.tune.dirty=on --set sim.tune.fence=0 --workdir SW --set sim.jobs=32 --set lhd.incremental=false
+METRIC sim_setup_full_ms                       61807 ms
+CMD sim_cc_full: lhd sim tree/RenameTableWrapper.prp tree/xs_renametable_tb.prp --run-only --set sim.compile_only=true --set sim.ninja=/soe/renau/.local/bin/ninja --set sim.tune.profile=off --set sim.tune.dirty=on --set sim.tune.fence=0 --diag-fmt pretty --workdir SW --set sim.jobs=32 --set lhd.incremental=false
+METRIC sim_cc_full_ms                          35475 ms
+METRIC workdir_bytes_full                   75186176 bytes
+CMD sim_exec_full: SW/sim/drv.bin --cycles 40000 --result-json SW/sim/exec_tests.json
+METRIC sim_exec_gate_ok                            1 bool
+CMD sim_setup_cold: lhd sim tree/RenameTableWrapper.prp tree/xs_renametable_tb.prp --setup-only --set sim.vcd=false --set sim.tune.profile=off --set sim.tune.dirty=on --set sim.tune.fence=0 --workdir SW --set sim.jobs=32
+METRIC sim_setup_cold_ms                       70973 ms
+CMD sim_cc_cold: lhd sim tree/RenameTableWrapper.prp tree/xs_renametable_tb.prp --run-only --set sim.compile_only=true --set sim.ninja=/soe/renau/.local/bin/ninja --set sim.tune.profile=off --set sim.tune.dirty=on --set sim.tune.fence=0 --diag-fmt pretty --workdir SW --set sim.jobs=32
+METRIC sim_cc_cold_ms                          35469 ms
+METRIC workdir_bytes_cold                  692506624 bytes
+CMD sim_exec_cold: SW/sim/drv.bin --cycles 40000 --result-json SW/sim/exec_tests.json
+METRIC sim_exec_cold_equals_full                   1 bool
+VARIANT comment-only: appended to RenameTableWrapper.prp
+CMD sim_setup_comment: lhd sim tree/RenameTableWrapper.prp tree/xs_renametable_tb.prp --setup-only --set sim.vcd=false --set sim.tune.profile=off --set sim.tune.dirty=on --set sim.tune.fence=0 --workdir SW --set sim.jobs=32
+METRIC sim_setup_comment_ms                     8170 ms
+CMD sim_cc_comment: lhd sim tree/RenameTableWrapper.prp tree/xs_renametable_tb.prp --run-only --set sim.compile_only=true --set sim.ninja=/soe/renau/.local/bin/ninja --set sim.tune.profile=off --set sim.tune.dirty=on --set sim.tune.fence=0 --diag-fmt pretty --workdir SW --set sim.jobs=32
+METRIC sim_cc_comment_ms                         374 ms
+METRIC workdir_bytes_comment               692510720 bytes
+METRIC sim_rewritten_comment                       0 files
+METRIC sim_warm_equals_cold                        1 bool
+CMD sim_exec_comment: SW/sim/drv.bin --cycles 40000 --result-json SW/sim/exec_tests.json
+METRIC sim_exec_comment_equals_full                1 bool
+VARIANT bug1: RenameTable.prp:36183   io_readPorts_0_data = (io_readPorts_0_data__w1) ^ 1
+CMD sim_setup_edit: lhd sim tree/RenameTableWrapper.prp tree/xs_renametable_tb.prp --setup-only --set sim.vcd=false --set sim.tune.profile=off --set sim.tune.dirty=on --set sim.tune.fence=0 --workdir SW --set sim.jobs=32
+METRIC sim_setup_edit_ms                       43176 ms
+CMD sim_cc_edit: lhd sim tree/RenameTableWrapper.prp tree/xs_renametable_tb.prp --run-only --set sim.compile_only=true --set sim.ninja=/soe/renau/.local/bin/ninja --set sim.tune.profile=off --set sim.tune.dirty=on --set sim.tune.fence=0 --diag-fmt pretty --workdir SW --set sim.jobs=32
+METRIC sim_cc_edit_ms                          35452 ms
+METRIC workdir_bytes_edit                  682348544 bytes
+METRIC sim_rewritten_edit                         20 files
+CMD sim_setup_oracle: lhd sim tree/RenameTableWrapper.prp tree/xs_renametable_tb.prp --setup-only --set sim.vcd=false --set sim.tune.profile=off --set sim.tune.dirty=on --set sim.tune.fence=0 --workdir SW_oracle --set sim.jobs=32 --set lhd.incremental=false
+METRIC sim_setup_oracle_ms                     61802 ms
+CMD sim_cc_oracle: lhd sim tree/RenameTableWrapper.prp tree/xs_renametable_tb.prp --run-only --set sim.compile_only=true --set sim.ninja=/soe/renau/.local/bin/ninja --set sim.tune.profile=off --set sim.tune.dirty=on --set sim.tune.fence=0 --diag-fmt pretty --workdir SW_oracle --set sim.jobs=32 --set lhd.incremental=false
+METRIC sim_cc_oracle_ms                        35389 ms
+METRIC workdir_bytes_oracle                 75202560 bytes
+CMD sim_exec_oracle: SW_oracle/sim/drv.bin --cycles 40000 --result-json SW_oracle/sim/exec_tests.json
+CMD sim_exec_edit: SW/sim/drv.bin --cycles 40000 --result-json SW/sim/exec_tests.json
+METRIC sim_exec_edit_equals_oracle                 1 bool
+METRIC sim_edit_tree_equals_oracle                 1 bool
+PASS: sim_incremental built drv.bin for full/cold/no-change/edit; cold and no-change simulate exactly like the caches-off build, the edit exactly like a from-scratch build of the edited tree

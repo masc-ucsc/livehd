@@ -1,0 +1,18 @@
+Executing tests from //bench:matched_filter_lec_incremental
+CMD compile_ref: lhd compile verilog --top matched_filter --emit-dir lg:ref.lg --workdir cw_ref -- -F matched_filter/verilog/filelist.f -DSYNTHESIS
+METRIC compile_ref_ms                            278 ms
+CMD compile_p1: lhd compile src/pyrope/matched_filter.prp --top matched_filter --emit-dir lg:impl1 --workdir cw_impl1 --set sim.jobs=32
+METRIC compile_p1_ms                             297 ms
+CMD lec_full: lhd lec --impl lg:impl1 --ref lg:ref.lg --top matched_filter --workdir LF --set formal.timeout=300 --set lhd.incremental=false
+METRIC lec_full_ms                               153 ms
+METRIC lec_full_timeout                            0 bool
+CMD lec_cold: lhd lec --impl lg:impl1 --ref lg:ref.lg --top matched_filter --workdir LW --set formal.timeout=300
+METRIC lec_cold_ms                               177 ms
+CMD lec_warm: lhd lec --impl lg:impl1 --ref lg:ref.lg --top matched_filter --workdir LW --set formal.timeout=300
+METRIC lec_warm_ms                                62 ms
+VARIANT comment1: overlaid tap.prp
+CMD compile_p3: lhd compile src/pyrope/matched_filter.prp --top matched_filter --emit-dir lg:impl3 --workdir cw_impl3 --set sim.jobs=32
+METRIC compile_p3_ms                             289 ms
+CMD lec_touch: lhd lec --impl lg:impl3 --ref lg:ref.lg --top matched_filter --workdir LW --set formal.timeout=300
+METRIC lec_touch_ms                               64 ms
+PASS: cold/warm/comment-touch lec runs all equivalent

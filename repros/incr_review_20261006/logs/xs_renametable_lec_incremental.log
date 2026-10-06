@@ -1,0 +1,18 @@
+Executing tests from //bench:xs_renametable_lec_incremental
+CMD compile_ref: lhd compile verilog --top RenameTableWrapper --emit-dir lg:ref.lg --workdir cw_ref -- -F xs_renametable/verilog/filelist.f -DSYNTHESIS --single-unit
+METRIC compile_ref_ms                          39293 ms
+CMD compile_p1: lhd compile src/pyrope/RenameTableWrapper.prp --top RenameTableWrapper --emit-dir lg:impl1 --workdir cw_impl1 --set sim.jobs=32
+METRIC compile_p1_ms                           50338 ms
+CMD lec_full: lhd lec --impl lg:impl1 --ref lg:ref.lg --top RenameTableWrapper --workdir LF --set formal.timeout=300 --set lhd.incremental=false
+METRIC lec_full_ms                             16836 ms
+METRIC lec_full_timeout                            0 bool
+CMD lec_cold: lhd lec --impl lg:impl1 --ref lg:ref.lg --top RenameTableWrapper --workdir LW --set formal.timeout=300
+METRIC lec_cold_ms                             18579 ms
+CMD lec_warm: lhd lec --impl lg:impl1 --ref lg:ref.lg --top RenameTableWrapper --workdir LW --set formal.timeout=300
+METRIC lec_warm_ms                              3353 ms
+VARIANT comment1: appended to RenameTableWrapper.prp
+CMD compile_p3: lhd compile src/pyrope/RenameTableWrapper.prp --top RenameTableWrapper --emit-dir lg:impl3 --workdir cw_impl3 --set sim.jobs=32
+METRIC compile_p3_ms                           50010 ms
+CMD lec_touch: lhd lec --impl lg:impl3 --ref lg:ref.lg --top RenameTableWrapper --workdir LW --set formal.timeout=300
+METRIC lec_touch_ms                             3355 ms
+PASS: cold/warm/comment-touch lec runs all equivalent

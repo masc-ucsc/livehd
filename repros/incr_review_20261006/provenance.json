@@ -1,0 +1,451 @@
+{
+  "host": "satsuma",
+  "incremental_passes": 48,
+  "incremental_failures": 5,
+  "scenarios": {
+    "cva6_compile_incremental": {
+      "status": "PASS",
+      "mtime": 1791243250.3191288,
+      "xml": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/cva6_compile_incremental/test.xml",
+      "detail": [],
+      "source_log": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/cva6_compile_incremental/test.log",
+      "log_sha256": "85ae130e4a5194a1ab4680dc532d5c30534f2d7d67f739ab802bd6588fef2f6a"
+    },
+    "cva6_sim_incremental": {
+      "status": "PASS",
+      "mtime": 1791260143.6720912,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/cva6_sim_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/cva6_sim_incremental/test.log",
+      "log_sha256": "28aada1958815e76ba1c9ba43c9704b9e5fd940591f989071f9696cc02163fb0"
+    },
+    "cva6_sim_incremental_llvm": {
+      "status": "PASS",
+      "mtime": 1791282876.2408779,
+      "result_log": "/tmp/lhdsuite-review-cva6-signed-final.log",
+      "source_log": "/var/tmp/lhdsuite-review-bazel-20261005/execroot/_main/bazel-out/k8-opt/testlogs/bench/cva6_sim_incremental_llvm/test.log",
+      "log_sha256": "f350ae26b9e338759866b3fd9b202a2373ed4a5fb4ac9e5056503f9ad2d17515"
+    },
+    "cva6_verify_incremental": {
+      "status": "PASS",
+      "mtime": 1791209711.319732,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/cva6_verify_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/cva6_verify_incremental/test.log",
+      "log_sha256": "7026d28ef5c9334f42425cbbbfc0b680fff4f2290c7398f9772a5f425480d19c"
+    },
+    "dino_compile_incremental": {
+      "status": "PASS",
+      "mtime": 1791209980.728503,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/dino_compile_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/dino_compile_incremental/test.log",
+      "log_sha256": "b92acb550bd2a8879a67691307ae08eecdac40dcf199657301d0ededa1257566"
+    },
+    "dino_lec_incremental": {
+      "status": "PASS",
+      "mtime": 1791209793.6891913,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/dino_lec_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/dino_lec_incremental/test.log",
+      "log_sha256": "0e2d22d9745aaeb10555a01b3ffbc8bc30a2c07def81d2627592a247fa38eed1"
+    },
+    "matched_filter_compile_incremental": {
+      "status": "PASS",
+      "mtime": 1791186782.1576915,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/matched_filter_compile_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/matched_filter_compile_incremental/test.log",
+      "log_sha256": "6bc6e88c9a1cae549e40e30be025ce47607691a2e9564e3ed9a0b791fcbc5b98"
+    },
+    "matched_filter_lec_incremental": {
+      "status": "PASS",
+      "mtime": 1791209795.1692176,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/matched_filter_lec_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/matched_filter_lec_incremental/test.log",
+      "log_sha256": "cdcbf841c2e44b01b93306c5a6e86e61f8ecc78f89f57b60679c8c6b4308010f"
+    },
+    "matched_filter_sim_incremental": {
+      "status": "PASS",
+      "mtime": 1791186780.5976593,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/matched_filter_sim_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/matched_filter_sim_incremental/test.log",
+      "log_sha256": "8abcdf57bcf4911547111e3cf034a2abd630db3a80054082e0f39a88afbbf9ec"
+    },
+    "matched_filter_sim_incremental_llvm": {
+      "status": "PASS",
+      "mtime": 1791281004.44419,
+      "result_log": "/tmp/lhdsuite-review-llvm-signed-six-final.log",
+      "source_log": "/var/tmp/lhdsuite-review-signed-six-20261006/execroot/_main/bazel-out/k8-opt/testlogs/bench/matched_filter_sim_incremental_llvm/test.log",
+      "log_sha256": "d37313a46ae6af693a72922fede7729bd92dbaf91e79a8ab0fd82c7bb029939a"
+    },
+    "minion_sim_incremental_llvm": {
+      "status": "PASS",
+      "mtime": 1791281004.44419,
+      "result_log": "/tmp/lhdsuite-review-llvm-signed-six-final.log",
+      "source_log": "/var/tmp/lhdsuite-review-signed-six-20261006/execroot/_main/bazel-out/k8-opt/testlogs/bench/minion_sim_incremental_llvm/test.log",
+      "log_sha256": "54694b2697169899e504a3d03b4bd23ac3a462d6826ac2220ff38c8fbc5b8eb3"
+    },
+    "minion_synth_incremental": {
+      "status": "PASS",
+      "mtime": 1791188273.114108,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/minion_synth_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/minion_synth_incremental/test.log",
+      "log_sha256": "580fd3fc0b7b448ffabfcec15d3d84f5a4da25b6be41e6e0fc7ef6c1a5cf9555"
+    },
+    "minion_verify_incremental": {
+      "status": "PASS",
+      "mtime": 1791209979.2404766,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/minion_verify_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/minion_verify_incremental/test.log",
+      "log_sha256": "2fb4b38700794927e3c6a992ce763b0946c448c577986b516749afb5e1d31799"
+    },
+    "picorv32_compile_incremental": {
+      "status": "PASS",
+      "mtime": 1791209713.5597718,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/picorv32_compile_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/picorv32_compile_incremental/test.log",
+      "log_sha256": "57d9c9d5979844169b64cb78a8579b0150a6f6a4ee332926653643dcbc81af2f"
+    },
+    "picorv32_lec_incremental": {
+      "status": "PASS",
+      "mtime": 1791212484.8033905,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/picorv32_lec_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/picorv32_lec_incremental/test.log",
+      "log_sha256": "4aacf4cdef3d7cee3fd7625049d7da7de05ab30dfc1a9b69f905addbb1356463"
+    },
+    "xs_alu_compile_incremental": {
+      "status": "PASS",
+      "mtime": 1791211628.7406285,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_alu_compile_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_alu_compile_incremental/test.log",
+      "log_sha256": "25bfc7bb2a38ac5645f7c6924b54539298ecd2654455f8fd27e02697800a75cd"
+    },
+    "xs_alu_lec_incremental": {
+      "status": "PASS",
+      "mtime": 1791209790.5691361,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_alu_lec_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_alu_lec_incremental/test.log",
+      "log_sha256": "75f3a9f11ef57f56140fa0a622db229efa5939f3346320e093d020eecb832927"
+    },
+    "xs_alu_sim_incremental_llvm": {
+      "status": "PASS",
+      "mtime": 1791281004.44419,
+      "result_log": "/tmp/lhdsuite-review-llvm-signed-six-final.log",
+      "source_log": "/var/tmp/lhdsuite-review-signed-six-20261006/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_alu_sim_incremental_llvm/test.log",
+      "log_sha256": "1a8ae0b5535488b87d2aac7a0e9e96e369286b05ae0a241426cf1dc5d0870473"
+    },
+    "xs_div_compile_incremental": {
+      "status": "PASS",
+      "mtime": 1791195927.929275,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_div_compile_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_div_compile_incremental/test.log",
+      "log_sha256": "a6436e7d2833c32d230f072dc1015a4a6278342a58924b9ae51094e38820c189"
+    },
+    "xs_div_lec_incremental": {
+      "status": "PASS",
+      "mtime": 1791209768.6447477,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_div_lec_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_div_lec_incremental/test.log",
+      "log_sha256": "668ea494ef76e207437afb8e462d3999a8fa51c05fba442bc5a2124098608a6f"
+    },
+    "xs_exu_compile_incremental": {
+      "status": "PASS",
+      "mtime": 1791211151.1205964,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_exu_compile_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_exu_compile_incremental/test.log",
+      "log_sha256": "4aa5ca6ec4874453e1881d4829b4908108864c7aaf81cf90ef0a09fc5b3f9249"
+    },
+    "xs_exu_lec_incremental": {
+      "status": "PASS",
+      "mtime": 1791196760.7426758,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_exu_lec_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_exu_lec_incremental/test.log",
+      "log_sha256": "e116aa3cd0b314f7ef3f800c2f0482ce0033be0ac27488693158fbed47be26e8"
+    },
+    "xs_renametable_compile_incremental": {
+      "status": "PASS",
+      "mtime": 1791190467.3656116,
+      "xml": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_renametable_compile_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_renametable_compile_incremental/test.log",
+      "log_sha256": "47574388499441e0b21ee0819e4f6f190eb1df9c77d1862bd74dfa19e17e9d87"
+    },
+    "xs_renametable_lec_incremental": {
+      "status": "PASS",
+      "mtime": 1791209977.8124514,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_renametable_lec_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_renametable_lec_incremental/test.log",
+      "log_sha256": "47bc3d8764da7d5a9b84648da9090607b6591ea484be1120c899d4295ae519d8"
+    },
+    "xs_renametable_sim_incremental": {
+      "status": "PASS",
+      "mtime": 1791212021.3673685,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_renametable_sim_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_renametable_sim_incremental/test.log",
+      "log_sha256": "02533b0c830845110bff78e938c8e8b807ec58be67cfd8909701872065158896"
+    },
+    "xs_renametable_sim_incremental_llvm": {
+      "status": "PASS",
+      "mtime": 1791281004.44419,
+      "result_log": "/tmp/lhdsuite-review-llvm-signed-six-final.log",
+      "source_log": "/var/tmp/lhdsuite-review-signed-six-20261006/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_renametable_sim_incremental_llvm/test.log",
+      "log_sha256": "24f53f33b2842f55a828d2ca3c01e6ce925d743e1e6aefd9f30a7dedc7264d0f"
+    },
+    "xs_rob_sim_incremental_llvm": {
+      "status": "PASS",
+      "mtime": 1791294479.2049584,
+      "result_log": "/tmp/lhdsuite-review-rob-signed-final.log",
+      "source_log": "/var/tmp/lhdsuite-review-llvm-final-20261006/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_rob_sim_incremental_llvm/test.log",
+      "log_sha256": "c7291380de7ce97b718b71add79951cc43ea76e59a88a4f1d1bbf6768d057feb"
+    },
+    "cva6_synth_incremental": {
+      "status": "FAIL",
+      "mtime": 1791249815.306423,
+      "xml": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/cva6_synth_incremental/test.xml",
+      "detail": [
+        {
+          "message": "exited with error code 1"
+        }
+      ],
+      "result_log": "/tmp/lhdsuite-review-synth-restart.log",
+      "source_log": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/cva6_synth_incremental/test.log",
+      "log_sha256": "37e0e2d3a265fe790d86a3491c8f3d0317747ba8553c3e0fbc32b001fbfd93a0"
+    },
+    "matched_filter_synth_incremental": {
+      "status": "PASS",
+      "mtime": 1791262756.8028262,
+      "xml": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/matched_filter_synth_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/matched_filter_synth_incremental/test.log",
+      "log_sha256": "2e83697edff484e9fb95d886940cc7bf332a767e49531c0f9d063b707775b9c3"
+    },
+    "picorv32_synth_incremental": {
+      "status": "PASS",
+      "mtime": 1791239244.4933584,
+      "xml": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/picorv32_synth_incremental/test.xml",
+      "detail": [],
+      "result_log": "/tmp/lhdsuite-review-synth-restart.log",
+      "source_log": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/picorv32_synth_incremental/test.log",
+      "log_sha256": "068acaefad65fb9b406bf3d28d632d4f1bc0b273516bda83f0ddd28ce2183e7a"
+    },
+    "xs_alu_synth_incremental": {
+      "status": "PASS",
+      "mtime": 1791240189.703162,
+      "xml": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_alu_synth_incremental/test.xml",
+      "detail": [],
+      "result_log": "/tmp/lhdsuite-review-synth-restart.log",
+      "source_log": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_alu_synth_incremental/test.log",
+      "log_sha256": "2929f0a14cc7f96949730a5e08e8f07245ec40e1be5244eedd861c503bada385"
+    },
+    "xs_div_synth_incremental": {
+      "status": "PASS",
+      "mtime": 1791239212.0487905,
+      "xml": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_div_synth_incremental/test.xml",
+      "detail": [],
+      "result_log": "/tmp/lhdsuite-review-synth-restart.log",
+      "source_log": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_div_synth_incremental/test.log",
+      "log_sha256": "4cf6e786cbee9c593dac4a5b804343ea8a628ee53ccccf5a032d85af225eda1d"
+    },
+    "xs_exu_synth_incremental": {
+      "status": "FAIL",
+      "mtime": 1791240174.5908365,
+      "xml": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_exu_synth_incremental/test.xml",
+      "detail": [
+        {
+          "message": "exited with error code 1"
+        }
+      ],
+      "result_log": "/tmp/lhdsuite-review-synth-restart.log",
+      "source_log": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_exu_synth_incremental/test.log",
+      "log_sha256": "86025f97db152e50a6cf4d45766efd5efe2befaf8cce21fe6451a0e655bb63d6"
+    },
+    "xs_renametable_synth_incremental": {
+      "status": "PASS",
+      "mtime": 1791239169.412044,
+      "xml": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_renametable_synth_incremental/test.xml",
+      "detail": [],
+      "result_log": "/tmp/lhdsuite-review-synth-restart.log",
+      "source_log": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_renametable_synth_incremental/test.log",
+      "log_sha256": "5eefd4d515a7c0e76903f1c30bc89148b9b5606d8d071c9a2a3e62d73bed675e"
+    },
+    "minion_sim_incremental": {
+      "status": "PASS",
+      "mtime": 1791261986.4117746,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/minion_sim_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/minion_sim_incremental/test.log",
+      "log_sha256": "6ae8c70a08129f6b82938af050f71f085c1c7406b711047f90107dd895205dc7"
+    },
+    "picorv32_sim_incremental": {
+      "status": "PASS",
+      "mtime": 1791262011.5362632,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/picorv32_sim_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/picorv32_sim_incremental/test.log",
+      "log_sha256": "36ed92c2457c39510d825e1f46f6e0ada4903a6f6b25b0a1e08f2b0adb8bc6b6"
+    },
+    "xs_rob_compile_incremental": {
+      "status": "PASS",
+      "mtime": 1791240881.3692186,
+      "xml": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_rob_compile_incremental/test.xml",
+      "detail": [],
+      "source_log": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_rob_compile_incremental/test.log",
+      "log_sha256": "bf140d9ef6e4934ef2b6dc30b5b9f3192681a606e835b9cc94c60be41ae1081f"
+    },
+    "picorv32_verify_incremental": {
+      "status": "PASS",
+      "mtime": 1791241261.5205822,
+      "xml": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/picorv32_verify_incremental/test.xml",
+      "detail": [],
+      "source_log": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/picorv32_verify_incremental/test.log",
+      "log_sha256": "1756a8218bffd11516851b8888d323f143771202065d2ac45a985472d225e50b"
+    },
+    "minion_compile_incremental": {
+      "status": "PASS",
+      "mtime": 1791241578.7631686,
+      "xml": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/minion_compile_incremental/test.xml",
+      "detail": [],
+      "source_log": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/minion_compile_incremental/test.log",
+      "log_sha256": "b5adcc15ef6e79f398acdf3ed49bbbafeac18c19adb47a9a8013d01e8f5be1fb"
+    },
+    "dino_verify_incremental": {
+      "status": "PASS",
+      "mtime": 1791242791.7019,
+      "xml": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/dino_verify_incremental/test.xml",
+      "detail": [],
+      "source_log": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/dino_verify_incremental/test.log",
+      "log_sha256": "e9b2f2ed72e7785fe7e28902fabdd0f5db0c98b13d981f3be93e072fe5389ec5"
+    },
+    "xs_rob_lec_incremental": {
+      "status": "FAIL",
+      "mtime": 1791242787.1098068,
+      "xml": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_rob_lec_incremental/test.xml",
+      "detail": [
+        {
+          "message": "exited with error code 7"
+        }
+      ],
+      "source_log": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_rob_lec_incremental/test.log",
+      "log_sha256": "6fa2929503c97a418e7e964a4e57ecf79fe6a4fce989bef869602f33f447680b"
+    },
+    "dino_sim_incremental": {
+      "status": "PASS",
+      "mtime": 1791259730.3321857,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/dino_sim_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/dino_sim_incremental/test.log",
+      "log_sha256": "61996ac63a8264f304e3d177b2378cf232d5a624c60c7a1f9b62985315500b25"
+    },
+    "minion_lec_incremental": {
+      "status": "PASS",
+      "mtime": 1791243187.133865,
+      "xml": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/minion_lec_incremental/test.xml",
+      "detail": [],
+      "source_log": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/minion_lec_incremental/test.log",
+      "log_sha256": "68a235e1166de1f799d1fd65ba4355cd42e90614e637d39e56d816c82f10dca8"
+    },
+    "picorv32_sim_incremental_llvm": {
+      "status": "PASS",
+      "mtime": 1791281004.44419,
+      "result_log": "/tmp/lhdsuite-review-llvm-signed-six-final.log",
+      "source_log": "/var/tmp/lhdsuite-review-signed-six-20261006/execroot/_main/bazel-out/k8-opt/testlogs/bench/picorv32_sim_incremental_llvm/test.log",
+      "log_sha256": "ef39bad3286e3d505ebe5d93b3f29644c45f8e4d30e346a4d242e919ab138627"
+    },
+    "xs_rob_sim_incremental": {
+      "status": "PASS",
+      "mtime": 1791247721.4296932,
+      "xml": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_rob_sim_incremental/test.xml",
+      "detail": [],
+      "source_log": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_rob_sim_incremental/test.log",
+      "log_sha256": "33564f4e92d636b40e14212b9b5f9e07115b33fb209bf4573e036ee615280ea9"
+    },
+    "dino_sim_incremental_llvm": {
+      "status": "PASS",
+      "mtime": 1791281004.44419,
+      "result_log": "/tmp/lhdsuite-review-llvm-signed-six-final.log",
+      "source_log": "/var/tmp/lhdsuite-review-signed-six-20261006/execroot/_main/bazel-out/k8-opt/testlogs/bench/dino_sim_incremental_llvm/test.log",
+      "log_sha256": "199e579eeddfc6502eb8eafb0c2b3593a9981fbcc6bced71bc4e4ef9c24e9c7b"
+    },
+    "matched_filter_verify_incremental": {
+      "status": "PASS",
+      "mtime": 1791243250.787138,
+      "xml": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/matched_filter_verify_incremental/test.xml",
+      "detail": [],
+      "source_log": "/var/tmp/renau/_bazel_renau/c6cba80e00a0f312029aa0ffe841331d/execroot/_main/bazel-out/k8-opt/testlogs/bench/matched_filter_verify_incremental/test.log",
+      "log_sha256": "2a97f083985881233a893cb4ec515a375abf10f8a245d1f75ed6eccb1b0255d4"
+    },
+    "xs_alu_sim_incremental": {
+      "status": "PASS",
+      "mtime": 1791259699.4995644,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_alu_sim_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_alu_sim_incremental/test.log",
+      "log_sha256": "caf449ec111991aabcc2846e497644faaf3ac3ee97c348a30bd42e5445c75aa0"
+    },
+    "xs_rob_synth_incremental": {
+      "status": "FAIL",
+      "mtime": 1791245317.6480246,
+      "xml": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_rob_synth_incremental/test.xml",
+      "detail": [
+        {
+          "message": "exited with error code 1"
+        }
+      ],
+      "result_log": "/tmp/lhdsuite-review-synth-restart.log",
+      "source_log": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_rob_synth_incremental/test.log",
+      "log_sha256": "e95834e776cbb8e413a7ab5985e3bc598690159cf8a5fe752e91c17c278edc29"
+    },
+    "dino_synth_incremental": {
+      "status": "PASS",
+      "mtime": 1791249904.8316956,
+      "xml": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/dino_synth_incremental/test.xml",
+      "detail": [],
+      "result_log": "/tmp/lhdsuite-review-synth-restart.log",
+      "source_log": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/dino_synth_incremental/test.log",
+      "log_sha256": "876d11a0db4a7b782a83cd7a2ee4a4852fe8a73b707ad7a32c1919d9fd29de84"
+    },
+    "xs_backend_compile_incremental": {
+      "status": "PASS",
+      "mtime": 1791253175.16428,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_backend_compile_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_backend_compile_incremental/test.log",
+      "log_sha256": "b44fc6d259c7d59661dd167d5697c16a80e76cc6a314d85ed9ff94edb653d7d4"
+    },
+    "xs_backend_lec_incremental": {
+      "status": "PASS",
+      "mtime": 1791257404.08668,
+      "xml": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_backend_lec_incremental/test.xml",
+      "detail": [],
+      "source_log": "/tmp/lhdsuite-review-bazel/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_backend_lec_incremental/test.log",
+      "log_sha256": "d14d2e458368056deeac0a6c27e026244830f9c65c9fc42ebc879ed2d639e677"
+    },
+    "xs_backend_synth_incremental": {
+      "status": "FAIL",
+      "mtime": 1791262700.4177203,
+      "xml": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_backend_synth_incremental/test.xml",
+      "detail": [
+        {
+          "message": "exited with error code 1"
+        }
+      ],
+      "source_log": "/tmp/lhdsuite-review-missing/execroot/_main/bazel-out/k8-opt/testlogs/bench/xs_backend_synth_incremental/test.log",
+      "log_sha256": "b05aa3ab5ceb344c5d7d39b75ac880b24517ec98920d29a9724c0dd025c474d5"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+Executing tests from //bench:minion_compile_incremental
+CMD compile_full: lhd compile tree/minion_top.prp --top minion_top --emit-dir lg:out_lg --workdir w --result-json compile_full.json --set lhd.incremental=false
+METRIC compile_full_ms                         29848 ms
+METRIC hits_full                                   0 units
+METRIC misses_full                                 0 units
+METRIC redone_ms_full                            0.0 ms
+METRIC refused_full                                0 units
+METRIC store_failed_full                           0 units
+METRIC workdir_bytes_full                     143360 bytes
+CMD compile_cold: lhd compile tree/minion_top.prp --top minion_top --emit-dir lg:out_lg --workdir w --result-json compile_cold.json
+METRIC compile_cold_ms                         40884 ms
+METRIC hits_cold                                   0 units
+METRIC misses_cold                               178 units
+METRIC redone_ms_cold                       39751.72 ms
+METRIC refused_cold                                1 units
+METRIC store_failed_cold                           0 units
+METRIC workdir_bytes_cold                   39399424 bytes
+VARIANT comment-only: appended to minion_top.prp
+CMD compile_comment: lhd compile tree/minion_top.prp --top minion_top --emit-dir lg:out_lg --workdir w --result-json compile_comment.json
+METRIC compile_comment_ms                      34743 ms
+METRIC hits_comment                              177 units
+METRIC misses_comment                              1 units
+METRIC redone_ms_comment                   32800.878 ms
+METRIC refused_comment                             1 units
+METRIC store_failed_comment                        0 units
+METRIC workdir_bytes_comment                39526400 bytes
+CMD compile_comment: lhd tool diff lg:cold_lg lg:out_lg --structural -q
+VARIANT bug1: overlaid txfma_adder.prp
+CMD compile_edit: lhd compile tree/minion_top.prp --top minion_top --emit-dir lg:out_lg --workdir w --result-json compile_edit.json
+METRIC compile_edit_ms                         30516 ms
+METRIC hits_edit                                 177 units
+METRIC misses_edit                                 1 units
+METRIC redone_ms_edit                      29419.282 ms
+METRIC refused_edit                                1 units
+METRIC store_failed_edit                           0 units
+METRIC workdir_bytes_edit                   39653376 bytes
+CMD compile_edit: lhd compile tree/minion_top.prp --top minion_top --emit-dir lg:edit_cold_lg --workdir edit_cold_w --set lhd.incremental=false -q --result-json edit_cold.json
+CMD compile_edit: lhd tool diff lg:edit_cold_lg lg:out_lg --structural -q
+CMD compile_edit: lhd tool diff lg:cold_lg lg:edit_cold_lg --structural -q
+METRIC compile_edit_changes_cold                   1 bool
+METRIC compile_warm_equals_cold                    1 bool
+PASS: compile_incremental (cold/comment/edit over one workdir)

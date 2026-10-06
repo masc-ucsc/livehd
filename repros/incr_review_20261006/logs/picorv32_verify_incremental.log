@@ -1,0 +1,16 @@
+Executing tests from //bench:picorv32_verify_incremental
+CMD -: lhd formal verify src/pyrope/picorv32.prp picorv32/verif/picorv32.verify.prp --top picorv32 --list-tests
+CMD verify_full: lhd formal verify src/pyrope/picorv32.prp picorv32/verif/picorv32.verify.prp --top picorv32 --set formal.bound=8 --workdir FF --set formal.timeout=600 --set lhd.incremental=false
+METRIC verify_full_ms                         122956 ms
+METRIC verify_full_obligations                     4 asserts
+CMD verify_cold: lhd formal verify src/pyrope/picorv32.prp picorv32/verif/picorv32.verify.prp --top picorv32 --set formal.bound=8 --workdir FW --set formal.timeout=600
+METRIC verify_cold_ms                         133019 ms
+METRIC verify_cold_obligations                     4 asserts
+CMD verify_warm: lhd formal verify src/pyrope/picorv32.prp picorv32/verif/picorv32.verify.prp --top picorv32 --set formal.bound=8 --workdir FW --set formal.timeout=600
+METRIC verify_warm_ms                          61258 ms
+METRIC verify_warm_obligations                     4 asserts
+VARIANT comment1: appended to picorv32.prp
+CMD verify_touch: lhd formal verify src/pyrope/picorv32.prp picorv32/verif/picorv32.verify.prp --top picorv32 --set formal.bound=8 --workdir FW --set formal.timeout=600
+METRIC verify_touch_ms                         62533 ms
+METRIC verify_touch_obligations                    4 asserts
+PASS: cold/warm/comment-touch verify runs all PROVEN (4 obligations each)

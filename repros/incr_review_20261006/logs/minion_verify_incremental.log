@@ -1,0 +1,16 @@
+Executing tests from //bench:minion_verify_incremental
+CMD -: lhd formal verify src/pyrope/txfma_adder.prp minion/verif/txfma_adder.verify.prp --top txfma_adder --list-tests
+CMD verify_full: lhd formal verify src/pyrope/txfma_adder.prp minion/verif/txfma_adder.verify.prp --top txfma_adder --set formal.bound=2 --workdir FF --set sim.jobs=32 --set lhd.incremental=false
+METRIC verify_full_ms                            223 ms
+METRIC verify_full_obligations                     2 asserts
+CMD verify_cold: lhd formal verify src/pyrope/txfma_adder.prp minion/verif/txfma_adder.verify.prp --top txfma_adder --set formal.bound=2 --workdir FW --set sim.jobs=32
+METRIC verify_cold_ms                            380 ms
+METRIC verify_cold_obligations                     2 asserts
+CMD verify_warm: lhd formal verify src/pyrope/txfma_adder.prp minion/verif/txfma_adder.verify.prp --top txfma_adder --set formal.bound=2 --workdir FW --set sim.jobs=32
+METRIC verify_warm_ms                            280 ms
+METRIC verify_warm_obligations                     2 asserts
+VARIANT comment1: overlaid txfma_adder.prp
+CMD verify_touch: lhd formal verify src/pyrope/txfma_adder.prp minion/verif/txfma_adder.verify.prp --top txfma_adder --set formal.bound=2 --workdir FW --set sim.jobs=32
+METRIC verify_touch_ms                           280 ms
+METRIC verify_touch_obligations                    2 asserts
+PASS: cold/warm/comment-touch verify runs all PROVEN (2 obligations each)

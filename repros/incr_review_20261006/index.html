@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>October 4–6 incremental review measurements</title>
+<h1>October 4–6 incremental review measurements</h1>
+<p>The completed review recorded <strong>48 passes and five failures across 53 incremental targets</strong> on host <code>satsuma</code>. All eight final LLVM simulation scenarios passed full, cold, comment-only, edited and fresh-reference comparisons. All six available Pyrope2 compile/simulation targets passed against published LiveHD <code>d03ee05f24375bddb865633c1eed0ebdccaab049</code>. The full root suites passed: opt 4,663 with two skips; dbg 4,662 with three skips.</p>
+<p><a href="../../docs/current_opt_loop_incr.html">Generated dashboard</a> · <a href="measurements.jsonl">Ledger rows</a> · <a href="provenance.json">Per-target status, completion time, original path and log hash</a></p>
+<p><code>review-final-llvm-opt-20261006</code> contains the eight reruns on the final frozen compiler and reviewed LHDSuite sources published as <code>cef05e14d1145f0c87619954924eff50c02f06f3</code>. These runs use <code>sim.jobs=32</code>; the concurrent owner change to <code>bench/sim.sh</code> is excluded. <code>review-matrix-opt-20261004-06</code> contains the earlier SLOP, compile, synthesis, LEC and formal results. Compiler pins changed between those scenarios; their exact per-scenario source identities were not retained and are left empty rather than attributed to the final compiler. Compare timings only within one scenario and host.</p>
+<p>The dashboard is generated from <code>../lhdsuite/bench/ledger.jsonl</code>. Its simulation timing tables sum setup/code generation and native compilation; they exclude driver execution. Native compilation alone is recorded as <code>sim_cc_*</code> in the archived logs. The full, caches-off build is the denominator of dashboard speedups. The synthesis harness's separate cold/comment cache-miss-work ratio is a gate diagnostic, not an end-to-end synthesis speedup.</p>
+<p>Each <code>logs/&lt;target&gt;.log</code> contains the original metrics, commands and outcome lines with bounded long-line excerpts. The corresponding <code>.log.gz</code> preserves the complete original log; its decompressed SHA-256 is in <code>provenance.json</code>. No execution timing was measured by these incremental simulation runs, so no execution milliseconds are inferred from their correctness checks.</p>
+<p>Exu and Backend fail the required 2× cold/comment mapping-work gate. ROB's unbounded equivalence proves 10 of 12 definitions; RenameBuffer and Rob remain unknown. ROB and CVA6 fail all four downstream timing runs with allocation errors near 560 and 548 GiB peak RSS; Backend also fails full/cold timing near 545 GiB. Peak RSS is a process measurement, not an aggregate process-tree memory measurement. Failed modes are excluded from dashboard ratios. Minion and Backend LEC targets pass their existing no-refutation timeout policy, but equivalence remains unknown.</p>
+<p>The optional strict Pyrope2 validator passed 411/457 checks: four lack RTL references and 42 have incomplete unbounded proofs; none were refuted. The maintained 21 XiangShan Pyrope2 graph/LNAST bundles compiled. Thirteen passing opt tests still exceed the 20-second runtime guideline. The original 1,440 Pyrope baseline files remain unchanged.</p>
+<pre>cd ../lhdsuite
+python3 bench/ledger.py render --flow incr \
+  --out ../livehd/docs/current_opt_loop_incr.html \
+  --current review-final-llvm-opt-20261006 \
+  --also-current review-matrix-opt-20261004-06 \
+  --title "Incremental rebuilds, simulation validation and synthesis"
+</pre>
