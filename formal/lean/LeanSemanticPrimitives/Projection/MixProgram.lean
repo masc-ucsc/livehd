@@ -54,6 +54,7 @@ def tagRStat : Nat := 70   -- PRes: a value
 def tagRCode : Nat := 71   -- PRes: residual code
 def tagRCons : Nat := 72   -- PRes: a partial cons
 def tagRLets : Nat := 73   -- PRes: a package, bindings plus a result
+def tagRVal  : Nat := 74   -- PRes: a CARRIED partial value (`PRes.val`)
 def tagReq   : Nat := 80   -- SpecRequest
 
 /-! ## Building surface terms -/
@@ -106,6 +107,7 @@ private def rStat (v : SExp) := SExp.mk tagRStat [v]
 private def rCode (t : SExp) := SExp.mk tagRCode [t]
 private def rCons (a b : SExp) := SExp.mk tagRCons [a, b]
 private def rLets (bs r : SExp) := SExp.mk tagRLets [bs, r]
+private def rVal (v : SExp) := SExp.mk tagRVal [v]
 
 private def true_  : SExp := .lit (.bool true)
 private def false_ : SExp := .lit (.bool false)
@@ -166,9 +168,10 @@ private def mixTermAlts : List SAlt :=
             .letN "e" (C "nthE" [R "i", R "env"]) <|
             .ite (eq_ (C "nthS" [R "i", R "D"]) (K 0))
               (pair_ (rStat (C "pvVal" [R "e"])) nil_)
-              -- a dyn entry reads back as `var k`, a preserved spine as a
-              -- partial cons; `pvToPRes` is the one rule for both
-              (pair_ (C "pvToPRes" [R "e"]) nil_))
+              -- a dyn entry reads back as `var k`, a preserved spine is CARRIED
+              -- as `.val` rather than copied; `ofPVal` is the one rule for both,
+              -- mirroring the host's `var` rule and `PRes.ofPVal`
+              (pair_ (C "ofPVal" [R "e"]) nil_))
 
         , (tagALift, ["e"],
             .letN "o" (C "mixTerm" [R "A", R "reqs", R "D", R "env", R "e"])
@@ -385,12 +388,24 @@ def mixS : SProgram where
         (cons_ (C "shiftPV" [R "k", hd_ (R "env")])
                (C "shiftEnv" [R "k", tl_ (R "env")])) }
 
-  -- reading a preserved spine back out as a partial RESULT
-  , { name := "pvToPRes", params := ["v"]
+  -- `PRes.ofPVal`: reading a preserved spine back out as a partial RESULT.
+  -- A `dyn` entry is a `var`, and a spine is CARRIED in O(1) as `.val` rather
+  -- than copied.  This replaced `pvToPRes`, which copied the spine into a
+  -- chain of `rCons` -- the host's `var` rule no longer calls `PVal.toPRes`, so
+  -- nothing here calls its mirror and it was removed rather than left dead.
+  , { name := "ofPVal", params := ["v"]
     , body := .switch (R "v")
-        [ (tagPStat, ["x"],    rStat (R "x"))
-        , (tagPDyn,  ["k"],    rCode (eVar (R "k")))
-        , (tagPCons, ["a","b"], rCons (C "pvToPRes" [R "a"]) (C "pvToPRes" [R "b"])) ] }
+        [ (tagPStat, ["x"],     rStat (R "x"))
+        , (tagPDyn,  ["k"],     rCode (eVar (R "k")))
+        , (tagPCons, ["a","b"], rVal (R "v")) ] }
+
+  -- `PVal.toCode`: reify a partial value directly
+  , { name := "pvToCode", params := ["v"]
+    , body := .switch (R "v")
+        [ (tagPStat, ["x"],     eLit (R "x"))
+        , (tagPDyn,  ["k"],     eVar (R "k"))
+        , (tagPCons, ["a","b"],
+            ePrim (K 23) (cons_ (C "pvToCode" [R "a"]) (cons_ (C "pvToCode" [R "b"]) nil_))) ] }
 
   -- `[dyn j, dyn (j+1), …, dyn (k-1)]`
   , { name := "freshFrom", params := ["j", "k"]
@@ -421,7 +436,8 @@ def mixS : SProgram where
         -- a spine forced into a dynamic context re-emits the `consP` chain
         , (tagRCons, ["a","b"],
             ePrim (K 23) (cons_ (C "toCode" [R "a"]) (cons_ (C "toCode" [R "b"]) nil_)))
-        , (tagRLets, ["bs","r2"], C "wrapLetsL" [R "bs", C "toCode" [R "r2"]]) ] }
+        , (tagRLets, ["bs","r2"], C "wrapLetsL" [R "bs", C "toCode" [R "r2"]])
+        , (tagRVal,  ["v"],       C "pvToCode" [R "v"]) ] }
 
   -- ## the discard guard, and the structural answers it licenses
 
@@ -433,7 +449,9 @@ def mixS : SProgram where
         [ (tagRStat, ["v"],    true_)
         , (tagRCode, ["t"],    eq_ (ctorTag_ (R "t")) (K (Int.ofNat tagVar)))
         , (tagRCons, ["a","b"], and_ (C "totalL" [R "a"]) (C "totalL" [R "b"]))
-        , (tagRLets, ["bs","r2"], false_) ] }
+        , (tagRLets, ["bs","r2"], false_)
+        -- a partial value's leaves are `stat` or `dyn`: total
+        , (tagRVal,  ["v"],       true_) ] }
 
   -- Each peel sees THROUGH a package and puts it back; the guard applies to the
   -- component being DISCARDED, which is why `hd` tests the tail, `tl` the head,
@@ -445,7 +463,13 @@ def mixS : SProgram where
         , (tagRCons, ["a","b"], .ite (C "totalL" [R "b"]) (some_ (R "a")) none_)
         , (tagRLets, ["bs","r2"],
             .letN "o" (C "peelHdL" [R "r2"]) <|
-            .ite (isNil_ (R "o")) none_ (some_ (rLets (R "bs") (hd_ (R "o"))))) ] }
+            .ite (isNil_ (R "o")) none_ (some_ (rLets (R "bs") (hd_ (R "o")))))
+        -- a carried spine answers without a guard walk: its parts are total
+        , (tagRVal, ["v"],
+            .switch (R "v")
+              [ (tagPStat, ["x"],     none_)
+              , (tagPDyn,  ["k"],     none_)
+              , (tagPCons, ["a","b"], some_ (C "ofPVal" [R "a"])) ]) ] }
 
   , { name := "peelTlL", params := ["r"]
     , body := .switch (R "r")
@@ -454,7 +478,13 @@ def mixS : SProgram where
         , (tagRCons, ["a","b"], .ite (C "totalL" [R "a"]) (some_ (R "b")) none_)
         , (tagRLets, ["bs","r2"],
             .letN "o" (C "peelTlL" [R "r2"]) <|
-            .ite (isNil_ (R "o")) none_ (some_ (rLets (R "bs") (hd_ (R "o"))))) ] }
+            .ite (isNil_ (R "o")) none_ (some_ (rLets (R "bs") (hd_ (R "o")))))
+        -- a carried spine answers without a guard walk: its parts are total
+        , (tagRVal, ["v"],
+            .switch (R "v")
+              [ (tagPStat, ["x"],     none_)
+              , (tagPDyn,  ["k"],     none_)
+              , (tagPCons, ["a","b"], some_ (C "ofPVal" [R "b"])) ]) ] }
 
   , { name := "peelIsNilL", params := ["r"]
     , body := .switch (R "r")
@@ -465,7 +495,13 @@ def mixS : SProgram where
                  (some_ (rStat false_)) none_)
         , (tagRLets, ["bs","r2"],
             .letN "o" (C "peelIsNilL" [R "r2"]) <|
-            .ite (isNil_ (R "o")) none_ (some_ (rLets (R "bs") (hd_ (R "o"))))) ] }
+            .ite (isNil_ (R "o")) none_ (some_ (rLets (R "bs") (hd_ (R "o")))))
+        -- a carried spine answers without a guard walk: its parts are total
+        , (tagRVal, ["v"],
+            .switch (R "v")
+              [ (tagPStat, ["x"],     none_)
+              , (tagPDyn,  ["k"],     none_)
+              , (tagPCons, ["a","b"], some_ (rStat false_)) ]) ] }
 
   -- `consP` discards nothing, so it may always build a spine.
   , { name := "primStructL", params := ["p", "rs"]
@@ -513,7 +549,9 @@ def mixS : SProgram where
                 (pair_ (cons_ (C "toCode" [rCons (R "a") (R "b")]) nil_) (pDyn (K 0)))))
         , (tagRLets, ["bs","r2"],
             .letN "p" (C "prepareL" [R "r2"]) <|
-            pair_ (C "appendL" [R "bs", fst_ (R "p")]) (snd_ (R "p"))) ] }
+            pair_ (C "appendL" [R "bs", fst_ (R "p")]) (snd_ (R "p")))
+        -- already a partial value: nothing to bind, nothing to copy
+        , (tagRVal, ["v"], pair_ nil_ (R "v")) ] }
 
   , { name := "allStaticL", params := ["rs"]
     , body := .ite (isNil_ (R "rs")) nil_

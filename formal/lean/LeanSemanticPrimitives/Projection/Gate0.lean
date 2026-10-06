@@ -30,7 +30,10 @@ open MixProg
 -- nine functions added (`shiftPV`, `pvToPRes`, `totalL`, the three peels,
 -- `primStructL`, `prepareL`, `mixPArgsL`), two removed (`mixUArgsL`,
 -- `inlineEnvL`)
-#guard mixProgram.funs.length == 60
+-- 61 since S1 (`PRes.val` promoted): `ofPVal` and `pvToCode` added, `pvToPRes`
+-- removed -- the `var` rule now CARRIES a spine instead of copying it, so
+-- nothing calls the copy.  See certio/PHASE6_PERF.md 34.
+#guard mixProgram.funs.length == 61
 
 /-- Run the object-level specializer on the toy interpreter and the sample
 expression -- the same inputs `Demo.residual2` gave the Lean specializer. -/
@@ -126,8 +129,12 @@ def compilerR : Except MixError Program := mixDriver 200000 500 A_M [encAProgram
 
 def compilerP : Program := match compilerR with | .ok p => p | .error _ => ⟨[], 0⟩
 
--- one residual function per (division, subterm) reachable in the interpreter
-#guard compilerP.funs.length == 99
+-- one residual function per (division, subterm) reachable in the interpreter.
+-- 100 since S1 (was 99): the object `mix` it is specialized from gained
+-- `ofPVal`/`pvToCode` and the `tagRVal` arms and lost `pvToPRes`.  Every other
+-- guard in this file is unchanged and passes, including the compiled program's
+-- agreement with the interpreter.
+#guard compilerP.funs.length == 100
 
 /-- Run the compiler on the source program.  Its argument is the SOURCE, and
 nothing else -- the interpreter is gone, baked in. -/

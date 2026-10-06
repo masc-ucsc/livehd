@@ -30,6 +30,16 @@ THIS FILE IS NOT PROVED.  It carries no theorems and is not imported by
 `Audit.lean`.  The verified specializer in `Projection/PartialEvaluator.lean`
 remains the semantic reference; this fork exists to MEASURE whether the change
 is worth bridging into the verified path, which is a separate job.
+
+UPDATE -- BOTH CHANGES ARE NOW IN THE PROVED SPECIALIZER, AND THIS FILE IS ONLY
+A MEASUREMENT CONTROL.  CHANGE 2 went in as a `@[csimp]` fast path; CHANGE 1 went
+in as `PRes.val` (certio/PHASE6_PERF.md 34), added IN PLACE rather than bridged
+from here, so nothing about this file was ever proved and nothing needs to be.
+The proved version is NOT this one: it builds results through `PRes.ofPVal`,
+which carries only genuine spines as `.val`, where the peels below return a raw
+`.val a` and can build `.val (.stat v)` -- which `allStatic` rejects and
+`primStruct`'s static fold misses.  Keep this file for in-process timing
+controls; do not read it as a description of the verified path.
 -/
 import LeanSemanticPrimitives.Projection.BindingTime
 import LeanSemanticPrimitives.Projection.ObjectLanguageSemantics

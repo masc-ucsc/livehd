@@ -237,6 +237,7 @@ def PRes.Scoped (depth : Nat) : PRes → Prop
   | .code t    => Term.Scoped depth t
   | .cons a b  => PRes.Scoped depth a ∧ PRes.Scoped depth b
   | .lets bs r => ScopedLets depth bs ∧ PRes.Scoped (depth + bs.length) r
+  | .val v     => PVal.Scoped depth v
 
 def PEnv.Scoped (depth : Nat) : PEnv → Prop
   | []      => True
@@ -262,13 +263,31 @@ theorem Term.Scoped_wrapLets : ∀ (bs : List Term) (d : Nat) (body : Term),
       have : d + 1 + ts.length = d + (t :: ts).length := by simp; omega
       rw [this]; exact hb
 
+/-- A scoped partial value reifies to scoped code.  Proved on `PVal` directly
+rather than through `toPRes`: `PRes.Scoped_toCode` needs it for its `.val` case,
+and `toPRes v` is not a structural subterm of `.val v`. -/
+theorem PVal.Scoped_toCode : ∀ {v : PVal} {d : Nat},
+    PVal.Scoped d v → Term.Scoped d v.toCode
+  | .stat _,   _, _ => trivial
+  | .dyn _,    _, h => h
+  | .cons _ _, _, h => ⟨PVal.Scoped_toCode h.1, PVal.Scoped_toCode h.2, trivial⟩
+
 theorem PRes.Scoped_toCode : ∀ {r : PRes} {d : Nat},
     PRes.Scoped d r → Term.Scoped d r.toCode
+  | .val _,     _, h => PVal.Scoped_toCode h
   | .stat _,    _, _ => trivial
   | .code _,    _, h => h
   | .cons _ _,  _, h => ⟨PRes.Scoped_toCode h.1, PRes.Scoped_toCode h.2, trivial⟩
   | .lets bs r, d, h =>
       Term.Scoped_wrapLets bs d (PRes.toCode r) h.1 (PRes.Scoped_toCode h.2)
+
+/-- `PRes.ofPVal` keeps scope: it is `toPRes` at the leaves, and a carried spine
+is scoped exactly when the spine is. -/
+theorem PRes.Scoped_ofPVal : ∀ {pv : PVal} {d : Nat},
+    PVal.Scoped d pv → PRes.Scoped d (PRes.ofPVal pv)
+  | .stat _,   _, _ => trivial
+  | .dyn _,    _, h => h
+  | .cons _ _, _, h => h
 
 /-! #### Scope, structurally
 
@@ -345,6 +364,7 @@ theorem splitArgs_scoped {d : Nat} : ∀ (ps : Div) (rs : List PRes)
               | code _   => simp [splitArgs] at hsp
               | cons _ _ => simp [splitArgs] at hsp
               | lets _ _ => simp [splitArgs] at hsp
+              | val _    => simp [splitArgs] at hsp
           | dyn =>
               simp only [splitArgs] at hsp
               cases hres : splitArgs bs rs' with
@@ -378,6 +398,14 @@ theorem peelHd_scoped : ∀ {r r' : PRes} {d : Nat},
       simp only [peelHd, Option.map_eq_some_iff] at hp
       obtain ⟨r'', hr'', rfl⟩ := hp
       exact ⟨h.1, ih hr'' h.2⟩
+  | val v =>
+      intro r' d hp h
+      cases v with
+      | cons a b =>
+          simp only [peelHd, Option.some.injEq] at hp
+          subst hp; exact PRes.Scoped_ofPVal h.1
+      | stat _ => simp [peelHd] at hp
+      | dyn _  => simp [peelHd] at hp
 
 theorem peelTl_scoped : ∀ {r r' : PRes} {d : Nat},
     peelTl r = some r' → PRes.Scoped d r → PRes.Scoped d r' := by
@@ -397,6 +425,14 @@ theorem peelTl_scoped : ∀ {r r' : PRes} {d : Nat},
       simp only [peelTl, Option.map_eq_some_iff] at hp
       obtain ⟨r'', hr'', rfl⟩ := hp
       exact ⟨h.1, ih hr'' h.2⟩
+  | val v =>
+      intro r' d hp h
+      cases v with
+      | cons a b =>
+          simp only [peelTl, Option.some.injEq] at hp
+          subst hp; exact PRes.Scoped_ofPVal h.2
+      | stat _ => simp [peelTl] at hp
+      | dyn _  => simp [peelTl] at hp
 
 theorem peelIsNil_scoped : ∀ {r r' : PRes} {d : Nat},
     peelIsNil r = some r' → PRes.Scoped d r → PRes.Scoped d r' := by
@@ -416,6 +452,14 @@ theorem peelIsNil_scoped : ∀ {r r' : PRes} {d : Nat},
       simp only [peelIsNil, Option.map_eq_some_iff] at hp
       obtain ⟨r'', hr'', rfl⟩ := hp
       exact ⟨h.1, ih hr'' h.2⟩
+  | val v =>
+      intro r' d hp h
+      cases v with
+      | cons a b =>
+          simp only [peelIsNil, Option.some.injEq] at hp
+          subst hp; trivial
+      | stat _ => simp [peelIsNil] at hp
+      | dyn _  => simp [peelIsNil] at hp
 
 theorem primStruct_scoped {d : Nat} {p : Prim} {rs : List PRes} {r : PRes}
     (hp : primStruct p rs = some r) (h : PRes.ScopedList d rs) : PRes.Scoped d r := by
@@ -443,6 +487,14 @@ theorem prepare_toPRes : ∀ (pv : PVal), prepare pv.toPRes = ⟨[], pv⟩
   | .cons a b => by
       simp only [PVal.toPRes, prepare, prepare_toPRes a, prepare_toPRes b]
       simp
+
+/-- The `PRes.ofPVal` counterpart of `prepare_toPRes`, and the reason carrying a
+spine costs nothing to prepare: no bindings, and the value is the spine itself.
+`rfl` in every case, where `prepare_toPRes` needs an induction. -/
+theorem prepare_ofPVal : ∀ (pv : PVal), prepare (PRes.ofPVal pv) = ⟨[], pv⟩
+  | .stat _   => rfl
+  | .dyn _    => rfl
+  | .cons _ _ => rfl
 
 /-- THE structural property responsible for linear specialization: extending the
 environment by one node costs exactly ONE binding, the spine survives, and its
@@ -633,6 +685,7 @@ theorem prepare_scoped : ∀ {r : PRes} {d : Nat},
   intro r
   induction r with
   | stat v => intro d _; exact prepare_stat_scoped
+  | val v => intro d h; refine ⟨trivial, ?_⟩; simpa [prepare, PRes.Scoped] using h
   | code t =>
       intro d h
       cases t with
@@ -704,6 +757,7 @@ theorem mixPArgs_scoped {n : Nat} (h : ScopeOK n) :
                   | code _   => simp at hm
                   | cons _ _ => simp at hm
                   | lets _ _ => simp at hm
+                  | val _    => simp at hm
           | dyn =>
               simp only [mixPArgs] at hm
               cases ht : mixTerm n A idx Δ env t with
@@ -761,7 +815,7 @@ theorem mixTerm_scoped : ∀ n, ScopeOK n := by
           · rename_i _ _ _; cases hm; trivial
           · rename_i k _ hv; cases hm; exact PEnv.Scoped_lookup henv hv
           · rename_i a b _ hv; cases hm
-            exact PVal.Scoped_toPRes (PEnv.Scoped_lookup henv hv)
+            exact PEnv.Scoped_lookup henv hv
       | lift e =>
           simp only [mixTerm] at hm
           split at hm <;> try contradiction
@@ -1234,6 +1288,9 @@ def PResOK (Pr : Program) : Env → PRes → Val → Prop
   | ρr, .code c,    v => Eval Pr ρr c v
   | ρr, .cons a b,  v => ∃ x y, v = .cons x y ∧ PResOK Pr ρr a x ∧ PResOK Pr ρr b y
   | ρr, .lets bs r, v => ∃ ρ', EvalLets Pr ρr bs ρ' ∧ PResOK Pr ρ' r v
+  -- a carried partial value means exactly what its `toPRes` would mean; that
+  -- this is the SAME meaning is `PResOK_val_iff_toPRes` below
+  | ρr, .val pv,    v => PValOK ρr pv v
 
 /-! The two projections the old conjunctive definition offered, kept so that
 every existing proof reads the same. -/
@@ -1256,7 +1313,19 @@ inductive Forall₂ {α β : Type} (R : α → β → Prop) : List α → List �
 abbrev PResAll (Pr : Program) (ρr : Env) : List PRes → List Val → Prop :=
   Forall₂ (PResOK Pr ρr)
 
+/-- A partial value's reified code evaluates to what it denotes.  Proved on
+`PVal` directly for the same reason as `PVal.Scoped_toCode`. -/
+theorem PValOK_toCode {Pr ρr} : ∀ {pv : PVal} {v : Val},
+    PValOK ρr pv v → Eval Pr ρr pv.toCode v
+  | .stat _,   _, h => by subst h; exact .lit
+  | .dyn _,    _, h => .var h
+  | .cons a b, _, h => by
+      obtain ⟨x, y, hv, ha, hb⟩ := h
+      subst hv
+      exact .prim (.cons (PValOK_toCode ha) (.cons (PValOK_toCode hb) .nil)) rfl
+
 theorem PResOK_toCode : ∀ {Pr ρr r v}, PResOK Pr ρr r v → Eval Pr ρr r.toCode v
+  | _, _, .val _, _, h => PValOK_toCode h
   | _, _, .stat w, v, h => by
       have : w = v := h.statEq w rfl
       subst this; exact .lit
@@ -1268,6 +1337,14 @@ theorem PResOK_toCode : ∀ {Pr ρr r v}, PResOK Pr ρr r v → Eval Pr ρr r.to
   | Pr, ρr, .lets bs r, v, h => by
       obtain ⟨ρ', hl, hr⟩ := h
       exact wrapLets_eval bs ρr ρ' (PRes.toCode r) v hl (PResOK_toCode hr)
+
+/-- `PRes.ofPVal` keeps meaning: at the leaves it IS `toPRes`, and a carried
+spine means what the spine means. -/
+theorem PResOK_ofPVal {Pr ρr} : ∀ {pv : PVal} {v : Val},
+    PValOK ρr pv v → PResOK Pr ρr (PRes.ofPVal pv) v
+  | .stat _,   _, h => h
+  | .dyn _,    _, h => Eval.var h
+  | .cons _ _, _, h => h
 
 /-! #### Structural answers, forwards
 
@@ -1314,6 +1391,17 @@ theorem peelHd_ok {Pr} : ∀ {r r' : PRes} {ρr : Env} {x y : Val},
       subst hr'
       obtain ⟨ρ', hl, hrr⟩ := hok
       exact ⟨ρ', hl, ih hp'' hrr⟩
+  | val pv =>
+      intro r' ρr x y hp hok
+      cases pv with
+      | cons a b =>
+          simp only [peelHd, Option.some.injEq] at hp
+          subst hp
+          obtain ⟨_, _, he, ha, _⟩ := hok
+          cases he
+          exact PResOK_ofPVal ha
+      | stat _ => simp [peelHd] at hp
+      | dyn _  => simp [peelHd] at hp
 
 theorem peelTl_ok {Pr} : ∀ {r r' : PRes} {ρr : Env} {x y : Val},
     peelTl r = some r' → PResOK Pr ρr r (.cons x y) → PResOK Pr ρr r' y := by
@@ -1339,6 +1427,17 @@ theorem peelTl_ok {Pr} : ∀ {r r' : PRes} {ρr : Env} {x y : Val},
       subst hr'
       obtain ⟨ρ', hl, hrr⟩ := hok
       exact ⟨ρ', hl, ih hp'' hrr⟩
+  | val pv =>
+      intro r' ρr x y hp hok
+      cases pv with
+      | cons a b =>
+          simp only [peelTl, Option.some.injEq] at hp
+          subst hp
+          obtain ⟨_, _, he, _, hb⟩ := hok
+          cases he
+          exact PResOK_ofPVal hb
+      | stat _ => simp [peelTl] at hp
+      | dyn _  => simp [peelTl] at hp
 
 theorem peelIsNil_ok {Pr} : ∀ {r r' : PRes} {ρr : Env} {u v : Val},
     peelIsNil r = some r' → PResOK Pr ρr r u → evalPrim .isNil [u] = .ok v →
@@ -1367,6 +1466,19 @@ theorem peelIsNil_ok {Pr} : ∀ {r r' : PRes} {ρr : Env} {u v : Val},
       subst hr'
       obtain ⟨ρ', hl, hrr⟩ := hok
       exact ⟨ρ', hl, ih hp'' hrr hv⟩
+  | val pv =>
+      intro r' ρr u v hp hok hv
+      cases pv with
+      | cons a b =>
+          simp only [peelIsNil, Option.some.injEq] at hp
+          subst hp
+          obtain ⟨x, y, he, _, _⟩ := hok
+          subst he
+          simp only [evalPrim] at hv
+          cases hv
+          rfl
+      | stat _ => simp [peelIsNil] at hp
+      | dyn _  => simp [peelIsNil] at hp
 
 /-- A structural answer agrees with the source primitive. -/
 theorem primStruct_ok {Pr : Program} {ρr : Env} {p : Prim} {rs : List PRes}
@@ -1405,11 +1517,11 @@ theorem primStruct_ok {Pr : Program} {ρr : Env} {p : Prim} {rs : List PRes}
                       cases hps
                       show Val.cons a b = _
                       rw [(hA : a = _), (hB : b = _)]
-                  | code _ | cons _ _ | lets _ _ =>
+                  | code _ | cons _ _ | lets _ _ | val _ =>
                       simp only [primStruct] at hps
                       cases hps
                       exact ⟨_, _, rfl, hA, hB⟩
-                | code _ | cons _ _ | lets _ _ =>
+                | code _ | cons _ _ | lets _ _ | val _ =>
                     simp only [primStruct] at hps
                     cases hps
                     exact ⟨_, _, rfl, hA, hB⟩
@@ -1693,6 +1805,31 @@ theorem PResOK_toPRes {Pr ρr} : ∀ {pv : PVal} {v : Val},
       subst hv
       exact ⟨x, y, rfl, PResOK_toPRes ha, PResOK_toPRes hb⟩
 
+theorem PValOK_of_PResOK_toPRes {Pr ρr} : ∀ {pv : PVal} {v : Val},
+    PResOK Pr ρr pv.toPRes v → PValOK ρr pv v
+  | .stat _,   _, h => h
+  | .dyn _,    _, h => by cases h with | var hk => exact hk
+  | .cons a b, _, h => by
+      obtain ⟨x, y, hv, ha, hb⟩ := h
+      exact ⟨x, y, hv, PValOK_of_PResOK_toPRes ha, PValOK_of_PResOK_toPRes hb⟩
+
+/-- **The carried form and the copied form MEAN the same thing.**  This is what
+makes `PRes.val` a pure representation change: `.val pv` and `pv.toPRes`
+denote the same values, so carrying a spine instead of copying it can change
+the cost of specialization and nothing else. -/
+theorem PResOK_val_iff_toPRes {Pr ρr} (pv : PVal) (v : Val) :
+    PResOK Pr ρr (.val pv) v ↔ PResOK Pr ρr pv.toPRes v :=
+  ⟨PResOK_toPRes, PValOK_of_PResOK_toPRes⟩
+
+/-- ...and they reify to the SAME code, which is why carrying `.val` leaves the
+residual unchanged. -/
+theorem PRes.toCode_toPRes : ∀ (pv : PVal), (PVal.toPRes pv).toCode = pv.toCode
+  | .stat _   => rfl
+  | .dyn _    => rfl
+  | .cons a b => by
+      simp only [PVal.toPRes, PRes.toCode, PVal.toCode,
+                 PRes.toCode_toPRes a, PRes.toCode_toPRes b]
+
 /-- The semantic relation for a prepared argument, parallel to `PResOK`'s
 package case: the bindings run, and the value denotes under the environment they
 extend. -/
@@ -1767,6 +1904,7 @@ theorem prepare_ok {P : Program} : ∀ {ρ : Env} {r : PRes} {v : Val},
   intro ρ r
   induction r generalizing ρ with
   | stat w => intro v h; exact ⟨ρ, .nil, h⟩
+  | val pv => intro v h; exact ⟨ρ, .nil, h⟩
   | code t =>
       intro v h
       cases t with
@@ -1885,6 +2023,44 @@ theorem wrapLets_peel {P : Program} :
                  .cons (evalFuel_mono _ _ _ _ _ _ (Nat.le_succ mq) hd)
                        (EvalLetsAt_mono (Nat.le_succ mq) hl), hb⟩
 
+/-- A fuel run of a partial value's reified code returns a value the partial
+value denotes.  This is `prepare_peel`'s `.val` case, where nothing is bound;
+the unfolding is the `.cons` case of `prepare_peel` below with `PVal.toCode`
+in place of `PRes.toCode`. -/
+theorem PValOK_of_evalFuel {P : Program} : ∀ (pv : PVal) (mr : Nat) (ρ : Env) (v : Val),
+    evalFuel mr P ρ pv.toCode = .value v → PValOK ρ pv v
+  | .stat w, mr, ρ, v, hev => by
+      cases mr with
+      | zero => simp [evalFuel] at hev
+      | succ mq =>
+          simp only [PVal.toCode, evalFuel] at hev
+          cases hev; rfl
+  | .dyn i, mr, ρ, v, hev => by
+      cases mr with
+      | zero => simp [evalFuel] at hev
+      | succ mq =>
+          simp only [PVal.toCode, evalFuel] at hev
+          cases hk : ρ[i]? with
+          | none   => rw [hk] at hev; simp at hev
+          | some u => rw [hk] at hev; cases hev; exact hk
+  | .cons a b, mr, ρ, v, hev => by
+      cases mr with
+      | zero => simp [evalFuel] at hev
+      | succ mq =>
+        simp only [PVal.toCode, evalFuel] at hev
+        cases hx : evalFuel mq P ρ (PVal.toCode a) with
+        | outOfFuel   => simp [evalFuelList, hx] at hev
+        | typeError _ => simp [evalFuelList, hx] at hev
+        | value x =>
+          cases hy : evalFuel mq P ρ (PVal.toCode b) with
+          | outOfFuel   => simp [evalFuelList, hx, hy] at hev
+          | typeError _ => simp [evalFuelList, hx, hy] at hev
+          | value y =>
+            simp only [evalFuelList, hx, hy, evalPrim] at hev
+            cases hev
+            exact ⟨x, y, rfl, PValOK_of_evalFuel a mq ρ x hx,
+                   PValOK_of_evalFuel b mq ρ y hy⟩
+
 /-- The converse companion to `prepare_ok`: a `toCode` run always contains a
 run of the package.  This is what lets the soundness invariant be stated over
 the prepared form while `specSound_all` still hands it a `toCode` run. -/
@@ -1893,6 +2069,9 @@ theorem prepare_peel {P : Program} : ∀ (r : PRes) (mr : Nat) (ρ : Env) (v : V
     ∃ ρp, EvalLetsAt mr P ρ (prepare r).binds ρp ∧ PValOK ρp (prepare r).value v := by
   intro r
   induction r with
+  | val pv =>
+      intro mr ρ v hev
+      exact ⟨ρ, .nil, PValOK_of_evalFuel pv mr ρ v hev⟩
   | stat w =>
       intro mr ρ v hev
       cases mr with
@@ -2064,6 +2243,7 @@ theorem mixPArgs_ok {A Pr reqs n m} (h : TOK A Pr reqs n m) :
               | code _ => simp at hmix
               | cons _ _ => simp at hmix
               | lets _ _ => simp at hmix
+              | val _ => simp at hmix
               | stat w =>
                 cases hrec : mixPArgs n A (indexOfReq reqs) Δ env ps' ts' with
                 | error z => simp [hrec] at hmix
@@ -2164,7 +2344,8 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
               obtain ⟨u', hs, hp⟩ := Compat_pval_lookup hc i (.cons a b) henv hdiv
               rw [hu] at hs
               cases Option.some.inj hs
-              exact PResOK_toPRes hp
+              -- the result is `.val (.cons a b)`, whose meaning IS the spine's
+              exact hp
 
         | lift e =>
             simp only [mixTerm] at hmix
@@ -2597,6 +2778,7 @@ in-scope-ness, both, exactly as the guard says -- and this is the first place
 the two are used for different jobs in the same step. -/
 
 theorem prepare_total_binds : ∀ {r : PRes}, r.total = true → (prepare r).binds = []
+  | .val _,             _ => rfl
   | .stat _,            _ => rfl
   | .code (.var _),     _ => rfl
   | .code (.lit _),     h => by simp [PRes.total] at h
@@ -2776,6 +2958,21 @@ theorem peelHd_run_inv {Pr : Program} {m : Nat} :
            PValOK ρp (prepare r).value (.cons d y) := by
   intro r
   induction r with
+  -- a carried spine: the dropped half is a `PVal`, total by construction, so
+  -- scope alone supplies its value -- exactly the guard's job in the `.cons` case
+  | val pv =>
+      intro r' ρ ρp d hp hsc hl hv
+      cases pv with
+      | cons a b =>
+          simp only [peelHd, Option.some.injEq] at hp
+          subst hp
+          rw [prepare_ofPVal] at hl hv
+          cases hl
+          obtain ⟨_, hbsc⟩ := hsc
+          obtain ⟨y, hy⟩ := PValOK_of_Scoped (ρ := ρ) hbsc
+          exact ⟨y, .nil, d, y, rfl, hv, hy⟩
+      | stat _ => simp [peelHd] at hp
+      | dyn _  => simp [peelHd] at hp
   | stat w =>
       intro r' ρ ρp d hp _ _ _
       simp [peelHd] at hp
@@ -2817,6 +3014,21 @@ theorem peelTl_run_inv {Pr : Program} {m : Nat} :
            PValOK ρp (prepare r).value (.cons x d) := by
   intro r
   induction r with
+  -- a carried spine: the dropped half is a `PVal`, total by construction, so
+  -- scope alone supplies its value -- exactly the guard's job in the `.cons` case
+  | val pv =>
+      intro r' ρ ρp d hp hsc hl hv
+      cases pv with
+      | cons a b =>
+          simp only [peelTl, Option.some.injEq] at hp
+          subst hp
+          rw [prepare_ofPVal] at hl hv
+          cases hl
+          obtain ⟨hasc, _⟩ := hsc
+          obtain ⟨x, hx⟩ := PValOK_of_Scoped (ρ := ρ) hasc
+          exact ⟨x, .nil, x, d, rfl, hx, hv⟩
+      | stat _ => simp [peelTl] at hp
+      | dyn _  => simp [peelTl] at hp
   | stat w =>
       intro r' ρ ρp d hp _ _ _
       simp [peelTl] at hp
@@ -2858,6 +3070,23 @@ theorem peelIsNil_run_inv {Pr : Program} {m : Nat} :
            PValOK ρp (prepare r).value u ∧ evalPrim .isNil [u] = .ok d := by
   intro r
   induction r with
+  -- a carried spine: the dropped half is a `PVal`, total by construction, so
+  -- scope alone supplies its value -- exactly the guard's job in the `.cons` case
+  | val pv =>
+      intro r' ρ ρp d hp hsc hl hv
+      cases pv with
+      | cons a b =>
+          simp only [peelIsNil, Option.some.injEq] at hp
+          subst hp
+          cases hl
+          have hd : Val.bool false = d := hv
+          subst hd
+          obtain ⟨hasc, hbsc⟩ := hsc
+          obtain ⟨x, hx⟩ := PValOK_of_Scoped (ρ := ρ) hasc
+          obtain ⟨y, hy⟩ := PValOK_of_Scoped (ρ := ρ) hbsc
+          exact ⟨.cons x y, .nil, ⟨x, y, rfl, hx, hy⟩, rfl⟩
+      | stat _ => simp [peelIsNil] at hp
+      | dyn _  => simp [peelIsNil] at hp
   | stat w =>
       intro r' ρ ρp d hp _ _ _
       simp [peelIsNil] at hp
@@ -2954,6 +3183,16 @@ theorem PResSound_of_toPRes {A Pr mr ρr ρs t} {pv : PVal}
   cases hl
   exact h d hval
 
+/-- The same obligation for a CARRIED spine.  `prepare (.val pv)` is
+`⟨[], pv⟩` on the nose, so this is `PResSound_of_toPRes` without the rewrite. -/
+theorem PResSound_of_val {A Pr mr ρr ρs t} {pv : PVal}
+    (h : ∀ u, PValOK ρr pv u → Eval (eraseProgram A) ρs (erase t) u) :
+    PResSound A Pr mr ρr ρs (.val pv) t := by
+  intro ρp d hl hval
+  simp only [prepare] at hl hval
+  cases hl
+  exact h d hval
+
 /-- Arbitrary residual code.  The `var` exclusion is real: `prepare` binds code
 exactly when it is not already a reference, and a reference carries no binding
 whose evaluation could supply the value, so that shape goes through
@@ -3044,6 +3283,7 @@ theorem mixTerms_sound_stat {A Pr reqs n mr} (h : SOK A Pr reqs n mr) :
       | code _ => simp [allStatic] at hst
       | cons _ _ => simp [allStatic] at hst
       | lets _ _ => simp [allStatic] at hst
+      | val _ => simp [allStatic] at hst
       | stat u =>
           simp only [allStatic] at hst
           split at hst <;> try contradiction
@@ -3195,7 +3435,7 @@ theorem primStruct_sound {A Pr mr ρr ρs} {p : Prim} {rs : List PRes} {ts : Lis
                       subst hd
                       exact .prim (.cons (hA ρr a .nil rfl)
                                     (.cons (hB ρr b .nil rfl) .nil)) rfl
-                  | code _ | cons _ _ | lets _ _ =>
+                  | code _ | cons _ _ | lets _ _ | val _ =>
                       simp only [primStruct] at hps
                       cases hps
                       obtain ⟨x, y, ρa, ρb, he, hla, hxa, hlb, hyb⟩ :=
@@ -3203,7 +3443,7 @@ theorem primStruct_sound {A Pr mr ρr ρs} {p : Prim} {rs : List PRes} {ts : Lis
                       subst he
                       exact .prim (.cons (hA ρa x hla hxa)
                                     (.cons (hB ρb y hlb hyb) .nil)) rfl
-                | code _ | cons _ _ | lets _ _ =>
+                | code _ | cons _ _ | lets _ _ | val _ =>
                     simp only [primStruct] at hps
                     cases hps
                     obtain ⟨x, y, ρa, ρb, he, hla, hxa, hlb, hyb⟩ :=
@@ -3338,6 +3578,7 @@ theorem splitArgs_sound {A Pr reqs n mr} (h : SOK A Pr reqs n mr) :
             | code _ => simp [splitArgs] at hsp
             | cons _ _ => simp [splitArgs] at hsp
             | lets _ _ => simp [splitArgs] at hsp
+            | val _ => simp [splitArgs] at hsp
             | stat w =>
                 simp only [splitArgs] at hsp
                 split at hsp <;> try contradiction
@@ -3417,6 +3658,7 @@ theorem mixPArgs_sound {A Pr reqs n mr} (hsok : SOK A Pr reqs n mr) :
               | code _ => simp at hmix
               | cons _ _ => simp at hmix
               | lets _ _ => simp at hmix
+              | val _ => simp at hmix
               | stat w =>
                 cases hrec : mixPArgs n A (indexOfReq reqs) Δ env ps' ts' with
                 | error z => simp [hrec] at hmix
@@ -3504,7 +3746,7 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
           · -- a preserved spine, read back structurally
             rename_i a b hdiv henv
             cases hmix
-            refine PResSound_of_toPRes (pv := .cons a b) (fun u hval => ?_)
+            refine PResSound_of_val (pv := .cons a b) (fun u hval => ?_)
             obtain ⟨u', hs, hp⟩ := Compat_pval_lookup hc i (.cons a b) henv hdiv
             cases PValOK_functional hval hp
             exact .var hs

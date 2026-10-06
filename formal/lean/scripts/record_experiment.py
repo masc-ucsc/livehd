@@ -49,6 +49,13 @@ CODE_TOTAL = ['scripts/total_probe.lean',
               'LeanSemanticPrimitives/Projection/Proto/VariantAdequacy.lean',
               'LeanSemanticPrimitives/Projection/Proto/RewriteTotal.lean',
               'LeanSemanticPrimitives/Projection/Proto/VariantTransport.lean']
+# The PROVED specializer.  Every runner that calls `Projection.mixDriver` --
+# total-probe, host-var, host-var-total -- is decided by this file, and it was
+# missing: S1 (`PRes.val`, PHASE6_PERF.md 34) and the earlier `@[csimp]` fast
+# path both changed it, and a ledger row could not tell a run before either
+# change from one after except through `git_rev`.  The fork runner does not use
+# it (`ProtoFast` is a separate copy), so it is not in CODE_COMMON.
+CODE_PROVED = ['LeanSemanticPrimitives/Projection/PartialEvaluator.lean']
 SUPPORT_FIELDS = ['wf', 'memFree', 'sources', 'ops', 'arities', 'flopClocks']
 
 # Which runner produced the log, and therefore WHICH BACKEND ran.  The fields
@@ -82,7 +89,7 @@ RUNNERS = {
         'specializer': 'Projection.mixDriver  (the PROVED specializer -- no fork)',
         'interpreter': 'Projection.ProtoVar.hwAPVar  (VARIANT from the PARTIAL goInline -- no equivalence lemma, and NOT the proof target)',
         'acceptance': 'FEASIBILITY ONLY: 3 seeds, no trace, no control',
-        'code': CODE_FORK + CODE_COMMON,
+        'code': CODE_FORK + CODE_COMMON + CODE_PROVED,
         'seed_re': r'seed (\d+): residual (\S+)\s+matches interpretDesign (\w+)',
         'terms_re': r'terms (\d+)',
         'bound_re': r'ACCEPTED, bound (\d+)',
@@ -96,7 +103,7 @@ RUNNERS = {
         'specializer': 'Projection.mixDriver  (the PROVED specializer -- no fork)',
         'interpreter': 'Projection.ProtoVar.hwAPVarT  (TOTAL variant; IHwAdequate_varT and specializeDesign_varT_correct are PROVED, so this pair is the covered backend)',
         'acceptance': 'CHECKED SIMULATOR PATH: specialized once, checker must accept, every cycle at the CHECKED BOUND; 6 width-aware stimuli + threaded trace + control interpreter',
-        'code': CODE_TOTAL + CODE_COMMON,
+        'code': CODE_TOTAL + CODE_COMMON + CODE_PROVED,
         'seed_re': r'seed (\d+): (\S+)\s+matches interpretDesign (\w+)',
         'terms_re': r'residual (\d+) terms',
         'bound_re': r'checker bound (\d+)',
@@ -120,7 +127,7 @@ RUNNERS = {
         'acceptance': 'FEASIBILITY ONLY: 3 seeds, no trace, no control; and it '
                       'interprets at a FALLBACK bound when the checker rejects, '
                       'so it is not a checked run -- superseded by total-probe',
-        'code': CODE_FORK + CODE_TOTAL + CODE_COMMON,
+        'code': CODE_FORK + CODE_TOTAL + CODE_COMMON + CODE_PROVED,
         'seed_re': r'seed (\d+): residual (\S+)\s+matches interpretDesign (\w+)',
         'terms_re': r'terms (\d+)',
         'bound_re': r'ACCEPTED, bound (\d+)',

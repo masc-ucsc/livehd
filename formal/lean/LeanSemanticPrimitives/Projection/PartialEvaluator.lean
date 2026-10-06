@@ -209,7 +209,21 @@ inductive PRes where
   | code : Term → PRes
   | cons : PRes → PRes → PRes
   | lets : List Term → PRes → PRes
+  /-- A partial value CARRIED rather than converted.  `.val v` denotes exactly
+  what `v.toPRes` denotes, but costs O(1) to build where `toPRes` copies the
+  whole spine.  Built only through `PRes.ofPVal`, so it only ever holds a
+  genuine spine.  Promoted from `Proto/PartialEvaluatorFast.lean` (CHANGE 1);
+  see `certio/PHASE6_PERF.md` 26 and 27 for what it buys. -/
+  | val  : PVal → PRes
   deriving Inhabited, Repr
+
+/-- Reify a partial value directly, without building a `PRes` first.  Agrees
+with `(PVal.toPRes v).toCode` -- `PRes.toCode_toPRes` in the correctness file
+says so -- which is why carrying `.val` changes no residual. -/
+def PVal.toCode : PVal → Term
+  | .stat v   => .lit v
+  | .dyn k    => .var k
+  | .cons a b => .prim .consP [PVal.toCode a, PVal.toCode b]
 
 /-- Turn any result into residual code.  On a static value this is the `lift`
 of the two-level language, and it is why lifting is always available: every
@@ -221,6 +235,7 @@ def PRes.toCode : PRes → Term
   | .code t   => t
   | .cons a b  => .prim .consP [PRes.toCode a, PRes.toCode b]
   | .lets bs r => wrapLets bs (PRes.toCode r)
+  | .val v     => PVal.toCode v
 
 /-- Read a partial environment entry back as a result.  A preserved spine has
 to survive being looked up, or the `var` rule would flatten it the first time it
@@ -229,6 +244,22 @@ def PVal.toPRes : PVal → PRes
   | .stat v   => .stat v
   | .dyn k    => .code (.var k)
   | .cons a b => .cons (PVal.toPRes a) (PVal.toPRes b)
+
+/-- The O(1) embedding of a partial value into a result.  It agrees with
+`PVal.toPRes` EXACTLY at the leaves -- a `stat` stays `stat`, a `dyn k` becomes
+`code (.var k)` -- and carries only a genuine spine as `.val`.
+
+Keeping `.val` to spines is deliberate, and it is where this promotion departs
+from the fork.  The fork's `peel` arms return a raw `.val a`, so they can build
+`.val (.stat v)` -- which `allStatic` rejects where it accepts `.stat v`, and
+which `primStruct`'s static fold does not match.  That is a latent new failure
+mode and a residual difference.  Through `ofPVal` every result is one the old
+specializer could have built, or `.val` standing for a spine it would have
+copied; so residuals are unchanged, which is what makes the change checkable. -/
+def PRes.ofPVal : PVal → PRes
+  | .stat v   => .stat v
+  | .dyn k    => .code (.var k)
+  | .cons a b => .val (.cons a b)
 
 /-- Can this result's residual code fail to produce a value?
 
@@ -249,6 +280,8 @@ def PRes.total : PRes → Bool
   | .code _        => false
   | .cons a b      => PRes.total a && PRes.total b
   | .lets _ _      => false
+  -- a partial value's leaves are `stat` or `dyn`, both total under `Compat`
+  | .val _         => true
 
 inductive MixError where
   | outOfFuel
@@ -346,6 +379,8 @@ needs a binding.
 A `lets` PACKAGE concatenates safely, and only it does: its inner bindings
 genuinely live under its outer ones, so no shift is owed. -/
 def prepare : PRes → Prepared
+  -- already a partial value: nothing to bind, nothing to copy
+  | .val v         => ⟨[], v⟩
   | .stat v        => ⟨[], .stat v⟩
   -- already a reference; binding it again would be a wasted let
   | .code (.var i) => ⟨[], .dyn i⟩
@@ -421,16 +456,20 @@ object cannot mirror would mean two independently designed specializers. -/
 def peelHd : PRes → Option PRes
   | .lets bs r        => (peelHd r).map (PRes.lets bs)
   | .cons a b         => if b.total then some a else none
+  -- a partial value's tail is total, so the guard is answered without a walk
+  | .val (.cons a _)  => some (PRes.ofPVal a)
   | _                 => none
 
 def peelTl : PRes → Option PRes
   | .lets bs r        => (peelTl r).map (PRes.lets bs)
   | .cons a b         => if a.total then some b else none
+  | .val (.cons _ b)  => some (PRes.ofPVal b)
   | _                 => none
 
 def peelIsNil : PRes → Option PRes
   | .lets bs r        => (peelIsNil r).map (PRes.lets bs)
   | .cons a b         => if a.total && b.total then some (.stat (.bool false)) else none
+  | .val (.cons _ _)  => some (.stat (.bool false))
   | _                 => none
 
 /-- `consP` discards nothing, so it may always build a spine. -/
@@ -454,6 +493,7 @@ def allStatic : List PRes → Except MixError (List Val)
   | .code _ :: _  => .error (.notStatic "static node has a residual operand")
   | .cons _ _ :: _ => .error (.notStatic "static node has a partially static operand")
   | .lets _ _ :: _ => .error (.notStatic "static node has a residual operand")
+  | .val _ :: _    => .error (.notStatic "static node has a partially static operand")
 
 /-- The residual code of each DYNAMIC argument, in source order.  These become
 the `let`s an unfold wraps around the inlined body. -/
@@ -514,7 +554,7 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
       | some .stat, some (.stat v)   => .ok (.stat v, [])
       | some .dyn,  some (.dyn k)    => .ok (.code (.var k), [])
       -- a preserved spine reads back structurally rather than being flattened
-      | some .dyn,  some (.cons a b) => .ok ((PVal.cons a b).toPRes, [])
+      | some .dyn,  some (.cons a b) => .ok (.val (.cons a b), [])
       | some _,     some _           => .error (.illAnnotated "var: division disagrees with the environment")
       | _,          _              => .error (.unboundVar i)
     | .lift e =>
@@ -524,6 +564,7 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
       | .ok (.code _, _)  => .error (.notStatic "lift: operand is not static")
       | .ok (.cons _ _, _) => .error (.notStatic "lift: operand is not static")
       | .ok (.lets _ _, _) => .error (.notStatic "lift: operand is not static")
+      | .ok (.val _, _)    => .error (.notStatic "lift: operand is not static")
     | .letIn _ e body =>
       match mixTerm n A idx Δ env e with
       | .error z => .error z
@@ -547,6 +588,7 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
         | .stat, .code _ => .error (.notStatic "letIn: static binding produced code")
         | .stat, .cons _ _ => .error (.notStatic "letIn: static binding produced a partial structure")
         | .stat, .lets _ _ => .error (.notStatic "letIn: static binding produced code")
+        | .stat, .val _ => .error (.notStatic "letIn: static binding produced a partial structure")
     | .ite _ c a e =>
       match mixTerm n A idx Δ env c with
       | .error z => .error z
