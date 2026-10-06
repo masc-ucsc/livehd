@@ -16,8 +16,106 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
+
+TEST(CgenLlvm, WideShiftKnownBits) {
+  constexpr unsigned bits = 131064;
+  llvm::KnownBits    lhs(bits);
+  llvm::KnownBits    rhs(bits);
+  lhs.Zero          = llvm::APInt::getHighBitsSet(bits, bits - 64);
+  rhs.Zero          = llvm::APInt::getHighBitsSet(bits, bits - 16);
+  const auto result = llvm::KnownBits::shl(lhs, rhs, true, true);
+  EXPECT_EQ(result.Zero, llvm::APInt::getHighBitsSet(bits, bits - 64 - 65535));
+  EXPECT_TRUE(result.One.isZero());
+
+  lhs.One  = llvm::APInt(bits, 1);
+  lhs.Zero = ~lhs.One;
+  rhs.Zero.setAllBits();
+  rhs.Zero.clearBit(0);
+  rhs.Zero.clearBit(15);
+  llvm::APInt possible(bits, 0);
+  possible.setBit(1);
+  possible.setBit(32768);
+  possible.setBit(32769);
+  const auto nonzero = llvm::KnownBits::shl(lhs, rhs, true, true, true);
+  EXPECT_EQ(nonzero.Zero, ~possible);
+  EXPECT_TRUE(nonzero.One.isZero());
+}
+
+TEST(CgenLlvm, ShiftKnownBitsMatchConcreteValues) {
+  struct Case {
+    llvm::KnownBits       known;
+    std::vector<unsigned> values;
+  };
+  for (unsigned bits = 1; bits <= 5; ++bits) {
+    const unsigned limit    = 1u << bits;
+    unsigned       patterns = 1;
+    for (unsigned i = 0; i < bits; ++i) {
+      patterns *= 3;
+    }
+    std::vector<Case> cases;
+    for (unsigned code = 0; code < patterns; ++code) {
+      Case     sample{llvm::KnownBits(bits), {}};
+      unsigned digits = code;
+      for (unsigned bit = 0; bit < bits; ++bit, digits /= 3) {
+        if (digits % 3 == 1) {
+          sample.known.Zero.setBit(bit);
+        } else if (digits % 3 == 2) {
+          sample.known.One.setBit(bit);
+        }
+      }
+      for (unsigned value = 0; value < limit; ++value) {
+        if ((value & sample.known.Zero.getZExtValue()) == 0
+            && (value & sample.known.One.getZExtValue()) == sample.known.One.getZExtValue()) {
+          sample.values.push_back(value);
+        }
+      }
+      cases.push_back(std::move(sample));
+    }
+    for (const auto& lhs : cases) {
+      for (const auto& rhs : cases) {
+        for (unsigned flags = 0; flags < 8; ++flags) {
+          const bool nuw        = (flags & 1) != 0;
+          const bool nsw        = (flags & 2) != 0;
+          const bool nonzero    = (flags & 4) != 0;
+          unsigned   may_be_one = 0;
+          unsigned   always_one = limit - 1;
+          bool       defined    = false;
+          for (unsigned value : lhs.values) {
+            for (unsigned amount : rhs.values) {
+              if (amount >= bits || (nonzero && amount == 0)) {
+                continue;
+              }
+              const unsigned shifted = value << amount;
+              const int      signed_value
+                  = value >= limit / 2 ? static_cast<int>(value) - static_cast<int>(limit) : static_cast<int>(value);
+              const int signed_shifted = signed_value * static_cast<int>(1u << amount);
+              if ((nuw && shifted >= limit)
+                  || (nsw && (signed_shifted < -static_cast<int>(limit / 2) || signed_shifted >= static_cast<int>(limit / 2)))) {
+                continue;
+              }
+              defined     = true;
+              may_be_one |= shifted & (limit - 1);
+              always_one &= shifted & (limit - 1);
+            }
+          }
+          const auto result = llvm::KnownBits::shl(lhs.known, rhs.known, nuw, nsw, nonzero);
+          if (!defined) {
+            continue;
+          }
+          ASSERT_EQ(result.Zero.getZExtValue() & may_be_one, 0u) << bits << " bits, flags=" << flags;
+          ASSERT_EQ(result.One.getZExtValue() & ~always_one, 0u) << bits << " bits, flags=" << flags;
+          if (!nuw && !nsw && !lhs.known.isUnknown() && rhs.values.back() < bits) {
+            ASSERT_EQ(result.Zero.getZExtValue(), (~may_be_one & (limit - 1)));
+            ASSERT_EQ(result.One.getZExtValue(), always_one);
+          }
+        }
+      }
+    }
+  }
+}
 
 TEST(CgenLlvm, LinksWideBitTestCounts) {
   llvm::LLVMContext context;

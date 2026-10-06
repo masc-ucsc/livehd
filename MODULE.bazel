@@ -42,6 +42,7 @@ http_archive(
         "//packages:llvm22-twoaddr-phys-map.patch",
         "//packages:llvm22-scheduler-dead-defs.patch",
         "//packages:llvm22-bt-narrow-count.patch",
+        "//packages:llvm22-known-bits-shifts.patch",
     ],
     sha256 = "922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888",
     strip_prefix = "llvm-project-22.1.8.src",

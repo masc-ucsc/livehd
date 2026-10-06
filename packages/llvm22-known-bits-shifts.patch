@@ -1,0 +1,49 @@
+--- a/llvm/lib/Support/KnownBits.cpp
++++ b/llvm/lib/Support/KnownBits.cpp
+@@ -348,6 +348,46 @@
+   // Find the common bits from all possible shifts.
+   unsigned ShiftAmtZeroMask = RHS.Zero.zextOrTrunc(32).getZExtValue();
+   unsigned ShiftAmtOneMask = RHS.One.zextOrTrunc(32).getZExtValue();
++  // Fold the complete shift domain one unknown amount bit at a time. Shifts
++  // distribute over bitwise OR/AND, so this computes the same common bits as
++  // enumeration in O(log(MaxShiftAmount) * BitWidth) rather than quadratic
++  // work on very wide integers. Keep enumeration when poison constraints
++  // remove part of the domain or NSW can infer additional sign information.
++  unsigned SignRun =
++      std::max(LHS.countMinLeadingZeros(), LHS.countMinLeadingOnes());
++  if (MaxValue.ule(MaxShiftAmount) && (!NSW || MaxShiftAmount < SignRun)) {
++    unsigned UnknownShiftBits =
++        (MaxValue ^ RHS.One).zextOrTrunc(32).getZExtValue();
++    bool ExcludeZero = ShAmtNonZero && ShiftAmtOneMask == 0;
++    if (!ExcludeZero || UnknownShiftBits != 0) {
++      APInt MayBeOne = ~LHS.Zero;
++      APInt AlwaysOne = LHS.One;
++      if (ExcludeZero) {
++        APInt NonzeroMayBeOne(BitWidth, 0);
++        APInt NonzeroAlwaysOne = APInt::getAllOnes(BitWidth);
++        while (UnknownShiftBits != 0) {
++          unsigned Step = UnknownShiftBits & -UnknownShiftBits;
++          UnknownShiftBits &= UnknownShiftBits - 1;
++          NonzeroMayBeOne |= (NonzeroMayBeOne | MayBeOne).shl(Step);
++          NonzeroAlwaysOne &= (NonzeroAlwaysOne & AlwaysOne).shl(Step);
++        }
++        MayBeOne = std::move(NonzeroMayBeOne);
++        AlwaysOne = std::move(NonzeroAlwaysOne);
++      } else {
++        MayBeOne <<= ShiftAmtOneMask;
++        AlwaysOne <<= ShiftAmtOneMask;
++        while (UnknownShiftBits != 0) {
++          unsigned Step = UnknownShiftBits & -UnknownShiftBits;
++          UnknownShiftBits &= UnknownShiftBits - 1;
++          MayBeOne |= MayBeOne.shl(Step);
++          AlwaysOne &= AlwaysOne.shl(Step);
++        }
++      }
++      Known.Zero = ~MayBeOne;
++      Known.One = std::move(AlwaysOne);
++      return Known;
++    }
++  }
+   Known.setAllConflict();
+   for (unsigned ShiftAmt = MinShiftAmount; ShiftAmt <= MaxShiftAmount;
+        ++ShiftAmt) {
