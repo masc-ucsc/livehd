@@ -173,6 +173,15 @@ public:
 
   void store_packed(llvm::Value* value, llvm::Value* base, size_t offset, uint32_t width) {
     auto* i64 = builder.getInt64Ty();
+    if constexpr (std::endian::native == std::endian::little) {
+      if (width > 64) {
+        auto* ptr    = builder.CreateConstInBoundsGEP1_64(i64, base, offset);
+        auto* padded = cast_integer(builder, value, static_cast<unsigned>(word_count(width) * 64), true);
+        auto* store  = builder.CreateStore(padded, ptr);
+        store->setAlignment(llvm::Align(alignof(uint64_t)));
+        return;
+      }
+    }
     for (size_t word = 0; word < word_count(width); ++word) {
       auto* lane = value;
       if (word != 0) {
@@ -388,7 +397,76 @@ Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t 
     // bitwidth pass legitimately narrows `a >> k`'s result below `a`'s width,
     // and truncating first would shift the very bits the node selects out of
     // existence (Slop shifts the untruncated carrier and lands the result).
-    const unsigned work_width    = op == Binary_op::shl ? result_width : std::max<unsigned>(lhs.width, result_width);
+    const unsigned     work_width               = op == Binary_op::shl ? result_width : std::max<unsigned>(lhs.width, result_width);
+    // A wide variable barrel shifter expands into thousands of dependent
+    // machine operations. Keep native code bounded by shifting packed words
+    // in an LLVM loop instead; constant shifts retain their direct path.
+    constexpr unsigned max_variable_shift_width = 4096;
+    if (work_width > max_variable_shift_width && !llvm::isa<llvm::ConstantInt>(right)) {
+      auto&      b               = impl_->builder;
+      auto*      i64             = b.getInt64Ty();
+      const auto source_words    = word_count(work_width);
+      const auto output_words    = word_count(result_width);
+      left                       = cast_integer(b, left, work_width, lhs.unsign);
+      auto*             padded   = cast_integer(b, left, static_cast<unsigned>(source_words * 64), op != Binary_op::ashr);
+      auto*             function = b.GetInsertBlock()->getParent();
+      llvm::IRBuilder<> allocations(&function->getEntryBlock(), function->getEntryBlock().getFirstInsertionPt());
+      auto*             source = allocations.CreateAlloca(i64, llvm::ConstantInt::get(i64, source_words), "shift.source");
+      auto*             output = allocations.CreateAlloca(i64, llvm::ConstantInt::get(i64, output_words), "shift.output");
+      source->setAlignment(llvm::Align(alignof(uint64_t)));
+      output->setAlignment(llvm::Align(alignof(uint64_t)));
+      impl_->store_packed(padded, source, 0, static_cast<uint32_t>(source_words * 64));
+      const auto   compare_width = std::max<unsigned>(rhs.width, 32);
+      auto*        count         = cast_integer(b, right, compare_width, true);
+      auto*        oversized     = b.CreateICmpUGE(count, llvm::ConstantInt::get(count->getType(), work_width));
+      auto*        amount        = cast_integer(b, right, 64, true);
+      auto*        words         = b.CreateLShr(amount, llvm::ConstantInt::get(i64, 6));
+      auto*        bits          = b.CreateAnd(amount, llvm::ConstantInt::get(i64, 63));
+      llvm::Value* fill          = llvm::ConstantInt::get(i64, 0);
+      if (op == Binary_op::ashr) {
+        auto* sign = b.CreateTrunc(b.CreateLShr(left, llvm::ConstantInt::get(left->getType(), work_width - 1)), b.getInt1Ty());
+        fill       = b.CreateSExt(sign, i64);
+      }
+      auto* entry = b.GetInsertBlock();
+      auto* loop  = llvm::BasicBlock::Create(impl_->context, "shift.loop", function);
+      auto* done  = llvm::BasicBlock::Create(impl_->context, "shift.done", function);
+      b.CreateBr(loop);
+      b.SetInsertPoint(loop);
+      auto* index = b.CreatePHI(i64, 2, "shift.word");
+      index->addIncoming(llvm::ConstantInt::get(i64, 0), entry);
+      const auto load_word = [&](llvm::Value* position, llvm::Value* valid) {
+        valid               = b.CreateAnd(valid, b.CreateNot(oversized));
+        auto* safe_position = b.CreateSelect(valid, position, llvm::ConstantInt::get(i64, 0));
+        auto* ptr           = b.CreateInBoundsGEP(i64, source, safe_position);
+        auto* value         = b.CreateLoad(i64, ptr);
+        return b.CreateSelect(valid, value, fill);
+      };
+      llvm::Value* shifted = nullptr;
+      if (op == Binary_op::shl) {
+        auto* position = b.CreateSub(index, words);
+        auto* low      = load_word(position, b.CreateICmpUGE(index, words));
+        auto* high     = load_word(b.CreateSub(position, llvm::ConstantInt::get(i64, 1)), b.CreateICmpUGT(index, words));
+        auto* funnel   = llvm::Intrinsic::getOrInsertDeclaration(impl_->module.get(), llvm::Intrinsic::fshl, {i64});
+        shifted        = b.CreateCall(funnel, {low, high, bits});
+      } else {
+        auto* position = b.CreateAdd(index, words);
+        auto* next     = b.CreateAdd(position, llvm::ConstantInt::get(i64, 1));
+        auto* low      = load_word(position, b.CreateICmpULT(position, llvm::ConstantInt::get(i64, source_words)));
+        auto* high     = load_word(next, b.CreateICmpULT(next, llvm::ConstantInt::get(i64, source_words)));
+        auto* funnel   = llvm::Intrinsic::getOrInsertDeclaration(impl_->module.get(), llvm::Intrinsic::fshr, {i64});
+        shifted        = b.CreateCall(funnel, {high, low, bits});
+      }
+      b.CreateStore(shifted, b.CreateInBoundsGEP(i64, output, index));
+      auto* next     = b.CreateAdd(index, llvm::ConstantInt::get(i64, 1));
+      auto* backedge = b.CreateCondBr(b.CreateICmpULT(next, llvm::ConstantInt::get(i64, output_words)), loop, done);
+      index->addIncoming(next, loop);
+      auto* no_unroll = llvm::MDNode::get(impl_->context, {llvm::MDString::get(impl_->context, "llvm.loop.unroll.disable")});
+      auto* loop_id   = llvm::MDNode::getDistinct(impl_->context, {nullptr, no_unroll});
+      loop_id->replaceOperandWith(0, loop_id);
+      backedge->setMetadata(llvm::LLVMContext::MD_loop, loop_id);
+      b.SetInsertPoint(done);
+      return impl_->remember(impl_->load_packed(output, 0, result_width, "shift.result"), result_width, result_unsign);
+    }
     left                         = cast_integer(impl_->builder, left, work_width, lhs.unsign);
     const unsigned compare_width = std::max<unsigned>(rhs.width, 32);
     auto*          count         = cast_integer(impl_->builder, right, compare_width, true);
@@ -749,8 +827,8 @@ bool Cgen_llvm::write_object(std::string_view path, std::string& error, bool tra
   // Keep exact-width bit operations visible to a deliberately bounded scalar
   // pipeline before instruction selection. The generic O2 module pipeline is
   // a poor fit for generated color kernels: Minion's largest straight-line
-  // color spent more than 14 minutes in GVN alone. These kernels contain no
-  // internal calls or loops, so one pass each of stack promotion, local CSE,
+  // color spent more than 14 minutes in GVN alone. These kernels contain only bounded packed-word loops
+  // and no internal calls, so one pass each of stack promotion, local CSE,
   // bit folding, CFG cleanup, and dead-code removal captures the useful
   // simplifications without the inliner/GVN compile-time cliff.
   llvm::LoopAnalysisManager     loop_analyses;
@@ -774,6 +852,30 @@ bool Cgen_llvm::write_object(std::string_view path, std::string& error, bool tra
   llvm::ModulePassManager pipeline;
   pipeline.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(functions)));
   pipeline.run(*impl_->module, module_analyses);
+
+  // Legalizing an oversized integer produces thousands of native operations.
+  // Keep such kernels in separate functions so AlwaysInliner cannot combine
+  // many wide packed-array operations into one enormous scheduling region.
+  const auto wide_integer = [](llvm::Type* type) { return type->isIntegerTy() && type->getIntegerBitWidth() > 4096; };
+  bool       wide_kernel  = false;
+  for (auto& block : *impl_->function) {
+    for (auto& instruction : block) {
+      wide_kernel = wide_integer(instruction.getType());
+      for (const auto& operand : instruction.operands()) {
+        wide_kernel |= wide_integer(operand->getType());
+      }
+      if (wide_kernel) {
+        break;
+      }
+    }
+    if (wide_kernel) {
+      break;
+    }
+  }
+  if (wide_kernel) {
+    impl_->function->removeFnAttr(llvm::Attribute::AlwaysInline);
+    impl_->function->addFnAttr(llvm::Attribute::NoInline);
+  }
 
   // Emit into MEMORY, then hand the bytes to File_output rather than writing
   // the file directly. The object is a link input keyed on mtime by the

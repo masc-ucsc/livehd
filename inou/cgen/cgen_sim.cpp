@@ -13220,7 +13220,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                sim_const_expr(literal, std::to_string(width)),
                                ").copy_packed_words(__words);\n}\n");
                 }
-                return llvm_kernel.external_read_all(symbol, width, is_unsign(pin));
+                return llvm_kernel.external_read_all(symbol, width, false);
               }
               auto simulated = constant;
               if (constant.has_unknowns()) {
@@ -13236,7 +13236,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                   words[bit / 64] |= uint64_t{1} << (bit % 64);
                 }
               }
-              return llvm_kernel.constant_words(width, words, is_unsign(pin));
+              // Numeric literals use signed numeric storage. Constant
+              // pins need not carry pin_signed, so their default unsigned hint
+              // must not zero-extend a narrow negative mask (e.g. -4 -> 4).
+              return llvm_kernel.constant_words(width, words, false);
             }
             return {};
           };

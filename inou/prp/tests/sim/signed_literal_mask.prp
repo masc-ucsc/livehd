@@ -1,0 +1,32 @@
+/*
+:name: signed_literal_mask
+:type: simulation
+:sim_sweep: sim.tune.backend=llvm
+*/
+// Numeric constants retain their sign when widened for unsigned operands.
+pub mod signed_literal_mask(clk:Clock, a:U64, b:U130) -> (aligned:U64@[0], all_bits:U64@[0], sum:U64@[0], wide:U130@[0]) {
+  wrap aligned = a & -4
+  wrap all_bits = a & -1
+  wrap sum = a + -4
+  wrap wide = b & -(1 << 70)
+}
+
+test signed_literal_mask.cases {
+  mut dut = signed_literal_mask
+  const addresses = [0, 3, 4, 0x80000000, 0x80000003, 0xFEDCBA9876543210, 0xFFFFFFFFFFFFFFFF]
+  const mask64 = (1 << 64) - 1
+  mut iteration = 0
+  tick 7 {
+    const address = addresses[iteration]
+    const big = (1 << 129) | (address << 66) | 0x123456789ABCDEF
+    dut.a = address
+    dut.b = big
+    step
+    assert(dut.aligned == (address & -4), "negative alignment mask")
+    assert(dut.all_bits == address, "negative all-ones mask")
+    assert(dut.sum == ((address - 4) & mask64), "negative addend")
+    assert(dut.wide == (big & -(1 << 70)), "negative mask across packed words")
+    iteration += 1
+  }
+  assert(iteration == 7, "all negative literal cases ran")
+}

@@ -82,3 +82,25 @@ diff --git a/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp b/llvm/lib/CodeGen/ScheduleD
    Uses.clear();
    CurrentVRegDefs.clear();
    CurrentVRegUses.clear();
+diff --git a/llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp b/llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp
+--- a/llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp
++++ b/llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp
+@@ -2346,2 +2346,6 @@
+ static unsigned closestSucc(const SUnit *SU) {
++  // NumSuccs counts data edges; a node with only control edges has no
++  // register successor, even when its memory-order fanout is enormous.
++  if (SU->NumSuccs == 0)
++    return 0;
+   unsigned MaxHeight = 0;
+@@ -2364,8 +2368,5 @@
+ static unsigned calcMaxScratches(const SUnit *SU) {
+-  unsigned Scratches = 0;
+-  for (const SDep &Pred : SU->Preds) {
+-    if (Pred.isCtrl()) continue;  // ignore chain preds
+-    Scratches++;
+-  }
+-  return Scratches;
++  // SUnit already maintains the exact number of data predecessors. Avoid
++  // rescanning large control-edge sets during every queue comparison.
++  return SU->NumPreds;
+ }

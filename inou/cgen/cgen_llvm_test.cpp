@@ -21,6 +21,35 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 
+TEST(CgenLlvm, WideVariableShiftsCompileAsPackedLoops) {
+  for (const uint32_t width : {4096u, 4097u, 131064u}) {
+    Cgen_llvm   kernel("variable_shift",
+                       {
+                           {width, false},
+                           {   17,  true}
+    });
+    std::string error;
+    size_t      output = 0;
+    for (const auto op : {Cgen_llvm::Binary_op::shl, Cgen_llvm::Binary_op::lshr, Cgen_llvm::Binary_op::ashr}) {
+      const auto result_width = op == Cgen_llvm::Binary_op::shl ? width : 64u;
+      const auto shifted      = kernel.binary(op, kernel.input(0), kernel.input(1), result_width, false);
+      EXPECT_EQ(shifted.width, result_width);
+      ASSERT_TRUE(kernel.add_output(output++, shifted, error)) << error;
+      const auto constant = kernel.binary(op, kernel.input(0), kernel.constant(17, 4, true), result_width, false);
+      EXPECT_EQ(constant.width, result_width);
+    }
+    EXPECT_EQ(kernel.dynamic_extract(kernel.input(0), kernel.input(1), 64, 64, true).width, 64u);
+    if (width == 131064) {
+      const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-wide-variable-shift.bc";
+      ASSERT_TRUE(kernel.write_object(path.string(), error, false)) << error;
+      const auto native = path.string() + ".o";
+      ASSERT_TRUE(Cgen_llvm::link_bitcode_object(path.string(), {}, native, error)) << error;
+      std::filesystem::remove(native);
+      std::filesystem::remove(path);
+    }
+  }
+}
+
 TEST(CgenLlvm, WideShiftKnownBits) {
   constexpr unsigned bits = 131064;
   llvm::KnownBits    lhs(bits);

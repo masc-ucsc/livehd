@@ -1,0 +1,41 @@
+/*
+:name: wide_variable_shift
+:type: simulation
+:sim_sweep: sim.tune.backend=llvm
+*/
+// Cross word boundaries, the partial last word, and oversized counts with
+// both signs. The testbench computes the oracle using its Slop arithmetic.
+pub mod wide_variable_shift(clk:Clock, a:S4097, b:U4097, k:U17) -> (l:U4097@[0], u:U4097@[0], r:S4097@[0]) {
+  wrap l = b << k
+  u = b >> k
+  r = a >> k
+}
+
+test wide_variable_shift.cases {
+  mut dut = wide_variable_shift
+  const distances = [0, 1, 63, 64, 65, 4096, 4097, 8191, 131071]
+  const mask = (1 << 4097) - 1
+  mut slot = 0
+  mut iteration = 0
+  tick 18 {
+    const distance = distances[slot]
+    mut pattern = (1 << 4095) | 0xFEDCBA987654321
+    if iteration >= 9 {
+      pattern = -pattern
+    }
+    const raw = pattern#[0..<4097]
+    dut.a = pattern
+    dut.b = raw
+    dut.k = distance
+    step
+    assert(dut.l#[0..<4097] == ((raw << distance) & mask), "wide left shift")
+    assert(dut.u#[0..<4097] == (raw >> distance), "wide logical right shift")
+    assert(dut.r == (pattern >> distance), "wide arithmetic right shift")
+    slot += 1
+    iteration += 1
+    if slot == 9 {
+      slot = 0
+    }
+  }
+  assert(iteration == 18, "all signed and unsigned cases ran")
+}
