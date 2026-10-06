@@ -2543,3 +2543,431 @@ and it is Obligation A, still unproved.
 Machine: wall 202.24 s (P1: 254.85 s), peak RSS 15,012 KB (P1: 14,684 KB) --
 RSS unchanged, which is expected: the guard avoids allocation, it does not
 change live-set size.
+
+## 27. S0.1 -- the fork profiled on the real ALU, and a confound resolved
+
+Predictions and decision rules were recorded BEFORE the run in
+`.perfwork/S0-prediction.txt`.  Both of the rules it wrote down FAILED to fire,
+and one of its predictions is refuted outright.  Both outcomes are below.
+
+### 27.1 The 1,226 s fork number was an `-O0` build
+
+Every prior statement of the fork's real-design cost used **1,226,168 ms**
+(`.perfwork/alu_gate-200k.log`).  Re-running the same probe mode, same
+certificate, same fuel, on an `-O2` build:
+
+    [specialize ... d=89996 161101 ms]
+
+**161,101 ms, not 1,226,168.**  Same 89,996 residual terms, same checker bound
+28,899.  The old figure was an `-O0` binary, which section 17 already warned
+about in general and which nothing had re-measured for this design.  The `-O0`
+to `-O2` factor on the fork is therefore **7.6x**.
+
+This matters because section 18.2 called the fork-vs-covered ratio confounded
+for exactly this reason.  It is now unconfounded on the build axis:
+
+| | specializer | interpreter | build | ALU specialize |
+|---|---|---|---|---|
+| host | PROVED `mixDriver` | `hwAPVarT` | `-O2` everywhere | 61,267,338 ms |
+| fork | `ProtoFast.mixDriver` | `hwAPVar` | `-O2` + `-g -fno-omit-frame-pointer` | 161,101 ms |
+
+**380x on the real design**, against 70.5x on the source ladder (26.3).  Three
+qualifications, none of which reverse it:
+
+* the interpreter still differs, exactly as in P1/P4 -- `hwAPVarT` (total
+  `rewrittenT`) against `hwAPVar` (partial `goInline`).  `--rewrite-agree`
+  shows the two transforms produce the SAME `main` body by exact `BEq`.  That
+  is evidence, not a theorem, and it is the same convention P1 and P4 used;
+* the fork binary carries `-g -fno-omit-frame-pointer`, which COSTS
+  performance, so 161,101 ms is an UPPER bound on the fork and 380x is a
+  LOWER bound on the ratio;
+* the host figure predates the `@[csimp]` fast path, worth 1.26x on the ladder
+  (26.1).  If it carries over, the current ratio is nearer 300x.
+
+### 27.2 The profile: there is no hotspot
+
+`perf record -F 99 --call-graph fp`, 150 s cap inside the 161 s specialize
+stage, so the window is pure specialization: 14,769 samples.  Raw artifacts
+`.perfwork/S0-fork-{self,inclusive,walkdepth}.txt`, data
+`.perfwork/S0-fork-alu-pure.data`.  A second, 180 s sample
+(`S0-fork-alu.data`, 17,835 samples) includes the seed runs and agrees.
+
+**SELF time**, grouped.  The groups are mine; the numbers are perf's.
+
+    34.27%  the three mutual traversals   mixTerm 16.83  mixTerms 10.24  mixPArgs 7.20
+    30.55%  allocator + reference counts  mi_free 7.83  dec_ref_known 7.41
+                                          dec_ref_cold 5.81  mi_malloc_small 4.04
+                                          lean_dec 2.32  alloc_ctor 2.15  free_object 0.99
+     8.86%  PVal.shift
+     7.45%  field access                  lean_ctor_get 4.54  lean_ctor_set 2.91
+     3.81%  allStatic
+     3.16%  evalPrim
+     3.03%  List.get?Internal
+     2.19%  List.reverseAux
+     1.61%  the `lets`/append family      prepare 0.54  appendTR 0.52
+                                          PEnv.shiftBy 0.29  PRes.toCode 0.26
+
+**INCLUSIVE** -- a different accounting, never to be summed with the above:
+`mixTerm` 89.56%, `mixPArgs` 56.19%, `mixTerms` 38.27%, `mi_malloc_small`
+19.53%, `mi_free` 18.54%, `evalPrim` 10.21%, `PVal.shift` 10.13%.
+
+**Both decision rules failed to fire.**  The rule was: a named specializer
+function above 20% self names the target; otherwise an allocator band above 35%
+self means the problem is allocation volume.  The largest named function is
+`mixTerm` at 16.83%, and the allocator band is 30.55%.  Neither threshold is
+met, and the recorded consequence was to "record the profile and propose what
+it implies; do not reach for a drafted option".
+
+**What it implies.**  The cost is spread almost evenly across traversal,
+allocation, field access and shifting -- which is the signature of ONE uniform
+operation repeated an enormous number of times, not of a slow function.  The
+fork does not have a hotspot; it has a STEP COUNT.  That makes
+"make a function faster" the wrong shape of fix and "perform fewer steps" the
+right one, which is a conclusion about S2's options, not about any of them in
+particular.
+
+### 27.3 89.4% of specialization time is spent at great stack depth
+
+`nthD` is an INLINED object function: each index step is a `.ucall .dyn` that
+re-enters `mixTerm`, so a read at depth d puts ~d `mixTerm` frames on the
+stack.  Bucketing every sample by how many `mixTerm` frames its stack carries
+(`.perfwork/s0/walk_attr.py`):
+
+    mixTerm frames   samples    share
+       80 - 159       13,188    89.30%
+       40 -  79           10     0.07%
+       20 -  39            5     0.03%
+        1 -  19            5     0.03%
+            0          1,561    10.57%
+
+The distribution is **bimodal**: a sample is either outside the specializer
+entirely or buried ~100 frames deep.  Twenty samples out of 14,769 lie in
+between.
+
+Two things this is NOT.  The deepest stack seen is 127 frames, which is
+**perf's default call-graph limit**, so the depth is SATURATED and no claim is
+made about how deep the recursion actually goes.  And deep recursion is not by
+itself `nthD`: `mkSources` and `evalNodes` are also inlined recursions over the
+design's lists.  What separates them is arithmetic, not the profile --
+`mkSources` runs 6,137 steps and `evalNodes` 6,597, once each, while
+`cert_shape.py` puts the `nthD` total at **18,828,964**.  The walk family is
+three orders of magnitude larger than the other two combined, so the deep
+population is `nthD`.
+
+### 27.4 Two corrections to the prediction file, and one to `PRes.val`'s standing
+
+**The prediction for S0.3 was wrong, and wrong twice over.**  It said the walk
+would be 0.7% to 6.7% of the run, hence "THE WALK DOES NOT DOMINATE".  It got
+there from 8,179,105 steps at 1,226 s.  Both inputs are wrong: `cert_shape.py`
+on this certificate gives **18,828,964** steps, and the `-O2` time is **161 s**.
+Redone, 18.83M steps against 161 s is **8.55 us per step if the walk were all
+of it**, and 27.3 measures the share at ~89%.  The walk dominates.  This is the
+third time the walk has been mis-sized here, each time by a different error,
+and the prediction file is what caught it.
+
+**`PRes.val` is validated on a real design, not just on the ladder.**  P2
+measured `prepare` at 15.65% self and 43.05% inclusive on the HOST.  On the
+fork, on the ALU, `prepare` is **0.54% self** and the whole `lets`/append
+family is **1.61%**.  The change does what its comment says it does, at real
+scale.
+
+**One finding nobody's option covers.**  `List.get?Internal` is 3.03% of self
+time, and it is `AProgram.fn` -- `P.funs[i]?` on `funs : List AFunDef`
+(`BindingTime.lean:96-101`; `Program.fn` is the same shape,
+`ObjectLanguage.lean:265`).  Every object-level call pays a linear scan of the
+function table.  It is small, it is orthogonal to P-A through P-D, and it is
+recorded here rather than acted on.
+
+## 28. S0.4 -- the fork IS quadratic in design size, and the law is the sum of lookup depths
+
+Every ladder before this one pinned an axis: `chainD` holds sources at 2,
+`srcD` holds nodes at 64.  Neither can see a cost that depends on the PRODUCT,
+and neither moves the dependency-read count E independently of the node count.
+`scripts/s0_grid.lean` sweeps S, N and E one at a time and then together.
+`Op_And` has `RequiredArity = none` (`HardwareInterpreter.lean:966`), so arity
+-- and hence E = N x arity -- is a free knob.
+
+Raw: `.perfwork/S0-grid.log`.  **Every point, both backends, passed the
+fragment checker and then matched `interpretDesign` at its own checked bound,
+outside the timed sections, and host and fork residual term counts were
+identical at every shared point.**  The host was run only where it is cheap.
+
+    [A] S varies, N=256, E=512 fixed     323  351  469  929  1869 ms   (S 64..1024)
+    [B] N varies, S=256, arity 2         119  235  471 1374  4594 ms   (N 64..1024)
+    [C] E varies, S=256, N=256 fixed     247  479  935 1824  3652 ms   (E 256..4096)
+    [D] S = N, arity 2                    32  121  472 1862  7771 ms   (both 64..1024)
+
+Fitted exponents, endpoints and top doubling:
+
+| sweep | what moves | endpoints | top doubling |
+|---|---|---:|---:|
+| A | S alone | 0.633 | **1.009** |
+| B | N alone (E rides along) | 1.318 | 1.741 |
+| C | E alone | 0.972 | **1.002** |
+| D | S and N together | 1.981 | **2.061** |
+
+**The fork is linear in sources alone, linear in reads alone, and QUADRATIC
+when both move -- which is the axis every real design moves.**
+
+### 28.1 One constant explains all twenty points
+
+A read of source slot `s` from node `i` sits at list depth `(S + i) - 1 - s`,
+so the average read depth over N nodes is about `S + N/2`, and the total work
+should be the SUM OF LOOKUP DEPTHS, `E * (S + N/2)`.  Dividing the measured
+time by that quantity:
+
+    sweep A   3286  2678  2385  2835  3169   ns per unit
+    sweep B   3228  2869  2396  2621  2921
+    sweep C   2513  2436  2378  2319  2322
+    sweep D   2604  2462  2401  2368  2470
+
+**min 2,319 ns, max 3,286 ns, mean 2,633 ns -- a spread of 1.42x across points
+whose raw times span 243x.**  A single constant of about **2.6 us per unit of
+lookup depth** predicts the whole grid.  That is not a curve fit with free
+parameters; it is one number.
+
+This is exactly the shape the research note predicted -- "a list lookup
+contributes work proportional to the sum of lookup depths, potentially
+E*(S+N)" -- and it is why sweep B is superlinear while sweep C is not: in B the
+node count raises the average depth as well as E, in C it cannot.
+
+### 28.2 The decision rule fired, and my prediction was wrong again
+
+The rule recorded before the run: combined exponent >= 1.5 means representation
+work is justified at all; below 1.2 means it is not.  **Observed 1.98, so it
+fires.**
+
+The prediction said "between 1.2 and 1.5".  It was too low, in the same
+direction as the S0.3 prediction in 27.4: I have now underestimated the walk
+three times.  The grid is what settles it, because it varies the axes
+separately instead of reasoning about one of them.
+
+### 28.3 Extrapolating to the ALU -- where the law accounts for about a third
+
+`cert_shape.py` puts the ALU's source-prefix walk at **18,828,964** steps.  At
+2.6 us that is **49 s**, against **161 s** measured (27.1), so the fixture law
+accounts for roughly **31%** of the real design.  The gap is not hidden and not
+explained away:
+
+* `cert_shape.py`'s (B) term counts only reads that reach a SOURCE slot.  The
+  ALU's dependency targets are 648 input, 6,135 const and **7,433 node**, and
+  a read of a node slot also walks -- those steps are in neither number;
+* the ALU's residual is 89,996 terms against the grid's 1,000-22,000, so there
+  is far more non-walk work to do;
+* the ALU runs 15 operators at arities up to 65, where the grid runs one.
+
+Section 23.3's caution stands and is now quantified: **these fixtures are not a
+model of that design.**  What transfers is the LAW -- cost tracks the sum of
+lookup depths -- not the constant.
+
+## 29. S0.3 -- the walk, sized correctly at last
+
+S0.3 asked how many `nthD` unfolds a real design performs and what one costs.
+Neither number needed a new counter in the end: the count is static and the
+cost falls out of the S0.4 regression.
+
+**How many.**  `cert_shape.py` on `rt_alu_gate.dcert` gives **18,828,964**
+source-prefix walk steps (plus 3 for the runtime-input vector).  The prediction
+file said 8,179,105; that number is wrong and is withdrawn.
+
+**What one costs.**  Section 28.1 fits twenty grid points with a single
+constant of **~2.6 us per unit of lookup depth**, and one unit of lookup depth
+IS one `nthD` unfold.  The prediction file guessed "between 1 and 10
+microseconds", which is the one thing in it that held.  This is a REGRESSION
+constant over controlled fixtures, not an instrumented per-call timing, and it
+carries the 1.42x spread of that fit.
+
+**The share.**  Three independent measurements, which do not fully agree and
+are reported as they are:
+
+| evidence | what it says about the walk |
+|---|---|
+| grid regression (28.1) | the law accounts for the fixtures within 1.42x -- on the grid the walk is essentially ALL of it |
+| ALU, law extrapolated (28.3) | 18.83M x 2.6 us = 49 s of 161 s = **31%** |
+| ALU, stack-depth profile (27.3) | **89%** of samples buried ~100 `mixTerm` frames deep |
+
+The 31% and the 89% bound the same quantity from opposite directions and the
+gap is explained in 28.3: `cert_shape.py` counts only reads that reach a SOURCE
+slot, and 7,433 of the ALU's dependencies target NODE slots, which also walk
+and are in neither figure.  So 31% is a floor, not an estimate.
+
+**The decision rule fired.**  It read: unfolds x cost >= 25% of fork wall makes
+a verified lookup summary a candidate for S2; below 10% withdraws P-A and P-D
+outright.  The floor alone is 31%.
+
+**So the rule that would have withdrawn P-A and P-D did not fire -- the
+opposite one did.**  The prediction attached to it ("THE WALK DOES NOT
+DOMINATE") is refuted, which is the third time in this section the walk has
+been mis-sized, each time downward and each time by a different error.
+
+## 30. S0.2 -- my nested-`lets` hypothesis is REFUTED where I put it, and true somewhere else
+
+A COUNTER, not a profile, by the P3 method (25): `.perfwork/s0/src/` is a copy
+of the tree whose only modified file is `Proto/PartialEvaluatorFast.lean`,
+where `prepare` and `PEnv.shiftBy` keep their logical bodies VERBATIM and gain
+`@[implemented_by]` counting implementations.  Probe `.perfwork/s0/s0_count.lean`,
+raw `.perfwork/S0-counts.log`.
+
+**Validity conditions met.**  The instrumented tree builds
+`Projection/PartialEvaluatorCorrect.lean` unchanged, and the residual term
+counts on `srcD` are **796 / 988 / 1756 / 4828** at nsrc 16/64/256/1024 --
+identical to the uninstrumented `.perfwork/P4-ladder.log`.  Counting a
+different computation would have answered a different question.
+
+### 30.1 The hypothesis as stated: refuted
+
+The claim was that `prepare (.lets bs r) = <bs ++ p.binds, ...>` becomes
+quadratic because `prepare` runs again at every level of a growing nest.
+`s0PrepCells` counts exactly the cells `++` copies:
+
+| sweep | cells copied | exponent | top doubling |
+|---|---|---:|---:|
+| `srcD`, nsrc 16 -> 1024 | 290 -> 2,306 | 0.499 | 0.791 |
+| `dynSrcD`, nsrc 16 -> 1024 | 290 -> 2,306 | 0.499 | 0.791 |
+| `dynSrcD`, nnode 64 -> 512 | 386 -> 2,178 | 0.832 | -- |
+
+**Every exponent is SUB-LINEAR**, against a decision rule that required >= 1.5
+to proceed and declared the hypothesis refuted below 1.2.  **Refuted, recorded
+as a negative result, not to be revisited.**
+
+The reason is the one `PRes.val` was built for: in the fork a slot read never
+turns the spine into code, so `prepare` is handed a `.val` and returns
+`<[], v>` with no bindings at all.  The `.lets` path is largely inactive --
+which is also why 27.2 found the whole `lets`/append family at 1.61% of self
+time on the ALU.
+
+### 30.2 But a quadratic IS there, at the OTHER append site, on a shape real designs do not have
+
+`prepare` is not the only place a package is concatenated: `mixPArgs` does
+`p.binds ++ bs` and passes `k = p.binds.length` to `PEnv.shiftBy` (:677).
+Recording that `k` measures the site the patch cannot reach directly -- it is
+inside the `mutual` block with `mixTerm`.
+
+| sweep | sum of k | exponent | top doubling |
+|---|---|---:|---:|
+| `srcD` (2 inputs, rest CONSTANT), nsrc 16 -> 1024 | 590 -> 4,622 | 0.495 | 0.788 |
+| `dynSrcD` (EVERY source dynamic), nsrc 16 -> 1024 | 828 -> 1,052,172 | 1.719 | **1.988** |
+
+Largest package carried is `nsrc + 1` exactly (17 / 65 / 257 / 1025).
+
+So the mechanism is real and it is quadratic -- **on an all-dynamic-source
+fixture, which is not the shape of any real certificate here.**  `rt_alu_gate`
+is 6,135 constants out of 6,137 sources, and on the constant-heavy fixture the
+same measure is sub-linear (0.495).
+
+**Corrected position: I was right that a quadratic exists, wrong about which
+site it lives at, and wrong about it mattering.**  It is `mixPArgs`, not
+`prepare`, and it is dormant on constant-heavy designs.
+
+### 30.3 An unplanned finding: all-dynamic sources blow up the RESIDUAL
+
+`dynSrcD` residual size runs **1,195 -> 7,219 -> 100,435 -> 1,579,219** terms
+at nsrc 16/64/256/1024 -- exponent **1.987**, quadratic, against 4,828 terms
+for the constant-heavy `srcD` at the same size.  That is a factor of **327**.
+
+This is the OTHER walk, and it is the one that cannot be specialized away.
+A dynamic source is `.input i w`, and `srcVal` reads it with
+`C "nthD" [R "inp", R "idx"]` -- an index into the RUNTIME input vector
+(`HardwareInterpreter.lean`).  `inp` is dynamic, so that walk RESIDUALIZES: at
+nsrc = 1024 the residual must perform sum(i) = 524,288 `tl` operations at run
+time.  `cert_shape.py` separates these as chain (A), runtime-vector, from
+chain (B), source-prefix -- and this is why that separation was worth making.
+
+The slot-environment walk (B) is a SPECIALIZATION-time cost that a lookup
+summary could remove.  The runtime-vector walk (A) is a RESIDUAL-size cost that
+no specializer change touches, because the index is genuinely unknown until run
+time.  **They must never be quoted as one number.**  On `rt_alu_gate`, (A) is 3
+steps and (B) is 18,828,961.
+
+## 31. What S0 decided
+
+Four experiments, four decision rules fixed in `.perfwork/S0-prediction.txt`
+before any of them ran.
+
+| | question | rule | outcome |
+|---|---|---|---|
+| S0.1 | what dominates the fork? | named fn > 20% self, or allocator > 35% | **neither fired** -- max named 16.83%, allocator 30.55% |
+| S0.2 | is nested-`lets` append quadratic? | exponent >= 1.5 proceeds, < 1.2 refutes | **refuted** -- 0.50 to 0.83 |
+| S0.3 | does the walk dominate? | >= 25% makes a lookup summary a candidate | **fired** -- floor 31%, profile 89% |
+| S0.4 | is the fork quadratic in design size? | >= 1.5 justifies representation work | **fired** -- 1.98 |
+
+**Three of my four predictions were wrong, all in the same direction: I
+underestimated the walk every time.**  The prediction file is what caught it.
+
+### 31.1 The finding, in one sentence
+
+**Fork specialization time is the SUM OF LOOKUP DEPTHS over the design's slot
+reads, at about 2.6 us per step, with no hotspot anywhere -- and on
+`rt_alu_gate`, 99.9966% of those steps are reads that terminate at a CONSTANT
+whose value the specializer already knows.**
+
+The last clause is the actionable one.  The ALU's walk is 18,828,961 steps;
+18,828,315 of them end at one of its 6,135 constant sources.  The specializer
+holds that constant as a `PVal.stat` the whole time and still walks the spine
+one `.ucall .dyn` at a time to reach it.
+
+### 31.2 So S2 should be a RESTRICTED lookup summary
+
+Recognise a complete `nthD` read whose index is static and in bounds, whose
+spine is statically known, and whose work is computation-free, and answer it in
+ONE step -- retaining every enclosing binding, and falling back otherwise.
+
+What the measurements add to that, beyond what the plan already said:
+
+* **It does not need the general case.**  Because 99.9966% of the ALU's steps
+  end at a constant, a summary restricted to a statically-known spine with a
+  `stat` leaf captures essentially the whole win.  That is a far smaller proof
+  obligation than a summary that also handles dynamic leaves, and it should be
+  built first and measured before being generalised.
+* **It is specializer-side**, so `I_hw` and `IHwAdequate` are untouched.
+* **The acceptance relation must be semantic, not fuel-identical** -- skipping
+  interpreter steps changes fuel consumption, so equality at matched budgets is
+  the wrong criterion.
+* **Expected benefit on the real ALU is bounded, not promised**: a floor of 31%
+  from the law (28.3) and ~89% from the stack-depth profile (27.3).  The two
+  differ because `cert_shape.py` counts only source-targeted reads.  Quote the
+  range, never the top of it.
+
+### 31.3 The other three options, as the evidence now stands
+
+* **P-A, indexed partial values -- WITHDRAWN.**  S0.4 shows cost tracks the
+  NUMBER of lookup steps, and indexed storage does not reduce it: `nthD(env, k)`
+  unfolds k times whatever the list is made of.  This was the reviewer's
+  central objection and the grid confirms it quantitatively.
+* **P-B, levels or deferred shift -- DOWNGRADED.**  `PVal.shift` is 8.86% of
+  fork self time, so Amdahl caps the whole idea at about **1.10x**.  Section 26
+  is the precedent: removing 99.2% of shift VISITS bought 1.26x and did not
+  move the exponent.
+* **P-C, environment escape -- KEPT, AS SECOND CHOICE.**  It attacks the same
+  constants from the other side: drop 6,135 constant slots and the spine those
+  reads walk nearly vanishes.  The reason it is second is that omitting them
+  renumbers slots, which changes `I_hw` and puts the adequacy bridge back in
+  scope, where the summary leaves it alone.  If the summary proves harder than
+  expected, this is the fallback, and the reviewer's framing of it -- keep the
+  slot environment inside the specializer, materialise only at a genuine escape
+  -- is the right one.
+* **P-D, an indexed object primitive -- STILL AN OPTION, NOT A PRIORITY.**  It
+  removes the same steps as the summary at the cost of the broadest
+  language-and-proof impact, and it would have to be mirrored in the object
+  specializer for the second projection.
+
+### 31.4 Two things recorded, neither acted on
+
+* `AProgram.fn` is `P.funs[i]?` on a `List` (`BindingTime.lean:96-101`), so
+  every object-level call pays a linear scan of the function table:
+  **3.03% of fork self time**.  Small, orthogonal to every option above.
+* The host/fork ratio on the real ALU, with the `-O0` confound removed, is
+  **380x** (27.1).  That is a fact about the fork's value, and the decision
+  whether to promote `PRes.val` into the proved specializer remains the user's,
+  deferred, along with whether to mirror the constructor in `MixProgram.lean`.
+
+### 31.5 What S0 did not change
+
+No proved definition was touched; `Audit.lean` is byte-identical; `PRes` gained
+nothing; `MixProgram.lean` is untouched.  Coverage is unchanged at **8 blocks
+differential, 8 with no known reset conflict**, still ceilinged by the exporter
+reset defect and by `aes` being unsupported on `sources` and `ops`.
+
+Fixture experiments are NOT added to `experiments.jsonl`, which tracks
+real-certificate acceptance runs only; their identities are pinned in
+`.perfwork/S0-grid-capture.json` and `.perfwork/S0-prof-capture.json`.
