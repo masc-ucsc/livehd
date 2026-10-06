@@ -30,6 +30,7 @@ MODULES=(
   Projection/ProjectionCorrect Projection/ResidualFragment
   Projection/ProjectedStep Projection/CertLoad
   Projection/Proto/PartialEvaluatorFast Projection/Proto/PartialEvaluatorSummary
+  Projection/Proto/PartialEvaluatorShift
   Projection/Proto/InterpreterVariant
   Projection/Proto/VariantTransport Projection/Proto/RewriteTotal
   Projection/Proto/VariantAdequacy Projection/Proto/VariantExec

@@ -3656,3 +3656,93 @@ value and the static index.  Each argument is specialized ONCE, the fallback
 reuses the result, and binding order, requests and scope are exactly
 `mixPArgs`' own -- which also lets the proof reuse the existing `mixPArgs`
 lemmas rather than re-derive them.
+
+## 38. S2 integrated and PROVED; then the S3 deferred-shift prototype
+
+### 38.1 What is proved (3c175a4da)
+
+The summary runs on `mixPArgs`' OUTPUT (37.4): `nthSummaryEnv f fd env'` reads
+the prepared list value and the static index straight off the environment
+`mixPArgs` built.  New in `PartialEvaluator.lean`: `isNthD`, `walkHead`,
+`nthSummaryEnv`, one match in the dynamic-unfold arm.  In
+`PartialEvaluatorCorrect.lean`, against a reference `listNth?` and through
+`PValOK`:
+
+| step (37.3) | lemma | says |
+|---|---|---|
+| 1 | `isNthD_spec`, `nthD_source` | a recognised callee's ERASED body evaluates `[vl, int k]` to `listNth? vl k` |
+| 2 | `walkHead_ok` | walking a value that denotes `vl` lands on a leaf denoting `listNth? vl k` |
+| 2 | `walkHead_scoped`, `nthSummaryEnv_scoped` | that leaf is in scope |
+| 3 | `ucall` case of `mixTerm_scoped` | scope preserved |
+| 3 | `ucall` case of `mixTerm_complete` | source run -> residual `PResOK`; closed with `Surface.Eval_det` |
+| 3 | `ucall` case of `mixTerm_sound` | residual run -> source `call`, via `PResSound_of_lets` |
+
+The safety point the review raised -- that the selected reference is in scope
+and the prepared structure denotes the original operand -- is exactly
+`nthSummaryEnv_scoped` plus `mixPArgs_ok`/`mixPArgs_sound`'s `Compat` on the
+environment the summary reads.  `mixDriver_iff` unchanged in statement; no
+`sorry`; no new warnings; **Audit 311/311 and ProtoAudit 46/46 axiom sets
+identical to S1, per theorem.**
+
+Mirror (`MixProgram.lean`): `isNthDL`, `walkHeadL`, `nthEnvL`, hook after
+`mixPArgsL`; Gate0 pin measured 61 -> 64; `compilerP` unchanged at 100 (for the
+toy, `isNthDL` is decided statically during the second projection).
+`Proto/LookupMirrorCheck.lean`: recognizers agree on every function of three
+programs; object residual == host == S2a prototype on four hardware designs.
+The integrated object summary fires: 1.4 s / 3.8 s / 7.0 s against 8.2 s /
+48.8 s / 144.6 s for the baseline tree's object specializer (interpreted;
+ratios only).  Concrete checks, not `mixProgram_implements_mixHost`.
+
+### 38.2 Measured: S1 -> integrated summary
+
+One probe (`scripts/s2_probe.lean`) built against a tree with S1's three
+specializer files restored from 0f175676b and against 3c175a4da, the S2a
+prototype in-process as control in both:
+
+* **25/25 grid residuals identical to S1** by digest; every checker and
+  `interpretDesign` check passes, both builds, both backends.
+* `alu` **163.5 s -> 13.9 s (11.8x)**; `decoder` **312.4 s -> 23.7 s (13.2x)**;
+  three repeats each, residual digest identical, all stimuli and traces agree.
+* **The fallback fix shows**: on the all-dynamic fixture the integrated host is
+  1.4x faster than the in-process prototype (151 vs 214 ms at S=256), which
+  re-specialized arguments on every fallback.
+* Combined-axis exponent 2.04 -- still quadratic, as 36.5 predicted.
+* RSS +~1 MB (+3%), consistent across repeats.
+
+### 38.3 Coverage re-run on the integrated specializer
+
+All 8 counted blocks, `total_probe` (covered backend), prelaunch-captured at
+3c175a4da (`experiments.jsonl` rows 23-30): support all-true, 6/6 stimuli,
+trace, control, exit 0, and **every residual size and checker bound identical
+to the S1 run**.  Specialization per block, S1 -> S2:
+
+    instr_scan 6.7 -> 0.58 s   commit_stage 6.4 -> 0.50 s   compressed_decoder 16.2 -> 1.33 s
+    pmp 37.2 -> 3.2 s          pmp_data_if 72.6 -> 6.3 s     alu_wrapper 169.3 -> 14.1 s
+    alu 162.6 -> 14.4 s        decoder 340.8 -> 23.4 s       (11.3x to 14.6x)
+
+Counts unchanged: 8 differential, 8 on the covered backend, 8 with no known
+reset conflict.
+
+### 38.4 S3 -- the deferred-shift prototype, as designed
+
+`Proto/PartialEvaluatorShift.lean` (`ProtoShift`): S2's specializer with ONE
+representation change -- `PVal` gains `shifted k v`.
+
+| operation | eager (S2) | deferred (S3) |
+|---|---|---|
+| enter k binders (`PVal.shift`) | rebuilds the whole spine | wraps, or composes into an existing offset -- O(1) |
+| select a leaf (`walkHead`) | -- | adds offsets on the way down, applies once at the leaf; no allocation per cell |
+| expose a head (`hnf`) | -- | pushes ONE layer of offset onto the children -- O(1) |
+| reify (`toCodeAt`) | traverses | applies the offset during the traversal it already does |
+
+`Term.var` and `Eval` are untouched.  The intended meaning: `shifted k v` holds
+in `rho` iff `v` holds in `rho.drop k` -- what the eager shift gives.  Every
+site that pattern-matches a partial value (the `var` rule, the peels, `ofPVal`)
+reads through `hnf`.
+
+**Fixture agreement with the proved S2 host, before any timing** -- identical
+residual programs on: six hardware designs (constant-heavy, high fan-in,
+all-dynamic); the toy interpreters `interpA` and `interpA2P`; `twoArgA`;
+`twoFunA`; and **the second projection itself** -- mix specialized to the toy
+interpreter, 100 functions, where dynamic `caseT` puts fresh alternative
+binders (`mixAlts`, `freshDyns`) and nested function scopes everywhere.
