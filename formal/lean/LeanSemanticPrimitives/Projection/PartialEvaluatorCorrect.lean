@@ -42,6 +42,7 @@
 
 import LeanSemanticPrimitives.Projection.PartialEvaluator
 import LeanSemanticPrimitives.Projection.BTA
+import LeanSemanticPrimitives.Projection.SurfaceSemantics
 
 namespace Projection
 
@@ -521,6 +522,141 @@ leave them nothing to appeal to.  This mirrors the existing `TOK` organization
 with every semantic parameter removed: nothing here mentions `Compat`,
 evaluation, or well-annotatedness. -/
 
+/-! ## The `nthD` lookup summary -- recognizer, walk, scope
+
+The summary is proved against a REFERENCE, `listNth?`, and through `PValOK`
+rather than through how a spine happens to be represented -- so a later change
+to `PVal` (deferred shifting, PHASE6_PERF.md 37.3) needs representation lemmas
+for `walkHead`, not a new argument about the interpreter.
+
+1. `isNthD_spec` / `nthD_source`: a recognised callee's ERASED body is list
+   indexing -- it evaluates `[vl, int k]` to `listNth? vl k`.
+2. `walkHead_ok`: walking a partial value that denotes `vl` lands on a leaf
+   that denotes `listNth? vl k`.
+3. `walkHead_scoped` / `nthSummaryEnv_scoped`: the leaf is in scope. -/
+
+/-- List indexing on values: the semantics the summary must agree with. -/
+def listNth? : Val → Nat → Option Val
+  | .cons x _, 0     => some x
+  | .cons _ y, k + 1 => listNth? y k
+  | _,         _     => none
+
+/-- The erased body of a recognised callee. -/
+def nthBodyErased (f : Nat) : Term :=
+  .ite (.prim .eqI [.var 1, .lit (.int 0)]) (.prim .hd [.var 0])
+       (.call f [.prim .tl [.var 0], .prim .subI [.var 1, .lit (.int 1)]])
+
+/-- What the recognizer actually checks, as a statement. -/
+theorem isNthD_spec {f : Nat} {fd : AFunDef} (h : isNthD f fd = true) :
+    fd.params = [.dyn, .stat] ∧ erase fd.body = nthBodyErased f := by
+  unfold isNthD at h
+  split at h
+  · rename_i hp hb
+    simp only [beq_iff_eq] at h
+    subst h
+    exact ⟨hp, by rw [hb]; rfl⟩
+  · exact absurd h (by simp)
+
+/-- The erased template IS list indexing, by induction on the index. -/
+theorem nthBody_eval {P : Program} {f : Nat} (hfn : P.fn f = some ⟨2, nthBodyErased f⟩) :
+    ∀ (k : Nat) (vl u : Val), listNth? vl k = some u →
+      Eval P [vl, .int k] (nthBodyErased f) u := by
+  intro k
+  induction k with
+  | zero =>
+      intro vl u h
+      match vl, h with
+      | .cons x y, h =>
+        simp only [listNth?, Option.some.injEq] at h
+        subst h
+        exact .iteT (.prim (.cons (.var rfl) (.cons .lit .nil)) (by simp [evalPrim]))
+                    (.prim (.cons (.var rfl) .nil) (by simp [evalPrim]))
+  | succ k ih =>
+      intro vl u h
+      match vl, h with
+      | .cons x y, h =>
+        simp only [listNth?] at h
+        refine .iteF (.prim (.cons (.var rfl) (.cons .lit .nil)) (by simp [evalPrim]; omega)) ?_
+        exact .call (.cons (.prim (.cons (.var rfl) .nil) (by simp [evalPrim]))
+                      (.cons (.prim (.cons (.var rfl) (.cons .lit .nil)) (by simp [evalPrim])) .nil))
+                    hfn rfl (ih y u h)
+
+/-- **Step 1 of 37.3.**  A callee the recognizer accepts computes list
+indexing in the SOURCE program: its erased body evaluates `[vl, int k]` to the
+`k`-th element of `vl`. -/
+theorem nthD_source {A : AProgram} {f : Nat} {fd : AFunDef}
+    (hfn : A.fn f = some fd) (hrec : isNthD f fd = true) :
+    ∀ (k : Nat) (vl u : Val), listNth? vl k = some u →
+      Eval (eraseProgram A) [vl, .int k] (eraseFunDef fd).body u := by
+  obtain ⟨hps, hbody⟩ := isNthD_spec hrec
+  have hfn' : (eraseProgram A).fn f = some ⟨2, nthBodyErased f⟩ := by
+    rw [eraseProgram_fn hfn]; simp [eraseFunDef, hps, hbody]
+  intro k vl u h
+  show Eval _ _ (erase fd.body) u
+  rw [hbody]
+  exact nthBody_eval hfn' k vl u h
+
+/-- **Step 2 of 37.3.**  Walking a partial value that denotes `vl` lands on a
+leaf that denotes `listNth? vl k`. -/
+theorem walkHead_ok {ρ : Env} : ∀ {pv : PVal} {k : Nat} {leaf : PVal} {vl : Val},
+    walkHead pv k = some leaf → PValOK ρ pv vl →
+    ∃ u, listNth? vl k = some u ∧ PValOK ρ leaf u
+  | .cons a _, 0, _, _, h, hok => by
+      simp only [walkHead, Option.some.injEq] at h
+      subst h
+      obtain ⟨x, y, hv, ha, _⟩ := hok
+      subst hv
+      exact ⟨x, rfl, ha⟩
+  | .cons _ b, k + 1, _, _, h, hok => by
+      simp only [walkHead] at h
+      obtain ⟨x, y, hv, _, hb⟩ := hok
+      subst hv
+      obtain ⟨u, hu, hl⟩ := walkHead_ok h hb
+      exact ⟨u, by simpa [listNth?] using hu, hl⟩
+  | .stat _, k, _, _, h, _ => by cases k <;> simp [walkHead] at h
+  | .dyn _,  k, _, _, h, _ => by cases k <;> simp [walkHead] at h
+
+theorem walkHead_scoped {d : Nat} : ∀ {pv : PVal} {k : Nat} {leaf : PVal},
+    walkHead pv k = some leaf → PVal.Scoped d pv → PVal.Scoped d leaf
+  | .cons _ _, 0, _, h, hs => by
+      simp only [walkHead, Option.some.injEq] at h
+      subst h; exact hs.1
+  | .cons _ _, _ + 1, _, h, hs => by
+      simp only [walkHead] at h
+      exact walkHead_scoped h hs.2
+  | .stat _, k, _, h, _ => by cases k <;> simp [walkHead] at h
+  | .dyn _,  k, _, h, _ => by cases k <;> simp [walkHead] at h
+
+/-- Inverting a successful summary: what it was handed and what it returned. -/
+theorem nthSummaryEnv_some {f : Nat} {fd : AFunDef} {env : PEnv} {r : PRes}
+    (h : nthSummaryEnv f fd env = some r) :
+    isNthD f fd = true ∧ ∃ (pv : PVal) (k : Int) (j : Nat),
+      env = [pv, .stat (.int k)] ∧ 0 ≤ k ∧ walkHead pv k.toNat = some (.dyn j) ∧
+      r = .code (.var j) := by
+  unfold nthSummaryEnv at h
+  by_cases hrec : isNthD f fd = true
+  · refine ⟨hrec, ?_⟩
+    simp only [hrec, if_true] at h
+    split at h
+    · rename_i pv k
+      by_cases hk : k < 0
+      · simp [hk] at h
+      · simp only [hk, if_false] at h
+        split at h
+        · rename_i j hw
+          cases h
+          exact ⟨pv, k, j, rfl, by omega, hw, rfl⟩
+        · contradiction
+    · contradiction
+  · simp [hrec] at h
+
+/-- **Step 2, scope half.**  The summary's result is in scope wherever the
+environment it was read from is. -/
+theorem nthSummaryEnv_scoped {f : Nat} {fd : AFunDef} {env : PEnv} {r : PRes} {d : Nat}
+    (henv : PEnv.Scoped d env) (h : nthSummaryEnv f fd env = some r) : PRes.Scoped d r := by
+  obtain ⟨_, pv, k, j, rfl, _, hw, rfl⟩ := nthSummaryEnv_some h
+  exact walkHead_scoped (d := d) hw henv.1
+
 def ScopeOK (n : Nat) : Prop :=
   ∀ (A : AProgram) (idx : SpecRequest → Option Nat)
     (Δ : Div) (env : PEnv) (t : ATerm)
@@ -945,12 +1081,17 @@ theorem mixTerm_scoped : ∀ n, ScopeOK n := by
             exact ih A idx _ _ fd.body _ _ d (PEnv.Scoped_stat_map d vs) hb
           · split at hm <;> try contradiction
             rename_i bs env' rq₂ hu
-            split at hm <;> try contradiction
-            rename_i rb rq₃ _hne hb
-            cases hm
             obtain ⟨hbinds, henv'⟩ :=
               mixPArgs_scoped ih A idx Δ fd.params ts env d bs env' rq₂ henv hu
-            exact ⟨hbinds, ih A idx _ _ fd.body _ rq₃ _ henv' hb⟩
+            split at hm
+            · -- the lookup summary: its leaf is in scope wherever `env'` is
+              rename_i r' hsum
+              cases hm
+              exact ⟨hbinds, nthSummaryEnv_scoped henv' hsum⟩
+            · split at hm <;> try contradiction
+              rename_i rb rq₃ _hne hb
+              cases hm
+              exact ⟨hbinds, ih A idx _ _ fd.body _ rq₃ _ henv' hb⟩
 
 /-! #### Layer 4: the whole generated program
 
@@ -2597,14 +2738,37 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
             · -- inline: the `let`s build the scope the body is specialized in
               split at hmix <;> try contradiction
               rename_i bs env' rq₂ hua
-              split at hmix <;> try contradiction
-              rename_i rb rq₃ _hne hbody
-              cases hmix
               obtain ⟨ρr', hlets, hcp⟩ :=
                 mixPArgs_ok ihm' fd.params ts Δ env bs env' rq₂ ρr ρs vs hc hua hvs
-              have hb := ihm' _ _ fd.body rb rq₃ ρr' vs v hcp hbody
-                           (by simpa [eraseFunDef] using hsrc)
-              exact ⟨ρr', hlets, hb⟩
+              split at hmix
+              · -- the lookup summary.  The source call computes the k-th element
+                -- of the list argument (`nthD_source`); the walk lands on a leaf
+                -- denoting that same element (`walkHead_ok`); determinism of the
+                -- source closes the gap between the two.
+                rename_i r' hsum
+                cases hmix
+                obtain ⟨hrec, pv, k, j, rfl, hk, hw, rfl⟩ := nthSummaryEnv_some hsum
+                rw [(isNthD_spec hrec).1] at hcp
+                cases hcp with
+                | dyn hpv hc2 =>
+                  cases hc2 with
+                  | stat hc3 =>
+                    cases hc3
+                    obtain ⟨u, hu, hj⟩ := walkHead_ok hw hpv
+                    have hsrcE := evalFuel_sound _ _ _ _ _ (by simpa [eraseFunDef] using hsrc)
+                    have hk' : ((k.toNat : Nat) : Int) = k := Int.toNat_of_nonneg hk
+                    have hu' := nthD_source hfn hrec k.toNat _ u hu
+                    rw [hk'] at hu'
+                    have huv : u = v := Surface.Eval_det hu' hsrcE
+                    subst huv
+                    have hj' : ρr'[j]? = some u := hj
+                    exact ⟨ρr', hlets, .var hj'⟩
+              · split at hmix <;> try contradiction
+                rename_i rb rq₃ _hne hbody
+                cases hmix
+                have hb := ihm' _ _ fd.body rb rq₃ ρr' vs v hcp hbody
+                             (by simpa [eraseFunDef] using hsrc)
+                exact ⟨ρr', hlets, hb⟩
 
 /-! ## Tying the knot
 
@@ -4009,16 +4173,43 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
               (by simpa [eraseFunDef] using hb ρp d hl hval)
           · split at hmix <;> try contradiction
             rename_i bs env' rq₂ hua
-            split at hmix <;> try contradiction
-            rename_i rb rq₃ _hne hbody
-            cases hmix
-            -- an unfolded call also returns a PACKAGE now
-            refine PResSound_of_lets (fun ρ1 ρp d hl1 hl2 hval => ?_)
-            obtain ⟨vs, hcp, hel, hvl⟩ :=
-              mixPArgs_sound ihm fd.params ts Δ env bs env' rq₂ ρr ρs ρ1 hc hua hl1
-            have hb := ihm _ _ fd.body rb rq₃ ρ1 vs hcp hbody
-            exact .call hel (eraseProgram_fn hfn) (by simpa [eraseFunDef] using hvl.symm)
-              (by simpa [eraseFunDef] using hb ρp d hl2 hval)
+            split at hmix
+            · -- the lookup summary.  The package's bindings run (they are the
+              -- arguments' own, from `mixPArgs`), the residual reads ONE variable,
+              -- and the source call computes exactly the element it holds.
+              rename_i r' hsum
+              cases hmix
+              refine PResSound_of_lets (fun ρ1 ρp d hl1 hl2 hval => ?_)
+              obtain ⟨vs, hcp, hel, hvl⟩ :=
+                mixPArgs_sound ihm fd.params ts Δ env bs env' _ ρr ρs ρ1 hc hua hl1
+              obtain ⟨hrec, pv, k, j, rfl, hk, hw, rfl⟩ := nthSummaryEnv_some hsum
+              simp only [prepare] at hl2 hval
+              cases hl2
+              rw [(isNthD_spec hrec).1] at hcp
+              cases hcp with
+              | dyn hpv hc2 =>
+                cases hc2 with
+                | stat hc3 =>
+                  cases hc3
+                  obtain ⟨u, hu, hj⟩ := walkHead_ok hw hpv
+                  have hj' : ρ1[j]? = some u := hj
+                  have hv' : ρ1[j]? = some d := hval
+                  have hud : u = d := Option.some.inj (hj'.symm.trans hv')
+                  subst hud
+                  have hk' : ((k.toNat : Nat) : Int) = k := Int.toNat_of_nonneg hk
+                  have hb := nthD_source hfn hrec k.toNat _ u hu
+                  rw [hk'] at hb
+                  exact .call hel (eraseProgram_fn hfn) (by simpa [eraseFunDef] using hvl.symm) hb
+            · split at hmix <;> try contradiction
+              rename_i rb rq₃ _hne hbody
+              cases hmix
+              -- an unfolded call also returns a PACKAGE now
+              refine PResSound_of_lets (fun ρ1 ρp d hl1 hl2 hval => ?_)
+              obtain ⟨vs, hcp, hel, hvl⟩ :=
+                mixPArgs_sound ihm fd.params ts Δ env bs env' rq₂ ρr ρs ρ1 hc hua hl1
+              have hb := ihm _ _ fd.body rb rq₃ ρ1 vs hcp hbody
+              exact .call hel (eraseProgram_fn hfn) (by simpa [eraseFunDef] using hvl.symm)
+                (by simpa [eraseFunDef] using hb ρp d hl2 hval)
 
 /-! ## Tying the converse knot -/
 

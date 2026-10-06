@@ -57,6 +57,16 @@ def tagRLets : Nat := 73   -- PRes: a package, bindings plus a result
 def tagRVal  : Nat := 74   -- PRes: a CARRIED partial value (`PRes.val`)
 def tagReq   : Nat := 80   -- SpecRequest
 
+/-! ## The `nthD` lookup summary's template -- shared with the host
+
+`isNthD` (PartialEvaluator.lean) is a pattern match on exactly these terms;
+`isNthDL` below compares the ENCODED callee with their `encATerm` encoding.
+`Proto/LookupMirrorCheck.lean` checks that the two recognizers agree on every
+function of three annotated programs. -/
+def nthCondT : ATerm := .prim .stat .eqI [.var 1, .lit (.int 0)]
+def nthBaseT : ATerm := .prim .dyn .hd [.var 0]
+def nthArgsT : List ATerm := [.prim .dyn .tl [.var 0], .prim .stat .subI [.var 1, .lit (.int 1)]]
+
 /-! ## Building surface terms -/
 
 private abbrev R := SExp.ref
@@ -284,10 +294,14 @@ private def mixTermAlts : List SAlt :=
               -- body keeps its spine on the way out.
               (.letN "u" (C "mixPArgsL"
                   [R "A", R "reqs", R "D", R "env", R "ps", R "ts"]) <|
-               .letN "o2" (C "mixTerm"
-                   [R "A", R "reqs", R "ps", t2_ (R "u"), C "funBody" [R "fd"]]) <|
-               pair_ (rLets (t1_ (R "u")) (fst_ (R "o2")))
-                     (C "appendL" [t3_ (R "u"), snd_ (R "o2")]))) ]
+               -- the lookup summary, on the environment just built; `none` unfolds
+               .letN "sm" (.ite (C "isNthDL" [R "fd", R "f"]) (C "nthEnvL" [t2_ (R "u")]) none_) <|
+               .ite (isNil_ (R "sm"))
+                 (.letN "o2" (C "mixTerm"
+                     [R "A", R "reqs", R "ps", t2_ (R "u"), C "funBody" [R "fd"]]) <|
+                  pair_ (rLets (t1_ (R "u")) (fst_ (R "o2")))
+                        (C "appendL" [t3_ (R "u"), snd_ (R "o2")]))
+                 (pair_ (rLets (t1_ (R "u")) (hd_ (R "sm"))) (t3_ (R "u"))))) ]
 
 /-! ## The program -/
 
@@ -428,6 +442,48 @@ def mixS : SProgram where
 
   , { name := "presVal", params := ["r"]
     , body := .switch (R "r") [(tagRStat, ["v"], R "v")] }
+
+  -- ## the `nthD` lookup summary (mirrors `isNthD`, `walkHead`, `nthSummaryEnv`)
+
+  -- the recognizer: params [dyn, stat], body an `ite` whose condition, base and
+  -- recursive call are the template -- the `ite`'s own binding time is NOT
+  -- compared, exactly as the host ignores it -- and the recursion is to `f`
+  , { name := "isNthDL", params := ["fd", "f"]
+    , body :=
+        .letN "bd" (C "funBody" [R "fd"]) <|
+        .ite (P2 .eqV (C "funParams" [R "fd"]) (.lit (encDiv [.dyn, .stat])))
+          (.ite (eq_ (ctorTag_ (R "bd")) (K (Int.ofNat tagAIte)))
+             (.letN "fs" (ctorFields_ (R "bd")) <|
+              and_ (P2 .eqV (hd_ (tl_ (R "fs"))) (.lit (encATerm nthCondT)))
+                (and_ (P2 .eqV (hd_ (tl_ (tl_ (R "fs")))) (.lit (encATerm nthBaseT)))
+                      (P2 .eqV (hd_ (tl_ (tl_ (tl_ (R "fs")))))
+                               (SExp.mk tagAUcall [.lit (encBT .dyn), R "f", .lit (encATerms nthArgsT)]))))
+             false_)
+          false_ }
+
+  -- walk a KNOWN encoded spine `k` cells; `some` its head there, else `none`
+  , { name := "walkHeadL", params := ["v", "k"]
+    , body :=
+        .ite (eq_ (ctorTag_ (R "v")) (K (Int.ofNat tagPCons)))
+          (.letN "fs" (ctorFields_ (R "v")) <|
+           .ite (eq_ (R "k") (K 0)) (some_ (hd_ (R "fs")))
+                (C "walkHeadL" [hd_ (tl_ (R "fs")), sub_ (R "k") (K 1)]))
+          none_ }
+
+  -- the summary, on the environment `mixPArgsL` built for a recognised callee:
+  -- [list entry, static index].  Only a `dyn` leaf is answered.  A non-integer
+  -- index is a `typeError` here where the host falls back -- and the host's
+  -- unfold then fails on `eqI` too, so failure maps to failure.
+  , { name := "nthEnvL", params := ["env"]
+    , body :=
+        .letN "k" (C "pvVal" [hd_ (tl_ (R "env"))]) <|
+        .ite (P2 .ltI (R "k") (K 0)) none_
+          (.letN "h" (C "walkHeadL" [hd_ (R "env"), R "k"]) <|
+           .ite (isNil_ (R "h")) none_
+             (.letN "lf" (hd_ (R "h")) <|
+              .ite (eq_ (ctorTag_ (R "lf")) (K (Int.ofNat tagPDyn)))
+                (some_ (rCode (eVar (C "pvIdx" [R "lf"]))))
+                none_)) }
 
   , { name := "toCode", params := ["r"]
     , body := .switch (R "r")

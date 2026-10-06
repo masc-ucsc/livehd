@@ -33,7 +33,10 @@ open MixProg
 -- 61 since S1 (`PRes.val` promoted): `ofPVal` and `pvToCode` added, `pvToPRes`
 -- removed -- the `var` rule now CARRIES a spine instead of copying it, so
 -- nothing calls the copy.  See certio/PHASE6_PERF.md 34.
-#guard mixProgram.funs.length == 61
+-- 64 since S2 (the `nthD` lookup summary): `isNthDL`, `walkHeadL`, `nthEnvL`.
+-- `compilerP` below did NOT move: for the toy interpreter `isNthDL` is decided
+-- statically during the second projection, so the summary branch drops out.
+#guard mixProgram.funs.length == 64
 
 /-- Run the object-level specializer on the toy interpreter and the sample
 expression -- the same inputs `Demo.residual2` gave the Lean specializer. -/

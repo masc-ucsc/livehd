@@ -538,6 +538,55 @@ structural recursion on `Nat`.  It is genuinely needed: unfolding a static call
 is unbounded, and a static loop that fails to terminate at specialization time
 is a real failure mode of offline partial evaluation, not a Lean artifact. -/
 
+
+/-! ## The `nthD` lookup summary (certio/PHASE6_PERF.md 35-37)
+
+At a dynamic unfold of a callee whose ANNOTATED definition is the list-index
+recursion, the `k + 1` unfolds a static index `k` would cost are replaced by a
+walk of the known spine.  It runs on `mixPArgs`' OUTPUT -- the bindings, the
+prepared list value and the static index -- so every argument is specialized
+exactly once, a failed attempt costs nothing extra, and binding order, requests
+and scope are `mixPArgs`' own.  Proved in `PartialEvaluatorCorrect.lean`:
+`isNthD_spec`, `nthD_source`, `walkHead_ok`, `nthSummaryEnv_scoped`, and the
+`ucall` cases of `mixTerm_scoped`, `mixTerm_complete` and `mixTerm_sound`. -/
+
+/-- The callee's annotated definition is the list-index recursion itself: a
+structural match, the self-recursion checked, never the name or the index.
+Every binding-time annotation the unfold path depends on is matched; the
+`ite`'s own is a wildcard because `mixTerm` dispatches on `btOf` of the
+condition, not on it. -/
+def isNthD (f : Nat) (fd : AFunDef) : Bool :=
+  match fd.params, fd.body with
+  | [.dyn, .stat],
+    .ite _ (.prim .stat .eqI [.var 1, .lit (.int 0)])
+           (.prim .dyn .hd [.var 0])
+           (.ucall .dyn g [.prim .dyn .tl [.var 0],
+                           .prim .stat .subI [.var 1, .lit (.int 1)]]) => g == f
+  | _, _ => false
+
+/-- Walk a known spine `k` cells.  `O(k)` host work: the summary removes the
+interpreter unfolds, not the walk. -/
+def walkHead : PVal → Nat → Option PVal
+  | .cons a _, 0     => some a
+  | .cons _ b, k + 1 => walkHead b k
+  | _,         _     => none
+
+/-- The summary, read off the environment `mixPArgs` built for a recognised
+callee: the list's prepared value, then the static index.  Only a `dyn` leaf is
+answered -- at lookup time in `I_hw` every leaf is one (PHASE6_PERF.md 35.1),
+and a `stat` leaf is exactly where the unfold path rejects a static body, which
+the summary must not turn into success.  `none` falls through to the unfold. -/
+def nthSummaryEnv (f : Nat) (fd : AFunDef) (env : PEnv) : Option PRes :=
+  if isNthD f fd then
+    match env with
+    | [pv, .stat (.int k)] =>
+      if k < 0 then none else
+        match walkHead pv k.toNat with
+        | some (.dyn j) => some (.code (.var j))
+        | _             => none
+    | _ => none
+  else none
+
 mutual
 
 /-- Explicit `match` throughout rather than `do`.  `Except`'s bind does not
@@ -717,6 +766,10 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
           match mixPArgs n A idx Δ env fd.params ts with
           | .error z => .error z
           | .ok (bs, env', rq₂) =>
+            -- the lookup summary, on the environment just built; `none` unfolds
+            match nthSummaryEnv f fd env' with
+            | some r => .ok (.lets bs r, rq₂)
+            | none =>
             match mixTerm n A idx fd.params env' fd.body with
             | .error z            => .error z
             | .ok (.stat _, _)    => .error (.illAnnotated "ucall: dynamic unfold with a static body")

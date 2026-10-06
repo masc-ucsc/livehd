@@ -3602,3 +3602,57 @@ No proved definition touched; `Audit.lean` unchanged.  Coverage unchanged:
 8 differential, 8 on the covered backend, 8 with no known reset conflict.
 **The exporter reset defect remains its own coverage workstream** -- a faster
 specializer does not unblock the 21 sequential blocks.
+
+## 37. Amendment to the 35.6 decision rule, and the S2 plan after review
+
+### 37.1 The rule was flawed, and is amended -- recorded, not taken silently
+
+35.6 said: *combined exponent >= 1.5 OR walk >= 25% of self time -> the list
+walk is still the cost; combine the summary with indexed storage.*  **Its
+first clause was wrong in kind**: an exponent identifies SCALING, not which
+operation causes it.  36.5 shows the remaining quadratic is binder shifting
+(55.4% self) with the walk at 3.8%, so the clause fired on a premise the
+attribution refutes.
+
+**Amended rule, adopted on review:** a decision about WHICH optimization comes
+next is made from call-chain/self-time attribution and work counters, never
+from an exponent alone.  The exponent decides only whether a scaling problem
+remains.
+
+**Direction accepted:** verify and integrate S2a; then target deferred binder
+shifting; **indexed storage is DEFERRED, not rejected** -- revisited after
+shifting is measured.
+
+### 37.2 Two qualifications to 36.5's interpretation
+
+* The **~1.04x ceiling** for indexed storage is the Amdahl bound for
+  eliminating ONLY the measured walk cost (3.77% self) with everything else
+  unchanged.  It is not a ceiling on any combination of changes.
+* **The 36.1% allocator/refcount band is not attributed to shifting.**  That
+  profile has no call chains (the timed `-O2` build omits frame pointers), so
+  the band's callers are unknown.  Likewise, a shift NODE VISIT is not
+  necessarily a physical allocation: the runtime may reuse a uniquely-owned
+  node in place.  What IS established: `PVal.shiftGo` is 55.4% self, and its
+  node visits are quadratic and 10-13x the walk's cells.
+
+### 37.3 Proof order (adopted)
+
+1. **Recognizer**: `isNthD f fd = true` and `A.fn f = some fd` imply the
+   ERASED function is list indexing -- stated against a reference `listNth?`.
+2. **Lookup contract**, stated through `PValOK`/`PResOK`, not cons structure:
+   a successful lookup on a prepared, scoped partial value returns the
+   corresponding element, in scope, with its bindings retained.
+3. **Integration** into both directions of `mixDriver` correctness and into
+   scope preservation; axiom audit diffed per theorem.
+4. Then prototype deferred shifting against that verified baseline.
+
+### 37.4 The fallback fix, by construction
+
+The prototype mixed the arguments for the summary, and again in `mixPArgs` on
+fallback -- at every level of an unknown runtime-input chain (36.7).  The
+integrated version runs the summary on `mixPArgs`' OUTPUT instead: for a
+recognised callee, `mixPArgs` already yields the bindings, the prepared list
+value and the static index.  Each argument is specialized ONCE, the fallback
+reuses the result, and binding order, requests and scope are exactly
+`mixPArgs`' own -- which also lets the proof reuse the existing `mixPArgs`
+lemmas rather than re-derive them.
