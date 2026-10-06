@@ -969,55 +969,65 @@ struct Net_driver_census {
   int  whole = 0;
   bool part  = false;
 };
-Net_driver_census net_driver_census(const slang::ast::ValueSymbol& sym) {
+using Net_census_cache
+    = absl::flat_hash_map<const slang::ast::Scope*, absl::flat_hash_map<const slang::ast::Symbol*, std::pair<int, bool>>>;
+Net_driver_census net_driver_census(const slang::ast::ValueSymbol& sym, Net_census_cache& cache) {
   Net_driver_census out;
   if (sym.getInitializer() != nullptr) {
     ++out.whole;
   }
-  std::function<void(const slang::ast::Scope&)> scan = [&](const slang::ast::Scope& scope) {
-    for (const auto& member : scope.members()) {
-      if (member.kind == slang::ast::SymbolKind::GenerateBlock) {
-        const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
-        if (!gen.isUninstantiated) {
-          scan(gen);
+  const auto* parent = sym.getParentScope();
+  if (parent == nullptr) {
+    return out;
+  }
+  auto [it, inserted] = cache.try_emplace(parent);
+  if (inserted) {
+    // One scan indexes every target of the scope: a bare-name LHS adds a whole
+    // driver to its symbol; any other LHS marks every symbol it names as
+    // partially written (exactly what the per-net scan tested).
+    auto&                                         index = it->second;
+    std::function<void(const slang::ast::Scope&)> scan  = [&](const slang::ast::Scope& scope) {
+      for (const auto& member : scope.members()) {
+        if (member.kind == slang::ast::SymbolKind::GenerateBlock) {
+          const auto& gen = member.as<slang::ast::GenerateBlockSymbol>();
+          if (!gen.isUninstantiated) {
+            scan(gen);
+          }
+          continue;
         }
-        continue;
-      }
-      if (member.kind == slang::ast::SymbolKind::GenerateBlockArray) {
-        for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
-          scan(*entry);
+        if (member.kind == slang::ast::SymbolKind::GenerateBlockArray) {
+          for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
+            scan(*entry);
+          }
+          continue;
         }
-        continue;
-      }
-      if (member.kind != slang::ast::SymbolKind::ContinuousAssign) {
-        continue;
-      }
-      const auto& asn = member.as<slang::ast::ContinuousAssignSymbol>().getAssignment();
-      if (asn.kind != ExpressionKind::Assignment) {
-        continue;
-      }
-      const auto* lhs = &asn.as<slang::ast::AssignmentExpression>().left();
-      while (lhs->kind == ExpressionKind::Conversion) {
-        lhs = &lhs->as<slang::ast::ConversionExpression>().operand();
-      }
-      if (lhs->kind == ExpressionKind::NamedValue) {
-        if (&lhs->as<slang::ast::NamedValueExpression>().symbol == &sym) {
-          ++out.whole;
+        if (member.kind != slang::ast::SymbolKind::ContinuousAssign) {
+          continue;
         }
-        continue;
-      }
-      Named_value_collector nvc;  // a select/concat LHS: does it target `sym`?
-      lhs->visit(nvc);
-      for (const auto* s : nvc.syms) {
-        if (s == &sym) {
-          out.part = true;
-          break;
+        const auto& asn = member.as<slang::ast::ContinuousAssignSymbol>().getAssignment();
+        if (asn.kind != ExpressionKind::Assignment) {
+          continue;
+        }
+        const auto* lhs = &asn.as<slang::ast::AssignmentExpression>().left();
+        while (lhs->kind == ExpressionKind::Conversion) {
+          lhs = &lhs->as<slang::ast::ConversionExpression>().operand();
+        }
+        if (lhs->kind == ExpressionKind::NamedValue) {
+          ++index[&lhs->as<slang::ast::NamedValueExpression>().symbol].first;
+          continue;
+        }
+        Named_value_collector nvc;  // a select/concat LHS: every symbol it names
+        lhs->visit(nvc);
+        for (const auto* s : nvc.syms) {
+          index[s].second = true;
         }
       }
-    }
-  };
-  if (const auto* scope = sym.getParentScope(); scope != nullptr) {
-    scan(*scope);
+    };
+    scan(*parent);
+  }
+  if (const auto f = it->second.find(&sym); f != it->second.end()) {
+    out.whole += f->second.first;
+    out.part   = f->second.second;
   }
   return out;
 }
@@ -2108,7 +2118,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
         if (!ct.isIntegral() || ct.isStruct()) {
           continue;  // structs have their own per-field split
         }
-        const auto census = net_driver_census(ns);
+        const auto census = net_driver_census(ns, net_census_cache_);
         if (census.whole != 1 || census.part) {
           continue;
         }
@@ -6233,7 +6243,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
   // reset_pin/initial slot, so a second rung on the same register (async SET plus
   // async RESET) has nowhere to go and must be refused by name, not left to
   // upass.attributes' generic "attribute is already set" conflict.
-  absl::flat_hash_set<const slang::ast::ValueSymbol*> async_rung_regs;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                     async_rung_regs;
   absl::flat_hash_set<std::pair<const slang::ast::ValueSymbol*, int64_t>> async_rung_bits;
 
   while (edges.size() > 1) {
@@ -6477,11 +6487,12 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       for (const auto& store : arm.bit_stores) {
         if (async_rung_regs.contains(store.sym)
             || async_rung_bits.contains(std::make_pair(store.sym, static_cast<int64_t>(store.bit)))) {
-          emit_unsupported(cond_stmt.ifTrue.sourceRange,
-                           "dual-async-reset",
-                           std::string("register '") + std::string(store.sym->name)
-                               + "' has two asynchronous reset/set rungs (an async set AND an async reset): a flop has one reset_pin",
-                           "keep one asynchronous rung and make the other synchronous, or split the state");
+          emit_unsupported(
+              cond_stmt.ifTrue.sourceRange,
+              "dual-async-reset",
+              std::string("register '") + std::string(store.sym->name)
+                  + "' has two asynchronous reset/set rungs (an async set AND an async reset): a flop has one reset_pin",
+              "keep one asynchronous rung and make the other synchronous, or split the state");
           return;
         }
       }
@@ -6497,11 +6508,12 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
           bit_overlap = bit_overlap || bsym == sym;
         }
         if (async_rung_regs.contains(sym) || bit_overlap) {
-          emit_unsupported(cond_stmt.ifTrue.sourceRange,
-                           "dual-async-reset",
-                           std::string("register '") + std::string(sym->name)
-                               + "' has two asynchronous reset/set rungs (an async set AND an async reset): a flop has one reset_pin",
-                           "keep one asynchronous rung and make the other synchronous, or split the state");
+          emit_unsupported(
+              cond_stmt.ifTrue.sourceRange,
+              "dual-async-reset",
+              std::string("register '") + std::string(sym->name)
+                  + "' has two asynchronous reset/set rungs (an async set AND an async reset): a flop has one reset_pin",
+              "keep one asynchronous rung and make the other synchronous, or split the state");
           return;
         }
       }
@@ -7346,7 +7358,7 @@ std::string Slang_context::lower_clock_bus_lane(const slang::ast::Expression& ex
                                                                                          : std::string{};
     }
     case ExpressionKind::Concatenation: {
-      int64_t off = 0;  // LSB-first walk: operands are written MSB-first
+      int64_t    off = 0;  // LSB-first walk: operands are written MSB-first
       const auto ops = expr.as<slang::ast::ConcatenationExpression>().operands();
       for (auto it = ops.rbegin(); it != ops.rend(); ++it) {
         const auto w = static_cast<int64_t>((*it)->type->getBitWidth());
@@ -7381,7 +7393,7 @@ std::string Slang_context::lower_clock_bus_lane(const slang::ast::Expression& ex
       if (sym.kind != slang::ast::SymbolKind::Net) {
         return {};
       }
-      if (const auto census = net_driver_census(sym); census.whole == 1 && !census.part) {
+      if (const auto census = net_driver_census(sym, net_census_cache_); census.whole == 1 && !census.part) {
         if (const auto* driver = whole_net_driver(sym)) {
           return lower_clock_bus_lane(*driver, bit, depth + 1);
         }

@@ -2344,6 +2344,266 @@ void sim_command(Options& opts, Result& res) {
     }
   }
 
+  // Output staleness, shared by the precompiled-header stage below and the
+  // built-in TU build: an output is fresh when its stamp (the exact command
+  // that produced it) matches and it is not older than any prerequisite its
+  // depfile lists -- ninja's rule, see the built-in build for the caveats.
+  auto mtime_of = [](const std::string& path) -> std::optional<fs::file_time_type> {
+    std::error_code ec;
+    const auto      t = fs::last_write_time(path, ec);
+    if (ec) {
+      return std::nullopt;
+    }
+    return t;
+  };
+  auto not_older_than_all = [&](const std::string& out, const std::vector<std::string>& ins) {
+    const auto ot = mtime_of(out);
+    if (!ot) {
+      return false;
+    }
+    for (const auto& in : ins) {
+      const auto it = mtime_of(in);
+      if (!it || *it > *ot) {
+        return false;  // a missing input is a rebuild too: it may reappear
+      }
+    }
+    return true;
+  };
+  auto stamp_path    = [](const std::string& out) { return out + ".cmd"; };
+  auto stamp_matches = [&](const std::string& out, const std::string& cmd) {
+    std::ifstream f(stamp_path(out));
+    if (!f.is_open()) {
+      return false;
+    }
+    const std::string prev((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    return prev == cmd;
+  };
+  auto drop_stamp = [&](const std::string& out) {
+    std::error_code ec;
+    fs::remove(stamp_path(out), ec);
+  };
+  auto write_stamp = [&](const std::string& out, const std::string& cmd) {
+    std::ofstream f(stamp_path(out));
+    if (f.is_open()) {
+      f << cmd;
+    }
+  };
+  // A `-MD` depfile is one make rule: `out: prereq prereq \<newline> prereq`.
+  // Backslash-newline continues a line and `\ ` is a literal space in a path;
+  // nothing else in the format needs unescaping.
+  auto read_depfile = [](const std::string& dep) {
+    std::vector<std::string> prereqs;
+    std::ifstream            f(dep);
+    if (!f.is_open()) {
+      return prereqs;
+    }
+    const std::string all((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    const auto        colon = all.find(':');
+    if (colon == std::string::npos) {
+      return prereqs;
+    }
+    std::string cur;
+    for (size_t i = colon + 1; i < all.size(); ++i) {
+      const char c = all[i];
+      if (c == '\\' && i + 1 < all.size()) {
+        const char n = all[i + 1];
+        if (n == '\n' || n == '\r') {
+          ++i;
+          continue;
+        }
+        if (n == ' ') {
+          cur += ' ';
+          ++i;
+          continue;
+        }
+      }
+      if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+        if (!cur.empty()) {
+          prereqs.push_back(cur);
+          cur.clear();
+        }
+        continue;
+      }
+      cur += c;
+    }
+    if (!cur.empty()) {
+      prereqs.push_back(cur);
+    }
+    return prereqs;
+  };
+
+  // Precompiled headers (clang only; `--set sim.pch=false` disables them).
+  // Measured on minion (462 TUs, 128 jobs): 4216 -> 2352 CPU-s and 40 -> 28 s
+  // of host build, with the same drv.bin behavior and cycle rate. Two layers:
+  //  * a PRELUDE of the std/hlop headers every generated module header opens
+  //    with (slop.hpp pulls in <format>/<print>/<random>), shared by every TU;
+  //  * one chained PCH per generated header that is the FIRST include of two
+  //    or more TUs -- a sharded module's evaluator/commit/bind shards all open
+  //    with `<mod>.color-runtime.hpp`, which transitively parses every child
+  //    module's class (most of a shard's front end).
+  // Codegen is unchanged: -include-pch only replays the parse, and every
+  // generated header is `#pragma once` with nothing #defined ahead of its first
+  // include, so the TU's own #include of the same header is a no-op. lhd builds
+  // the PCHs itself (stage 0 of either build path, same stamp+depfile staleness
+  // as the TUs), so a header that does not precompile cleanly only drops its
+  // TUs back to the prelude (or to no PCH) instead of failing the simulation.
+  // LLVM-bitcode TUs keep the plain command.
+  std::vector<std::string> tu_pch(tus.size());  // the -include-pch file per TU ("" = none)
+  {
+    std::string pch_set;
+    for (const auto& [k, v] : opts.sets) {
+      if (k == "sim.pch") {
+        pch_set = v;
+      }
+    }
+    // Default (unset/auto): only a CPU-bound build, at least two TUs per job.
+    // With every TU already running in parallel, the serial PCH stage only
+    // delays the critical path (drv.cpp): measured on dino/picorv32 at 128
+    // jobs, 6.4 -> 7.0 s. `true` forces it, `false` disables it.
+    const bool pch_forced = pch_set == "true" || pch_set == "1" || pch_set == "on";
+    bool       pch_on     = pch_set != "false" && pch_set != "0" && pch_set != "off"
+                  && (pch_forced || tus.size() >= 2 * static_cast<size_t>(std::max(jobs, 1)));
+    if (pch_on) {
+      int        vrc     = 0;
+      const auto version = capture(std::format("{} --version 2>&1", shell_quote(cxx)), vrc);
+      pch_on             = vrc == 0 && version.find("clang") != std::string::npos;
+    }
+    // ABSOLUTE, like the -I paths: ninja runs with its cwd in the sim dir.
+    const std::string pch_dir = simdir_abs + "/pch";
+    if (pch_on) {
+      ensure_dir(pch_dir);
+      // Write-if-different: its mtime keys every PCH and so every TU.
+      const std::string prelude_hdr  = pch_dir + "/prelude.hpp";
+      const std::string prelude_text = "// Generated by `lhd sim`: precompiled prelude of every generated TU.\n#pragma once\n"
+                                       "#include <array>\n#include <cstdint>\n#include <map>\n#include <string>\n"
+                                       "#include <vector>\n#include \"slop.hpp\"\n#include \"memory.hpp\"\n";
+      std::string old;
+      if (std::ifstream in(prelude_hdr); in) {
+        old.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+      }
+      if (old != prelude_text) {
+        std::ofstream out(prelude_hdr, std::ios::trunc);
+        out << prelude_text;
+      }
+      // The first `#include "..."` of a TU, followed through a unity batch to
+      // its first member; only a header generated in the sim dir qualifies.
+      const auto first_header = [&](const std::string& tu) -> std::string {
+        std::string path = tu;
+        for (int hop = 0; hop < 2; ++hop) {
+          std::ifstream in(path);
+          std::string   line;
+          while (std::getline(in, line)) {
+            if (!line.starts_with("#include \"")) {
+              continue;
+            }
+            const auto close = line.find('"', 10);
+            if (close == std::string::npos) {
+              return {};
+            }
+            const fs::path inc = fs::path(path).parent_path() / line.substr(10, close - 10);
+            if (inc.extension() == ".cpp") {
+              path = inc.lexically_normal().string();
+              break;  // a unity batch: follow its first member
+            }
+            const fs::path hdr = fs::path(simdir) / inc.filename();
+            std::error_code ec;
+            return fs::exists(hdr, ec) && inc.lexically_normal().parent_path() == fs::path(simdir).lexically_normal()
+                       ? hdr.string()
+                       : std::string{};
+          }
+        }
+        return {};
+      };
+      std::vector<std::string>      first(tus.size());
+      std::map<std::string, size_t> users;  // std::map: a stable PCH order
+      for (size_t i = 0; i < tus.size(); ++i) {
+        if (llvm_kernels[i].empty() && !tus[i].ends_with("/vcd_writer.cpp")) {
+          first[i] = first_header(tus[i]);
+          if (!first[i].empty()) {
+            ++users[first[i]];
+          }
+        }
+      }
+      struct Pch_unit {
+        std::string header;
+        std::string pch;
+        std::string base;  // chained-on PCH ("" for the prelude)
+        bool        ok = false;
+      };
+      std::vector<Pch_unit> units{{prelude_hdr, pch_dir + "/prelude.pch", "", false}};
+      std::map<std::string, size_t> unit_of;
+      for (const auto& [hdr, n] : users) {
+        if (n >= 2) {
+          unit_of[hdr] = units.size();
+          units.push_back({hdr, pch_dir + "/" + fs::path(hdr).filename().string() + ".pch", units[0].pch, false});
+        }
+      }
+      const auto build_unit = [&](Pch_unit& u, const std::string& base_ok) {
+        const std::string dep = u.pch + ".d";
+        const std::string cmd = std::format("{} {}{} -x c++-header -MD -MF {} {} -o {} 2>&1",
+                                            shell_quote(cxx),
+                                            cflags,
+                                            base_ok.empty() ? std::string{} : " -include-pch " + shell_quote(base_ok),
+                                            shell_quote(dep),
+                                            shell_quote(u.header),
+                                            shell_quote(u.pch));
+        if (stamp_matches(u.pch, cmd)) {
+          auto prereqs = read_depfile(dep);
+          if (!base_ok.empty()) {
+            prereqs.push_back(base_ok);
+          }
+          if (!prereqs.empty() && not_older_than_all(u.pch, prereqs)) {
+            u.ok = true;
+            return;
+          }
+        }
+        drop_stamp(u.pch);
+        int rc = 0;
+        (void)capture(cmd, rc);
+        u.ok = rc == 0;
+        if (u.ok) {
+          write_stamp(u.pch, cmd);
+        }
+      };
+      build_unit(units[0], "");
+      if (units[0].ok) {
+        std::atomic<size_t> cursor{1};
+        livehd::run_workers(static_cast<size_t>(std::clamp<size_t>(jobs, 1, std::max<size_t>(1, units.size() - 1))),
+                            [&](size_t) {
+                              for (size_t u = cursor.fetch_add(1); u < units.size(); u = cursor.fetch_add(1)) {
+                                build_unit(units[u], units[0].pch);
+                              }
+                            });
+        for (size_t i = 0; i < tus.size(); ++i) {
+          if (!llvm_kernels[i].empty() || tus[i].ends_with("/vcd_writer.cpp")) {
+            continue;
+          }
+          const auto found = first[i].empty() ? unit_of.end() : unit_of.find(first[i]);
+          tu_pch[i]        = found != unit_of.end() && units[found->second].ok ? units[found->second].pch : units[0].pch;
+        }
+      }
+    }
+    // PCHs a previous run built and this one does not use only cost disk.
+    std::error_code ec;
+    for (const auto& de : fs::directory_iterator(pch_dir, ec)) {
+      const auto name = de.path().filename().string();
+      bool       used = name == "prelude.hpp";
+      for (const auto& p : tu_pch) {
+        used = used || (!p.empty() && (name == fs::path(p).filename().string() || name == fs::path(p).filename().string() + ".d"
+                                       || name == fs::path(p).filename().string() + ".cmd"));
+      }
+      if (!used) {
+        std::error_code rm_ec;
+        fs::remove(de.path(), rm_ec);
+      }
+    }
+  }
+  // No leading space: ninja strips it from a variable's value (the `cc` rule
+  // spells `$cflags $pchflags`); the built-in command adds its own.
+  const auto pch_flag = [&](size_t i) {
+    return tu_pch[i].empty() ? std::string{} : "-include-pch " + shell_quote(tu_pch[i]);
+  };
+
   // build.ninja, ALWAYS written (even when the build below does not use ninja).
   // It is the escape hatch that works: `ninja -C <simdir>` reproduces exactly
   // what lhd did. That matters because the OTHER generated build file, the
@@ -2416,7 +2676,7 @@ void sim_command(Options& opts, Result& res) {
        // read. Rule bodies must be SPACE-indented and every rule must be
        // declared before the first build statement that uses it.
        << "rule cc\n"
-       << "  command = $cxx $cflags -MD -MF $out.d -c $in -o $out\n"
+       << "  command = $cxx $cflags $pchflags -MD -MF $out.d -c $in -o $out\n"
        << "  description = CC $out\n"
        << "  depfile = $out.d\n"
        << "  deps = gcc\n\n"
@@ -2433,7 +2693,16 @@ void sim_command(Options& opts, Result& res) {
        << "  description = LINK $out\n\n";
     for (size_t i = 0; i < tus.size(); ++i) {
       if (llvm_kernels[i].empty()) {
-        nf << "build " << nesc(objs[i]) << ": cc " << nesc(tus[i]) << "\n";
+        nf << "build " << nesc(objs[i]) << ": cc " << nesc(tus[i]);
+        if (!tu_pch[i].empty()) {
+          // lhd builds the PCH (stage 0 above); ninja only orders on it.
+          std::string flag;
+          for (char c : pch_flag(i)) {
+            flag += (c == '$') ? "$$" : std::string(1, c);
+          }
+          nf << " | " << nesc(tu_pch[i]) << "\n  pchflags = " << flag;
+        }
+        nf << "\n";
       } else {
         nf << "build " << nesc(compile_objs[i]) << ": cc_bc " << nesc(tus[i]) << "\n";
         nf << "build " << nesc(objs[i]) << ": llvm_inline " << nesc(compile_objs[i]);
@@ -2566,89 +2835,6 @@ void sim_command(Options& opts, Result& res) {
     // output is fresh when it is NOT OLDER than its inputs, so a source
     // rewritten inside the same filesystem timestamp tick as its object is
     // missed (sub-second stamps make that window vanishing on APFS/ext4/btrfs).
-    auto mtime_of = [](const std::string& path) -> std::optional<fs::file_time_type> {
-      std::error_code ec;
-      const auto      t = fs::last_write_time(path, ec);
-      if (ec) {
-        return std::nullopt;
-      }
-      return t;
-    };
-    auto not_older_than_all = [&](const std::string& out, const std::vector<std::string>& ins) {
-      const auto ot = mtime_of(out);
-      if (!ot) {
-        return false;
-      }
-      for (const auto& in : ins) {
-        const auto it = mtime_of(in);
-        if (!it || *it > *ot) {
-          return false;  // a missing input is a rebuild too: it may reappear
-        }
-      }
-      return true;
-    };
-    auto stamp_path    = [](const std::string& out) { return out + ".cmd"; };
-    auto stamp_matches = [&](const std::string& out, const std::string& cmd) {
-      std::ifstream f(stamp_path(out));
-      if (!f.is_open()) {
-        return false;
-      }
-      const std::string prev((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-      return prev == cmd;
-    };
-    auto drop_stamp = [&](const std::string& out) {
-      std::error_code ec;
-      fs::remove(stamp_path(out), ec);
-    };
-    auto write_stamp = [&](const std::string& out, const std::string& cmd) {
-      std::ofstream f(stamp_path(out));
-      if (f.is_open()) {
-        f << cmd;
-      }
-    };
-    // A `-MD` depfile is one make rule: `out: prereq prereq \<newline> prereq`.
-    // Backslash-newline continues a line and `\ ` is a literal space in a path;
-    // nothing else in the format needs unescaping.
-    auto read_depfile = [](const std::string& dep) {
-      std::vector<std::string> prereqs;
-      std::ifstream            f(dep);
-      if (!f.is_open()) {
-        return prereqs;
-      }
-      const std::string all((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-      const auto        colon = all.find(':');
-      if (colon == std::string::npos) {
-        return prereqs;
-      }
-      std::string cur;
-      for (size_t i = colon + 1; i < all.size(); ++i) {
-        const char c = all[i];
-        if (c == '\\' && i + 1 < all.size()) {
-          const char n = all[i + 1];
-          if (n == '\n' || n == '\r') {
-            ++i;
-            continue;
-          }
-          if (n == ' ') {
-            cur += ' ';
-            ++i;
-            continue;
-          }
-        }
-        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-          if (!cur.empty()) {
-            prereqs.push_back(cur);
-            cur.clear();
-          }
-          continue;
-        }
-        cur += c;
-      }
-      if (!cur.empty()) {
-        prereqs.push_back(cur);
-      }
-      return prereqs;
-    };
 
     std::vector<std::string> cmds(tus.size()), outs(tus.size());
     std::vector<int>         rcs(tus.size(), 0);
@@ -2657,15 +2843,19 @@ void sim_command(Options& opts, Result& res) {
       auto                worker = [&] {
         for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
           const std::string dep = compile_objs[i] + ".d";
-          cmds[i]               = std::format("{} {}{} -MD -MF {} -c {} -o {} 2>&1",
+          cmds[i]               = std::format("{} {}{}{} -MD -MF {} -c {} -o {} 2>&1",
                                               shell_quote(cxx),
                                               cflags,
+                                              tu_pch[i].empty() ? std::string{} : " " + pch_flag(i),
                                               llvm_kernels[i].empty() ? "" : " -emit-llvm",
                                               shell_quote(dep),
                                               shell_quote(tus[i]),
                                               shell_quote(compile_objs[i]));
           if (stamp_matches(compile_objs[i], cmds[i])) {
-            const auto prereqs = read_depfile(dep);
+            auto prereqs = read_depfile(dep);
+            if (!prereqs.empty() && !tu_pch[i].empty()) {
+              prereqs.push_back(tu_pch[i]);
+            }
             // An empty prereq list means no usable depfile (ninja consumes and
             // deletes them), which is a rebuild, not a free pass.
             if (!prereqs.empty() && not_older_than_all(compile_objs[i], prereqs)) {

@@ -26,6 +26,8 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/node_hash_map.h"
+#include "absl/container/node_hash_set.h"
 #include "file_output.hpp"
 #include "hash_util.hpp"
 #include "latch_contract.hpp"
@@ -1621,20 +1623,27 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
     return result;
   };
-  std::array<absl::flat_hash_map<hhds::Occurrence_pin, Gate_formula>, 2> gate_formulas;
-  std::function<Gate_formula(hhds::Occurrence_pin, bool, unsigned)>      gate_formula;
-  gate_formula = [&](hhds::Occurrence_pin pin, bool positive, unsigned depth) -> Gate_formula {
+  // Formulas are returned by reference into a pointer-stable memo: copying a
+  // formula copies every literal's Occurrence_pin (shared hierarchy handles),
+  // and those copies dominated minion's color-plan discovery. The recursion
+  // only inserts, never erases, so a returned reference outlives the call; an
+  // entry's own cycle-guard value is overwritten only after its subtree used it.
+  static const Gate_formula                                                gate_true{{}};
+  static const Gate_formula                                                gate_false{};
+  std::array<absl::node_hash_map<hhds::Occurrence_pin, Gate_formula>, 2>   gate_formulas;
+  std::function<const Gate_formula&(hhds::Occurrence_pin, bool, unsigned)> gate_formula;
+  gate_formula = [&](hhds::Occurrence_pin pin, bool positive, unsigned depth) -> const Gate_formula& {
     if (pin.is_invalid()) {
-      return {{}};  // no information
+      return gate_true;  // no information
     }
     if (pin.is_const()) {
       if (pin.is_known_true()) {
-        return positive ? Gate_formula{{}} : Gate_formula{};
+        return positive ? gate_true : gate_false;
       }
       if (pin.is_known_false()) {
-        return positive ? Gate_formula{} : Gate_formula{{}};
+        return positive ? gate_false : gate_true;
       }
-      return {{}};  // unknown constants cannot prove a gate closed
+      return gate_true;  // unknown constants cannot prove a gate closed
     }
     if (const auto found = gate_formulas[positive].find(pin); found != gate_formulas[positive].end()) {
       return found->second;
@@ -1648,38 +1657,38 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         positive = positive != control.inverted;
       }
     }
-    const Gate_formula opaque{{{pin, positive}}};
-    gate_formulas[original_positive].emplace(original, opaque);  // cycle guard
+    // Cycle guard; stays the memoized value on every early (opaque) return.
+    auto& memo = gate_formulas[original_positive].try_emplace(original, Gate_formula{{{pin, positive}}}).first->second;
     if (depth == 16 || gu::bits_of(pin) != 1) {
-      return opaque;
+      return memo;
     }
     const auto node = pin.get_master_node();
     const auto op   = gu::type_op_of(node);
     if (op != Ntype_op::And && op != Ntype_op::Or) {
-      return opaque;
+      return memo;
     }
     const bool   conjunction = positive == (op == Ntype_op::And);
     Gate_formula result      = conjunction ? Gate_formula{{}} : Gate_formula{};
     for (const auto& input : gu::inp_sink_drivers(node)) {
       if (!input.driver.is_const() && gu::bits_of(input.driver) != 1) {
-        return opaque;
+        return memo;
       }
-      const auto operand = gate_formula(input.driver, positive, depth + 1);
+      const auto& operand = gate_formula(input.driver, positive, depth + 1);
       if (conjunction) {
-        const auto product = gate_and(result, operand);
+        auto product = gate_and(result, operand);
         if (!product) {
-          return opaque;
+          return memo;
         }
-        result = *product;
+        result = std::move(*product);
       } else {
         if (result.size() + operand.size() > gate_limit) {
-          return opaque;
+          return memo;
         }
         result.insert(result.end(), operand.begin(), operand.end());
       }
     }
-    gate_formulas[original_positive][original] = result;
-    return result;
+    memo = std::move(result);
+    return memo;
   };
   // A latch's asynchronous reset overrides its enable (the emitted update is
   // `reset ? initial : enable ? din : Q`). It therefore matters twice:
@@ -1715,18 +1724,40 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       }
     }
   }
+  // gate_and(a, b) is empty (rather than non-empty or over the bound) iff no
+  // cube pair is consistent -- gate_and only overflows while keeping a
+  // consistent cube. Same per-pair test as gate_and, without the product.
+  const auto gate_disjoint = [](const Gate_formula& a, const Gate_formula& b) {
+    for (const auto& left : a) {
+      for (const auto& right : b) {
+        bool impossible = false;
+        for (size_t i = 0; i < right.size() && !impossible; ++i) {
+          const auto& term  = right[i];
+          const auto  found = std::ranges::find(left, term.first, &Gate_literal::first);
+          if (found != left.end()) {
+            impossible = found->second != term.second;
+            continue;
+          }
+          // gate_and appends right's earlier literals to the cube first.
+          const auto end   = right.begin() + static_cast<std::ptrdiff_t>(i);
+          const auto prior = std::ranges::find(right.begin(), end, term.first, &Gate_literal::first);
+          impossible       = prior != end && prior->second != term.second;
+        }
+        if (!impossible) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
   const auto closed_during = [&](size_t source, const Gate_formula& demand) {
     if (gu::type_op_of(plan.sites_[source].node) != Ntype_op::Latch) {
       return false;
     }
-    if (latch_has_reset[source]) {
-      const auto reset_overlap = gate_and(latch_reset_terms[source], demand);
-      if (!reset_overlap || !reset_overlap->empty()) {
-        return false;  // an independent reset may change even a closed source
-      }
+    if (latch_has_reset[source] && !gate_disjoint(latch_reset_terms[source], demand)) {
+      return false;  // an independent reset may change even a closed source
     }
-    const auto overlap = gate_and(latch_open_terms[source], demand);
-    return overlap && overlap->empty();
+    return gate_disjoint(latch_open_terms[source], demand);
   };
   // A private mux arm that feeds a latch's own D can represent retained Q,
   // rather than transparent feedback (the same exemption as latch legality).
@@ -2072,6 +2103,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     phase_constants[high][pin] = result;
     return result;
   };
+  enum class Hotmux_control_phase : uint8_t { opaque, selected, inactive };
+  struct Hotmux_phase_scan {
+    bool                              started = false;
+    std::vector<hhds::Occurrence_pin> controls;  // control sinks, port order
+    std::vector<Hotmux_control_phase> outcomes;  // resolved prefix of `controls`
+  };
+  std::array<absl::flat_hash_map<hhds::Occurrence_node, Hotmux_phase_scan>, 2> hotmux_phase_scans;
   const auto unused_phase_input = [&](const hhds::Occurrence_node& node, hhds::Port_id port, bool high) {
     const auto op = gu::type_op_of(node);
     if (op == Ntype_op::Latch && port == Ntype::get_sink_pid(op, "din")) {
@@ -2087,23 +2125,44 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       const auto end = gu::hotmux_control_end(node);
       if (!gu::is_hotmux_control(port, end)) {
         // Ports alternate control/value, followed by an optional default.
-        for (const auto& sink : node.inp_sorted_pins()) {
-          if (!gu::is_hotmux_control(sink.get_port_id(), end)) {
-            continue;
+        // Every value port of a hotmux asks the same ordered control scan, so
+        // it is resolved once per (node, phase) instead of once per port (an
+        // O(arms^2) rescan that was 10% of minion's discovery). The scan
+        // advances lazily, so phase_boolean (whose cycle guard makes its memo
+        // order-sensitive) sees exactly the calls, in exactly the order, of
+        // the per-port scan.
+        auto& scan = hotmux_phase_scans[high][node];
+        if (!scan.started) {
+          scan.started = true;
+          for (const auto& sink : node.inp_sorted_pins()) {
+            if (gu::is_hotmux_control(sink.get_port_id(), end)) {
+              scan.controls.push_back(sink);
+            }
           }
-          const auto drivers = sink.get_driver_pins();
-          if (drivers.size() != 1) {
-            return false;
+        }
+        for (size_t i = 0;; ++i) {
+          if (i == scan.outcomes.size()) {
+            if (i == scan.controls.size()) {
+              return false;
+            }
+            const auto drivers = scan.controls[i].get_driver_pins();
+            if (drivers.size() != 1) {
+              scan.outcomes.push_back(Hotmux_control_phase::opaque);
+            } else if (const auto active_phase = phase_boolean(*drivers.begin(), high); !active_phase) {
+              scan.outcomes.push_back(Hotmux_control_phase::opaque);
+            } else {
+              scan.outcomes.push_back(*active_phase ? Hotmux_control_phase::selected : Hotmux_control_phase::inactive);
+            }
           }
-          const auto active_phase = phase_boolean(*drivers.begin(), high);
-          if (!active_phase) {
-            return false;
-          }
-          if (*active_phase) {
-            return port != sink.get_port_id() + 1;
-          }
-          if (port == sink.get_port_id() + 1) {
-            return true;
+          const auto value_port = scan.controls[i].get_port_id() + 1;
+          switch (scan.outcomes[i]) {
+            case Hotmux_control_phase::opaque  : return false;
+            case Hotmux_control_phase::selected: return port != value_port;
+            case Hotmux_control_phase::inactive:
+              if (port == value_port) {
+                return true;
+              }
+              break;
           }
         }
       }
@@ -3569,13 +3628,18 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       }
     }
     std::map<std::vector<size_t>, size_t> specialized_versions;
-    const auto guarded_demand = [&](const Version_site& consumer, hhds::Port_id port, Gate_formula demand) {
-      const auto& node    = plan.sites_[consumer.base_site].node;
-      const auto  op      = gu::type_op_of(node);
-      const auto  require = [&](hhds::Occurrence_pin guard, bool positive) {
+    // Returns nullopt when no guard narrows `base` (the common case), so the
+    // recursion below passes the caller's formula by reference instead of
+    // copying it per edge.
+    const auto                            guarded_demand
+        = [&](const Version_site& consumer, hhds::Port_id port, const Gate_formula& base) -> std::optional<Gate_formula> {
+      const auto&                 node = plan.sites_[consumer.base_site].node;
+      const auto                  op   = gu::type_op_of(node);
+      std::optional<Gate_formula> demand;
+      const auto                  require = [&](hhds::Occurrence_pin guard, bool positive) {
         if (!guard.is_invalid() && gu::bits_of(guard) == 1) {
-          if (const auto guarded = gate_and(demand, gate_formula(guard, positive, 0))) {
-            demand = *guarded;
+          if (auto guarded = gate_and(demand ? *demand : base, gate_formula(guard, positive, 0))) {
+            demand = std::move(*guarded);
           }
         }
       };
@@ -3600,13 +3664,15 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       if (!target_site.latch_settle) {
         continue;
       }
-      size_t budget = 4096;
-      struct Specialization {
-        Gate_formula demand;
-        size_t       version;
-      };
-      absl::flat_hash_map<size_t, std::vector<Specialization>>     memo;
-      std::function<size_t(size_t, const Gate_formula&, unsigned)> specialize;
+      size_t                                                              budget = 4096;
+      // Memo of (producer, demand) -> version. Each distinct demand is copied
+      // once per target into a pointer-stable pool and keyed by address; the
+      // per-producer demand copies (and their linear equality scans) cost ~9%
+      // of minion's discovery. An entry holds `producer` while its recursion
+      // is open, which also stops malformed rings, as before.
+      absl::node_hash_set<Gate_formula>                                   demand_pool;
+      absl::flat_hash_map<std::pair<size_t, const Gate_formula*>, size_t> memo;
+      std::function<size_t(size_t, const Gate_formula&, unsigned)>        specialize;
       specialize = [&](size_t producer, const Gate_formula& demand, unsigned depth) -> size_t {
         const auto version = plan.version_sites_[producer];
         // A settle latch's transparent version, or the open-window data version
@@ -3627,27 +3693,26 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             || budget == 0) {
           return producer;
         }
-        for (const auto& cached : memo[producer]) {
-          if (cached.demand == demand) {
-            return cached.version;
-          }
+        const Gate_formula* interned   = &*demand_pool.insert(demand).first;
+        const auto [memo_it, inserted] = memo.try_emplace({producer, interned}, producer);
+        if (!inserted) {
+          return memo_it->second;
         }
         --budget;
         // Also stops a malformed combinational ring. A genuine ring remains
         // present in its ordinary version and is still rejected below.
-        const size_t memo_index = memo[producer].size();
-        memo[producer].push_back({demand, producer});
-        std::vector<Value_use> uses;
-        std::vector<size_t>    key{producer};
-        bool                   changed         = false;
-        const auto             producer_inputs = incoming_uses[producer];
+        const std::pair<size_t, const Gate_formula*> memo_key{producer, interned};
+        std::vector<Value_use>                       uses;
+        std::vector<size_t>                          key{producer};
+        bool                                         changed         = false;
+        const auto                                   producer_inputs = incoming_uses[producer];
         for (const size_t use_index : producer_inputs) {
           auto use = plan.value_uses_[use_index];
           if (!use.top_input && use.producer_version != Color_plan::invalid_index && use.literal.empty()) {
-            const auto   input_demand  = guarded_demand(version, use.consumer_port, demand);
-            const size_t replacement   = specialize(use.producer_version, input_demand, depth + 1);
-            changed                   |= replacement != use.producer_version;
-            use.producer_version       = replacement;
+            const auto   guarded      = guarded_demand(version, use.consumer_port, demand);
+            const size_t replacement  = specialize(use.producer_version, guarded ? *guarded : demand, depth + 1);
+            changed                  |= replacement != use.producer_version;
+            use.producer_version      = replacement;
           }
           key.push_back(use.producer_version);
           uses.push_back(std::move(use));
@@ -3679,7 +3744,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             specialized_versions.emplace(std::move(key), result);
           }
         }
-        memo[producer][memo_index].version = result;
+        memo[memo_key] = result;
         return result;
       };
       // A specialization can append versions and uses, so hold neither a vector

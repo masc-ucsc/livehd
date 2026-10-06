@@ -112,6 +112,12 @@ struct Slang_module_state {
   // async-reset slices can never cover the whole symbol -- see
   // finalize_pending_async_resets.
   absl::flat_hash_set<const slang::ast::Symbol*>              cont_assign_syms_;
+  // net_driver_census memo: per parent scope, every net's continuous-assign
+  // driver census from ONE scan of that scope (and its instantiated generate
+  // scopes). The per-net rescan was O(nets x assigns) -- 36% of the XiangShan
+  // Rob front end. Value: {whole-net assign drivers, partially written}.
+  absl::flat_hash_map<const slang::ast::Scope*, absl::flat_hash_map<const slang::ast::Symbol*, std::pair<int, bool>>>
+      net_census_cache_;
   absl::flat_hash_set<const slang::ast::Symbol*>
       wire_syms_;  // 2c-wire — comb-cycle nets: declared `wire` so reads are position-independent
   // A `wire` net that is MULTIPLY written (a case/priority-if or bit-slice
@@ -597,12 +603,12 @@ private:
   // Unknown-module definition names already diagnosed (one warning per name,
   // not per instance — XS-scale designs instantiate one SRAM macro x100s).
   absl::flat_hash_set<std::string> unknown_warned_;
-  void lower_continuous_assign(const slang::ast::ContinuousAssignSymbol& ca, const std::string* precomputed_rhs = nullptr);
+  void        lower_continuous_assign(const slang::ast::ContinuousAssignSymbol& ca, const std::string* precomputed_rhs = nullptr);
   // Bit `bit` (0 = LSB) of a clock BUS expression, resolved at compile time to the
   // clock it picks; "" when the bus is not a plain concat/replication/AND shape.
   std::string lower_clock_bus_lane(const slang::ast::Expression& expr, int64_t bit, int depth);
-  void declare_value_symbol(const slang::ast::ValueSymbol& sym, bool force_reg);
-  void declare_reg(const slang::ast::ValueSymbol& sym);
+  void        declare_value_symbol(const slang::ast::ValueSymbol& sym, bool force_reg);
+  void        declare_reg(const slang::ast::ValueSymbol& sym);
 
   std::string tuple_type_name(const slang::ast::Type& elem);
   // Emit a `type T=(...)` region (once per type per module) in the no-default
