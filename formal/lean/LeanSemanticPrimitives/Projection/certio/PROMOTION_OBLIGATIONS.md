@@ -447,3 +447,42 @@ curve and A can.**  Nothing in the earlier argument is withdrawn -- B is still
 the smaller proof -- but the reason to do A is no longer "the fork is faster",
 it is "the fork is asymptotically better and we have measured which of its two
 changes is responsible".
+
+## Update 2026-10-05 (later) -- Obligation A is DISCHARGED, by a different route
+
+Section "CORRECTION: a structural erasure does NOT commute" above costed
+Obligation A as "the same shape as the host development, not a transport of
+it", because it assumed the fork would be BRIDGED to the host -- an erasure
+`E (.val v) = v.toPRes`, which `primStruct` shows does not commute.
+
+That route was never taken.  **`PRes.val` was added to the PROVED
+`PartialEvaluator.lean` in place**, so there is no fork to bridge, no erasure,
+and no commutation obligation.  `mixDriver_iff` is unchanged in statement and
+still proved.  `PHASE6_PERF.md` 34 has the details; the short version:
+
+* **The `.val` cases were not new reasoning.**  `.val v` is defined to behave
+  as `v.toPRes` already did, and the bridges were already proved
+  (`prepare_toPRes`, `PVal.Scoped_toPRes`, `PResOK_toPRes`,
+  `PreparedOK_toPRes`, `PResSound_of_toPRes`).  New lemmas: `PVal.Scoped_toCode`,
+  `PRes.Scoped_ofPVal`, `PValOK_toCode`, `PResOK_ofPVal`, `prepare_ofPVal`,
+  `PValOK_of_evalFuel`, `PResSound_of_val`, and the two that state the change
+  is pure representation -- `PResOK_val_iff_toPRes` (same meaning) and
+  `PRes.toCode_toPRes` (same code).
+* **The `primStruct` counterexample cannot arise.**  Results are built through
+  `PRes.ofPVal`, which is `toPRes` at the leaves and carries only genuine
+  spines as `.val`.  So `.val (.stat a)` is never constructed -- a deliberate
+  departure from the fork, whose `peel` arms return a raw `.val a`.
+* **Axiom sets are identical to HEAD for all 311 `Audit.lean` entries and all
+  46 `ProtoAudit.lean` entries** -- diffed per theorem, not merely checked
+  against the allowed set.
+* **`MixProgram.lean` is mirrored in the same increment**: `tagRVal = 74`,
+  object `ofPVal` and `pvToCode`, `tagRVal` arms in `toCode`, `totalL`,
+  `prepareL` and the three peels; the dead `pvToPRes` removed.  This keeps the
+  two specializers one design.  It does NOT prove the outstanding generic
+  host/object equivalence (`mixProgram_implements_mixHost`), which remains
+  unproved and deliberately last.
+
+What remains of the original Obligation A: nothing about the PROVED path.
+`Proto/PartialEvaluatorFast.lean` is still unproved and still differs from the
+host (raw `.val` in its peels); it stays as an in-process MEASUREMENT CONTROL,
+which is the only role it now has.
