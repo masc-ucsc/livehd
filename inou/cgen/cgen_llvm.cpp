@@ -3,6 +3,7 @@
 #include "cgen_llvm.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -146,6 +147,15 @@ public:
   }
 
   llvm::Value* load_packed(llvm::Value* base, size_t offset, uint32_t width, llvm::StringRef name) {
+    // Packed words are least-significant first. A native little-endian wide
+    // load reads that layout directly and keeps packed arrays out of the
+    // optimizer's word-by-word shift/OR reconstruction.
+    if constexpr (std::endian::native == std::endian::little) {
+      if (width > 64) {
+        auto* ptr = builder.CreateConstInBoundsGEP1_64(builder.getInt64Ty(), base, offset);
+        return builder.CreateAlignedLoad(builder.getIntNTy(width), ptr, llvm::Align(alignof(uint64_t)), name + ".bits");
+      }
+    }
     auto*        type   = builder.getIntNTy(width);
     llvm::Value* result = llvm::ConstantInt::get(type, 0);
     auto*        i64    = builder.getInt64Ty();

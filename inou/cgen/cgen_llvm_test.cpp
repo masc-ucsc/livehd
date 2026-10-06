@@ -2,6 +2,7 @@
 
 #include "cgen_llvm.hpp"
 
+#include <bit>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -42,6 +43,28 @@ TEST(CgenLlvm, WideShiftKnownBits) {
   const auto nonzero = llvm::KnownBits::shl(lhs, rhs, true, true, true);
   EXPECT_EQ(nonzero.Zero, ~possible);
   EXPECT_TRUE(nonzero.One.isZero());
+}
+
+TEST(CgenLlvm, WideShiftKnownBitsWithPoisonConstraints) {
+  constexpr unsigned bits = 131064;
+  llvm::KnownBits    lhs(bits);
+  llvm::KnownBits    rhs(bits);
+  lhs.Zero.setBit(0);
+  rhs.Zero                  = llvm::APInt::getHighBitsSet(bits, bits - 16);
+  const auto signed_unknown = llvm::KnownBits::shl(lhs, rhs, false, true);
+  EXPECT_EQ(signed_unknown.Zero, llvm::APInt(bits, 1));
+  EXPECT_TRUE(signed_unknown.One.isZero());
+
+  lhs.One.setSignBit();
+  const auto negative = llvm::KnownBits::shl(lhs, rhs, false, true, true);
+  EXPECT_EQ(negative.Zero, llvm::APInt::getLowBitsSet(bits, 2));
+  EXPECT_EQ(negative.One, llvm::APInt::getSignMask(bits));
+
+  lhs.One            = llvm::APInt(bits, 1);
+  lhs.Zero           = ~lhs.One;
+  rhs.Zero           = llvm::APInt::getHighBitsSet(bits, bits - 17);
+  const auto bounded = llvm::KnownBits::shl(lhs, rhs, false, false);
+  EXPECT_TRUE(bounded.isUnknown());
 }
 
 TEST(CgenLlvm, ShiftKnownBitsMatchConcreteValues) {
@@ -199,6 +222,55 @@ TEST(CgenLlvm, VerifiesArbitraryWidthOperations) {
   ASSERT_TRUE(llvm.write_object(path.string(), error)) << error;
   EXPECT_TRUE(std::filesystem::is_regular_file(path));
   EXPECT_GT(std::filesystem::file_size(path), 0u);
+  std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, WidePackedInputsUseConstantSizeLoads) {
+  if constexpr (std::endian::native != std::endian::little) {
+    GTEST_SKIP() << "wide native loads use the little-endian packed layout";
+  }
+  Cgen_llvm   kernel("packed_wide",
+                     {
+                         {     7, true},
+                         {131048, true},
+                         {    65, true}
+  });
+  std::string error;
+  ASSERT_TRUE(kernel.add_output(0, kernel.input(1), error)) << error;
+  ASSERT_TRUE(kernel.add_output(1, kernel.input(2), error)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-packed-wide.bc";
+  ASSERT_TRUE(kernel.write_object(path.string(), error, false)) << error;
+  auto buffer = llvm::MemoryBuffer::getFile(path.string());
+  ASSERT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  ASSERT_TRUE(module);
+  const auto* function = (*module)->getFunction("packed_wide");
+  ASSERT_NE(function, nullptr);
+  unsigned input_loads = 0;
+  for (const auto& block : *function) {
+    for (const auto& instruction : block) {
+      const auto* load = llvm::dyn_cast<llvm::LoadInst>(&instruction);
+      if (!load) {
+        continue;
+      }
+      const auto* gep = llvm::dyn_cast<llvm::GetElementPtrInst>(load->getPointerOperand());
+      if (!gep || gep->getPointerOperand() != function->getArg(0)) {
+        continue;
+      }
+      llvm::APInt offset((*module)->getDataLayout().getPointerSizeInBits(), 0);
+      ASSERT_TRUE(gep->accumulateConstantOffset((*module)->getDataLayout(), offset));
+      ++input_loads;
+      if (offset.getZExtValue() == 8) {
+        EXPECT_EQ(load->getType()->getIntegerBitWidth(), 131048u);
+      } else {
+        EXPECT_EQ(offset.getZExtValue(), 2049u * 8);
+        EXPECT_EQ(load->getType()->getIntegerBitWidth(), 65u);
+      }
+      EXPECT_EQ(load->getAlign().value(), alignof(uint64_t));
+    }
+  }
+  EXPECT_EQ(input_loads, 2u);
   std::filesystem::remove(path);
 }
 

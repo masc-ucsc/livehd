@@ -1,49 +1,109 @@
 --- a/llvm/lib/Support/KnownBits.cpp
 +++ b/llvm/lib/Support/KnownBits.cpp
-@@ -348,6 +348,46 @@
+@@ -285,27 +285,6 @@
+ KnownBits KnownBits::shl(const KnownBits &LHS, const KnownBits &RHS, bool NUW,
+                          bool NSW, bool ShAmtNonZero) {
+   unsigned BitWidth = LHS.getBitWidth();
+-  auto ShiftByConst = [&](const KnownBits &LHS, unsigned ShiftAmt) {
+-    KnownBits Known;
+-    bool ShiftedOutZero, ShiftedOutOne;
+-    Known.Zero = LHS.Zero.ushl_ov(ShiftAmt, ShiftedOutZero);
+-    Known.Zero.setLowBits(ShiftAmt);
+-    Known.One = LHS.One.ushl_ov(ShiftAmt, ShiftedOutOne);
+-
+-    // All cases returning poison have been handled by MaxShiftAmount already.
+-    if (NSW) {
+-      if (NUW && ShiftAmt != 0)
+-        // NUW means we can assume anything shifted out was a zero.
+-        ShiftedOutZero = true;
+-
+-      if (ShiftedOutZero)
+-        Known.makeNonNegative();
+-      else if (ShiftedOutOne)
+-        Known.makeNegative();
+-    }
+-    return Known;
+-  };
+-
+   // Fast path for a common case when LHS is completely unknown.
+   KnownBits Known(BitWidth);
+   unsigned MinShiftAmount = RHS.getMinValue().getLimitedValue(BitWidth);
+@@ -348,16 +327,69 @@
    // Find the common bits from all possible shifts.
    unsigned ShiftAmtZeroMask = RHS.Zero.zextOrTrunc(32).getZExtValue();
    unsigned ShiftAmtOneMask = RHS.One.zextOrTrunc(32).getZExtValue();
-+  // Fold the complete shift domain one unknown amount bit at a time. Shifts
-+  // distribute over bitwise OR/AND, so this computes the same common bits as
-+  // enumeration in O(log(MaxShiftAmount) * BitWidth) rather than quadratic
-+  // work on very wide integers. Keep enumeration when poison constraints
-+  // remove part of the domain or NSW can infer additional sign information.
-+  unsigned SignRun =
-+      std::max(LHS.countMinLeadingZeros(), LHS.countMinLeadingOnes());
-+  if (MaxValue.ule(MaxShiftAmount) && (!NSW || MaxShiftAmount < SignRun)) {
-+    unsigned UnknownShiftBits =
-+        (MaxValue ^ RHS.One).zextOrTrunc(32).getZExtValue();
-+    bool ExcludeZero = ShAmtNonZero && ShiftAmtOneMask == 0;
-+    if (!ExcludeZero || UnknownShiftBits != 0) {
-+      APInt MayBeOne = ~LHS.Zero;
-+      APInt AlwaysOne = LHS.One;
-+      if (ExcludeZero) {
-+        APInt NonzeroMayBeOne(BitWidth, 0);
-+        APInt NonzeroAlwaysOne = APInt::getAllOnes(BitWidth);
-+        while (UnknownShiftBits != 0) {
-+          unsigned Step = UnknownShiftBits & -UnknownShiftBits;
-+          UnknownShiftBits &= UnknownShiftBits - 1;
-+          NonzeroMayBeOne |= (NonzeroMayBeOne | MayBeOne).shl(Step);
-+          NonzeroAlwaysOne &= (NonzeroAlwaysOne & AlwaysOne).shl(Step);
-+        }
-+        MayBeOne = std::move(NonzeroMayBeOne);
-+        AlwaysOne = std::move(NonzeroAlwaysOne);
-+      } else {
-+        MayBeOne <<= ShiftAmtOneMask;
-+        AlwaysOne <<= ShiftAmtOneMask;
-+        while (UnknownShiftBits != 0) {
-+          unsigned Step = UnknownShiftBits & -UnknownShiftBits;
-+          UnknownShiftBits &= UnknownShiftBits - 1;
++  // Partition the bounded shift domain into aligned power-of-two blocks.
++  // Within each block, fold one unknown amount bit at a time. Shifts
++  // distribute over OR/AND, so this computes the same common bits as
++  // enumeration in O(log(BitWidth)^2 * BitWidth), without quadratic work
++  // on very wide integers.
+   Known.setAllConflict();
+-  for (unsigned ShiftAmt = MinShiftAmount; ShiftAmt <= MaxShiftAmount;
+-       ++ShiftAmt) {
+-    // Skip if the shift amount is impossible.
+-    if ((ShiftAmtZeroMask & ShiftAmt) != 0 ||
+-        (ShiftAmtOneMask | ShiftAmt) != ShiftAmt)
+-      continue;
+-    Known = Known.intersectWith(ShiftByConst(LHS, ShiftAmt));
+-    if (Known.isUnknown())
+-      break;
++  auto FoldRange = [&](uint64_t Low, uint64_t High, int Sign) {
++    while (Low <= High) {
++      uint64_t Size = uint64_t(1) << Log2_64(High - Low + 1);
++      if (Low != 0)
++        Size = std::min(Size, Low & -Low);
++      unsigned LowerMask = static_cast<unsigned>(Size - 1);
++      unsigned Prefix = static_cast<unsigned>(Low);
++      if ((((Prefix & ShiftAmtZeroMask) | (~Prefix & ShiftAmtOneMask)) &
++           ~LowerMask) == 0) {
++        unsigned Base = Prefix | ShiftAmtOneMask;
++        unsigned UnknownBits =
++            LowerMask & ~(ShiftAmtZeroMask | ShiftAmtOneMask);
++        APInt MayBeOne = (~LHS.Zero).shl(Base);
++        APInt AlwaysOne = LHS.One.shl(Base);
++        while (UnknownBits != 0) {
++          unsigned Step = UnknownBits & -UnknownBits;
++          UnknownBits &= UnknownBits - 1;
 +          MayBeOne |= MayBeOne.shl(Step);
 +          AlwaysOne &= AlwaysOne.shl(Step);
 +        }
++        KnownBits Domain(BitWidth);
++        Domain.Zero = ~MayBeOne;
++        Domain.One = std::move(AlwaysOne);
++        if (Sign > 0)
++          Domain.makeNonNegative();
++        else if (Sign < 0)
++          Domain.makeNegative();
++        Known = Known.intersectWith(Domain);
 +      }
-+      Known.Zero = ~MayBeOne;
-+      Known.One = std::move(AlwaysOne);
-+      return Known;
++      Low += Size;
 +    }
-+  }
-   Known.setAllConflict();
-   for (unsigned ShiftAmt = MinShiftAmount; ShiftAmt <= MaxShiftAmount;
-        ++ShiftAmt) {
++  };
++
++  // NSW can infer a sign bit when a known zero/one is shifted out. Split
++  // at those thresholds so each folded range has the same sign inference
++  // as the original per-shift computation. NUW makes every nonzero NSW
++  // shift nonnegative.
++  unsigned ZeroThreshold = LHS.Zero.countLeadingZeros();
++  unsigned OneThreshold = LHS.One.countLeadingZeros();
++  unsigned Low = MinShiftAmount;
++  while (Low <= MaxShiftAmount) {
++    unsigned High = MaxShiftAmount;
++    int Sign = 0;
++    if (NSW) {
++      if ((NUW && Low != 0) || Low > ZeroThreshold)
++        Sign = 1;
++      else if (Low > OneThreshold)
++        Sign = -1;
++      if (NUW && Low == 0)
++        High = 0;
++      if (Low <= ZeroThreshold)
++        High = std::min(High, ZeroThreshold);
++      if (Low <= OneThreshold)
++        High = std::min(High, OneThreshold);
++    }
++    FoldRange(Low, High, Sign);
++    Low = High + 1;
+   }
+ 
+   // All shift amounts may result in poison.
