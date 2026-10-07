@@ -1,0 +1,312 @@
+{
+  "run_id": "20261007T075625",
+  "test": "br_arb_lru",
+  "rows": [
+    {
+      "cached": false,
+      "comparable": false,
+      "config": "nr16",
+      "cpus": 128,
+      "date": "2026-10-07",
+      "flow": "sim_verilator",
+      "host": "satsuma",
+      "host_class": "Linux-x86_64",
+      "kind": "sim",
+      "lec": "proven",
+      "lec_gate": true,
+      "measured": "2026-10-07",
+      "passed": true,
+      "peak_rss_kb": {
+        "cc": 219372,
+        "exec": 219372,
+        "max": 219372,
+        "setup": 219372
+      },
+      "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+      "pyrope_status": "auto",
+      "run_id": "20261007T075625",
+      "sim": {
+        "build_jobs": 32,
+        "checksum": "17234768102000538843",
+        "cycles": 11235955,
+        "cycles_per_s": 8141996,
+        "exec_ms": 1380,
+        "exec_samples_ms": [
+          1394,
+          1387,
+          1380
+        ],
+        "measurement_jobs": 1
+      },
+      "status": "ok",
+      "suite": "arb",
+      "tech": null,
+      "test": "br_arb_lru",
+      "time_ms": {
+        "cc": 2651,
+        "exec": 1380,
+        "setup": 136,
+        "total": 4167
+      },
+      "versions": {
+        "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+        "cxx": "Debian clang version 19.1.7 (3+b1)",
+        "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+        "lhd": "33d391bc957cfe1234835bfeb19392889b421f97 binary-sha256:ac8aceb9bcb496adc5636b04fdee03c2262ad054cdee4d3c4d386722cc604805",
+        "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+        "sta": "3.1.0 sha256:f6cc36b19980821d",
+        "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+        "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+        "yosys2": "sha256:18b8ec4b9094e5c9",
+        "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+      }
+    },
+    {
+      "cached": false,
+      "comparable": false,
+      "config": "nr16",
+      "cpus": 128,
+      "date": "2026-10-07",
+      "flow": "sim_lhd_verilog",
+      "host": "satsuma",
+      "host_class": "Linux-x86_64",
+      "kind": "sim",
+      "lec": "proven",
+      "lec_gate": true,
+      "measured": "2026-10-07",
+      "passed": true,
+      "peak_rss_kb": {
+        "elab": 277856,
+        "exec": 219372,
+        "max": 277856,
+        "run": 253072,
+        "setup": 219372
+      },
+      "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+      "pyrope_status": "auto",
+      "run_id": "20261007T075625",
+      "sim": {
+        "backend": "slop",
+        "build_jobs": 32,
+        "checksum": "17234768102000538843",
+        "cycles": 11235955,
+        "cycles_per_s": 4001408,
+        "exec_ms": 2808,
+        "exec_samples_ms": [
+          2808,
+          2864,
+          2836
+        ],
+        "measurement_jobs": 1
+      },
+      "status": "ok",
+      "suite": "arb",
+      "tech": null,
+      "test": "br_arb_lru",
+      "time_ms": {
+        "cc": 6248,
+        "elab": 375,
+        "exec": 2808,
+        "setup": 244,
+        "total": 9675
+      },
+      "versions": {
+        "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+        "cxx": "Debian clang version 19.1.7 (3+b1)",
+        "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+        "lhd": "33d391bc957cfe1234835bfeb19392889b421f97 binary-sha256:ac8aceb9bcb496adc5636b04fdee03c2262ad054cdee4d3c4d386722cc604805",
+        "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+        "sta": "3.1.0 sha256:f6cc36b19980821d",
+        "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+        "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+        "yosys2": "sha256:18b8ec4b9094e5c9",
+        "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+      }
+    },
+    {
+      "cached": false,
+      "comparable": false,
+      "config": "nr16",
+      "cpus": 128,
+      "date": "2026-10-07",
+      "flow": "sim_lhd_pyrope",
+      "host": "satsuma",
+      "host_class": "Linux-x86_64",
+      "kind": "sim",
+      "lec": "proven",
+      "lec_gate": true,
+      "measured": "2026-10-07",
+      "passed": true,
+      "peak_rss_kb": {
+        "exec": 219372,
+        "max": 264508,
+        "run": 264508,
+        "setup": 219372
+      },
+      "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+      "pyrope_status": "auto",
+      "run_id": "20261007T075625",
+      "sim": {
+        "backend": "slop",
+        "build_jobs": 32,
+        "checksum": "17234768102000538843",
+        "cycles": 11235955,
+        "cycles_per_s": 1039019,
+        "exec_ms": 10814,
+        "exec_samples_ms": [
+          10845,
+          10814,
+          10844
+        ],
+        "measurement_jobs": 1
+      },
+      "status": "ok",
+      "suite": "arb",
+      "tech": null,
+      "test": "br_arb_lru",
+      "time_ms": {
+        "cc": 6591,
+        "exec": 10814,
+        "setup": 271,
+        "total": 17676
+      },
+      "versions": {
+        "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+        "cxx": "Debian clang version 19.1.7 (3+b1)",
+        "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+        "lhd": "33d391bc957cfe1234835bfeb19392889b421f97 binary-sha256:ac8aceb9bcb496adc5636b04fdee03c2262ad054cdee4d3c4d386722cc604805",
+        "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+        "sta": "3.1.0 sha256:f6cc36b19980821d",
+        "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+        "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+        "yosys2": "sha256:18b8ec4b9094e5c9",
+        "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+      }
+    },
+    {
+      "cached": false,
+      "comparable": false,
+      "config": "nr16",
+      "cpus": 128,
+      "date": "2026-10-07",
+      "flow": "sim_lhd_verilog_llvm",
+      "host": "satsuma",
+      "host_class": "Linux-x86_64",
+      "kind": "sim",
+      "lec": "proven",
+      "lec_gate": true,
+      "measured": "2026-10-07",
+      "passed": true,
+      "peak_rss_kb": {
+        "elab": 277376,
+        "exec": 219372,
+        "max": 277376,
+        "run": 253172,
+        "setup": 219372
+      },
+      "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+      "pyrope_status": "auto",
+      "run_id": "20261007T075625",
+      "sim": {
+        "backend": "llvm",
+        "build_jobs": 32,
+        "checksum": "17234768102000538843",
+        "cycles": 11235955,
+        "cycles_per_s": 1863342,
+        "exec_ms": 6030,
+        "exec_samples_ms": [
+          6139,
+          6085,
+          6030
+        ],
+        "measurement_jobs": 1
+      },
+      "status": "ok",
+      "suite": "arb",
+      "tech": null,
+      "test": "br_arb_lru",
+      "time_ms": {
+        "cc": 6277,
+        "elab": 378,
+        "exec": 6030,
+        "setup": 411,
+        "total": 13096
+      },
+      "versions": {
+        "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+        "cxx": "Debian clang version 19.1.7 (3+b1)",
+        "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+        "lhd": "33d391bc957cfe1234835bfeb19392889b421f97 binary-sha256:ac8aceb9bcb496adc5636b04fdee03c2262ad054cdee4d3c4d386722cc604805",
+        "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+        "sta": "3.1.0 sha256:f6cc36b19980821d",
+        "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+        "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+        "yosys2": "sha256:18b8ec4b9094e5c9",
+        "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+      }
+    },
+    {
+      "cached": false,
+      "comparable": false,
+      "config": "nr16",
+      "cpus": 128,
+      "date": "2026-10-07",
+      "flow": "sim_lhd_pyrope_llvm",
+      "host": "satsuma",
+      "host_class": "Linux-x86_64",
+      "kind": "sim",
+      "lec": "proven",
+      "lec_gate": true,
+      "measured": "2026-10-07",
+      "passed": true,
+      "peak_rss_kb": {
+        "exec": 219372,
+        "max": 265488,
+        "run": 265488,
+        "setup": 219372
+      },
+      "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+      "pyrope_status": "auto",
+      "run_id": "20261007T075625",
+      "sim": {
+        "backend": "llvm",
+        "build_jobs": 32,
+        "checksum": "17234768102000538843",
+        "cycles": 11235955,
+        "cycles_per_s": 292131,
+        "exec_ms": 38462,
+        "exec_samples_ms": [
+          38462,
+          38494,
+          38559
+        ],
+        "measurement_jobs": 1
+      },
+      "status": "ok",
+      "suite": "arb",
+      "tech": null,
+      "test": "br_arb_lru",
+      "time_ms": {
+        "cc": 6719,
+        "exec": 38462,
+        "setup": 499,
+        "total": 45680
+      },
+      "versions": {
+        "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+        "cxx": "Debian clang version 19.1.7 (3+b1)",
+        "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+        "lhd": "33d391bc957cfe1234835bfeb19392889b421f97 binary-sha256:ac8aceb9bcb496adc5636b04fdee03c2262ad054cdee4d3c4d386722cc604805",
+        "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+        "sta": "3.1.0 sha256:f6cc36b19980821d",
+        "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+        "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+        "yosys2": "sha256:18b8ec4b9094e5c9",
+        "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+      }
+    }
+  ],
+  "object": "../lhdtrack/var/work/20261007T075625/br_arb_lru/nr16/notech/sim_lhd_pyrope_llvm/SW/sim/br_arb_lru.br_arb_lru.__loop3.color-kernel-s_bc1dfd6b4f52722b1158ef081c5f0927.llvm.o",
+  "disassembly": "\n../lhdtrack/var/work/20261007T075625/br_arb_lru/nr16/notech/sim_lhd_pyrope_llvm/SW/sim/br_arb_lru.br_arb_lru.__loop3.color-kernel-s_bc1dfd6b4f52722b1158ef081c5f0927.llvm.o:     file format elf64-x86-64\n\n\nDisassembly of section .text:\n\n0000000000000000 <__lhd_color_kernel_br_arb_lru_br_arb_lru___loop3_s_bc1dfd6b4f52722b1158ef081c5f0927_llvm>:\n   0:\t4c 8b 47 20          \tmov    0x20(%rdi),%r8\n   4:\t8b 47 28             \tmov    0x28(%rdi),%eax\n   7:\t41 0f a3 c0          \tbt     %eax,%r8d\n   b:\t41 0f 92 c1          \tsetb   %r9b\n   f:\t8d 0c c5 00 00 00 00 \tlea    0x0(,%rax,8),%ecx\n  16:\tc0 f9 03             \tsar    $0x3,%cl\n  19:\t80 f1 20             \txor    $0x20,%cl\n  1c:\t41 ba 01 00 00 00    \tmov    $0x1,%r10d\n  22:\t49 d3 e2             \tshl    %cl,%r10\n  25:\t80 e1 3f             \tand    $0x3f,%cl\n  28:\t48 b8 ff ff ff ff ff \tmovabs $0xffffffffffff,%rax\n  2f:\tff 00 00 \n  32:\t4c 21 d0             \tand    %r10,%rax\n  35:\t45 31 d2             \txor    %r10d,%r10d\n  38:\t80 f9 30             \tcmp    $0x30,%cl\n  3b:\t49 0f 43 c2          \tcmovae %r10,%rax\n  3f:\t48 89 c1             \tmov    %rax,%rcx\n  42:\t48 f7 d1             \tnot    %rcx\n  45:\tf3 0f 6f 47 10       \tmovdqu 0x10(%rdi),%xmm0\n  4a:\t4c 8b 1f             \tmov    (%rdi),%r11\n  4d:\t4c 21 d9             \tand    %r11,%rcx\n  50:\t45 84 c9             \ttest   %r9b,%r9b\n  53:\t49 0f 44 c2          \tcmove  %r10,%rax\n  57:\t4c 09 d8             \tor     %r11,%rax\n  5a:\t41 f6 c0 04          \ttest   $0x4,%r8b\n  5e:\t48 0f 45 c1          \tcmovne %rcx,%rax\n  62:\t48 8b 4f 08          \tmov    0x8(%rdi),%rcx\n  66:\t48 c7 02 00 00 00 00 \tmovq   $0x0,(%rdx)\n  6d:\tf3 0f 6f 4e 10       \tmovdqu 0x10(%rsi),%xmm1\n  72:\t48 8b 7e 08          \tmov    0x8(%rsi),%rdi\n  76:\t48 31 cf             \txor    %rcx,%rdi\n  79:\t66 0f ef c8          \tpxor   %xmm0,%xmm1\n  7d:\t66 0f 70 d1 ee       \tpshufd $0xee,%xmm1,%xmm2\n  82:\t66 49 0f 7e d0       \tmovq   %xmm2,%r8\n  87:\t49 09 f8             \tor     %rdi,%r8\n  8a:\t48 8b 3e             \tmov    (%rsi),%rdi\n  8d:\t48 31 c7             \txor    %rax,%rdi\n  90:\t66 49 0f 7e c9       \tmovq   %xmm1,%r9\n  95:\t49 09 f9             \tor     %rdi,%r9\n  98:\t31 ff                \txor    %edi,%edi\n  9a:\t4d 09 c1             \tor     %r8,%r9\n  9d:\t40 0f 95 c7          \tsetne  %dil\n  a1:\t48 89 3a             \tmov    %rdi,(%rdx)\n  a4:\tf3 0f 7f 46 10       \tmovdqu %xmm0,0x10(%rsi)\n  a9:\t48 89 4e 08          \tmov    %rcx,0x8(%rsi)\n  ad:\t48 89 06             \tmov    %rax,(%rsi)\n  b0:\tc3                   \tret\n  b1:\t66 66 66 66 66 66 2e \tdata16 data16 data16 data16 data16 cs nopw 0x0(%rax,%rax,1)\n  b8:\t0f 1f 84 00 00 00 00 \n  bf:\t00 \n\n00000000000000c0 <__lhd_color_kernel_br_arb_lru_br_arb_lru___loop3_s_bc1dfd6b4f52722b1158ef081c5f0927_llvm_loop>:\n  c0:\t55                   \tpush   %rbp\n  c1:\t41 57                \tpush   %r15\n  c3:\t41 56                \tpush   %r14\n  c5:\t41 55                \tpush   %r13\n  c7:\t41 54                \tpush   %r12\n  c9:\t53                   \tpush   %rbx\n  ca:\t48 89 c8             \tmov    %rcx,%rax\n  cd:\t0f b7 4f 10          \tmovzwl 0x10(%rdi),%ecx\n  d1:\t4c 8b 77 18          \tmov    0x18(%rdi),%r14\n  d5:\t4c 8b 4f 20          \tmov    0x20(%rdi),%r9\n  d9:\t4c 8b 57 30          \tmov    0x30(%rdi),%r10\n  dd:\t48 8b 7f 28          \tmov    0x28(%rdi),%rdi\n  e1:\t48 89 7c 24 c0       \tmov    %rdi,-0x40(%rsp)\n  e6:\t4c 89 54 24 c8       \tmov    %r10,-0x38(%rsp)\n  eb:\t4c 89 74 24 b0       \tmov    %r14,-0x50(%rsp)\n  f0:\t4c 89 4c 24 b8       \tmov    %r9,-0x48(%rsp)\n  f5:\t48 89 4c 24 f0       \tmov    %rcx,-0x10(%rsp)\n  fa:\t45 31 db             \txor    %r11d,%r11d\n  fd:\t31 db                \txor    %ebx,%ebx\n  ff:\t48 39 d3             \tcmp    %rdx,%rbx\n 102:\t73 7e                \tjae    182 <__lhd_color_kernel_br_arb_lru_br_arb_lru___loop3_s_bc1dfd6b4f52722b1158ef081c5f0927_llvm_loop+0xc2>\n 104:\t66 66 66 2e 0f 1f 84 \tdata16 data16 cs nopw 0x0(%rax,%rax,1)\n 10b:\t00 00 00 00 00 \n 110:\t89 c1                \tmov    %eax,%ecx\n 112:\t80 e1 0f             \tand    $0xf,%cl\n 115:\t4c 89 74 24 d0       \tmov    %r14,-0x30(%rsp)\n 11a:\t4c 89 4c 24 d8       \tmov    %r9,-0x28(%rsp)\n 11f:\t48 89 7c 24 e0       \tmov    %rdi,-0x20(%rsp)\n 124:\t4c 89 54 24 e8       \tmov    %r10,-0x18(%rsp)\n 129:\t41 89 c7             \tmov    %eax,%r15d\n 12c:\t41 83 e7 0f          \tand    $0xf,%r15d\n 130:\t4c 89 7c 24 f8       \tmov    %r15,-0x8(%rsp)\n 135:\t4c 8b 64 24 f0       \tmov    -0x10(%rsp),%r12\n 13a:\t80 c9 20             \tor     $0x20,%cl\n 13d:\t41 bd 01 00 00 00    \tmov    $0x1,%r13d\n 143:\t49 d3 e5             \tshl    %cl,%r13\n 146:\t4c 89 f5             \tmov    %r14,%rbp\n 149:\t48 0f b3 cd          \tbtr    %rcx,%rbp\n 14d:\t45 0f a3 fc          \tbt     %r15d,%r12d\n 151:\t4d 0f 43 eb          \tcmovae %r11,%r13\n 155:\t4d 09 f5             \tor     %r14,%r13\n 158:\t41 f6 c4 04          \ttest   $0x4,%r12b\n 15c:\t4c 0f 45 ed          \tcmovne %rbp,%r13\n 160:\t4c 89 4c 24 b8       \tmov    %r9,-0x48(%rsp)\n 165:\t48 89 7c 24 c0       \tmov    %rdi,-0x40(%rsp)\n 16a:\t4c 89 54 24 c8       \tmov    %r10,-0x38(%rsp)\n 16f:\t4c 89 6c 24 b0       \tmov    %r13,-0x50(%rsp)\n 174:\t48 ff c3             \tinc    %rbx\n 177:\t4c 01 c0             \tadd    %r8,%rax\n 17a:\t4d 89 ee             \tmov    %r13,%r14\n 17d:\t48 39 d3             \tcmp    %rdx,%rbx\n 180:\t72 8e                \tjb     110 <__lhd_color_kernel_br_arb_lru_br_arb_lru___loop3_s_bc1dfd6b4f52722b1158ef081c5f0927_llvm_loop+0x50>\n 182:\t0f 10 44 24 b0       \tmovups -0x50(%rsp),%xmm0\n 187:\t0f 10 4c 24 c0       \tmovups -0x40(%rsp),%xmm1\n 18c:\t0f 11 4e 10          \tmovups %xmm1,0x10(%rsi)\n 190:\t0f 11 06             \tmovups %xmm0,(%rsi)\n 193:\t5b                   \tpop    %rbx\n 194:\t41 5c                \tpop    %r12\n 196:\t41 5d                \tpop    %r13\n 198:\t41 5e                \tpop    %r14\n 19a:\t41 5f                \tpop    %r15\n 19c:\t5d                   \tpop    %rbp\n 19d:\tc3                   \tret\n",
+  "observation": "The loop body has no call, but retains stack writes for packed carry/input/output buffers on every iteration. Profiling and an isolated before/after change are still needed to quantify their contribution."
+}

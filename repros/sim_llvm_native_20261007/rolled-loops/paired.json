@@ -1,0 +1,465 @@
+{
+  "binary_sha256": "ac8aceb9bcb496adc5636b04fdee03c2262ad054cdee4d3c4d386722cc604805",
+  "cpu": 0,
+  "cxx": "Debian clang version 19.1.7 (3+b1)",
+  "runs": {
+    "add_mop_setup": {
+      "seconds": 0.17101257015019655,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-loop-index-range/toolchain/lhd",
+        "sim",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/add_mop/bw64/notech/sim_lhd_pyrope_llvm/tree/AddMop_harness.prp",
+        "/mada/users/renau/projs/lhdtrack/tests/add_mop/sim/AddMop_tb.prp",
+        "--setup-only",
+        "--set",
+        "sim.init_zero=true",
+        "--set",
+        "sim.unknown_zero=true",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.jobs=8",
+        "--workdir",
+        "/tmp/lhd-loop-index-range/add_mop/SW"
+      ]
+    },
+    "add_mop_compile": {
+      "seconds": 5.937610116088763,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-loop-index-range/toolchain/lhd",
+        "sim",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/add_mop/bw64/notech/sim_lhd_pyrope_llvm/tree/AddMop_harness.prp",
+        "/mada/users/renau/projs/lhdtrack/tests/add_mop/sim/AddMop_tb.prp",
+        "--set",
+        "sim.init_zero=true",
+        "--set",
+        "sim.unknown_zero=true",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.jobs=8",
+        "--workdir",
+        "/tmp/lhd-loop-index-range/add_mop/SW",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true"
+      ]
+    },
+    "add_mop_before0": {
+      "seconds": 9.878104259027168,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/add_mop/bw64/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+        "+cycles=58125472"
+      ]
+    },
+    "add_mop_after0": {
+      "seconds": 3.131314188009128,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-index-range/add_mop/SW/sim/drv.bin",
+        "+cycles=58125472"
+      ]
+    },
+    "add_mop_slop0": {
+      "seconds": 2.655479005072266,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/add_mop/bw64/notech/sim_lhd_pyrope/SW/sim/drv.bin",
+        "+cycles=58125472"
+      ]
+    },
+    "add_mop_before1": {
+      "seconds": 9.99559428007342,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/add_mop/bw64/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+        "+cycles=58125472"
+      ]
+    },
+    "add_mop_after1": {
+      "seconds": 3.0730224621947855,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-index-range/add_mop/SW/sim/drv.bin",
+        "+cycles=58125472"
+      ]
+    },
+    "add_mop_slop1": {
+      "seconds": 2.614263864932582,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/add_mop/bw64/notech/sim_lhd_pyrope/SW/sim/drv.bin",
+        "+cycles=58125472"
+      ]
+    },
+    "add_mop_before2": {
+      "seconds": 9.93776591704227,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/add_mop/bw64/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+        "+cycles=58125472"
+      ]
+    },
+    "add_mop_after2": {
+      "seconds": 3.0648664000909775,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-index-range/add_mop/SW/sim/drv.bin",
+        "+cycles=58125472"
+      ]
+    },
+    "add_mop_slop2": {
+      "seconds": 2.6049266310874373,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/add_mop/bw64/notech/sim_lhd_pyrope/SW/sim/drv.bin",
+        "+cycles=58125472"
+      ]
+    },
+    "br_arb_rr_setup": {
+      "seconds": 0.06483742385171354,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-loop-index-range/toolchain/lhd",
+        "sim",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm/tree/br_arb_rr_harness.prp",
+        "/mada/users/renau/projs/lhdtrack/tests/br_arb_rr/sim/br_arb_rr_tb.prp",
+        "--setup-only",
+        "--set",
+        "sim.init_zero=true",
+        "--set",
+        "sim.unknown_zero=true",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.jobs=8",
+        "--workdir",
+        "/tmp/lhd-loop-index-range/br_arb_rr/SW"
+      ]
+    },
+    "br_arb_rr_compile": {
+      "seconds": 5.815665936097503,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-loop-index-range/toolchain/lhd",
+        "sim",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm/tree/br_arb_rr_harness.prp",
+        "/mada/users/renau/projs/lhdtrack/tests/br_arb_rr/sim/br_arb_rr_tb.prp",
+        "--set",
+        "sim.init_zero=true",
+        "--set",
+        "sim.unknown_zero=true",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.jobs=8",
+        "--workdir",
+        "/tmp/lhd-loop-index-range/br_arb_rr/SW",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true"
+      ]
+    },
+    "br_arb_rr_before0": {
+      "seconds": 3.486072405008599,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+        "+cycles=18867925"
+      ]
+    },
+    "br_arb_rr_after0": {
+      "seconds": 1.1872459559235722,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-index-range/br_arb_rr/SW/sim/drv.bin",
+        "+cycles=18867925"
+      ]
+    },
+    "br_arb_rr_slop0": {
+      "seconds": 0.9656174459960312,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-slop-parity/br_arb_rr/SW/sim/drv.bin",
+        "+cycles=18867925"
+      ]
+    },
+    "br_arb_rr_before1": {
+      "seconds": 3.480417169863358,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+        "+cycles=18867925"
+      ]
+    },
+    "br_arb_rr_after1": {
+      "seconds": 1.1852836690377444,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-index-range/br_arb_rr/SW/sim/drv.bin",
+        "+cycles=18867925"
+      ]
+    },
+    "br_arb_rr_slop1": {
+      "seconds": 0.9720976990647614,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-slop-parity/br_arb_rr/SW/sim/drv.bin",
+        "+cycles=18867925"
+      ]
+    },
+    "br_arb_rr_before2": {
+      "seconds": 3.4800372931640595,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+        "+cycles=18867925"
+      ]
+    },
+    "br_arb_rr_after2": {
+      "seconds": 1.1888178309891373,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-index-range/br_arb_rr/SW/sim/drv.bin",
+        "+cycles=18867925"
+      ]
+    },
+    "br_arb_rr_slop2": {
+      "seconds": 0.9742697440087795,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-slop-parity/br_arb_rr/SW/sim/drv.bin",
+        "+cycles=18867925"
+      ]
+    },
+    "br_flow_arb_rr_setup": {
+      "seconds": 0.05755620403215289,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-loop-index-range/toolchain/lhd",
+        "sim",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/tree/br_flow_arb_rr_harness.prp",
+        "/mada/users/renau/projs/lhdtrack/tests/br_flow_arb_rr/sim/br_flow_arb_rr_tb.prp",
+        "--setup-only",
+        "--set",
+        "sim.init_zero=true",
+        "--set",
+        "sim.unknown_zero=true",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.jobs=8",
+        "--workdir",
+        "/tmp/lhd-loop-index-range/br_flow_arb_rr/SW"
+      ]
+    },
+    "br_flow_arb_rr_compile": {
+      "seconds": 5.834158095996827,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-loop-index-range/toolchain/lhd",
+        "sim",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/tree/br_flow_arb_rr_harness.prp",
+        "/mada/users/renau/projs/lhdtrack/tests/br_flow_arb_rr/sim/br_flow_arb_rr_tb.prp",
+        "--set",
+        "sim.init_zero=true",
+        "--set",
+        "sim.unknown_zero=true",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.jobs=8",
+        "--workdir",
+        "/tmp/lhd-loop-index-range/br_flow_arb_rr/SW",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true"
+      ]
+    },
+    "br_flow_arb_rr_before0": {
+      "seconds": 9.795585328014567,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+        "+cycles=22222222"
+      ]
+    },
+    "br_flow_arb_rr_after0": {
+      "seconds": 2.0031569700222462,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-index-range/br_flow_arb_rr/SW/sim/drv.bin",
+        "+cycles=22222222"
+      ]
+    },
+    "br_flow_arb_rr_slop0": {
+      "seconds": 1.603361435001716,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-slop-parity/br_flow_arb_rr/SW/sim/drv.bin",
+        "+cycles=22222222"
+      ]
+    },
+    "br_flow_arb_rr_before1": {
+      "seconds": 9.83821554784663,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+        "+cycles=22222222"
+      ]
+    },
+    "br_flow_arb_rr_after1": {
+      "seconds": 1.9974382701329887,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-index-range/br_flow_arb_rr/SW/sim/drv.bin",
+        "+cycles=22222222"
+      ]
+    },
+    "br_flow_arb_rr_slop1": {
+      "seconds": 1.6029315809719265,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-slop-parity/br_flow_arb_rr/SW/sim/drv.bin",
+        "+cycles=22222222"
+      ]
+    },
+    "br_flow_arb_rr_before2": {
+      "seconds": 9.79776623705402,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/mada/users/renau/projs/lhdtrack/var/work/20261007T000304/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+        "+cycles=22222222"
+      ]
+    },
+    "br_flow_arb_rr_after2": {
+      "seconds": 2.0004271930083632,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-index-range/br_flow_arb_rr/SW/sim/drv.bin",
+        "+cycles=22222222"
+      ]
+    },
+    "br_flow_arb_rr_slop2": {
+      "seconds": 1.5971299088560045,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-loop-slop-parity/br_flow_arb_rr/SW/sim/drv.bin",
+        "+cycles=22222222"
+      ]
+    }
+  },
+  "comparisons": {
+    "add_mop": {
+      "before": 9.93776591704227,
+      "after": 3.0730224621947855,
+      "slop": 2.614263864932582
+    },
+    "br_arb_rr": {
+      "before": 3.480417169863358,
+      "after": 1.1872459559235722,
+      "slop": 0.9720976990647614
+    },
+    "br_flow_arb_rr": {
+      "before": 9.79776623705402,
+      "after": 2.0004271930083632,
+      "slop": 1.6029315809719265
+    }
+  }
+}

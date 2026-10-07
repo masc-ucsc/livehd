@@ -1,0 +1,30 @@
+{
+  "fifo": {
+    "binary": "/mada/users/renau/projs/lhdtrack/var/work/20261007T072010/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+    "samples": 70,
+    "frames": {
+      "__GI__dl_debug_state": 1,
+      "br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_run()": 42,
+      "__lhd_color_kernel_br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness_s_37a0496b4758c5042b5de8f2fce5b98d_llvm": 16,
+      "_run_bench_run(std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::set<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, _Fail&)": 9,
+      "__lhd_color_kernel_br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness_s_331bb1cd9a18a593a7712ad2f2e0a950_llvm": 1,
+      "__lhd_color_kernel_br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness_s_172e963020aeaf3b7c209e7ca13ada60_llvm": 1
+    },
+    "method": "70 GDB interrupts at staggered 17\u201335 ms intervals; includes one loader/startup sample. Hardware perf is disabled. No benchmark was timed concurrently."
+  },
+  "axi": {
+    "binary": "/mada/users/renau/projs/lhdtrack/var/work/20261007T072010/br_amba_axi_isolate_mgr/aw32_dw32_iw4_mabl1_mo16/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+    "samples": 70,
+    "frames": {
+      "__GI__dl_debug_state": 1,
+      "__lhd_color_kernel_br_amba_axi_isolate_mgr_harness_br_amba_axi_isolate_mgr_harness_s_4c3571542ac4afbc8452614c05c562dd_llvm": 34,
+      "__lhd_color_kernel_br_amba_axi_isolate_mgr_harness_br_amba_axi_isolate_mgr_harness_s_206c32c1453312274b33631b17245891_llvm": 3,
+      "br_amba_axi_isolate_mgr_harness_br_amba_axi_isolate_mgr_harness::__color_run_part_0()": 20,
+      "br_amba_axi_isolate_mgr_harness_br_amba_axi_isolate_mgr_harness::__color_run()": 5,
+      "br_amba_axi_isolate_mgr_harness_br_amba_axi_isolate_mgr_harness::__color_run_part_2()": 4,
+      "_run_bench_run(std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::set<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, _Fail&)": 2,
+      "__lhd_color_kernel_br_amba_axi_isolate_mgr_harness_br_amba_axi_isolate_mgr_harness_s_723881d263cc8665d136e6d96758e1b8_llvm": 1
+    },
+    "method": "70 GDB interrupts at staggered 17\u201335 ms intervals; includes one loader/startup sample. Hardware perf is disabled. No benchmark was timed concurrently."
+  }
+}
