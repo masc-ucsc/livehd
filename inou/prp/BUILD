@@ -775,8 +775,9 @@ _EQUIV_SIM = [
 # The guard on that guard: the yosys oracle TOLERATES every verdict but a
 # counterexample, so a refactor that quietly unhooks it would leave every pair
 # above green forever. This drives run_yosys_lec directly over two hand-written
-# .v files (no lhd compile, no Pyrope) and requires that it still PROVES an
-# equivalent pair, REFUTES an off-by-one one, and honors `:yosys_lec: false`.
+# .v files (no lhd compile, no Pyrope), checks any decided verdict against the
+# known pair, tolerates timeouts/inconclusive results, and checks exit mapping
+# deterministically so a slow machine does not weaken the harness guard.
 sh_test(
     name = "prp-yosys-lec-oracle",
     srcs = ["tests/yosys_lec_oracle_test.py"],

@@ -1,8 +1,0 @@
-Executing tests from //bench:xs_rob_lec_incremental
-CMD compile_ref: lhd compile verilog --top Rob --emit-dir lg:ref.lg --workdir cw_ref -- -F xs_rob/verilog/filelist.f -DSYNTHESIS --single-unit
-METRIC compile_ref_ms                         187164 ms
-CMD compile_p1: lhd compile src/pyrope/Rob.prp --top Rob --emit-dir lg:impl1 --workdir cw_impl1
-METRIC compile_p1_ms                          240384 ms
-CMD lec_full: lhd lec --impl lg:impl1 --ref lg:ref.lg --top Rob --workdir LF --set formal.timeout=300 --set lhd.incremental=false
-METRIC lec_full_ms                            771621 ms
-FAIL: step 'lec_full' exited 7

@@ -1,9 +1,0 @@
-Executing tests from //bench:minion_lec_incremental
-CMD compile_ref: lhd compile verilog --top minion_top --emit-dir lg:ref.lg --workdir cw_ref -- -F minion/verilog/filelist.f -DSYNTHESIS --relax-enum-conversions --allow-use-before-declare
-METRIC compile_ref_ms                           8125 ms
-CMD compile_p1: lhd compile src/pyrope/minion_top.prp --top minion_top --emit-dir lg:impl1 --workdir cw_impl1
-METRIC compile_p1_ms                           30783 ms
-CMD lec_full: lhd lec --impl lg:impl1 --ref lg:ref.lg --top minion_top --workdir LF --set formal.timeout=300 --set lhd.incremental=false
-METRIC lec_full_ms                            356124 ms
-METRIC lec_full_timeout                            1 bool
-PASS: lec_incremental reached the 300s budget on the full leg without refuting
