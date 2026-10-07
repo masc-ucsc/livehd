@@ -42,6 +42,32 @@ std::string emit(const std::shared_ptr<hhds::Graph>& graph, const std::string& n
   return code;
 }
 
+TEST(CgenSim, ProofOnlySubnodesKeepSlopPureBodiesInlineable) {
+  const std::string name    = "pure_with_proof";
+  auto&             library = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io      = library.create_io(name);
+  io->add_input("a", 0);
+  io->add_output("y", 1);
+  for (const auto* port : {"a", "y"}) {
+    io->set_bits(port, 8);
+    io->set_unsign(port, true);
+  }
+  auto graph = io->create_graph();
+  graph->get_input_pin("a").connect_sink(graph->get_output_pin("y"));
+  auto proof_io = library.create_io(gu::lgassert_module_name);
+  proof_io->add_input("a", 0);
+  proof_io->set_bits("a", 1);
+  auto proof = gu::create_typed_node(*graph, Ntype_op::Sub);
+  proof.set_subnode(proof_io);
+  gu::create_const(*graph, *Dlop::create_integer(1)).connect_sink(proof.create_sink_pin(0));
+  emit(graph, name);
+  const auto pure = slurp(std::filesystem::path(name) / (name + ".pure.inc"));
+  EXPECT_NE(pure.find("[[gnu::always_inline]] inline"), std::string::npos);
+  EXPECT_NE(pure.find("::__pure_eval("), std::string::npos);
+  EXPECT_EQ(pure.find(std::string(gu::lgassert_module_name)), std::string::npos);
+  std::filesystem::remove_all(name);
+}
+
 TEST(CgenSim, LlvmObjectsSurviveInsertionAndLongModuleNames) {
   const std::string dir = "llvm_incremental_objects";
   const std::string name(200, 'x');

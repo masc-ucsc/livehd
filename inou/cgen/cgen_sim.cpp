@@ -3872,6 +3872,7 @@ std::string Cgen_sim::generation_key(hhds::Graph* g, bool color_root) {
     gd                  = fnv1a(gd, has_loop);
     if (has_loop) {
       const auto& loop = *it->second;
+      gd               = fnv1a(gd, loop.index_bits);
       for (const auto port : {loop.index, loop.activation, loop.next_active}) {
         gd = fnv1a(gd, port.has_value());
         if (port) {
@@ -14158,6 +14159,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           if (found != shared_gen_->native_loops.end() && found->second) {
             const auto&                     loop = *found->second;
             Cgen_llvm::Loop_layout          layout;
+            layout.index_bits = loop.index_bits;
             std::map<hhds::Port_id, size_t> input_indices, output_indices;
             for (const auto& port : g->get_io()->get_input_pin_decls()) {
               input_indices.emplace(port.port_id, layout.inputs.size());

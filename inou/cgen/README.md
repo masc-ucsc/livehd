@@ -129,7 +129,10 @@ also get a native rolled-loop entry. The color body is explicitly inlined into
 that loop once; there is no per-iteration call or C++ arithmetic. The adapter
 packs ports once, invokes the loop, and publishes its outputs. Carry and
 activation values stay in native SSA, including zero-trip carry seeds. The
-entry accepts count/first/step dynamically and shares objects across identical
+entry accepts count/first/step dynamically. A proven nonnegative index range
+removes impossible sign/bounds guards without unrolling; unsupported or wrapping
+domains retain the general representation. Shared definitions merge their range
+requirements conservatively. The emitter shares objects across identical
 phase computations. Binding layouts salt generation reuse; the existing bounded
 workers emit these objects. Unroll-disable metadata and IR regression tests
 preserve the loop regardless of trip count.

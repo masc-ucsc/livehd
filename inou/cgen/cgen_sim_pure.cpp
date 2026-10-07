@@ -32,8 +32,18 @@ bool Cgen_sim::pure_graph(hhds::Graph* graph) {
         || op == Ntype_op::Invalid) {
       return false;
     }
-    if (op == Ntype_op::Sub && !pure_graph(node.get_subnode_graph().get())) {
-      return false;
+    if (op == Ntype_op::Sub) {
+      const auto io = node.get_subnode_io();
+      // Match the ordinary simulator emitter: proof-only subnodes and
+      // detached placeholders have no runtime instance or side effects.
+      // They must not turn a stateless arithmetic loop into lane scheduling.
+      if (!io || io->get_name().empty() || io->get_name() == gu::lgassert_module_name
+          || io->get_name() == gu::fproperty_module_name) {
+        continue;
+      }
+      if (!pure_graph(node.get_subnode_graph().get())) {
+        return false;
+      }
     }
     for (auto sink : node.inp_sorted_pins()) {
       for (auto driver : sink.get_driver_pins()) {

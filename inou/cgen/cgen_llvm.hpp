@@ -144,6 +144,9 @@ public:
     std::vector<std::pair<uint32_t, bool>> inputs;
     std::vector<Loop_binding>              bindings;  // one per body ABI input
     std::optional<size_t>                  index, activation, next_active;
+    // Optional caller-proven NONNEGATIVE index range [0, 2^index_bits).
+    // Zero leaves the general signed/wrapping index representation intact.
+    uint32_t                               index_bits = 0;
     std::vector<std::pair<size_t, size_t>> carries;  // input, output indices
   };
   // void entry(const uint64_t* inputs, uint64_t* outputs,

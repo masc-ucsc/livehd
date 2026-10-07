@@ -171,6 +171,7 @@ public:
   struct Native_loop {
     std::optional<hhds::Port_id>                         index, activation, next_active;
     std::vector<std::pair<hhds::Port_id, hhds::Port_id>> carries;
+    uint32_t                                             index_bits = 0;  // proven nonnegative range; zero means unknown
     bool                                                 operator==(const Native_loop&) const = default;
   };
   struct Generation_index {

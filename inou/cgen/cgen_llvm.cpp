@@ -1219,6 +1219,10 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     error = "native loop has an invalid index or activation binding";
     return false;
   }
+  if (layout.index_bits && (!layout.index || layout.index_bits > layout.inputs[*layout.index].first)) {
+    error = "native loop index range exceeds its declared port";
+    return false;
+  }
   for (size_t i = 0; i < layout.bindings.size(); ++i) {
     const auto& binding = layout.bindings[i];
     if (binding.input >= layout.inputs.size() || binding.bit >= layout.inputs[binding.input].first) {
@@ -1329,10 +1333,11 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
   b.CreateCondBr(b.CreateICmpULT(ordinal, fn->getArg(2)), body, done);
   b.SetInsertPoint(body);
   if (layout.index) {
-    values[*layout.index] = cast_integer(b,
-                                         b.CreateAdd(fn->getArg(3), b.CreateMul(ordinal, fn->getArg(4))),
-                                         layout.inputs[*layout.index].first,
-                                         false);
+    auto* index = b.CreateAdd(fn->getArg(3), b.CreateMul(ordinal, fn->getArg(4)));
+    if (layout.index_bits) {
+      index = cast_integer(b, index, layout.index_bits, true);
+    }
+    values[*layout.index] = cast_integer(b, index, layout.inputs[*layout.index].first, layout.index_bits != 0);
   }
   for (size_t i = 0; i < layout.bindings.size(); ++i) {
     const auto input = layout.bindings[i].input;

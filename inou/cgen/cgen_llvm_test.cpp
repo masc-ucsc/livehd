@@ -799,7 +799,9 @@ TEST(CgenLlvm, NativeStateDescriptorRejectsInvalidInitialization) {
 }
 
 TEST(CgenLlvm, NativeReductionStaysRolledWithNoBodyCall) {
-  for (bool scalar : {false, true}) {
+  for (unsigned variant = 0; variant < 4; ++variant) {
+    const bool  scalar  = (variant & 1) != 0;
+    const bool  bounded = (variant & 2) != 0;
     Cgen_llvm   kernel("body",
                        {
                            { 8, false},
@@ -823,6 +825,7 @@ TEST(CgenLlvm, NativeReductionStaysRolledWithNoBodyCall) {
     layout.carries = {
         {2, 0}
     };
+    layout.index_bits = bounded ? 4 : 0;
     ASSERT_TRUE(kernel.add_loop("reduction", layout, error)) << error;
     const auto path = std::filesystem::temp_directory_path() / "livehd-native-reduction.bc";
     ASSERT_TRUE(kernel.write_bitcode(path.string(), error)) << error;
@@ -865,14 +868,18 @@ TEST(CgenLlvm, NativeReductionStaysRolledWithNoBodyCall) {
     EXPECT_EQ(outputs[0], 100u);
     loop(inputs, outputs, 4, 1, 1);
     EXPECT_EQ(outputs[0], 110u);
-    loop(inputs, outputs, 5, 2, -1);
-    EXPECT_EQ(outputs[0], 100u);
-    loop(inputs, outputs, 100000, 0, 1);
-    int64_t expected = 100;
-    for (uint64_t i = 0; i < 100000; ++i) {
-      expected += static_cast<int8_t>(i);
+    loop(inputs, outputs, 16, 15, -1);
+    EXPECT_EQ(outputs[0], 220u);
+    if (!bounded) {
+      loop(inputs, outputs, 5, 2, -1);
+      EXPECT_EQ(outputs[0], 100u);
+      loop(inputs, outputs, 100000, 0, 1);
+      int64_t expected = 100;
+      for (uint64_t i = 0; i < 100000; ++i) {
+        expected += static_cast<int8_t>(i);
+      }
+      EXPECT_EQ(outputs[0], static_cast<uint64_t>(expected));
     }
-    EXPECT_EQ(outputs[0], static_cast<uint64_t>(expected));
     std::filesystem::remove(path);
     std::filesystem::remove(object);
   }

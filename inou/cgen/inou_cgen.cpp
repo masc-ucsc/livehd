@@ -2,7 +2,9 @@
 
 #include "inou_cgen.hpp"
 
+#include <bit>
 #include <charconv>
+#include <limits>
 #include <map>
 #include <string>
 #include <string_view>
@@ -442,9 +444,33 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
         binding.carries.emplace_back(carry.input_port(), carry.output_port());
       }
       std::ranges::sort(binding.carries);
+      // Supply the same nonnegative ordinal range the host compiler sees in
+      // Slop's loop. Keep count/first/step dynamic, but remove impossible sign
+      // and bounds guards in the native body. Overflow/wrapping domains stay
+      // on the unrestricted representation.
+      if (loop->index_input && loop->count > 0 && loop->first >= 0 && loop->step >= 0) {
+        const auto first = static_cast<uint64_t>(loop->first);
+        const auto step  = static_cast<uint64_t>(loop->step);
+        if (step == 0 || loop->count - 1 <= (std::numeric_limits<int64_t>::max() - first) / step) {
+          const auto last = first + (loop->count - 1) * step;
+          const auto bits = std::max<uint32_t>(1, std::bit_width(last));
+          for (const auto& port : child->get_io()->get_input_pin_decls()) {
+            if (port.port_id == *loop->index_input && bits + (port.unsign ? 0u : 1u) <= port.bits) {
+              binding.index_bits = bits;
+            }
+          }
+        }
+      }
       const auto [it, inserted] = gen_index.native_loops.try_emplace(child.get(), binding);
-      if (!inserted && it->second != binding) {
-        it->second.reset();
+      if (!inserted && it->second) {
+        auto&      previous    = *it->second;
+        const auto merged_bits = previous.index_bits && binding.index_bits ? std::max(previous.index_bits, binding.index_bits) : 0u;
+        previous.index_bits    = binding.index_bits;
+        if (previous != binding) {
+          it->second.reset();
+        } else {
+          previous.index_bits = merged_bits;
+        }
       }
     }
   }
