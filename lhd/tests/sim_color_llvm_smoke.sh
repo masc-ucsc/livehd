@@ -18,6 +18,7 @@ PRPS=(
   "inou/prp/tests/sim/loop_state_multi_carry.prp"
   "inou/prp/tests/sim/loop_mixed_carry.prp"
   "inou/prp/tests/sim/div_narrow_result.prp"
+  "inou/prp/tests/sim/llvm_native_division.prp"
   "inou/prp/tests/sim/loop_inlined_capture.prp"
   "inou/prp/tests/sim/loop_inlined_array.prp"
   "inou/prp/tests/sim/mem_wensize_lanes.prp"
@@ -116,9 +117,18 @@ print(f'PASS: all {len(expected)} test blocks executed on both backends')
 PY
 
 objects=("$work"/llvm/sim/smoke.llvm_scalar.color-kernel-*.llvm.o)
-[ -f "${objects[0]}" ] || fail "profitable scalar region did not emit LLVM bitcode"
-grep -q 'llvm_inline .* | .*llvm_sim_link' "$work"/llvm/sim/build.ninja \
-  || fail "LLVM native object does not depend on the version-matched link helper"
+[ -f "${objects[0]}" ] || fail "scalar region did not emit a native LLVM object"
+! grep -Eq 'emit-llvm|llvm_inline|llvm_sim_link' "$work"/llvm/sim/build.ninja \
+  || fail "LLVM colors still depend on host bitcode compilation"
+python3 - "$work/llvm/sim" <<'PYCODE'
+import pathlib,sys
+objects=list(pathlib.Path(sys.argv[1]).glob('*.llvm.o'))
+assert objects
+for p in objects:
+    magic=p.read_bytes()[:4]
+    assert magic in (b'\x7fELF',b'\xcf\xfa\xed\xfe',b'\xfe\xed\xfa\xcf'), (p,magic)
+assert not list(pathlib.Path(sys.argv[1]).glob('*.pure.inc'))
+PYCODE
 
 wide_objects=("$work"/llvm/sim/smoke.llvm_wide.color-kernel-*.llvm.o)
 [ -f "${wide_objects[0]}" ] || fail "sim.tune.backend=llvm did not emit the wide kernel in LLVM"
@@ -161,7 +171,7 @@ for backend in slop llvm; do
     || fail "$backend did not fuse independent equal-domain loops"
 done
 
-grep -q 'color-eval-0.o: llvm_inline' "$shard_work/sim/build.ninja" \
-  || fail "LLVM kernel was not associated with its evaluator shard"
+grep -q 'color-eval-0.o: cc' "$shard_work/sim/build.ninja" \
+  || fail "LLVM evaluator shard was not compiled as ordinary C++"
 
 echo "PASS: selected backend emits scalar, wide, and compact-loop kernels; both match the simulation assertions"

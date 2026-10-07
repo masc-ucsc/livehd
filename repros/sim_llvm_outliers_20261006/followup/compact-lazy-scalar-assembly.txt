@@ -1,0 +1,56 @@
+br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()
+   1fa50:	mov    0x18(%rdi),%rcx
+   1fa54:	cmp    %rcx,0x58(%rdi)
+   1fa58:	jne    1fa87 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()+0x37>
+   1fa5a:	mov    %ecx,%esi
+   1fa5c:	shr    $0x2,%esi
+   1fa5f:	xor    %r8d,%r8d
+   1fa62:	and    $0x3,%esi
+   1fa65:	mov    0x40(%rdi),%rdx
+   1fa69:	mov    0x38(%rdi),%rax
+   1fa6d:	cmovne %rdx,%rax
+   1fa71:	cmovne %r8,%rdx
+   1fa75:	cmp    $0x2,%esi
+   1fa78:	cmovae %r8,%rax
+   1fa7c:	test   $0x8,%cl
+   1fa7f:	je     1fa9a <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()+0x4a>
+   1fa81:	movzwl 0x68(%rdi),%eax
+   1fa85:	jmp    1faa2 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()+0x52>
+   1fa87:	movups 0x60(%rdi),%xmm0
+   1fa8b:	movups %xmm0,0x98(%rdi)
+   1fa92:	movups %xmm0,0xa8(%rdi)
+   1fa99:	ret
+   1fa9a:	shl    $0x4,%rcx
+   1fa9e:	shrd   %cl,%rdx,%rax
+   1faa2:	movzwl %ax,%eax
+   1faa5:	movq   $0x0,0x98(%rdi)
+   1fab0:	mov    %rax,0xa0(%rdi)
+   1fab7:	movzbl 0x58(%rdi),%esi
+   1fabb:	mov    0x18(%rdi),%rcx
+   1fabf:	mov    0x40(%rdi),%rax
+   1fac3:	mov    %ecx,%r8d
+   1fac6:	and    $0xf,%r8b
+   1faca:	and    $0x7,%sil
+   1face:	mov    %ecx,%r9d
+   1fad1:	shr    $0x2,%r9d
+   1fad5:	xor    %r10d,%r10d
+   1fad8:	and    $0x3,%r9d
+   1fadc:	mov    0x38(%rdi),%rdx
+   1fae0:	cmovne %rax,%rdx
+   1fae4:	cmovne %r10,%rax
+   1fae8:	cmp    $0x2,%r9d
+   1faec:	cmovae %r10,%rdx
+   1faf0:	cmp    %r8b,%sil
+   1faf3:	jne    1fb13 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()+0xc3>
+   1faf5:	shl    $0x4,%rcx
+   1faf9:	shrd   %cl,%rax,%rdx
+   1fafd:	movzwl %dx,%eax
+   1fb00:	movq   $0x0,0xa8(%rdi)
+   1fb0b:	mov    %rax,0xb0(%rdi)
+   1fb12:	ret
+   1fb13:	movzwl 0x68(%rdi),%edx
+   1fb17:	movzwl %dx,%eax
+   1fb1a:	movq   $0x0,0xa8(%rdi)
+   1fb25:	mov    %rax,0xb0(%rdi)
+   1fb2c:	ret
+   1fb2d:	nopl   (%rax)

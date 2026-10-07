@@ -1,0 +1,152 @@
+br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)
+   2a7e0:	cmp    $0x1,%rsi
+   2a7e4:	jne    2aa23 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x243>
+   2a7ea:	mov    (%rdi),%rax
+   2a7ed:	cmpb   $0x1,0x5a(%rax)
+   2a7f1:	jne    2a817 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x37>
+   2a7f3:	lea    0x40(%rax),%rcx
+   2a7f7:	cmpb   $0x1,0x5b(%rax)
+   2a7fb:	jne    2a830 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x50>
+   2a7fd:	movups 0x40(%rdi),%xmm0
+   2a801:	movups 0x50(%rdi),%xmm1
+   2a805:	movups 0x60(%rdi),%xmm2
+   2a809:	movups %xmm2,0x30(%rdi)
+   2a80d:	movups %xmm1,0x20(%rdi)
+   2a811:	movups %xmm0,0x10(%rdi)
+   2a815:	jmp    2a862 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x82>
+   2a817:	xor    %ecx,%ecx
+   2a819:	cmpb   $0x1,0x5b(%rax)
+   2a81d:	je     2a84e <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x6e>
+   2a81f:	cmpb   $0x1,0x50(%rax)
+   2a823:	je     2a870 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x90>
+   2a825:	cmpb   $0x1,0x51(%rax)
+   2a829:	je     2a8a9 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0xc9>
+   2a82b:	jmp    2a8bf <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0xdf>
+   2a830:	mov    0x50(%rdi),%rdx
+   2a834:	mov    %rdx,0x20(%rdi)
+   2a838:	movups 0x40(%rdi),%xmm0
+   2a83c:	movups %xmm0,0x10(%rdi)
+   2a840:	movb   $0x1,(%rcx)
+   2a843:	mov    $0x1,%ecx
+   2a848:	cmpb   $0x1,0x5b(%rax)
+   2a84c:	jne    2a81f <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x3f>
+   2a84e:	mov    0x68(%rdi),%rcx
+   2a852:	mov    %rcx,0x38(%rdi)
+   2a856:	movups 0x58(%rdi),%xmm0
+   2a85a:	movups %xmm0,0x28(%rdi)
+   2a85e:	lea    0x40(%rax),%rcx
+   2a862:	movb   $0x1,(%rcx)
+   2a865:	mov    $0x3,%ecx
+   2a86a:	cmpb   $0x1,0x50(%rax)
+   2a86e:	jne    2a825 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x45>
+   2a870:	lea    0x70(%rdi),%rdx
+   2a874:	lea    0x90(%rdi),%rsi
+   2a87b:	or     $0x1,%rcx
+   2a87f:	cmpb   $0x1,0x51(%rax)
+   2a883:	jne    2a899 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0xb9>
+   2a885:	movups (%rsi),%xmm0
+   2a888:	movups 0x10(%rsi),%xmm1
+   2a88c:	movups %xmm1,0x10(%rdx)
+   2a890:	movups %xmm0,(%rdx)
+   2a893:	movb   $0x1,0x40(%rax)
+   2a897:	jmp    2a8bf <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0xdf>
+   2a899:	movups (%rsi),%xmm0
+   2a89c:	movups %xmm0,(%rdx)
+   2a89f:	movb   $0x1,0x40(%rax)
+   2a8a3:	cmpb   $0x1,0x51(%rax)
+   2a8a7:	jne    2a8bf <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0xdf>
+   2a8a9:	movups 0xa0(%rdi),%xmm0
+   2a8b0:	movups %xmm0,0x80(%rdi)
+   2a8b7:	movb   $0x1,0x40(%rax)
+   2a8bb:	or     $0x1,%rcx
+   2a8bf:	cmpb   $0x1,0x59(%rax)
+   2a8c3:	jne    2a8fb <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x11b>
+   2a8c5:	lea    0x170(%rdi),%rdx
+   2a8cc:	lea    0x190(%rdi),%rsi
+   2a8d3:	or     $0x1,%rcx
+   2a8d7:	cmpb   $0x1,0x58(%rax)
+   2a8db:	jne    2a8f1 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x111>
+   2a8dd:	movups (%rsi),%xmm0
+   2a8e0:	movups 0x10(%rsi),%xmm1
+   2a8e4:	movups %xmm1,0x10(%rdx)
+   2a8e8:	movups %xmm0,(%rdx)
+   2a8eb:	movb   $0x1,0x40(%rax)
+   2a8ef:	jmp    2a917 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x137>
+   2a8f1:	movups (%rsi),%xmm0
+   2a8f4:	movups %xmm0,(%rdx)
+   2a8f7:	movb   $0x1,0x40(%rax)
+   2a8fb:	cmpb   $0x1,0x58(%rax)
+   2a8ff:	jne    2a917 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x137>
+   2a901:	movups 0x1a0(%rdi),%xmm0
+   2a908:	movups %xmm0,0x180(%rdi)
+   2a90f:	movb   $0x1,0x40(%rax)
+   2a913:	or     $0x1,%rcx
+   2a917:	cmpb   $0x1,0x57(%rax)
+   2a91b:	jne    2a953 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x173>
+   2a91d:	lea    0x270(%rdi),%rdx
+   2a924:	lea    0x290(%rdi),%rsi
+   2a92b:	or     $0x1,%rcx
+   2a92f:	cmpb   $0x1,0x56(%rax)
+   2a933:	jne    2a949 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x169>
+   2a935:	movups (%rsi),%xmm0
+   2a938:	movups 0x10(%rsi),%xmm1
+   2a93c:	movups %xmm1,0x10(%rdx)
+   2a940:	movups %xmm0,(%rdx)
+   2a943:	movb   $0x1,0x40(%rax)
+   2a947:	jmp    2a96f <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x18f>
+   2a949:	movups (%rsi),%xmm0
+   2a94c:	movups %xmm0,(%rdx)
+   2a94f:	movb   $0x1,0x40(%rax)
+   2a953:	cmpb   $0x1,0x56(%rax)
+   2a957:	jne    2a96f <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x18f>
+   2a959:	movups 0x2a0(%rdi),%xmm0
+   2a960:	movups %xmm0,0x280(%rdi)
+   2a967:	movb   $0x1,0x40(%rax)
+   2a96b:	or     $0x1,%rcx
+   2a96f:	cmpb   $0x1,0x54(%rax)
+   2a973:	jne    2a9ab <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x1cb>
+   2a975:	lea    0x370(%rdi),%rdx
+   2a97c:	lea    0x390(%rdi),%rsi
+   2a983:	or     $0x1,%rcx
+   2a987:	cmpb   $0x1,0x55(%rax)
+   2a98b:	jne    2a9a1 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x1c1>
+   2a98d:	movups (%rsi),%xmm0
+   2a990:	movups 0x10(%rsi),%xmm1
+   2a994:	movups %xmm1,0x10(%rdx)
+   2a998:	movups %xmm0,(%rdx)
+   2a99b:	movb   $0x1,0x40(%rax)
+   2a99f:	jmp    2a9c7 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x1e7>
+   2a9a1:	movups (%rsi),%xmm0
+   2a9a4:	movups %xmm0,(%rdx)
+   2a9a7:	movb   $0x1,0x40(%rax)
+   2a9ab:	cmpb   $0x1,0x55(%rax)
+   2a9af:	jne    2a9c7 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x1e7>
+   2a9b1:	movups 0x3a0(%rdi),%xmm0
+   2a9b8:	movups %xmm0,0x380(%rdi)
+   2a9bf:	movb   $0x1,0x40(%rax)
+   2a9c3:	or     $0x1,%rcx
+   2a9c7:	cmpb   $0x1,0x53(%rax)
+   2a9cb:	jne    2aa03 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x223>
+   2a9cd:	lea    0x470(%rdi),%rdx
+   2a9d4:	lea    0x490(%rdi),%rsi
+   2a9db:	or     $0x1,%rcx
+   2a9df:	cmpb   $0x1,0x52(%rax)
+   2a9e3:	jne    2a9f9 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x219>
+   2a9e5:	movups (%rsi),%xmm0
+   2a9e8:	movups 0x10(%rsi),%xmm1
+   2a9ec:	movups %xmm1,0x10(%rdx)
+   2a9f0:	movups %xmm0,(%rdx)
+   2a9f3:	movb   $0x1,0x40(%rax)
+   2a9f7:	jmp    2aa1f <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x23f>
+   2a9f9:	movups (%rsi),%xmm0
+   2a9fc:	movups %xmm0,(%rdx)
+   2a9ff:	movb   $0x1,0x40(%rax)
+   2aa03:	cmpb   $0x1,0x52(%rax)
+   2aa07:	jne    2aa1f <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x23f>
+   2aa09:	movups 0x4a0(%rdi),%xmm0
+   2aa10:	movups %xmm0,0x480(%rdi)
+   2aa17:	movb   $0x1,0x40(%rax)
+   2aa1b:	or     $0x1,%rcx
+   2aa1f:	or     %rcx,0x48(%rax)
+   2aa23:	ret
+   2aa24:	data16 data16 cs nopw 0x0(%rax,%rax,1)

@@ -1,0 +1,227 @@
+br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)
+   2ef30:	cmp    $0x1,%rsi
+   2ef34:	jne    2f1c6 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x296>
+   2ef3a:	push   %r14
+   2ef3c:	push   %rbx
+   2ef3d:	push   %rax
+   2ef3e:	mov    (%rdi),%rbx
+   2ef41:	movups 0x1970(%rdi),%xmm0
+   2ef48:	movups %xmm0,0x1950(%rdi)
+   2ef4f:	movups 0x1960(%rdi),%xmm0
+   2ef56:	movups %xmm0,0x1940(%rdi)
+   2ef5d:	movups 0x1740(%rdi),%xmm0
+   2ef64:	movups %xmm0,0x1718(%rdi)
+   2ef6b:	movups 0x1750(%rdi),%xmm0
+   2ef72:	movups %xmm0,0x1728(%rdi)
+   2ef79:	mov    0x1760(%rdi),%rax
+   2ef80:	mov    %rax,0x1738(%rdi)
+   2ef87:	movups 0x1628(%rdi),%xmm0
+   2ef8e:	movups %xmm0,0x1608(%rdi)
+   2ef95:	movups 0x1638(%rdi),%xmm0
+   2ef9c:	movups %xmm0,0x1618(%rdi)
+   2efa3:	movups 0xac8(%rdi),%xmm0
+   2efaa:	movups 0xad8(%rdi),%xmm1
+   2efb1:	movups %xmm0,0xaa8(%rdi)
+   2efb8:	movups %xmm1,0xab8(%rdi)
+   2efbf:	movups 0x9a8(%rdi),%xmm0
+   2efc6:	movups %xmm0,0x968(%rdi)
+   2efcd:	movups 0x998(%rdi),%xmm0
+   2efd4:	movups %xmm0,0x958(%rdi)
+   2efdb:	movups 0x988(%rdi),%xmm0
+   2efe2:	movups %xmm0,0x948(%rdi)
+   2efe9:	movups 0x978(%rdi),%xmm0
+   2eff0:	movups %xmm0,0x938(%rdi)
+   2eff7:	movups 0x40(%rdi),%xmm0
+   2effb:	movups 0x50(%rdi),%xmm1
+   2efff:	movups 0x60(%rdi),%xmm2
+   2f003:	movups 0xb0(%rdi),%xmm3
+   2f00a:	movups %xmm3,0x90(%rdi)
+   2f011:	movups 0xc0(%rdi),%xmm3
+   2f018:	movups %xmm3,0xa0(%rdi)
+   2f01f:	movups %xmm2,0x30(%rdi)
+   2f023:	movups %xmm1,0x20(%rdi)
+   2f027:	movups %xmm0,0x10(%rdi)
+   2f02b:	cmpb   $0x1,0x1e7(%rbx)
+   2f032:	jne    2f04c <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x11c>
+   2f034:	movb   $0x1,0x1c0(%rbx)
+   2f03b:	mov    $0x1,%r14d
+   2f041:	cmpb   $0x1,0x1e8(%rbx)
+   2f048:	je     2f058 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x128>
+   2f04a:	jmp    2f065 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x135>
+   2f04c:	xor    %r14d,%r14d
+   2f04f:	cmpb   $0x1,0x1e8(%rbx)
+   2f056:	jne    2f065 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x135>
+   2f058:	movb   $0x1,0x1c0(%rbx)
+   2f05f:	mov    $0x5,%r14d
+   2f065:	cmpb   $0x1,0x1d5(%rbx)
+   2f06c:	je     2f1c7 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x297>
+   2f072:	cmpb   $0x1,0x1d1(%rbx)
+   2f079:	je     2f1ea <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x2ba>
+   2f07f:	cmpb   $0x1,0x1d2(%rbx)
+   2f086:	je     2f202 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x2d2>
+   2f08c:	cmpb   $0x1,0x1d0(%rbx)
+   2f093:	je     2f21a <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x2ea>
+   2f099:	cmpb   $0x1,0x1d3(%rbx)
+   2f0a0:	je     2f240 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x310>
+   2f0a6:	cmpb   $0x1,0x1d4(%rbx)
+   2f0ad:	je     2f266 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x336>
+   2f0b3:	cmpb   $0x1,0x1e0(%rbx)
+   2f0ba:	je     2f28c <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x35c>
+   2f0c0:	cmpb   $0x1,0x1dc(%rbx)
+   2f0c7:	je     2f2b2 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x382>
+   2f0cd:	cmpb   $0x1,0x1dd(%rbx)
+   2f0d4:	je     2f2ca <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x39a>
+   2f0da:	cmpb   $0x1,0x1de(%rbx)
+   2f0e1:	je     2f2e2 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x3b2>
+   2f0e7:	cmpb   $0x1,0x1db(%rbx)
+   2f0ee:	je     2f2fa <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x3ca>
+   2f0f4:	cmpb   $0x1,0x1d8(%rbx)
+   2f0fb:	je     2f312 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x3e2>
+   2f101:	cmpb   $0x1,0x1d9(%rbx)
+   2f108:	je     2f338 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x408>
+   2f10e:	cmpb   $0x1,0x1da(%rbx)
+   2f115:	je     2f350 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x420>
+   2f11b:	cmpb   $0x1,0x1d7(%rbx)
+   2f122:	je     2f368 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x438>
+   2f128:	cmpb   $0x1,0x1df(%rbx)
+   2f12f:	je     2f38e <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x45e>
+   2f135:	cmpb   $0x1,0x1d6(%rbx)
+   2f13c:	je     2f3b4 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x484>
+   2f142:	cmpb   $0x1,0x1e3(%rbx)
+   2f149:	je     2f3da <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x4aa>
+   2f14f:	cmpb   $0x1,0x1e4(%rbx)
+   2f156:	je     2f3f2 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x4c2>
+   2f15c:	cmpb   $0x1,0x1e5(%rbx)
+   2f163:	je     2f40a <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x4da>
+   2f169:	cmpb   $0x1,0x1e6(%rbx)
+   2f170:	je     2f422 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x4f2>
+   2f176:	cmpb   $0x1,0x1e1(%rbx)
+   2f17d:	je     2f43a <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x50a>
+   2f183:	cmpb   $0x1,0x1e2(%rbx)
+   2f18a:	je     2f452 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x522>
+   2f190:	cmpb   $0x1,0x1e9(%rbx)
+   2f197:	jne    2f1b8 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x288>
+   2f199:	add    $0x1b48,%rdi
+   2f1a0:	call   31290 <hlop::Mem_base<Slop_u<32>, 32, 30ul, 1, 1, 1, 1>::tick()>
+   2f1a5:	or     %al,0x1c0(%rbx)
+   2f1ab:	mov    %r14,%rcx
+   2f1ae:	or     $0x3,%rcx
+   2f1b2:	test   %al,%al
+   2f1b4:	cmovne %rcx,%r14
+   2f1b8:	or     %r14,0x1c8(%rbx)
+   2f1bf:	add    $0x8,%rsp
+   2f1c3:	pop    %rbx
+   2f1c4:	pop    %r14
+   2f1c6:	ret
+   2f1c7:	movups 0x80(%rdi),%xmm0
+   2f1ce:	movups %xmm0,0x70(%rdi)
+   2f1d2:	movb   $0x1,0x1c0(%rbx)
+   2f1d9:	or     $0x1,%r14
+   2f1dd:	cmpb   $0x1,0x1d1(%rbx)
+   2f1e4:	jne    2f07f <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x14f>
+   2f1ea:	movb   $0x1,0x1c0(%rbx)
+   2f1f1:	or     $0x1,%r14
+   2f1f5:	cmpb   $0x1,0x1d2(%rbx)
+   2f1fc:	jne    2f08c <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x15c>
+   2f202:	movb   $0x1,0x1c0(%rbx)
+   2f209:	or     $0x1,%r14
+   2f20d:	cmpb   $0x1,0x1d0(%rbx)
+   2f214:	jne    2f099 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x169>
+   2f21a:	movups 0xe0(%rdi),%xmm0
+   2f221:	movups %xmm0,0xd0(%rdi)
+   2f228:	movb   $0x1,0x1c0(%rbx)
+   2f22f:	or     $0x1,%r14
+   2f233:	cmpb   $0x1,0x1d3(%rbx)
+   2f23a:	jne    2f0a6 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x176>
+   2f240:	movups 0x358(%rdi),%xmm0
+   2f247:	movups %xmm0,0x348(%rdi)
+   2f24e:	movb   $0x1,0x1c0(%rbx)
+   2f255:	or     $0x1,%r14
+   2f259:	cmpb   $0x1,0x1d4(%rbx)
+   2f260:	jne    2f0b3 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x183>
+   2f266:	movups 0x5c0(%rdi),%xmm0
+   2f26d:	movups %xmm0,0x5b0(%rdi)
+   2f274:	movb   $0x1,0x1c0(%rbx)
+   2f27b:	or     $0x1,%r14
+   2f27f:	cmpb   $0x1,0x1e0(%rbx)
+   2f286:	jne    2f0c0 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x190>
+   2f28c:	movups 0x928(%rdi),%xmm0
+   2f293:	movups %xmm0,0x918(%rdi)
+   2f29a:	movb   $0x1,0x1c0(%rbx)
+   2f2a1:	or     $0x1,%r14
+   2f2a5:	cmpb   $0x1,0x1dc(%rbx)
+   2f2ac:	jne    2f0cd <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x19d>
+   2f2b2:	movb   $0x1,0x1c0(%rbx)
+   2f2b9:	or     $0x1,%r14
+   2f2bd:	cmpb   $0x1,0x1dd(%rbx)
+   2f2c4:	jne    2f0da <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x1aa>
+   2f2ca:	movb   $0x1,0x1c0(%rbx)
+   2f2d1:	or     $0x1,%r14
+   2f2d5:	cmpb   $0x1,0x1de(%rbx)
+   2f2dc:	jne    2f0e7 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x1b7>
+   2f2e2:	movb   $0x1,0x1c0(%rbx)
+   2f2e9:	or     $0x1,%r14
+   2f2ed:	cmpb   $0x1,0x1db(%rbx)
+   2f2f4:	jne    2f0f4 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x1c4>
+   2f2fa:	movb   $0x1,0x1c0(%rbx)
+   2f301:	or     $0x1,%r14
+   2f305:	cmpb   $0x1,0x1d8(%rbx)
+   2f30c:	jne    2f101 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x1d1>
+   2f312:	movups 0x9c8(%rdi),%xmm0
+   2f319:	movups %xmm0,0x9b8(%rdi)
+   2f320:	movb   $0x1,0x1c0(%rbx)
+   2f327:	or     $0x1,%r14
+   2f32b:	cmpb   $0x1,0x1d9(%rbx)
+   2f332:	jne    2f10e <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x1de>
+   2f338:	movb   $0x1,0x1c0(%rbx)
+   2f33f:	or     $0x1,%r14
+   2f343:	cmpb   $0x1,0x1da(%rbx)
+   2f34a:	jne    2f11b <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x1eb>
+   2f350:	movb   $0x1,0x1c0(%rbx)
+   2f357:	or     $0x1,%r14
+   2f35b:	cmpb   $0x1,0x1d7(%rbx)
+   2f362:	jne    2f128 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x1f8>
+   2f368:	movups 0xbb8(%rdi),%xmm0
+   2f36f:	movups %xmm0,0xba8(%rdi)
+   2f376:	movb   $0x1,0x1c0(%rbx)
+   2f37d:	or     $0x1,%r14
+   2f381:	cmpb   $0x1,0x1df(%rbx)
+   2f388:	jne    2f135 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x205>
+   2f38e:	movups 0xdf0(%rdi),%xmm0
+   2f395:	movups %xmm0,0xde0(%rdi)
+   2f39c:	movb   $0x1,0x1c0(%rbx)
+   2f3a3:	or     $0x1,%r14
+   2f3a7:	cmpb   $0x1,0x1d6(%rbx)
+   2f3ae:	jne    2f142 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x212>
+   2f3b4:	movups 0x1028(%rdi),%xmm0
+   2f3bb:	movups %xmm0,0x1018(%rdi)
+   2f3c2:	movb   $0x1,0x1c0(%rbx)
+   2f3c9:	or     $0x1,%r14
+   2f3cd:	cmpb   $0x1,0x1e3(%rbx)
+   2f3d4:	jne    2f14f <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x21f>
+   2f3da:	movb   $0x1,0x1c0(%rbx)
+   2f3e1:	or     $0x1,%r14
+   2f3e5:	cmpb   $0x1,0x1e4(%rbx)
+   2f3ec:	jne    2f15c <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x22c>
+   2f3f2:	movb   $0x1,0x1c0(%rbx)
+   2f3f9:	or     $0x1,%r14
+   2f3fd:	cmpb   $0x1,0x1e5(%rbx)
+   2f404:	jne    2f169 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x239>
+   2f40a:	movb   $0x1,0x1c0(%rbx)
+   2f411:	or     $0x1,%r14
+   2f415:	cmpb   $0x1,0x1e6(%rbx)
+   2f41c:	jne    2f176 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x246>
+   2f422:	movb   $0x1,0x1c0(%rbx)
+   2f429:	or     $0x1,%r14
+   2f42d:	cmpb   $0x1,0x1e1(%rbx)
+   2f434:	jne    2f183 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x253>
+   2f43a:	movb   $0x1,0x1c0(%rbx)
+   2f441:	or     $0x1,%r14
+   2f445:	cmpb   $0x1,0x1e2(%rbx)
+   2f44c:	jne    2f190 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x260>
+   2f452:	movb   $0x1,0x1c0(%rbx)
+   2f459:	or     $0x1,%r14
+   2f45d:	cmpb   $0x1,0x1e9(%rbx)
+   2f464:	je     2f199 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x269>
+   2f46a:	jmp    2f1b8 <br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_commit(unsigned long)+0x288>
+   2f46f:	nop

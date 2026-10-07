@@ -1,0 +1,142 @@
+[
+  {
+    "cycles": 0,
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "compact-loops": "0",
+      "compact-lazy-mux": "0",
+      "compact-once": "0",
+      "compact-once-lazy": "0",
+      "compact-scalar-extract": "0",
+      "compact-once-scalar": "0",
+      "compact-lazy-scalar": "0"
+    }
+  },
+  {
+    "cycles": 1,
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "compact-loops": "0",
+      "compact-lazy-mux": "0",
+      "compact-once": "0",
+      "compact-once-lazy": "0",
+      "compact-scalar-extract": "0",
+      "compact-once-scalar": "0",
+      "compact-lazy-scalar": "0"
+    }
+  },
+  {
+    "cycles": 2,
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "compact-loops": "0",
+      "compact-lazy-mux": "0",
+      "compact-once": "0",
+      "compact-once-lazy": "0",
+      "compact-scalar-extract": "0",
+      "compact-once-scalar": "0",
+      "compact-lazy-scalar": "0"
+    }
+  },
+  {
+    "cycles": 3,
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "compact-loops": "0",
+      "compact-lazy-mux": "0",
+      "compact-once": "0",
+      "compact-once-lazy": "0",
+      "compact-scalar-extract": "0",
+      "compact-once-scalar": "0",
+      "compact-lazy-scalar": "0"
+    }
+  },
+  {
+    "cycles": 7,
+    "checksums": {
+      "slop": "1903836",
+      "llvm": "1903836",
+      "compact-loops": "1903836",
+      "compact-lazy-mux": "1903836",
+      "compact-once": "1903836",
+      "compact-once-lazy": "1903836",
+      "compact-scalar-extract": "1903836",
+      "compact-once-scalar": "1903836",
+      "compact-lazy-scalar": "1903836"
+    }
+  },
+  {
+    "cycles": 17,
+    "checksums": {
+      "slop": "2015114850727",
+      "llvm": "2015114850727",
+      "compact-loops": "2015114850727",
+      "compact-lazy-mux": "2015114850727",
+      "compact-once": "2015114850727",
+      "compact-once-lazy": "2015114850727",
+      "compact-scalar-extract": "2015114850727",
+      "compact-once-scalar": "2015114850727",
+      "compact-lazy-scalar": "2015114850727"
+    }
+  },
+  {
+    "cycles": 31,
+    "checksums": {
+      "slop": "5972695712920153388",
+      "llvm": "5972695712920153388",
+      "compact-loops": "5972695712920153388",
+      "compact-lazy-mux": "5972695712920153388",
+      "compact-once": "5972695712920153388",
+      "compact-once-lazy": "5972695712920153388",
+      "compact-scalar-extract": "5972695712920153388",
+      "compact-once-scalar": "5972695712920153388",
+      "compact-lazy-scalar": "5972695712920153388"
+    }
+  },
+  {
+    "cycles": 127,
+    "checksums": {
+      "slop": "13098152658823242115",
+      "llvm": "13098152658823242115",
+      "compact-loops": "13098152658823242115",
+      "compact-lazy-mux": "13098152658823242115",
+      "compact-once": "13098152658823242115",
+      "compact-once-lazy": "13098152658823242115",
+      "compact-scalar-extract": "13098152658823242115",
+      "compact-once-scalar": "13098152658823242115",
+      "compact-lazy-scalar": "13098152658823242115"
+    }
+  },
+  {
+    "cycles": 997,
+    "checksums": {
+      "slop": "12081538831510274192",
+      "llvm": "12081538831510274192",
+      "compact-loops": "12081538831510274192",
+      "compact-lazy-mux": "12081538831510274192",
+      "compact-once": "12081538831510274192",
+      "compact-once-lazy": "12081538831510274192",
+      "compact-scalar-extract": "12081538831510274192",
+      "compact-once-scalar": "12081538831510274192",
+      "compact-lazy-scalar": "12081538831510274192"
+    }
+  },
+  {
+    "cycles": 10007,
+    "checksums": {
+      "slop": "15307254018953559997",
+      "llvm": "15307254018953559997",
+      "compact-loops": "15307254018953559997",
+      "compact-lazy-mux": "15307254018953559997",
+      "compact-once": "15307254018953559997",
+      "compact-once-lazy": "15307254018953559997",
+      "compact-scalar-extract": "15307254018953559997",
+      "compact-once-scalar": "15307254018953559997",
+      "compact-lazy-scalar": "15307254018953559997"
+    }
+  }
+]

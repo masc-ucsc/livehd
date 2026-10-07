@@ -1,0 +1,94 @@
+{
+  "label": "final",
+  "mode": "pyrope",
+  "backend": "llvm",
+  "binary": "/tmp/lhd-native-colors/lhd-preview-check",
+  "cycles": 100000,
+  "jobs": 8,
+  "stages": {
+    "setup": {
+      "seconds": 151.75895516597666,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-native-colors/lhd-preview-check",
+        "sim",
+        "/mada/users/renau/projs/lhdsuite/minion/pyrope/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-native-colors/minion-final-pyrope-llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only"
+      ]
+    },
+    "compile_run": {
+      "seconds": 130.91220676898956,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-native-colors/lhd-preview-check",
+        "sim",
+        "/mada/users/renau/projs/lhdsuite/minion/pyrope/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-native-colors/minion-final-pyrope-llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.ninja=false",
+        "--arg",
+        "cycles=100000",
+        "--result-json",
+        "/tmp/lhd-native-colors/minion-final-pyrope-llvm/run.json"
+      ]
+    },
+    "exec0": {
+      "seconds": 2.6743909961078316,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-native-colors/minion-final-pyrope-llvm/SW/sim/drv.bin",
+        "--cycles",
+        "100000",
+        "--result-json",
+        "/tmp/lhd-native-colors/minion-final-pyrope-llvm/exec0.json"
+      ]
+    },
+    "exec1": {
+      "seconds": 2.659940747078508,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-native-colors/minion-final-pyrope-llvm/SW/sim/drv.bin",
+        "--cycles",
+        "100000",
+        "--result-json",
+        "/tmp/lhd-native-colors/minion-final-pyrope-llvm/exec1.json"
+      ]
+    },
+    "exec2": {
+      "seconds": 2.590513594215736,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-native-colors/minion-final-pyrope-llvm/SW/sim/drv.bin",
+        "--cycles",
+        "100000",
+        "--result-json",
+        "/tmp/lhd-native-colors/minion-final-pyrope-llvm/exec2.json"
+      ]
+    }
+  },
+  "exec_s": 2.590513594215736,
+  "setup_compile_s": 280.0806483407505,
+  "status": "pass"
+}

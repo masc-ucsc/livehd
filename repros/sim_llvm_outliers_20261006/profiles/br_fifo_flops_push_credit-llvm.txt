@@ -1,0 +1,12 @@
+Functions sorted by metric: Exclusive Total CPU Time
+
+Excl. Total   Incl. Total    Name
+CPU           CPU
+ sec.      %   sec.      %
+0.670 100.00  0.670 100.00   <Total>
+0.550  82.09  0.570  85.07   br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_run()
+0.100  14.93  0.670 100.00   _run_bench_run(std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::set<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, _Fail&)
+0.010   1.49  0.010   1.49   __lhd_llvm_mem_br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness_p_7afbf71fe917d699e6541e3cd6302575_o0_read_0
+0.010   1.49  0.010   1.49   __lhd_llvm_mem_br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness_p_7afbf71fe917d699e6541e3cd6302575_o0_stage_0
+0.      0.    0.670 100.00   main
+

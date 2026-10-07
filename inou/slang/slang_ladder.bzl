@@ -35,7 +35,7 @@ SLANG_LADDER = {
     "fflop": "lec",
     "fixme_array": "lec",
     "fixme_async": "lec",
-    "fixme_hier_test": "lec",
+    "fixme_hier_test": "error",  # GENUINE comb loops (leaf4 tempo=tempi-2 on one wire; m2/m4 eo<->ei ring): pass.legalize errors (todo/livehd/legalize_acyclic.md)
     "latch": "lec",  # PROMOTED 2f-latch M0/M1 (was fixme_latch, tier "error"): the FIXTURE was wrong —
                      # `output q` is a net, procedurally written inside always_latch. Fixed to
                      # `output logic q`; M1 then fixed cgen's undeclared-enable emission, so it LECs.

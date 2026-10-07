@@ -35,6 +35,7 @@ exports_files([
     "tests/sim/loop_state_multi_carry.prp",
     "tests/sim/loop_mixed_carry.prp",
     "tests/sim/div_narrow_result.prp",
+    "tests/sim/llvm_native_division.prp",
     "tests/sim/loop_inlined_capture.prp",
     "tests/sim/loop_inlined_array.prp",
     "tests/sim/mem_wensize_lanes.prp",

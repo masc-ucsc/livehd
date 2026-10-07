@@ -1,0 +1,1958 @@
+{
+  "br_amba_axi_timing_slice": {
+    "grouped-state": {
+      "header_changes": {
+        "br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.hpp": [
+          [
+            "lfsr",
+            "sum"
+          ]
+        ],
+        "br_flow_reg_fwd_p1.br_flow_reg_fwd_p1.hpp": [
+          [
+            "pop_valid__i2",
+            "pop_data__i2"
+          ]
+        ],
+        "br_flow_reg_fwd_p2.br_flow_reg_fwd_p2.hpp": [
+          [
+            "pop_valid__i2",
+            "pop_data__i2"
+          ]
+        ],
+        "br_flow_reg_fwd_p3.br_flow_reg_fwd_p3.hpp": [
+          [
+            "pop_valid__i2",
+            "pop_data__i2"
+          ]
+        ],
+        "br_flow_reg_fwd.br_flow_reg_fwd.hpp": [
+          [
+            "pop_valid__i2",
+            "pop_data__i2"
+          ]
+        ]
+      },
+      "fields": {
+        "lfsr": {
+          "y": 16,
+          "z": 64,
+          "size": 24
+        },
+        "sum": {
+          "y": 40,
+          "z": 88,
+          "size": 24
+        },
+        "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_valid__i2": {
+          "y": 112,
+          "z": 144,
+          "size": 16
+        },
+        "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_data__i2": {
+          "y": 128,
+          "z": 160,
+          "size": 16
+        },
+        "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_valid__i2": {
+          "y": 368,
+          "z": 400,
+          "size": 16
+        },
+        "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_data__i2": {
+          "y": 384,
+          "z": 416,
+          "size": 16
+        },
+        "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_valid__i2": {
+          "y": 624,
+          "z": 656,
+          "size": 16
+        },
+        "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_data__i2": {
+          "y": 640,
+          "z": 672,
+          "size": 16
+        },
+        "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_valid__i2": {
+          "y": 880,
+          "z": 912,
+          "size": 16
+        },
+        "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_data__i2": {
+          "y": 896,
+          "z": 928,
+          "size": 16
+        },
+        "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_valid__i2": {
+          "y": 1136,
+          "z": 1168,
+          "size": 16
+        },
+        "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_data__i2": {
+          "y": 1152,
+          "z": 1184,
+          "size": 16
+        }
+      },
+      "compiler_commands": [
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/br_amba_axi_timing_slice.br_amba_axi_timing_slice.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/obj/br_amba_axi_timing_slice.br_amba_axi_timing_slice.o"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-emit-llvm",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/obj/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.bc"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.tune-id.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/obj/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.tune-id.o"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.tune.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/obj/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.tune.o"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/br_flow_reg_fwd.br_flow_reg_fwd.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/obj/br_flow_reg_fwd.br_flow_reg_fwd.o"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/br_flow_reg_fwd_p1.br_flow_reg_fwd_p1.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/obj/br_flow_reg_fwd_p1.br_flow_reg_fwd_p1.o"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/br_flow_reg_fwd_p2.br_flow_reg_fwd_p2.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/obj/br_flow_reg_fwd_p2.br_flow_reg_fwd_p2.o"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/br_flow_reg_fwd_p3.br_flow_reg_fwd_p3.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/obj/br_flow_reg_fwd_p3.br_flow_reg_fwd_p3.o"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/drv.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/obj/drv.o"
+        ]
+      ],
+      "llvm_commands": [
+        [
+          "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/_main/inou/cgen/llvm_sim_link",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/obj/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/obj/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.bc",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.color-kernel-body-color-0.llvm.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/grouped-state/sim/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.color-kernel-body-color-1.llvm.o"
+        ]
+      ]
+    },
+    "grouped-memcpy": {
+      "groups": [
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_data__i2"
+          ],
+          "flags": [
+            3,
+            2
+          ],
+          "y": 1136,
+          "z": 1168,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_data__i2"
+          ],
+          "flags": [
+            4,
+            5
+          ],
+          "y": 880,
+          "z": 912,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_data__i2"
+          ],
+          "flags": [
+            7,
+            6
+          ],
+          "y": 624,
+          "z": 656,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_data__i2"
+          ],
+          "flags": [
+            9,
+            8
+          ],
+          "y": 368,
+          "z": 400,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_data__i2"
+          ],
+          "flags": [
+            0,
+            1
+          ],
+          "y": 112,
+          "z": 144,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "lfsr",
+            "sum"
+          ],
+          "flags": [
+            10,
+            11
+          ],
+          "y": 16,
+          "z": 64,
+          "bytes": 48,
+          "dirty_masks": {
+            "0": 3
+          }
+        }
+      ],
+      "layout_variant": "grouped-state",
+      "predication": "Bulk copy only when all original per-state commit flags are true; otherwise original copies and dirty marks."
+    },
+    "bank-copy": {
+      "groups": [
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_data__i2"
+          ],
+          "flags": [
+            3,
+            2
+          ],
+          "y": 1136,
+          "z": 1168,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_data__i2"
+          ],
+          "flags": [
+            4,
+            5
+          ],
+          "y": 880,
+          "z": 912,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_data__i2"
+          ],
+          "flags": [
+            7,
+            6
+          ],
+          "y": 624,
+          "z": 656,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_data__i2"
+          ],
+          "flags": [
+            9,
+            8
+          ],
+          "y": 368,
+          "z": 400,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_data__i2"
+          ],
+          "flags": [
+            0,
+            1
+          ],
+          "y": 112,
+          "z": 144,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "lfsr",
+            "sum"
+          ],
+          "flags": [
+            10,
+            11
+          ],
+          "y": 16,
+          "z": 64,
+          "bytes": 48,
+          "dirty_masks": {
+            "0": 3
+          }
+        }
+      ],
+      "invariant": "Initialize staged banks from current banks in root reset/load settling. For these single-edge flops, every uncommitted field must have staged == current before the barrier. Checked variant traps on a violation.",
+      "checks_enabled": false
+    },
+    "bank-copy-checked": {
+      "groups": [
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_data__i2"
+          ],
+          "flags": [
+            3,
+            2
+          ],
+          "y": 1136,
+          "z": 1168,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_data__i2"
+          ],
+          "flags": [
+            4,
+            5
+          ],
+          "y": 880,
+          "z": 912,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_data__i2"
+          ],
+          "flags": [
+            7,
+            6
+          ],
+          "y": 624,
+          "z": 656,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_data__i2"
+          ],
+          "flags": [
+            9,
+            8
+          ],
+          "y": 368,
+          "z": 400,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_data__i2"
+          ],
+          "flags": [
+            0,
+            1
+          ],
+          "y": 112,
+          "z": 144,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "lfsr",
+            "sum"
+          ],
+          "flags": [
+            10,
+            11
+          ],
+          "y": 16,
+          "z": 64,
+          "bytes": 48,
+          "dirty_masks": {
+            "0": 3
+          }
+        }
+      ],
+      "invariant": "Initialize staged banks from current banks in root reset/load settling. For these single-edge flops, every uncommitted field must have staged == current before the barrier. Checked variant traps on a violation.",
+      "checks_enabled": true
+    },
+    "bank-packed-flags": {
+      "groups": [
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_data__i2"
+          ],
+          "flags": [
+            3,
+            2
+          ],
+          "y": 1136,
+          "z": 1168,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_data__i2"
+          ],
+          "flags": [
+            4,
+            5
+          ],
+          "y": 880,
+          "z": 912,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_data__i2"
+          ],
+          "flags": [
+            7,
+            6
+          ],
+          "y": 624,
+          "z": 656,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_data__i2"
+          ],
+          "flags": [
+            9,
+            8
+          ],
+          "y": 368,
+          "z": 400,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_data__i2"
+          ],
+          "flags": [
+            0,
+            1
+          ],
+          "y": 112,
+          "z": 144,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "lfsr",
+            "sum"
+          ],
+          "flags": [
+            10,
+            11
+          ],
+          "y": 16,
+          "z": 64,
+          "bytes": 48,
+          "dirty_masks": {
+            "0": 3
+          }
+        }
+      ],
+      "flags": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "dirty_bits": {
+        "(0, 0)": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "(0, 1)": [
+          11
+        ]
+      },
+      "nflags": 12,
+      "flag_representation": "Satsuma little-endian, one-byte bool; full-byte masks, bounded memcpy loads."
+    },
+    "bank-masked-copy": {
+      "groups": [
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_r_slice_forward_br_flow_reg_fwd_r_slice.pop_data__i2"
+          ],
+          "flags": [
+            3,
+            2
+          ],
+          "y": 1136,
+          "z": 1168,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_ar_slice_forward_br_flow_reg_fwd_ar_slice.pop_data__i2"
+          ],
+          "flags": [
+            4,
+            5
+          ],
+          "y": 880,
+          "z": 912,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_b_slice_forward_br_flow_reg_fwd_b_slice.pop_data__i2"
+          ],
+          "flags": [
+            7,
+            6
+          ],
+          "y": 624,
+          "z": 656,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_w_slice_forward_br_flow_reg_fwd_w_slice.pop_data__i2"
+          ],
+          "flags": [
+            9,
+            8
+          ],
+          "y": 368,
+          "z": 400,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_valid__i2",
+            "u_br_amba_axi_timing_slice_br_amba_axi_timing_slice_target_awready_37.gen_aw_slice_forward_br_flow_reg_fwd_aw_slice.pop_data__i2"
+          ],
+          "flags": [
+            0,
+            1
+          ],
+          "y": 112,
+          "z": 144,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "lfsr",
+            "sum"
+          ],
+          "flags": [
+            10,
+            11
+          ],
+          "y": 16,
+          "z": 64,
+          "bytes": 48,
+          "dirty_masks": {
+            "0": 3
+          }
+        }
+      ],
+      "flags": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "dirty_bits": {
+        "(0, 0)": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "(0, 1)": [
+          11
+        ]
+      },
+      "nflags": 12,
+      "flag_representation": "Satsuma little-endian, one-byte bool; full-byte masks, bounded memcpy loads."
+    }
+  },
+  "br_fifo_flops_push_credit": {
+    "grouped-state": {
+      "header_changes": {
+        "__sim_const_60961770707_0.hpp": [
+          [
+            "pop_empty__i2",
+            "buffer_valid",
+            "buffer_bypass",
+            "buffer_data"
+          ]
+        ],
+        "br_fifo_staging_buffer.br_fifo_staging_buffer.hpp": [
+          [
+            "pop_empty__i2",
+            "buffer_valid",
+            "buffer_bypass",
+            "buffer_data"
+          ]
+        ],
+        "br_delay_valid.br_delay_valid.hpp": [
+          [
+            "stage_valid___q",
+            "stage___q"
+          ]
+        ],
+        "br_credit_receiver.br_credit_receiver.hpp": [
+          [
+            "push_receiver_in_reset__i2",
+            "push_credit__i2"
+          ]
+        ],
+        "br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.hpp": [
+          [
+            "lfsr",
+            "sum"
+          ]
+        ],
+        "br_flow_reg_fwd.br_flow_reg_fwd.hpp": [
+          [
+            "pop_valid__i2",
+            "pop_data__i2"
+          ]
+        ],
+        "br_delay_valid_p1.br_delay_valid_p1.hpp": [
+          [
+            "stage_valid___q",
+            "stage___q"
+          ]
+        ]
+      },
+      "fields": {
+        "lfsr": {
+          "y": 16,
+          "z": 64,
+          "size": 24
+        },
+        "sum": {
+          "y": 40,
+          "z": 88,
+          "size": 24
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.full__i2": {
+          "y": 112,
+          "z": 128,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_receiver_in_reset__i2": {
+          "y": 144,
+          "z": 176,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_credit__i2": {
+          "y": 160,
+          "z": 192,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.br_credit_counter.value__i2": {
+          "y": 208,
+          "z": 224,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_fifo_push_ctrl_core.gen_wr_addr_counter_br_counter_incr_wr_addr.value__i2": {
+          "y": 840,
+          "z": 856,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_counter_slots.value__i2": {
+          "y": 1456,
+          "z": 1472,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.empty__i2": {
+          "y": 2328,
+          "z": 2344,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.pop_empty__i2": {
+          "y": 2360,
+          "z": 2424,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_valid": {
+          "y": 2376,
+          "z": 2440,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_bypass": {
+          "y": 2392,
+          "z": 2456,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_data": {
+          "y": 2408,
+          "z": 2472,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_single_entry_buffer_br_counter_read_inflight.value__i2": {
+          "y": 2488,
+          "z": 2504,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_valid__i2": {
+          "y": 2728,
+          "z": 2760,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_data__i2": {
+          "y": 2744,
+          "z": 2776,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.br_counter_staged_items.value__i2": {
+          "y": 2984,
+          "z": 3000,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_ram_rd_addr_counter_br_counter_incr_rd_addr.value__i2": {
+          "y": 3552,
+          "z": 3568,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_counter_items.value__i2": {
+          "y": 4120,
+          "z": 4136,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q": {
+          "y": 5640,
+          "z": 5672,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage___q": {
+          "y": 5656,
+          "z": 5688,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage_valid___q": {
+          "y": 5912,
+          "z": 5952,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage___q": {
+          "y": 5928,
+          "z": 5968,
+          "size": 24
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q": {
+          "y": 6464,
+          "z": 6496,
+          "size": 16
+        },
+        "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage___q": {
+          "y": 6480,
+          "z": 6512,
+          "size": 16
+        }
+      },
+      "compiler_commands": [
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/__sim_const_768818316817_4.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/__sim_const_768818316817_4.o"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-emit-llvm",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter.br_counter.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter.br_counter.bc"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-emit-llvm",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_incr.br_counter_incr.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_incr.br_counter_incr.bc"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-emit-llvm",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_incr_p1.br_counter_incr_p1.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_incr_p1.br_counter_incr_p1.bc"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-emit-llvm",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_p1.br_counter_p1.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_p1.br_counter_p1.bc"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-emit-llvm",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_p2.br_counter_p2.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_p2.br_counter_p2.bc"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-emit-llvm",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_credit_counter.br_credit_counter.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_credit_counter.br_credit_counter.bc"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-emit-llvm",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.bc"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-emit-llvm",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.bc"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-emit-llvm",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_fifo_staging_buffer.br_fifo_staging_buffer.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_fifo_staging_buffer.br_fifo_staging_buffer.bc"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/drv.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/drv.o"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/unity/unity-0.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/unity-0.o"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/unity/unity-1.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/unity-1.o"
+        ],
+        [
+          "clang++",
+          "-std=c++23",
+          "-DNDEBUG",
+          "-O2",
+          "-pthread",
+          "-I/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+hlop/hlop",
+          "-I/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/+git_repository+iassert/src",
+          "-c",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/unity/unity-2.cpp",
+          "-o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/unity-2.o"
+        ]
+      ],
+      "llvm_commands": [
+        [
+          "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/_main/inou/cgen/llvm_sim_link",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter.br_counter.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter.br_counter.bc",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter.br_counter.color-kernel-body-color-0.llvm.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter.br_counter.color-kernel-body-color-1.llvm.o"
+        ],
+        [
+          "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/_main/inou/cgen/llvm_sim_link",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_incr.br_counter_incr.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_incr.br_counter_incr.bc",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_incr.br_counter_incr.color-kernel-body-color-0.llvm.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_incr.br_counter_incr.color-kernel-body-color-1.llvm.o"
+        ],
+        [
+          "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/_main/inou/cgen/llvm_sim_link",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_incr_p1.br_counter_incr_p1.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_incr_p1.br_counter_incr_p1.bc",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_incr_p1.br_counter_incr_p1.color-kernel-body-color-0.llvm.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_incr_p1.br_counter_incr_p1.color-kernel-body-color-1.llvm.o"
+        ],
+        [
+          "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/_main/inou/cgen/llvm_sim_link",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_p1.br_counter_p1.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_p1.br_counter_p1.bc",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_p1.br_counter_p1.color-kernel-body-color-0.llvm.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_p1.br_counter_p1.color-kernel-body-color-1.llvm.o"
+        ],
+        [
+          "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/_main/inou/cgen/llvm_sim_link",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_p2.br_counter_p2.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_counter_p2.br_counter_p2.bc",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_p2.br_counter_p2.color-kernel-body-color-0.llvm.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_counter_p2.br_counter_p2.color-kernel-body-color-1.llvm.o"
+        ],
+        [
+          "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/_main/inou/cgen/llvm_sim_link",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_credit_counter.br_credit_counter.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_credit_counter.br_credit_counter.bc",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_credit_counter.br_credit_counter.color-kernel-body-color-0.llvm.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_credit_counter.br_credit_counter.color-kernel-body-color-1.llvm.o"
+        ],
+        [
+          "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/_main/inou/cgen/llvm_sim_link",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.bc",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.color-kernel-body-color-0.llvm.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.color-kernel-body-color-1.llvm.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.color-kernel-body-color-2.llvm.o"
+        ],
+        [
+          "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/_main/inou/cgen/llvm_sim_link",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.bc",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.color-kernel-body-color-0.llvm.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.color-kernel-body-color-1.llvm.o"
+        ],
+        [
+          "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/ab60cd16e534e67f-fe201d40b/lhd.runfiles/_main/inou/cgen/llvm_sim_link",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_fifo_staging_buffer.br_fifo_staging_buffer.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/obj/br_fifo_staging_buffer.br_fifo_staging_buffer.bc",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_fifo_staging_buffer.br_fifo_staging_buffer.color-kernel-body-color-0.llvm.o",
+          "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/grouped-state/sim/br_fifo_staging_buffer.br_fifo_staging_buffer.color-kernel-body-color-1.llvm.o"
+        ]
+      ]
+    },
+    "grouped-memcpy": {
+      "groups": [
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage___q"
+          ],
+          "flags": [
+            17,
+            18
+          ],
+          "y": 6464,
+          "z": 6496,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage___q"
+          ],
+          "flags": [
+            21,
+            22
+          ],
+          "y": 5912,
+          "z": 5952,
+          "bytes": 40,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage___q"
+          ],
+          "flags": [
+            19,
+            20
+          ],
+          "y": 5640,
+          "z": 5672,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_valid__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_data__i2"
+          ],
+          "flags": [
+            9,
+            10
+          ],
+          "y": 2728,
+          "z": 2760,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.pop_empty__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_valid",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_bypass",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_data"
+          ],
+          "flags": [
+            12,
+            13,
+            14,
+            11
+          ],
+          "y": 2360,
+          "z": 2424,
+          "bytes": 64,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_receiver_in_reset__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_credit__i2"
+          ],
+          "flags": [
+            1,
+            2
+          ],
+          "y": 144,
+          "z": 176,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "lfsr",
+            "sum"
+          ],
+          "flags": [
+            23,
+            24
+          ],
+          "y": 16,
+          "z": 64,
+          "bytes": 48,
+          "dirty_masks": {
+            "0": 5
+          }
+        }
+      ],
+      "layout_variant": "grouped-state",
+      "predication": "Bulk copy only when all original per-state commit flags are true; otherwise original copies and dirty marks."
+    },
+    "bank-copy": {
+      "groups": [
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage___q"
+          ],
+          "flags": [
+            17,
+            18
+          ],
+          "y": 6464,
+          "z": 6496,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage___q"
+          ],
+          "flags": [
+            21,
+            22
+          ],
+          "y": 5912,
+          "z": 5952,
+          "bytes": 40,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage___q"
+          ],
+          "flags": [
+            19,
+            20
+          ],
+          "y": 5640,
+          "z": 5672,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_valid__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_data__i2"
+          ],
+          "flags": [
+            9,
+            10
+          ],
+          "y": 2728,
+          "z": 2760,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.pop_empty__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_valid",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_bypass",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_data"
+          ],
+          "flags": [
+            12,
+            13,
+            14,
+            11
+          ],
+          "y": 2360,
+          "z": 2424,
+          "bytes": 64,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_receiver_in_reset__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_credit__i2"
+          ],
+          "flags": [
+            1,
+            2
+          ],
+          "y": 144,
+          "z": 176,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "lfsr",
+            "sum"
+          ],
+          "flags": [
+            23,
+            24
+          ],
+          "y": 16,
+          "z": 64,
+          "bytes": 48,
+          "dirty_masks": {
+            "0": 5
+          }
+        }
+      ],
+      "invariant": "Initialize staged banks from current banks in root reset/load settling. For these single-edge flops, every uncommitted field must have staged == current before the barrier. Checked variant traps on a violation.",
+      "checks_enabled": false
+    },
+    "bank-copy-checked": {
+      "groups": [
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage___q"
+          ],
+          "flags": [
+            17,
+            18
+          ],
+          "y": 6464,
+          "z": 6496,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage___q"
+          ],
+          "flags": [
+            21,
+            22
+          ],
+          "y": 5912,
+          "z": 5952,
+          "bytes": 40,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage___q"
+          ],
+          "flags": [
+            19,
+            20
+          ],
+          "y": 5640,
+          "z": 5672,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_valid__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_data__i2"
+          ],
+          "flags": [
+            9,
+            10
+          ],
+          "y": 2728,
+          "z": 2760,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.pop_empty__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_valid",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_bypass",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_data"
+          ],
+          "flags": [
+            12,
+            13,
+            14,
+            11
+          ],
+          "y": 2360,
+          "z": 2424,
+          "bytes": 64,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_receiver_in_reset__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_credit__i2"
+          ],
+          "flags": [
+            1,
+            2
+          ],
+          "y": 144,
+          "z": 176,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "lfsr",
+            "sum"
+          ],
+          "flags": [
+            23,
+            24
+          ],
+          "y": 16,
+          "z": 64,
+          "bytes": 48,
+          "dirty_masks": {
+            "0": 5
+          }
+        }
+      ],
+      "invariant": "Initialize staged banks from current banks in root reset/load settling. For these single-edge flops, every uncommitted field must have staged == current before the barrier. Checked variant traps on a violation.",
+      "checks_enabled": true
+    },
+    "bank-packed-flags": {
+      "groups": [
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage___q"
+          ],
+          "flags": [
+            17,
+            18
+          ],
+          "y": 6464,
+          "z": 6496,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage___q"
+          ],
+          "flags": [
+            21,
+            22
+          ],
+          "y": 5912,
+          "z": 5952,
+          "bytes": 40,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage___q"
+          ],
+          "flags": [
+            19,
+            20
+          ],
+          "y": 5640,
+          "z": 5672,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_valid__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_data__i2"
+          ],
+          "flags": [
+            9,
+            10
+          ],
+          "y": 2728,
+          "z": 2760,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.pop_empty__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_valid",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_bypass",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_data"
+          ],
+          "flags": [
+            12,
+            13,
+            14,
+            11
+          ],
+          "y": 2360,
+          "z": 2424,
+          "bytes": 64,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_receiver_in_reset__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_credit__i2"
+          ],
+          "flags": [
+            1,
+            2
+          ],
+          "y": 144,
+          "z": 176,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "lfsr",
+            "sum"
+          ],
+          "flags": [
+            23,
+            24
+          ],
+          "y": 16,
+          "z": 64,
+          "bytes": 48,
+          "dirty_masks": {
+            "0": 5
+          }
+        }
+      ],
+      "flags": [
+        1,
+        2,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24
+      ],
+      "dirty_bits": {
+        "(0, 0)": [
+          1,
+          2,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24
+        ],
+        "(0, 2)": [
+          24
+        ]
+      },
+      "nflags": 26,
+      "flag_representation": "Satsuma little-endian, one-byte bool; full-byte masks, bounded memcpy loads."
+    },
+    "bank-masked-copy": {
+      "groups": [
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_read_decoder_0_br_ram_addr_decoder_rd.gen_tiles_eq1_br_delay_valid_addr.stage___q"
+          ],
+          "flags": [
+            17,
+            18
+          ],
+          "y": 6464,
+          "z": 6496,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_gen_datapath_br_delay_valid_data.stage___q"
+          ],
+          "flags": [
+            21,
+            22
+          ],
+          "y": 5912,
+          "z": 5952,
+          "bytes": 40,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage_valid___q",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_ram_flops.gen_write_decoder_0_gen_full_write_addr_decoder_br_ram_addr_decoder_wr.gen_tiles_eq1_br_delay_valid_addr.stage___q"
+          ],
+          "flags": [
+            19,
+            20
+          ],
+          "y": 5640,
+          "z": 5672,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_valid__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.gen_pop_reg_br_flow_reg_fwd.pop_data__i2"
+          ],
+          "flags": [
+            9,
+            10
+          ],
+          "y": 2728,
+          "z": 2760,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.pop_empty__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_valid",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_bypass",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_pop_ctrl.br_fifo_pop_ctrl_core.gen_staging_buffer_br_fifo_staging_buffer.buffer_data"
+          ],
+          "flags": [
+            12,
+            13,
+            14,
+            11
+          ],
+          "y": 2360,
+          "z": 2424,
+          "bytes": 64,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_receiver_in_reset__i2",
+            "u_br_fifo_flops_push_credit_br_fifo_flops_push_credit_push_receiver_in_reset_8.br_fifo_ctrl_1r1w_push_credit.br_fifo_push_ctrl_credit.br_credit_receiver.push_credit__i2"
+          ],
+          "flags": [
+            1,
+            2
+          ],
+          "y": 144,
+          "z": 176,
+          "bytes": 32,
+          "dirty_masks": {
+            "0": 1
+          }
+        },
+        {
+          "members": [
+            "lfsr",
+            "sum"
+          ],
+          "flags": [
+            23,
+            24
+          ],
+          "y": 16,
+          "z": 64,
+          "bytes": 48,
+          "dirty_masks": {
+            "0": 5
+          }
+        }
+      ],
+      "flags": [
+        1,
+        2,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24
+      ],
+      "dirty_bits": {
+        "(0, 0)": [
+          1,
+          2,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24
+        ],
+        "(0, 2)": [
+          24
+        ]
+      },
+      "nflags": 26,
+      "flag_representation": "Satsuma little-endian, one-byte bool; full-byte masks, bounded memcpy loads."
+    }
+  }
+}

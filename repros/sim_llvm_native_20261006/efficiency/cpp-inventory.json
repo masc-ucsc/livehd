@@ -1,0 +1,71 @@
+{
+  "baseline": {
+    "test driver": {
+      "files": 1,
+      "lines": 2602,
+      "bytes": 124528
+    },
+    "headers": {
+      "files": 337,
+      "lines": 121485,
+      "bytes": 5158120
+    },
+    "module support": {
+      "files": 229,
+      "lines": 211275,
+      "bytes": 14707783
+    },
+    "Slop pure bodies": {
+      "files": 60,
+      "lines": 4763,
+      "bytes": 890951
+    },
+    "tuning metadata": {
+      "files": 108,
+      "lines": 56229,
+      "bytes": 12432849
+    },
+    "color evaluators": {
+      "files": 339,
+      "lines": 578336,
+      "bytes": 45927609
+    },
+    "state commit shards": {
+      "files": 250,
+      "lines": 257247,
+      "bytes": 9271883
+    }
+  },
+  "final": {
+    "test driver": {
+      "files": 1,
+      "lines": 2602,
+      "bytes": 124528
+    },
+    "headers": {
+      "files": 334,
+      "lines": 154374,
+      "bytes": 6403049
+    },
+    "module support": {
+      "files": 228,
+      "lines": 173396,
+      "bytes": 11932069
+    },
+    "tuning metadata": {
+      "files": 106,
+      "lines": 53258,
+      "bytes": 11774507
+    },
+    "color evaluators": {
+      "files": 305,
+      "lines": 558286,
+      "bytes": 42551767
+    },
+    "state commit shards": {
+      "files": 236,
+      "lines": 247274,
+      "bytes": 8950584
+    }
+  }
+}

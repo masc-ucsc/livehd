@@ -41,7 +41,7 @@ TEST(CgenLlvm, WideVariableShiftsCompileAsPackedLoops) {
     EXPECT_EQ(kernel.dynamic_extract(kernel.input(0), kernel.input(1), 64, 64, true).width, 64u);
     if (width == 131064) {
       const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-wide-variable-shift.bc";
-      ASSERT_TRUE(kernel.write_object(path.string(), error, false)) << error;
+      ASSERT_TRUE(kernel.write_bitcode(path.string(), error, false)) << error;
       const auto native = path.string() + ".o";
       ASSERT_TRUE(Cgen_llvm::link_bitcode_object(path.string(), {}, native, error)) << error;
       std::filesystem::remove(native);
@@ -218,7 +218,7 @@ TEST(CgenLlvm, EmitsBitcode) {
   ASSERT_TRUE(llvm.add_output(0, sum, error)) << error;
 
   const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-llvm-test.bc";
-  ASSERT_TRUE(llvm.write_object(path.string(), error)) << error;
+  ASSERT_TRUE(llvm.write_bitcode(path.string(), error)) << error;
   EXPECT_TRUE(std::filesystem::is_regular_file(path));
   EXPECT_GT(std::filesystem::file_size(path), 0u);
   std::filesystem::remove(path);
@@ -248,7 +248,7 @@ TEST(CgenLlvm, VerifiesArbitraryWidthOperations) {
   ASSERT_TRUE(llvm.add_output(2, lut, error)) << error;
 
   const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-llvm-wide-test.bc";
-  ASSERT_TRUE(llvm.write_object(path.string(), error)) << error;
+  ASSERT_TRUE(llvm.write_bitcode(path.string(), error)) << error;
   EXPECT_TRUE(std::filesystem::is_regular_file(path));
   EXPECT_GT(std::filesystem::file_size(path), 0u);
   std::filesystem::remove(path);
@@ -268,7 +268,7 @@ TEST(CgenLlvm, WidePackedInputsUseConstantSizeLoads) {
   ASSERT_TRUE(kernel.add_output(0, kernel.input(1), error)) << error;
   ASSERT_TRUE(kernel.add_output(1, kernel.input(2), error)) << error;
   const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-packed-wide.bc";
-  ASSERT_TRUE(kernel.write_object(path.string(), error, false)) << error;
+  ASSERT_TRUE(kernel.write_bitcode(path.string(), error, false)) << error;
   auto buffer = llvm::MemoryBuffer::getFile(path.string());
   ASSERT_TRUE(buffer);
   llvm::LLVMContext context;
@@ -304,20 +304,23 @@ TEST(CgenLlvm, WidePackedInputsUseConstantSizeLoads) {
 }
 
 TEST(CgenLlvm, DefersInputLoadsAndCastsAndMarksDisjointBuffers) {
-  Cgen_llvm  kernel("late_inputs",
-                    {
-                        {64, true},
-                        {64, true},
-                        {64, true}
+  Cgen_llvm         kernel("late_inputs",
+                           {
+                               {64, true},
+                               {64, true},
+                               {64, true}
   });
-  const auto later = kernel.resize(kernel.input(1), 65, true);
-  const auto first = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.constant(64, 1), 64, true);
-  ASSERT_TRUE(kernel.external_apply("record_first", first));
+  const auto        later = kernel.resize(kernel.input(1), 65, true);
+  const auto        first = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.constant(64, 1), 64, true);
+  Cgen_llvm::Memory memory;
+  memory.packed_value = true;
+  kernel.bind_memory("record_first", memory);
+  ASSERT_TRUE(kernel.memory_apply("record_first", first));
   const auto  last = kernel.binary(Cgen_llvm::Binary_op::add, later, first, 65, true);
   std::string error;
   ASSERT_TRUE(kernel.add_output(0, last, error)) << error;
   const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-late-inputs.bc";
-  ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
+  ASSERT_TRUE(kernel.write_bitcode(path.string(), error)) << error;
   auto buffer = llvm::MemoryBuffer::getFile(path.string());
   ASSERT_TRUE(buffer);
   llvm::LLVMContext context;
@@ -333,10 +336,8 @@ TEST(CgenLlvm, DefersInputLoadsAndCastsAndMarksDisjointBuffers) {
   bool loaded_later   = false;
   for (const auto& block : *function) {
     for (const auto& instruction : block) {
-      if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction)) {
-        recorded_first |= call->getCalledFunction() && call->getCalledFunction()->getName() == "record_first";
-      }
-      const auto* load = llvm::dyn_cast<llvm::LoadInst>(&instruction);
+      recorded_first   |= llvm::isa<llvm::StoreInst>(instruction);
+      const auto* load  = llvm::dyn_cast<llvm::LoadInst>(&instruction);
       if (!load) {
         continue;
       }
@@ -357,4 +358,46 @@ TEST(CgenLlvm, DefersInputLoadsAndCastsAndMarksDisjointBuffers) {
   }
   EXPECT_TRUE(loaded_later);
   std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, EmitsIndependentNativeObjects) {
+  Cgen_llvm         kernel("native_memory",
+                           {
+                               {32, true},
+                               { 8, true},
+                               { 1, true}
+  });
+  Cgen_llvm::Memory memory;
+  memory.data    = 0;
+  memory.pending = 1;
+  memory.bits    = 32;
+  memory.size    = 16;
+  memory.writes  = 1;
+  memory.forward = 1;
+  kernel.bind_memory("memory", memory);
+  ASSERT_TRUE(kernel.memory_stage_write("memory", kernel.input(2), kernel.input(1), kernel.input(0)));
+  const auto  value = kernel.memory_read("memory", kernel.input(1), 32, true);
+  std::string error;
+  ASSERT_TRUE(kernel.add_output(0, value, error)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-native-memory.o";
+  ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
+  EXPECT_GT(std::filesystem::file_size(path), 0u);
+  std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, NativeWideCopiesAndDivisionHaveNoRuntimeDependencies) {
+  for (const uint32_t width : {65u, 128u, 256u, 4097u, 131064u}) {
+    Cgen_llvm   kernel("native_wide",
+                       {
+                           {width, true},
+                           {width, true}
+    });
+    std::string error;
+    auto        result
+        = width <= 256 ? kernel.binary(Cgen_llvm::Binary_op::div, kernel.input(0), kernel.input(1), width, true) : kernel.input(0);
+    ASSERT_TRUE(kernel.add_output(0, result, error)) << error;
+    const auto path = std::filesystem::temp_directory_path() / "livehd-cgen-native-wide.o";
+    ASSERT_TRUE(kernel.write_object(path.string(), error, false)) << width << ": " << error;
+    std::filesystem::remove(path);
+  }
 }

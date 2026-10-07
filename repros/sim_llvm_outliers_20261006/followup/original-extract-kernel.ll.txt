@@ -1,0 +1,35 @@
+entry:
+  %in.word = load i64, ptr %inputs, align 4
+  %0 = getelementptr inbounds nuw i8, ptr %inputs, i64 8
+  %in.word1 = load i64, ptr %0, align 4
+  %1 = trunc i64 %in.word1 to i4
+  %2 = trunc i64 %in.word to i4
+  %3 = and i4 %2, 7
+  %4 = icmp eq i4 %3, %1
+  %5 = shl i64 %in.word1, 4
+  %6 = lshr i64 %5, 6
+  %extract.word = and i64 %6, 3
+  %7 = icmp samesign ult i64 %extract.word, 2
+  %.not = icmp eq i64 %extract.word, 0
+  %8 = select i1 %.not, i64 3, i64 4
+  %9 = getelementptr inbounds nuw i64, ptr %inputs, i64 %8
+  %extract.load = load i64, ptr %9, align 4
+  %10 = select i1 %7, i64 %extract.load, i64 0
+  %11 = icmp eq i64 %extract.word, 0
+  %12 = getelementptr inbounds nuw i8, ptr %inputs, i64 32
+  %extract.load3 = load i64, ptr %12, align 4
+  %13 = select i1 %11, i64 %extract.load3, i64 0
+  %extract.lane = call i64 @llvm.fshr.i64(i64 %13, i64 %10, i64 %5)
+  %14 = getelementptr inbounds nuw i8, ptr %inputs, i64 16
+  %in.word4 = load i64, ptr %14, align 4
+  %.v = select i1 %4, i64 %extract.lane, i64 %in.word4
+  %15 = trunc i64 %.v to i16
+  store i64 0, ptr %changed, align 4
+  %out.old.word = load i64, ptr %outputs, align 4
+  %16 = trunc i64 %out.old.word to i16
+  %.not6 = icmp ne i16 %16, %15
+  %17 = zext i1 %.not6 to i64
+  store i64 %17, ptr %changed, align 4
+  %18 = and i64 %.v, 65535
+  store i64 %18, ptr %outputs, align 4
+  ret void

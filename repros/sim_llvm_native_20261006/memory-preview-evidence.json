@@ -1,0 +1,107 @@
+{
+  "old LLVM seed123": {
+    "trace": [
+      {
+        "cycle": 0,
+        "dut.last": 0
+      },
+      {
+        "cycle": 1,
+        "dut.last": 1
+      },
+      {
+        "cycle": 2,
+        "dut.last": 2
+      },
+      {
+        "cycle": 3,
+        "dut.last": 3
+      }
+    ],
+    "draws": 0
+  },
+  "Slop seed123": {
+    "trace": [
+      {
+        "cycle": 0,
+        "dut.last": 64
+      },
+      {
+        "cycle": 1,
+        "dut.last": 235
+      },
+      {
+        "cycle": 2,
+        "dut.last": 61
+      },
+      {
+        "cycle": 3,
+        "dut.last": 126
+      }
+    ],
+    "draws": 4
+  },
+  "native seed123": {
+    "trace": [
+      {
+        "cycle": 0,
+        "dut.last": 43
+      },
+      {
+        "cycle": 1,
+        "dut.last": 124
+      },
+      {
+        "cycle": 2,
+        "dut.last": 232
+      },
+      {
+        "cycle": 3,
+        "dut.last": 255
+      }
+    ],
+    "draws": 4
+  },
+  "native seed123 repeat": {
+    "trace": [
+      {
+        "cycle": 0,
+        "dut.last": 43
+      },
+      {
+        "cycle": 1,
+        "dut.last": 124
+      },
+      {
+        "cycle": 2,
+        "dut.last": 232
+      },
+      {
+        "cycle": 3,
+        "dut.last": 255
+      }
+    ],
+    "draws": 4
+  },
+  "native seed124": {
+    "trace": [
+      {
+        "cycle": 0,
+        "dut.last": 249
+      },
+      {
+        "cycle": 1,
+        "dut.last": 164
+      },
+      {
+        "cycle": 2,
+        "dut.last": 95
+      },
+      {
+        "cycle": 3,
+        "dut.last": 92
+      }
+    ],
+    "draws": 4
+  }
+}

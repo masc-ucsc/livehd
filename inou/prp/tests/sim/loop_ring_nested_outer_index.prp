@@ -1,8 +1,12 @@
 /*
 :name: loop_ring_nested_outer_index
 :type: simulation
-:expect_instances: u_loop*=3
+:expect_instances: u_loop*=4
 */
+// pass.legalize (acyclic.hpp) breaks the ring through a rolled loop -- a cycle
+// only while the instance is atomic -- by splitting it into `__ring<ports>` /
+// `__free` halves over the same domain (never unrolled), so each split loop
+// counts twice in `u_loop*`.
 
 // lhdtrack suggestions 1.3 (br_flow_xbar_rr): a `wire` back-edge read inside a
 // ROLLED `for` whose body holds a NESTED loop that reads the OUTER index. LEC
@@ -24,7 +28,7 @@
 // `const` before the loop keeps the loops rolled, as in the lhdtrack design.
 // The unroll decision must key on a DIRECT read of a wire NAME in the loop
 // body (docs 05b-statements.md "Loops and `wire`"), not on dataflow from a
-// wire through `wc`; otherwise the `u_loop*=3` pin below fails for a reason
+// wire through `wc`; otherwise the `u_loop*` pin above fails for a reason
 // unrelated to this bug. The direct spelling (unrolled) is covered by
 // loop_body_reads_wire.prp (lbw_nested).
 //
@@ -33,7 +37,7 @@
 // same reason comb_false_loop_sub.prp carries it. The attribute is the
 // documented escape hatch that turns every timing check off in this lambda.
 //
-// `:expect_instances: u_loop*=3` keeps the claim honest: the outer `i` loop,
+// `:expect_instances:` keeps the claim honest: the outer `i` loop,
 // its nested `j` loop and the `k` loop all stay rolled (a silent unroll would
 // pass the values without exercising the bug).
 //

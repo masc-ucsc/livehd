@@ -1,0 +1,21 @@
+[
+  {
+    "test": "br_mux_bin_structured_gates_mock",
+    "config": "nsi5_sw16",
+    "cycles": 43478261,
+    "checksum": "13049023983008151410",
+    "reported_ratio": 0.5096603620093553,
+    "legs": {
+      "slop": {
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope",
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/slop/drv.bin",
+        "sha256": "bfda7feca86d1aee4dbd073c395b68dc1ad75e243e591ef751269fbe4b27938a"
+      },
+      "llvm": {
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm",
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/llvm/drv.bin",
+        "sha256": "852aef3293ac73b45014f66559446fb483801b5b556224de27f3b4da5d89f99c"
+      }
+    }
+  }
+]

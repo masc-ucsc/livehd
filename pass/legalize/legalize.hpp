@@ -6,14 +6,14 @@
 //
 // WHAT RUNS TODAY (legalize_design):
 //
-//   1. REPAIR. A false combinational loop through a pure-comb Sub is broken by
-//      inlining that instance (graph/split_selfref.hpp flatten_false_loop_subs),
-//      so every consumer's scheduler can linearize the body. NOTE: cgen_verilog
-//      schedules ACROSS a Sub boundary read-only (comb_emit_order) and no longer
-//      needs this; pass.lec keeps its own call for the non-pipeline inputs. The
-//      repair is kept here for the remaining consumers, and it edits the shared
-//      library def in place -- an instance it dissolves is gone from the
-//      hierarchy every consumer sees.
+//   1. ACYCLIC REPAIR (acyclic.hpp make_acyclic), the one place that handles
+//      combinational loops: afterwards every def is acyclic at ARC level, so
+//      no consumer schedules around a loop. Instances on an arc-level cycle
+//      and state-free instances on an atomic-level one are inlined, a rolled
+//      loop on an atomic-only ring is split by ring/free carries (never
+//      unrolled), packed slices left in a body are rewired, and a loop left is
+//      a diag error. It edits the shared library def in place -- an instance
+//      it dissolves is gone from the hierarchy every consumer sees.
 //
 //   2. LOOP SPLIT (split_loops below), on the repaired graph.
 //
@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 
 namespace livehd::legalize {
@@ -172,9 +173,19 @@ struct Split_state {
   std::vector<std::shared_ptr<hhds::Graph>>                                                             added;
   // Stale same-named defs dropped from the library while creating a half.
   std::vector<std::shared_ptr<hhds::Graph>>                                                             removed;
-  // body gid -> (parallel half, induction half), one pair per run.
-  absl::flat_hash_map<hhds::Gid, std::pair<std::shared_ptr<hhds::Graph>, std::shared_ptr<hhds::Graph>>> halves;
+  // (body gid, first suffix) -> its two halves, one pair per split kind per run.
+  absl::flat_hash_map<std::pair<hhds::Gid, std::string>, std::pair<std::shared_ptr<hhds::Graph>, std::shared_ptr<hhds::Graph>>>
+      halves;
 };
+
+// Split the rolled loop instance `sub` (in `host`) so a combinational ring
+// through it no longer closes: carries whose cone reads any port in
+// `ring_inputs` go to one rolled loop (`<body>__ring`), the rest to another
+// (`<body>__free`), both over the original domain -- never unrolled. false
+// when no such partition exists (every carry reads the ring) or the halves
+// would share logic.
+bool split_loop_by_ring(hhds::Graph* host, hhds::GraphLibrary& lib, const hhds::Node_class& sub,
+                        const absl::flat_hash_set<hhds::Port_id>& ring_inputs, Split_state* state);
 
 // Split every eligible compact loop of `host`. Returns the number split. With
 // `state == nullptr` a local state is used (halves are still deduplicated

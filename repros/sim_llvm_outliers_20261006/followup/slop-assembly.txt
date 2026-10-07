@@ -1,0 +1,45 @@
+br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_pre_rise()
+   1e280:	mov    0x60(%rdi),%rax
+   1e284:	cmp    %rax,0x68(%rdi)
+   1e288:	jne    1e292 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_pre_rise()+0x12>
+   1e28a:	cmpq   $0x0,0x70(%rdi)
+   1e28f:	jne    1e292 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_pre_rise()+0x12>
+   1e291:	ret
+   1e292:	mov    0x8(%rdi),%rsi
+   1e296:	cmp    %rsi,0x48(%rdi)
+   1e29a:	jne    1e2c8 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_pre_rise()+0x48>
+   1e29c:	shl    $0x4,%esi
+   1e29f:	lea    0x3f(%rsi),%edx
+   1e2a2:	test   %esi,%esi
+   1e2a4:	cmovns %esi,%edx
+   1e2a7:	mov    %edx,%r8d
+   1e2aa:	sar    $0x6,%r8d
+   1e2ae:	and    $0xffffffc0,%edx
+   1e2b1:	mov    %esi,%ecx
+   1e2b3:	sub    %edx,%ecx
+   1e2b5:	cmp    $0x7f,%esi
+   1e2b8:	jg     1e2ce <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_pre_rise()+0x4e>
+   1e2ba:	movslq %r8d,%rdx
+   1e2bd:	mov    0x28(%rdi,%rdx,8),%rdx
+   1e2c2:	test   %ecx,%ecx
+   1e2c4:	jne    1e2d4 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_pre_rise()+0x54>
+   1e2c6:	jmp    1e2e9 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_pre_rise()+0x69>
+   1e2c8:	movzwl 0x58(%rdi),%edx
+   1e2cc:	jmp    1e2e9 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_pre_rise()+0x69>
+   1e2ce:	xor    %edx,%edx
+   1e2d0:	test   %ecx,%ecx
+   1e2d2:	je     1e2e9 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_pre_rise()+0x69>
+   1e2d4:	cmp    $0x3f,%esi
+   1e2d7:	jg     1e2e3 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_pre_rise()+0x63>
+   1e2d9:	movslq %r8d,%rsi
+   1e2dc:	mov    0x30(%rdi,%rsi,8),%rsi
+   1e2e1:	jmp    1e2e5 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_pre_rise()+0x65>
+   1e2e3:	xor    %esi,%esi
+   1e2e5:	shrd   %cl,%rsi,%rdx
+   1e2e9:	movzwl %dx,%ecx
+   1e2ec:	movq   $0x0,0x88(%rdi)
+   1e2f7:	mov    %rcx,0x90(%rdi)
+   1e2fe:	mov    %rax,0x68(%rdi)
+   1e302:	movq   $0x0,0x70(%rdi)
+   1e30a:	ret
+   1e30b:	nopl   0x0(%rax,%rax,1)

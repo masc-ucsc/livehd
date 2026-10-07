@@ -1,0 +1,18 @@
+[
+  {
+    "module": "br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0",
+    "kernel_bodies_identical": true,
+    "body_sha256": [
+      "f8a949450e5093bb4bf8498d9ab38a532bf389358777d11939e3dee254c4aadb",
+      "f8a949450e5093bb4bf8498d9ab38a532bf389358777d11939e3dee254c4aadb"
+    ]
+  },
+  {
+    "module": "br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0",
+    "kernel_bodies_identical": true,
+    "body_sha256": [
+      "f8a949450e5093bb4bf8498d9ab38a532bf389358777d11939e3dee254c4aadb",
+      "f8a949450e5093bb4bf8498d9ab38a532bf389358777d11939e3dee254c4aadb"
+    ]
+  }
+]

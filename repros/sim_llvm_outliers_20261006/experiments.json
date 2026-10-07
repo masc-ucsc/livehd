@@ -1,0 +1,267 @@
+{
+  "br_amba_axi_timing_slice/postlink-o2": {
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axi_timing_slice/arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/postlink-o2/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.o"
+    },
+    "link": [
+      "clang++",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axi_timing_slice/arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_amba_axi_timing_slice.br_amba_axi_timing_slice.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/postlink-o2/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axi_timing_slice/arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axi_timing_slice/arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_amba_axi_timing_slice_harness.br_amba_axi_timing_slice_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axi_timing_slice/arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_fwd.br_flow_reg_fwd.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axi_timing_slice/arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_fwd_p1.br_flow_reg_fwd_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axi_timing_slice/arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_fwd_p2.br_flow_reg_fwd_p2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axi_timing_slice/arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_fwd_p3.br_flow_reg_fwd_p3.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axi_timing_slice/arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/postlink-o2/drv.bin"
+    ],
+    "tool_hashes": {
+      "opt": "f7de19ad61a2b8ecd5f826f62eaae13889bd958380064480328ed129542e67c9",
+      "llvm-link": "b8a420f33fc8e6fce5a0f3cf120e57114920250fcd901d65af9e982d68aa48e9"
+    }
+  },
+  "br_amba_axil_timing_slice/postlink-o2": {
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_amba_axil_timing_slice_harness.br_amba_axil_timing_slice_harness.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axil_timing_slice/postlink-o2/br_amba_axil_timing_slice_harness.br_amba_axil_timing_slice_harness.o"
+    },
+    "link": [
+      "clang++",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_amba_axil_timing_slice.br_amba_axil_timing_slice.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axil_timing_slice/postlink-o2/br_amba_axil_timing_slice_harness.br_amba_axil_timing_slice_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_amba_axil_timing_slice_harness.br_amba_axil_timing_slice_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_amba_axil_timing_slice_harness.br_amba_axil_timing_slice_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_both.br_flow_reg_both.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_both_p1.br_flow_reg_both_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_both_p2.br_flow_reg_both_p2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_both_p3.br_flow_reg_both_p3.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_fwd.br_flow_reg_fwd.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_fwd_p1.br_flow_reg_fwd_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_fwd_p2.br_flow_reg_fwd_p2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_fwd_p3.br_flow_reg_fwd_p3.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_rev.br_flow_reg_rev.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_rev_p1.br_flow_reg_rev_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_rev_p2.br_flow_reg_rev_p2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_reg_rev_p3.br_flow_reg_rev_p3.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axil_timing_slice/postlink-o2/drv.bin"
+    ],
+    "tool_hashes": {
+      "opt": "f7de19ad61a2b8ecd5f826f62eaae13889bd958380064480328ed129542e67c9",
+      "llvm-link": "b8a420f33fc8e6fce5a0f3cf120e57114920250fcd901d65af9e982d68aa48e9"
+    }
+  },
+  "br_arb_rr/compact-loops": {
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_arb_rr.br_arb_rr.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_arb_rr/compact-loops/br_arb_rr.br_arb_rr.__loop0.o"
+    },
+    "link": [
+      "clang++",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_arb_rr/compact-loops/br_arb_rr.br_arb_rr.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_arb_rr.br_arb_rr.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_arb_rr_harness.br_arb_rr_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_arb_rr_harness.br_arb_rr_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_arb_rr_harness.br_arb_rr_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_arb_rr/compact-loops/drv.bin"
+    ],
+    "change": "Pure combinational loop bodies: bypass input history/dirty runtime; always evaluate unchanged LLVM phase kernels."
+  },
+  "br_cdc_fifo_flops/inline-memory": {
+    "callbacks_marked_alwaysinline": 0,
+    "replaced_objects": {},
+    "link": [
+      "clang++",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_cdc_fifo_flops_harness.br_cdc_fifo_flops_harness.color-eval-0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_cdc_fifo_flops_harness.br_cdc_fifo_flops_harness.color-eval-1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter.br_counter.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr.br_counter_incr.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr_p1.br_counter_incr_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr_p2.br_counter_incr_p2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_p1.br_counter_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_pop_ctrl_core.br_fifo_pop_ctrl_core.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_staging_buffer.br_fifo_staging_buffer.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_gate_and2.br_gate_and2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_gate_mux2.br_gate_mux2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-3.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-4.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_cdc_fifo_flops/inline-memory/drv.bin"
+    ]
+  },
+  "br_cdc_fifo_flops/inline-shard-memory": {
+    "callbacks": 34,
+    "objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_cdc_fifo_flops_harness.br_cdc_fifo_flops_harness.color-eval-0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_cdc_fifo_flops/inline-shard-memory/br_cdc_fifo_flops_harness.br_cdc_fifo_flops_harness.color-eval-0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_cdc_fifo_flops_harness.br_cdc_fifo_flops_harness.color-eval-1.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_cdc_fifo_flops/inline-shard-memory/br_cdc_fifo_flops_harness.br_cdc_fifo_flops_harness.color-eval-1.o"
+    },
+    "link": [
+      "clang++",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_cdc_fifo_flops/inline-shard-memory/br_cdc_fifo_flops_harness.br_cdc_fifo_flops_harness.color-eval-0.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_cdc_fifo_flops/inline-shard-memory/br_cdc_fifo_flops_harness.br_cdc_fifo_flops_harness.color-eval-1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter.br_counter.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr.br_counter_incr.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr_p1.br_counter_incr_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr_p2.br_counter_incr_p2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_p1.br_counter_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_pop_ctrl_core.br_fifo_pop_ctrl_core.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_staging_buffer.br_fifo_staging_buffer.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_gate_and2.br_gate_and2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_gate_mux2.br_gate_mux2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-3.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-4.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_cdc_fifo_flops/inline-shard-memory/drv.bin"
+    ]
+  },
+  "br_credit_sender/postlink-o2": {
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_arb_multi_rr.br_arb_multi_rr.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_credit_sender/postlink-o2/br_arb_multi_rr.br_arb_multi_rr.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_credit_sender_harness.br_credit_sender_harness.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_credit_sender/postlink-o2/br_credit_sender_harness.br_credit_sender_harness.o"
+    },
+    "link": [
+      "clang++",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/__sim_const_126573478829_0.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_credit_sender/postlink-o2/br_arb_multi_rr.br_arb_multi_rr.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_arb_multi_rr.br_arb_multi_rr.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_arb_multi_rr.br_arb_multi_rr.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_credit_counter.br_credit_counter.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_credit_sender.br_credit_sender.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_credit_sender/postlink-o2/br_credit_sender_harness.br_credit_sender_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_credit_sender_harness.br_credit_sender_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_credit_sender_harness.br_credit_sender_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_enc_priority_dynamic.br_enc_priority_dynamic.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_enc_priority_encoder.br_enc_priority_encoder.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_credit_sender/postlink-o2/drv.bin"
+    ],
+    "tool_hashes": {
+      "opt": "f7de19ad61a2b8ecd5f826f62eaae13889bd958380064480328ed129542e67c9",
+      "llvm-link": "b8a420f33fc8e6fce5a0f3cf120e57114920250fcd901d65af9e982d68aa48e9"
+    }
+  },
+  "br_fifo_flops_push_credit/inline-memory": {
+    "callbacks_marked_alwaysinline": 3,
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/inline-memory/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.o"
+    },
+    "link": [
+      "clang++",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/__sim_const_768818316817_4.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter.br_counter.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr.br_counter_incr.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr_p1.br_counter_incr_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_p1.br_counter_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_p2.br_counter_p2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_credit_counter.br_credit_counter.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/inline-memory/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_staging_buffer.br_fifo_staging_buffer.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-2.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/inline-memory/drv.bin"
+    ]
+  },
+  "br_fifo_flops_push_credit/postlink-o2": {
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter.br_counter.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_counter.br_counter.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr.br_counter_incr.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_counter_incr.br_counter_incr.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr_p1.br_counter_incr_p1.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_counter_incr_p1.br_counter_incr_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_p1.br_counter_p1.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_counter_p1.br_counter_p1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_p2.br_counter_p2.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_counter_p2.br_counter_p2.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_credit_counter.br_credit_counter.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_credit_counter.br_credit_counter.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_fifo_staging_buffer.br_fifo_staging_buffer.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_fifo_staging_buffer.br_fifo_staging_buffer.o"
+    },
+    "link": [
+      "clang++",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/__sim_const_768818316817_4.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_counter.br_counter.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_counter_incr.br_counter_incr.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_counter_incr_p1.br_counter_incr_p1.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_counter_p1.br_counter_p1.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_counter_p2.br_counter_p2.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_credit_counter.br_credit_counter.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_fifo_flops_push_credit_harness.br_fifo_flops_push_credit_harness.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_fifo_push_ctrl_core.br_fifo_push_ctrl_core.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/br_fifo_staging_buffer.br_fifo_staging_buffer.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm/SW/sim/obj/unity-2.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/postlink-o2/drv.bin"
+    ],
+    "tool_hashes": {
+      "opt": "f7de19ad61a2b8ecd5f826f62eaae13889bd958380064480328ed129542e67c9",
+      "llvm-link": "b8a420f33fc8e6fce5a0f3cf120e57114920250fcd901d65af9e982d68aa48e9"
+    }
+  },
+  "br_flow_arb_rr/compact-loops": {
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_arb_rr.br_flow_arb_rr.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_arb_rr/compact-loops/br_flow_arb_rr.br_flow_arb_rr.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_arb_rr.br_flow_arb_rr.__loop1.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_arb_rr/compact-loops/br_flow_arb_rr.br_flow_arb_rr.__loop1.o"
+    },
+    "link": [
+      "clang++",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_arb_rr/compact-loops/br_flow_arb_rr.br_flow_arb_rr.__loop0.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_arb_rr/compact-loops/br_flow_arb_rr.br_flow_arb_rr.__loop1.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_arb_rr.br_flow_arb_rr.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_arb_rr_harness.br_flow_arb_rr_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_arb_rr_harness.br_flow_arb_rr_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_arb_rr_harness.br_flow_arb_rr_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_arb_rr/compact-loops/drv.bin"
+    ],
+    "change": "Pure combinational loop bodies: bypass input history/dirty runtime; always evaluate unchanged LLVM phase kernels."
+  },
+  "br_flow_deserializer/inline-memory": {
+    "callbacks_marked_alwaysinline": 22,
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_deserializer/dmsf0_mw8_pw64_pw8/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_deserializer_harness.br_flow_deserializer_harness.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_deserializer/inline-memory/br_flow_deserializer_harness.br_flow_deserializer_harness.o"
+    },
+    "link": [
+      "clang++",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_deserializer/dmsf0_mw8_pw64_pw8/notech/sim_lhd_pyrope_llvm/SW/sim/obj/__sim_const_86073636917_0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_deserializer/dmsf0_mw8_pw64_pw8/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr.br_counter_incr.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_deserializer/dmsf0_mw8_pw64_pw8/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr.br_counter_incr.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_deserializer/dmsf0_mw8_pw64_pw8/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_counter_incr.br_counter_incr.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_deserializer/dmsf0_mw8_pw64_pw8/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_deserializer.br_flow_deserializer.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_deserializer/inline-memory/br_flow_deserializer_harness.br_flow_deserializer_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_deserializer/dmsf0_mw8_pw64_pw8/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_deserializer_harness.br_flow_deserializer_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_deserializer/dmsf0_mw8_pw64_pw8/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_flow_deserializer_harness.br_flow_deserializer_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_deserializer/dmsf0_mw8_pw64_pw8/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_deserializer/inline-memory/drv.bin"
+    ]
+  }
+}

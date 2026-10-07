@@ -1,0 +1,82 @@
+[
+  {
+    "test": "br_amba_axi_timing_slice",
+    "variant": "grouped-state",
+    "instructions": 105,
+    "vector_moves": 24,
+    "conditional_jumps": 23,
+    "memcpy_calls": 0
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "variant": "grouped-memcpy",
+    "instructions": 151,
+    "vector_moves": 50,
+    "conditional_jumps": 22,
+    "memcpy_calls": 0
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "variant": "bank-copy",
+    "instructions": 103,
+    "vector_moves": 26,
+    "conditional_jumps": 23,
+    "memcpy_calls": 0
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "variant": "grouped-state",
+    "instructions": 228,
+    "vector_moves": 50,
+    "conditional_jumps": 51,
+    "memcpy_calls": 0
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "variant": "grouped-memcpy",
+    "instructions": 301,
+    "vector_moves": 84,
+    "conditional_jumps": 58,
+    "memcpy_calls": 0
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "variant": "bank-copy",
+    "instructions": 226,
+    "vector_moves": 52,
+    "conditional_jumps": 51,
+    "memcpy_calls": 0
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "variant": "bank-packed-flags",
+    "instructions": 41,
+    "vector_moves": 26,
+    "conditional_jumps": 1,
+    "memcpy_calls": 0
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "variant": "bank-packed-flags",
+    "instructions": 148,
+    "vector_moves": 52,
+    "conditional_jumps": 19,
+    "memcpy_calls": 0
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "variant": "bank-masked-copy",
+    "instructions": 61,
+    "vector_moves": 26,
+    "conditional_jumps": 7,
+    "memcpy_calls": 0
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "variant": "bank-masked-copy",
+    "instructions": 171,
+    "vector_moves": 51,
+    "conditional_jumps": 26,
+    "memcpy_calls": 0
+  }
+]

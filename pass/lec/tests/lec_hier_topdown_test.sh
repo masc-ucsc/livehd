@@ -342,12 +342,19 @@ done
 if [ "$fail" -eq 0 ]; then
   OUT=$("$LHD" lec --ref "lg:$W/feedback_a" --impl "lg:$W/feedback_b" --top feedback_top \
         --set formal.lec.semdiff=none --workdir "$W/wd_feedback_boundary" 2>&1); RC=$?
+  # loop_o -> fb is a Moore feedback (loop_o = q): no cycle at arc level, so
+  # pass.legalize keeps the instance (todo/livehd/legalize_acyclic.md) and the
+  # occurrence view resolves fb through u's body to q. LEC proves the design
+  # as-is (u's refutation is absorbed by feedback_top, the ordinary top-down
+  # escalation).
   if [ "$RC" -ne 0 ]; then
-    echo "FAIL: case 9 sequential Sub feedback boundary did not prove after contextual inline (rc=$RC)"
+    echo "FAIL: case 9 sequential Sub feedback design did not prove (rc=$RC)"
     echo "$OUT" | grep -E "lec\[hier\]|operand of|feedback"; fail=1
   elif ! echo "$OUT" | grep -q "ESCALATE 'feedback_top'"; then
-    echo "FAIL: case 9 fixture did not exercise contextual feedback-boundary expansion"; fail=1
-  else echo "ok: a sequential Sub feedback boundary is exposed by one private contextual inline"; fi
+    echo "FAIL: case 9 did not prove top-down (u's refutation absorbed by feedback_top)"; fail=1
+  elif echo "$OUT" | grep -q "lec: acyclic repair"; then
+    echo "FAIL: case 9 LEC repaired a Moore feedback that is acyclic at arc level"; fail=1
+  else echo "ok: a sequential Sub feedback design proves with no LEC-side boundary repair"; fi
 fi
 
 # ---------------------------------------------------------------------------

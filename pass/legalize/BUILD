@@ -5,8 +5,14 @@ load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "legalize",
-    srcs = ["legalize.cpp"],
-    hdrs = ["legalize.hpp"],
+    srcs = [
+        "acyclic.cpp",
+        "legalize.cpp",
+    ],
+    hdrs = [
+        "acyclic.hpp",
+        "legalize.hpp",
+    ],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],

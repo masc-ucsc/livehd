@@ -1,0 +1,654 @@
+[
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 0,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 1,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 2,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 3,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 7,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "15436847544817946592",
+      "llvm": "15436847544817946592",
+      "grouped-state": "15436847544817946592",
+      "grouped-memcpy": "15436847544817946592",
+      "bank-copy": "15436847544817946592",
+      "bank-copy-checked": "15436847544817946592",
+      "bank-packed-flags": "15436847544817946592",
+      "bank-masked-copy": "15436847544817946592"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 31,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "17613872769953881767",
+      "llvm": "17613872769953881767",
+      "grouped-state": "17613872769953881767",
+      "grouped-memcpy": "17613872769953881767",
+      "bank-copy": "17613872769953881767",
+      "bank-copy-checked": "17613872769953881767",
+      "bank-packed-flags": "17613872769953881767",
+      "bank-masked-copy": "17613872769953881767"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 127,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "6489875459950400269",
+      "llvm": "6489875459950400269",
+      "grouped-state": "6489875459950400269",
+      "grouped-memcpy": "6489875459950400269",
+      "bank-copy": "6489875459950400269",
+      "bank-copy-checked": "6489875459950400269",
+      "bank-packed-flags": "6489875459950400269",
+      "bank-masked-copy": "6489875459950400269"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 997,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "17215812550763319181",
+      "llvm": "17215812550763319181",
+      "grouped-state": "17215812550763319181",
+      "grouped-memcpy": "17215812550763319181",
+      "bank-copy": "17215812550763319181",
+      "bank-copy-checked": "17215812550763319181",
+      "bank-packed-flags": "17215812550763319181",
+      "bank-masked-copy": "17215812550763319181"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 10007,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "17375073989656798617",
+      "llvm": "17375073989656798617",
+      "grouped-state": "17375073989656798617",
+      "grouped-memcpy": "17375073989656798617",
+      "bank-copy": "17375073989656798617",
+      "bank-copy-checked": "17375073989656798617",
+      "bank-packed-flags": "17375073989656798617",
+      "bank-masked-copy": "17375073989656798617"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 0,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 1,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 2,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 3,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 7,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "10735135733718964523",
+      "llvm": "10735135733718964523",
+      "grouped-state": "10735135733718964523",
+      "grouped-memcpy": "10735135733718964523",
+      "bank-copy": "10735135733718964523",
+      "bank-copy-checked": "10735135733718964523",
+      "bank-packed-flags": "10735135733718964523",
+      "bank-masked-copy": "10735135733718964523"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 31,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "5786947045933398793",
+      "llvm": "5786947045933398793",
+      "grouped-state": "5786947045933398793",
+      "grouped-memcpy": "5786947045933398793",
+      "bank-copy": "5786947045933398793",
+      "bank-copy-checked": "5786947045933398793",
+      "bank-packed-flags": "5786947045933398793",
+      "bank-masked-copy": "5786947045933398793"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 127,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "18315854926707930787",
+      "llvm": "18315854926707930787",
+      "grouped-state": "18315854926707930787",
+      "grouped-memcpy": "18315854926707930787",
+      "bank-copy": "18315854926707930787",
+      "bank-copy-checked": "18315854926707930787",
+      "bank-packed-flags": "18315854926707930787",
+      "bank-masked-copy": "18315854926707930787"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 997,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "13100979736728941019",
+      "llvm": "13100979736728941019",
+      "grouped-state": "13100979736728941019",
+      "grouped-memcpy": "13100979736728941019",
+      "bank-copy": "13100979736728941019",
+      "bank-copy-checked": "13100979736728941019",
+      "bank-packed-flags": "13100979736728941019",
+      "bank-masked-copy": "13100979736728941019"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 10007,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "14698988399799382978",
+      "llvm": "14698988399799382978",
+      "grouped-state": "14698988399799382978",
+      "grouped-memcpy": "14698988399799382978",
+      "bank-copy": "14698988399799382978",
+      "bank-copy-checked": "14698988399799382978",
+      "bank-packed-flags": "14698988399799382978",
+      "bank-masked-copy": "14698988399799382978"
+    }
+  },
+  {
+    "test": "br_amba_axi_timing_slice",
+    "cycles": 16129032,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "bank-copy-checked": "1956944815607682736"
+    },
+    "invariant_checked_every_commit": true
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 0,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 1,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 2,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 3,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 7,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "9406429476471542",
+      "llvm": "9406429476471542",
+      "grouped-state": "9406429476471542",
+      "grouped-memcpy": "9406429476471542",
+      "bank-copy": "9406429476471542",
+      "bank-copy-checked": "9406429476471542",
+      "bank-packed-flags": "9406429476471542",
+      "bank-masked-copy": "9406429476471542"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 31,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "4476827278177816128",
+      "llvm": "4476827278177816128",
+      "grouped-state": "4476827278177816128",
+      "grouped-memcpy": "4476827278177816128",
+      "bank-copy": "4476827278177816128",
+      "bank-copy-checked": "4476827278177816128",
+      "bank-packed-flags": "4476827278177816128",
+      "bank-masked-copy": "4476827278177816128"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 127,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "14000222655241929069",
+      "llvm": "14000222655241929069",
+      "grouped-state": "14000222655241929069",
+      "grouped-memcpy": "14000222655241929069",
+      "bank-copy": "14000222655241929069",
+      "bank-copy-checked": "14000222655241929069",
+      "bank-packed-flags": "14000222655241929069",
+      "bank-masked-copy": "14000222655241929069"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 997,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "6549821548552486264",
+      "llvm": "6549821548552486264",
+      "grouped-state": "6549821548552486264",
+      "grouped-memcpy": "6549821548552486264",
+      "bank-copy": "6549821548552486264",
+      "bank-copy-checked": "6549821548552486264",
+      "bank-packed-flags": "6549821548552486264",
+      "bank-masked-copy": "6549821548552486264"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 10007,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "slop": "2996082879586381736",
+      "llvm": "2996082879586381736",
+      "grouped-state": "2996082879586381736",
+      "grouped-memcpy": "2996082879586381736",
+      "bank-copy": "2996082879586381736",
+      "bank-copy-checked": "2996082879586381736",
+      "bank-packed-flags": "2996082879586381736",
+      "bank-masked-copy": "2996082879586381736"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 0,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 1,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 2,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 3,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "0",
+      "llvm": "0",
+      "grouped-state": "0",
+      "grouped-memcpy": "0",
+      "bank-copy": "0",
+      "bank-copy-checked": "0",
+      "bank-packed-flags": "0",
+      "bank-masked-copy": "0"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 7,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "9406429476471542",
+      "llvm": "9406429476471542",
+      "grouped-state": "9406429476471542",
+      "grouped-memcpy": "9406429476471542",
+      "bank-copy": "9406429476471542",
+      "bank-copy-checked": "9406429476471542",
+      "bank-packed-flags": "9406429476471542",
+      "bank-masked-copy": "9406429476471542"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 31,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "4476827278177816128",
+      "llvm": "4476827278177816128",
+      "grouped-state": "4476827278177816128",
+      "grouped-memcpy": "4476827278177816128",
+      "bank-copy": "4476827278177816128",
+      "bank-copy-checked": "4476827278177816128",
+      "bank-packed-flags": "4476827278177816128",
+      "bank-masked-copy": "4476827278177816128"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 127,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "14000222655241929069",
+      "llvm": "14000222655241929069",
+      "grouped-state": "14000222655241929069",
+      "grouped-memcpy": "14000222655241929069",
+      "bank-copy": "14000222655241929069",
+      "bank-copy-checked": "14000222655241929069",
+      "bank-packed-flags": "14000222655241929069",
+      "bank-masked-copy": "14000222655241929069"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 997,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "6549821548552486264",
+      "llvm": "6549821548552486264",
+      "grouped-state": "6549821548552486264",
+      "grouped-memcpy": "6549821548552486264",
+      "bank-copy": "6549821548552486264",
+      "bank-copy-checked": "6549821548552486264",
+      "bank-packed-flags": "6549821548552486264",
+      "bank-masked-copy": "6549821548552486264"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 10007,
+    "init": [
+      "--seed",
+      "7"
+    ],
+    "checksums": {
+      "slop": "2996082879586381736",
+      "llvm": "2996082879586381736",
+      "grouped-state": "2996082879586381736",
+      "grouped-memcpy": "2996082879586381736",
+      "bank-copy": "2996082879586381736",
+      "bank-copy-checked": "2996082879586381736",
+      "bank-packed-flags": "2996082879586381736",
+      "bank-masked-copy": "2996082879586381736"
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "cycles": 15151515,
+    "init": [
+      "--init-zero"
+    ],
+    "checksums": {
+      "bank-copy-checked": "17427903416933715990"
+    },
+    "invariant_checked_every_commit": true
+  }
+]

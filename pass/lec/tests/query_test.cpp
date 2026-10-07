@@ -5,6 +5,7 @@
 // (and, in the lec.cross path, lgcheck). Graphs are built programmatically so
 // the test needs no reader.
 
+#include "acyclic.hpp"
 #include "query.hpp"
 
 #include <chrono>
@@ -383,7 +384,7 @@ TEST(LecNames, PyropeQuotedStateMatchesDirectRtlName) {
   EXPECT_EQ(lec::canon_flop_name("csrMod\\_Mhpmevent10_0"), lec::canon_flop_name("csrMod_Mhpmevent10_0"));
 }
 
-TEST(CombEquiv, PackedFeedbackSlicesAreRepairedPrivately) {
+TEST(CombEquiv, LegalizedPackedFeedbackProves) {
   hhds::GraphLibrary lib;
   auto               build = [&](const std::string& name, bool packed, int invert, bool real_cycle = false) {
     namespace gu = graph_util;
@@ -418,26 +419,39 @@ TEST(CombEquiv, PackedFeedbackSlicesAreRepairedPrivately) {
     word.connect_sink(g->get_output_pin("out"));
     return g;
   };
-  auto             ref    = build("ref", false, 3);
-  auto             packed = build("packed", true, 3);
-  auto             wrong  = build("wrong", true, 1);
-  auto             cycle  = build("cycle", true, 3, true);
+  auto ref    = build("ref", false, 3);
+  auto packed = build("packed", true, 3);
+  auto wrong  = build("wrong", true, 1);
+  auto cycle  = build("cycle", true, 3, true);
+  // Before legalize the packed word reads its own upper lane: a word-level
+  // cycle the encoder refuses. LEC never repairs loops itself.
+  {
+    cvc5::TermManager tm;
+    lec::Encoder      encoder(tm);
+    auto              original = encoder.encode(packed.get());
+    EXPECT_FALSE(original.ok);
+    EXPECT_NE(original.error.find("WORD-LEVEL CYCLE"), std::string::npos) << original.error;
+  }
+  // pass.legalize, the one owner of combinational loops, removes the false
+  // (bit-disjoint) packed cycles and reports the genuine one.
+  livehd::legalize::Split_state state;
+  const auto                    legal = livehd::legalize::make_acyclic({packed, wrong}, state);
+  EXPECT_EQ(legal.loops, 0);
+  EXPECT_GT(legal.slices_rewired, 0);
+  livehd::legalize::Split_state cycle_state;
+  EXPECT_EQ(livehd::legalize::make_acyclic({cycle}, cycle_state).loops, 1);
+
   lec::Lec_options opts;
   opts.engine = "ind";
   auto good   = lec::prove_equal(ref.get(), packed.get(), opts);
   EXPECT_EQ(good.verdict, Verdict::Proven) << good.detail;
-  EXPECT_NE(good.detail.find("packed-cycle slice repair"), std::string::npos) << good.detail;
   auto bad = lec::prove_equal(ref.get(), wrong.get(), opts);
   EXPECT_EQ(bad.verdict, Verdict::Refuted) << bad.detail;
+  // A genuine loop that reaches prove_equal (legalize reported it; a direct
+  // caller ignored that) must fail CLOSED: never a verdict, only unsupported.
   auto unresolved = lec::prove_equal(ref.get(), cycle.get(), opts);
   EXPECT_EQ(unresolved.verdict, Verdict::Unknown) << unresolved.detail;
   EXPECT_TRUE(unresolved.unsupported);
-  // The shared input remains cyclic: normalization belongs to the query copy.
-  cvc5::TermManager tm;
-  lec::Encoder      encoder(tm);
-  auto              original = encoder.encode(packed.get());
-  EXPECT_FALSE(original.ok);
-  EXPECT_NE(original.error.find("WORD-LEVEL CYCLE"), std::string::npos) << original.error;
 }
 
 TEST(LecState, PartialUnknownInitialPreservesKnownBits) {

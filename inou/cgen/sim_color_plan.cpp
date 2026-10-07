@@ -595,17 +595,33 @@ void append_multiset(Hash& hash, const Range& records, Append append) {
   hash.append_u64(combined.b);
 }
 
-std::string format_hash128(std::string_view prefix, const std::array<uint64_t, 2>& hash) {
-  char      text[40];
-  const int size = std::snprintf(text,
-                                 sizeof text,
-                                 "%.*s%016llx%016llx",
-                                 static_cast<int>(prefix.size()),
-                                 prefix.data(),
-                                 static_cast<unsigned long long>(hash[0]),
-                                 static_cast<unsigned long long>(hash[1]));
-  return std::string{text, static_cast<size_t>(size)};
-}
+// Typed, length-delimited composition of a Plan_id: a tag naming the kind of
+// identity, then its fields. Composing from parent ids hashes their 128 bits,
+// never their spelling, so no text is built on the planner's hot paths.
+class Id_hash {
+public:
+  explicit Id_hash(std::string_view tag) { hash_.append_text(tag); }
+  Id_hash& id(const Plan_id& x) {
+    hash_.append_u64(x.hi);
+    hash_.append_u64(x.lo);
+    return *this;
+  }
+  Id_hash& u(uint64_t value) {
+    hash_.append_u64(value);
+    return *this;
+  }
+  Id_hash& text(std::string_view value) {
+    hash_.append_text(value);
+    return *this;
+  }
+  [[nodiscard]] Plan_id finish() const {
+    const auto h = hash_.finish();
+    return Plan_id{h[0], h[1]};
+  }
+
+private:
+  Shape_hash_builder hash_;
+};
 
 // A name-free structural seed used only for discovery-site identity. Canonical
 // kernel identity is a later, stricter lockstep-verified contract. Hash typed,
@@ -624,7 +640,7 @@ std::string format_hash128(std::string_view prefix, const std::array<uint64_t, 2
 // operand lives) and the port ordering that the raw inp_pins() drops, and the
 // PLURAL reader keeps the second driver that get_driver_pin() would discard.
 // Both are correctness, not style.
-std::string node_shape(const hhds::Node_class& node) {
+Plan_id node_shape(const hhds::Node_class& node) {
   Shape_hash_builder hash;
   hash.append_u64(1);
   hash.append_u64(static_cast<uint64_t>(gu::type_op_of(node)));
@@ -718,15 +734,16 @@ std::string node_shape(const hhds::Node_class& node) {
   } else {
     hash.append_u64(0);
   }
-  return format_hash128("n:", hash.finish());
+  const auto h = hash.finish();
+  return Plan_id{h[0], h[1]};
 }
 
 struct Occurrence_shape_cache {
-  absl::flat_hash_map<hhds::Definition_index, std::string> definition_nodes;
-  absl::flat_hash_map<hhds::Occurrence_path, std::string>  paths;
+  absl::flat_hash_map<hhds::Definition_index, Plan_id> definition_nodes;
+  absl::flat_hash_map<hhds::Occurrence_path, Plan_id>  paths;
 };
 
-const std::string& cached_node_shape(const hhds::Node_class& node, Occurrence_shape_cache& cache) {
+const Plan_id& cached_node_shape(const hhds::Node_class& node, Occurrence_shape_cache& cache) {
   const auto key = node.get_definition_index();
   if (const auto found = cache.definition_nodes.find(key); found != cache.definition_nodes.end()) {
     return found->second;
@@ -801,33 +818,30 @@ std::array<uint64_t, 2> stable_hash128(std::string_view text) {
   return hash.finish();
 }
 
-std::string stable_id(std::string_view text) { return format_hash128("s:", stable_hash128(text)); }
-
-std::string occurrence_shape(const hhds::Occurrence_node& node, const hhds::GraphLibrary* library, Occurrence_shape_cache& cache) {
+Plan_id occurrence_shape(const hhds::Occurrence_node& node, const hhds::GraphLibrary* library, Occurrence_shape_cache& cache) {
   auto [path_it, fresh] = cache.paths.try_emplace(node.path());
   if (fresh) {
-    std::string& path_shape = path_it->second;
-    path_shape              = "root";
+    Id_hash path("occurrence-path");
     if (library != nullptr) {
       for (const auto& step : node.path().steps()) {
         auto parent = library->get_graph(step.subnode.gid);
         if (!parent) {
-          path_shape += "/missing";
+          path.u(0);  // missing
           continue;
         }
-        auto site   = parent->get_node(hhds::Class_index{step.subnode.value});
-        path_shape += "/" + cached_node_shape(site, cache);
+        auto site = parent->get_node(hhds::Class_index{step.subnode.value});
+        path.u(1).id(cached_node_shape(site, cache));
         if (step.ordinal) {
-          path_shape += std::format("@{}", *step.ordinal);
-        } else if (site.is_loop_subnode()) {
-          path_shape += "@group";
+          path.u(1).u(*step.ordinal);
+        } else {
+          path.u(site.is_loop_subnode() ? 2 : 0);
         }
       }
     }
+    path_it->second = path.finish();
   }
-  std::string shape  = path_it->second;
-  shape             += "/" + cached_node_shape(node.base_node(), cache);
-  return shape;
+  const Plan_id path_id = path_it->second;  // the map may grow below
+  return Id_hash("occurrence").id(path_id).id(cached_node_shape(node.base_node(), cache)).finish();
 }
 
 // The pin pair is the primary spelling: in-edge callers hand over the sink they
@@ -868,7 +882,7 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
   std::vector<std::array<uint64_t, 2>> seeds;
   seeds.reserve(sites.size());
   for (const auto& site : sites) {
-    seeds.push_back(stable_hash128(site.structural_id));
+    seeds.push_back({site.structural_id.hi, site.structural_id.lo});
   }
 
   // Scheduling fingerprints describe a bounded neighborhood. Global ordinal
@@ -1043,8 +1057,8 @@ void refine_structural_ids(std::vector<Color_plan::Site>&                       
   }
 
   for (size_t i = 0; i < sites.size(); ++i) {
-    sites[i].structural_id = format_hash128("s:", previous[i]);
-    sites[i].schedule_id   = format_hash128("p:", order_previous[i]);
+    sites[i].structural_id = Plan_id{previous[i][0], previous[i][1]};
+    sites[i].schedule_id   = Plan_id{order_previous[i][0], order_previous[i][1]};
   }
 }
 
@@ -1243,7 +1257,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     Site site;
     site.node                          = node;
     site.kind                          = classify(node);
-    site.structural_id                 = stable_id(occurrence_shape(node, library, shape_cache));
+    site.structural_id                 = occurrence_shape(node, library, shape_cache);
     site.gate_equivalents              = gu::mappable_ge_weight(node.base_node());
     plan.summary_.compact_loops       += site.kind == Site_kind::loop_control;
     plan.summary_.conditional_regions += site.kind == Site_kind::conditional_control;
@@ -1267,10 +1281,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   }
   refine_structural_ids(plan.sites_, index);
   {
-    std::map<std::string, size_t> occurrence_rank;
+    absl::flat_hash_map<Plan_id, size_t> occurrence_rank;
     for (auto& site : plan.sites_) {
       const size_t rank = occurrence_rank[site.schedule_id]++;
-      site.storage_id   = std::format("{}:o{}", site.schedule_id, rank);
+      site.storage_id   = Id_hash("storage").id(site.schedule_id).u(rank).finish();
     }
   }
   absl::flat_hash_set<hhds::Definition_index>                                  compact_steps;
@@ -1402,7 +1416,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
     for (const auto& decl : body_io->get_output_pin_decls()) {
       const auto  output    = body.graph->get_output_pin(decl.name);
-      std::string driver_id = "unbound";
+      Plan_id     driver_id = Id_hash("unbound").finish();
       if (body.graph == root && body.path.steps().empty()) {
         // Root GraphIO may be driven directly by a submodule output. Resolve
         // through that boundary to the executable leaf occurrence; the local
@@ -1422,12 +1436,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           }
         }
       }
-      plan.observations_.push_back(Observation{prefix + decl.name, std::move(driver_id), false, decl.port_id});
+      plan.observations_.push_back(Observation{prefix + decl.name, driver_id, false, decl.port_id});
     }
   }
   if (io != nullptr) {
     for (const auto& decl : io->get_input_pin_decls()) {
-      plan.observations_.push_back(Observation{decl.name, std::format("top-input:p{}", decl.port_id), true, decl.port_id});
+      plan.observations_.push_back(Observation{decl.name, Id_hash("top-input").u(decl.port_id).finish(), true, decl.port_id});
     }
   }
   while (!pending.empty()) {
@@ -1484,7 +1498,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                  static_cast<int>(st.kind),
                  static_cast<int>(gu::type_op_of(st.node)),
                  st.live,
-                 st.structural_id.substr(0, 40));
+                 st.structural_id.str().substr(0, 40));
     }
   }
 
@@ -1847,8 +1861,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     site.role           = role;
     site.latch_settle   = latch_settle[base] && role == Version_role::state_update;
     site.slot           = slot;
-    site.structural_id  = stable_id(plan.sites_[base].structural_id + ":" + std::string(state_version_name(version)) + ":"
-                                    + std::string(version_role_name(role)) + ":p" + std::to_string(output_port));
+    site.structural_id  = Id_hash("version")
+                             .id(plan.sites_[base].structural_id)
+                             .u(static_cast<uint64_t>(version))
+                             .u(static_cast<uint64_t>(role))
+                             .u(output_port)
+                             .finish();
     const size_t result = plan.version_sites_.size();
     plan.version_sites_.push_back(std::move(site));
     version_index.emplace(key, result);
@@ -3411,14 +3429,14 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         resolved = binding->second;
       }
       if (!resolved) {
-        plan.observations_.push_back(Observation{prefix + decl.name, "unbound", true, decl.port_id});
+        plan.observations_.push_back(Observation{prefix + decl.name, Id_hash("unbound").finish(), true, decl.port_id});
         continue;
       }
       const auto producer_it = index.find(resolved->get_master_node().get_occurrence_index());
       const bool top_input   = producer_it == index.end() && gu::is_graph_input_pin(*resolved) && resolved->get_graph() == root;
       const bool constant    = resolved->is_const();
       if (!top_input && !constant && (producer_it == index.end() || !plan.sites_[producer_it->second].live)) {
-        plan.observations_.push_back(Observation{prefix + decl.name, "unbound", true, decl.port_id});
+        plan.observations_.push_back(Observation{prefix + decl.name, Id_hash("unbound").finish(), true, decl.port_id});
         continue;
       }
       const std::string literal = constant ? gu::const_of(*resolved).to_pyrope() : std::string{};
@@ -3436,8 +3454,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                        top_input,
                                        literal});
       }
-      const auto source_id = top_input  ? std::format("top-input:p{}", resolved->get_port_id())
-                             : constant ? stable_id("literal:" + literal)
+      const auto source_id = top_input  ? Id_hash("top-input").u(resolved->get_port_id()).finish()
+                             : constant ? Id_hash("literal").text(literal).finish()
                                         : plan.version_sites_[input_uses.back().producer].structural_id;
       plan.observations_.push_back(Observation{prefix + decl.name, source_id, true, decl.port_id});
     }
@@ -3723,14 +3741,15 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             result = existing->second;
           } else {
             auto        clone     = version;
-            std::string signature = "latch-input:" + version.structural_id;
+            Id_hash signature("latch-input");
+            signature.id(version.structural_id);
             for (const auto& use : uses) {
               if (use.producer_version != Color_plan::invalid_index) {
-                const auto& input  = plan.version_sites_[use.producer_version];
-                signature         += ":" + plan.sites_[input.base_site].storage_id + ":" + input.structural_id;
+                const auto& input = plan.version_sites_[use.producer_version];
+                signature.id(plan.sites_[input.base_site].storage_id).id(input.structural_id);
               }
             }
-            clone.structural_id = stable_id(signature);
+            clone.structural_id = signature.finish();
             clone.latch_input   = true;
             result              = plan.version_sites_.size();
             plan.version_sites_.push_back(std::move(clone));
@@ -3828,7 +3847,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                          execution_slot_name(plan.version_sites_[edge.consumer].slot)));
     }
   }
-  std::vector<std::pair<std::string_view, hhds::Occurrence_path>> ordered_paths;
+  std::vector<std::pair<Plan_id, hhds::Occurrence_path>> ordered_paths;
   ordered_paths.reserve(shape_cache.paths.size());
   for (const auto& [path, shape] : shape_cache.paths) {
     ordered_paths.emplace_back(shape, path);
@@ -3873,6 +3892,122 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   for (size_t site = 0; site < plan.sites_.size(); ++site) {
     site_path_rank[site] = path_rank.at(plan.sites_[site].node.path());
   }
+  struct Control_trie_node {
+    std::map<Occurrence_step_key, size_t> children;
+    size_t                                owner = Color_plan::invalid_index;
+  };
+
+  // Preserve useful ordinary module boundaries, rather than every wrapper.
+  // A sizeable near-leaf body or a module with a narrow interface is a cheap
+  // cut and a useful reuse unit. Tiny helpers can still fuse into their caller.
+  struct Module_shape {
+    size_t   sites           = 0;
+    size_t   height          = 0;
+    uint64_t interface_words = 0;
+  };
+  absl::flat_hash_map<hhds::Gid, Module_shape> module_shapes;
+  absl::flat_hash_set<hhds::Gid>               active_modules;
+  std::function<Module_shape(hhds::Graph*)>    module_shape = [&](hhds::Graph* graph) -> Module_shape {
+    if (const auto it = module_shapes.find(graph->get_gid()); it != module_shapes.end()) {
+      return it->second;
+    }
+    if (!active_modules.insert(graph->get_gid()).second) {
+      return {};  // recursive hierarchy is already diagnosed by discovery
+    }
+    Module_shape shape;
+    if (auto mod_io = graph->get_io()) {
+      for (const auto& port : mod_io->get_input_pin_decls()) {
+        shape.interface_words += (static_cast<uint64_t>(std::max<uint32_t>(1, port.bits)) + 63) / 64;
+      }
+      for (const auto& port : mod_io->get_output_pin_decls()) {
+        shape.interface_words += (static_cast<uint64_t>(std::max<uint32_t>(1, port.bits)) + 63) / 64;
+      }
+    }
+    for (auto node : graph->body().nodes()) {
+      if (gu::is_builtin_node(node)) {
+        continue;
+      }
+      ++shape.sites;
+      if (gu::type_op_of(node) == Ntype_op::Sub && !node.is_loop_subnode()) {
+        if (auto child = node.get_subnode_graph()) {
+          const auto nested  = module_shape(child.get());
+          shape.sites       += nested.sites;
+          shape.height       = std::max(shape.height, nested.height + 1);
+        }
+      }
+    }
+    active_modules.erase(graph->get_gid());
+    module_shapes.emplace(graph->get_gid(), shape);
+    return shape;
+  };
+  // A fence is a trade-off. It lets dirty-bit gating skip a mostly idle
+  // module (xs_alu's AluDataModule sees constant operands: 26 MHz fenced vs
+  // 11 MHz fused; dino's register file and issue unit idle once the program
+  // spins: 3.36 vs 2.64 MHz; XS RenameTable's tables under a read-only driver:
+  // 61 vs 39 kHz), but every value crossing it is a stored, change-tested,
+  // dirty-marked slot, and the interval contraction below cuts a new color at
+  // every owner switch -- pure cost when the module toggles every cycle (an
+  // LFSR-driven lhdtrack DUT: br_enc_gray2bin 4.4 -> 46 MHz unfenced). Skipping
+  // an idle module saves work in proportion to its SITES; its seam costs in
+  // proportion to its INTERFACE WORDS. A module used once (no shared kernel)
+  // therefore keeps its fence only when sites / interface_words reaches
+  // `fence_ratio` (sim.tune.fence; 0 = always). Reused or very large bodies
+  // always keep it.
+  constexpr size_t                                kSingleBodyFenceSites = 1024;
+  const int64_t                                   single_body_ratio     = fence_ratio >= 0 ? fence_ratio : kDefaultFenceRatio;
+  absl::flat_hash_map<const hhds::Graph*, size_t> body_occurrences;
+  for (const auto& body : bodies) {
+    if (!body.path.steps().empty() && body.graph != nullptr) {
+      ++body_occurrences[body.graph];
+    }
+  }
+  std::vector<Control_trie_node> module_trie(1);
+  for (const auto& body : bodies) {
+    if (body.path.steps().empty() || body.graph == nullptr) {
+      continue;
+    }
+    const auto shape = module_shape(body.graph);
+    if (fence_ratio == kNoFences || shape.sites < 32 || (shape.height > 1 && shape.interface_words > 20)) {
+      continue;
+    }
+    // A single-occurrence body keeps its fence only when it is big for its seam.
+    const bool single = body_occurrences[body.graph] < 2 && shape.sites < kSingleBodyFenceSites;
+    const bool fenced = !single
+                        || static_cast<int64_t>(shape.sites)
+                               >= single_body_ratio * static_cast<int64_t>(std::max<uint64_t>(1, shape.interface_words));
+    if (!fenced) {
+      continue;
+    }
+    size_t trie_node = 0;
+    for (const auto& step : body.path.steps()) {
+      const auto key   = occurrence_step_key(step);
+      const auto found = module_trie[trie_node].children.find(key);
+      if (found == module_trie[trie_node].children.end()) {
+        const size_t child = module_trie.size();
+        module_trie[trie_node].children.emplace(key, child);
+        module_trie.emplace_back();
+        trie_node = child;
+      } else {
+        trie_node = found->second;
+      }
+    }
+    module_trie[trie_node].owner = trie_node;
+  }
+  std::vector<size_t> site_module_owner(plan.sites_.size(), Color_plan::invalid_index);
+  for (size_t site = 0; site < plan.sites_.size(); ++site) {
+    size_t trie_node = 0;
+    for (const auto& step : plan.sites_[site].node.path().steps()) {
+      const auto found = module_trie[trie_node].children.find(occurrence_step_key(step));
+      if (found == module_trie[trie_node].children.end()) {
+        break;
+      }
+      trie_node = found->second;
+      if (module_trie[trie_node].owner != Color_plan::invalid_index) {
+        site_module_owner[site] = module_trie[trie_node].owner;
+      }
+    }
+  }
+
   const auto later = [&](size_t lhs, size_t rhs) {
     const auto& a = plan.version_sites_[lhs];
     const auto& b = plan.version_sites_[rhs];
@@ -3889,46 +4024,60 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
   }
   // Reverse Kahn: start at outputs and pending state, and visit a fanin only
-  // after all its consumers have been scheduled. Prefer newly ready fanins in
-  // the same occurrence, with the widest dependency first. This keeps the
-  // sink's cone together without traversing any edge more than once.
-  uint64_t order          = 0;
-  size_t   preferred      = Color_plan::invalid_index;
-  uint64_t preferred_bits = 0;
-  while (preferred != Color_plan::invalid_index || !ready.empty()) {
-    size_t current = preferred;
-    preferred      = Color_plan::invalid_index;
-    preferred_bits = 0;
-    if (current == Color_plan::invalid_index) {
+  // after all its consumers have been scheduled. Fanins that become ready in
+  // the same phase and fence region go on a STACK (widest dependency on top), so
+  // the walk finishes the cone it is in before taking anything else: a
+  // depth-first, live-range-shortening order. Only when the stack is empty
+  // does the walk fall back to the global queue (phase, then occurrence rank).
+  // The structural id is just the last, deterministic tie-break. It used to
+  // order every fanin but the single widest one, so the schedule -- and the
+  // live-word pressure the coarsener below cuts on -- followed hash luck:
+  // matched_filter's evaluator split into 3 colors (1.66x slower) under one
+  // id encoding and fused into 2 under another.
+  uint64_t            order = 0;
+  std::vector<size_t> cone_stack;
+  std::vector<std::pair<size_t, uint64_t>> newly_ready;
+  while (!cone_stack.empty() || !ready.empty()) {
+    size_t current;
+    if (!cone_stack.empty()) {
+      current = cone_stack.back();
+      cone_stack.pop_back();
+    } else {
       current = ready.top();
       ready.pop();
     }
     plan.version_sites_[current].execution_order = plan.version_sites_.size() - 1 - order++;
-    std::vector<std::pair<size_t, uint64_t>> newly_ready;
+    newly_ready.clear();
     for (const auto& [successor, bits] : fanins[current]) {
       if (--remaining_consumers[successor] == 0) {
         newly_ready.emplace_back(successor, bits);
       }
     }
-    for (const auto& [successor, bits] : newly_ready) {
-      const auto& current_site   = plan.version_sites_[current];
-      const auto& successor_site = plan.version_sites_[successor];
-      const bool  same_surface   = current_site.slot == successor_site.slot
-                                   && site_path_rank[current_site.base_site] == site_path_rank[successor_site.base_site];
+    const auto& current_site = plan.version_sites_[current];
+    std::erase_if(newly_ready, [&](const std::pair<size_t, uint64_t>& entry) {
+      const auto& successor_site = plan.version_sites_[entry.first];
+      // Same phase and same fence region (site_module_owner, computed above
+      // for exactly this): the coarsener cuts a color wherever the owner
+      // changes, so the depth-first walk may cross ordinary instance
+      // boundaries -- matched_filter's tap cells -- but must not interleave
+      // two fenced modules (minion: 2.3 s vs 3.7 s when it does).
+      const bool same_surface = current_site.slot == successor_site.slot
+                                && site_module_owner[current_site.base_site] == site_module_owner[successor_site.base_site];
       if (!same_surface) {
-        ready.push(successor);
-        continue;
+        ready.push(entry.first);
       }
-      if (preferred == Color_plan::invalid_index || bits > preferred_bits
-          || (bits == preferred_bits && later(preferred, successor))) {
-        if (preferred != Color_plan::invalid_index) {
-          ready.push(preferred);
-        }
-        preferred      = successor;
-        preferred_bits = bits;
-      } else {
-        ready.push(successor);
+      return !same_surface;
+    });
+    // Push lowest priority first so the widest dependency (then the queue's
+    // own priority among equals) ends on top and is taken next.
+    std::ranges::sort(newly_ready, [&](const auto& lhs, const auto& rhs) {
+      if (lhs.second != rhs.second) {
+        return lhs.second < rhs.second;
       }
+      return later(lhs.first, rhs.first);
+    });
+    for (const auto& entry : newly_ready) {
+      cone_stack.push_back(entry.first);
     }
   }
   if (order != plan.version_sites_.size()) {
@@ -3940,7 +4089,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     for (size_t i = 0; i < remaining_consumers.size(); ++i) {
       if (remaining_consumers[i] != 0) {
         if (blocked_count < max_cycle_witnesses) {
-          blocked += (blocked.empty() ? "" : ",") + plan.version_sites_[i].structural_id;
+          blocked += (blocked.empty() ? "" : ",") + plan.version_sites_[i].structural_id.str();
         }
         ++blocked_count;
       }
@@ -4114,7 +4263,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           const auto&  site = plan.sites_[vs.base_site];
           hops += std::format("\n    {:>2}. {} op={} name={} graph={} path={} nid={} depth={} ge={} role={} version={} slot={}{}{}",
                               i,
-                              vs.structural_id.substr(0, 10),
+                              vs.structural_id.str().substr(0, 10),
                               Ntype::get_name(gu::type_op_of(site.node)),
                               gu::has_name(site.node.base_node()) ? gu::node_name_of(site.node) : std::string_view{"-"},
                               graph_name_of(site.node),
@@ -4181,7 +4330,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             }
           }
           boundaries += std::format("\n      {} graph={} instance={} depth={} output=p{}:{} slices={} support={} in={} out={}",
-                                    plan.version_sites_[idx].structural_id.substr(0, 10),
+                                    plan.version_sites_[idx].structural_id.str().substr(0, 10),
                                     graph_name_of(site.node),
                                     gu::has_name(site.node.base_node()) ? gu::node_name_of(site.node) : std::string_view{"-"},
                                     site.node.path().steps().size(),
@@ -4219,10 +4368,6 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // versions would be prohibitive.  The owner is a scheduling contract, not a
   // name heuristic: it comes solely from grouped occurrence paths and the
   // canonical __valid boundary classification above.
-  struct Control_trie_node {
-    std::map<Occurrence_step_key, size_t> children;
-    size_t                                owner = Color_plan::invalid_index;
-  };
   std::vector<Control_trie_node> control_trie(1);
   for (size_t site_index = 0; site_index < plan.sites_.size(); ++site_index) {
     if (plan.sites_[site_index].kind != Site_kind::conditional_control) {
@@ -4276,117 +4421,6 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       compact_body[site] = under_compact_loop(plan.sites_[site]);
     }
     plan.build_tune_tables(root, versions_by_base, site_path_rank, compact_body);
-  }
-
-  // Preserve useful ordinary module boundaries, rather than every wrapper.
-  // A sizeable near-leaf body or a module with a narrow interface is a cheap
-  // cut and a useful reuse unit. Tiny helpers can still fuse into their caller.
-  struct Module_shape {
-    size_t   sites           = 0;
-    size_t   height          = 0;
-    uint64_t interface_words = 0;
-  };
-  absl::flat_hash_map<hhds::Gid, Module_shape> module_shapes;
-  absl::flat_hash_set<hhds::Gid>               active_modules;
-  std::function<Module_shape(hhds::Graph*)>    module_shape = [&](hhds::Graph* graph) -> Module_shape {
-    if (const auto it = module_shapes.find(graph->get_gid()); it != module_shapes.end()) {
-      return it->second;
-    }
-    if (!active_modules.insert(graph->get_gid()).second) {
-      return {};  // recursive hierarchy is already diagnosed by discovery
-    }
-    Module_shape shape;
-    if (auto mod_io = graph->get_io()) {
-      for (const auto& port : mod_io->get_input_pin_decls()) {
-        shape.interface_words += (static_cast<uint64_t>(std::max<uint32_t>(1, port.bits)) + 63) / 64;
-      }
-      for (const auto& port : mod_io->get_output_pin_decls()) {
-        shape.interface_words += (static_cast<uint64_t>(std::max<uint32_t>(1, port.bits)) + 63) / 64;
-      }
-    }
-    for (auto node : graph->body().nodes()) {
-      if (gu::is_builtin_node(node)) {
-        continue;
-      }
-      ++shape.sites;
-      if (gu::type_op_of(node) == Ntype_op::Sub && !node.is_loop_subnode()) {
-        if (auto child = node.get_subnode_graph()) {
-          const auto nested  = module_shape(child.get());
-          shape.sites       += nested.sites;
-          shape.height       = std::max(shape.height, nested.height + 1);
-        }
-      }
-    }
-    active_modules.erase(graph->get_gid());
-    module_shapes.emplace(graph->get_gid(), shape);
-    return shape;
-  };
-  // A fence is a trade-off. It lets dirty-bit gating skip a mostly idle
-  // module (xs_alu's AluDataModule sees constant operands: 26 MHz fenced vs
-  // 11 MHz fused; dino's register file and issue unit idle once the program
-  // spins: 3.36 vs 2.64 MHz; XS RenameTable's tables under a read-only driver:
-  // 61 vs 39 kHz), but every value crossing it is a stored, change-tested,
-  // dirty-marked slot, and the interval contraction below cuts a new color at
-  // every owner switch -- pure cost when the module toggles every cycle (an
-  // LFSR-driven lhdtrack DUT: br_enc_gray2bin 4.4 -> 46 MHz unfenced). Skipping
-  // an idle module saves work in proportion to its SITES; its seam costs in
-  // proportion to its INTERFACE WORDS. A module used once (no shared kernel)
-  // therefore keeps its fence only when sites / interface_words reaches
-  // `fence_ratio` (sim.tune.fence; 0 = always). Reused or very large bodies
-  // always keep it.
-  constexpr size_t                                kSingleBodyFenceSites = 1024;
-  const int64_t                                   single_body_ratio     = fence_ratio >= 0 ? fence_ratio : kDefaultFenceRatio;
-  absl::flat_hash_map<const hhds::Graph*, size_t> body_occurrences;
-  for (const auto& body : bodies) {
-    if (!body.path.steps().empty() && body.graph != nullptr) {
-      ++body_occurrences[body.graph];
-    }
-  }
-  std::vector<Control_trie_node> module_trie(1);
-  for (const auto& body : bodies) {
-    if (body.path.steps().empty() || body.graph == nullptr) {
-      continue;
-    }
-    const auto shape = module_shape(body.graph);
-    if (fence_ratio == kNoFences || shape.sites < 32 || (shape.height > 1 && shape.interface_words > 20)) {
-      continue;
-    }
-    // A single-occurrence body keeps its fence only when it is big for its seam.
-    const bool single = body_occurrences[body.graph] < 2 && shape.sites < kSingleBodyFenceSites;
-    const bool fenced = !single
-                        || static_cast<int64_t>(shape.sites)
-                               >= single_body_ratio * static_cast<int64_t>(std::max<uint64_t>(1, shape.interface_words));
-    if (!fenced) {
-      continue;
-    }
-    size_t trie_node = 0;
-    for (const auto& step : body.path.steps()) {
-      const auto key   = occurrence_step_key(step);
-      const auto found = module_trie[trie_node].children.find(key);
-      if (found == module_trie[trie_node].children.end()) {
-        const size_t child = module_trie.size();
-        module_trie[trie_node].children.emplace(key, child);
-        module_trie.emplace_back();
-        trie_node = child;
-      } else {
-        trie_node = found->second;
-      }
-    }
-    module_trie[trie_node].owner = trie_node;
-  }
-  std::vector<size_t> site_module_owner(plan.sites_.size(), Color_plan::invalid_index);
-  for (size_t site = 0; site < plan.sites_.size(); ++site) {
-    size_t trie_node = 0;
-    for (const auto& step : plan.sites_[site].node.path().steps()) {
-      const auto found = module_trie[trie_node].children.find(occurrence_step_key(step));
-      if (found == module_trie[trie_node].children.end()) {
-        break;
-      }
-      trie_node = found->second;
-      if (module_trie[trie_node].owner != Color_plan::invalid_index) {
-        site_module_owner[site] = module_trie[trie_node].owner;
-      }
-    }
   }
 
   // Contract consecutive intervals of the reverse topological order. A path
@@ -4618,26 +4652,28 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       // slot and commit-flag numbering must not follow changing content hashes.
       return std::tie(plan.version_sites_[a].structural_id, a) < std::tie(plan.version_sites_[b].structural_id, b);
     });
-    std::string signature = std::string(execution_slot_name(plan.version_sites_[color_members.front()].slot));
+    Id_hash signature("color");
+    signature.u(static_cast<uint64_t>(plan.version_sites_[color_members.front()].slot));
     for (const size_t member : identity_members) {
-      signature += ":" + plan.version_sites_[member].structural_id;
+      signature.id(plan.version_sites_[member].structural_id);
     }
     // Allocate activation storage by the interval's terminal value, not by
     // its whole implementation. An internal cone edit must not move the dirty
     // bit marked by unchanged state commits. Semantic membership above still
     // controls all kernel reuse. Terminal versions belong to only one color.
     const auto&   terminal          = plan.version_sites_[color_members.back()];
-    const auto    storage_signature = std::format("{}:{}:{}:{}:{}:{}",
-                                                  execution_slot_name(terminal.slot),
-                                                  plan.sites_[terminal.base_site].storage_id,
-                                                  static_cast<unsigned>(terminal.version),
-                                                  static_cast<unsigned>(terminal.role),
-                                                  terminal.output_port,
-                                                  terminal.latch_input ? terminal.structural_id : std::string{});
     Pending_color pending_color;
-    pending_color.color.storage_id       = stable_id(storage_signature);
+    pending_color.color.storage_id       = Id_hash("color-storage")
+                                         .u(static_cast<uint64_t>(terminal.slot))
+                                         .id(plan.sites_[terminal.base_site].storage_id)
+                                         .u(static_cast<uint64_t>(terminal.version))
+                                         .u(static_cast<uint64_t>(terminal.role))
+                                         .u(terminal.output_port)
+                                         .u(terminal.latch_input ? 1 : 0)
+                                         .id(terminal.latch_input ? terminal.structural_id : Plan_id{})
+                                         .finish();
     pending_color.root                   = root_index;
-    pending_color.color.structural_id    = stable_id(signature);
+    pending_color.color.structural_id    = signature.finish();
     pending_color.color.slot             = plan.version_sites_[color_members.front()].slot;
     pending_color.color.execution_order  = plan.version_sites_[root_index].execution_order;
     pending_color.color.members          = std::move(color_members);
@@ -4678,8 +4714,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   const auto color_of_version = [&](size_t version) {
     return version == Color_plan::invalid_index ? Color_plan::invalid_index : root_to_color[root_of(version)];
   };
-  std::map<std::string, size_t> slot_index;
-  const auto                    ensure_slot = [&](std::string   signature,
+  // A state's natural current-value slot: spelled once, because the state's
+  // own publication and every natural-view reader must name the same slot.
+  const auto current_slot_id = [](const Plan_id& storage, uint64_t port) {
+    return Id_hash("current").id(storage).u(port).finish();
+  };
+  absl::flat_hash_map<Plan_id, size_t> slot_index;
+  const auto                           ensure_slot = [&](const Plan_id& signature,
                                                   Boundary_kind kind,
                                                   State_version version,
                                                   size_t        owner_site,
@@ -4691,9 +4732,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                                   bool          unsign) {
     if (const auto it = slot_index.find(signature); it != slot_index.end()) {
       auto& slot = plan.boundary_slots_[it->second];
-      if (slot.kind != kind || slot.owner_site != owner_site || slot.producer_version != producer_version_index
-          || slot.producer_color != producer_color || slot.producer_port != producer_port || slot.public_port != public_port
-          || slot.width != width || slot.unsign != unsign) {
+      // Every field a signature encodes is compared, so a 128-bit id collision
+      // is a reported error, never a silent merge of two slots.
+      if (slot.kind != kind || slot.version != version || slot.owner_site != owner_site
+          || slot.producer_version != producer_version_index || slot.producer_color != producer_color
+          || slot.producer_port != producer_port || slot.public_port != public_port || slot.width != width
+          || slot.unsign != unsign) {
         plan.summary_.boundary_one_writer = false;
         plan.summary_.versioning_complete = false;
         plan.errors_.push_back(
@@ -4721,7 +4765,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       return it->second;
     }
     Boundary_slot slot;
-    slot.structural_id    = stable_id(signature);
+    slot.structural_id    = signature;
     slot.kind             = kind;
     slot.version          = version;
     slot.owner_site       = owner_site;
@@ -4733,7 +4777,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     slot.unsign           = unsign;
     const size_t result   = plan.boundary_slots_.size();
     plan.boundary_slots_.push_back(std::move(slot));
-    slot_index.emplace(std::move(signature), result);
+    slot_index.emplace(signature, result);
     return result;
   };
   const auto add_consumer = [&](size_t        slot_index_value,
@@ -4783,7 +4827,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       }
     }
     for (const auto& output : state_outputs) {
-      const auto   signature    = std::format("{}:current:p{}", plan.sites_[base].storage_id, output.get_port_id());
+      const auto   signature    = current_slot_id(plan.sites_[base].storage_id, output.get_port_id());
       const size_t update       = state_updates[base];
       const size_t current_slot = ensure_slot(signature,
                                               Boundary_kind::state_current,
@@ -4810,12 +4854,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         if (plan.version_sites_[pending_update].role != Version_role::state_update) {
           continue;
         }
-        const auto pending_signature = latch_settle[base]
-                                           ? std::format("{}:pending:{}:p{}",
-                                                         plan.sites_[base].storage_id,
-                                                         state_version_name(plan.version_sites_[pending_update].version),
-                                                         output.get_port_id())
-                                           : std::format("{}:pending:p{}", plan.sites_[base].storage_id, output.get_port_id());
+        const auto pending_signature
+            = latch_settle[base] ? Id_hash("pending-version")
+                                       .id(plan.sites_[base].storage_id)
+                                       .u(static_cast<uint64_t>(plan.version_sites_[pending_update].version))
+                                       .u(output.get_port_id())
+                                       .finish()
+                                 : Id_hash("pending").id(plan.sites_[base].storage_id).u(output.get_port_id()).finish();
         (void)ensure_slot(pending_signature,
                           Boundary_kind::state_pending,
                           plan.version_sites_[pending_update].version,
@@ -4835,7 +4880,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     size_t       source_slot    = Color_plan::invalid_index;
     size_t       producer_color = Color_plan::invalid_index;
     if (!use.literal.empty()) {
-      const auto signature                      = std::format("literal:{}:b{}:u{}", use.literal, use.width, use.unsign);
+      const auto signature = Id_hash("literal-slot").text(use.literal).u(use.width).u(use.unsign ? 1 : 0).finish();
       source_slot                               = ensure_slot(signature,
                                                               Boundary_kind::color_value,
                                                               State_version::pre_rise,
@@ -4846,14 +4891,24 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                                               0,
                                                               use.width,
                                                               use.unsign);
-      plan.boundary_slots_[source_slot].literal = use.literal;
+      auto& literal_slot = plan.boundary_slots_[source_slot];
+      if (!literal_slot.literal.empty() && literal_slot.literal != use.literal) {
+        plan.summary_.boundary_one_writer = false;
+        plan.summary_.versioning_complete = false;
+        plan.errors_.push_back(std::format("direct-ABI literal slot {} conflicts: '{}' vs '{}'",
+                                           literal_slot.structural_id,
+                                           literal_slot.literal,
+                                           use.literal));
+      }
+      literal_slot.literal = use.literal;
     } else if (use.top_input) {
-      const auto signature = std::format("top-input:p{}:b{}:u{}:x{}-{}",
-                                         use.producer_port,
-                                         use.width,
-                                         use.unsign,
-                                         use.producer_extract_lo,
-                                         use.producer_extract_hi);
+      const auto signature = Id_hash("top-input-slot")
+                                 .u(use.producer_port)
+                                 .u(use.width)
+                                 .u(use.unsign ? 1 : 0)
+                                 .u(use.producer_extract_lo)
+                                 .u(use.producer_extract_hi)
+                                 .finish();
       source_slot          = ensure_slot(signature,
                                          Boundary_kind::top_input,
                                          State_version::pre_rise,
@@ -4874,15 +4929,16 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         const bool physical_unsign = gu::is_unsign(physical_pin);
         const bool natural_view
             = !use.preextracted && use.producer_shift == 0 && use.width == physical_width && use.unsign == physical_unsign;
-        const auto   signature = natural_view ? std::format("{}:current:p{}", producer_base.storage_id, use.producer_port)
-                                              : std::format("{}:current-view:p{}:shift{}:b{}:u{}:x{}-{}",
-                                                            producer_base.storage_id,
-                                                            use.producer_port,
-                                                            use.producer_shift,
-                                                            use.width,
-                                                            use.unsign,
-                                                            use.producer_extract_lo,
-                                                            use.producer_extract_hi);
+        const auto   signature = natural_view ? current_slot_id(producer_base.storage_id, use.producer_port)
+                                              : Id_hash("current-view")
+                                                  .id(producer_base.storage_id)
+                                                  .u(use.producer_port)
+                                                  .u(use.producer_shift)
+                                                  .u(use.width)
+                                                  .u(use.unsign ? 1 : 0)
+                                                  .u(use.producer_extract_lo)
+                                                  .u(use.producer_extract_hi)
+                                                  .finish();
         const size_t update    = state_updates[producer_site.base_site];
         source_slot            = ensure_slot(signature,
                                              Boundary_kind::state_current,
@@ -4896,18 +4952,19 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                              use.unsign);
         plan.boundary_slots_[source_slot].producer_shift = use.producer_shift;
       } else if (producer_color != consumer_color) {
-        const auto storage   = producer_site.latch_input ? producer_base.storage_id + ":latch-input:" + producer_site.structural_id
-                                                         : producer_base.storage_id;
-        const auto signature = std::format("{}:{}:{}:value:p{}:shift{}:b{}:u{}:x{}-{}",
-                                           storage,
-                                           state_version_name(producer_site.version),
-                                           version_role_name(producer_site.role),
-                                           use.producer_port,
-                                           use.producer_shift,
-                                           use.width,
-                                           use.unsign,
-                                           use.producer_extract_lo,
-                                           use.producer_extract_hi);
+        const auto signature = Id_hash("value")
+                                   .id(producer_base.storage_id)
+                                   .u(producer_site.latch_input ? 1 : 0)
+                                   .id(producer_site.latch_input ? producer_site.structural_id : Plan_id{})
+                                   .u(static_cast<uint64_t>(producer_site.version))
+                                   .u(static_cast<uint64_t>(producer_site.role))
+                                   .u(use.producer_port)
+                                   .u(use.producer_shift)
+                                   .u(use.width)
+                                   .u(use.unsign ? 1 : 0)
+                                   .u(use.producer_extract_lo)
+                                   .u(use.producer_extract_hi)
+                                   .finish();
         source_slot          = ensure_slot(signature,
                                            Boundary_kind::color_value,
                                            producer_site.version,
@@ -4945,11 +5002,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   }
   for (const auto& output : output_uses) {
     const auto   kind      = output.top ? Boundary_kind::top_output : Boundary_kind::observation_output;
-    const auto   signature = output.top ? std::format("top-output:p{}:{}", output.public_port, state_version_name(output.version))
-                                        : std::format("{}:observation-output:p{}:{}",
-                                                      plan.sites_[output.body_anchor].storage_id,
-                                                      output.public_port,
-                                                      state_version_name(output.version));
+    const auto   signature = output.top ? Id_hash("top-output").u(output.public_port).u(static_cast<uint64_t>(output.version)).finish()
+                                        : Id_hash("observation-output")
+                                            .id(plan.sites_[output.body_anchor].storage_id)
+                                            .u(output.public_port)
+                                            .u(static_cast<uint64_t>(output.version))
+                                            .finish();
     const size_t slot      = ensure_slot(signature,
                                          kind,
                                          output.version,
@@ -4968,10 +5026,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     plan.boundary_slots_[slot].literal = output.literal;
   }
   for (const auto& input : input_uses) {
-    const auto   signature = std::format("{}:observation-input:p{}:{}",
-                                         plan.sites_[input.body_anchor].storage_id,
-                                         input.public_port,
-                                         state_version_name(input.version));
+    const auto   signature = Id_hash("observation-input")
+                                   .id(plan.sites_[input.body_anchor].storage_id)
+                                   .u(input.public_port)
+                                   .u(static_cast<uint64_t>(input.version))
+                                   .finish();
     const size_t slot      = ensure_slot(signature,
                                          Boundary_kind::observation_input,
                                          input.version,
@@ -5147,9 +5206,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         return std::tie(plan.version_sites_[lhs].execution_order, plan.version_sites_[lhs].structural_id)
                < std::tie(plan.version_sites_[rhs].execution_order, plan.version_sites_[rhs].structural_id);
       });
-      std::string signature = stable_id("unique:" + color.structural_id);
+      std::string signature = Id_hash("unique").id(color.structural_id).finish().str();
       while (!used_kernel_signatures.insert(signature).second) {
-        signature = stable_id("collision:" + signature + ":" + color.structural_id);
+        signature = Id_hash("collision").text(signature).id(color.structural_id).finish().str();
       }
       plan.kernel_classes_.push_back(Color_plan::Kernel_class{std::move(signature), color_index, {color_index}});
       continue;
@@ -5250,13 +5309,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       plan.kernel_classes_[it->second].colors.push_back(color_index);
       continue;
     }
-    std::string signature = stable_id(serialization);
+    std::string signature = Id_hash("kernel").text(serialization).finish().str();
     if (!used_kernel_signatures.insert(signature).second) {
       // A genuine 128-bit hash collision receives a distinct deterministic ID;
       // it is never admitted into the existing exact-serialization class.
-      signature = stable_id("collision:" + signature + ":" + serialization);
+      signature = Id_hash("collision").text(signature).text(serialization).finish().str();
       while (!used_kernel_signatures.insert(signature).second) {
-        signature = stable_id("collision:" + signature + ":" + serialization);
+        signature = Id_hash("collision").text(signature).text(serialization).finish().str();
       }
     }
     const size_t kernel_index = plan.kernel_classes_.size();
@@ -5980,7 +6039,7 @@ std::string Color_plan::report() const {
 
     std::vector<std::string> version_sites;
     version_sites.reserve(version_sites_.size());
-    std::vector<std::string_view> version_color(version_sites_.size());
+    std::vector<Plan_id> version_color(version_sites_.size());
     for (const auto& color : colors_) {
       for (const size_t member : color.members) {
         version_color[member] = color.structural_id;
@@ -5992,14 +6051,14 @@ std::string Color_plan::report() const {
           std::format("version-site {} base={} control-owner={} output-port={} version={} role={} slot={} order={} color={}\n",
                       site.structural_id,
                       sites_[site.base_site].structural_id,
-                      site.control_owner == Color_plan::invalid_index ? std::string_view{"unconditional"}
-                                                                      : std::string_view{sites_[site.control_owner].structural_id},
+                      site.control_owner == Color_plan::invalid_index ? std::string{"unconditional"}
+                                                                      : sites_[site.control_owner].structural_id.str(),
                       site.output_port,
                       state_version_name(site.version),
                       version_role_name(site.role),
                       execution_slot_name(site.slot),
                       site.execution_order,
-                      version_color[site_index]));
+                      version_color[site_index].empty() ? std::string{} : version_color[site_index].str()));
     }
     std::ranges::sort(version_sites);
     for (const auto& site : version_sites) {
@@ -6028,7 +6087,7 @@ std::string Color_plan::report() const {
                                      color.execution_order,
                                      color.gate_equivalents);
       for (size_t i = 0; i < color.members.size(); ++i) {
-        line += (i == 0 ? "" : ",") + version_sites_[color.members[i]].structural_id;
+        line += (i == 0 ? "" : ",") + version_sites_[color.members[i]].structural_id.str();
       }
       colors.push_back(std::move(line) + "\n");
     }
@@ -6042,7 +6101,7 @@ std::string Color_plan::report() const {
                             kernel.signature,
                             colors_[kernel.representative].structural_id);
       for (size_t i = 0; i < kernel.colors.size(); ++i) {
-        result += (i == 0 ? "" : ",") + colors_[kernel.colors[i]].structural_id;
+        result += (i == 0 ? "" : ",") + colors_[kernel.colors[i]].structural_id.str();
       }
       result += "\n";
     }
@@ -6061,14 +6120,13 @@ std::string Color_plan::report() const {
     }
 
     for (const auto& slot : boundary_slots_) {
-      const auto owner
-          = slot.owner_site == invalid_index ? std::string_view("-") : std::string_view(sites_[slot.owner_site].structural_id);
+      const auto owner = slot.owner_site == invalid_index ? std::string("-") : sites_[slot.owner_site].structural_id.str();
       const auto producer_version  = slot.producer_version == invalid_index
-                                         ? std::string_view("-")
-                                         : std::string_view(version_sites_[slot.producer_version].structural_id);
+                                         ? std::string("-")
+                                         : version_sites_[slot.producer_version].structural_id.str();
       const auto producer_color    = slot.producer_color == invalid_index
-                                         ? std::string_view("-")
-                                         : std::string_view(colors_[slot.producer_color].structural_id);
+                                         ? std::string("-")
+                                         : colors_[slot.producer_color].structural_id.str();
       result                      += std::format(
           "boundary-slot {} kind={} version={} owner={} writer-version={} writer-color={} "
           "producer-port={} producer-shift={} producer-extract=[{},{}) public-port={} bits={} unsign={} consumers=",

@@ -1,8 +1,12 @@
 /*
 :name: loop_ring_hidden_from_planner
 :type: simulation
-:expect_instances: u_loop*=3
+:expect_instances: u_loop*=5
 */
+// pass.legalize (acyclic.hpp) breaks the ring through a rolled loop -- a cycle
+// only while the instance is atomic -- by splitting it into `__ring<ports>` /
+// `__free` halves over the same domain (never unrolled), so each split loop
+// counts twice in `u_loop*`.
 
 // Siblings of loop_ring_through_own_carry.prp (lhdtrack suggestions 1.3a-x):
 // a `wire` ring that closes through a ROLLED loop's own output. The roll
@@ -19,7 +23,7 @@
 //   error[internal]: Subnode_group::validate: carry input needs one self-edge
 //   and one external initial driver
 // The folds now keep that buffer (graph_util::closes_loop_self_edge).
-// `:expect_instances: u_loop*=3` keeps the loops rolled (lrh_later's, the one
+// `:expect_instances:` keeps the loops rolled (lrh_later's, the one
 // in lrh_lanes' own module, and its copy inlined into lrh_call), so the fixture
 // keeps exercising that path. `::[timecheck=false]`: see
 // loop_ring_nested_outer_index.prp. Same values as `--set compile.unroll=true`.

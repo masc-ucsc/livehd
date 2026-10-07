@@ -59,6 +59,12 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
 // that scheduler. Returns the number of instances inlined.
 int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_callees = nullptr);
 
+// Resolve the constant bit slices on a word-level cycle INSIDE `g` (no Sub on
+// it): each slice read is rewired to the operand that drives those bits, one
+// splitter round per freshly computed residual cycle. Leaves a true
+// combinational loop in place. Returns the number of rewired reads.
+int split_packed_cycle_slices(hhds::Graph* g);
+
 // Repair packed word-level cycles in a simulator-private graph. This may
 // inline pure-combinational instances that participate in a multi-instance
 // ring, then resolves only the bit slices still on the recomputed residual

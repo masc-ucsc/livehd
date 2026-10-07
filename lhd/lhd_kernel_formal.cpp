@@ -43,6 +43,7 @@
 #include "semdiff.hpp"
 #include "solve_stats.hpp"
 #include "split_selfref.hpp"  // //graph — repair a self-ref exposed by flattening a comb instance
+#include "acyclic.hpp"        // //pass/legalize — the acyclic repair for lg: sides that skipped compile
 #include "str_tools.hpp"
 #include "taskflow/taskflow.hpp"
 
@@ -4613,24 +4614,27 @@ void lec_command(Options& opts, Result& res) {
       return std::find(o.collapse.begin(), o.collapse.end(), full) != o.collapse.end()
              || std::find(o.collapse.begin(), o.collapse.end(), ent) != o.collapse.end();
     };
-    // Give lec the same false-loop preparation inou.cgen.verilog runs. A packed
-    // self-reference whose feedback threads through a PURE-COMB instance is
-    // invisible to lnast.tolg's per-wire splitter (a Sub is a scheduling
-    // boundary there), but pass/lec/encode.cpp INLINES a combinational callee,
-    // so the encoder does see the cycle and refuses the whole def ("operand has
-    // no encodable driver (combinational cycle?)") -- UNKNOWN on a design that
-    // is acyclic per bit and perfectly provable once the instance is dissolved.
-    // flatten_false_loop_subs also repairs the word-level cycle it exposes.
-    //
-    // Only the two TOPS are prepared: a `--lib` cell model in sub_lib is SHARED
-    // by both sides, so inlining into one would be a cross-side edit. Both steps
-    // are no-ops unless a stateless Sub's output really feeds back into one of
-    // its own inputs, so this costs nothing on an ordinary design.
-    for (auto* prep : {ref_g.get(), impl_g.get()}) {
-      if (prep != nullptr) {
-        if (const int nf = livehd::graph_util::flatten_false_loop_subs(prep); nf > 0) {
-          std::print("lec: dissolved {} false comb-loop instance(s) in '{}' before encoding\n", nf, prep->get_name());
+    // The same acyclic repair pass.legalize runs at the end of every compile
+    // (todo/livehd/legalize_acyclic.md): a compiled side is already acyclic and
+    // this only scans it, but an lg: side may come from a producer that never
+    // legalized (`lhd pass abc|usyn|partition --emit-dir lg:`, synth's net/, an
+    // older binary). Each side's OWN defs only: a `--lib` cell model in sub_lib
+    // is shared by both sides, so repairing it would be a cross-side edit.
+    for (auto* side_var : {&ref_var, &impl_var}) {
+      std::vector<std::shared_ptr<hhds::Graph>> own;
+      for (const auto& sp : side_var->graphs) {
+        if (sp && !sub_lib.contains(sp->get_gid())) {
+          own.push_back(sp);
         }
+      }
+      livehd::legalize::Split_state split;
+      const auto                    fixed = livehd::legalize::make_acyclic(own, split);
+      for (const auto& half : split.added) {
+        side_var->add(half);
+      }
+      if (fixed.instances_inlined + fixed.loops_split + fixed.slices_rewired > 0) {
+        std::print("lec: acyclic repair of the {} side: inlined {} instance(s), split {} loop(s), rewired {} slice(s)\n",
+                   side_var == &ref_var ? "ref" : "impl", fixed.instances_inlined, fixed.loops_split, fixed.slices_rewired);
       }
     }
 

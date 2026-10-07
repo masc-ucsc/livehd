@@ -9,6 +9,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "acyclic.hpp"
 #include "attr_carry.hpp"
 #include "attrs.hpp"
 #include "cell.hpp"
@@ -450,8 +451,11 @@ void cone_of_output(hhds::Graph* body, hhds::Port_id out_port, Half& half) {
       continue;
     }
     for (auto e_sink : n.inp_sorted_pins()) {
-      auto e_drv = e_sink.get_driver_pin();
-      work.push_back(e_drv);
+      // every driver: a nested compact loop's carry-in holds its seed AND its
+      // self-edge, and the seed's body input must be read
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        work.push_back(e_drv);
+      }
     }
   }
 }
@@ -491,6 +495,245 @@ void refuse(hhds::Graph* host, std::string_view code, std::string_view why) {
 }
 
 }  // namespace
+
+// Split the rolled loop `sub` in `host` into two rolled loops over the SAME
+// domain: `a` and `b` partition its carries (carry_in/carry_out filled). Each
+// half owns the backward cone of its carry outputs; refused (false, loop left
+// whole, with a progress diagnostic) when the cones share logic, a half reads
+// the other's carry, or the body has a non-carry output. The halves are named
+// `<body><suffix_a>` / `<body><suffix_b>`, stable across runs.
+static bool split_loop_into_halves(hhds::Graph* host, hhds::GraphLibrary& lib, const hhds::Node_class& sub, Half a, Half b,
+                                 std::string_view suffix_a, std::string_view suffix_b, Split_state* state) {
+  auto body = sub.get_subnode_graph();
+  auto desc = sub.subnode_loop();
+  if (!body || !body->get_io() || !desc.has_value()) {
+    return false;
+  }
+
+  // A callee output that is not a carry (a per-lane "final" the host reads,
+  // the descriptor's next_active_output) has no half to live in: each half
+  // declares only its own carry outputs.
+  absl::flat_hash_set<hhds::Port_id> carry_outs(a.carry_out.begin(), a.carry_out.end());
+  carry_outs.insert(b.carry_out.begin(), b.carry_out.end());
+  bool extra_output = desc->next_active_output.has_value();
+  for (const auto& o : body->get_io()->get_output_pin_decls()) {
+    extra_output = extra_output || !carry_outs.contains(o.port_id);
+  }
+  if (extra_output) {
+    refuse(host, "loop-split-extra-output", "its body has an output that is not a carry");
+    return false;
+  }
+
+  // Each half owns the backward cone of ITS carry outputs. Computed here for
+  // both sides rather than reusing `cls.induction_nodes`, which only covers
+  // carries classified `induction` -- an associative reduction is on the
+  // recurrence side too and its cone must come with it.
+  for (const auto& port : b.carry_out) {
+    cone_of_output(body.get(), port, b);
+  }
+  for (const auto& port : a.carry_out) {
+    cone_of_output(body.get(), port, a);
+  }
+  // v1: shared logic would have to be duplicated into both halves. Refuse and
+  // leave the loop whole -- correct, just not yet optimized.
+  bool shared = false;
+  for (const auto& n : a.nodes) {
+    shared = shared || b.nodes.contains(n);
+  }
+  if (shared) {
+    refuse(host, "loop-split-shared", "its two halves' cones share logic");
+    return false;
+  }
+  // A half self-wires only ITS carries; a cone that reads the other half's
+  // carry-in port would read that carry's seed in every lane instead of the
+  // running value. The classifier already sends a carry whose position or
+  // value depends on ANY carry to the recurrence side, so this is the
+  // belt-and-braces check on the split itself.
+  const absl::flat_hash_set<hhds::Port_id> a_in(a.carry_in.begin(), a.carry_in.end());
+  const absl::flat_hash_set<hhds::Port_id> b_in(b.carry_in.begin(), b.carry_in.end());
+  bool                                     crossed = false;
+  for (const auto port : a.reads_inputs) {
+    crossed = crossed || b_in.contains(port);
+  }
+  for (const auto port : b.reads_inputs) {
+    crossed = crossed || a_in.contains(port);
+  }
+  if (crossed) {
+    refuse(host, "loop-split-cross-carry", "one half reads the other half's carry");
+    return false;
+  }
+
+  // Derived, STABLE names: abc_incr keys its region cache on the module name,
+  // so a name that reshuffles when an unrelated loop appears would invalidate
+  // entries that did not change. One pair per body per run: two loops may
+  // share one body def.
+  const auto                   body_gid = body->get_gid();
+  std::shared_ptr<hhds::Graph> a_body;
+  std::shared_ptr<hhds::Graph> b_body;
+  if (auto it = state->halves.find(std::make_pair(body_gid, std::string{suffix_a})); it != state->halves.end()) {
+    a_body = it->second.first;
+    b_body = it->second.second;
+  } else {
+    const std::string base = std::string{body->get_name()};
+    a_body               = make_half(lib, body.get(), a, base + std::string{suffix_a}, *state);
+    b_body               = make_half(lib, body.get(), b, base + std::string{suffix_b}, *state);
+    if (a_body && b_body) {
+      state->halves.emplace(std::make_pair(body_gid, std::string{suffix_a}), std::make_pair(a_body, b_body));
+    }
+  }
+  if (!a_body || !b_body) {
+    return false;
+  }
+
+  auto a_sub = gu::create_typed_node(*host, Ntype_op::Sub);
+  auto b_sub = gu::create_typed_node(*host, Ntype_op::Sub);
+  a_sub.set_subnode(a_body->get_io(), *desc);
+  b_sub.set_subnode(b_body->get_io(), *desc);
+  gu::carry_node_attrs(sub, a_sub);
+  gu::carry_node_attrs(sub, b_sub);
+  gu::carry_srcid(sub, a_sub);
+  gu::carry_srcid(sub, b_sub);
+  // Two instances must not share one instance name: semdiff keys its cut
+  // points and hier LEC its pairing on the hierarchical name.
+  if (auto nm = sub.attr(hhds::attrs::name); nm.has()) {
+    a_sub.attr(hhds::attrs::name).set(std::string{nm.get()} + std::string{suffix_a});
+    b_sub.attr(hhds::attrs::name).set(std::string{nm.get()} + std::string{suffix_b});
+  }
+
+  // External inputs (invariants, index, activation, every carry's seed) feed
+  // BOTH halves; a carry self-edge is re-created per half below. The other
+  // half's seed lands on a port that half never self-wires, which makes it a
+  // plain (unused) input there.
+  //
+  // Only the inputs a half USES are connected (its cone's reads, its own carry
+  // seeds, the domain's index/activation): an unused-but-connected input is
+  // harmless to evaluate, but it would make the half depend on that value when
+  // the instance is treated atomically -- exactly the false ring a split
+  // through acyclic.hpp exists to remove. Port ids are unchanged either way.
+  const auto uses = [&](const Half& h, hhds::Port_id pid) {
+    return h.reads_inputs.contains(pid) || std::ranges::find(h.carry_in, pid) != h.carry_in.end()
+           || (desc->index_input && *desc->index_input == pid) || (desc->activation_input && *desc->activation_input == pid);
+  };
+  for (auto e_sink : sub.inp_pins_snapshot()) {
+    for (auto e_drv : e_sink.get_driver_pins()) {
+      if (e_drv.get_master_node() == sub) {
+        continue;  // the old self-edge
+      }
+      const auto pid = e_sink.get_port_id();
+      if (uses(a, pid)) {
+        auto ps = a_sub.create_sink_pin(pid);
+        gu::carry_pin_attrs(e_sink, ps);
+        e_drv.connect_sink(ps);
+      }
+      if (uses(b, pid)) {
+        auto is = b_sub.create_sink_pin(pid);
+        gu::carry_pin_attrs(e_sink, is);
+        e_drv.connect_sink(is);
+      }
+    }
+  }
+  const auto self_wire = [](const hhds::Node_class& n, const Half& h) {
+    for (size_t i = 0; i < h.carry_in.size(); ++i) {
+      n.create_driver_pin(h.carry_out[i]).connect_sink(n.create_sink_pin(h.carry_in[i]));
+    }
+  };
+  self_wire(a_sub, a);
+  self_wire(b_sub, b);
+
+  // External readers move to whichever half now owns that output port. The
+  // new edges are added only AFTER the old Sub is gone: a reader may be the
+  // carry seed of a later loop that hhds has already validated, and its debug
+  // hook re-validates that loop on every edge change -- with both drivers
+  // present for a moment it would see two seeds and throw. delete_node drops
+  // the old edges unhooked, so the one checked mutation leaves exactly one.
+  struct Rewire {
+    hhds::Pin_class driver;
+    hhds::Pin_class sink;
+  };
+  std::vector<hhds::Edge_class> readers;
+  for (const auto& e : sub.out_edges()) {
+    if (e.sink.get_master_node() != sub) {
+      readers.push_back(e);
+    }
+  }
+  const absl::flat_hash_set<hhds::Port_id> a_out(a.carry_out.begin(), a.carry_out.end());
+  std::vector<Rewire>                      rewires;
+  rewires.reserve(readers.size());
+  for (const auto& e : readers) {
+    const auto pid   = e.driver.get_port_id();
+    auto       owner = a_out.contains(pid) ? a_sub : b_sub;
+    auto       d     = owner.create_driver_pin(pid);
+    gu::carry_pin_attrs(e.driver, d);
+    rewires.push_back(Rewire{.driver = d, .sink = e.sink});
+  }
+  sub.del_node();
+  for (const auto& r : rewires) {
+    r.driver.connect_sink(r.sink);
+  }
+  state->split_bodies.push_back(body_gid);
+  return true;
+}
+
+bool split_loop_by_ring(hhds::Graph* host, hhds::GraphLibrary& lib, const hhds::Node_class& sub,
+                        const absl::flat_hash_set<hhds::Port_id>& ring_inputs, Split_state* state) {
+  if (host == nullptr || sub.is_invalid() || !sub.is_loop_subnode()) {
+    return false;
+  }
+  auto body = sub.get_subnode_graph();
+  auto cls  = gu::classify_loop(sub);
+  if (!body || !cls.valid) {
+    return false;
+  }
+  // A carry is on the ring side when its cone reads a ring input, and -- to a
+  // fixpoint -- when it reads a ring carry's running value or a ring carry
+  // reads its own: two carries that read each other must share a half.
+  std::vector<absl::flat_hash_set<hhds::Port_id>> reads(cls.carries.size());
+  for (size_t i = 0; i < cls.carries.size(); ++i) {
+    Half probe;
+    cone_of_output(body.get(), cls.carries[i].out_port, probe);
+    reads[i] = std::move(probe.reads_inputs);
+  }
+  std::vector<bool> on_ring(cls.carries.size(), false);
+  for (size_t i = 0; i < cls.carries.size(); ++i) {
+    on_ring[i] = ring_inputs.contains(cls.carries[i].in_port);
+    for (const auto port : reads[i]) {
+      on_ring[i] = on_ring[i] || ring_inputs.contains(port);
+    }
+  }
+  for (bool grew = true; grew;) {
+    grew = false;
+    for (size_t i = 0; i < cls.carries.size(); ++i) {
+      for (size_t j = 0; j < cls.carries.size() && !on_ring[i]; ++j) {
+        if (on_ring[j] && (reads[i].contains(cls.carries[j].in_port) || reads[j].contains(cls.carries[i].in_port))) {
+          on_ring[i] = true;
+          grew       = true;
+        }
+      }
+    }
+  }
+  Half ring;
+  Half free;
+  for (size_t i = 0; i < cls.carries.size(); ++i) {
+    auto& side = on_ring[i] ? ring : free;
+    side.carry_in.push_back(cls.carries[i].in_port);
+    side.carry_out.push_back(cls.carries[i].out_port);
+  }
+  if (ring.carry_out.empty() || free.carry_out.empty()) {
+    return false;  // every carry is on the ring side (or none is): no split breaks it
+  }
+  // The partition depends on THIS instance's ring, not on the body alone, so
+  // it is part of the half names (and the Split_state cache key): two
+  // instances of one body with different rings get different halves. Port ids
+  // are stable, so the names are too.
+  auto ring_ports = ring.carry_out;
+  std::ranges::sort(ring_ports);
+  std::string suffix = "__ring";
+  for (const auto port : ring_ports) {
+    suffix += "_" + std::to_string(port);
+  }
+  Split_state local;
+  return split_loop_into_halves(host, lib, sub, std::move(ring), std::move(free), suffix, suffix + "__free", state ? state : &local);
+}
 
 int split_loops(hhds::Graph* host, hhds::GraphLibrary& lib, Split_state* state) {
   if (host == nullptr) {
@@ -537,160 +780,9 @@ int split_loops(hhds::Graph* host, hhds::GraphLibrary& lib, Split_state* state) 
       continue;  // already one-sided: nothing to split
     }
 
-    auto body = sub.get_subnode_graph();
-    auto desc = sub.subnode_loop();
-    if (!body || !body->get_io() || !desc.has_value()) {
-      continue;
+    if (split_loop_into_halves(host, lib, sub, std::move(par), std::move(ind), "__par", "__ind", state)) {
+      ++split;
     }
-
-    // A callee output that is not a carry (a per-lane "final" the host reads,
-    // the descriptor's next_active_output) has no half to live in: each half
-    // declares only its own carry outputs.
-    absl::flat_hash_set<hhds::Port_id> carry_outs(par.carry_out.begin(), par.carry_out.end());
-    carry_outs.insert(ind.carry_out.begin(), ind.carry_out.end());
-    bool extra_output = desc->next_active_output.has_value();
-    for (const auto& o : body->get_io()->get_output_pin_decls()) {
-      extra_output = extra_output || !carry_outs.contains(o.port_id);
-    }
-    if (extra_output) {
-      refuse(host, "loop-split-extra-output", "its body has an output that is not a carry");
-      continue;
-    }
-
-    // Each half owns the backward cone of ITS carry outputs. Computed here for
-    // both sides rather than reusing `cls.induction_nodes`, which only covers
-    // carries classified `induction` -- an associative reduction is on the
-    // recurrence side too and its cone must come with it.
-    for (const auto& port : ind.carry_out) {
-      cone_of_output(body.get(), port, ind);
-    }
-    for (const auto& port : par.carry_out) {
-      cone_of_output(body.get(), port, par);
-    }
-    // v1: shared logic would have to be duplicated into both halves. Refuse and
-    // leave the loop whole -- correct, just not yet optimized.
-    bool shared = false;
-    for (const auto& n : par.nodes) {
-      shared = shared || ind.nodes.contains(n);
-    }
-    if (shared) {
-      refuse(host, "loop-split-shared", "its parallel and recurrence cones share logic");
-      continue;
-    }
-    // A half self-wires only ITS carries; a cone that reads the other half's
-    // carry-in port would read that carry's seed in every lane instead of the
-    // running value. The classifier already sends a carry whose position or
-    // value depends on ANY carry to the recurrence side, so this is the
-    // belt-and-braces check on the split itself.
-    const absl::flat_hash_set<hhds::Port_id> par_in(par.carry_in.begin(), par.carry_in.end());
-    const absl::flat_hash_set<hhds::Port_id> ind_in(ind.carry_in.begin(), ind.carry_in.end());
-    bool                                     crossed = false;
-    for (const auto port : par.reads_inputs) {
-      crossed = crossed || ind_in.contains(port);
-    }
-    for (const auto port : ind.reads_inputs) {
-      crossed = crossed || par_in.contains(port);
-    }
-    if (crossed) {
-      refuse(host, "loop-split-cross-carry", "one half reads the other half's carry");
-      continue;
-    }
-
-    // Derived, STABLE names: abc_incr keys its region cache on the module name,
-    // so a name that reshuffles when an unrelated loop appears would invalidate
-    // entries that did not change. One pair per body per run: two loops may
-    // share one body def.
-    const auto                   body_gid = body->get_gid();
-    std::shared_ptr<hhds::Graph> par_body;
-    std::shared_ptr<hhds::Graph> ind_body;
-    if (auto it = state->halves.find(body_gid); it != state->halves.end()) {
-      par_body = it->second.first;
-      ind_body = it->second.second;
-    } else {
-      const std::string base = std::string{body->get_name()};
-      par_body               = make_half(lib, body.get(), par, base + "__par", *state);
-      ind_body               = make_half(lib, body.get(), ind, base + "__ind", *state);
-      if (par_body && ind_body) {
-        state->halves.emplace(body_gid, std::make_pair(par_body, ind_body));
-      }
-    }
-    if (!par_body || !ind_body) {
-      continue;
-    }
-
-    auto par_sub = gu::create_typed_node(*host, Ntype_op::Sub);
-    auto ind_sub = gu::create_typed_node(*host, Ntype_op::Sub);
-    par_sub.set_subnode(par_body->get_io(), *desc);
-    ind_sub.set_subnode(ind_body->get_io(), *desc);
-    gu::carry_node_attrs(sub, par_sub);
-    gu::carry_node_attrs(sub, ind_sub);
-    gu::carry_srcid(sub, par_sub);
-    gu::carry_srcid(sub, ind_sub);
-    // Two instances must not share one instance name: semdiff keys its cut
-    // points and hier LEC its pairing on the hierarchical name.
-    if (auto nm = sub.attr(hhds::attrs::name); nm.has()) {
-      par_sub.attr(hhds::attrs::name).set(std::string{nm.get()} + "__par");
-      ind_sub.attr(hhds::attrs::name).set(std::string{nm.get()} + "__ind");
-    }
-
-    // External inputs (invariants, index, activation, every carry's seed) feed
-    // BOTH halves; a carry self-edge is re-created per half below. The other
-    // half's seed lands on a port that half never self-wires, which makes it a
-    // plain (unused) input there.
-    for (auto e_sink : sub.inp_pins_snapshot()) {
-      for (auto e_drv : e_sink.get_driver_pins()) {
-        if (e_drv.get_master_node() == sub) {
-          continue;  // the old self-edge
-        }
-        const auto pid = e_sink.get_port_id();
-        auto       ps  = par_sub.create_sink_pin(pid);
-        auto       is  = ind_sub.create_sink_pin(pid);
-        gu::carry_pin_attrs(e_sink, ps);
-        gu::carry_pin_attrs(e_sink, is);
-        e_drv.connect_sink(ps);
-        e_drv.connect_sink(is);
-      }
-    }
-    const auto self_wire = [](const hhds::Node_class& n, const Half& h) {
-      for (size_t i = 0; i < h.carry_in.size(); ++i) {
-        n.create_driver_pin(h.carry_out[i]).connect_sink(n.create_sink_pin(h.carry_in[i]));
-      }
-    };
-    self_wire(par_sub, par);
-    self_wire(ind_sub, ind);
-
-    // External readers move to whichever half now owns that output port. The
-    // new edges are added only AFTER the old Sub is gone: a reader may be the
-    // carry seed of a later loop that hhds has already validated, and its debug
-    // hook re-validates that loop on every edge change -- with both drivers
-    // present for a moment it would see two seeds and throw. delete_node drops
-    // the old edges unhooked, so the one checked mutation leaves exactly one.
-    struct Rewire {
-      hhds::Pin_class driver;
-      hhds::Pin_class sink;
-    };
-    std::vector<hhds::Edge_class> readers;
-    for (const auto& e : sub.out_edges()) {
-      if (e.sink.get_master_node() != sub) {
-        readers.push_back(e);
-      }
-    }
-    const absl::flat_hash_set<hhds::Port_id> par_out(par.carry_out.begin(), par.carry_out.end());
-    std::vector<Rewire>                      rewires;
-    rewires.reserve(readers.size());
-    for (const auto& e : readers) {
-      const auto pid   = e.driver.get_port_id();
-      auto       owner = par_out.contains(pid) ? par_sub : ind_sub;
-      auto       d     = owner.create_driver_pin(pid);
-      gu::carry_pin_attrs(e.driver, d);
-      rewires.push_back(Rewire{.driver = d, .sink = e.sink});
-    }
-    sub.del_node();
-    for (const auto& r : rewires) {
-      r.driver.connect_sink(r.sink);
-    }
-    state->split_bodies.push_back(body_gid);
-    ++split;
   }
   return split;
 }
@@ -737,20 +829,21 @@ Legalize_result legalize_design(const std::vector<std::shared_ptr<hhds::Graph>>&
   Legalize_result out;
   Split_state     state;
 
-  // 1. ACYCLIC REPAIR, over every graph first: a false combinational loop
-  //    through a pure-comb Sub is broken by inlining that instance, so every
-  //    consumer's scheduler can linearize the body. Intra-def wire
-  //    self-references are already resolved upstream (split_packed_selfref_wire
-  //    in lnast.tolg); what survives to here is only the cross-boundary shape,
-  //    and this is a no-op when it is absent, which is the common case. Before
-  //    any split, so a half is copied from a repaired body.
+  // 1. ACYCLIC REPAIR (acyclic.hpp): the one place that handles combinational
+  //    loops. Every instance on an arc-level combinational cycle (a path
+  //    that really leaves and re-enters its ports; Moore/Mealy handshakes are
+  //    not one) is inlined, as is a state-free instance on a cycle with
+  //    instances atomic (no state moves); packed slices left inside a body are
+  //    resolved, and a true loop is an error. Before any split, so a half is
+  //    copied from a repaired body.
+  const auto acyclic = make_acyclic(graphs, state);
   for (const auto& g : graphs) {
     if (is_live(g.get())) {
-      std::vector<std::string> inlined;
-      (void)gu::flatten_false_loop_subs(g.get(), &inlined);
       auto attr = g->get_input_node().attr(livehd::attrs::legalize_inlined);
       attr.del();
-      if (!inlined.empty()) {
+      auto inlined_it = acyclic.inlined.find(g.get());
+      if (inlined_it != acyclic.inlined.end() && !inlined_it->second.empty()) {
+        auto inlined = inlined_it->second;
         std::sort(inlined.begin(), inlined.end());
         inlined.erase(std::unique(inlined.begin(), inlined.end()), inlined.end());
         std::string encoded;

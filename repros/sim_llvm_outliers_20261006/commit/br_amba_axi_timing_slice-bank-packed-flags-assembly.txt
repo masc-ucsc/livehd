@@ -1,0 +1,42 @@
+br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)
+   2a880:	cmp    $0x1,%rsi
+   2a884:	jne    2a953 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0xd3>
+   2a88a:	mov    (%rdi),%rax
+   2a88d:	mov    0x58(%rax),%ecx
+   2a890:	xor    %edx,%edx
+   2a892:	cmp    $0x1000000,%rcx
+   2a899:	setae  %dl
+   2a89c:	xor    %esi,%esi
+   2a89e:	or     0x50(%rax),%rcx
+   2a8a2:	setne  %sil
+   2a8a6:	or     %sil,0x40(%rax)
+   2a8aa:	lea    (%rsi,%rdx,2),%rcx
+   2a8ae:	movups 0x4a0(%rdi),%xmm0
+   2a8b5:	movups %xmm0,0x480(%rdi)
+   2a8bc:	movups 0x490(%rdi),%xmm0
+   2a8c3:	movups %xmm0,0x470(%rdi)
+   2a8ca:	movups 0x390(%rdi),%xmm0
+   2a8d1:	movups %xmm0,0x370(%rdi)
+   2a8d8:	movups 0x3a0(%rdi),%xmm0
+   2a8df:	movups %xmm0,0x380(%rdi)
+   2a8e6:	movups 0x290(%rdi),%xmm0
+   2a8ed:	movups %xmm0,0x270(%rdi)
+   2a8f4:	movups 0x2a0(%rdi),%xmm0
+   2a8fb:	movups %xmm0,0x280(%rdi)
+   2a902:	movups 0x90(%rdi),%xmm0
+   2a909:	movups 0xa0(%rdi),%xmm1
+   2a910:	movups 0x190(%rdi),%xmm2
+   2a917:	movups 0x1a0(%rdi),%xmm3
+   2a91e:	movups %xmm2,0x170(%rdi)
+   2a925:	movups %xmm3,0x180(%rdi)
+   2a92c:	movups %xmm1,0x80(%rdi)
+   2a933:	movups %xmm0,0x70(%rdi)
+   2a937:	movups 0x40(%rdi),%xmm0
+   2a93b:	movups 0x50(%rdi),%xmm1
+   2a93f:	movups 0x60(%rdi),%xmm2
+   2a943:	movups %xmm2,0x30(%rdi)
+   2a947:	movups %xmm1,0x20(%rdi)
+   2a94b:	movups %xmm0,0x10(%rdi)
+   2a94f:	or     %rcx,0x48(%rax)
+   2a953:	ret
+   2a954:	data16 data16 cs nopw 0x0(%rax,%rax,1)

@@ -1774,7 +1774,6 @@ bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out, const absl::flat_h
 }
 }  // namespace
 
-static int split_packed_cycle_slices(hhds::Graph* g);
 
 int repair_simulator_packed_cycles(hhds::Graph* g) { return repair_private_packed_cycles(g); }
 
@@ -1803,7 +1802,7 @@ int repair_private_packed_cycles(hhds::Graph* g) {
   return repaired + split_packed_cycle_slices(g);
 }
 
-static int split_packed_cycle_slices(hhds::Graph* g) {
+int split_packed_cycle_slices(hhds::Graph* g) {
   if (g == nullptr) {
     return 0;
   }

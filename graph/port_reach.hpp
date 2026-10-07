@@ -20,12 +20,13 @@
 //
 // Boundary rules (kept in lockstep with inou/cgen's simgen-7 classifiers):
 //   Flop/Fflop/Latch   cut — q is last period's value.
-//   Memory             JOINS via every sink cone: an async read's dout is comb
-//                      in its address, and under write-forwarding orderings in
-//                      the write cones too. Conservative for sync reads and
-//                      read-first orderings (their douts are input-independent)
-//                      — that direction only over-reports a dependence, which a
-//                      scheduler answers with a later, still-correct order.
+//   Memory             port-accurate (Memory_deps below): an async read's dout
+//                      is comb in its address/enable, and under
+//                      write-forwarding orderings in the write cones too; a
+//                      sync read or read-first ordering is input-independent.
+//                      A port it cannot classify joins every sink cone (only
+//                      over-reports, which a scheduler answers with a later,
+//                      still-correct order).
 //   Sub                splices the CALLEE's summary at the boundary; a
 //                      body-less blackbox conservatively depends on ALL of the
 //                      instance's connected inputs.
@@ -95,6 +96,37 @@ struct Def_reach {
 // body: a stored one (see stamped() below), or a conservative one for a body
 // the client cannot trust. nullopt walks the callee body as usual.
 using Callee_reach = std::function<std::optional<Def_reach>(const std::shared_ptr<hhds::Graph>&)>;
+
+// One memory cell's ports, decoded once: which drivers each OUTPUT pin
+// depends on COMBINATIONALLY. An async read's dout reaches that read port's
+// address/enable (plus the write cones under same-cycle forwarding or on an
+// unclocked array); a sync read is a register; read_all reaches the write
+// cones only when unclocked. Shared by the summaries below and pass.legalize's
+// loop check, so both use one memory model.
+class Memory_deps {
+public:
+  explicit Memory_deps(const hhds::Node_class& mem);
+  // Calls `enqueue` with each comb driver of output `out_pid`; false when the
+  // pin is not a decoded port (callers then join every sink). `writes` false
+  // drops the write cones a forwarding or unclocked memory adds to a read
+  // (and the readall arm): an over-approximation a scheduler can afford, but
+  // every consumer sequences those writes after the read, so a loop check
+  // must not report them -- only an async read's own address/enable is.
+  bool deps(hhds::Port_id out_pid, const std::function<void(const hhds::Pin_class&)>& enqueue, bool writes = true) const;
+
+private:
+  struct Port {
+    hhds::Pin_class addr, en, din;
+    bool            rd = false;
+  };
+  std::vector<Port>            pv;
+  std::vector<hhds::Pin_class> wr_cones;
+  hhds::Pin_class              update;
+  bool                         has_clock   = false;
+  bool                         fwd_nonzero = false;
+  int                          mtype       = 2;
+  int                          n_wr        = 0;
+};
 
 // Memoized per-definition summaries. One Cache per analysis run; summaries are
 // computed on first request and reused for every instance of the same def.

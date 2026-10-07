@@ -1124,6 +1124,17 @@ sh_test(
 )
 
 sh_test(
+    name = "sim_llvm_memory",
+    srcs = ["sim_llvm_memory.sh"],
+    data = [
+        "//inou/prp:tests/sim/color_kernel_llvm_mem_whole.prp",
+        "//inou/prp:tests/sim/mem_none_color_random.prp",
+        "//lhd",
+    ],
+    tags = ["cpu:4"],
+)
+
+sh_test(
     name = "sim_color_llvm_smoke",
     size = "large",
     srcs = ["sim_color_llvm_smoke.sh"],
@@ -1135,6 +1146,7 @@ sh_test(
         "//inou/prp:tests/sim/color_kernel_llvm_wide.prp",
         "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
         "//inou/prp:tests/sim/div_narrow_result.prp",
+        "//inou/prp:tests/sim/llvm_native_division.prp",
         "//inou/prp:tests/sim/loop_carry_kinds_sim.prp",
         "//inou/prp:tests/sim/loop_fused_state.prp",
         "//inou/prp:tests/sim/loop_hierarchy.prp",

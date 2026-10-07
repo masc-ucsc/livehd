@@ -145,6 +145,7 @@ cc_test(
         "//graph",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/enableopt:pass_enableopt",
+        "//pass/legalize",  # make_acyclic: LEC inputs are legalized, never loop-repaired here
         "//pass/partition:flatten",  # transparent-hierarchy LecNames cases
         "//pass/semdiff",
         "//pass/single_edge:pass_single_edge",  # proof_prep: the kernel's absent-hierarchy inline

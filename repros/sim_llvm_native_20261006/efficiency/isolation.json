@@ -1,0 +1,24 @@
+{
+  "replacements": {
+    "/mada/users/renau/projs/lhdtrack/var/work/20261006T182504/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_arb_multi_rr.br_arb_multi_rr.o": "/tmp/lhd-object-efficiency/separate-br_arb_multi_rr.br_arb_multi_rr.o",
+    "/tmp/lhd-object-efficiency/kernels-br_arb_multi_rr.br_arb_multi_rr.o": "/tmp/lhd-object-efficiency/kernels-br_arb_multi_rr.br_arb_multi_rr.o",
+    "/mada/users/renau/projs/lhdtrack/var/work/20261006T182504/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_credit_sender_harness.br_credit_sender_harness.o": "/tmp/lhd-object-efficiency/separate-br_credit_sender_harness.br_credit_sender_harness.o",
+    "/tmp/lhd-object-efficiency/kernels-br_credit_sender_harness.br_credit_sender_harness.o": "/tmp/lhd-object-efficiency/kernels-br_credit_sender_harness.br_credit_sender_harness.o"
+  },
+  "timings": [
+    {
+      "host": "/mada/users/renau/projs/lhdtrack/var/work/20261006T182504/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_arb_multi_rr.br_arb_multi_rr.bc",
+      "separate_lower_s": 0.49011589493602514,
+      "kernels_lower_s": 0.03863604296930134,
+      "kernels": 6
+    },
+    {
+      "host": "/mada/users/renau/projs/lhdtrack/var/work/20261006T182504/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_credit_sender_harness.br_credit_sender_harness.bc",
+      "separate_lower_s": 0.45497627812437713,
+      "kernels_lower_s": 0.052803267957642674,
+      "kernels": 10
+    }
+  ],
+  "baseline": "/mada/users/renau/projs/lhdtrack/var/work/20261006T182504/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin",
+  "native": "/mada/users/renau/projs/lhdtrack/var/work/20261006T185507/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm/SW/sim/drv.bin"
+}

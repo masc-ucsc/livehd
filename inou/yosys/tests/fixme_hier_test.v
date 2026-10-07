@@ -1,6 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 // test file with super deep hierarchy to test hierarchy
+// :error: combinational loop
+// The design has GENUINE combinational loops (leaf4 tempo = tempi - 2 on one
+// wire; mid2/mid4 eo <-> ei ring), which pass.legalize reports as an error.
 
 module leaf1(input [14:0] ai, output [14:0] ao);
   assign ao = (~ai == 15'h0) ? 15'h5 : 15'h0;

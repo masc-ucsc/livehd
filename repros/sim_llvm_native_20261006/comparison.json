@@ -1,0 +1,279 @@
+{
+  "small": [
+    {
+      "test": "br_amba_axi_timing_slice",
+      "config": "arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0",
+      "frontend": "Pyrope",
+      "slop": 1.036,
+      "old": 1.116,
+      "native": 1.395,
+      "old_prep": 7.159,
+      "native_prep": 7.562,
+      "slop_prep": 6.904,
+      "cycles": 16129032,
+      "checksum": "1956944815607682736"
+    },
+    {
+      "test": "br_amba_axil_timing_slice",
+      "config": "aw32_dw32",
+      "frontend": "Pyrope",
+      "slop": 1.319,
+      "old": 1.371,
+      "native": 1.71,
+      "old_prep": 11.055,
+      "native_prep": 11.748,
+      "slop_prep": 10.548,
+      "cycles": 14925373,
+      "checksum": "13002415611947852208"
+    },
+    {
+      "test": "br_arb_rr",
+      "config": "nr16",
+      "frontend": "Pyrope",
+      "slop": 1.567,
+      "old": 3.136,
+      "native": 3.501,
+      "old_prep": 7.169,
+      "native_prep": 7.755,
+      "slop_prep": 6.568,
+      "cycles": 18867925,
+      "checksum": "14573127022883009526"
+    },
+    {
+      "test": "br_cdc_fifo_flops",
+      "config": "d32_frads1_frdt1_frrdds0_frrdws_7f28a45b",
+      "frontend": "Pyrope",
+      "slop": 1.265,
+      "old": 1.606,
+      "native": 1.691,
+      "old_prep": 24.177,
+      "native_prep": 20.81,
+      "slop_prep": 24.482,
+      "cycles": 3225806,
+      "checksum": "13083134103330125444"
+    },
+    {
+      "test": "br_credit_sender",
+      "config": "mc16_nf4_pcmc4_rpo1_w64",
+      "frontend": "Pyrope",
+      "slop": 1.172,
+      "old": 1.345,
+      "native": 1.746,
+      "old_prep": 8.635,
+      "native_prep": 8.838,
+      "slop_prep": 9.159,
+      "cycles": 14084507,
+      "checksum": "10026819886260638103"
+    },
+    {
+      "test": "br_fifo_flops_push_credit",
+      "config": "d32_eb1_frads1_rpo1_rpo1_w32",
+      "frontend": "Pyrope",
+      "slop": 0.922,
+      "old": 1.147,
+      "native": 1.477,
+      "old_prep": 11.039,
+      "native_prep": 8.867,
+      "slop_prep": 7.721,
+      "cycles": 15151515,
+      "checksum": "17427903416933715990"
+    },
+    {
+      "test": "br_flow_arb_rr",
+      "config": "nf16",
+      "frontend": "Pyrope",
+      "slop": 4.183,
+      "old": 9.161,
+      "native": 9.843,
+      "old_prep": 7.544,
+      "native_prep": 9.179,
+      "slop_prep": 7.733,
+      "cycles": 22222222,
+      "checksum": "12059985226895709169"
+    },
+    {
+      "test": "br_flow_deserializer",
+      "config": "dmsf0_mw8_pw64_pw8",
+      "frontend": "Pyrope",
+      "slop": 1.104,
+      "old": 2.384,
+      "native": 1.747,
+      "old_prep": 7.589,
+      "native_prep": 10.987,
+      "slop_prep": 11.919,
+      "cycles": 25000000,
+      "checksum": "14659346828983681186"
+    },
+    {
+      "test": "br_mux_bin_structured_gates_mock",
+      "config": "nsi5_sw16",
+      "frontend": "Pyrope",
+      "slop": 2.559,
+      "old": 4.96,
+      "native": 5.934,
+      "old_prep": 8.245,
+      "native_prep": 7.576,
+      "slop_prep": 8.681,
+      "cycles": 43478261,
+      "checksum": "13049023983008151410"
+    },
+    {
+      "test": "br_amba_axi_timing_slice",
+      "config": "arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0",
+      "frontend": "Verilog",
+      "slop": 1.006,
+      "old": 1.338,
+      "native": 1.564,
+      "old_prep": 9.213,
+      "native_prep": 8.081,
+      "slop_prep": 7.326,
+      "cycles": 16129032,
+      "checksum": "1956944815607682736"
+    },
+    {
+      "test": "br_amba_axil_timing_slice",
+      "config": "aw32_dw32",
+      "frontend": "Verilog",
+      "slop": 1.364,
+      "old": 1.466,
+      "native": 1.812,
+      "old_prep": 7.975,
+      "native_prep": 7.141,
+      "slop_prep": 7.249,
+      "cycles": 14925373,
+      "checksum": "13002415611947852208"
+    },
+    {
+      "test": "br_arb_rr",
+      "config": "nr16",
+      "frontend": "Verilog",
+      "slop": 0.785,
+      "old": 0.571,
+      "native": 0.809,
+      "old_prep": 7.001,
+      "native_prep": 6.904,
+      "slop_prep": 6.564,
+      "cycles": 18867925,
+      "checksum": "14573127022883009526"
+    },
+    {
+      "test": "br_cdc_fifo_flops",
+      "config": "d32_frads1_frdt1_frrdds0_frrdws_7f28a45b",
+      "frontend": "Verilog",
+      "slop": 8.697,
+      "old": 6.986,
+      "native": 10.46,
+      "old_prep": 21.457,
+      "native_prep": 16.384,
+      "slop_prep": 15.431,
+      "cycles": 3225806,
+      "checksum": "13083134103330125444"
+    },
+    {
+      "test": "br_credit_sender",
+      "config": "mc16_nf4_pcmc4_rpo1_w64",
+      "frontend": "Verilog",
+      "slop": 1.152,
+      "old": 1.325,
+      "native": 1.789,
+      "old_prep": 7.643,
+      "native_prep": 12.144,
+      "slop_prep": 7.394,
+      "cycles": 14084507,
+      "checksum": "10026819886260638103"
+    },
+    {
+      "test": "br_fifo_flops_push_credit",
+      "config": "d32_eb1_frads1_rpo1_rpo1_w32",
+      "frontend": "Verilog",
+      "slop": 0.938,
+      "old": 1.203,
+      "native": 1.48,
+      "old_prep": 10.781,
+      "native_prep": 8.282,
+      "slop_prep": 8.164,
+      "cycles": 15151515,
+      "checksum": "17427903416933715990"
+    },
+    {
+      "test": "br_flow_arb_rr",
+      "config": "nf16",
+      "frontend": "Verilog",
+      "slop": 1.388,
+      "old": 1.174,
+      "native": 1.827,
+      "old_prep": 7.597,
+      "native_prep": 12.104,
+      "slop_prep": 8.216,
+      "cycles": 22222222,
+      "checksum": "12059985226895709169"
+    },
+    {
+      "test": "br_flow_deserializer",
+      "config": "dmsf0_mw8_pw64_pw8",
+      "frontend": "Verilog",
+      "slop": 1.152,
+      "old": 2.471,
+      "native": 1.754,
+      "old_prep": 9.461,
+      "native_prep": 14.424,
+      "slop_prep": 13.393,
+      "cycles": 25000000,
+      "checksum": "14659346828983681186"
+    },
+    {
+      "test": "br_mux_bin_structured_gates_mock",
+      "config": "nsi5_sw16",
+      "frontend": "Verilog",
+      "slop": 1.13,
+      "old": 0.809,
+      "native": 1.182,
+      "old_prep": 8.109,
+      "native_prep": 9.692,
+      "slop_prep": 7.797,
+      "cycles": 43478261,
+      "checksum": "13049023983008151410"
+    }
+  ],
+  "minion": [
+    {
+      "variant": "Slop",
+      "exec_s": 2.2725267289206386,
+      "samples": [
+        2.2759706461802125,
+        2.446503668092191,
+        2.223637819988653,
+        2.2725267289206386,
+        2.243762600934133
+      ],
+      "setup_s": 138.74396344996057,
+      "setup_compile_s": 310.416334122885
+    },
+    {
+      "variant": "old LLVM",
+      "exec_s": 2.8314328601118177,
+      "samples": [
+        3.211131246993318,
+        2.8314328601118177,
+        2.8407956098672003,
+        2.8042995338328183,
+        2.7956409791950136
+      ],
+      "setup_s": 165.2867845511064,
+      "setup_compile_s": 345.4743027440272
+    },
+    {
+      "variant": "native LLVM",
+      "exec_s": 2.6808268649037927,
+      "samples": [
+        2.837923663901165,
+        2.6796524999663234,
+        2.606492568971589,
+        2.6808268649037927,
+        2.73524786089547
+      ],
+      "setup_s": 151.75895516597666,
+      "setup_compile_s": 280.0806483407505
+    }
+  ]
+}

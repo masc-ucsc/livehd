@@ -1,0 +1,17 @@
+Functions sorted by metric: Exclusive Total CPU Time
+
+Excl. Total   Incl. Total    Name
+CPU           CPU
+ sec.      %   sec.      %
+0.891 100.00  0.891 100.00   <Total>
+0.560  62.92  0.610  68.54   br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness::__color_run_part_0()
+0.220  24.72  0.220  24.72   br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness::__color_run_part_1()
+0.060   6.74  0.741  83.15   br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness::__color_run()
+0.010   1.12  0.010   1.12   __lhd_llvm_mem_br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness_p_d4898409b17004c06add41c826de93bd_o0_read_15
+0.010   1.12  0.010   1.12   __lhd_llvm_mem_br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness_p_d4898409b17004c06add41c826de93bd_o0_read_16
+0.010   1.12  0.010   1.12   __lhd_llvm_mem_br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness_p_d4898409b17004c06add41c826de93bd_o0_read_17
+0.010   1.12  0.010   1.12   __lhd_llvm_mem_br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness_p_d4898409b17004c06add41c826de93bd_o0_read_31
+0.010   1.12  0.010   1.12   __lhd_llvm_mem_br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness_p_d4898409b17004c06add41c826de93bd_o0_read_7
+0.      0.    0.741  83.15   _run_bench_run(std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::set<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, _Fail&)
+0.      0.    0.741  83.15   main
+

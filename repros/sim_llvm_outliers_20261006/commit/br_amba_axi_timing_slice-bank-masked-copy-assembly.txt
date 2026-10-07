@@ -1,0 +1,63 @@
+000000000002a880 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)>:
+   2a880:	cmp    $0x1,%rsi
+   2a884:	jne    2a996 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x116>
+   2a88a:	mov    (%rdi),%rax
+   2a88d:	mov    0x50(%rax),%r8
+   2a891:	mov    0x58(%rax),%ecx
+   2a894:	xor    %edx,%edx
+   2a896:	cmp    $0x1000000,%rcx
+   2a89d:	setae  %r9b
+   2a8a1:	xor    %esi,%esi
+   2a8a3:	mov    %r8,%r10
+   2a8a6:	or     %rcx,%r10
+   2a8a9:	setne  %r10b
+   2a8ad:	or     %r10b,0x40(%rax)
+   2a8b1:	mov    %r8,%r11
+   2a8b4:	shr    $0x10,%r11
+   2a8b8:	test   %r11w,%r11w
+   2a8bc:	je     2a8da <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x5a>
+   2a8be:	movups 0x490(%rdi),%xmm0
+   2a8c5:	movups 0x4a0(%rdi),%xmm1
+   2a8cc:	movups %xmm1,0x480(%rdi)
+   2a8d3:	movups %xmm0,0x470(%rdi)
+   2a8da:	mov    %r8,%r11
+   2a8dd:	shr    $0x20,%r11
+   2a8e1:	test   %r11w,%r11w
+   2a8e5:	je     2a903 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x83>
+   2a8e7:	movups 0x390(%rdi),%xmm0
+   2a8ee:	movups 0x3a0(%rdi),%xmm1
+   2a8f5:	movups %xmm1,0x380(%rdi)
+   2a8fc:	movups %xmm0,0x370(%rdi)
+   2a903:	mov    %r8,%r11
+   2a906:	shr    $0x30,%r11
+   2a90a:	je     2a928 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0xa8>
+   2a90c:	movups 0x290(%rdi),%xmm0
+   2a913:	movups 0x2a0(%rdi),%xmm1
+   2a91a:	movups %xmm1,0x280(%rdi)
+   2a921:	movups %xmm0,0x270(%rdi)
+   2a928:	mov    %r10b,%sil
+   2a92b:	mov    %r9b,%dl
+   2a92e:	test   %cx,%cx
+   2a931:	je     2a94f <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0xcf>
+   2a933:	movups 0x190(%rdi),%xmm0
+   2a93a:	movups 0x1a0(%rdi),%xmm1
+   2a941:	movups %xmm1,0x180(%rdi)
+   2a948:	movups %xmm0,0x170(%rdi)
+   2a94f:	test   %r8w,%r8w
+   2a953:	je     2a96e <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0xee>
+   2a955:	movups 0x90(%rdi),%xmm0
+   2a95c:	movups 0xa0(%rdi),%xmm1
+   2a963:	movups %xmm1,0x80(%rdi)
+   2a96a:	movups %xmm0,0x70(%rdi)
+   2a96e:	lea    (%rsi,%rdx,2),%rdx
+   2a972:	cmp    $0x10000,%ecx
+   2a978:	jb     2a992 <br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_commit(unsigned long)+0x112>
+   2a97a:	movups 0x40(%rdi),%xmm0
+   2a97e:	movups 0x50(%rdi),%xmm1
+   2a982:	movups 0x60(%rdi),%xmm2
+   2a986:	movups %xmm2,0x30(%rdi)
+   2a98a:	movups %xmm1,0x20(%rdi)
+   2a98e:	movups %xmm0,0x10(%rdi)
+   2a992:	or     %rdx,0x48(%rax)
+   2a996:	ret
+   2a997:	nopw   0x0(%rax,%rax,1)

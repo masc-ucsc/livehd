@@ -46,9 +46,11 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <future>
 #include <limits>
 #include <optional>
 #include <print>
@@ -75,6 +77,8 @@
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"  // //graph — realize native loop groups in the private simulator library
 #include "sim_color_plan.hpp"
+#include "sim_compile_jobs.hpp"
+#include "sim_llvm_memory_rt.hpp"
 #include "sim_plusargs_rt.hpp"
 #include "sim_program.hpp"
 #include "sim_specialize.hpp"  // refold_private_body: cprop/bitwidth over a body a splice just changed
@@ -4352,6 +4356,16 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
 }
 
 void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
+  std::vector<std::future<std::string>> object_jobs;
+  const auto                            object_job_limit = object_jobs_ == 0 ? livehd::sim::available_compile_jobs() : object_jobs_;
+  const auto                            finish_object    = [&](size_t index) {
+    auto error = object_jobs[index].get();
+    object_jobs.erase(object_jobs.begin() + index);
+    if (!error.empty()) {
+      livehd::diag::err("inou.cgen.sim", "llvm-object", "unsupported").msg("{}", error).fatal();
+    }
+  };
+
   emitting_color_root_ = false;  // set below, once this module's color_root verdict is known
   emitted_files_.clear();        // the Gen_record lists THIS module's artifacts only
   pin2var.clear();
@@ -4507,7 +4521,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   }
 
   // Switching a compact definition from LLVM to Slop removes its color
-  // evaluator. The host builder enumerates generated sources/bitcode, so stale
+  // evaluator. The host builder enumerates generated sources/objects, so stale
   // color artifacts would otherwise keep both backends in the same build.
   if (!odir.empty() && !color_root) {
     // Every color artifact of this module shares the `<fstem>.color-` prefix.
@@ -4554,6 +4568,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // root's __tune_sources write words with. Every module header carries it, so
   // the walkers of any module compile without a root in the TU.
   hout->append(kTuneHashHelper);
+  if (llvm_backend_) {
+    hout->append(livehd::sim::kLlvmMemorySupport);
+  }
   hout->append(
       "#ifndef LHD_SIM_PRESERVE_LOOP\n"
       "#if defined(__clang__)\n"
@@ -6175,7 +6192,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // Keep its boundary cache, but never update a lane generation or call a
     // simulator phase method for an ordinal. The body is visible to the host
     // optimizer; LHD_SIM_PRESERVE_LOOP still prohibits loop unrolling.
-    if (pure_loop) {
+    if (pure_loop && !llvm_backend_) {
       hout->append("  static Out __pure_eval(", pure_parameters(*sio), ") {\n");
       for (size_t ci = 0; ci < s.carries.size(); ++ci) {
         const auto& name = s.carries[ci].first;
@@ -6410,26 +6427,29 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // generic) with a same-named "program" memory share the driver's namespace.
   auto mem_prefix_name = [&](const Mem& m) { return absl::StrCat("__", mod, "__", m.member, "_fwd_upto"); };
   auto mem_type        = [&](const Mem& m) -> std::string {
-    const std::string common = absl::StrCat(value_type(m.bits, m.unsign),
-                                            ", ",
-                                            m.bits,
-                                            ", ",
-                                            m.size,
-                                            ", ",
-                                            m.n_rd,
-                                            ", ",
-                                            m.n_wr,
-                                            ", ",
-                                            m.n_user_wr,
-                                            ", ",
-                                            m.wensize);
+    const std::string common = absl::StrCat(
+        llvm_backend_ ? absl::StrCat("__lhd_packed_value<", m.bits, ", ", slop_u_ && m.unsign ? "true" : "false", ">")
+                      : value_type(m.bits, m.unsign),
+        ", ",
+        m.bits,
+        ", ",
+        m.size,
+        ", ",
+        m.n_rd,
+        ", ",
+        m.n_wr,
+        ", ",
+        m.n_user_wr,
+        ", ",
+        m.wensize);
+    const auto wrap = [&](std::string type) { return llvm_backend_ ? absl::StrCat("__lhd_packed_memory<", type, ">") : type; };
     switch (m.order) {
-      case Mem::Order::fwd    : return absl::StrCat("hlop::Memory_fwd<", common, ">");
-      case Mem::Order::none   : return absl::StrCat("hlop::Memory_none<", common, ">");
-      case Mem::Order::program: return absl::StrCat("hlop::Memory_program<", common, ", ", mem_prefix_name(m), ">");
+      case Mem::Order::fwd    : return wrap(absl::StrCat("hlop::Memory_fwd<", common, ">"));
+      case Mem::Order::none   : return wrap(absl::StrCat("hlop::Memory_none<", common, ">"));
+      case Mem::Order::program: return wrap(absl::StrCat("hlop::Memory_program<", common, ", ", mem_prefix_name(m), ">"));
       case Mem::Order::old    : break;
     }
-    return absl::StrCat("hlop::Memory_old<", common, ">");
+    return wrap(absl::StrCat("hlop::Memory_old<", common, ">"));
   };
   // The write enable a port stages with. The Memory cell's `enable` (pid 4) IS
   // the lane mask: one bit at wensize==1, a wensize-bit vector otherwise. An
@@ -7152,7 +7172,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       std::ifstream input(odir.empty() ? layout_name : absl::StrCat(odir, "/", layout_name));
       std::string   magic;
       input >> magic;
-      if (magic == "color-layout-v1") {
+      // v2: identities are Plan_id spellings composed from typed fields; a v1
+      // file (text-composed ids) never matches, so it is ignored, not misread.
+      if (magic == "color-layout-v2") {
         uint32_t    width;
         unsigned    canonical;
         size_t      position;
@@ -7168,27 +7190,29 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     std::map<Slot_key, std::vector<size_t>> live_values;
     const size_t                            boundary_count = color_plan_->boundary_slots().size();
-    std::vector<std::string_view>           identities(boundary_count + color_plan_->colors().size());
+    // Serialized here and only here: the layout file is what persists slot
+    // positions across runs (see livehd::sim::Plan_id).
+    std::vector<std::string>                identities(boundary_count + color_plan_->colors().size());
     for (size_t i = 0; i < boundary_count; ++i) {
       const auto& slot = color_plan_->boundary_slots()[i];
       if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value) {
         live_values[{slot.width, slot_is_canonical(slot)}].push_back(i);
-        identities[i] = slot.structural_id;
+        identities[i] = slot.structural_id.str();
       }
     }
     for (const size_t color : color_plan_->colors_in_execution_order()) {
       live_values[{0, false}].push_back(boundary_count + color);
-      identities[boundary_count + color] = color_plan_->colors()[color].storage_id;
+      identities[boundary_count + color] = color_plan_->colors()[color].storage_id.str();
     }
     std::vector<size_t> physical_slot(identities.size(), livehd::sim::Color_plan::invalid_index);
     auto                layout = open_out(layout_name);
-    layout->append("color-layout-v1\n");
+    layout->append("color-layout-v2\n");
     for (const auto& [key, values] : live_values) {
       std::vector<bool> occupied(capacities.at(key), false);
       // Reserve surviving allocations before placing new values. Even damaged
       // metadata cannot alias two live values: accepted addresses are unique.
       for (const size_t i : values) {
-        const auto it = slot_positions[key].find(std::string(identities[i]));
+        const auto it = slot_positions[key].find(identities[i]);
         if (it != slot_positions[key].end() && !occupied[it->second]) {
           physical_slot[i]     = it->second;
           occupied[it->second] = true;
@@ -7502,7 +7526,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                    std::to_string(site_index),
                    "_cen = false;  // whole-array update/reset fires at the phase barrier\n");
     }
-    if (llvm_backend_) {  // only the LLVM object reaches the qualifier through a callback
+    if (llvm_backend_) {  // the LLVM evaluator supplies this qualifier through its data ABI
       for (const auto& site : color_plan_->sites()) {
         if (type_op_of(site.node.base_node()) != Ntype_op::Memory) {
           continue;
@@ -7591,7 +7615,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append("  };\n  struct Out {\n");
   emit_io_block(false);
   hout->append("  };\n");
-  if (pure_graph(g)) {
+  if (!llvm_backend_ && pure_graph(g)) {
     hout->append("  static Out __pure_eval(", pure_parameters(*g->get_io()), ");\n");
   }
 
@@ -7920,9 +7944,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hout->append("  bool observe_mem(const std::string& _n, long _i, std::string& _o) const;\n");
   hout->append("};\n");
 
+  if (llvm_backend_ && !odir.empty()) {
+    std::error_code ec;
+    std::filesystem::remove(absl::StrCat(odir, "/", fstem, ".pure.inc"), ec);
+  }
+
   // Pure evaluator bodies stay visible for inlining, but live separately from
   // the storage interface so a body edit does not rewrite that interface.
-  if (pure_graph(g)) {
+  if (!llvm_backend_ && pure_graph(g)) {
     const auto name = absl::StrCat(fstem, ".pure.inc");
     auto       pure = open_out(name);
     pure->append("// Generated pure evaluator. Do not edit.\n#pragma once\n");
@@ -11295,12 +11324,34 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     const auto& direct_hierarchy_clocks = hierarchy_clocks_for_root();
     const auto  state_update_version    = [&](size_t site_index) { return direct_state_update[site_index]; };
+    // Memo of the shallowest depth each occurrence pin was already searched at
+    // without finding the target: a failure at depth d is a failure at every
+    // depth >= d (the bound only shrinks), so the result is unchanged, but a
+    // reconvergent cone is no longer re-walked once per PATH -- exponential on
+    // a large inlined body (minion with its handshake instances inlined: >25
+    // min). Only consulted once a query is past `kResolveMemoAfter` calls, so
+    // the common shallow query pays no hashing.
+    constexpr size_t                               kResolveMemoAfter = 1024;
+    absl::flat_hash_map<hhds::Occurrence_pin, int> resolve_failed_at;
+    size_t                                         resolve_calls = 0;
     std::function<std::optional<hhds::Occurrence_pin>(const hhds::Occurrence_pin&, const hhds::Pin_class&, int)>
         resolve_occurrence_pin;
     resolve_occurrence_pin =
         [&](const hhds::Occurrence_pin& root_pin, const hhds::Pin_class& target, int depth) -> std::optional<hhds::Occurrence_pin> {
       if (root_pin.is_invalid() || target.is_invalid() || depth > 32) {
         return std::nullopt;
+      }
+      if (depth == 0) {  // a new query (recursion keeps the same target)
+        resolve_calls = 0;
+        if (!resolve_failed_at.empty()) {
+          resolve_failed_at.clear();
+        }
+      }
+      const bool memo = ++resolve_calls > kResolveMemoAfter;
+      if (memo) {
+        if (const auto seen = resolve_failed_at.find(root_pin); seen != resolve_failed_at.end() && seen->second <= depth) {
+          return std::nullopt;
+        }
       }
       if (root_pin.base_pin().get_definition_index() == target.get_definition_index()) {
         return root_pin;
@@ -11324,6 +11375,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         if (auto found = resolve_occurrence_pin(occurrence_in[input].driver, target, depth + 1)) {
           return found;
+        }
+      }
+      if (memo) {
+        auto [it, fresh] = resolve_failed_at.try_emplace(root_pin, depth);
+        if (!fresh) {
+          it->second = std::min(it->second, depth);
         }
       }
       return std::nullopt;
@@ -11547,7 +11604,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // Memory clocks are timing metadata and intentionally do not enter the
     // color data ABI.  The reference backend nevertheless folds every decoded
     // ICG enable (and a hierarchical clock-port tick) into the write enable.
-    // Keep that policy at the owner callback boundary: the LLVM object still
+    // Keep that policy at the resource binding boundary: the LLVM object still
     // computes exact-width data/enables, while this tiny generated method reads
     // the structurally resolved clock qualifier from the owning occurrence.
     struct Llvm_memory_gate {
@@ -12461,8 +12518,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                        "[llvm-state-reject] module=%s member=%zu structural=%s storage=%s op=%s reason=%.*s\n",
                        gname.c_str(),
                        member,
-                       version.structural_id.c_str(),
-                       site.storage_id.c_str(),
+                       version.structural_id.str().c_str(),
+                       site.storage_id.str().c_str(),
                        op_name(op),
                        static_cast<int>(reason.size()),
                        reason.data());
@@ -12605,7 +12662,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // Extra invariants that only the SHARED C++ kernel body needs. The LLVM
     // backend emits one object per color from that color's own occurrence, so
     // it may lower a Memory member (its storage is reached through generated
-    // owner callbacks) and an occurrence-specific constant. A shared canonical
+    // the packed resource table) and an occurrence-specific constant. A shared canonical
     // TU can do neither: it is emitted once from the representative and has no
     // module members in scope at all.
     const auto shared_cpp_body_color = [&](size_t color_index) {
@@ -12780,8 +12837,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
     }
     absl::flat_hash_set<std::string> emitted_kernels;
-    absl::flat_hash_set<std::string> emitted_llvm_memory_helpers;
-    absl::flat_hash_set<std::string> emitted_llvm_constant_helpers;
+    std::vector<std::string>              llvm_resource_before(direct_kernel.size()), llvm_resource_after(direct_kernel.size());
+    std::vector<std::vector<std::string>> llvm_resources(direct_kernel.size());
     const auto llvm_memory_helper_name = [&](const livehd::sim::Color_plan::Site& site, std::string_view operation) {
       std::string name = absl::StrCat("__lhd_llvm_mem_", mod, "_", site.storage_id, "_", operation);
       for (char& c : name) {
@@ -12790,157 +12847,6 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
       }
       return name;
-    };
-    const auto emit_llvm_memory_read_helper
-        = [&](const livehd::sim::Color_plan::Site& site, const MemPort& port, Cgen_llvm::Value address) {
-            const auto symbol = llvm_memory_helper_name(site, absl::StrCat("read_", port.rdidx));
-            if (emitted_llvm_memory_helpers.insert(symbol).second) {
-              fout->append(absl::StrCat("extern \"C\" void ",
-                                        symbol,
-                                        "(void* __owner, const std::uint64_t* __addr_words, std::uint64_t* __out_words) {\n",
-                                        "  auto& __self = *static_cast<",
-                                        mod,
-                                        "*>(__owner);\n",
-                                        "  const auto __addr = ",
-                                        address.unsign ? "Slop_u<" : "Slop<",
-                                        address.width,
-                                        ">::from_packed_words(__addr_words);\n",
-                                        "  const auto __value = __self.",
-                                        occurrence_member(site),
-                                        ".read(",
-                                        port.rdidx,
-                                        ", __addr);\n",
-                                        "  __value.copy_packed_words(__out_words);\n",
-                                        "}\n"));
-            }
-            return symbol;
-          };
-    const auto emit_llvm_memory_read_all_helper = [&](const livehd::sim::Color_plan::Site& site, const Mem& memory) {
-      const auto symbol = llvm_memory_helper_name(site, "read_all");
-      if (emitted_llvm_memory_helpers.insert(symbol).second) {
-        fout->append(
-            absl::StrCat("extern \"C\" void ",
-                         symbol,
-                         "(void* __owner, std::uint64_t* __out_words) {\n",
-                         "  auto& __self = *static_cast<",
-                         mod,
-                         "*>(__owner);\n",
-                         memory.registered() ? std::string{} : absl::StrCat("  __self.", occurrence_member(site), ".tick();\n"),
-                         "  const auto __value = __self.",
-                         occurrence_member(site),
-                         ".read_all();\n",
-                         "  __value.copy_packed_words(__out_words);\n",
-                         "}\n"));
-      }
-      return symbol;
-    };
-    const auto emit_llvm_memory_apply_helper = [&](const livehd::sim::Color_plan::Site& site, const Mem& memory) {
-      const auto symbol = llvm_memory_helper_name(site, "apply");
-      if (emitted_llvm_memory_helpers.insert(symbol).second) {
-        fout->append(absl::StrCat("extern \"C\" void ",
-                                  symbol,
-                                  "(void* __owner, const std::uint64_t* __data_words) {\n",
-                                  "  auto& __self = *static_cast<",
-                                  mod,
-                                  "*>(__owner);\n",
-                                  "  const auto __data = ",
-                                  value_type(memory.bits * memory.size, memory.unsign),
-                                  "::from_packed_words(__data_words);\n",
-                                  "  __self.",
-                                  occurrence_member(site),
-                                  ".apply_update(__data);\n",
-                                  "}\n"));
-      }
-      return symbol;
-    };
-    const auto emit_llvm_memory_stage_whole_helper
-        = [&](size_t site_index, const livehd::sim::Color_plan::Site& site, const Mem& memory) {
-            const auto symbol = llvm_memory_helper_name(site, "stage_whole");
-            if (emitted_llvm_memory_helpers.insert(symbol).second) {
-              const auto pending = whole_pending(site_index);
-              fout->append(absl::StrCat("extern \"C\" void ",
-                                        symbol,
-                                        "(void* __owner, const std::uint64_t* __enable_words, const std::uint64_t* __force_words, "
-                                        "const std::uint64_t* __data_words) {\n",
-                                        "  auto& __self = *static_cast<",
-                                        mod,
-                                        "*>(__owner);\n",
-                                        "  __self.",
-                                        pending,
-                                        "_din = ",
-                                        value_type(memory.bits * memory.size, memory.unsign),
-                                        "::from_packed_words(__data_words);\n",
-                                        "  __self.",
-                                        pending,
-                                        "_cen = Slop<1>::from_packed_words(__force_words).is_known_true() || "
-                                        "(Slop<1>::from_packed_words(__enable_words).is_known_true()",
-                                        llvm_memory_gates[site_index].method.empty()
-                                            ? std::string{}
-                                            : absl::StrCat(" && __self.", llvm_memory_gates[site_index].method, "()"),
-                                        ");\n",
-                                        "}\n"));
-            }
-            return symbol;
-          };
-    const auto emit_llvm_memory_clear_helper = [&](const livehd::sim::Color_plan::Site& site) {
-      const auto symbol = llvm_memory_helper_name(site, "clear");
-      if (emitted_llvm_memory_helpers.insert(symbol).second) {
-        fout->append(absl::StrCat("extern \"C\" void ",
-                                  symbol,
-                                  "(void* __owner) {\n",
-                                  "  auto& __self = *static_cast<",
-                                  mod,
-                                  "*>(__owner);\n",
-                                  "  __self.",
-                                  occurrence_member(site),
-                                  ".clear_pending();\n",
-                                  "}\n"));
-      }
-      return symbol;
-    };
-    const auto emit_llvm_memory_stage_helper = [&](size_t                               site_index,
-                                                   const livehd::sim::Color_plan::Site& site,
-                                                   const Mem&                           memory,
-                                                   const MemPort&                       port,
-                                                   Cgen_llvm::Value                     enable,
-                                                   Cgen_llvm::Value                     address) {
-      const auto symbol = llvm_memory_helper_name(site, absl::StrCat("stage_", port.wridx));
-      if (emitted_llvm_memory_helpers.insert(symbol).second) {
-        fout->append(absl::StrCat("extern \"C\" void ",
-                                  symbol,
-                                  "(void* __owner, const std::uint64_t* __wen_words, const std::uint64_t* __addr_words, const "
-                                  "std::uint64_t* __din_words) {\n",
-                                  "  auto& __self = *static_cast<",
-                                  mod,
-                                  "*>(__owner);\n",
-                                  "  const auto __wen = ",
-                                  enable.unsign ? "Slop_u<" : "Slop<",
-                                  enable.width,
-                                  ">::from_packed_words(__wen_words);\n",
-                                  "  const auto __addr = ",
-                                  address.unsign ? "Slop_u<" : "Slop<",
-                                  address.width,
-                                  ">::from_packed_words(__addr_words);\n",
-                                  "  const auto __din = ",
-                                  value_type(memory.bits, memory.unsign),
-                                  "::from_packed_words(__din_words);\n",
-                                  "  const auto __effective_wen = ",
-                                  llvm_memory_gates[site_index].method.empty() ? std::string{"__wen"}
-                                                                               : absl::StrCat("__self.",
-                                                                                              llvm_memory_gates[site_index].method,
-                                                                                              "() ? __wen : ",
-                                                                                              enable.unsign ? "Slop_u<" : "Slop<",
-                                                                                              enable.width,
-                                                                                              ">::create_integer(0)"),
-                                  ";\n",
-                                  "  __self.",
-                                  occurrence_member(site),
-                                  ".stage_write(",
-                                  port.wridx,
-                                  ", __effective_wen, __addr, __din);\n",
-                                  "}\n"));
-      }
-      return symbol;
     };
     for (size_t color_index = 0; color_index < direct_kernel.size(); ++color_index) {
       const auto* kernel       = direct_kernel[color_index];
@@ -13037,6 +12943,114 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           input_types.emplace_back(slot.width, slot.unsign);
         }
         Cgen_llvm                                       llvm_kernel(llvm_raw_name, input_types, llvm_scalar_abi);
+        auto&                                           resources = llvm_resources[color_index];
+        auto&                                           before    = llvm_resource_before[color_index];
+        auto&                                           after     = llvm_resource_after[color_index];
+        const auto                                      resource  = [&](std::string expression) {
+          const auto found = std::find(resources.begin(), resources.end(), expression);
+          if (found != resources.end()) {
+            return static_cast<size_t>(found - resources.begin());
+          }
+          resources.push_back(std::move(expression));
+          return resources.size() - 1;
+        };
+        const auto memory_binding = [&](const livehd::sim::Color_plan::Site& site, const Mem& memory) {
+          Cgen_llvm::Memory binding;
+          const auto        state = occurrence_member(site);
+          binding.data            = resource(state + ".packed_data()");
+          binding.pending         = resource(state + ".packed_pending()");
+          binding.bits            = memory.bits;
+          binding.size            = memory.size;
+          binding.writes          = memory.n_wr;
+          binding.lanes           = memory.wensize;
+          return binding;
+        };
+        const auto memory_gate = [&](size_t site_index, Cgen_llvm::Memory& binding) {
+          if (llvm_memory_gates[site_index].method.empty()) {
+            return;
+          }
+          const auto name = absl::StrCat("__llvm_gate_", resources.size());
+          absl::StrAppend(&before, "  uint64_t ", name, " = ", llvm_memory_gates[site_index].method, "();\n");
+          binding.gated = true;
+          binding.gate  = resource("&" + name);
+        };
+        const auto emit_llvm_memory_read_helper
+            = [&](const livehd::sim::Color_plan::Site& site, const MemPort& port, Cgen_llvm::Value address) {
+                const auto& memory  = *direct_memory(site);
+                auto        binding = memory_binding(site, memory);
+                binding.forward     = memory.order == Mem::Order::fwd       ? memory.n_user_wr
+                                      : memory.order == Mem::Order::program ? memory.fwd_upto[port.rdidx]
+                                                                            : 0;
+                binding.undefined   = memory.order == Mem::Order::none ? memory.n_user_wr : 0;
+                if (binding.undefined || address.width > 64 || (address.unsign && address.width == 64)) {
+                  binding.random = resource(occurrence_member(site) + ".packed_random()");
+                  binding.draws  = resource("&hlop_random_draws()");
+                }
+                const auto symbol = llvm_memory_helper_name(site, absl::StrCat("read_", port.rdidx));
+                llvm_kernel.bind_memory(symbol, binding);
+                return symbol;
+              };
+        const auto emit_llvm_memory_read_all_helper = [&](const livehd::sim::Color_plan::Site& site, const Mem& memory) {
+          auto binding               = memory_binding(site, memory);
+          binding.commit_before_read = !memory.registered();
+          const auto symbol          = llvm_memory_helper_name(site, "read_all");
+          llvm_kernel.bind_memory(symbol, binding);
+          return symbol;
+        };
+        const auto emit_llvm_memory_apply_helper = [&](const livehd::sim::Color_plan::Site& site, const Mem& memory) {
+          const auto symbol = llvm_memory_helper_name(site, "apply");
+          llvm_kernel.bind_memory(symbol, memory_binding(site, memory));
+          return symbol;
+        };
+        const auto emit_llvm_memory_clear_helper = [&](const livehd::sim::Color_plan::Site& site) {
+          const auto symbol = llvm_memory_helper_name(site, "clear");
+          llvm_kernel.bind_memory(symbol, memory_binding(site, *direct_memory(site)));
+          return symbol;
+        };
+        const auto emit_llvm_memory_stage_helper = [&](size_t                               site_index,
+                                                       const livehd::sim::Color_plan::Site& site,
+                                                       const Mem&                           memory,
+                                                       const MemPort&                       port,
+                                                       Cgen_llvm::Value,
+                                                       Cgen_llvm::Value) {
+          auto binding = memory_binding(site, memory);
+          binding.port = port.wridx;
+          memory_gate(site_index, binding);
+          const auto symbol = llvm_memory_helper_name(site, absl::StrCat("stage_", port.wridx));
+          llvm_kernel.bind_memory(symbol, binding);
+          return symbol;
+        };
+        const auto emit_llvm_memory_stage_whole_helper = [&](size_t                               site_index,
+                                                             const livehd::sim::Color_plan::Site& site,
+                                                             const Mem&                           memory) {
+          Cgen_llvm::Memory binding;
+          const auto        name = absl::StrCat("__llvm_whole_", resources.size());
+          const auto        type = value_type(memory.bits * memory.size, memory.unsign);
+          // Slop's signed carrier can contain an extra sign word. The bridge
+          // allocates its full transport size; native code writes value words.
+          absl::StrAppend(&before, "  uint64_t ", name, "[", type, "::packed_word_count]{};\n  uint64_t ", name, "_enable = 0;\n");
+          binding.data         = resource(name);
+          binding.pending      = resource("&" + name + "_enable");
+          binding.packed_value = true;
+          memory_gate(site_index, binding);
+          const auto pending = whole_pending(site_index);
+          absl::StrAppend(&after,
+                          "  ",
+                          pending,
+                          "_din = ",
+                          type,
+                          "::from_packed_words(",
+                          name,
+                          ");\n  ",
+                          pending,
+                          "_cen = ",
+                          name,
+                          "_enable != 0;\n");
+          const auto symbol = llvm_memory_helper_name(site, "stage_whole");
+          llvm_kernel.bind_memory(symbol, binding);
+          return symbol;
+        };
+
         absl::flat_hash_map<uint64_t, Cgen_llvm::Value> llvm_inputs;
         absl::flat_hash_map<size_t, Cgen_llvm::Value>   llvm_outputs;
         absl::flat_hash_set<size_t>                     llvm_preextracted_get_masks;
@@ -13213,14 +13227,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               if (constant.has_unknowns() && !unknown_zero_) {
                 const auto literal = sim_const_text(constant, false);
                 const auto symbol = absl::StrCat("__lhd_llvm_constant_", mod, "_", width, "_", livehd::hash_util::fnv1a64(literal));
-                if (emitted_llvm_constant_helpers.insert(symbol).second) {
-                  fout->append("extern \"C\" void ",
-                               symbol,
-                               "(void*, std::uint64_t* __words) {\n  (",
-                               sim_const_expr(literal, std::to_string(width)),
-                               ").copy_packed_words(__words);\n}\n");
-                }
-                return llvm_kernel.external_read_all(symbol, width, false);
+                const auto name    = absl::StrCat("__llvm_constant_", resources.size());
+                absl::StrAppend(&before,
+                                "  uint64_t ",
+                                name,
+                                "[Slop<",
+                                width,
+                                " >::packed_word_count]{};\n  (",
+                                sim_const_expr(literal, std::to_string(width)),
+                                ").copy_packed_words(",
+                                name,
+                                ");\n");
+                Cgen_llvm::Memory binding;
+                binding.data         = resource(name);
+                binding.packed_value = true;
+                llvm_kernel.bind_memory(symbol, binding);
+                return llvm_kernel.memory_read_all(symbol, width, false);
               }
               auto simulated = constant;
               if (constant.has_unknowns()) {
@@ -13436,7 +13458,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             case Ntype_op::Memory: {
               const auto* memory = find_local_mem(version.base_site);
               if (memory == nullptr) {
-                return reject("memory callback has no storage description");
+                return reject("memory operation has no storage description");
               }
               if (version.role == livehd::sim::Color_plan::Version_role::state_update) {
                 if (memory->has_reset_stage()) {
@@ -13478,12 +13500,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                   }
                   const auto symbol
                       = emit_llvm_memory_stage_whole_helper(version.base_site, color_plan_->sites()[version.base_site], *memory);
-                  if (!llvm_kernel.external_stage_whole(symbol, enable, force, update)) {
-                    return reject("whole-array memory stage callback construction failed");
+                  if (!llvm_kernel.memory_stage_whole(symbol, enable, force, update)) {
+                    return reject("whole-array memory stage operation construction failed");
                   }
                 }
-                if (!llvm_kernel.external_clear(emit_llvm_memory_clear_helper(color_plan_->sites()[version.base_site]))) {
-                  return reject("memory clear callback construction failed");
+                if (!llvm_kernel.memory_clear(emit_llvm_memory_clear_helper(color_plan_->sites()[version.base_site]))) {
+                  return reject("memory clear operation construction failed");
                 }
                 for (const auto& port : memory->ports) {
                   if (port.rd || port.addr.is_invalid() || port.din.is_invalid()) {
@@ -13502,7 +13524,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                   auto address = memory_operand(port.pid, "addr");
                   auto data    = memory_operand(port.pid, "din");
                   if (address.width == 0 || data.width == 0) {
-                    return reject("memory write callback has no address or data value");
+                    return reject("memory write operation has no address or data value");
                   }
                   data              = llvm_kernel.resize(data, static_cast<uint32_t>(memory->bits), memory->unsign);
                   const auto symbol = emit_llvm_memory_stage_helper(version.base_site,
@@ -13511,8 +13533,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                                                     port,
                                                                     enable,
                                                                     address);
-                  if (!llvm_kernel.external_stage_write(symbol, enable, address, data)) {
-                    return reject("memory write callback construction failed");
+                  if (!llvm_kernel.memory_stage_write(symbol, enable, address, data)) {
+                    return reject("memory write operation construction failed");
                   }
                 }
                 result = llvm_kernel.constant(result_width, 0, result_unsign);
@@ -13524,15 +13546,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                   return reject("combinational whole-array memory has no update value");
                 }
                 update = llvm_kernel.resize(update, static_cast<uint32_t>(memory->bits * memory->size), memory->unsign);
-                if (!llvm_kernel.external_apply(emit_llvm_memory_apply_helper(color_plan_->sites()[version.base_site], *memory),
-                                                update)) {
-                  return reject("whole-array memory apply callback construction failed");
+                if (!llvm_kernel.memory_apply(emit_llvm_memory_apply_helper(color_plan_->sites()[version.base_site], *memory),
+                                              update)) {
+                  return reject("whole-array memory apply operation construction failed");
                 }
               }
               if (memory->has_read_all && version.output_port == Ntype::Memory_readall_pid) {
                 if (!memory->registered()) {
-                  if (!llvm_kernel.external_clear(emit_llvm_memory_clear_helper(color_plan_->sites()[version.base_site]))) {
-                    return reject("combinational memory clear callback construction failed");
+                  if (!llvm_kernel.memory_clear(emit_llvm_memory_clear_helper(color_plan_->sites()[version.base_site]))) {
+                    return reject("combinational memory clear operation construction failed");
                   }
                   for (const auto& port : memory->ports) {
                     if (port.rd || port.addr.is_invalid() || port.din.is_invalid() || port.wridx >= memory->n_user_wr) {
@@ -13556,12 +13578,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                                                       port,
                                                                       enable,
                                                                       address);
-                    if (!llvm_kernel.external_stage_write(symbol, enable, address, data)) {
-                      return reject("combinational memory write callback construction failed");
+                    if (!llvm_kernel.memory_stage_write(symbol, enable, address, data)) {
+                      return reject("combinational memory write operation construction failed");
                     }
                   }
                 }
-                result = llvm_kernel.external_read_all(
+                result = llvm_kernel.memory_read_all(
                     emit_llvm_memory_read_all_helper(color_plan_->sites()[version.base_site], *memory),
                     result_width,
                     result_unsign);
@@ -13578,14 +13600,51 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 }
               }
               if (read_port == nullptr || read_port->addr.is_invalid()) {
-                return reject("memory read callback has no matching port");
+                return reject("memory read operation has no matching port");
               }
               auto address = memory_operand(read_port->pid, "addr");
               if (address.width == 0) {
-                return reject("memory read callback has no address value");
+                return reject("memory read operation has no address value");
+              }
+              // A pre-rise read previews the writes in its forwarding prefix.
+              // These writes can belong to another color; replay their inputs
+              // here just as the shared Slop evaluator's stage_through does.
+              const int prefix = memory->order == Mem::Order::fwd || memory->order == Mem::Order::none ? memory->n_user_wr
+                                 : memory->order == Mem::Order::program ? memory->fwd_upto[read_port->rdidx]
+                                                                        : 0;
+              if (prefix > 0 && (!memory->registered() || version.version == livehd::sim::Color_plan::State_version::pre_rise)) {
+                if (!llvm_kernel.memory_clear(emit_llvm_memory_clear_helper(color_plan_->sites()[version.base_site]))) {
+                  return reject("memory preview clear construction failed");
+                }
+                for (const auto& port : memory->ports) {
+                  if (port.rd || port.addr.is_invalid() || port.din.is_invalid() || port.wridx >= prefix
+                      || port.enable.is_known_false()) {
+                    continue;
+                  }
+                  auto enable = memory_operand(port.pid, "enable");
+                  if (enable.width == 0) {
+                    const auto bits = static_cast<uint32_t>(std::max(memory->wensize, 1));
+                    enable          = llvm_kernel.constant_words(bits, std::vector<uint64_t>((bits + 63) / 64, ~uint64_t{0}), true);
+                  }
+                  auto write_address = memory_operand(port.pid, "addr");
+                  auto data          = memory_operand(port.pid, "din");
+                  if (write_address.width == 0 || data.width == 0) {
+                    return reject("memory preview has no address or data value");
+                  }
+                  data                    = llvm_kernel.resize(data, static_cast<uint32_t>(memory->bits), memory->unsign);
+                  const auto write_symbol = emit_llvm_memory_stage_helper(version.base_site,
+                                                                          color_plan_->sites()[version.base_site],
+                                                                          *memory,
+                                                                          port,
+                                                                          enable,
+                                                                          write_address);
+                  if (!llvm_kernel.memory_stage_write(write_symbol, enable, write_address, data)) {
+                    return reject("memory preview write construction failed");
+                  }
+                }
               }
               const auto symbol = emit_llvm_memory_read_helper(color_plan_->sites()[version.base_site], *read_port, address);
-              result            = llvm_kernel.external_read(symbol, address, result_width, result_unsign);
+              result            = llvm_kernel.memory_read(symbol, address, result_width, result_unsign);
               break;
             }
             case Ntype_op::Flop :
@@ -13959,11 +14018,26 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             }
           }
         }
-        std::string error;
         const auto  object_path = odir.empty() ? llvm_object : absl::StrCat(odir, "/", llvm_object);
-        if (!llvm_kernel.write_object(object_path, error, llvm_changed_in_kernel(abi))) {
-          return reject(error);
+        while (object_jobs.size() >= object_job_limit) {
+          size_t ready = 0;
+          for (size_t i = 0; i < object_jobs.size(); ++i) {
+            if (object_jobs[i].wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+              ready = i;
+              break;
+            }
+          }
+          finish_object(ready);
         }
+        object_jobs.push_back(
+            std::async(std::launch::async,
+                       [kernel = std::move(llvm_kernel), object_path, changed = llvm_changed_in_kernel(abi)]() mutable {
+                         std::string failure;
+                         if (!kernel.write_object(object_path, failure, changed)) {
+                           return object_path + ": " + failure;
+                         }
+                         return std::string{};
+                       }));
         // Objects are link inputs, so they belong in the module's artifact
         // manifest exactly like the generated .cpp files: a warm run that finds
         // one missing must miss cold rather than skip and then fail to link.
@@ -14327,7 +14401,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         fout->append(indent, "__rt.__state_commit[", std::to_string(direct_state_commit_flag_of_member[member]), "] = true;\n");
       }
     };
-    // A memory state update stages through generated owner callbacks, so no
+    // A memory state update stages through generated the packed resource table, so no
     // boundary write carries its changed bit: its commit is UNCONDITIONAL.
     const auto kernel_memory_commit_members = [&](size_t color_index) {
       std::vector<size_t> members;
@@ -14751,6 +14825,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       seq_volatile_.clear();
 
       if (llvm_inline_kernel[color_index]) {
+        fout->append(llvm_resource_before[color_index]);
+        fout->append("  void* __llvm_resources[] = {");
+        for (const auto& pointer : llvm_resources[color_index]) {
+          fout->append(pointer, ",");
+        }
+        fout->append("nullptr};\n");
+
         const auto& abi        = direct_abi[color_index];
         const auto  llvm_words = [](uint32_t width) { return (static_cast<size_t>(width) + 63) / 64; };
         const auto  llvm_slots = llvm_input_slots(abi);  // one kernel input per boundary SLOT
@@ -14792,7 +14873,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           for (size_t input = 0; input < llvm_slots.reads.size(); ++input) {
             fout->append(input == 0 ? "__llvm_input_" : ", __llvm_input_", std::to_string(input));
           }
-          fout->append(llvm_slots.reads.empty() ? "this);\n" : ", this);\n");
+          fout->append(llvm_slots.reads.empty() ? "__llvm_resources);\n" : ", __llvm_resources);\n");
+          fout->append(llvm_resource_after[color_index]);
           fout->append("  const bool __llvm_value_changed = __llvm_value != __llvm_old;\n");
           const auto expr      = direct_write_expr(slot, write.slot_index);
           const bool canonical = direct_slot_is_u[write.slot_index];
@@ -14891,7 +14973,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                      std::to_string(changed_words),
                      "]{};\n  ",
                      llvm_inline_raw_name[color_index],
-                     "(__llvm_inputs, __llvm_outputs, __llvm_changed, this);\n");
+                     "(__llvm_inputs, __llvm_outputs, __llvm_changed, __llvm_resources);\n");
+        fout->append(llvm_resource_after[color_index]);
         for (const auto& write : abi.writes) {  // snapshot every latch `_din` before the first store below
           if (color_plan_->boundary_slots()[write.slot_index].kind == livehd::sim::Color_plan::Boundary_kind::state_pending) {
             emit_latch_din_placeholder('S', write.version);
@@ -14937,7 +15020,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           }
         }
         for (const size_t member : kernel_memory_commit_members(color_index)) {
-          emit_commit_flag_at("  ", member);  // staged through owner callbacks: no changed bit carries it
+          emit_commit_flag_at("  ", member);  // staged through the packed resource table: no changed bit carries it
         }
         close_case();
         fout->append("    return;\n  }\n");
@@ -17548,6 +17631,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // precisely the one module this reuse exists for, on every design with a
   // register. A genuine unresolved cycle still blocks the record, because the
   // paths that find one set `cycle_reported_` and emit an error.
+  while (!object_jobs.empty()) {
+    finish_object(0);
+  }
   if (!odir.empty() && !cycle_reported_ && !livehd::diag::sink().has_errors()) {
     std::sort(emitted_files_.begin(), emitted_files_.end());
     emitted_files_.erase(std::unique(emitted_files_.begin(), emitted_files_.end()), emitted_files_.end());

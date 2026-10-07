@@ -1,0 +1,1100 @@
+[
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_verilog_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "elab": 263924,
+      "exec": 22724,
+      "max": 263924,
+      "run": 251248,
+      "setup": 82708
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "1956944815607682736",
+      "cycles": 16129032,
+      "cycles_per_s": 10312680,
+      "exec_ms": 1564,
+      "exec_samples_ms": [
+        1564,
+        1565,
+        1576
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "amba",
+    "tech": null,
+    "test": "br_amba_axi_timing_slice",
+    "time_ms": {
+      "cc": 7054,
+      "elab": 1731,
+      "exec": 1564,
+      "setup": 1027,
+      "total": 11376
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_pyrope_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "exec": 22724,
+      "max": 255480,
+      "run": 255480,
+      "setup": 87372
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "1956944815607682736",
+      "cycles": 16129032,
+      "cycles_per_s": 11562030,
+      "exec_ms": 1395,
+      "exec_samples_ms": [
+        1396,
+        1395,
+        1404
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "amba",
+    "tech": null,
+    "test": "br_amba_axi_timing_slice",
+    "time_ms": {
+      "cc": 7228,
+      "exec": 1395,
+      "setup": 334,
+      "total": 8957
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "aw32_dw32",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_verilog_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "elab": 266292,
+      "exec": 22724,
+      "max": 266292,
+      "run": 250828,
+      "setup": 80460
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "13002415611947852208",
+      "cycles": 14925373,
+      "cycles_per_s": 8236960,
+      "exec_ms": 1812,
+      "exec_samples_ms": [
+        1816,
+        1812,
+        1822
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "amba",
+    "tech": null,
+    "test": "br_amba_axil_timing_slice",
+    "time_ms": {
+      "cc": 6614,
+      "elab": 288,
+      "exec": 1812,
+      "setup": 527,
+      "total": 9241
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "aw32_dw32",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_pyrope_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "exec": 22724,
+      "max": 229272,
+      "run": 229272,
+      "setup": 88156
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "13002415611947852208",
+      "cycles": 14925373,
+      "cycles_per_s": 8728288,
+      "exec_ms": 1710,
+      "exec_samples_ms": [
+        1723,
+        1710,
+        1721
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "amba",
+    "tech": null,
+    "test": "br_amba_axil_timing_slice",
+    "time_ms": {
+      "cc": 11349,
+      "exec": 1710,
+      "setup": 399,
+      "total": 13458
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "nr16",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_verilog_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "elab": 265172,
+      "exec": 22724,
+      "max": 265172,
+      "run": 249216,
+      "setup": 81100
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "14573127022883009526",
+      "cycles": 18867925,
+      "cycles_per_s": 23322527,
+      "exec_ms": 809,
+      "exec_samples_ms": [
+        809,
+        818,
+        816
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "arb",
+    "tech": null,
+    "test": "br_arb_rr",
+    "time_ms": {
+      "cc": 6776,
+      "elab": 472,
+      "exec": 809,
+      "setup": 128,
+      "total": 8185
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "nr16",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_pyrope_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "exec": 22724,
+      "max": 249196,
+      "run": 249196,
+      "setup": 86904
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "14573127022883009526",
+      "cycles": 18867925,
+      "cycles_per_s": 5389295,
+      "exec_ms": 3501,
+      "exec_samples_ms": [
+        3501,
+        3541,
+        3522
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "arb",
+    "tech": null,
+    "test": "br_arb_rr",
+    "time_ms": {
+      "cc": 7576,
+      "exec": 3501,
+      "setup": 179,
+      "total": 11256
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "d32_frads1_frdt1_frrdds0_frrdws_7f28a45b",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_verilog_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": false,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "elab": 314712,
+      "exec": 23748,
+      "max": 552632,
+      "run": 552632,
+      "setup": 168188
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "13083134103330125444",
+      "cycles": 3225806,
+      "cycles_per_s": 308394,
+      "exec_ms": 10460,
+      "exec_samples_ms": [
+        10483,
+        10460,
+        10533
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "cdc",
+    "tech": null,
+    "test": "br_cdc_fifo_flops",
+    "time_ms": {
+      "cc": 14064,
+      "elab": 1325,
+      "exec": 10460,
+      "setup": 2320,
+      "total": 28169
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "d32_frads1_frdt1_frrdds0_frrdws_7f28a45b",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_pyrope_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": false,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "exec": 23748,
+      "max": 426404,
+      "run": 257368,
+      "setup": 426404
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "13083134103330125444",
+      "cycles": 3225806,
+      "cycles_per_s": 1907632,
+      "exec_ms": 1691,
+      "exec_samples_ms": [
+        1691,
+        1705,
+        1700
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "cdc",
+    "tech": null,
+    "test": "br_cdc_fifo_flops",
+    "time_ms": {
+      "cc": 8531,
+      "exec": 1691,
+      "setup": 12279,
+      "total": 22501
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "mc16_nf4_pcmc4_rpo1_w64",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_verilog_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "elab": 265256,
+      "exec": 23748,
+      "max": 265256,
+      "run": 243380,
+      "setup": 85100
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "10026819886260638103",
+      "cycles": 14084507,
+      "cycles_per_s": 7872837,
+      "exec_ms": 1789,
+      "exec_samples_ms": [
+        1789,
+        1801,
+        1951
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "credit",
+    "tech": null,
+    "test": "br_credit_sender",
+    "time_ms": {
+      "cc": 8034,
+      "elab": 1051,
+      "exec": 1789,
+      "setup": 4110,
+      "total": 14984
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "mc16_nf4_pcmc4_rpo1_w64",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_pyrope_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "exec": 23748,
+      "max": 249136,
+      "run": 249136,
+      "setup": 91800
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "10026819886260638103",
+      "cycles": 14084507,
+      "cycles_per_s": 8066727,
+      "exec_ms": 1746,
+      "exec_samples_ms": [
+        1752,
+        1757,
+        1746
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "credit",
+    "tech": null,
+    "test": "br_credit_sender",
+    "time_ms": {
+      "cc": 8519,
+      "exec": 1746,
+      "setup": 319,
+      "total": 10584
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "d32_eb1_frads1_rpo1_rpo1_w32",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_verilog_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "elab": 269164,
+      "exec": 23748,
+      "max": 269164,
+      "run": 252368,
+      "setup": 82888
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "17427903416933715990",
+      "cycles": 15151515,
+      "cycles_per_s": 10237510,
+      "exec_ms": 1480,
+      "exec_samples_ms": [
+        1484,
+        1480,
+        1576
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "fifo",
+    "tech": null,
+    "test": "br_fifo_flops_push_credit",
+    "time_ms": {
+      "cc": 7660,
+      "elab": 345,
+      "exec": 1480,
+      "setup": 622,
+      "total": 10107
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "d32_eb1_frads1_rpo1_rpo1_w32",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_pyrope_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "exec": 23748,
+      "max": 251268,
+      "run": 251268,
+      "setup": 90536
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "17427903416933715990",
+      "cycles": 15151515,
+      "cycles_per_s": 10258303,
+      "exec_ms": 1477,
+      "exec_samples_ms": [
+        1477,
+        1484,
+        1479
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "fifo",
+    "tech": null,
+    "test": "br_fifo_flops_push_credit",
+    "time_ms": {
+      "cc": 8024,
+      "exec": 1477,
+      "setup": 843,
+      "total": 10344
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "nf16",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_verilog_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "elab": 266148,
+      "exec": 23748,
+      "max": 266148,
+      "run": 247128,
+      "setup": 80976
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "12059985226895709169",
+      "cycles": 22222222,
+      "cycles_per_s": 12163230,
+      "exec_ms": 1827,
+      "exec_samples_ms": [
+        1970,
+        1848,
+        1827
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "flow",
+    "tech": null,
+    "test": "br_flow_arb_rr",
+    "time_ms": {
+      "cc": 9087,
+      "elab": 594,
+      "exec": 1827,
+      "setup": 3017,
+      "total": 14525
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "nf16",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_pyrope_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "exec": 23748,
+      "max": 247180,
+      "run": 247180,
+      "setup": 81616
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "12059985226895709169",
+      "cycles": 22222222,
+      "cycles_per_s": 2257667,
+      "exec_ms": 9843,
+      "exec_samples_ms": [
+        9880,
+        9943,
+        9843
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "flow",
+    "tech": null,
+    "test": "br_flow_arb_rr",
+    "time_ms": {
+      "cc": 7630,
+      "exec": 9843,
+      "setup": 1549,
+      "total": 19022
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "dmsf0_mw8_pw64_pw8",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_verilog_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "elab": 266308,
+      "exec": 23748,
+      "max": 266308,
+      "run": 242876,
+      "setup": 83264
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "14659346828983681186",
+      "cycles": 25000000,
+      "cycles_per_s": 14253135,
+      "exec_ms": 1754,
+      "exec_samples_ms": [
+        1756,
+        1754,
+        1759
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "flow",
+    "tech": null,
+    "test": "br_flow_deserializer",
+    "time_ms": {
+      "cc": 8762,
+      "elab": 927,
+      "exec": 1754,
+      "setup": 5662,
+      "total": 17105
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": false,
+    "config": "dmsf0_mw8_pw64_pw8",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_pyrope_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "exec": 23748,
+      "max": 248044,
+      "run": 248044,
+      "setup": 82572
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "auto",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "14659346828983681186",
+      "cycles": 25000000,
+      "cycles_per_s": 14310246,
+      "exec_ms": 1747,
+      "exec_samples_ms": [
+        1774,
+        1747,
+        1753
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "flow",
+    "tech": null,
+    "test": "br_flow_deserializer",
+    "time_ms": {
+      "cc": 8369,
+      "exec": 1747,
+      "setup": 2618,
+      "total": 12734
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": true,
+    "config": "nsi5_sw16",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_verilog_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "elab": 264140,
+      "exec": 23748,
+      "max": 264140,
+      "run": 251188,
+      "setup": 80660
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "idiomatic",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "13049023983008151410",
+      "cycles": 43478261,
+      "cycles_per_s": 36783638,
+      "exec_ms": 1182,
+      "exec_samples_ms": [
+        1188,
+        1262,
+        1182
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "mux",
+    "tech": null,
+    "test": "br_mux_bin_structured_gates_mock",
+    "time_ms": {
+      "cc": 8150,
+      "elab": 490,
+      "exec": 1182,
+      "setup": 1542,
+      "total": 11364
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  },
+  {
+    "cached": false,
+    "comparable": true,
+    "config": "nsi5_sw16",
+    "cpus": 128,
+    "date": "2026-10-06",
+    "flow": "sim_lhd_pyrope_llvm",
+    "host": "satsuma",
+    "host_class": "Linux-x86_64",
+    "kind": "sim",
+    "lec": "proven",
+    "lec_gate": true,
+    "measured": "2026-10-06",
+    "passed": true,
+    "peak_rss_kb": {
+      "exec": 23748,
+      "max": 251248,
+      "run": 251248,
+      "setup": 83120
+    },
+    "platform": "Linux 6.12.107+deb13-amd64 x86_64",
+    "pyrope_status": "idiomatic",
+    "run_id": "20261006T185507",
+    "sim": {
+      "backend": "llvm",
+      "build_jobs": 8,
+      "checksum": "13049023983008151410",
+      "cycles": 43478261,
+      "cycles_per_s": 7326973,
+      "exec_ms": 5934,
+      "exec_samples_ms": [
+        5934,
+        5934,
+        5941
+      ],
+      "measurement_jobs": 1
+    },
+    "status": "ok",
+    "suite": "mux",
+    "tech": null,
+    "test": "br_mux_bin_structured_gates_mock",
+    "time_ms": {
+      "cc": 7456,
+      "exec": 5934,
+      "setup": 120,
+      "total": 13510
+    },
+    "versions": {
+      "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+      "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+      "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+      "lhd": "livehd 8a9f29ffd+dirty opt sha256:4b6f5d38d2aa8ba7",
+      "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+      "sta": "3.1.0 sha256:f6cc36b19980821d",
+      "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+      "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+      "yosys2": "sha256:338d182a1c18fd12",
+      "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47"
+    }
+  }
+]

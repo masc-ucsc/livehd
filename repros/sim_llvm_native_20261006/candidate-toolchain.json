@@ -1,0 +1,61 @@
+{
+  "bin": {
+    "abc": "/var/tmp/renau/_bazel_renau/9dfe49b94bcdf1a5ec2219719154e95e/execroot/_main/bazel-out/k8-opt/bin/external/abc+/abc_bin",
+    "cxx": "/usr/bin/x86_64-linux-gnu-g++-14",
+    "lhd": "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/0b21680149c21e6f-8a9f29ffd-dirty-src-554725d3b7d01cb5/lhd",
+    "make": "/usr/bin/make",
+    "sta": "/var/tmp/renau/_bazel_renau/9dfe49b94bcdf1a5ec2219719154e95e/execroot/_main/bazel-out/k8-opt/bin/external/+http_archive+opensta/opensta_build/bin/sta",
+    "verilator": "/var/tmp/renau/_bazel_renau/9dfe49b94bcdf1a5ec2219719154e95e/execroot/_main/bazel-out/k8-opt/bin/external/verilator+/verilator",
+    "yosys": "/var/tmp/renau/_bazel_renau/9dfe49b94bcdf1a5ec2219719154e95e/execroot/_main/bazel-out/k8-opt/bin/external/yosys+/yosys",
+    "yosys_slang": "/var/tmp/renau/_bazel_renau/9dfe49b94bcdf1a5ec2219719154e95e/execroot/_main/bazel-out/k8-opt/bin/external/+http_archive+yosys_slang/slang.so",
+    "lgcheck": "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/0b21680149c21e6f-8a9f29ffd-dirty-src-554725d3b7d01cb5/lhd.runfiles/_main/inou/yosys/lgcheck",
+    "yosys2": "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/0b21680149c21e6f-8a9f29ffd-dirty-src-554725d3b7d01cb5/lhd.runfiles/_main/inou/yosys/yosys2"
+  },
+  "env": {
+    "lhd": {
+      "RUNFILES_DIR": "/mada/users/renau/projs/lhdtrack/var/toolchain/eval/0b21680149c21e6f-8a9f29ffd-dirty-src-554725d3b7d01cb5/lhd.runfiles",
+      "LGCHECK_EQUIV_TIMEOUT": "300",
+      "LGCHECK_SLANG_THREADS": "1"
+    },
+    "verilator": {
+      "VERILATOR_ROOT": "/mada/users/renau/projs/lhdtrack/var/toolchain/share/verilator"
+    },
+    "sta": {
+      "LD_LIBRARY_PATH": "/mada/users/renau/projs/lhdtrack/var/toolchain/share/build-tools/lib/x86_64-linux-gnu",
+      "TCL_LIBRARY": "/mada/users/renau/projs/lhdtrack/var/toolchain/share/build-tools/share/tcltk/tcl8.6"
+    }
+  },
+  "generated": "2026-10-07T01:36:32.507681+00:00",
+  "host_class": "Linux-x86_64",
+  "schema_version": 1,
+  "tech": {
+    "asap7": {
+      "liberty": [
+        "/var/tmp/renau/_bazel_renau/9dfe49b94bcdf1a5ec2219719154e95e/execroot/_main/bazel-out/k8-opt/bin/tech/asap7/asap7sc7p5t_RVT_TT_merged.lib"
+      ],
+      "sha256": "f1474fb23977fd54",
+      "time_unit": "ps"
+    },
+    "sky130": {
+      "liberty": [
+        "/var/tmp/renau/_bazel_renau/cache/repos/v1/contents/34b09caa14d46c9ee9a8e327963c8e42301fdceb7183401839c0f49aa8a0b4f8/585e11ca-aebc-48e0-813e-ea84b0d4221d/file/sky130_fd_sc_hd__tt_025C_1v80.lib"
+      ],
+      "sha256": "3df032a7e10d66a5",
+      "time_unit": "ns"
+    }
+  },
+  "versions": {
+    "abc": "UC Berkeley, ABC 1.01 (compiled redacted redacted) sha256:285c7b43edd95343",
+    "cxx": "cxx (Debian 14.2.0-19) 14.2.0 sha256:6b3696e4dcb85e1c",
+    "lhd": "livehd 8a9f29ffd+dirty opt sha256:0b21680149c21e6f",
+    "make": "GNU Make 4.4.1 sha256:8a229baf64671988",
+    "sta": "3.1.0 sha256:f6cc36b19980821d",
+    "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+    "yosys": "Yosys 0.64 sha256:f0b765c3a575f1c0",
+    "yosys_slang": "yosys-slang sha256:99ad11e3a4df2f47",
+    "lgcheck": "sha256:2581b8e9ea60c9e6 adapter-sha256:f55a8d926dc68c5c",
+    "yosys2": "sha256:7de7f58fcaa089ea"
+  },
+  "livehd_source_diff_sha256": "554725d3b7d01cb5c937a528f6ca803570e0870a91791f01aa2d221f3dbbb0df",
+  "livehd_source_revision": "8a9f29ffdd9ba9887946d0cebe8bb0b658509018"
+}

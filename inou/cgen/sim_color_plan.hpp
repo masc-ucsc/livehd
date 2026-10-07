@@ -2,7 +2,10 @@
 #pragma once
 
 #include <cstddef>
+#include <compare>
 #include <cstdint>
+#include <cstdio>
+#include <format>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -14,6 +17,39 @@
 #include "sim_tune_vector.hpp"
 
 namespace livehd::sim {
+
+// Content-derived plan identity: a 128-bit hash of a node's structure (never of
+// hhds ids, which are unique but not stable across compiles), so an unchanged
+// site/slot/color keeps its identity -- and its color-layout position and
+// emitted order -- after an edit elsewhere. Held as a value everywhere inside
+// the planner; spelled as text ("s:" + 32 hex digits) only where it is
+// serialized: the color layout file, reports, diagnostics and symbol names.
+// Ordering is (hi, lo), i.e. the order of that fixed-width spelling.
+struct Plan_id {
+  uint64_t hi = 0;
+  uint64_t lo = 0;
+
+  [[nodiscard]] constexpr auto operator<=>(const Plan_id&) const = default;
+  [[nodiscard]] constexpr bool empty() const noexcept { return hi == 0 && lo == 0; }
+  [[nodiscard]] std::string    str() const {
+    char      text[40];
+    const int size = std::snprintf(text,
+                                   sizeof text,
+                                   "s:%016llx%016llx",
+                                   static_cast<unsigned long long>(hi),
+                                   static_cast<unsigned long long>(lo));
+    return std::string{text, static_cast<size_t>(size)};
+  }
+
+  template <typename H>
+  friend H AbslHashValue(H h, const Plan_id& x) {
+    return H::combine(std::move(h), x.hi, x.lo);
+  }
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const Plan_id& x) {
+    sink.Append(x.str());
+  }
+};
 
 // Read-only occurrence-wide discovery for the simulator color schedule.
 //
@@ -74,9 +110,9 @@ public:
   };
 
   struct Site {
-    std::string           structural_id;
-    std::string           schedule_id;  // topology-only ordering; excludes operation and literal contents
-    std::string           storage_id;   // occurrence-unique ABI identity; excluded from kernel reuse
+    Plan_id               structural_id;
+    Plan_id               schedule_id;  // topology-only ordering; excludes operation and literal contents
+    Plan_id               storage_id;   // occurrence-unique ABI identity; excluded from kernel reuse
     Site_kind             kind = Site_kind::data;
     hhds::Occurrence_node node;
     uint64_t              gate_equivalents = 0;
@@ -94,13 +130,13 @@ public:
 
   struct Observation {
     std::string name;
-    std::string structural_id;
+    Plan_id     structural_id;
     bool        input = false;
     uint32_t    port  = 0;
   };
 
   struct Version_site {
-    std::string    structural_id;
+    Plan_id        structural_id;
     size_t         base_site       = 0;
     // Outermost structural conditional region containing this occurrence.
     // Coarsening may never cross this boundary: doing so would erase the
@@ -165,7 +201,7 @@ public:
   // top I/O slots are public root storage. Consumers bind directly to a slot --
   // they never call another module's settle/eval routine.
   struct Boundary_slot {
-    std::string                    structural_id;
+    Plan_id                        structural_id;
     Boundary_kind                  kind                = Boundary_kind::color_value;
     State_version                  version             = State_version::pre_rise;
     size_t                         owner_site          = invalid_index;
@@ -183,8 +219,8 @@ public:
   };
 
   struct Color {
-    std::string         structural_id;
-    std::string         storage_id;  // terminal topology; activation allocation, never a kernel cache key
+    Plan_id             structural_id;
+    Plan_id             storage_id;  // terminal topology; activation allocation, never a kernel cache key
     Execution_slot      slot = Execution_slot::pre_rise_eval;
     std::vector<size_t> members;
     uint64_t            gate_equivalents = 0;
@@ -442,3 +478,10 @@ private:
 };
 
 }  // namespace livehd::sim
+
+template <>
+struct std::formatter<livehd::sim::Plan_id> : std::formatter<std::string> {
+  auto format(const livehd::sim::Plan_id& id, std::format_context& ctx) const {
+    return std::formatter<std::string>::format(id.str(), ctx);
+  }
+};

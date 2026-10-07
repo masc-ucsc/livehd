@@ -1,0 +1,72 @@
+[
+  {
+    "test": "br_amba_axi_timing_slice",
+    "variants": {
+      "llvm": {
+        "instructions": 105,
+        "xmm_moves": 24,
+        "memcpy_calls": 0
+      },
+      "memcpy-state": {
+        "instructions": 105,
+        "xmm_moves": 24,
+        "memcpy_calls": 0
+      },
+      "grouped-state": {
+        "instructions": 105,
+        "xmm_moves": 24,
+        "memcpy_calls": 0
+      },
+      "grouped-memcpy": {
+        "instructions": 151,
+        "xmm_moves": 50,
+        "memcpy_calls": 0
+      }
+    }
+  },
+  {
+    "test": "br_amba_axil_timing_slice",
+    "variants": {
+      "llvm": {
+        "instructions": 185,
+        "xmm_moves": 44,
+        "memcpy_calls": 0
+      },
+      "memcpy-state": {
+        "instructions": 185,
+        "xmm_moves": 44,
+        "memcpy_calls": 0
+      }
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "variants": {
+      "llvm": {
+        "instructions": 228,
+        "xmm_moves": 50,
+        "memcpy_calls": 0
+      },
+      "inline-memory": {
+        "instructions": 228,
+        "xmm_moves": 50,
+        "memcpy_calls": 0
+      },
+      "memcpy-state": {
+        "instructions": 228,
+        "xmm_moves": 50,
+        "memcpy_calls": 0
+      },
+      "grouped-state": {
+        "instructions": 228,
+        "xmm_moves": 50,
+        "memcpy_calls": 0
+      },
+      "grouped-memcpy": {
+        "instructions": 301,
+        "xmm_moves": 84,
+        "memcpy_calls": 0
+      }
+    }
+  }
+]

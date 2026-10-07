@@ -1,0 +1,186 @@
+{
+  "cpu": 34,
+  "cycles": 100000,
+  "samples": [
+    {
+      "variant": "old LLVM",
+      "round": 0,
+      "warmup": true,
+      "wall_s": 2.803089841036126,
+      "cpu_s": 2.8026899999999997,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "native LLVM",
+      "round": 0,
+      "warmup": true,
+      "wall_s": 2.5615293928422034,
+      "cpu_s": 2.5611340000000005,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "Slop",
+      "round": 0,
+      "warmup": true,
+      "wall_s": 2.7910159029997885,
+      "cpu_s": 2.790461,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "native LLVM",
+      "round": 1,
+      "warmup": false,
+      "wall_s": 2.837923663901165,
+      "cpu_s": 2.8375909999999993,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "Slop",
+      "round": 1,
+      "warmup": false,
+      "wall_s": 2.2759706461802125,
+      "cpu_s": 2.2756319999999994,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "old LLVM",
+      "round": 1,
+      "warmup": false,
+      "wall_s": 3.211131246993318,
+      "cpu_s": 3.210508000000001,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "Slop",
+      "round": 2,
+      "warmup": false,
+      "wall_s": 2.446503668092191,
+      "cpu_s": 2.4459359999999988,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "old LLVM",
+      "round": 2,
+      "warmup": false,
+      "wall_s": 2.8314328601118177,
+      "cpu_s": 2.8206789999999984,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "native LLVM",
+      "round": 2,
+      "warmup": false,
+      "wall_s": 2.6796524999663234,
+      "cpu_s": 2.6793660000000017,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "old LLVM",
+      "round": 3,
+      "warmup": false,
+      "wall_s": 2.8407956098672003,
+      "cpu_s": 2.8404069999999995,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "native LLVM",
+      "round": 3,
+      "warmup": false,
+      "wall_s": 2.606492568971589,
+      "cpu_s": 2.6060799999999977,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "Slop",
+      "round": 3,
+      "warmup": false,
+      "wall_s": 2.223637819988653,
+      "cpu_s": 2.2232950000000065,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "native LLVM",
+      "round": 4,
+      "warmup": false,
+      "wall_s": 2.6808268649037927,
+      "cpu_s": 2.680454999999998,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "Slop",
+      "round": 4,
+      "warmup": false,
+      "wall_s": 2.2725267289206386,
+      "cpu_s": 2.272135999999997,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "old LLVM",
+      "round": 4,
+      "warmup": false,
+      "wall_s": 2.8042995338328183,
+      "cpu_s": 2.803854000000007,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "Slop",
+      "round": 5,
+      "warmup": false,
+      "wall_s": 2.243762600934133,
+      "cpu_s": 2.243429999999993,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "old LLVM",
+      "round": 5,
+      "warmup": false,
+      "wall_s": 2.7956409791950136,
+      "cpu_s": 2.7952920000000003,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    {
+      "variant": "native LLVM",
+      "round": 5,
+      "warmup": false,
+      "wall_s": 2.73524786089547,
+      "cpu_s": 2.7349000000000006,
+      "marker": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    }
+  ]
+}

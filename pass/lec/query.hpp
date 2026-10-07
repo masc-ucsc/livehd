@@ -622,7 +622,6 @@ struct Lec_options {
   // materialized the remaining loop occurrences. Portfolio/tier retries must
   // reuse that prepared graph rather than copying and expanding it again.
   bool                             _loop_prepared              = false;
-  bool                             _boundary_feedback_prepared = false;
   bool                             _ports_fitted               = false;  // every unfit Sub port is spelled (scratch)
   // Internal-only mode for the speculative-pair recovery leg. With a detected
   // reset it is inert. Without one, otherwise-uninitialized reference flop state

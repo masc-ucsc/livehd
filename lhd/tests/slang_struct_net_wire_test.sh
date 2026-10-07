@@ -121,12 +121,39 @@ if grep -Eq "\.\\\\?coef_i\.[a-z0-9]+ *\(\s*[0-9]+'sb1\?" "$W/sn.v"; then
   fail "u_fma's coefficient inputs are tied to a don't-care const — the connection is severed:
 $(grep -E "coef_i\." "$W/sn.v")"
 fi
-grep -Eq "\.\\\\?coef_i\.c0 *\([a-zA-Z_]" "$W/sn.v" \
-  || fail "u_fma's .coef_i.c0 is not driven by a real net:
-$(sed -n '/fma5 u_fma/,/);/p' "$W/sn.v")"
-grep -Eq "\.\\\\?o\.c0 *\([a-zA-Z_]" "$W/sn.v" \
-  || fail "u_rom's struct output ports are missing from the netlist:
-$(sed -n '/rom5 u_rom/,/);/p' "$W/sn.v")"
+# pass.legalize inlines u_fma: it is state-free and sits on the res_exc
+# feedback (todo/livehd/legalize_acyclic.md), so the instance ports are not a
+# stable probe. Prove the connection instead, against a STRUCT-FREE reference
+# (the scalar twin's logic under sn's flattened port names): comparing with
+# sn.sv itself would elaborate both sides through the reader under test, and a
+# severed net would then prove equal to itself.
+cat >"$W/sn_ref.v" <<'EOF'
+module rom6 (input logic clk, input logic exc_i, input logic [3:0] x,
+             output logic [3:0] c0, output logic [3:0] c2, output logic exc);
+  always_ff @(posedge clk) begin
+    c0  <= x;
+    c2  <= {3'b0, exc_i};
+    exc <= exc_i;
+  end
+endmodule
+module fma6 (input logic [3:0] c0, input logic [3:0] c2, input logic exc_i, input logic [3:0] x,
+             output logic [7:0] data, output logic exc);
+  always_comb begin
+    data = {c0, c2} ^ {4'b0, x};
+    exc  = exc_i;
+  end
+endmodule
+module sn (input logic clk, input logic [3:0] x, output logic [7:0] \res.data , output logic \res.exc ,
+           output logic [1:0] dbg);
+  logic [3:0] coef_c0, coef_c2; logic coef_exc;
+  rom6 u_rom (.clk(clk), .exc_i(\res.exc ), .x(x), .c0(coef_c0), .c2(coef_c2), .exc(coef_exc));
+  fma6 u_fma (.c0(coef_c0), .c2(coef_c2), .exc_i(coef_exc), .x(x), .data(\res.data ), .exc(\res.exc ));
+  always_comb dbg = {coef_exc, coef_c0[0]};
+endmodule
+EOF
+"$LHD" lec --impl "verilog:$W/sn.v" --ref "verilog:$W/sn_ref.v" --top sn --workdir "$W/w_lec" >"$W/lec.log" 2>&1 \
+  || fail "the struct connection does not carry the source value (netlist not equivalent to the scalar reference):
+$(tail -5 "$W/lec.log")"
 # dbg reads the same net through a third driver; a severed net folds it to a
 # pure X constant.
 grep -Eq "dbg *= *\(?[0-9]+'sb[01]\?+\)? *;" "$W/sn.v" \
@@ -138,7 +165,8 @@ echo "PASS: the producer->consumer struct connection survives into the netlist"
 # Same forward-read shape, but the struct is written by an always_comb that also
 # READS it (an RMW). There is no per-leaf split device, so promoting this to a
 # wire would make the RMW read bind the wire's own buffer output — a
-# combinational self-loop. It must stay `mut` (and therefore still warn).
+# combinational self-loop. It must stay `mut`; the design's genuine loop is
+# then reported by pass.legalize (checked below).
 cat >"$W/sn_proc.sv" <<'EOF'
 package p7;
   typedef struct packed { logic [3:0] a; logic [3:0] b; } st_t;
@@ -163,18 +191,19 @@ module sn_proc (input logic [3:0] x, output logic [3:0] o);
   end
 endmodule
 EOF
-"$LHD" compile "$W/sn_proc.sv" --top sn_proc --workdir "$W/w_proc" >"$W/proc.log" 2>&1 \
-  || fail "compile of sn_proc failed: $(cat "$W/proc.log")"
-grep -q '"code":"unresolved-ref"' "$W/proc.log" \
-  || echo "NOTE: sn_proc no longer warns — if a per-leaf split landed, retire this boundary case"
-# What must NOT happen either way: a comb loop or a hard error.
-grep -q '"severity":"error"' "$W/proc.log" \
-  && fail "a procedurally-written struct must not be promoted to a wire (hard error):
+# snk7 -> src7 -> always_comb -> snk7 is a GENUINE combinational loop (o reads
+# fb = o + 1), so pass.legalize reports it -- the one place loops are handled
+# (todo/livehd/legalize_acyclic.md). What must not happen is the wire
+# over-promotion this case guards: a self-loop surfaced as unresolved-cycle.
+proc_rc=0
+"$LHD" compile "$W/sn_proc.sv" --top sn_proc --workdir "$W/w_proc" >"$W/proc.log" 2>&1 || proc_rc=$?
+[ "$proc_rc" -eq 6 ] && grep -q '"code":"comb-loop"' "$W/proc.log" \
+  || fail "sn_proc's genuine combinational loop must be a pass.legalize comb-loop error (exit 6), got $proc_rc:
 $(grep -o '"message":"[^"]*"' "$W/proc.log")"
 grep -q '"code":"unresolved-cycle"' "$W/proc.log" \
   && fail "a procedurally-written struct was promoted to a wire and formed a combinational self-loop:
 $(grep -o '"message":"[^"]*"' "$W/proc.log")"
-echo "PASS: a procedurally-written (RMW) struct keeps 'mut' — no self-loop, no error"
+echo "PASS: a procedurally-written (RMW) struct is not over-promoted; its genuine loop is a legalize error"
 
 # ── (4) a WIRE-classified scalar OUTPUT PORT gets its buffer ─────────────────
 # An output port is declared from io_meta, so `declared_` already holds it and

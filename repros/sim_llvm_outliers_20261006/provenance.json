@@ -1,0 +1,91 @@
+{
+  "date": "2026-10-06",
+  "host": "satsuma",
+  "original_run": "20261006T110636",
+  "frozen_lhd_revision": "fe201d40b",
+  "frozen_toolchain_directory": "ab60cd16e534e67f-fe201d40b",
+  "retained_experiment_directory": "/tmp/lhd-llvm-outliers-u4vwiy53",
+  "runtime_only": true,
+  "baseline_repetitions": 5,
+  "variant_repetitions": 3,
+  "warmups_excluded": 1,
+  "baseline_cpu": 34,
+  "profiling_cpu": 50,
+  "profiles_cycle_multiplier": 5,
+  "profile_pair_checksums": {
+    "br_amba_axi_timing_slice": {
+      "slop": "11511868102035946797",
+      "llvm": "11511868102035946797"
+    },
+    "br_amba_axil_timing_slice": {
+      "slop": "5279117473457067964",
+      "llvm": "5279117473457067964"
+    },
+    "br_arb_rr": {
+      "slop": "2181072264873541255",
+      "llvm": "2181072264873541255"
+    },
+    "br_cdc_fifo_flops": {
+      "slop": "7988045963991426265",
+      "llvm": "7988045963991426265"
+    },
+    "br_credit_sender": {
+      "slop": "142407312757340837",
+      "llvm": "142407312757340837"
+    },
+    "br_fifo_flops_push_credit": {
+      "slop": "7031401504595811085",
+      "llvm": "7031401504595811085"
+    },
+    "br_flow_arb_rr": {
+      "slop": "6863428707654097058",
+      "llvm": "6863428707654097058"
+    },
+    "br_flow_deserializer": {
+      "slop": "15592131535015428111",
+      "llvm": "15592131535015428111"
+    }
+  },
+  "color_plans": {
+    "br_amba_axi_timing_slice": {
+      "identical_shared_reports": 1,
+      "additional_llvm_plans": []
+    },
+    "br_amba_axil_timing_slice": {
+      "identical_shared_reports": 1,
+      "additional_llvm_plans": []
+    },
+    "br_arb_rr": {
+      "identical_shared_reports": 1,
+      "additional_llvm_plans": [
+        "br_arb_rr.br_arb_rr.__loop0.color-plan.txt"
+      ]
+    },
+    "br_cdc_fifo_flops": {
+      "identical_shared_reports": 12,
+      "additional_llvm_plans": []
+    },
+    "br_credit_sender": {
+      "identical_shared_reports": 2,
+      "additional_llvm_plans": []
+    },
+    "br_fifo_flops_push_credit": {
+      "identical_shared_reports": 9,
+      "additional_llvm_plans": []
+    },
+    "br_flow_arb_rr": {
+      "identical_shared_reports": 1,
+      "additional_llvm_plans": [
+        "br_flow_arb_rr.br_flow_arb_rr.__loop0.color-plan.txt",
+        "br_flow_arb_rr.br_flow_arb_rr.__loop1.color-plan.txt"
+      ]
+    },
+    "br_flow_deserializer": {
+      "identical_shared_reports": 2,
+      "additional_llvm_plans": []
+    }
+  },
+  "production_source_changes": false,
+  "hardware_perf_unavailable": "perf_event_paranoid=3; perf_event_open denied",
+  "profiler": "gprofng software PC sampling; percentages used only for hotspot location, not absolute execution times"
+}

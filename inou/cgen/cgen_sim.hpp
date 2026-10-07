@@ -350,7 +350,7 @@ public:
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
            bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = false, bool _debug = false,
            bool _unknown_zero = false, bool _llvm_backend = false, bool _dut = false, uint32_t _live_words = 0,
-           int64_t _fence_ratio = -1, uint32_t _unroll_sites = kDefaultUnrollSites)
+           int64_t _fence_ratio = -1, uint32_t _unroll_sites = kDefaultUnrollSites, unsigned _object_jobs = 0)
       : odir(_odir)
       , vcd_file(_vcd)
       , top(_top)
@@ -359,12 +359,14 @@ public:
       , runtime_support_on(_runtime_support_on || _observation_on || !_vcd.empty())
       , color_plan_(_color_plan)
       , compact_kernel_(_compact_kernel)
+      , object_jobs_(_object_jobs)
       , llvm_backend_(_llvm_backend)
       , slop_u_(_slop_u)
       , debug_(_debug)
       , unknown_zero_(_unknown_zero)
       , dut_(_dut)
       , unroll_sites_(_unroll_sites)
+
       , tune_(livehd::sim::canonical_tune_vector(_color_dirty, _fence_ratio, _live_words, _llvm_backend))
       , tune_vector_(tune_.tv1())
       , env_(Sim_env::read()) {}
@@ -381,7 +383,8 @@ public:
 private:
   const livehd::sim::Color_plan* color_plan_     = nullptr;  // non-null only while emitting the selected hierarchy root
   bool                           compact_kernel_ = false;    // definition still called by a native compact-loop wrapper
-  bool                           llvm_backend_   = false;    // direct native object lowering requested for supported colors
+  unsigned                       object_jobs_    = 0;
+  bool                           llvm_backend_   = false;  // direct native object lowering requested for supported colors
   // sim.slop_u — materialize every value whose LGraph driver pin is proven
   // unsigned in the CANONICAL-unsigned Slop_u<n> (one mask at the write),
   // instead of the lazily-masked Slop<n> (one mask at every read).

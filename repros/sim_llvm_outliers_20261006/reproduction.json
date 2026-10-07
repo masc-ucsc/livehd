@@ -1,0 +1,610 @@
+[
+  {
+    "test": "br_amba_axi_timing_slice",
+    "config": "arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0",
+    "reported_ratio": 0.3491569390402075,
+    "cycles": 16129032,
+    "checksum": "1956944815607682736",
+    "cpu": 34,
+    "legs": {
+      "slop": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/slop/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axi_timing_slice/arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0/notech/sim_lhd_pyrope",
+        "sha256": "3aa7ffa26358e3bb42e1a571ade8f61f5f651b42cf2fc5177cbc3ae25eeaa4a4",
+        "samples": [
+          {
+            "wall_s": 1.0889364890754223,
+            "cpu_s": 1.0883879999999997
+          },
+          {
+            "wall_s": 1.0927835339680314,
+            "cpu_s": 1.0921419999999997
+          },
+          {
+            "wall_s": 1.09155879705213,
+            "cpu_s": 1.0910309999999994
+          },
+          {
+            "wall_s": 1.4940628139302135,
+            "cpu_s": 1.4933499999999988
+          },
+          {
+            "wall_s": 1.0937301311641932,
+            "cpu_s": 1.0923109999999998
+          }
+        ],
+        "original_samples_ms": [
+          1554,
+          3750,
+          1346
+        ]
+      },
+      "llvm": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axi_timing_slice/llvm/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axi_timing_slice/arst0_awst0_aw32_bst0_dw32_iw4_rst0_wst0/notech/sim_lhd_pyrope_llvm",
+        "sha256": "fc7766134bdec117510b3135512e223ce8a4188205e8813e9a4d392350fd3054",
+        "samples": [
+          {
+            "wall_s": 1.17961196298711,
+            "cpu_s": 1.178902
+          },
+          {
+            "wall_s": 1.1840298641473055,
+            "cpu_s": 1.183174
+          },
+          {
+            "wall_s": 1.1768578060436994,
+            "cpu_s": 1.1761750000000004
+          },
+          {
+            "wall_s": 1.755490261130035,
+            "cpu_s": 1.754879
+          },
+          {
+            "wall_s": 1.6217140220105648,
+            "cpu_s": 1.6212469999999988
+          }
+        ],
+        "original_samples_ms": [
+          3855,
+          3975,
+          4429
+        ]
+      }
+    },
+    "isolated_ratio_wall_s": 0.9229357865521522,
+    "isolated_ratio_cpu_s": 0.9230611896475073
+  },
+  {
+    "test": "br_amba_axil_timing_slice",
+    "config": "aw32_dw32",
+    "reported_ratio": 0.3602886290121921,
+    "cycles": 14925373,
+    "checksum": "13002415611947852208",
+    "cpu": 34,
+    "legs": {
+      "slop": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axil_timing_slice/slop/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope",
+        "sha256": "d60c44c004ab2af536acb5eedfbd9666fcc864af52f64d085ce2ced97ac63be3",
+        "samples": [
+          {
+            "wall_s": 1.3550377150531858,
+            "cpu_s": 1.3547330000000006
+          },
+          {
+            "wall_s": 1.355504684848711,
+            "cpu_s": 1.355233000000003
+          },
+          {
+            "wall_s": 1.3585834251716733,
+            "cpu_s": 1.3582960000000004
+          },
+          {
+            "wall_s": 1.3458376720082015,
+            "cpu_s": 1.3455400000000008
+          },
+          {
+            "wall_s": 1.3452059540431947,
+            "cpu_s": 1.3445290000000016
+          }
+        ],
+        "original_samples_ms": [
+          4055,
+          1448,
+          3317
+        ]
+      },
+      "llvm": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_amba_axil_timing_slice/llvm/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_amba_axil_timing_slice/aw32_dw32/notech/sim_lhd_pyrope_llvm",
+        "sha256": "122981e34ff478af755518335ba1088089da062201cc3a3f3dbf44d9eca69f9e",
+        "samples": [
+          {
+            "wall_s": 1.4049817591439933,
+            "cpu_s": 1.4046449999999997
+          },
+          {
+            "wall_s": 1.41141775297001,
+            "cpu_s": 1.4110409999999984
+          },
+          {
+            "wall_s": 1.3931857980787754,
+            "cpu_s": 1.3927930000000022
+          },
+          {
+            "wall_s": 1.3879338919650763,
+            "cpu_s": 1.3875620000000037
+          },
+          {
+            "wall_s": 1.383867816068232,
+            "cpu_s": 1.3834209999999996
+          }
+        ],
+        "original_samples_ms": [
+          4694,
+          4019,
+          5058
+        ]
+      }
+    },
+    "isolated_ratio_wall_s": 0.9726180936683417,
+    "isolated_ratio_cpu_s": 0.972673613379733
+  },
+  {
+    "test": "br_arb_rr",
+    "config": "nr16",
+    "reported_ratio": 0.44684455739093604,
+    "cycles": 18867925,
+    "checksum": "14573127022883009526",
+    "cpu": 34,
+    "legs": {
+      "slop": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_arb_rr/slop/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_arb_rr/nr16/notech/sim_lhd_pyrope",
+        "sha256": "fab71bc0c5b8e96692651869d5dda2a94a32ed1c0f0688b44d03565b0f937a3f",
+        "samples": [
+          {
+            "wall_s": 2.1156992281321436,
+            "cpu_s": 2.1152980000000023
+          },
+          {
+            "wall_s": 2.121438005939126,
+            "cpu_s": 2.1211160000000007
+          },
+          {
+            "wall_s": 2.996391602093354,
+            "cpu_s": 2.995952999999998
+          },
+          {
+            "wall_s": 2.244705214863643,
+            "cpu_s": 2.244334
+          },
+          {
+            "wall_s": 2.1390842790715396,
+            "cpu_s": 2.1382549999999987
+          }
+        ],
+        "original_samples_ms": [
+          4622,
+          4314,
+          2110
+        ]
+      },
+      "llvm": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_arb_rr/llvm/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_arb_rr/nr16/notech/sim_lhd_pyrope_llvm",
+        "sha256": "de8128f7947182773b0769e83b788bd0b7ba44bb353ca948e7fd2df9575b23d4",
+        "samples": [
+          {
+            "wall_s": 3.5838864271063358,
+            "cpu_s": 3.583446999999999
+          },
+          {
+            "wall_s": 3.5836278800852597,
+            "cpu_s": 3.583293999999995
+          },
+          {
+            "wall_s": 3.592783713946119,
+            "cpu_s": 3.5924270000000007
+          },
+          {
+            "wall_s": 3.567700403975323,
+            "cpu_s": 3.5672609999999927
+          },
+          {
+            "wall_s": 3.6351012990344316,
+            "cpu_s": 3.5926470000000044
+          }
+        ],
+        "original_samples_ms": [
+          8658,
+          4722,
+          5492
+        ]
+      }
+    },
+    "isolated_ratio_wall_s": 0.5968616256622442,
+    "isolated_ratio_cpu_s": 0.5967033975945505
+  },
+  {
+    "test": "br_cdc_fifo_flops",
+    "config": "d32_frads1_frdt1_frrdds0_frrdws_7f28a45b",
+    "reported_ratio": 0.4713114754098361,
+    "cycles": 3225806,
+    "checksum": "13083134103330125444",
+    "cpu": 34,
+    "legs": {
+      "slop": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_cdc_fifo_flops/slop/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope",
+        "sha256": "aa5bc39fb481661b6499f29868907521a35447b95ae87b777b06ec1c0a40ceca",
+        "samples": [
+          {
+            "wall_s": 1.435071845073253,
+            "cpu_s": 1.4346500000000066
+          },
+          {
+            "wall_s": 1.4457791070453823,
+            "cpu_s": 1.4454480000000007
+          },
+          {
+            "wall_s": 1.4466785860713571,
+            "cpu_s": 1.4463910000000064
+          },
+          {
+            "wall_s": 1.4501663560513407,
+            "cpu_s": 1.4498909999999947
+          },
+          {
+            "wall_s": 1.441279490943998,
+            "cpu_s": 1.4409940000000057
+          }
+        ],
+        "original_samples_ms": [
+          1610,
+          3237,
+          1824
+        ]
+      },
+      "llvm": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_cdc_fifo_flops/llvm/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_cdc_fifo_flops/d32_frads1_frdt1_frrdds0_frrdws_7f28a45b/notech/sim_lhd_pyrope_llvm",
+        "sha256": "60eaa61fe18a5cb1fc394f7ece61b943844bba30e2d32bfd6d1aca6e2cda63e5",
+        "samples": [
+          {
+            "wall_s": 1.8017984880134463,
+            "cpu_s": 1.8013799999999964
+          },
+          {
+            "wall_s": 1.8179816349875182,
+            "cpu_s": 1.8168429999999933
+          },
+          {
+            "wall_s": 1.7926526658702642,
+            "cpu_s": 1.7918239999999988
+          },
+          {
+            "wall_s": 1.8196482700295746,
+            "cpu_s": 1.8193299999999946
+          },
+          {
+            "wall_s": 1.8053876869380474,
+            "cpu_s": 1.8050090000000065
+          }
+        ],
+        "original_samples_ms": [
+          3416,
+          5131,
+          4436
+        ]
+      }
+    },
+    "isolated_ratio_wall_s": 0.8008136521067315,
+    "isolated_ratio_cpu_s": 0.8007982231667518
+  },
+  {
+    "test": "br_credit_sender",
+    "config": "mc16_nf4_pcmc4_rpo1_w64",
+    "reported_ratio": 0.37573177221926557,
+    "cycles": 14084507,
+    "checksum": "10026819886260638103",
+    "cpu": 34,
+    "legs": {
+      "slop": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_credit_sender/slop/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope",
+        "sha256": "970e0e357d6bdeeb83748e856d405d6d27028db5a8c2520a0dceab4f1af710f4",
+        "samples": [
+          {
+            "wall_s": 1.4104742819909006,
+            "cpu_s": 1.409085999999996
+          },
+          {
+            "wall_s": 1.4081135878805071,
+            "cpu_s": 1.4077879999999905
+          },
+          {
+            "wall_s": 1.4224814551416785,
+            "cpu_s": 1.4220639999999982
+          },
+          {
+            "wall_s": 1.4275864649098366,
+            "cpu_s": 1.4271059999999904
+          },
+          {
+            "wall_s": 1.40681157913059,
+            "cpu_s": 1.4065170000000018
+          }
+        ],
+        "original_samples_ms": [
+          4198,
+          1412,
+          3201
+        ]
+      },
+      "llvm": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_credit_sender/llvm/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_credit_sender/mc16_nf4_pcmc4_rpo1_w64/notech/sim_lhd_pyrope_llvm",
+        "sha256": "e00241867eeffcdb8158d16f693045341f7152487c997ec426753cfb082c187e",
+        "samples": [
+          {
+            "wall_s": 1.5781379269901663,
+            "cpu_s": 1.5777989999999928
+          },
+          {
+            "wall_s": 1.6923686519730836,
+            "cpu_s": 1.6919940000000022
+          },
+          {
+            "wall_s": 1.7909782640635967,
+            "cpu_s": 1.7906100000000091
+          },
+          {
+            "wall_s": 1.5769310409668833,
+            "cpu_s": 1.5764569999999845
+          },
+          {
+            "wall_s": 1.584505113074556,
+            "cpu_s": 1.5840849999999955
+          }
+        ],
+        "original_samples_ms": [
+          4599,
+          3758,
+          5696
+        ]
+      }
+    },
+    "isolated_ratio_wall_s": 0.8901670751027316,
+    "isolated_ratio_cpu_s": 0.8895267615058535
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "config": "d32_eb1_frads1_rpo1_rpo1_w32",
+    "reported_ratio": 0.42658227848101266,
+    "cycles": 15151515,
+    "checksum": "17427903416933715990",
+    "cpu": 34,
+    "legs": {
+      "slop": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/slop/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope",
+        "sha256": "e5668d2a7b16797aa0a4357bea0490d8b3a5245766fb247105dd762565ab1355",
+        "samples": [
+          {
+            "wall_s": 0.9506740050856024,
+            "cpu_s": 0.95038300000001
+          },
+          {
+            "wall_s": 0.9536560450214893,
+            "cpu_s": 0.953383000000004
+          },
+          {
+            "wall_s": 0.9504569778218865,
+            "cpu_s": 0.9501569999999918
+          },
+          {
+            "wall_s": 0.947177333990112,
+            "cpu_s": 0.9468169999999916
+          },
+          {
+            "wall_s": 0.950879291864112,
+            "cpu_s": 0.9505919999999969
+          }
+        ],
+        "original_samples_ms": [
+          1014,
+          2448,
+          1011
+        ]
+      },
+      "llvm": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_fifo_flops_push_credit/llvm/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_fifo_flops_push_credit/d32_eb1_frads1_rpo1_rpo1_w32/notech/sim_lhd_pyrope_llvm",
+        "sha256": "d2bd6d933d5682b0235d2c8ad642063724060a0eec3f6c87e770f804735f6a92",
+        "samples": [
+          {
+            "wall_s": 1.3370517250150442,
+            "cpu_s": 1.3367729999999873
+          },
+          {
+            "wall_s": 1.3305851630866528,
+            "cpu_s": 1.3302679999999911
+          },
+          {
+            "wall_s": 1.330128506058827,
+            "cpu_s": 1.3297550000000073
+          },
+          {
+            "wall_s": 1.327211112016812,
+            "cpu_s": 1.326867000000003
+          },
+          {
+            "wall_s": 1.3406742759980261,
+            "cpu_s": 1.3404040000000033
+          }
+        ],
+        "original_samples_ms": [
+          3687,
+          3516,
+          2370
+        ]
+      }
+    },
+    "isolated_ratio_wall_s": 0.714478134477508,
+    "isolated_ratio_cpu_s": 0.7144297239353395
+  },
+  {
+    "test": "br_flow_arb_rr",
+    "config": "nf16",
+    "reported_ratio": 0.44609665427509293,
+    "cycles": 22222222,
+    "checksum": "12059985226895709169",
+    "cpu": 34,
+    "legs": {
+      "slop": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_arb_rr/slop/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope",
+        "sha256": "9bbc917b189cec86b12369622d02345d757f60f4868438b35100e03dbaa25538",
+        "samples": [
+          {
+            "wall_s": 4.075933791929856,
+            "cpu_s": 4.074525999999987
+          },
+          {
+            "wall_s": 4.435777639970183,
+            "cpu_s": 4.435360999999989
+          },
+          {
+            "wall_s": 4.078775279922411,
+            "cpu_s": 4.078437999999975
+          },
+          {
+            "wall_s": 4.133781749056652,
+            "cpu_s": 4.133426000000009
+          },
+          {
+            "wall_s": 4.089199993060902,
+            "cpu_s": 4.088810000000003
+          }
+        ],
+        "original_samples_ms": [
+          4080,
+          4091,
+          6737
+        ]
+      },
+      "llvm": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_arb_rr/llvm/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_arb_rr/nf16/notech/sim_lhd_pyrope_llvm",
+        "sha256": "19f91acdf8982c9ffaf316ffc321cc2474374db50bf04ac5412365ef23d3530f",
+        "samples": [
+          {
+            "wall_s": 9.158397268038243,
+            "cpu_s": 9.157833000000013
+          },
+          {
+            "wall_s": 9.356755585875362,
+            "cpu_s": 9.35610200000001
+          },
+          {
+            "wall_s": 9.160385529976338,
+            "cpu_s": 9.159843000000002
+          },
+          {
+            "wall_s": 9.131272980943322,
+            "cpu_s": 9.13079
+          },
+          {
+            "wall_s": 9.10665735998191,
+            "cpu_s": 9.105575000000025
+          }
+        ],
+        "original_samples_ms": [
+          9201,
+          9422,
+          9146
+        ]
+      }
+    },
+    "isolated_ratio_wall_s": 0.44649733718493967,
+    "isolated_ratio_cpu_s": 0.4464822627798517
+  },
+  {
+    "test": "br_flow_deserializer",
+    "config": "dmsf0_mw8_pw64_pw8",
+    "reported_ratio": 0.48479582971329277,
+    "cycles": 25000000,
+    "checksum": "14659346828983681186",
+    "cpu": 34,
+    "legs": {
+      "slop": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_deserializer/slop/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_deserializer/dmsf0_mw8_pw64_pw8/notech/sim_lhd_pyrope",
+        "sha256": "81e9a993b53342585a71a94c89cf206a9c9820a5e7818d6becf22f8f23b1571c",
+        "samples": [
+          {
+            "wall_s": 1.1158623381052166,
+            "cpu_s": 1.1155009999999912
+          },
+          {
+            "wall_s": 1.1195265429560095,
+            "cpu_s": 1.1192249999999966
+          },
+          {
+            "wall_s": 1.1251601518597454,
+            "cpu_s": 1.1248979999999964
+          },
+          {
+            "wall_s": 1.1409489871002734,
+            "cpu_s": 1.1406110000000131
+          },
+          {
+            "wall_s": 1.1355846889782697,
+            "cpu_s": 1.135262000000001
+          }
+        ],
+        "original_samples_ms": [
+          1122,
+          1125,
+          1116
+        ]
+      },
+      "llvm": {
+        "binary": "/tmp/lhd-llvm-outliers-u4vwiy53/br_flow_deserializer/llvm/drv.bin",
+        "work": "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_flow_deserializer/dmsf0_mw8_pw64_pw8/notech/sim_lhd_pyrope_llvm",
+        "sha256": "9c26614c6d077394cac8c8937d26939980fcea89770702b640b112bbacf65386",
+        "samples": [
+          {
+            "wall_s": 2.3538303070235997,
+            "cpu_s": 2.3527590000000167
+          },
+          {
+            "wall_s": 2.3610530612058938,
+            "cpu_s": 2.360682999999991
+          },
+          {
+            "wall_s": 2.382653277134523,
+            "cpu_s": 2.382293999999998
+          },
+          {
+            "wall_s": 2.3635174008086324,
+            "cpu_s": 2.362042999999963
+          },
+          {
+            "wall_s": 2.3651691819541156,
+            "cpu_s": 2.3648119999999904
+          }
+        ],
+        "original_samples_ms": [
+          2303,
+          2302,
+          2303
+        ]
+      }
+    },
+    "isolated_ratio_wall_s": 0.47605325498123824,
+    "isolated_ratio_cpu_s": 0.47623942493850197
+  }
+]

@@ -96,6 +96,8 @@ cc_library(
         "@llvm-project//llvm:IPO",
         "@llvm-project//llvm:Linker",
         "@llvm-project//llvm:MC",
+        "@llvm-project//llvm:Object",
+        "@llvm-project//llvm:TransformUtils",
         "@llvm-project//llvm:Passes",
         "@llvm-project//llvm:Support",
         "@llvm-project//llvm:Target",

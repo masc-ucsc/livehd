@@ -635,7 +635,7 @@ std::string tune_tables_text(const livehd::sim::Color_plan& plan) {
                                      support.fold_cost_flat);
   for (const auto& source : support.sources) {
     const auto site
-        = source.site == livehd::sim::Color_plan::invalid_index ? std::string("-") : plan.sites()[source.site].storage_id;
+        = source.site == livehd::sim::Color_plan::invalid_index ? std::string("-") : plan.sites()[source.site].storage_id.str();
     text += std::format("source kind={} site={} port={} bucket={} occ={}\n",
                         static_cast<int>(source.kind),
                         site,
@@ -903,7 +903,7 @@ TEST(SimColorPlan, LocalEditPreservesDistantStructuralFingerprints) {
     value.connect_sink(graph->get_output_pin("y"));
     const auto plan = livehd::sim::Color_plan::discover(graph.get(), false);
     EXPECT_TRUE(plan.complete()) << plan.report();
-    std::vector<std::string> ids(nodes.size());
+    std::vector<livehd::sim::Plan_id> ids(nodes.size());
     for (const auto& site : plan.sites()) {
       for (size_t i = 0; i < nodes.size(); ++i) {
         if (site.node.base_node() == nodes[i]) {
@@ -1059,7 +1059,7 @@ TEST(SimColorPlan, StructuralHashPreservesPortRolesAndOperandMultiplicity) {
       }
     }
     ADD_FAILURE() << "sum missing from the discovery plan";
-    return std::string{};
+    return livehd::sim::Plan_id{};
   };
   const auto base = sum_shape("base", false, false, false);
   EXPECT_EQ(base, sum_shape("reverse", true, false, false));

@@ -1,0 +1,177 @@
+{
+  "compact-lazy-scalar": {
+    "change": "Select between values loaded from two fixed packed-input slots, instead of loading through a selected slot address. Both slots are valid initialized inputs.",
+    "host_variant": "compact-lazy-mux",
+    "modified_kernels": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.color-kernel-body-color-0.llvm.o": 1,
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.color-kernel-body-color-1.llvm.o": 1,
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.color-kernel-body-color-0.llvm.o": 1,
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.color-kernel-body-color-1.llvm.o": 1
+    },
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-lazy-scalar/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-lazy-scalar/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o"
+    },
+    "link": [
+      "clang++",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-lazy-scalar/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-lazy-scalar/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-lazy-scalar/drv.bin"
+    ]
+  },
+  "compact-once-scalar": {
+    "change": "Select between values loaded from two fixed packed-input slots, instead of loading through a selected slot address. Both slots are valid initialized inputs.",
+    "host_variant": "compact-once",
+    "modified_kernels": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.color-kernel-body-color-0.llvm.o": 1,
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.color-kernel-body-color-1.llvm.o": 1,
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.color-kernel-body-color-0.llvm.o": 1,
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.color-kernel-body-color-1.llvm.o": 1
+    },
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once-scalar/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once-scalar/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o"
+    },
+    "link": [
+      "clang++",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once-scalar/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once-scalar/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once-scalar/drv.bin"
+    ]
+  },
+  "compact-scalar-extract": {
+    "change": "Select between values loaded from two fixed packed-input slots, instead of loading through a selected slot address. Both slots are valid initialized inputs.",
+    "host_variant": "compact-loops",
+    "modified_kernels": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.color-kernel-body-color-0.llvm.o": 1,
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.color-kernel-body-color-1.llvm.o": 1,
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.color-kernel-body-color-0.llvm.o": 1,
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.color-kernel-body-color-1.llvm.o": 1
+    },
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-scalar-extract/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-scalar-extract/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o"
+    },
+    "link": [
+      "clang++",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-scalar-extract/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-scalar-extract/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-scalar-extract/drv.bin"
+    ]
+  },
+  "compact-once-lazy": {
+    "variant": "compact-once-lazy",
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once-lazy/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once-lazy/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o"
+    },
+    "link": [
+      "clang++",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once-lazy/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once-lazy/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once-lazy/drv.bin"
+    ]
+  },
+  "compact-once": {
+    "variant": "compact-once",
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o"
+    },
+    "link": [
+      "clang++",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-once/drv.bin"
+    ]
+  },
+  "compact-lazy-mux": {
+    "variant": "compact-lazy-mux",
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-lazy-mux/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-lazy-mux/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o"
+    },
+    "link": [
+      "clang++",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-lazy-mux/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-lazy-mux/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-lazy-mux/drv.bin"
+    ]
+  },
+  "compact-loops": {
+    "replaced_objects": {
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-loops/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o": "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-loops/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o"
+    },
+    "link": [
+      "clang++",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-loops/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench.br_mux_bin_structured_gates_mock_bench.tune.o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-loops/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.__loop0.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune-id.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/br_mux_bin_structured_gates_mock_bench_harness.br_mux_bin_structured_gates_mock_bench_harness.tune.o",
+      "/mada/users/renau/projs/lhdtrack/var/work/20261006T110636/br_mux_bin_structured_gates_mock/nsi5_sw16/notech/sim_lhd_pyrope_llvm/SW/sim/obj/drv.o",
+      "-pthread",
+      "-o",
+      "/tmp/lhd-llvm-outliers-u4vwiy53/br_mux_bin_structured_gates_mock/compact-loops/drv.bin"
+    ],
+    "change": "Pure combinational loop bodies: bypass input history/dirty runtime; always evaluate unchanged LLVM phase kernels."
+  }
+}

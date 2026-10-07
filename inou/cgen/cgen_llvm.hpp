@@ -41,7 +41,7 @@ public:
   };
 
   // Packed ABI: inputs, outputs, and changed are disjoint buffers and do not
-  // overlap owner storage. Generated callers guarantee this for LLVM noalias.
+  // overlap resource storage. Generated callers guarantee this for LLVM noalias.
   // Values (and boundary casts) load lazily at their first arithmetic use.
   explicit Cgen_llvm(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& inputs, bool scalar_abi = false);
   ~Cgen_llvm();
@@ -71,19 +71,39 @@ public:
   [[nodiscard]] Value hotmux(const std::vector<Value>& inputs, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value indexed_mux(Value select, const std::vector<Value>& arms, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value lut(Value table, Value address, uint32_t result_width, bool result_unsign);
-  [[nodiscard]] Value external_read(std::string_view symbol, Value address, uint32_t result_width, bool result_unsign);
-  [[nodiscard]] Value external_read_all(std::string_view symbol, uint32_t result_width, bool result_unsign);
-  bool                external_apply(std::string_view symbol, Value data);
-  bool                external_clear(std::string_view symbol);
-  bool                external_stage_whole(std::string_view symbol, Value enable, Value force, Value data);
-  bool                external_stage_write(std::string_view symbol, Value enable, Value address, Value data);
+  // Resource indices address a caller-owned array of data pointers, never
+  // functions. Memory layout is the shared packed simulator ABI.
+  struct Memory {
+    size_t   data               = 0;
+    size_t   pending            = 0;
+    size_t   gate               = 0;
+    size_t   random             = 0;
+    size_t   draws              = 0;
+    uint32_t bits               = 0;
+    uint64_t size               = 0;
+    uint32_t writes             = 0;
+    uint32_t lanes              = 1;
+    uint32_t port               = 0;
+    uint32_t forward            = 0;
+    uint32_t undefined          = 0;
+    bool     gated              = false;
+    bool     commit_before_read = false;
+    bool     packed_value       = false;
+  };
+  void                bind_memory(std::string_view symbol, const Memory& memory);
+  [[nodiscard]] Value memory_read(std::string_view symbol, Value address, uint32_t result_width, bool result_unsign);
+  [[nodiscard]] Value memory_read_all(std::string_view symbol, uint32_t result_width, bool result_unsign);
+  bool                memory_apply(std::string_view symbol, Value data);
+  bool                memory_clear(std::string_view symbol);
+  bool                memory_stage_whole(std::string_view symbol, Value enable, Value force, Value data);
+  bool                memory_stage_write(std::string_view symbol, Value enable, Value address, Value data);
 
   // Values cross the ABI as packed little-endian 64-bit words. `index` is the
   // logical output number; physical word offsets are derived from the exact
   // output widths when the object is finalized.
   bool add_output(size_t index, Value value, std::string& error);
 
-  // Verify, optimize, and emit LLVM bitcode. The module
+  // Verify, optimize, and emit a self-contained native object. The module
   // exports:
   //   void function_name(const uint64_t* inputs,
   //                      uint64_t* outputs,
@@ -100,12 +120,16 @@ public:
   // parameter, so the ABI and the adapter's call do not change shape.
   bool write_object(std::string_view path, std::string& error, bool track_changed = true);
 
+  // IR inspection for code-generator tests; not the simulator build path.
+  bool write_bitcode(std::string_view path, std::string& error, bool track_changed = true);
+
   // Inline the emitted color bitcode into one host-C++ bitcode translation
   // unit and lower the combined module to a native relocatable object.
   static bool link_bitcode_object(std::string_view host_path, const std::vector<std::string>& kernel_paths,
                                   std::string_view object_path, std::string& error);
 
 private:
+  bool write_module(std::string_view path, std::string& error, bool track_changed, bool native);
   class Impl;
   std::unique_ptr<Impl> impl_;
 };

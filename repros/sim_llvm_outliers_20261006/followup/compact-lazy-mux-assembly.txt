@@ -1,0 +1,57 @@
+br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()
+   1fa80:	mov    0x18(%rdi),%rcx
+   1fa84:	cmp    %rcx,0x58(%rdi)
+   1fa88:	jne    1fb57 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()+0xd7>
+   1fa8e:	movzwl 0x68(%rdi),%eax
+   1fa92:	movups 0x38(%rdi),%xmm0
+   1fa96:	movaps %xmm0,-0x18(%rsp)
+   1fa9b:	mov    %ecx,%r8d
+   1fa9e:	shr    $0x2,%r8d
+   1faa2:	xor    %r9d,%r9d
+   1faa5:	and    $0x3,%r8d
+   1faa9:	mov    -0x10(%rsp),%rsi
+   1faae:	mov    -0x18(%rsp),%rdx
+   1fab3:	cmovne %rsi,%rdx
+   1fab7:	cmovne %r9,%rsi
+   1fabb:	cmp    $0x2,%r8d
+   1fabf:	cmovae %r9,%rdx
+   1fac3:	test   $0x8,%cl
+   1fac6:	jne    1fad3 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()+0x53>
+   1fac8:	shl    $0x4,%rcx
+   1facc:	shrd   %cl,%rsi,%rdx
+   1fad0:	mov    %rdx,%rax
+   1fad3:	movzwl %ax,%eax
+   1fad6:	movq   $0x0,0x98(%rdi)
+   1fae1:	mov    %rax,0xa0(%rdi)
+   1fae8:	movzbl 0x58(%rdi),%r8d
+   1faed:	mov    0x18(%rdi),%rcx
+   1faf1:	movzwl 0x68(%rdi),%eax
+   1faf5:	movups 0x38(%rdi),%xmm0
+   1faf9:	movaps %xmm0,-0x18(%rsp)
+   1fafe:	mov    %ecx,%r9d
+   1fb01:	and    $0xf,%r9b
+   1fb05:	and    $0x7,%r8b
+   1fb09:	mov    %ecx,%r10d
+   1fb0c:	shr    $0x2,%r10d
+   1fb10:	xor    %r11d,%r11d
+   1fb13:	and    $0x3,%r10d
+   1fb17:	mov    -0x10(%rsp),%rsi
+   1fb1c:	mov    -0x18(%rsp),%rdx
+   1fb21:	cmovne %rsi,%rdx
+   1fb25:	cmovne %r11,%rsi
+   1fb29:	cmp    $0x2,%r10d
+   1fb2d:	cmovae %r11,%rdx
+   1fb31:	cmp    %r9b,%r8b
+   1fb34:	jne    1fb41 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()+0xc1>
+   1fb36:	shl    $0x4,%rcx
+   1fb3a:	shrd   %cl,%rsi,%rdx
+   1fb3e:	mov    %rdx,%rax
+   1fb41:	movzwl %ax,%eax
+   1fb44:	movq   $0x0,0xa8(%rdi)
+   1fb4f:	mov    %rax,0xb0(%rdi)
+   1fb56:	ret
+   1fb57:	movups 0x60(%rdi),%xmm0
+   1fb5b:	movups %xmm0,0x98(%rdi)
+   1fb62:	movups %xmm0,0xa8(%rdi)
+   1fb69:	ret
+   1fb6a:	nopw   0x0(%rax,%rax,1)

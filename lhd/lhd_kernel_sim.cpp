@@ -33,6 +33,7 @@
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "sim_compile_jobs.hpp"
 #include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
 namespace lhd {
@@ -2047,7 +2048,7 @@ void sim_command(Options& opts, Result& res) {
     }
   }
   if (jobs <= 0) {
-    jobs = std::getenv("TEST_SRCDIR") != nullptr ? 2 : static_cast<int>(std::thread::hardware_concurrency());
+    jobs = static_cast<int>(livehd::sim::available_compile_jobs());
   }
   jobs = std::clamp(jobs, 1, static_cast<int>(tus.size()));
 
@@ -2082,105 +2083,8 @@ void sim_command(Options& opts, Result& res) {
     }
   }
 
-  // LLVM color kernels are bitcode, grouped with the generated evaluator TU
-  // that calls them. Compile that TU to host-compiler bitcode, then let the
-  // companion LLVM binary inline all of its kernels and lower one native
-  // object. Keeping this boundary per evaluator preserves the
-  // parallel/incremental host build and avoids asking the system linker to
-  // understand lhd's LLVM bitcode version.
-  //
-  // Large modules split their evaluator into `<module>.color-eval-N.cpp`
-  // shards. A filename-prefix association would put every kernel into the
-  // unsplit `<module>.cpp` object even though the calls live in those shards;
-  // the inliner then quite correctly DCEs the unreferenced definitions and the
-  // final native link reports them undefined. The generated symbol spelling is
-  // deterministic, so associate each bitcode file with the ONE TU containing
-  // its call instead.
-  //
-  // ONE pass per body, into a symbol -> TU index: a per-kernel full-text search
-  // would be O(kernels x TUs x bytes), and the sharded designs this association
-  // exists for are exactly the ones with hundreds of kernels over hundreds of
-  // megabytes of generated C++. Nothing is read at all when the design has no
-  // bitcode kernels (every `sim.tune.backend=slop` run), so no body text is ever
-  // resident for the host build and simulation that follow.
-  std::vector<std::vector<std::string>> llvm_kernels(tus.size());
-  if (!direct_objects.empty()) {
-    constexpr std::string_view                 kernel_prefix = "__lhd_color_kernel_";
-    std::map<std::string, std::vector<size_t>> symbol_tus;
-    for (size_t i = 0; i < bodies.size(); ++i) {
-      std::ifstream body(bodies[i]);
-      if (!body) {
-        res.status        = "fail";
-        res.error_class   = "internal";
-        res.error_message = std::format("could not read generated sim body {}", bodies[i]);
-        res.exit_code     = exit_code_for(res.error_class);
-        return;
-      }
-      std::stringstream text;
-      text << body.rdbuf();
-      const std::string body_text = std::move(text).str();
-      for (auto pos = body_text.find(kernel_prefix); pos != std::string::npos;
-           pos      = body_text.find(kernel_prefix, pos + kernel_prefix.size())) {
-        auto end = pos;
-        while (end < body_text.size() && (std::isalnum(static_cast<unsigned char>(body_text[end])) != 0 || body_text[end] == '_')) {
-          ++end;
-        }
-        auto& owners = symbol_tus[body_text.substr(pos, end - pos)];
-        if (owners.empty() || owners.back() != i) {
-          owners.push_back(i);  // bodies are visited in order, so this dedups
-        }
-      }
-    }
-    // `Cgen_sim::cpp_id`, spelled once here: a graph name that sanitizes to
-    // nothing or starts with a digit gains a leading '_' in the emitted symbol,
-    // and the file stem it is recovered from does not carry that.
-    const auto cpp_id = [](std::string_view text) {
-      std::string id;
-      id.reserve(text.size() + 1);
-      for (const char c : text) {
-        id.push_back(std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_' ? c : '_');
-      }
-      if (id.empty() || std::isdigit(static_cast<unsigned char>(id.front())) != 0) {
-        id.insert(id.begin(), '_');
-      }
-      return id;
-    };
-    for (const auto& kernel : direct_objects) {
-      const auto                 filename   = fs::path(kernel).filename().string();
-      constexpr std::string_view marker     = ".color-kernel-";
-      constexpr std::string_view suffix     = ".llvm.o";
-      const auto                 marker_pos = filename.find(marker);
-      if (marker_pos == std::string::npos || !filename.ends_with(suffix)
-          || marker_pos + marker.size() + suffix.size() > filename.size()) {
-        res.status        = "fail";
-        res.error_class   = "internal";
-        res.error_message = std::format("malformed LLVM simulator kernel filename {}", kernel);
-        res.exit_code     = exit_code_for(res.error_class);
-        return;
-      }
-      // `<stem>.color-kernel-<signature>-color-<n>.llvm.o` was minted from
-      // `__lhd_color_kernel_<cpp_id(stem)>_<signature>_color_<n>_llvm`, where
-      // cgen mapped every non-alphanumeric signature character to '_'.
-      std::string instance(filename, marker_pos + marker.size(), filename.size() - (marker_pos + marker.size()) - suffix.size());
-      for (char& c : instance) {
-        if (std::isalnum(static_cast<unsigned char>(c)) == 0) {
-          c = '_';
-        }
-      }
-      const auto symbol = std::format("{}{}_{}_llvm", kernel_prefix, cpp_id(filename.substr(0, marker_pos)), instance);
-
-      const auto found = symbol_tus.find(symbol);
-      if (found == symbol_tus.end() || found->second.size() != 1) {
-        res.status      = "fail";
-        res.error_class = "internal";
-        res.error_message
-            = std::format("could not associate LLVM simulator kernel {} ({}) with exactly one evaluator", kernel, symbol);
-        res.exit_code = exit_code_for(res.error_class);
-        return;
-      }
-      llvm_kernels[found->second.front()].push_back(kernel);
-    }
-  }
+  // LLVM colors are native objects with a data-only ABI. Every C++ support
+  // translation unit uses the ordinary host compiler, independently of LLVM.
 
   // Unity batching of the SMALL generated translation units. A module body that
   // holds only cold members (dump/load/probe/describe ...), a 70-statement
@@ -2200,8 +2104,7 @@ void sim_command(Options& opts, Result& res) {
   // bucket count that depends only on the design, never on the host's core
   // count: an edit to one module rebuilds just its own batch, and two machines
   // compile the same TUs. A design with at most kUnityMinTus small TUs is left
-  // alone -- there the per-TU parallelism is free -- as is any TU with LLVM
-  // kernels (it lowers through its own bitcode + llvm_inline pair). This needs
+  // alone -- there the per-TU parallelism is free. This needs
   // every generated TU to be unity-safe: no two may define the same file-scope
   // name (cgen_sim_tune.cpp's per-module table namespace exists for this).
   {
@@ -2212,7 +2115,7 @@ void sim_command(Options& opts, Result& res) {
     std::vector<size_t>      candidates;
     std::uintmax_t           candidate_bytes = 0;
     for (size_t i = 0; i < bodies.size(); ++i) {  // tus[0, bodies.size()) are the simdir bodies
-      if (!llvm_kernels[i].empty() || fs::path(tus[i]).filename().string().find(".color-eval-") != std::string::npos) {
+      if (fs::path(tus[i]).filename().string().find(".color-eval-") != std::string::npos) {
         continue;  // evaluator shards already bound compiler work; do not batch them back together
       }
       std::error_code ec;
@@ -2279,22 +2182,18 @@ void sim_command(Options& opts, Result& res) {
       if (!unity_tus.empty()) {
         std::vector<std::string>              kept_tus;
         std::vector<std::string>              kept_objs;
-        std::vector<std::vector<std::string>> kept_kernels;
         for (size_t i = 0; i < tus.size(); ++i) {
           if (!batched[i]) {
             kept_tus.push_back(std::move(tus[i]));
             kept_objs.push_back(std::move(objs[i]));
-            kept_kernels.push_back(std::move(llvm_kernels[i]));
           }
         }
         for (size_t b = 0; b < unity_tus.size(); ++b) {
           kept_tus.push_back(std::move(unity_tus[b]));
           kept_objs.push_back(std::move(unity_objs[b]));
-          kept_kernels.emplace_back();
         }
         tus          = std::move(kept_tus);
         objs         = std::move(kept_objs);
-        llvm_kernels = std::move(kept_kernels);
       }
     }
     // Batches a previous run wrote and this one does not reference (the design
@@ -2307,43 +2206,6 @@ void sim_command(Options& opts, Result& res) {
       }
     }
   }
-  std::vector<std::string> compile_objs = objs;
-  bool                     has_llvm     = false;
-  for (size_t i = 0; i < tus.size(); ++i) {
-    if (!llvm_kernels[i].empty()) {
-      compile_objs[i] = fs::path(objs[i]).replace_extension(".bc").string();
-      has_llvm        = true;
-    }
-  }
-  const std::string llvm_link_tool = has_llvm ? sim_llvm_link_tool() : std::string{};
-  if (has_llvm && llvm_link_tool.empty()) {
-    res.status        = "fail";
-    res.error_class   = "dependency";
-    res.error_message = "could not locate llvm_sim_link in lhd's runfiles";
-    res.exit_code     = exit_code_for(res.error_class);
-    return;
-  }
-  // The `cc_bc` rule below hands the host compiler `-emit-llvm`, which is a
-  // CLANG flag. sim_host_cxx() prefers clang++ but falls back to c++/g++/$CXX,
-  // so a gcc-only host reaches this path and dies inside ninja as a `compile`
-  // error over generated code -- pointing the user at the simulator instead of
-  // at their toolchain. Probe once and name the real problem, the same way the
-  // missing-llvm_sim_link case above does.
-  if (has_llvm) {
-    int probe_rc = 0;
-    (void)capture(std::format("{} -x c++ -emit-llvm -c - -o /dev/null < /dev/null 2>/dev/null", shell_quote(cxx)), probe_rc);
-    if (probe_rc != 0) {
-      res.status        = "fail";
-      res.error_class   = "dependency";
-      res.error_message = std::format(
-          "the host C++ compiler ({}) does not accept -emit-llvm, which sim.tune.backend=llvm needs to compile the "
-          "evaluator to bitcode; use a clang++ (set $CXX) or re-run with --set sim.tune.backend=slop",
-          cxx);
-      res.exit_code = exit_code_for(res.error_class);
-      return;
-    }
-  }
-
   // Output staleness, shared by the precompiled-header stage below and the
   // built-in TU build: an output is fresh when its stamp (the exact command
   // that produced it) matches and it is not older than any prerequisite its
@@ -2447,7 +2309,7 @@ void sim_command(Options& opts, Result& res) {
   // the PCHs itself (stage 0 of either build path, same stamp+depfile staleness
   // as the TUs), so a header that does not precompile cleanly only drops its
   // TUs back to the prelude (or to no PCH) instead of failing the simulation.
-  // LLVM-bitcode TUs keep the plain command.
+  // Native LLVM colors do not participate in the host PCH build.
   std::vector<std::string> tu_pch(tus.size());  // the -include-pch file per TU ("" = none)
   {
     std::string pch_set;
@@ -2517,7 +2379,7 @@ void sim_command(Options& opts, Result& res) {
       std::vector<std::string>      first(tus.size());
       std::map<std::string, size_t> users;  // std::map: a stable PCH order
       for (size_t i = 0; i < tus.size(); ++i) {
-        if (llvm_kernels[i].empty() && !tus[i].ends_with("/vcd_writer.cpp")) {
+        if (!tus[i].ends_with("/vcd_writer.cpp")) {
           first[i] = first_header(tus[i]);
           if (!first[i].empty()) {
             ++users[first[i]];
@@ -2575,7 +2437,7 @@ void sim_command(Options& opts, Result& res) {
                               }
                             });
         for (size_t i = 0; i < tus.size(); ++i) {
-          if (!llvm_kernels[i].empty() || tus[i].ends_with("/vcd_writer.cpp")) {
+          if (tus[i].ends_with("/vcd_writer.cpp")) {
             continue;
           }
           const auto found = first[i].empty() ? unit_of.end() : unit_of.find(first[i]);
@@ -2665,7 +2527,6 @@ void sim_command(Options& opts, Result& res) {
        << "# Regenerated on every build, so edits here are lost.\n"
        << "ninja_required_version = 1.3\n\n"
        << "cxx = " << cxx << "\n"
-       << "llvm_link = " << shell_quote(llvm_link_tool) << "\n"
        << "cflags = " << nflags
        << "\n\n"
        // $in/$out are NOT shell-quoted here: ninja already shell-escapes each
@@ -2680,19 +2541,12 @@ void sim_command(Options& opts, Result& res) {
        << "  description = CC $out\n"
        << "  depfile = $out.d\n"
        << "  deps = gcc\n\n"
-       << "rule cc_bc\n"
-       << "  command = $cxx $cflags -emit-llvm -MD -MF $out.d -c $in -o $out\n"
-       << "  description = BC $out\n"
-       << "  depfile = $out.d\n"
-       << "  deps = gcc\n\n"
-       << "rule llvm_inline\n"
-       << "  command = $llvm_link $out $in\n"
-       << "  description = LLVM-LINK $out\n\n"
        << "rule link\n"
-       << "  command = $cxx $in -pthread -o $out\n"
+       << "  command = $cxx @$out.rsp -pthread -o $out\n"
+       << "  rspfile = $out.rsp\n"
+       << "  rspfile_content = $in_newline\n"
        << "  description = LINK $out\n\n";
     for (size_t i = 0; i < tus.size(); ++i) {
-      if (llvm_kernels[i].empty()) {
         nf << "build " << nesc(objs[i]) << ": cc " << nesc(tus[i]);
         if (!tu_pch[i].empty()) {
           // lhd builds the PCH (stage 0 above); ninja only orders on it.
@@ -2703,21 +2557,13 @@ void sim_command(Options& opts, Result& res) {
           nf << " | " << nesc(tu_pch[i]) << "\n  pchflags = " << flag;
         }
         nf << "\n";
-      } else {
-        nf << "build " << nesc(compile_objs[i]) << ": cc_bc " << nesc(tus[i]) << "\n";
-        nf << "build " << nesc(objs[i]) << ": llvm_inline " << nesc(compile_objs[i]);
-        for (const auto& kernel : llvm_kernels[i]) {
-          nf << " " << nesc(kernel);
-        }
-        // The helper is an implicit input as well as the command. Otherwise a
-        // rebuilt helper at the same path leaves Ninja's command hash unchanged
-        // and silently reuses a native object produced by the old optimizer.
-        nf << " | " << nesc(llvm_link_tool) << "\n";
-      }
     }
     nf << "\nbuild " << nesc(exe) << ": link";
     for (const auto& o : objs) {
       nf << " " << nesc(o);
+    }
+    for (const auto& object : direct_objects) {
+      nf << " " << nesc(object);
     }
     nf << "\n\ndefault " << nesc(exe) << "\n";
   }
@@ -2842,31 +2688,30 @@ void sim_command(Options& opts, Result& res) {
       std::atomic<size_t> cursor{0};
       auto                worker = [&] {
         for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
-          const std::string dep = compile_objs[i] + ".d";
-          cmds[i]               = std::format("{} {}{}{} -MD -MF {} -c {} -o {} 2>&1",
+          const std::string dep = objs[i] + ".d";
+          cmds[i]               = std::format("{} {}{} -MD -MF {} -c {} -o {} 2>&1",
                                               shell_quote(cxx),
                                               cflags,
                                               tu_pch[i].empty() ? std::string{} : " " + pch_flag(i),
-                                              llvm_kernels[i].empty() ? "" : " -emit-llvm",
                                               shell_quote(dep),
                                               shell_quote(tus[i]),
-                                              shell_quote(compile_objs[i]));
-          if (stamp_matches(compile_objs[i], cmds[i])) {
+                                              shell_quote(objs[i]));
+          if (stamp_matches(objs[i], cmds[i])) {
             auto prereqs = read_depfile(dep);
             if (!prereqs.empty() && !tu_pch[i].empty()) {
               prereqs.push_back(tu_pch[i]);
             }
             // An empty prereq list means no usable depfile (ninja consumes and
             // deletes them), which is a rebuild, not a free pass.
-            if (!prereqs.empty() && not_older_than_all(compile_objs[i], prereqs)) {
+            if (!prereqs.empty() && not_older_than_all(objs[i], prereqs)) {
               outs[i] = "(up to date)\n";
               continue;
             }
           }
-          drop_stamp(compile_objs[i]);
+          drop_stamp(objs[i]);
           outs[i] = capture(cmds[i], rcs[i]);
           if (rcs[i] == 0) {
-            write_stamp(compile_objs[i], cmds[i]);
+            write_stamp(objs[i], cmds[i]);
           }
         }
       };
@@ -2893,67 +2738,33 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
 
-    // Inline/lower each LLVM-bearing evaluator after all host compiles. These
-    // are independent module objects, so retain the same bounded fan-out as
-    // the C++ compilation stage.
-    std::vector<std::string> llvm_cmds(tus.size()), llvm_outs(tus.size());
-    std::vector<int>         llvm_rcs(tus.size(), 0);
-    {
-      std::atomic<size_t> cursor{0};
-      auto                worker = [&] {
-        for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
-          if (llvm_kernels[i].empty()) {
-            continue;
-          }
-          llvm_cmds[i] = std::format("{} {} {}", shell_quote(llvm_link_tool), shell_quote(objs[i]), shell_quote(compile_objs[i]));
-          for (const auto& kernel : llvm_kernels[i]) {
-            llvm_cmds[i] += " " + shell_quote(kernel);
-          }
-          llvm_cmds[i] += " 2>&1";
-          // Inputs are fully known here (no headers), so the depfile has no role:
-          // the module bitcode, every kernel object, and the helper itself — the
-          // helper by path, because a rebuilt optimizer at the same path must not
-          // leave the old native object in place.
-          std::vector<std::string> ins{compile_objs[i], llvm_link_tool};
-          ins.insert(ins.end(), llvm_kernels[i].begin(), llvm_kernels[i].end());
-          if (stamp_matches(objs[i], llvm_cmds[i]) && not_older_than_all(objs[i], ins)) {
-            llvm_outs[i] = "(up to date)\n";
-            continue;
-          }
-          drop_stamp(objs[i]);
-          llvm_outs[i] = capture(llvm_cmds[i], llvm_rcs[i]);
-          if (llvm_rcs[i] == 0) {
-            write_stamp(objs[i], llvm_cmds[i]);
-          }
+    auto link_inputs = objs;
+    link_inputs.insert(link_inputs.end(), direct_objects.begin(), direct_objects.end());
+    // Thousands of independent colors exceed the shell's single-argument
+    // limit. Both host builders pass objects through a compiler response file.
+    std::string response;
+    for (const auto& object : link_inputs) {
+      response += '"';
+      for (const char c : object) {
+        if (c == '\\' || c == '"') {
+          response += '\\';
         }
-      };
-      livehd::run_workers(static_cast<size_t>(jobs), [&](size_t) { worker(); });
-    }
-    shown.clear();
-    n_failed = 0;
-    for (size_t i = 0; i < tus.size(); ++i) {
-      if (llvm_cmds[i].empty()) {
-        continue;
+        response += c;
       }
-      log_body += llvm_cmds[i] + "\n\n" + llvm_outs[i] + "\n";
-      if (llvm_rcs[i] != 0 && n_failed++ == 0) {
-        shown = llvm_outs[i];
+      response += "\"\n";
+    }
+    const auto response_path = exe + ".rsp";
+    {
+      std::ofstream out(response_path);
+      out << response;
+      if (!out) {
+        fail_build("cannot write simulator link response file " + response_path, "");
+        return;
       }
     }
-    if (n_failed != 0) {
-      if (n_failed > 1) {
-        shown += std::format("({} more LLVM module(s) also failed; see build.log)\n", n_failed - 1);
-      }
-      fail_build(log_body, shown);
-      return;
-    }
-
-    std::string link = shell_quote(cxx);
-    for (const auto& o : objs) {
-      link += " " + shell_quote(o);
-    }
-    link += " -pthread -o " + shell_quote(exe) + " 2>&1";  // merge linker diagnostics into the capture
-    if (!stamp_matches(exe, link) || !not_older_than_all(exe, objs)) {
+    const auto link = shell_quote(cxx) + " " + shell_quote("@" + response_path) + " -pthread -o " + shell_quote(exe) + " 2>&1";
+    const auto link_stamp = link + "\n" + response;
+    if (!stamp_matches(exe, link_stamp) || !not_older_than_all(exe, link_inputs)) {
       drop_stamp(exe);
       int  link_rc  = 0;
       auto link_out = capture(link, link_rc);
@@ -2961,7 +2772,7 @@ void sim_command(Options& opts, Result& res) {
         fail_build(link + "\n\n" + link_out, link_out);
         return;
       }
-      write_stamp(exe, link);
+      write_stamp(exe, link_stamp);
     }
   }
   build_phase.stop();

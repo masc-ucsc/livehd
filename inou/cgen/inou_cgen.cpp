@@ -88,6 +88,7 @@ void Inou_cgen::setup() {
                         "sim.unknown_zero: fill every unknown (`?`) literal bit with 0 instead of a 0/1 drawn once "
                         "per literal from the run's seeded PRNG. true also lets the literal fold at C++ compile time",
                         "false");
+  m2.add_label_optional("jobs", "native object worker limit (0 = available CPUs)", "0");
   m2.add_label_optional("live_words",
                         "sim.tune.live_words: live 64-bit words one color may keep across its members, N in [1, 2^20] "
                         "(auto, empty or 0 = built-in default)",
@@ -460,7 +461,8 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                     is_dut(g),
                     static_cast<uint32_t>(tune.live_words),
                     tune.fence,
-                    unroll_sites);
+                    unroll_sites,
+                    static_cast<unsigned>(std::max(0, std::atoi(std::string(var.get("jobs")).c_str()))));
   };
   const auto probe_for = [&](const std::shared_ptr<hhds::Graph>& g) { return cgen_for(g, /*plan=*/nullptr); };
   // Which modules are already generated. Asked BEFORE the color plan, because

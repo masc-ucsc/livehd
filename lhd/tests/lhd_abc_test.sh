@@ -263,38 +263,37 @@ run lec --impl lg:"$P/net" --ref lg:"$P/lg" --top wide_wiring.wide_wiring --work
 echo "PASS: wide constant pack/unpack remains exact native zero-delay wiring"
 
 # ---------------------------------------------------------------------------
-# A real combinational SCC cannot enter ABC's acyclic Boolean network. Keep the
-# exact typed remainder native, map the acyclic cones around it, and report the
-# partial mapping explicitly. This is the IssueQueueVlduVstu shape that used to
-# fail after thousands of Backend colors had already completed.
+# A real combinational SCC is a DESIGN error, reported once by pass.legalize
+# (todo/livehd/legalize_acyclic.md): no later pass -- ABC, opentimer, sim, LEC
+# -- ever sees a combinational loop. This is the IssueQueueVlduVstu shape.
 # ---------------------------------------------------------------------------
 C="$W/comb_loop"
 mkdir -p "$C"
-run compile inou/prp/tests/pyrope/abc_comb_loop.prp --top abc_comb_loop --emit-dir lg:"$C/lg" --workdir "$C/w1"
-run pass color synth --top abc_comb_loop.abc_comb_loop lg:"$C/lg" --workdir "$C/w2"
-"$LHD" pass abc --top abc_comb_loop.abc_comb_loop lg:"$C/lg" --emit-dir lg:"$C/net" --set synth.liberty="$LIB" \
-    --diag-fmt jsonl --result-json "$C/r.json" --workdir "$C/w3" 2>"$C/diag.jsonl" \
-  || fail "pass abc rejected a preserved combinational SCC -> $(cat "$C/r.json" 2>/dev/null)"
-grep -q '"code":"comb-loop-native"' "$C/diag.jsonl" \
-  || fail "pass abc did not report the native combinational SCC boundary"
-run compile lg:"$C/net" --top abc_comb_loop.abc_comb_loop --emit-dir verilog:"$C/netv" --workdir "$C/w4"
-# The surviving native cone is `feedback & a`. Match it in EITHER operand
-# order: `&` is commutative and the emitter prints the operands in sink-pid
-# order, so which one comes first is not a property of the mapping. It used to
-# be stable only because every operand of a commutative cell shared ONE sink
-# pin and came back in edge-storage order; now each operand owns its own pid
-# (graph/cell.hpp's ONE DRIVER PER SINK PIN block) and the pair prints as
-# `(or_20 & a)` rather than `(a & or_20)`. Asserting one spelling made a pure
-# operand-order change look like a dropped expression.
-grep -Eq ' = \((a & [A-Za-z_][A-Za-z_0-9]*|[A-Za-z_][A-Za-z_0-9]* & a)\)' "$C/netv/"*.v \
-  || fail "mapped output dropped the native feedback expression"
-"$LHD" pass opentimer --top abc_comb_loop.abc_comb_loop lg:"$C/net" "$LIB" --workdir "$C/w5" \
-    --diag-fmt jsonl --result-json "$C/rt.json" 2>"$C/ot.jsonl" \
-  || fail "opentimer rejected the explicit native SCC boundary -> $(cat "$C/rt.json" 2>/dev/null)"
-grep -q '"code":"native-comb-boundary"' "$C/ot.jsonl" \
-  || fail "opentimer did not report its partial native-combinational timing boundary"
-grep -q '"kind":"sta"' "$C/w5/timing.json" || fail "native-boundary timing report missing"
-echo "PASS: pass.abc preserves combinational SCCs and opentimer reports their explicit timing cuts"
+rc=0
+"$LHD" compile inou/prp/tests/pyrope/abc_comb_loop.prp --top abc_comb_loop --emit-dir lg:"$C/lg" --workdir "$C/w1" \
+  --diag-fmt jsonl >"$C/diag.jsonl" 2>&1 || rc=$?
+[ "$rc" -eq 6 ] || fail "a genuine combinational loop must be a design error (exit 6), got exit $rc -> $(cat "$C/diag.jsonl")"
+grep -q '"code":"comb-loop"' "$C/diag.jsonl" || fail "pass.legalize did not report the combinational loop"
+echo "PASS: a genuine combinational SCC is a pass.legalize design error"
+
+# An ASYNC memory read is combinational in its address: a read that feeds its
+# own address is a loop too (a Memory is not a register cut for its comb read
+# ports -- port_reach::Memory_deps).
+cat >"$C/mloop.sv" <<'EOF'
+module mloop(input logic clk, input logic we, input logic [3:0] wa, input logic [3:0] wd, input logic [3:0] x, output logic [3:0] o);
+  logic [3:0] mem [16];
+  logic [3:0] rd, addr;
+  always_ff @(posedge clk) if (we) mem[wa] <= wd;
+  assign rd   = mem[addr];
+  assign addr = rd ^ x;
+  assign o    = rd;
+endmodule
+EOF
+rc=0
+"$LHD" compile "$C/mloop.sv" --top mloop --workdir "$C/w2" --diag-fmt jsonl >"$C/mdiag.jsonl" 2>&1 || rc=$?
+[ "$rc" -eq 6 ] && grep -q '"code":"comb-loop"' "$C/mdiag.jsonl" \
+  || fail "an async memory read in its own address cone must be a comb-loop error (exit 6), got $rc -> $(cat "$C/mdiag.jsonl")"
+echo "PASS: an async memory read feeding its own address is a pass.legalize design error"
 
 # ---------------------------------------------------------------------------
 # Feed-through wires must not become buffer cells. ABC materializes a Liberty

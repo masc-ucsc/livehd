@@ -1,0 +1,178 @@
+[
+  {
+    "test": "br_amba_axi_timing_slice",
+    "variants": {
+      "slop": {
+        "function": "br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_run()",
+        "instructions": 825,
+        "stack_references": 22,
+        "stack_reservations": [
+          "$0x38"
+        ],
+        "conditional_branches": 91
+      },
+      "llvm": {
+        "function": "br_amba_axi_timing_slice_harness_br_amba_axi_timing_slice_harness::__color_run()",
+        "instructions": 967,
+        "stack_references": 113,
+        "stack_reservations": [
+          "$0x158"
+        ],
+        "conditional_branches": 72
+      }
+    }
+  },
+  {
+    "test": "br_amba_axil_timing_slice",
+    "variants": {
+      "slop": {
+        "function": "br_amba_axil_timing_slice_harness_br_amba_axil_timing_slice_harness::__color_run()",
+        "instructions": 1082,
+        "stack_references": 113,
+        "stack_reservations": [
+          "$0xc8"
+        ],
+        "conditional_branches": 155
+      },
+      "llvm": {
+        "function": "br_amba_axil_timing_slice_harness_br_amba_axil_timing_slice_harness::__color_run()",
+        "instructions": 1081,
+        "stack_references": 118,
+        "stack_reservations": [
+          "$0x178"
+        ],
+        "conditional_branches": 112
+      }
+    }
+  },
+  {
+    "test": "br_arb_rr",
+    "variants": {
+      "slop": {
+        "function": "br_arb_rr_harness_br_arb_rr_harness::__color_run()",
+        "instructions": 1120,
+        "stack_references": 13,
+        "stack_reservations": [
+          "$0x18"
+        ],
+        "conditional_branches": 140
+      },
+      "llvm": {
+        "function": "br_arb_rr_harness_br_arb_rr_harness::__color_run()",
+        "instructions": 1140,
+        "stack_references": 41,
+        "stack_reservations": [
+          "$0x28"
+        ],
+        "conditional_branches": 140
+      }
+    }
+  },
+  {
+    "test": "br_cdc_fifo_flops",
+    "variants": {
+      "slop": {
+        "function": "br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness::__color_run()",
+        "instructions": 522,
+        "stack_references": 0,
+        "stack_reservations": [],
+        "conditional_branches": 99
+      },
+      "llvm": {
+        "function": "br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness::__color_run()",
+        "instructions": 522,
+        "stack_references": 0,
+        "stack_reservations": [],
+        "conditional_branches": 99
+      }
+    }
+  },
+  {
+    "test": "br_credit_sender",
+    "variants": {
+      "slop": {
+        "function": "br_credit_sender_harness_br_credit_sender_harness::__color_run()",
+        "instructions": 1188,
+        "stack_references": 82,
+        "stack_reservations": [
+          "$0xc8"
+        ],
+        "conditional_branches": 123
+      },
+      "llvm": {
+        "function": "br_credit_sender_harness_br_credit_sender_harness::__color_run()",
+        "instructions": 1218,
+        "stack_references": 115,
+        "stack_reservations": [
+          "$0x98"
+        ],
+        "conditional_branches": 79
+      }
+    }
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "variants": {
+      "slop": {
+        "function": "br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_run()",
+        "instructions": 1223,
+        "stack_references": 99,
+        "stack_reservations": [
+          "$0xd8"
+        ],
+        "conditional_branches": 181
+      },
+      "llvm": {
+        "function": "br_fifo_flops_push_credit_harness_br_fifo_flops_push_credit_harness::__color_run()",
+        "instructions": 1260,
+        "stack_references": 206,
+        "stack_reservations": [
+          "$0x178"
+        ],
+        "conditional_branches": 139
+      }
+    }
+  },
+  {
+    "test": "br_flow_arb_rr",
+    "variants": {
+      "slop": {
+        "function": "br_flow_arb_rr_harness_br_flow_arb_rr_harness::__color_run()",
+        "instructions": 472,
+        "stack_references": 0,
+        "stack_reservations": [],
+        "conditional_branches": 58
+      },
+      "llvm": {
+        "function": "br_flow_arb_rr_harness_br_flow_arb_rr_harness::__color_run()",
+        "instructions": 488,
+        "stack_references": 0,
+        "stack_reservations": [],
+        "conditional_branches": 64
+      }
+    }
+  },
+  {
+    "test": "br_flow_deserializer",
+    "variants": {
+      "slop": {
+        "function": "br_flow_deserializer_harness_br_flow_deserializer_harness::__color_run()",
+        "instructions": 790,
+        "stack_references": 59,
+        "stack_reservations": [
+          "$0x78"
+        ],
+        "conditional_branches": 73
+      },
+      "llvm": {
+        "function": "br_flow_deserializer_harness_br_flow_deserializer_harness::__color_run()",
+        "instructions": 774,
+        "stack_references": 179,
+        "stack_reservations": [
+          "$0x1e8"
+        ],
+        "conditional_branches": 63
+      }
+    }
+  }
+]

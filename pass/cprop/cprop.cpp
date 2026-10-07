@@ -526,7 +526,34 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
 // down refuses the whole rewrite.
 //
 // An upper bound from the explicit expression; unknown boundaries refuse.
-[[nodiscard]] int pack_lane_width(const hhds::Pin_class& p) { return livehd::cprop_value::unsigned_width(p); }
+//
+// A Concat counts only up to its highest lane that is not constant zero. A
+// field is often zero-extended to the full record width before its shift (a
+// 14-bit field of XiangShan's 347-bit NewRobDeqPtrWrapper `io` record arrives
+// as a 347-bit Concat with zero upper lanes); counting those zeros made the
+// lane overlap every other field, the pack stayed an Or, and `io_out =
+// io.out` kept a false word-level dependency on every input packed beside it.
+[[nodiscard]] int pack_lane_width(const hhds::Pin_class& p) {
+  const int bound = livehd::cprop_value::unsigned_width(p);
+  if (!p.is_invalid() && !p.is_const() && p.get_port_id() == 0) {
+    const auto node = p.get_master_node();
+    if (type_op_of(node) == Ntype_op::Concat) {
+      const auto lanes = livehd::graph_util::concat_lanes(node);  // MSB-first
+      if (!lanes.empty()) {
+        int lane_bound = 0;  // all lanes zero
+        for (const auto& lane : lanes) {
+          // is_known_zero, not is_known_false: a nil/X lane is no zero
+          if (!(lane.value.is_const() && const_of(lane.value).is_known_zero())) {
+            lane_bound = lane.offset + lane.width;
+            break;
+          }
+        }
+        return bound >= 0 ? std::min(bound, lane_bound) : lane_bound;  // the tighter of the two
+      }
+    }
+  }
+  return bound;
+}
 
 bool canonicalize_or_pack(hhds::Graph& g, hhds::Node_class& node) {
   auto out = node.get_driver_pin(0);

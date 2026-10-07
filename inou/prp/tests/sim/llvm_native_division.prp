@@ -1,0 +1,47 @@
+/*
+:name: llvm_native_division
+:type: simulation
+*/
+// Wide division must execute without a compiler-runtime call in LLVM colors.
+mod native_division(a:U128, b:U128, signed_a:S128, signed_b:S128)
+    -> (q:U128@[0], signed_q:S128@[0]) {
+  // Reset settling precedes the first testbench drive. Keep its divisor valid.
+  const unsigned_divisor = b | 1
+  const signed_divisor = if signed_b == 0 { 1 } else { signed_b }
+  q = a / unsigned_divisor
+  wrap signed_q = signed_a / signed_divisor
+}
+
+test native_division.wide {
+  // Testbench pokes transport bit patterns; provide all 128 sign bits.
+  mut dut = native_division
+  tick 3 {
+    if clock == 0 {
+      dut.a = 1329227995784915872903807060280344593
+      dut.b = 3
+      dut.signed_a = (1 << 128) - 1329227995784915872903807060280344593
+      dut.signed_b = 3
+    } elif clock == 1 {
+      dut.a = 340282366920938463463374607431768211455
+      dut.b = 18446744073709551617
+      dut.signed_a = (1 << 128) - 1329227995784915872903807060280344593
+      dut.signed_b = (1 << 128) - 7
+    } else {
+      dut.a = 17
+      dut.b = 340282366920938463463374607431768211455
+      dut.signed_a = 1 << 127
+      dut.signed_b = (1 << 128) - 1
+    }
+    step
+    if clock == 0 {
+      assert(dut.q == 443075998594971957634602353426781531)
+      assert(dut.signed_q == (0 - 443075998594971957634602353426781531))
+    } elif clock == 1 {
+      assert(dut.q == 18446744073709551615)
+      assert(dut.signed_q == 189889713683559410414829580040049227)
+    } else {
+      assert(dut.q == 0)
+      assert(dut.signed_q == (0 - 170141183460469231731687303715884105728))
+    }
+  }
+}

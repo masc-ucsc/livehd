@@ -1,0 +1,10 @@
+{
+  "total_objects": 5284,
+  "minion_objects": 4981,
+  "lhdtrack_objects": 303,
+  "named_undefined_symbols": 0,
+  "pure_includes": 0,
+  "format": "ELF",
+  "aggregate_sha256": "28bd961f7b0dbb583b5d6867e2a14f8438acd8920c6db3fe0785553b67f6990f",
+  "total_bytes": 9843864
+}

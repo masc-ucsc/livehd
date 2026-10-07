@@ -1,0 +1,54 @@
+br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()
+   1fa50:	movzbl 0x58(%rdi),%esi
+   1fa54:	mov    0x18(%rdi),%rcx
+   1fa58:	mov    0x40(%rdi),%rax
+   1fa5c:	mov    %ecx,%r8d
+   1fa5f:	and    $0xf,%r8b
+   1fa63:	and    $0x7,%sil
+   1fa67:	mov    %ecx,%r9d
+   1fa6a:	shr    $0x2,%r9d
+   1fa6e:	xor    %r10d,%r10d
+   1fa71:	and    $0x3,%r9d
+   1fa75:	mov    0x38(%rdi),%rdx
+   1fa79:	cmovne %rax,%rdx
+   1fa7d:	cmovne %r10,%rax
+   1fa81:	cmp    $0x2,%r9d
+   1fa85:	cmovae %r10,%rdx
+   1fa89:	cmp    %r8b,%sil
+   1fa8c:	jne    1fa98 <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()+0x48>
+   1fa8e:	shl    $0x4,%rcx
+   1fa92:	shrd   %cl,%rax,%rdx
+   1fa96:	jmp    1fa9c <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()+0x4c>
+   1fa98:	movzwl 0x68(%rdi),%edx
+   1fa9c:	movzwl %dx,%eax
+   1fa9f:	movq   $0x0,0x98(%rdi)
+   1faaa:	mov    %rax,0xa0(%rdi)
+   1fab1:	movzbl 0x58(%rdi),%esi
+   1fab5:	mov    0x18(%rdi),%rcx
+   1fab9:	mov    0x40(%rdi),%rax
+   1fabd:	mov    %ecx,%r8d
+   1fac0:	and    $0xf,%r8b
+   1fac4:	and    $0x7,%sil
+   1fac8:	mov    %ecx,%r9d
+   1facb:	shr    $0x2,%r9d
+   1facf:	xor    %r10d,%r10d
+   1fad2:	and    $0x3,%r9d
+   1fad6:	mov    0x38(%rdi),%rdx
+   1fada:	cmovne %rax,%rdx
+   1fade:	cmovne %r10,%rax
+   1fae2:	cmp    $0x2,%r9d
+   1fae6:	cmovae %r10,%rdx
+   1faea:	cmp    %r8b,%sil
+   1faed:	jne    1fb0d <br_mux_bin_structured_gates_mock_bench_harness_br_mux_bin_structured_gates_mock_bench_harness___loop0::__color_run()+0xbd>
+   1faef:	shl    $0x4,%rcx
+   1faf3:	shrd   %cl,%rax,%rdx
+   1faf7:	movzwl %dx,%eax
+   1fafa:	movq   $0x0,0xa8(%rdi)
+   1fb05:	mov    %rax,0xb0(%rdi)
+   1fb0c:	ret
+   1fb0d:	movzwl 0x68(%rdi),%edx
+   1fb11:	movzwl %dx,%eax
+   1fb14:	movq   $0x0,0xa8(%rdi)
+   1fb1f:	mov    %rax,0xb0(%rdi)
+   1fb26:	ret
+   1fb27:	nopw   0x0(%rax,%rax,1)

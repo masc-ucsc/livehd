@@ -116,13 +116,41 @@ hints. LLVM pipeline tuning also disables loop unrolling; LiveHD's bounded
 LLVM pass pipeline contains no unroll pass. `compile.unroll=false` remains the
 front-end default, independently preserving the compact graph representation.
 
-`sim.tune.backend=llvm` emits eligible circuit kernels as LLVM bitcode; `slop`
-emits C++ kernels. LLVM uses C++ for the driver, scheduling, state storage and
-runtime operations such as compact-loop calls. Packed LLVM kernels load inputs
-and materialize casts at first use, rather than loading every input at entry. The
-input, output, changed-bit and owner pointers carry `noalias`: the generated
-caller supplies disjoint buffers and module storage. Input buffers are also
+`sim.tune.backend=llvm` emits each circuit color directly as a native,
+position-independent object; `slop` emits C++ kernels. LLVM color objects have
+no external calls or undefined symbols: object emission validates the native symbol
+table, including dependencies introduced by instruction selection. Wide division
+uses an internal restoring loop and memory intrinsics expand locally. The C++
+support compiles normally, without host bitcode or cross-language inlining.
+The driver, scheduling, state commits, observation and compact-loop traversal
+remain C++ in this first step; unused Slop pure evaluators are not emitted for
+LLVM designs.
+
+Memory entries use contiguous packed words with no Slop tags or sign padding.
+A shared support template supplies reset, checkpoint and commit operations. A
+color receives an explicit table of data pointers to those arrays and staged
+writes; LLVM implements bounds checks, lane masks, write priority, forwarding
+and combinational commits directly. Pre-rise reads replay their forwarding
+prefix inside the object, including ordering-none collision draws. Whole-array
+registered updates cross a packed staging bridge and still commit at the existing phase barrier. Clock
+guards are sampled by the evaluator adapter. Unknown constants remain seeded
+runtime inputs, never setup-time random draws. Undefined memory collisions use
+a deterministic seeded packed-memory stream implemented in both the shared
+support and native IR; particular undefined values need not match Slop's stream.
+
+Packed kernels load inputs and materialize casts at first use. Input, output,
+changed-bit and resource-table pointers carry `noalias`: the caller supplies
+disjoint packed buffers and separate memory storage. Input buffers are also
 `readonly`; distinct fields within a buffer use distinct constant offsets.
+
+Native object emission uses bounded workers during setup. `sim.jobs` sets the
+same limit for object emission and host compilation. With no explicit limit,
+the worker budget is sampled from available CPUs and load, with at least one
+worker; setup waits for a completed job before starting another at the limit.
+Objects are written only when bytes change and are generation-cache artifacts,
+so a missing native object invalidates the generated module. Both host build
+paths link through response files, allowing thousands of color objects without
+exceeding the shell command-length limit.
 
 Large Slop binding initializers are split into translation units of at most
 128 candidate colors; small color bodies alone do not bound the compiler work
@@ -138,8 +166,8 @@ small support translation units.
 Shared-kernel calls and changed-bit actions use the same emitter in reset
 evaluation and normal scheduling.
 
-LLVM memory callbacks preserve the signedness of addresses and lane enables
-when unpacking the ABI, including narrow unsigned values with their high bit set.
+LLVM memory operations preserve the signedness of addresses and lane enables,
+including narrow unsigned values with their high bit set.
 
 Code-generation cache hits skip both
 coloring and emission; use a fresh workdir to measure a cold setup.

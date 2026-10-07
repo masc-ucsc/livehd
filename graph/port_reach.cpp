@@ -17,6 +17,103 @@ namespace livehd::port_reach {
 
 namespace gu = livehd::graph_util;
 
+Memory_deps::Memory_deps(const hhds::Node_class& m) {
+  // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
+  for (auto e_sink : m.inp_sorted_pins()) {
+    for (auto e_drv : e_sink.get_driver_pins()) {
+      const int  raw = static_cast<int>(e_sink.get_port_id());
+      const auto pn  = Ntype::get_sink_name(Ntype_op::Memory, raw);
+      const auto idx = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
+      if (pn == "fwd" || pn == "undef") {
+        if (e_drv.is_const()) {
+          const auto& c = gu::const_of(e_drv);
+          if (!(c.is_just_i64() && c.to_just_i64() == 0)) {
+            fwd_nonzero = true;
+          }
+        } else {
+          fwd_nonzero = true;
+        }
+      } else if (pn == "type") {
+        if (e_drv.is_const()) {
+          mtype = static_cast<int>(gu::const_of(e_drv).to_just_i64());
+        }
+      } else if (pn == "update") {
+        update = e_drv;
+      } else if (pn == "update_enable" || pn == "reset" || pn == "initial" || pn == "bits" || pn == "size" || pn == "wensize") {
+      } else if (pn.ends_with("clock_pin")) {
+        has_clock = true;
+      } else {
+        if (pv.size() <= idx) {
+          pv.resize(idx + 1);
+        }
+        if (pn.ends_with("addr")) {
+          pv[idx].addr = e_drv;
+        } else if (pn.ends_with("enable")) {
+          pv[idx].en = e_drv;
+        } else if (pn.ends_with("din")) {
+          pv[idx].din = e_drv;
+        } else if (pn.ends_with("rdport")) {
+          pv[idx].rd = e_drv.is_const() && !e_drv.is_known_false();
+        }
+      }
+    }
+  }
+  for (const auto& mp : pv) {
+    if (!mp.addr.is_invalid() && !mp.rd) {
+      ++n_wr;
+      wr_cones.push_back(mp.addr);
+      wr_cones.push_back(mp.din);
+      wr_cones.push_back(mp.en);
+    }
+  }
+}
+
+bool Memory_deps::deps(hhds::Port_id want_pid, const std::function<void(const hhds::Pin_class&)>& enqueue, bool writes) const {
+  bool        handled  = false;
+  if (want_pid == Ntype::Memory_readall_pid) {
+    handled = true;
+    if (!has_clock && writes) {
+      enqueue(update);
+      for (const auto& w : wr_cones) {
+        enqueue(w);
+      }
+    }
+  } else {
+    int rd = 0;
+    for (const auto& mp : pv) {
+      if (mp.addr.is_invalid() && mp.din.is_invalid() && mp.en.is_invalid()) {
+        continue;  // phantom slot — mirror cgen_sim
+      }
+      if (!mp.rd) {
+        continue;
+      }
+      if (static_cast<hhds::Port_id>(n_wr + rd) == want_pid) {
+        handled = true;
+        if (mtype != 1) {
+          enqueue(mp.addr);
+          enqueue(mp.en);
+          // Write cones flow into a SAME-CYCLE read in two cases:
+          // explicit forwarding, or an UNCLOCKED memory — a pure comb
+          // array is a mux tree, its contents are current-cycle
+          // functions of update/din (the readall arm below already
+          // applies the !has_clock rule; dropping it here silently
+          // zeroed a split callee's whole-array data input —
+          // tests/sim/whole_array_in_split_callee.prp).
+          if (writes && (fwd_nonzero || !has_clock)) {
+            enqueue(update);
+            for (const auto& w : wr_cones) {
+              enqueue(w);
+            }
+          }
+        }
+        break;
+      }
+      ++rd;
+    }
+  }
+  return handled;
+}
+
 namespace {
 
 // Decompose a packed-output driver into disjoint (lo, leaf) ranges when it is
@@ -340,76 +437,9 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
     };
     // A memory's ports, decoded once per definition: every read port's dout
     // would otherwise rescan all of the memory's sinks.
-    struct Mem_port {
-      hhds::Pin_class addr, en, din;
-      bool            rd = false;
-    };
-    struct Mem_ports {
-      std::vector<Mem_port>        pv;
-      std::vector<hhds::Pin_class> wr_cones;
-      hhds::Pin_class              update;
-      bool                         has_clock   = false;
-      bool                         fwd_nonzero = false;
-      int                          mtype       = 2;
-      int                          n_wr        = 0;
-    };
-    absl::node_hash_map<hhds::Node_class, Mem_ports> mem_ports;
-
-    auto mem_ports_of = [&](const hhds::Node_class& m) -> const Mem_ports& {
-      const auto [it, fresh] = mem_ports.try_emplace(m);
-      auto& mi               = it->second;
-      if (!fresh) {
-        return mi;
-      }
-      // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
-      for (auto e_sink : m.inp_sorted_pins()) {
-        for (auto e_drv : e_sink.get_driver_pins()) {
-          const int  raw = static_cast<int>(e_sink.get_port_id());
-          const auto pn  = Ntype::get_sink_name(Ntype_op::Memory, raw);
-          const auto idx = static_cast<size_t>(raw) / Ntype::Memory_port_stride;
-          if (pn == "fwd" || pn == "undef") {
-            if (e_drv.is_const()) {
-              const auto& c = gu::const_of(e_drv);
-              if (!(c.is_just_i64() && c.to_just_i64() == 0)) {
-                mi.fwd_nonzero = true;
-              }
-            } else {
-              mi.fwd_nonzero = true;
-            }
-          } else if (pn == "type") {
-            if (e_drv.is_const()) {
-              mi.mtype = static_cast<int>(gu::const_of(e_drv).to_just_i64());
-            }
-          } else if (pn == "update") {
-            mi.update = e_drv;
-          } else if (pn == "update_enable" || pn == "reset" || pn == "initial" || pn == "bits" || pn == "size" || pn == "wensize") {
-          } else if (pn.ends_with("clock_pin")) {
-            mi.has_clock = true;
-          } else {
-            if (mi.pv.size() <= idx) {
-              mi.pv.resize(idx + 1);
-            }
-            if (pn.ends_with("addr")) {
-              mi.pv[idx].addr = e_drv;
-            } else if (pn.ends_with("enable")) {
-              mi.pv[idx].en = e_drv;
-            } else if (pn.ends_with("din")) {
-              mi.pv[idx].din = e_drv;
-            } else if (pn.ends_with("rdport")) {
-              mi.pv[idx].rd = e_drv.is_const() && !e_drv.is_known_false();
-            }
-          }
-        }
-      }
-      for (const auto& mp : mi.pv) {
-        if (!mp.addr.is_invalid() && !mp.rd) {
-          ++mi.n_wr;
-          mi.wr_cones.push_back(mp.addr);
-          mi.wr_cones.push_back(mp.din);
-          mi.wr_cones.push_back(mp.en);
-        }
-      }
-      return mi;
+    absl::node_hash_map<hhds::Node_class, Memory_deps> mem_deps;
+    auto mem_deps_of = [&](const hhds::Node_class& m) -> const Memory_deps& {
+      return mem_deps.try_emplace(m, m).first->second;
     };
     // Wide instances are revisited for each output (and each packed slice).
     // Index their connected sinks once instead of scanning every sink for
@@ -522,54 +552,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
           // port's address/enable cone (+ write cones only under same-cycle
           // forwarding); sync dout -> a register; read_all -> boundary when
           // clocked. Undecoded shapes fall back to the blanket join.
-          const auto  want_pid = static_cast<hhds::Port_id>(d.get_port_id());
-          const auto& mp_info  = mem_ports_of(m);
-          const auto& pv       = mp_info.pv;
-          const auto& wr_cones = mp_info.wr_cones;
-          const auto& update   = mp_info.update;
-          const auto  n_wr     = mp_info.n_wr;
-          bool        handled  = false;
-          if (want_pid == Ntype::Memory_readall_pid) {
-            handled = true;
-            if (!mp_info.has_clock) {
-              enqueue(update);
-              for (const auto& w : wr_cones) {
-                enqueue(w);
-              }
-            }
-          } else {
-            int rd = 0;
-            for (const auto& mp : pv) {
-              if (mp.addr.is_invalid() && mp.din.is_invalid() && mp.en.is_invalid()) {
-                continue;  // phantom slot — mirror cgen_sim
-              }
-              if (!mp.rd) {
-                continue;
-              }
-              if (static_cast<hhds::Port_id>(n_wr + rd) == want_pid) {
-                handled = true;
-                if (mp_info.mtype != 1) {
-                  enqueue(mp.addr);
-                  enqueue(mp.en);
-                  // Write cones flow into a SAME-CYCLE read in two cases:
-                  // explicit forwarding, or an UNCLOCKED memory — a pure comb
-                  // array is a mux tree, its contents are current-cycle
-                  // functions of update/din (the readall arm below already
-                  // applies the !has_clock rule; dropping it here silently
-                  // zeroed a split callee's whole-array data input —
-                  // tests/sim/whole_array_in_split_callee.prp).
-                  if (mp_info.fwd_nonzero || !mp_info.has_clock) {
-                    enqueue(update);
-                    for (const auto& w : wr_cones) {
-                      enqueue(w);
-                    }
-                  }
-                }
-                break;
-              }
-              ++rd;
-            }
-          }
+          const bool handled = mem_deps_of(m).deps(static_cast<hhds::Port_id>(d.get_port_id()), enqueue);
           if (!handled && expanded.insert(m).second) {
             // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
             for (auto e_sink : m.inp_sorted_pins()) {

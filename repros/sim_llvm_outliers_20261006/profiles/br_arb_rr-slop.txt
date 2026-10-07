@@ -1,0 +1,13 @@
+Functions sorted by metric: Exclusive Total CPU Time
+
+Excl. Total   Incl. Total    Name
+CPU           CPU
+ sec.      %   sec.      %
+1.051 100.00  1.051 100.00   <Total>
+0.680  64.76  0.991  94.29   br_arb_rr_harness_br_arb_rr_harness::__color_run()
+0.150  14.29  0.150  14.29   br_arb_rr_br_arb_rr___loop0::__color_pre_rise()
+0.130  12.38  0.310  29.52   __compact_br_arb_rr_br_arb_rr_u_loop_0::__compact_advance()
+0.060   5.71  0.660  62.86   _run_bench_run(std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::set<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, _Fail&)
+0.030   2.86  0.030   2.86   br_arb_rr_br_arb_rr___loop0::__color_rise_commit()
+0.      0.    0.660  62.86   main
+

@@ -1,0 +1,14 @@
+Functions sorted by metric: Exclusive Total CPU Time
+
+Excl. Total   Incl. Total    Name
+CPU           CPU
+ sec.      %   sec.      %
+0.710 100.00  0.710 100.00   <Total>
+0.320  45.07  0.320  45.07   br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness::__color_run_part_0()
+0.240  33.80  0.240  33.80   br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness::__color_run_part_1()
+0.100  14.08  0.620  87.32   br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness::__color_run()
+0.020   2.82  0.640  90.14   _run_bench_run(std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::set<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&, _Fail&)
+0.020   2.82  0.020   2.82   br_cdc_fifo_flops_harness_br_cdc_fifo_flops_harness::__color_run_part_3()
+0.010   1.41  0.010   1.41   hlop::Mem_base<Slop_u<64>, 64, 32ul, 32, 1, 1, 1>::tick()
+0.      0.    0.640  90.14   main
+

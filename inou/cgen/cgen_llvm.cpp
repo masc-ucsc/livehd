@@ -9,6 +9,7 @@
 #include <optional>
 #include <string_view>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 
 #include "file_output.hpp"
@@ -17,12 +18,14 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -31,6 +34,7 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/Linker/Linker.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Object/ObjectFile.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -46,6 +50,7 @@
 #include "llvm/Transforms/Scalar/EarlyCSE.h"
 #include "llvm/Transforms/Scalar/SROA.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
+#include "llvm/Transforms/Utils/LowerMemIntrinsics.h"
 
 namespace {
 
@@ -72,21 +77,22 @@ public:
     Value  value;
   };
 
-  llvm::LLVMContext                      context;
-  std::unique_ptr<llvm::Module>          module;
-  llvm::IRBuilder<>                      builder;
-  llvm::Function*                        function = nullptr;
-  llvm::Value*                           inputs   = nullptr;
-  llvm::Value*                           outputs  = nullptr;
-  llvm::Value*                           changed  = nullptr;
-  llvm::Value*                           owner    = nullptr;
-  std::vector<llvm::Value*>              values;
-  std::vector<size_t>                    input_word_offsets;
-  std::vector<std::optional<Value>>      deferred_casts;
-  std::vector<std::pair<uint32_t, bool>> input_types;
-  std::vector<Output>                    output_values;
-  std::string                            error;
-  bool                                   scalar_abi = false;
+  llvm::LLVMContext                       context;
+  std::unique_ptr<llvm::Module>           module;
+  llvm::IRBuilder<>                       builder;
+  llvm::Function*                         function = nullptr;
+  llvm::Value*                            inputs   = nullptr;
+  llvm::Value*                            outputs  = nullptr;
+  llvm::Value*                            changed  = nullptr;
+  llvm::Value*                            owner    = nullptr;
+  std::vector<llvm::Value*>               values;
+  std::vector<size_t>                     input_word_offsets;
+  std::vector<std::optional<Value>>       deferred_casts;
+  std::vector<std::pair<uint32_t, bool>>  input_types;
+  std::vector<Output>                     output_values;
+  std::string                             error;
+  bool                                    scalar_abi = false;
+  std::unordered_map<std::string, Memory> memories;
 
   Impl(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& input_desc, bool use_scalar_abi)
       : module(std::make_unique<llvm::Module>("livehd.sim.color", context))
@@ -190,6 +196,72 @@ public:
       lane      = cast_integer(builder, lane, 64, true);
       auto* ptr = builder.CreateConstInBoundsGEP1_64(i64, base, offset + word);
       builder.CreateStore(lane, ptr);
+    }
+  }
+
+  llvm::Value* resource(size_t index) {
+    auto* slot = builder.CreateConstInBoundsGEP1_64(builder.getPtrTy(), owner, index);
+    return builder.CreateLoad(builder.getPtrTy(), slot, "resource");
+  }
+  llvm::Value* word_ptr(llvm::Value* base, uint64_t offset) {
+    return builder.CreateConstInBoundsGEP1_64(builder.getInt64Ty(), base, offset);
+  }
+  llvm::Value* pending_ptr(const Memory& m, uint32_t port) {
+    return word_ptr(resource(m.pending), uint64_t(port) * (3 * word_count(m.bits) + 2));
+  }
+  llvm::Value* fired_ptr(const Memory& m, llvm::Value* pending) { return word_ptr(pending, 3 * word_count(m.bits) + 1); }
+  llvm::Value* valid_address(Value address, uint64_t size) {
+    auto*      a     = get(address);
+    const auto width = std::max(64u, address.width);
+    a                = cast_integer(builder, a, width, address.unsign);
+    return builder.CreateICmpULT(a, llvm::ConstantInt::get(builder.getIntNTy(width), size));
+  }
+  template <class Fn>
+  void when(llvm::Value* condition, Fn emit) {
+    auto* yes  = llvm::BasicBlock::Create(context, "memory.active", function);
+    auto* done = llvm::BasicBlock::Create(context, "memory.done", function);
+    builder.CreateCondBr(condition, yes, done);
+    builder.SetInsertPoint(yes);
+    emit();
+    builder.CreateBr(done);
+    builder.SetInsertPoint(done);
+  }
+  llvm::Value* random_value(const Memory& m) {
+    auto*        state  = resource(m.random);
+    auto*        draws  = resource(m.draws);
+    llvm::Value* result = llvm::ConstantInt::get(builder.getIntNTy(m.bits), 0);
+    for (size_t word = 0; word < word_count(m.bits); ++word) {
+      auto* next = builder.CreateAdd(builder.CreateLoad(builder.getInt64Ty(), state), builder.getInt64(0x9e3779b97f4a7c15ULL));
+      builder.CreateStore(next, state);
+      builder.CreateStore(builder.CreateAdd(builder.CreateLoad(builder.getInt64Ty(), draws), builder.getInt64(1)), draws);
+      auto* z = builder.CreateMul(builder.CreateXor(next, builder.CreateLShr(next, 30)), builder.getInt64(0xbf58476d1ce4e5b9ULL));
+      z       = builder.CreateMul(builder.CreateXor(z, builder.CreateLShr(z, 27)), builder.getInt64(0x94d049bb133111ebULL));
+      z       = builder.CreateXor(z, builder.CreateLShr(z, 31));
+      z       = cast_integer(builder, z, m.bits, true);
+      result  = builder.CreateOr(result, builder.CreateShl(z, llvm::ConstantInt::get(z->getType(), word * 64)));
+    }
+    return result;
+  }
+
+  void commit_memory(const Memory& m) {
+    for (uint32_t port = 0; port < m.writes; ++port) {
+      auto* pending = pending_ptr(m, port);
+      auto* fired   = fired_ptr(m, pending);
+      auto* active  = builder.CreateICmpNE(builder.CreateLoad(builder.getInt8Ty(), fired), builder.getInt8(0));
+      when(active, [&] {
+        auto* address = builder.CreateLoad(builder.getInt64Ty(), word_ptr(pending, 3 * word_count(m.bits)));
+        auto* ptr     = builder.CreateInBoundsGEP(builder.getInt64Ty(),
+                                                  resource(m.data),
+                                                  builder.CreateMul(address, builder.getInt64(word_count(m.bits))));
+        auto* old     = load_packed(ptr, 0, m.bits, "memory.old");
+        auto* data    = load_packed(pending, 0, m.bits, "memory.new");
+        auto* mask    = load_packed(pending, word_count(m.bits), m.bits, "memory.mask");
+        store_packed(builder.CreateOr(builder.CreateAnd(old, builder.CreateNot(mask)), builder.CreateAnd(data, mask)),
+                     ptr,
+                     0,
+                     m.bits);
+        builder.CreateStore(builder.getInt8(0), fired);
+      });
     }
   }
 
@@ -508,7 +580,47 @@ Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t 
       auto* zero = llvm::ConstantInt::get(right->getType(), 0);
       impl_->trap_if(impl_->builder.CreateICmpEQ(right, zero), "divide.zero");
 
-      if (lhs.unsign && rhs.unsign) {
+      if (operation_width > 64) {
+        // Native targets lower wide division through compiler-rt otherwise.
+        // Restoring division keeps the entire operation inside this object.
+        auto&      b           = impl_->builder;
+        const bool signed_op   = !lhs.unsign || !rhs.unsign;
+        auto*      negative_l  = signed_op ? b.CreateICmpSLT(left, zero) : b.getFalse();
+        auto*      negative_r  = signed_op ? b.CreateICmpSLT(right, zero) : b.getFalse();
+        auto*      numerator   = b.CreateSelect(negative_l, b.CreateNeg(left), left);
+        auto*      denominator = b.CreateSelect(negative_r, b.CreateNeg(right), right);
+        auto*      entry       = b.GetInsertBlock();
+        auto*      loop        = llvm::BasicBlock::Create(impl_->context, "divide.bits", impl_->function);
+        auto*      done        = llvm::BasicBlock::Create(impl_->context, "divide.done", impl_->function);
+        b.CreateBr(loop);
+        b.SetInsertPoint(loop);
+        auto* count     = b.CreatePHI(b.getInt32Ty(), 2);
+        auto* quotient  = b.CreatePHI(left->getType(), 2);
+        auto* remainder = b.CreatePHI(left->getType(), 2);
+        count->addIncoming(b.getInt32(operation_width), entry);
+        quotient->addIncoming(zero, entry);
+        remainder->addIncoming(zero, entry);
+        auto* bit      = b.CreateSub(count, b.getInt32(1));
+        auto* shift    = cast_integer(b, bit, operation_width, true);
+        auto* one      = llvm::ConstantInt::get(left->getType(), 1);
+        auto* carry    = b.CreateICmpSLT(remainder, zero);
+        auto* shifted  = b.CreateOr(b.CreateShl(remainder, 1), b.CreateAnd(b.CreateLShr(numerator, shift), one));
+        auto* take     = b.CreateOr(carry, b.CreateICmpUGE(shifted, denominator));
+        auto* next_r   = b.CreateSelect(take, b.CreateSub(shifted, denominator), shifted);
+        auto* next_q   = b.CreateOr(quotient, b.CreateSelect(take, b.CreateShl(one, shift), zero));
+        auto* backedge = b.CreateCondBr(b.CreateICmpNE(bit, b.getInt32(0)), loop, done);
+        count->addIncoming(bit, loop);
+        quotient->addIncoming(next_q, loop);
+        remainder->addIncoming(next_r, loop);
+        auto* no_unroll = llvm::MDNode::get(impl_->context, {llvm::MDString::get(impl_->context, "llvm.loop.unroll.disable")});
+        auto* loop_id   = llvm::MDNode::getDistinct(impl_->context, {nullptr, no_unroll});
+        loop_id->replaceOperandWith(0, loop_id);
+        backedge->setMetadata(llvm::LLVMContext::MD_loop, loop_id);
+        b.SetInsertPoint(done);
+        auto* magnitude = op == Binary_op::div ? next_q : next_r;
+        auto* negative  = op == Binary_op::div ? b.CreateXor(negative_l, negative_r) : negative_l;
+        result          = b.CreateSelect(negative, b.CreateNeg(magnitude), magnitude);
+      } else if (lhs.unsign && rhs.unsign) {
         result = op == Binary_op::div ? impl_->builder.CreateUDiv(left, right) : impl_->builder.CreateURem(left, right);
       } else {
         auto* min_value = llvm::ConstantInt::get(impl_->context, llvm::APInt::getSignedMinValue(operation_width));
@@ -643,92 +755,179 @@ Cgen_llvm::Value Cgen_llvm::lut(Value table, Value address, uint32_t result_widt
   return impl_->remember(cast_integer(impl_->builder, bit, result_width, true), result_width, result_unsign);
 }
 
-Cgen_llvm::Value Cgen_llvm::external_read(std::string_view symbol, Value address, uint32_t result_width, bool result_unsign) {
-  auto* addr = impl_->get(address);
-  if (addr == nullptr || address.width == 0 || result_width == 0 || symbol.empty()) {
+void Cgen_llvm::bind_memory(std::string_view symbol, const Memory& memory) { impl_->memories.emplace(symbol, memory); }
+
+Cgen_llvm::Value Cgen_llvm::memory_read(std::string_view symbol, Value address, uint32_t result_width, bool result_unsign) {
+  const auto it = impl_->memories.find(std::string(symbol));
+  if (it == impl_->memories.end() || address.width == 0 || result_width == 0) {
     return {};
   }
-  auto* pointer        = llvm::PointerType::getUnqual(impl_->context);
-  auto* type           = llvm::FunctionType::get(impl_->builder.getVoidTy(), {pointer, pointer, pointer}, false);
-  auto  callee         = impl_->module->getOrInsertFunction(llvm::StringRef(symbol), type);
-  auto* packed_address = impl_->packed_alloca(addr, address.width, "mem.addr");
-  auto* packed_result
-      = impl_->builder.CreateAlloca(impl_->builder.getInt64Ty(), impl_->builder.getInt64(word_count(result_width)), "mem.result");
-  impl_->builder.CreateCall(callee, {impl_->owner, packed_address, packed_result});
-  return impl_->remember(impl_->load_packed(packed_result, 0, result_width, "mem.read"), result_width, result_unsign);
+  const auto& m     = it->second;
+  auto&       b     = impl_->builder;
+  auto*       valid = impl_->valid_address(address, m.size);
+  auto*       index = cast_integer(b, impl_->get(address), 64, address.unsign);
+  auto*       safe  = b.CreateSelect(valid, index, b.getInt64(0));
+  auto*       ptr = b.CreateInBoundsGEP(b.getInt64Ty(), impl_->resource(m.data), b.CreateMul(safe, b.getInt64(word_count(m.bits))));
+  llvm::Value* value = impl_->load_packed(ptr, 0, m.bits, "memory.read");
+  for (uint32_t port = 0; port < std::max(m.forward, m.undefined); ++port) {
+    auto* pending = impl_->pending_ptr(m, port);
+    auto* active  = b.CreateICmpNE(b.CreateLoad(b.getInt8Ty(), impl_->fired_ptr(m, pending)), b.getInt8(0));
+    auto* same    = b.CreateICmpEQ(index, b.CreateLoad(b.getInt64Ty(), impl_->word_ptr(pending, 3 * word_count(m.bits))));
+    auto* data    = impl_->load_packed(pending, 0, m.bits, "memory.forward");
+    auto* mask    = impl_->load_packed(pending, word_count(m.bits), m.bits, "memory.mask");
+    auto* merged  = b.CreateOr(b.CreateAnd(value, b.CreateNot(mask)), b.CreateAnd(data, mask));
+    if (port < m.undefined) {
+      auto* old_block = b.GetInsertBlock();
+      auto* collision = llvm::BasicBlock::Create(impl_->context, "memory.undefined", impl_->function);
+      auto* done      = llvm::BasicBlock::Create(impl_->context, "memory.resolved", impl_->function);
+      b.CreateCondBr(b.CreateAnd(valid, b.CreateAnd(active, same)), collision, done);
+      b.SetInsertPoint(collision);
+      auto* random      = impl_->random_value(m);
+      auto* unspecified = b.CreateOr(b.CreateAnd(value, b.CreateNot(mask)), b.CreateAnd(random, mask));
+      b.CreateBr(done);
+      b.SetInsertPoint(done);
+      auto* phi = b.CreatePHI(value->getType(), 2);
+      phi->addIncoming(value, old_block);
+      phi->addIncoming(unspecified, collision);
+      value = phi;
+    } else {
+      value = b.CreateSelect(b.CreateAnd(active, same), merged, value);
+    }
+  }
+  value = b.CreateSelect(valid, value, llvm::ConstantInt::get(value->getType(), 0));
+  if (address.width > 64 || (address.unsign && address.width == 64)) {
+    // The shared Memory contract treats values outside int64's range as
+    // unknown addresses; an ordinary in-range but out-of-array index reads 0.
+    auto*      raw   = impl_->get(address);
+    const auto width = std::max(65u, address.width);
+    raw              = cast_integer(b, raw, width, address.unsign);
+    auto* known
+        = address.unsign
+              ? b.CreateICmpULE(raw, llvm::ConstantInt::get(raw->getType(), uint64_t{INT64_MAX}))
+              : b.CreateAnd(b.CreateICmpSLE(raw, llvm::ConstantInt::get(raw->getType(), INT64_MAX, true)),
+                            b.CreateICmpSGE(raw, llvm::ConstantInt::get(raw->getType(), static_cast<uint64_t>(INT64_MIN), true)));
+    auto* prior   = b.GetInsertBlock();
+    auto* unknown = llvm::BasicBlock::Create(impl_->context, "memory.unknown_address", impl_->function);
+    auto* done    = llvm::BasicBlock::Create(impl_->context, "memory.address_resolved", impl_->function);
+    b.CreateCondBr(known, done, unknown);
+    b.SetInsertPoint(unknown);
+    auto* random = impl_->random_value(m);
+    b.CreateBr(done);
+    b.SetInsertPoint(done);
+    auto* phi = b.CreatePHI(value->getType(), 2);
+    phi->addIncoming(value, prior);
+    phi->addIncoming(random, unknown);
+    value = phi;
+  }
+  return impl_->remember(cast_integer(b, value, result_width, result_unsign), result_width, result_unsign);
 }
 
-Cgen_llvm::Value Cgen_llvm::external_read_all(std::string_view symbol, uint32_t result_width, bool result_unsign) {
-  if (result_width == 0 || symbol.empty()) {
+Cgen_llvm::Value Cgen_llvm::memory_read_all(std::string_view symbol, uint32_t result_width, bool result_unsign) {
+  const auto it = impl_->memories.find(std::string(symbol));
+  if (it == impl_->memories.end() || result_width == 0) {
     return {};
   }
-  auto* pointer = llvm::PointerType::getUnqual(impl_->context);
-  auto* type    = llvm::FunctionType::get(impl_->builder.getVoidTy(), {pointer, pointer}, false);
-  auto  callee  = impl_->module->getOrInsertFunction(llvm::StringRef(symbol), type);
-  auto* packed_result
-      = impl_->builder.CreateAlloca(impl_->builder.getInt64Ty(), impl_->builder.getInt64(word_count(result_width)), "mem.all");
-  impl_->builder.CreateCall(callee, {impl_->owner, packed_result});
-  return impl_->remember(impl_->load_packed(packed_result, 0, result_width, "mem.read_all"), result_width, result_unsign);
+  const auto& m = it->second;
+  if (m.commit_before_read) {
+    impl_->commit_memory(m);
+  }
+  auto& b    = impl_->builder;
+  auto* data = impl_->resource(m.data);
+  if (m.packed_value) {
+    return impl_->remember(impl_->load_packed(data, 0, result_width, "resource.value"), result_width, result_unsign);
+  }
+  llvm::Value* result = llvm::ConstantInt::get(b.getIntNTy(result_width), 0);
+  for (uint64_t i = 0; i < m.size; ++i) {
+    auto* entry = impl_->load_packed(data, i * word_count(m.bits), m.bits, "memory.entry");
+    entry       = cast_integer(b, entry, result_width, true);
+    result      = b.CreateOr(result, b.CreateShl(entry, llvm::ConstantInt::get(entry->getType(), i * m.bits)));
+  }
+  return impl_->remember(result, result_width, result_unsign);
 }
 
-bool Cgen_llvm::external_apply(std::string_view symbol, Value data) {
-  auto* din = impl_->get(data);
-  if (din == nullptr || data.width == 0 || symbol.empty()) {
+bool Cgen_llvm::memory_apply(std::string_view symbol, Value data) {
+  const auto it = impl_->memories.find(std::string(symbol));
+  if (it == impl_->memories.end() || data.width == 0) {
     return false;
   }
-  auto* pointer = llvm::PointerType::getUnqual(impl_->context);
-  auto* type    = llvm::FunctionType::get(impl_->builder.getVoidTy(), {pointer, pointer}, false);
-  auto  callee  = impl_->module->getOrInsertFunction(llvm::StringRef(symbol), type);
-  impl_->builder.CreateCall(callee, {impl_->owner, impl_->packed_alloca(din, data.width, "mem.update")});
+  const auto& m     = it->second;
+  auto&       b     = impl_->builder;
+  auto*       value = impl_->get(data);
+  auto*       ptr   = impl_->resource(m.data);
+  if (m.packed_value) {
+    impl_->store_packed(value, ptr, 0, data.width);
+    return true;
+  }
+  for (uint64_t i = 0; i < m.size; ++i) {
+    auto* entry = b.CreateLShr(value, llvm::ConstantInt::get(value->getType(), i * m.bits));
+    impl_->store_packed(cast_integer(b, entry, m.bits, true), ptr, i * word_count(m.bits), m.bits);
+  }
   return true;
 }
 
-bool Cgen_llvm::external_clear(std::string_view symbol) {
-  if (symbol.empty()) {
+bool Cgen_llvm::memory_clear(std::string_view symbol) {
+  const auto it = impl_->memories.find(std::string(symbol));
+  if (it == impl_->memories.end()) {
     return false;
   }
-  auto* pointer = llvm::PointerType::getUnqual(impl_->context);
-  auto* type    = llvm::FunctionType::get(impl_->builder.getVoidTy(), {pointer}, false);
-  auto  callee  = impl_->module->getOrInsertFunction(llvm::StringRef(symbol), type);
-  impl_->builder.CreateCall(callee, {impl_->owner});
+  const auto& m = it->second;
+  for (uint32_t port = 0; port < m.writes; ++port) {
+    impl_->builder.CreateStore(impl_->builder.getInt8(0), impl_->fired_ptr(m, impl_->pending_ptr(m, port)));
+  }
   return true;
 }
 
-bool Cgen_llvm::external_stage_whole(std::string_view symbol, Value enable, Value force, Value data) {
-  auto* wen = impl_->get(enable);
-  auto* rst = impl_->get(force);
-  auto* din = impl_->get(data);
-  if (wen == nullptr || rst == nullptr || din == nullptr || enable.width == 0 || force.width == 0 || data.width == 0
-      || symbol.empty()) {
+bool Cgen_llvm::memory_stage_whole(std::string_view symbol, Value enable, Value force, Value data) {
+  const auto it = impl_->memories.find(std::string(symbol));
+  if (it == impl_->memories.end() || !memory_apply(symbol, data)) {
     return false;
   }
-  auto* pointer = llvm::PointerType::getUnqual(impl_->context);
-  auto* type    = llvm::FunctionType::get(impl_->builder.getVoidTy(), {pointer, pointer, pointer, pointer}, false);
-  auto  callee  = impl_->module->getOrInsertFunction(llvm::StringRef(symbol), type);
-  impl_->builder.CreateCall(callee,
-                            {impl_->owner,
-                             impl_->packed_alloca(wen, enable.width, "mem.update_enable"),
-                             impl_->packed_alloca(rst, force.width, "mem.update_force"),
-                             impl_->packed_alloca(din, data.width, "mem.update")});
+  const auto& m      = it->second;
+  auto&       b      = impl_->builder;
+  auto*       wen    = impl_->get(enable);
+  auto*       rst    = impl_->get(force);
+  auto*       active = b.CreateICmpNE(wen, llvm::ConstantInt::get(wen->getType(), 0));
+  if (m.gated) {
+    active = b.CreateAnd(active, b.CreateICmpNE(b.CreateLoad(b.getInt64Ty(), impl_->resource(m.gate)), b.getInt64(0)));
+  }
+  active = b.CreateOr(active, b.CreateICmpNE(rst, llvm::ConstantInt::get(rst->getType(), 0)));
+  b.CreateStore(b.CreateZExt(active, b.getInt64Ty()), impl_->resource(m.pending));
   return true;
 }
 
-bool Cgen_llvm::external_stage_write(std::string_view symbol, Value enable, Value address, Value data) {
-  auto* wen  = impl_->get(enable);
-  auto* addr = impl_->get(address);
-  auto* din  = impl_->get(data);
-  if (wen == nullptr || addr == nullptr || din == nullptr || enable.width == 0 || address.width == 0 || data.width == 0
-      || symbol.empty()) {
+bool Cgen_llvm::memory_stage_write(std::string_view symbol, Value enable, Value address, Value data) {
+  const auto it = impl_->memories.find(std::string(symbol));
+  if (it == impl_->memories.end() || data.width == 0 || enable.width == 0 || address.width == 0) {
     return false;
   }
-  auto* pointer = llvm::PointerType::getUnqual(impl_->context);
-  auto* type    = llvm::FunctionType::get(impl_->builder.getVoidTy(), {pointer, pointer, pointer, pointer}, false);
-  auto  callee  = impl_->module->getOrInsertFunction(llvm::StringRef(symbol), type);
-  impl_->builder.CreateCall(callee,
-                            {impl_->owner,
-                             impl_->packed_alloca(wen, enable.width, "mem.wen"),
-                             impl_->packed_alloca(addr, address.width, "mem.addr"),
-                             impl_->packed_alloca(din, data.width, "mem.din")});
+  const auto&  m         = it->second;
+  auto&        b         = impl_->builder;
+  auto*        pending   = impl_->pending_ptr(m, m.port);
+  auto*        wen       = impl_->get(enable);
+  auto*        mask_type = b.getIntNTy(m.bits);
+  llvm::Value* mask      = llvm::ConstantInt::get(mask_type, 0);
+  for (uint32_t lane = 0; lane < m.lanes; ++lane) {
+    llvm::Value* active;
+    if (m.lanes == 1) {
+      active = b.CreateICmpNE(wen, llvm::ConstantInt::get(wen->getType(), 0));
+    } else if (lane >= enable.width) {
+      active = enable.unsign ? b.getFalse() : b.CreateICmpSLT(wen, llvm::ConstantInt::get(wen->getType(), 0));
+    } else {
+      active = b.CreateTrunc(b.CreateLShr(wen, llvm::ConstantInt::get(wen->getType(), lane)), b.getInt1Ty());
+    }
+    auto lane_mask = llvm::APInt::getBitsSet(m.bits, lane * (m.bits / m.lanes), (lane + 1) * (m.bits / m.lanes));
+    mask = b.CreateOr(mask,
+                      b.CreateSelect(active, llvm::ConstantInt::get(mask_type, lane_mask), llvm::ConstantInt::get(mask_type, 0)));
+  }
+  auto* valid = b.CreateAnd(impl_->valid_address(address, m.size), b.CreateICmpNE(mask, llvm::ConstantInt::get(mask_type, 0)));
+  if (m.gated) {
+    valid = b.CreateAnd(valid, b.CreateICmpNE(b.CreateLoad(b.getInt64Ty(), impl_->resource(m.gate)), b.getInt64(0)));
+  }
+  impl_->store_packed(impl_->get(data), pending, 0, m.bits);
+  impl_->store_packed(mask, pending, word_count(m.bits), m.bits);
+  impl_->store_packed(llvm::ConstantInt::get(mask_type, 0), pending, 2 * word_count(m.bits), m.bits);
+  b.CreateStore(cast_integer(b, impl_->get(address), 64, address.unsign), impl_->word_ptr(pending, 3 * word_count(m.bits)));
+  b.CreateStore(b.CreateZExt(valid, b.getInt8Ty()), impl_->fired_ptr(m, pending));
   return true;
 }
 
@@ -742,6 +941,12 @@ bool Cgen_llvm::add_output(size_t index, Value value, std::string& error) {
 }
 
 bool Cgen_llvm::write_object(std::string_view path, std::string& error, bool track_changed) {
+  return write_module(path, error, track_changed, true);
+}
+bool Cgen_llvm::write_bitcode(std::string_view path, std::string& error, bool track_changed) {
+  return write_module(path, error, track_changed, false);
+}
+bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool track_changed, bool native) {
   if (!impl_->error.empty()) {
     error = impl_->error;
     return false;
@@ -886,11 +1091,75 @@ bool Cgen_llvm::write_object(std::string_view path, std::string& error, bool tra
   // was the lone hole, and it is why the LLVM backend could never reach a
   // no-work warm rebuild.
   //
-  // Bitcode files are small compared with the C++ they replace, so buffering
-  // one is cheaper than forcing a relink on every warm simulation build.
+  // Buffering one color object also lets us validate its external dependencies
+  // before publishing it as a usable build input.
   llvm::SmallVector<char, 0> object_buffer;
   llvm::raw_svector_ostream  object(object_buffer);
-  llvm::WriteBitcodeToFile(*impl_->module, object);
+  if (native) {
+    // Expand memory intrinsics before instruction selection can turn a large
+    // packed copy/clear into a call to libc.
+    std::vector<llvm::MemIntrinsic*> memory_ops;
+    for (auto& block : *impl_->function) {
+      for (auto& instruction : block) {
+        if (auto* memory = llvm::dyn_cast<llvm::MemIntrinsic>(&instruction)) {
+          memory_ops.push_back(memory);
+        }
+      }
+    }
+    const auto& tti = function_analyses.getResult<llvm::TargetIRAnalysis>(*impl_->function);
+    for (auto* memory : memory_ops) {
+      if (auto* copy = llvm::dyn_cast<llvm::MemCpyInst>(memory)) {
+        llvm::expandMemCpyAsLoop(copy, tti);
+      } else if (auto* clear = llvm::dyn_cast<llvm::MemSetInst>(memory)) {
+        llvm::expandMemSetAsLoop(clear);
+      } else if (auto* move = llvm::dyn_cast<llvm::MemMoveInst>(memory)) {
+        if (!llvm::expandMemMoveAsLoop(move, tti)) {
+          error = "cannot inline memory move";
+          return false;
+        }
+      } else {
+        error = "unsupported memory intrinsic";
+        return false;
+      }
+      memory->eraseFromParent();
+    }
+    llvm::legacy::PassManager emit;
+    if (machine->addPassesToEmitFile(emit, object, nullptr, llvm::CodeGenFileType::ObjectFile)) {
+      error = "LLVM target cannot emit native color objects";
+      return false;
+    }
+    emit.run(*impl_->module);
+    auto parsed = llvm::object::ObjectFile::createObjectFile(
+        llvm::MemoryBufferRef(llvm::StringRef(object_buffer.data(), object_buffer.size()), "color.o"));
+    if (!parsed) {
+      error = llvm::toString(parsed.takeError());
+      return false;
+    }
+    for (const auto& symbol : (*parsed)->symbols()) {
+      auto flags = symbol.getFlags();
+      if (!flags) {
+        error = llvm::toString(flags.takeError());
+        return false;
+      }
+      if ((*flags & llvm::object::BasicSymbolRef::SF_Undefined) == 0) {
+        continue;
+      }
+      auto name = symbol.getName();
+      if (!name) {
+        error = llvm::toString(name.takeError());
+        return false;
+      }
+      // ELF's mandatory null symbol has no dependency. Every named undefined
+      // symbol, including a compiler-generated libcall, violates the ABI.
+      if (!name->empty()) {
+        error = "native LLVM color requires external symbol " + name->str();
+        return false;
+      }
+    }
+
+  } else {
+    llvm::WriteBitcodeToFile(*impl_->module, object);
+  }
   {
     File_output out{path};
     out.append(std::string_view(object_buffer.data(), object_buffer.size()));
