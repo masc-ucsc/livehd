@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -131,8 +132,26 @@ public:
   // Phase-barrier copy. Source and destination spans must not overlap.
   bool copy_state(size_t destination, size_t source, size_t words, std::string& error);
 
-  // Finalize the ABI and return exact bitcode with only the entry symbol
-  // normalized. Equal keys can share code; mutable instance storage is still
+  // Add a rolled reduction entry to this stateless body object. The body is
+  // inlined into the native loop once; neither a call nor loop unrolling is
+  // permitted. Domain arguments stay dynamic so changing the trip count does
+  // not invalidate the body object. Inputs use the whole declared-port layout.
+  struct Loop_binding {
+    size_t   input = 0;
+    uint32_t bit   = 0;
+  };
+  struct Loop_layout {
+    std::vector<std::pair<uint32_t, bool>> inputs;
+    std::vector<Loop_binding>              bindings;  // one per body ABI input
+    std::optional<size_t>                  index, activation, next_active;
+    std::vector<std::pair<size_t, size_t>> carries;  // input, output indices
+  };
+  // void entry(const uint64_t* inputs, uint64_t* outputs,
+  //            uint64_t count, int64_t first, int64_t step)
+  bool add_loop(std::string_view entry, const Loop_layout& layout, std::string& error, bool track_changed = true);
+
+  // Finalize the ABI and return exact bitcode with the color and optional loop
+  // entry symbols normalized. Equal keys can share code; mutable instance storage is still
   // supplied separately. Do not add operations after requesting this key.
   std::string sharing_key(std::string& error, bool track_changed = true);
 

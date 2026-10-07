@@ -52,6 +52,7 @@
 #include "llvm/Transforms/Scalar/EarlyCSE.h"
 #include "llvm/Transforms/Scalar/SROA.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
+#include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/LowerMemIntrinsics.h"
 #include "sim_llvm_target.hpp"
 
@@ -90,6 +91,7 @@ public:
   std::unique_ptr<llvm::Module>           module;
   llvm::IRBuilder<>                       builder;
   llvm::Function*                         function = nullptr;
+  llvm::Function*                         loop_function = nullptr;
   llvm::Value*                            inputs   = nullptr;
   llvm::Value*                            outputs  = nullptr;
   llvm::Value*                            changed  = nullptr;
@@ -1203,16 +1205,241 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
   return true;
 }
 
+bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std::string& error, bool track_changed) {
+  if (impl_->state_abi || impl_->loop_function || !impl_->memories.empty() || layout.bindings.size() != impl_->input_types.size()) {
+    error = "native loop requires a stateless body and a complete input binding";
+    return false;
+  }
+  if (!seal(error, track_changed)) {
+    return false;
+  }
+  const auto input_valid = [&](std::optional<size_t> input) { return !input || *input < layout.inputs.size(); };
+  if (!input_valid(layout.index) || !input_valid(layout.activation)
+      || (layout.next_active && (!layout.activation || *layout.next_active >= impl_->output_values.size()))) {
+    error = "native loop has an invalid index or activation binding";
+    return false;
+  }
+  for (size_t i = 0; i < layout.bindings.size(); ++i) {
+    const auto& binding = layout.bindings[i];
+    if (binding.input >= layout.inputs.size() || binding.bit >= layout.inputs[binding.input].first) {
+      error = "native loop input slice is outside its port";
+      return false;
+    }
+  }
+  std::vector<bool> carry_inputs(layout.inputs.size(), false), carry_outputs(impl_->output_values.size(), false);
+  for (const auto& [input, output] : layout.carries) {
+    if (input >= layout.inputs.size() || output >= impl_->output_values.size() || carry_inputs[input] || carry_outputs[output]
+        || layout.index == input || layout.activation == input) {
+      error = "native loop has an invalid or overlapping carry binding";
+      return false;
+    }
+    carry_inputs[input] = carry_outputs[output] = true;
+  }
+  for (const auto& [width, unsign] : layout.inputs) {
+    (void)unsign;
+    if (width == 0) {
+      error = "native loop has a zero-width input";
+      return false;
+    }
+  }
+  auto& b              = impl_->builder;
+  auto& context        = impl_->context;
+  auto* ptr            = llvm::PointerType::getUnqual(context);
+  auto* i64            = b.getInt64Ty();
+  auto* type           = llvm::FunctionType::get(b.getVoidTy(), {ptr, ptr, i64, i64, i64}, false);
+  auto* fn             = llvm::Function::Create(type, llvm::Function::ExternalLinkage, llvm::StringRef(entry), *impl_->module);
+  impl_->loop_function = fn;
+  fn->addParamAttr(0, llvm::Attribute::NoAlias);
+  fn->addParamAttr(0, llvm::Attribute::ReadOnly);
+  fn->addParamAttr(1, llvm::Attribute::NoAlias);
+  auto* inputs  = fn->getArg(0);
+  auto* outputs = fn->getArg(1);
+  inputs->setName("inputs");
+  outputs->setName("outputs");
+  auto* start  = llvm::BasicBlock::Create(context, "entry", fn);
+  auto* header = llvm::BasicBlock::Create(context, "loop", fn);
+  auto* body   = llvm::BasicBlock::Create(context, "body", fn);
+  auto* done   = llvm::BasicBlock::Create(context, "done", fn);
+  b.SetInsertPoint(start);
+  std::vector<llvm::Value*> initial;
+  size_t                    offset = 0;
+  for (const auto& [width, unsign] : layout.inputs) {
+    (void)unsign;
+    initial.push_back(impl_->load_packed(inputs, offset, width, "initial"));
+    offset += word_count(width);
+  }
+  size_t input_words = 0, output_words = 0;
+  for (const auto& [width, unsign] : impl_->input_types) {
+    (void)unsign;
+    input_words += word_count(width);
+  }
+  std::vector<size_t> output_offsets;
+  for (const auto& out : impl_->output_values) {
+    output_offsets.push_back(output_words);
+    output_words += word_count(out.value.width);
+  }
+  auto* packed_in  = b.CreateAlloca(i64, b.getInt64(std::max<size_t>(1, input_words)), "body.inputs");
+  auto* packed_out = b.CreateAlloca(i64, b.getInt64(std::max<size_t>(1, output_words)), "body.outputs");
+  auto* changed    = b.CreateAlloca(i64,
+                                    b.getInt64(std::max<size_t>(1, word_count(static_cast<uint32_t>(impl_->output_values.size())))),
+                                    "body.changed");
+  for (size_t i = 0; i < output_words; ++i) {
+    b.CreateStore(b.getInt64(0), b.CreateConstInBoundsGEP1_64(i64, packed_out, i));
+  }
+  for (const auto& [input, output] : layout.carries) {
+    const auto width = impl_->output_values[output].value.width;
+    impl_->store_packed(cast_integer(b, initial[input], width, layout.inputs[input].second),
+                        packed_out,
+                        output_offsets[output],
+                        width);
+  }
+  // Pack invariant ports once. Mutable ports are SSA values across iterations.
+  const auto bound = [&](size_t i, llvm::Value* value) {
+    const auto& binding = layout.bindings[i];
+    if (binding.bit) {
+      value = b.CreateLShr(value, binding.bit);
+    }
+    return cast_integer(b, value, impl_->input_types[i].first, layout.inputs[binding.input].second);
+  };
+  for (size_t i = 0; i < layout.bindings.size(); ++i) {
+    const auto input = layout.bindings[i].input;
+    if (!carry_inputs[input] && layout.index != input && layout.activation != input) {
+      impl_->store_packed(bound(i, initial[input]), packed_in, impl_->input_word_offsets[i], impl_->input_types[i].first);
+    }
+  }
+  b.CreateBr(header);
+  b.SetInsertPoint(header);
+  auto* ordinal = b.CreatePHI(i64, 2, "ordinal");
+  ordinal->addIncoming(b.getInt64(0), start);
+  std::vector<llvm::Value*>   values = initial;
+  std::vector<llvm::PHINode*> carries;
+  for (const auto& [input, output] : layout.carries) {
+    (void)output;
+    auto* phi = b.CreatePHI(initial[input]->getType(), 2, "carry");
+    phi->addIncoming(initial[input], start);
+    carries.push_back(phi);
+    values[input] = phi;
+  }
+  llvm::PHINode* active = nullptr;
+  if (layout.activation) {
+    active = b.CreatePHI(initial[*layout.activation]->getType(), 2, "active");
+    active->addIncoming(initial[*layout.activation], start);
+    values[*layout.activation] = active;
+  }
+  b.CreateCondBr(b.CreateICmpULT(ordinal, fn->getArg(2)), body, done);
+  b.SetInsertPoint(body);
+  if (layout.index) {
+    values[*layout.index] = cast_integer(b,
+                                         b.CreateAdd(fn->getArg(3), b.CreateMul(ordinal, fn->getArg(4))),
+                                         layout.inputs[*layout.index].first,
+                                         false);
+  }
+  for (size_t i = 0; i < layout.bindings.size(); ++i) {
+    const auto input = layout.bindings[i].input;
+    if (carry_inputs[input] || layout.index == input || layout.activation == input) {
+      impl_->store_packed(bound(i, values[input]), packed_in, impl_->input_word_offsets[i], impl_->input_types[i].first);
+    }
+  }
+  llvm::SmallVector<llvm::Value*> args;
+  if (impl_->scalar_abi) {
+    for (size_t i = 0; i < layout.bindings.size(); ++i) {
+      args.push_back(cast_integer(b,
+                                  impl_->load_packed(packed_in, impl_->input_word_offsets[i], impl_->input_types[i].first, "arg"),
+                                  64,
+                                  true));
+    }
+    args.push_back(llvm::ConstantPointerNull::get(ptr));
+  } else {
+    args = {packed_in, packed_out, changed, llvm::ConstantPointerNull::get(ptr)};
+  }
+  auto* call = b.CreateCall(impl_->function, args);
+  if (impl_->scalar_abi) {
+    impl_->store_packed(call, packed_out, 0, impl_->output_values.front().value.width);
+  }
+  auto*                     is_active = active ? b.CreateICmpNE(active, llvm::ConstantInt::get(active->getType(), 0)) : b.getTrue();
+  std::vector<llvm::Value*> next_carries;
+  for (size_t i = 0; i < layout.carries.size(); ++i) {
+    const auto [input, output] = layout.carries[i];
+    const auto& out            = impl_->output_values[output].value;
+    auto*       next           = cast_integer(b,
+                                              impl_->load_packed(packed_out, output_offsets[output], out.width, "next.carry"),
+                                              layout.inputs[input].first,
+                                              out.unsign);
+    next                       = b.CreateSelect(is_active, next, carries[i]);
+    next_carries.push_back(next);
+  }
+  llvm::Value* next_active = active;
+  if (layout.next_active) {
+    const auto  output = *layout.next_active;
+    const auto& out    = impl_->output_values[output].value;
+    next_active        = cast_integer(b,
+                                      impl_->load_packed(packed_out, output_offsets[output], out.width, "next.active"),
+                                      layout.inputs[*layout.activation].first,
+                                      out.unsign);
+    next_active        = b.CreateSelect(is_active, next_active, llvm::ConstantInt::get(active->getType(), 0));
+  }
+  // Carry outputs publish the retained carry, including inactive/zero trips.
+  for (size_t i = 0; i < layout.carries.size(); ++i) {
+    const auto [input, output] = layout.carries[i];
+    const auto width           = impl_->output_values[output].value.width;
+    impl_->store_packed(cast_integer(b, next_carries[i], width, layout.inputs[input].second),
+                        packed_out,
+                        output_offsets[output],
+                        width);
+  }
+  auto* next_ordinal = b.CreateAdd(ordinal, b.getInt64(1));
+  auto* latch        = b.GetInsertBlock();
+  ordinal->addIncoming(next_ordinal, latch);
+  for (size_t i = 0; i < carries.size(); ++i) {
+    carries[i]->addIncoming(next_carries[i], latch);
+  }
+  if (active) {
+    active->addIncoming(next_active, latch);
+  }
+  auto* backedge = b.CreateBr(header);
+  auto* disable  = llvm::MDNode::get(context, {llvm::MDString::get(context, "llvm.loop.unroll.disable")});
+  auto* loop_id  = llvm::MDNode::getDistinct(context, {nullptr, disable});
+  loop_id->replaceOperandWith(0, loop_id);
+  backedge->setMetadata(llvm::LLVMContext::MD_loop, loop_id);
+  b.SetInsertPoint(done);
+  for (size_t i = 0; i < impl_->output_values.size(); ++i) {
+    const auto width = impl_->output_values[i].value.width;
+    impl_->store_packed(impl_->load_packed(packed_out, output_offsets[i], width, "result"), outputs, output_offsets[i], width);
+  }
+  b.CreateRetVoid();
+  // Inline explicitly before optimization: even a large body remains one copy
+  // inside a rolled loop, independent of the general inliner's cost model.
+  // InlineFunction names alias scopes after the callee. Normalize that name
+  // too, so identical phase bodies do not acquire different sharing keys.
+  const auto body_name = impl_->function->getName().str();
+  impl_->function->setName("__lhd_loop_body");
+  llvm::InlineFunctionInfo info;
+  const auto               inlined = llvm::InlineFunction(*call, info);
+  impl_->function->setName(body_name);
+  if (!inlined.isSuccess() || llvm::verifyModule(*impl_->module, &llvm::errs())) {
+    error = "LLVM could not inline the body into the native loop";
+    return false;
+  }
+  return true;
+}
+
 std::string Cgen_llvm::sharing_key(std::string& error, bool track_changed) {
   if (!seal(error, track_changed)) {
     return {};
   }
   const std::string name = impl_->function->getName().str();
   impl_->function->setName("__lhd_shared_color");
+  const auto loop_name = impl_->loop_function ? impl_->loop_function->getName().str() : std::string{};
+  if (impl_->loop_function) {
+    impl_->loop_function->setName("__lhd_shared_loop");
+  }
   llvm::SmallVector<char, 0> bytes;
   llvm::raw_svector_ostream  stream(bytes);
   llvm::WriteBitcodeToFile(*impl_->module, stream);
   impl_->function->setName(name);
+  if (impl_->loop_function) {
+    impl_->loop_function->setName(loop_name);
+  }
   return {bytes.data(), bytes.size()};
 }
 
@@ -1347,15 +1574,17 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
     // Expand memory intrinsics before instruction selection can turn a large
     // packed copy/clear into a call to libc.
     std::vector<llvm::MemIntrinsic*> memory_ops;
-    for (auto& block : *impl_->function) {
-      for (auto& instruction : block) {
-        if (auto* memory = llvm::dyn_cast<llvm::MemIntrinsic>(&instruction)) {
-          memory_ops.push_back(memory);
+    for (auto& function : *impl_->module) {
+      for (auto& block : function) {
+        for (auto& instruction : block) {
+          if (auto* memory = llvm::dyn_cast<llvm::MemIntrinsic>(&instruction)) {
+            memory_ops.push_back(memory);
+          }
         }
       }
     }
-    const auto& tti = function_analyses.getResult<llvm::TargetIRAnalysis>(*impl_->function);
     for (auto* memory : memory_ops) {
+      const auto& tti = function_analyses.getResult<llvm::TargetIRAnalysis>(*memory->getFunction());
       if (auto* copy = llvm::dyn_cast<llvm::MemCpyInst>(memory)) {
         llvm::expandMemCpyAsLoop(copy, tti);
       } else if (auto* clear = llvm::dyn_cast<llvm::MemSetInst>(memory)) {

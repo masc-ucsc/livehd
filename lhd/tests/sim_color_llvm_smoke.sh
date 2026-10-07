@@ -148,6 +148,22 @@ loop_objects=("$work"/llvm/sim/smoke.loop_worker.__loop*.color-kernel-*.llvm.o)
 [ -f "${loop_objects[0]}" ] || fail "compact loop body bypassed LLVM"
 ! grep -q '__compact_pre_rise' "$work"/llvm/sim/*.cpp \
   || fail "LLVM loop emitted a second Slop period body"
+grep -q '\[\[gnu::always_inline\]\] inline' "$work"/slop/sim/*.pure.inc \
+  || fail "Slop pure bodies do not require inlining"
+grep -q '\[\[gnu::always_inline\]\] static Out __pure_eval' "$work"/slop/sim/*.hpp \
+  || fail "Slop rolled reduction helpers do not require inlining"
+# At least one retained stateless loop must select the native reduction entry.
+# The adapter transports ports once; all iteration arithmetic stays in LLVM.
+python3 - "$work/llvm/sim" <<'PYCODE'
+import pathlib, sys
+adapters = list(pathlib.Path(sys.argv[1]).glob('*.__loop*.native-loop.inc'))
+selected = [p for p in adapters if '__has_native_loop() { return true; }' in p.read_text()]
+assert selected, 'no stateless loop selected the native entry'
+for path in selected:
+    body = path.read_text()
+    assert '_llvm_loop(inputs, outputs, count, first, step);' in body, path
+    assert 'for (' not in body and '__pure_eval(' not in body, path
+PYCODE
 slop_objects=("$work"/slop/sim/*.llvm.o)
 [ ! -e "${slop_objects[0]}" ] || fail "Slop backend emitted LLVM kernels"
 

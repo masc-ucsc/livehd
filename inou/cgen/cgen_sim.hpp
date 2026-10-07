@@ -168,7 +168,13 @@ public:
   // deferred to flush_generation_index(): an unflushed record is simply absent
   // (or keeps an old, self-invalidating key), so a crash only costs a rebuild.
   // The repair retraction in generation_current() still writes immediately.
+  struct Native_loop {
+    std::optional<hhds::Port_id>                         index, activation, next_active;
+    std::vector<std::pair<hhds::Port_id, hhds::Port_id>> carries;
+    bool                                                 operator==(const Native_loop&) const = default;
+  };
   struct Generation_index {
+    absl::flat_hash_map<const hhds::Graph*, std::optional<Native_loop>> native_loops;
     bool                                          incremental = true;  // forwarded from the single lhd.incremental switch
     std::shared_ptr<livehd::sim::Compile_workers> object_workers;
     absl::flat_hash_map<std::string, Gen_record>  digests;

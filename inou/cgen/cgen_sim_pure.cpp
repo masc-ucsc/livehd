@@ -192,7 +192,13 @@ void Cgen_sim::emit_pure_eval(File_output& out, hhds::Graph* graph, std::string_
   preextracted_get_masks_.clear();
   native_values_.clear();
   const auto mark = out.mark();
-  out.append(absl::StrCat("inline ", mod, "::Out ", mod, "::__pure_eval(", pure_parameters(*graph->get_io()), ") {\n"));
+  out.append(absl::StrCat("[[gnu::always_inline]] inline ",
+                          mod,
+                          "::Out ",
+                          mod,
+                          "::__pure_eval(",
+                          pure_parameters(*graph->get_io()),
+                          ") {\n"));
   for (const auto& port : graph->get_io()->get_input_pin_decls()) {
     const auto pin  = graph->get_input_pin(port.name);
     const auto name = absl::StrCat("__p", port.port_id);

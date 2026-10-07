@@ -111,7 +111,9 @@ wrapper generation rather than scanning every child's generation; proof-only
 subnodes do not count as state. Checkpoints expose allocated scratch instances,
 not replicated combinational temporaries for every ordinal.
 
-Generated loop traversals carry Clang `unroll(disable)` (or GCC `unroll 1`)
+Slop pure body and reduction helpers require inlining, so the arithmetic is
+inside the rolled loop even when the body exceeds the compiler's usual inline
+cost threshold. Generated loop traversals carry Clang `unroll(disable)` (or GCC `unroll 1`)
 hints. LLVM pipeline tuning also disables loop unrolling; LiveHD's bounded
 LLVM pass pipeline contains no unroll pass. `compile.unroll=false` remains the
 front-end default, independently preserving the compact graph representation.
@@ -122,9 +124,20 @@ no external calls or undefined symbols: object emission validates the native sym
 table, including dependencies introduced by instruction selection. Wide division
 uses an internal restoring loop and memory intrinsics expand locally. The C++
 support compiles normally, without host bitcode or cross-language inlining.
-The driver, scheduling, state commits, observation and compact-loop traversal
-remain C++ in this first step; unused Slop pure evaluators are not emitted for
-LLVM designs.
+Stateless leaf loops whose entire output computation fits one native color
+also get a native rolled-loop entry. The color body is explicitly inlined into
+that loop once; there is no per-iteration call or C++ arithmetic. The adapter
+packs ports once, invokes the loop, and publishes its outputs. Carry and
+activation values stay in native SSA, including zero-trip carry seeds. The
+entry accepts count/first/step dynamically and shares objects across identical
+phase computations. Binding layouts salt generation reuse; the existing bounded
+workers emit these objects. Unroll-disable metadata and IR regression tests
+preserve the loop regardless of trip count.
+
+The driver, scheduling, state commits and observation remain C++. Stateful,
+nested, resource-backed and multi-color loops still use the existing compact
+scheduler. Observation mode also retains that path. Unused Slop pure evaluators
+are not emitted for LLVM designs.
 
 Memory entries use contiguous packed words with no Slop tags or sign padding.
 A shared support template supplies reset, checkpoint and commit operations. A

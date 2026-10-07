@@ -422,6 +422,32 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // library, so no body changes shape while the memo is alive.
   absl::flat_hash_map<hhds::Gid, uint64_t> digest_memo;
   Cgen_sim::Generation_index               gen_index;  // one gen_digests.json read/write + odir listing per run
+  // Record definition-local loop bindings before generation-cache probes. The
+  // domain is supplied at runtime; incompatible bindings retain the scheduler.
+  for (const auto& graph : sim_graphs) {
+    if (!graph) {
+      continue;
+    }
+    for (const auto node : graph->body().nodes()) {
+      const auto loop = node.subnode_loop();
+      if (!loop) {
+        continue;
+      }
+      const auto child = node.get_subnode_graph();
+      if (!child) {
+        continue;
+      }
+      Cgen_sim::Native_loop binding{loop->index_input, loop->activation_input, loop->next_active_output, {}};
+      for (const auto& carry : node.subnode_group().carries()) {
+        binding.carries.emplace_back(carry.input_port(), carry.output_port());
+      }
+      std::ranges::sort(binding.carries);
+      const auto [it, inserted] = gen_index.native_loops.try_emplace(child.get(), binding);
+      if (!inserted && it->second != binding) {
+        it->second.reset();
+      }
+    }
+  }
   gen_index.incremental = var.get("incremental") != "false" && var.get("incremental") != "0" && var.get("incremental") != "off";
   const auto                               is_selected_root = [&](std::string_view full, std::string_view entity) {
     return !top.empty() ? (top == full || top == entity) : !instantiated.contains(std::string(full));

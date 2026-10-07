@@ -797,3 +797,177 @@ TEST(CgenLlvm, NativeStateDescriptorRejectsInvalidInitialization) {
   instance->step();
   std::filesystem::remove(path);
 }
+
+TEST(CgenLlvm, NativeReductionStaysRolledWithNoBodyCall) {
+  for (bool scalar : {false, true}) {
+    Cgen_llvm   kernel("body",
+                       {
+                           { 8, false},
+                           {64,  true}
+    },
+                       scalar);
+    std::string error;
+    const auto  sum = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.input(1), 64, true);
+    ASSERT_TRUE(kernel.add_output(0, sum, error)) << error;
+    Cgen_llvm::Loop_layout layout;
+    layout.inputs = {
+        {64,  true}, // declared input unused by the body
+        { 8, false},
+        {64,  true}
+    };
+    layout.bindings = {
+        {1, 0},
+        {2, 0}
+    };
+    layout.index   = 1;
+    layout.carries = {
+        {2, 0}
+    };
+    ASSERT_TRUE(kernel.add_loop("reduction", layout, error)) << error;
+    const auto path = std::filesystem::temp_directory_path() / "livehd-native-reduction.bc";
+    ASSERT_TRUE(kernel.write_bitcode(path.string(), error)) << error;
+    auto buffer = llvm::MemoryBuffer::getFile(path.string());
+    ASSERT_TRUE(buffer);
+    llvm::LLVMContext context;
+    auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+    ASSERT_TRUE(module);
+    const auto* fn = (*module)->getFunction("reduction");
+    ASSERT_NE(fn, nullptr);
+    unsigned rolled = 0;
+    for (const auto& block : *fn) {
+      for (const auto& inst : block) {
+        EXPECT_FALSE(llvm::isa<llvm::CallBase>(inst));
+        if (const auto* md = inst.getMetadata(llvm::LLVMContext::MD_loop)) {
+          for (unsigned i = 1; i < md->getNumOperands(); ++i) {
+            const auto* property = llvm::dyn_cast<llvm::MDNode>(md->getOperand(i));
+            if (!property || property->getNumOperands() != 1) {
+              continue;
+            }
+            const auto* name = llvm::dyn_cast<llvm::MDString>(property->getOperand(0));
+            if (name && name->getString() == "llvm.loop.unroll.disable") {
+              ++rolled;
+            }
+          }
+        }
+      }
+    }
+    EXPECT_EQ(rolled, 1u);
+    const auto object = path.string() + ".o";
+    ASSERT_TRUE(kernel.write_object(object, error)) << error;
+    livehd::sim::Native_objects objects;
+    ASSERT_TRUE(objects.load(object, error)) << error;
+    using Loop      = void (*)(const uint64_t*, uint64_t*, uint64_t, int64_t, int64_t);
+    const auto loop = std::bit_cast<Loop>(objects.lookup("reduction", error));
+    ASSERT_NE(loop, nullptr) << error;
+    const uint64_t inputs[]  = {0x12345678, 99, 100};
+    uint64_t       outputs[] = {0};
+    loop(inputs, outputs, 0, 5, -1);
+    EXPECT_EQ(outputs[0], 100u);
+    loop(inputs, outputs, 4, 1, 1);
+    EXPECT_EQ(outputs[0], 110u);
+    loop(inputs, outputs, 5, 2, -1);
+    EXPECT_EQ(outputs[0], 100u);
+    loop(inputs, outputs, 100000, 0, 1);
+    int64_t expected = 100;
+    for (uint64_t i = 0; i < 100000; ++i) {
+      expected += static_cast<int8_t>(i);
+    }
+    EXPECT_EQ(outputs[0], static_cast<uint64_t>(expected));
+    std::filesystem::remove(path);
+    std::filesystem::remove(object);
+  }
+}
+
+TEST(CgenLlvm, NativeLoopRetainsWideCarriesWhenInactive) {
+  Cgen_llvm   kernel("active_body",
+                     {
+                         {  8, true},
+                         {128, true},
+                         {  1, true},
+                         {  8, true}
+  });
+  std::string error;
+  auto        sum    = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(1), kernel.input(0), 128, true);
+  auto        active = kernel.binary(Cgen_llvm::Binary_op::lt, kernel.input(0), kernel.constant(8, 2), 1, true);
+  auto        narrow = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(3), kernel.constant(8, 3), 8, true);
+  ASSERT_TRUE(kernel.add_output(0, sum, error));
+  ASSERT_TRUE(kernel.add_output(1, active, error));
+  ASSERT_TRUE(kernel.add_output(2, narrow, error));
+  Cgen_llvm::Loop_layout layout;
+  layout.inputs = {
+      {  8, true},
+      {128, true},
+      {  1, true},
+      {  8, true}
+  };
+  layout.bindings = {
+      {0, 0},
+      {1, 0},
+      {2, 0},
+      {3, 0}
+  };
+  layout.index       = 0;
+  layout.activation  = 2;
+  layout.next_active = 1;
+  layout.carries     = {
+      {1, 0},
+      {3, 2}
+  };
+  ASSERT_TRUE(kernel.add_loop("active_loop", layout, error)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-active-loop.o";
+  ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(path.string(), error)) << error;
+  using Loop      = void (*)(const uint64_t*, uint64_t*, uint64_t, int64_t, int64_t);
+  const auto loop = std::bit_cast<Loop>(objects.lookup("active_loop", error));
+  ASSERT_NE(loop, nullptr) << error;
+  uint64_t inputs[]   = {0, UINT64_MAX, 7, 1, 250};
+  uint64_t outputs[4] = {};
+  loop(inputs, outputs, 0, 0, 1);
+  EXPECT_EQ(outputs[0], UINT64_MAX);
+  EXPECT_EQ(outputs[1], 7u);
+  EXPECT_EQ(outputs[2], 0u);
+  EXPECT_EQ(outputs[3], 250u);
+  loop(inputs, outputs, 10, 0, 1);
+  EXPECT_EQ(outputs[0], 2u);
+  EXPECT_EQ(outputs[1], 8u);
+  EXPECT_EQ(outputs[2], 0u);
+  EXPECT_EQ(outputs[3], 3u);
+  inputs[3] = 0;
+  loop(inputs, outputs, 10, 0, 1);
+  EXPECT_EQ(outputs[0], UINT64_MAX);
+  EXPECT_EQ(outputs[1], 7u);
+  EXPECT_EQ(outputs[3], 250u);
+  std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, NativeLoopSharingIgnoresEntryAndInlineScopeNames) {
+  const auto make = [](std::string_view name, size_t carry_input) {
+    Cgen_llvm   kernel(name,
+                       {
+                           {8, true},
+                           {8, true}
+    });
+    std::string error;
+    const auto  sum = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.input(1), 8, true);
+    EXPECT_TRUE(kernel.add_output(0, sum, error)) << error;
+    Cgen_llvm::Loop_layout layout;
+    layout.inputs = {
+        {8, true},
+        {8, true}
+    };
+    layout.bindings = {
+        {0, 0},
+        {1, 0}
+    };
+    layout.carries = {
+        {carry_input, 0}
+    };
+    EXPECT_TRUE(kernel.add_loop(std::string(name) + "_loop", layout, error)) << error;
+    return kernel.sharing_key(error);
+  };
+  const auto first = make("phase_one", 0);
+  ASSERT_FALSE(first.empty());
+  EXPECT_EQ(first, make("phase_two", 0));
+  EXPECT_NE(first, make("phase_one", 1));
+}
