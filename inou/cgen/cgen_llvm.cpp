@@ -24,6 +24,7 @@
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
@@ -1282,11 +1283,15 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     output_offsets.push_back(output_words);
     output_words += word_count(out.value.width);
   }
-  auto* packed_in  = b.CreateAlloca(i64, b.getInt64(std::max<size_t>(1, input_words)), "body.inputs");
-  auto* packed_out = b.CreateAlloca(i64, b.getInt64(std::max<size_t>(1, output_words)), "body.outputs");
-  auto* changed    = b.CreateAlloca(i64,
-                                    b.getInt64(std::max<size_t>(1, word_count(static_cast<uint32_t>(impl_->output_values.size())))),
-                                    "body.changed");
+  // SROA skips array-count allocas even when the count is constant. Encode the
+  // fixed extent in the allocated type so inlined packed loads/stores can be
+  // promoted to SSA instead of copying wide carry buffers on every iteration.
+  const auto buffer = [&](size_t words, llvm::StringRef name) {
+    return b.CreateAlloca(llvm::ArrayType::get(i64, std::max<size_t>(1, words)), nullptr, name);
+  };
+  auto* packed_in  = buffer(input_words, "body.inputs");
+  auto* packed_out = buffer(output_words, "body.outputs");
+  auto* changed    = buffer(word_count(static_cast<uint32_t>(impl_->output_values.size())), "body.changed");
   for (size_t i = 0; i < output_words; ++i) {
     b.CreateStore(b.getInt64(0), b.CreateConstInBoundsGEP1_64(i64, packed_out, i));
   }

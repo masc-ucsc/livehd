@@ -840,6 +840,7 @@ TEST(CgenLlvm, NativeReductionStaysRolledWithNoBodyCall) {
     for (const auto& block : *fn) {
       for (const auto& inst : block) {
         EXPECT_FALSE(llvm::isa<llvm::CallBase>(inst));
+        EXPECT_FALSE(llvm::isa<llvm::AllocaInst>(inst));
         if (const auto* md = inst.getMetadata(llvm::LLVMContext::MD_loop)) {
           for (unsigned i = 1; i < md->getNumOperands(); ++i) {
             const auto* property = llvm::dyn_cast<llvm::MDNode>(md->getOperand(i));
@@ -921,7 +922,22 @@ TEST(CgenLlvm, NativeLoopRetainsWideCarriesWhenInactive) {
       {3, 2}
   };
   ASSERT_TRUE(kernel.add_loop("active_loop", layout, error)) << error;
-  const auto path = std::filesystem::temp_directory_path() / "livehd-active-loop.o";
+  const auto path    = std::filesystem::temp_directory_path() / "livehd-active-loop.o";
+  const auto bitcode = path.string() + ".bc";
+  ASSERT_TRUE(kernel.write_bitcode(bitcode, error)) << error;
+  auto buffer = llvm::MemoryBuffer::getFile(bitcode);
+  ASSERT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  ASSERT_TRUE(module);
+  const auto* fn = (*module)->getFunction("active_loop");
+  ASSERT_NE(fn, nullptr);
+  for (const auto& block : *fn) {
+    for (const auto& instruction : block) {
+      EXPECT_FALSE(llvm::isa<llvm::AllocaInst>(instruction));
+      EXPECT_FALSE(llvm::isa<llvm::CallBase>(instruction));
+    }
+  }
   ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
   livehd::sim::Native_objects objects;
   ASSERT_TRUE(objects.load(path.string(), error)) << error;
@@ -946,6 +962,7 @@ TEST(CgenLlvm, NativeLoopRetainsWideCarriesWhenInactive) {
   EXPECT_EQ(outputs[1], 7u);
   EXPECT_EQ(outputs[3], 250u);
   std::filesystem::remove(path);
+  std::filesystem::remove(bitcode);
 }
 
 TEST(CgenLlvm, NativeLoopSharingIgnoresEntryAndInlineScopeNames) {
