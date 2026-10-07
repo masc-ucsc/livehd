@@ -1,0 +1,50 @@
+{
+  "dino_slop": {
+    "before": {
+      "elf_bytes": 962352,
+      "text_bytes": 662044,
+      "cpp_objects": 6
+    },
+    "after": {
+      "elf_bytes": 799896,
+      "text_bytes": 563891,
+      "cpp_objects": 16
+    }
+  },
+  "dino_llvm": {
+    "before": {
+      "elf_bytes": 960752,
+      "text_bytes": 661111,
+      "cpp_objects": 6
+    },
+    "after": {
+      "elf_bytes": 796648,
+      "text_bytes": 559943,
+      "cpp_objects": 16
+    }
+  },
+  "minion_slop": {
+    "before": {
+      "elf_bytes": 42528680,
+      "text_bytes": 34332316,
+      "cpp_objects": 374
+    },
+    "after": {
+      "elf_bytes": 21931480,
+      "text_bytes": 18133130,
+      "cpp_objects": 119
+    }
+  },
+  "minion_llvm": {
+    "before": {
+      "elf_bytes": 46960680,
+      "text_bytes": 38010351,
+      "cpp_objects": 365
+    },
+    "after": {
+      "elf_bytes": 23273536,
+      "text_bytes": 19393918,
+      "cpp_objects": 114
+    }
+  }
+}

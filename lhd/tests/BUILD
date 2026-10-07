@@ -1147,6 +1147,7 @@ sh_test(
         "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
         "//inou/prp:tests/sim/div_narrow_result.prp",
         "//inou/prp:tests/sim/llvm_native_division.prp",
+        "//inou/prp:tests/sim/llvm_boundary_slices.prp",
         "//inou/prp:tests/sim/loop_carry_kinds_sim.prp",
         "//inou/prp:tests/sim/loop_fused_state.prp",
         "//inou/prp:tests/sim/loop_hierarchy.prp",
@@ -2350,3 +2351,10 @@ sh_test(
     )
     for backend in ["slop", "llvm"]
 ]
+
+sh_test(
+    name = "sim_reachable_smoke",
+    srcs = ["sim_reachable_smoke.sh"],
+    data = ["//lhd"],
+    env_inherit = ["PATH"],
+)

@@ -2144,6 +2144,7 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
     labels["observe"] = "true";
   }
   labels["runtime_support"] = opts.sim_runtime_support ? "true" : "false";
+  labels["incremental"]     = opts.incremental ? "true" : "false";
   merge_sets(opts, "compile.cgen", labels);
   // sim.* is the ONE sim vocabulary: the codegen
   // options ride the same names as the runtime `lhd sim` command, and the

@@ -1,0 +1,167 @@
+{
+  "verilator": "Verilator v5.046 rev v5.046 sha256:72e6a7f95102c286",
+  "cxx": "/usr/bin/clang++",
+  "jobs": 8,
+  "cpu": 0,
+  "scope": "Original SystemVerilog with maintained suite twin driver; no cycle-by-cycle equivalence claim against translated Pyrope.",
+  "runs": {
+    "dino_setup": {
+      "seconds": 0.13705369806848466,
+      "returncode": 0,
+      "argv": [
+        "/var/tmp/renau/_bazel_renau/9dfe49b94bcdf1a5ec2219719154e95e/execroot/_main/bazel-out/k8-opt/bin/external/verilator+/verilator",
+        "--cc",
+        "--exe",
+        "--Mdir",
+        "/tmp/lhd-verilator-footprint/dino/obj",
+        "--top-module",
+        "PipelinedDualIssueCPU",
+        "-Wno-fatal",
+        "-DSYNTHESIS",
+        "-I/mada/users/renau/projs/lhdsuite/dino/verilog",
+        "-F",
+        "/mada/users/renau/projs/lhdsuite/dino/verilog/filelist.f",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb_verilator.cpp"
+      ]
+    },
+    "dino_compile": {
+      "seconds": 2.614278170047328,
+      "returncode": 0,
+      "argv": [
+        "make",
+        "-C",
+        "/tmp/lhd-verilator-footprint/dino/obj",
+        "-f",
+        "VPipelinedDualIssueCPU.mk",
+        "-j8",
+        "VPipelinedDualIssueCPU",
+        "CXX=/usr/bin/clang++",
+        "LINK=/usr/bin/clang++",
+        "OPT_FAST=-O2",
+        "OPT_SLOW=-O2"
+      ]
+    },
+    "dino_exec0": {
+      "seconds": 1.4843191439285874,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-verilator-footprint/dino/obj/VPipelinedDualIssueCPU",
+        "--cycles",
+        "5000000"
+      ]
+    },
+    "dino_exec1": {
+      "seconds": 1.4822678139898926,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-verilator-footprint/dino/obj/VPipelinedDualIssueCPU",
+        "--cycles",
+        "5000000"
+      ]
+    },
+    "dino_exec2": {
+      "seconds": 1.4924781501758844,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-verilator-footprint/dino/obj/VPipelinedDualIssueCPU",
+        "--cycles",
+        "5000000"
+      ]
+    },
+    "minion_setup": {
+      "seconds": 11.864140044897795,
+      "returncode": 0,
+      "argv": [
+        "/var/tmp/renau/_bazel_renau/9dfe49b94bcdf1a5ec2219719154e95e/execroot/_main/bazel-out/k8-opt/bin/external/verilator+/verilator",
+        "--cc",
+        "--exe",
+        "--Mdir",
+        "/tmp/lhd-verilator-footprint/minion/obj",
+        "--top-module",
+        "minion_top",
+        "-Wno-fatal",
+        "-DSYNTHESIS",
+        "-I/mada/users/renau/projs/lhdsuite/minion/verilog",
+        "-F",
+        "/mada/users/renau/projs/lhdsuite/minion/verilog/filelist.f",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb_verilator.cpp"
+      ]
+    },
+    "minion_compile": {
+      "seconds": 7.037655911874026,
+      "returncode": 0,
+      "argv": [
+        "make",
+        "-C",
+        "/tmp/lhd-verilator-footprint/minion/obj",
+        "-f",
+        "Vminion_top.mk",
+        "-j8",
+        "Vminion_top",
+        "CXX=/usr/bin/clang++",
+        "LINK=/usr/bin/clang++",
+        "OPT_FAST=-O2",
+        "OPT_SLOW=-O2"
+      ]
+    },
+    "minion_exec0": {
+      "seconds": 1.387729000998661,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-verilator-footprint/minion/obj/Vminion_top",
+        "--cycles",
+        "100000"
+      ]
+    },
+    "minion_exec1": {
+      "seconds": 1.3870563430245966,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-verilator-footprint/minion/obj/Vminion_top",
+        "--cycles",
+        "100000"
+      ]
+    },
+    "minion_exec2": {
+      "seconds": 1.401475845836103,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-verilator-footprint/minion/obj/Vminion_top",
+        "--cycles",
+        "100000"
+      ]
+    }
+  },
+  "dino": {
+    "elf_bytes": 298816,
+    "text_bytes": 137789,
+    "cpp_bytes": 1111759,
+    "cycles": 5000000,
+    "exec_median_s": 1.4843191439285874
+  },
+  "minion": {
+    "elf_bytes": 2575480,
+    "text_bytes": 2114298,
+    "cpp_bytes": 52377101,
+    "cycles": 100000,
+    "exec_median_s": 1.387729000998661
+  }
+}

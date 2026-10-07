@@ -1,0 +1,13 @@
+{
+  "scope": "Retained simulator after the suite arithmetic mutation; source inputs restored after measurement.",
+  "dino": {
+    "elf_bytes": 792984,
+    "text_bytes": 555303,
+    "generated_cpp_bytes": 396256
+  },
+  "minion": {
+    "elf_bytes": 23240568,
+    "text_bytes": 19364654,
+    "generated_cpp_bytes": 75142629
+  }
+}

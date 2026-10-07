@@ -19,6 +19,7 @@ PRPS=(
   "inou/prp/tests/sim/loop_mixed_carry.prp"
   "inou/prp/tests/sim/div_narrow_result.prp"
   "inou/prp/tests/sim/llvm_native_division.prp"
+  "inou/prp/tests/sim/llvm_boundary_slices.prp"
   "inou/prp/tests/sim/loop_inlined_capture.prp"
   "inou/prp/tests/sim/loop_inlined_array.prp"
   "inou/prp/tests/sim/mem_wensize_lanes.prp"

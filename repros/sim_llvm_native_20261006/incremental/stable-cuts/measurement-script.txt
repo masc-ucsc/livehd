@@ -1,0 +1,55 @@
+import hashlib,json,os,pathlib,shutil,statistics,subprocess,time
+root=pathlib.Path(__file__).parent
+suite=pathlib.Path('/mada/users/renau/projs/lhdsuite')
+lhd=root/'toolchain/lhd'
+env=os.environ.copy(); env['RUNFILES_DIR']=str(root/'toolchain/lhd.runfiles');env['CXX']='/usr/bin/clang++'
+result={'binary_sha256':hashlib.sha256(lhd.read_bytes()).hexdigest(),'jobs':8,'cpu':min(os.sched_getaffinity(0)),'runs':{}}
+def run(name,argv,required=True):
+    print(name,'started',flush=True);start=time.perf_counter()
+    with (root/(name+'.log')).open('w') as f: proc=subprocess.run(list(map(str,argv)),env=env,cwd=root,stdout=f,stderr=subprocess.STDOUT)
+    result['runs'][name]={'seconds':time.perf_counter()-start,'returncode':proc.returncode,'argv':list(map(str,argv))}
+    save(); print(name,result['runs'][name]['seconds'],'exit',proc.returncode,flush=True)
+    if required and proc.returncode: raise SystemExit(name+' failed')
+def save(): (root/'results.json').write_text(json.dumps(result,indent=2))
+def snap(work):
+    return {p.name:{'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'mtime_ns':p.stat().st_mtime_ns,'bytes':p.stat().st_size}
+            for p in (work/'sim').iterdir() if p.is_file() and (p.name.endswith(('.llvm.o','.llvm.k','.cpp','.hpp','.color-cuts.txt')))}
+def changes(old,new,suffix):
+    names={n for n in old.keys()|new.keys() if n.endswith(suffix)}
+    return {'before':sum(n in old for n in names),'after':sum(n in new for n in names),
+            'changed_bytes':[n for n in sorted(names) if old.get(n,{}).get('sha256')!=new.get(n,{}).get('sha256')],
+            'rewritten':[n for n in sorted(names) if old.get(n,{}).get('mtime_ns')!=new.get(n,{}).get('mtime_ns')]}
+for core,top,mutation in [('dino','PipelinedDualIssueCPU.prp','ALU.prp'),('minion','minion_top.prp','txfma_adder.prp')]:
+    tree=root/core/'tree';shutil.copytree(suite/core/'pyrope',tree,dirs_exist_ok=True)
+    tb=suite/core/'sim'/f'{core}_prog_tb.prp'
+    base=(tree/mutation).read_bytes();result[core]={'source_mutation':mutation,'baseline_sha256':hashlib.sha256(base).hexdigest(),'backends':{}}
+    for backend in ['slop','llvm']:
+        work=root/core/backend/'SW';work.mkdir(parents=True,exist_ok=True)
+        args=[lhd,'sim',tree/top,tb,'--workdir',work,'--set','sim.jobs=8','--set','sim.tune.profile=off','--set',f'sim.tune.backend={backend}','--set','sim.vcd=false']
+        prefix=core+'_'+backend
+        run(prefix+'_cold_setup',args+['--setup-only','--result-json',root/(prefix+'_cold_setup.json')])
+        run(prefix+'_cold_compile',args+['--run-only','--set','sim.compile_only=true','--set','sim.ninja=false','--result-json',root/(prefix+'_cold_compile.json')])
+        snap0=snap(work);(root/(prefix+'_cold_files.json')).write_text(json.dumps(snap0,indent=2))
+        result[core]['backends'][backend]={'objects':sum(n.endswith('.llvm.o') for n in snap0),'cpp_bytes':sum(d['bytes'] for n,d in snap0.items() if n.endswith('.cpp'))}
+    # Paired runs with no concurrent compilation. Keep assertions and output digests.
+    for i in range(3):
+        for backend in ['slop','llvm']:
+            name=f'{core}_{backend}_exec{i}';binary=root/core/backend/'SW/sim/drv.bin'
+            run(name,['taskset','-c',str(result['cpu']),binary,'+cycles=100000','--result-json',root/(name+'.json')])
+            tests=json.loads((root/(name+'.json')).read_text());assert all(t['status']=='pass' for t in tests),tests
+    for backend in ['slop','llvm']:
+        result[core]['backends'][backend]['exec_median_s']=statistics.median(result['runs'][f'{core}_{backend}_exec{i}']['seconds'] for i in range(3))
+        work=root/core/backend/'SW';prefix=core+'_'+backend
+        args=[lhd,'sim',tree/top,tb,'--workdir',work,'--set','sim.jobs=8','--set','sim.tune.profile=off','--set',f'sim.tune.backend={backend}','--set','sim.vcd=false']
+        # Two no-change runs after the frozen build, then one real suite mutation.
+        for i in range(2):run(prefix+f'_warm{i}',args+['--setup-only','--result-json',root/(prefix+f'_warm{i}.json')])
+        old=snap(work)
+        shutil.copy2(suite/core/'tests/bug1'/mutation,tree/mutation)
+        run(prefix+'_edit_setup',args+['--setup-only','--result-json',root/(prefix+'_edit_setup.json')])
+        new=snap(work)
+        result[core]['backends'][backend]['edit']={suffix:changes(old,new,suffix) for suffix in ['.llvm.o','.llvm.k','.cpp','.hpp','.color-cuts.txt']};save()
+        run(prefix+'_edit_compile',args+['--run-only','--set','sim.compile_only=true','--set','sim.ninja=false','--result-json',root/(prefix+'_edit_compile.json')])
+        name=prefix+'_edit_exec';run(name,['taskset','-c',str(result['cpu']),work/'sim/drv.bin','+cycles=100000','--result-json',root/(name+'.json')],required=False)
+        (tree/mutation).write_bytes(base)
+    save()
+print('complete',flush=True)

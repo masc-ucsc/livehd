@@ -8,6 +8,8 @@
 #include <string_view>
 #include <vector>
 
+#include "sim_native_abi.hpp"
+
 // Cgen_llvm is the small, target-independent IR builder used by the opt-in
 // simulator backend.  It deliberately exposes no LLVM types in this header:
 // cgen_sim describes a color with exact-width integer operations and this
@@ -44,6 +46,25 @@ public:
   // overlap resource storage. Generated callers guarantee this for LLVM noalias.
   // Values (and boundary casts) load lazily at their first arithmetic use.
   explicit Cgen_llvm(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& inputs, bool scalar_abi = false);
+  // Native simulator ABI: void(uint64_t* state, void** resources). Every
+  // field occupies whole little-endian words in one caller-owned allocation.
+  // Inputs and outputs may alias: outputs observe the state before any output
+  // is written. No per-invocation packing buffers or C++ adapters are needed.
+  struct State_input {
+    size_t   word   = 0;
+    uint32_t width  = 0;
+    bool     unsign = false;
+    uint32_t bit    = 0;  // a fixed slice, without another stored copy
+  };
+  struct State_layout {
+    size_t                   words = 0;
+    std::vector<State_input> inputs;
+  };
+  struct Dirty_mask {
+    size_t   word = 0;
+    uint64_t mask = 0;
+  };
+  Cgen_llvm(std::string_view function_name, const State_layout& layout);
   ~Cgen_llvm();
 
   Cgen_llvm(const Cgen_llvm&)            = delete;
@@ -97,11 +118,23 @@ public:
   bool                memory_clear(std::string_view symbol);
   bool                memory_stage_whole(std::string_view symbol, Value enable, Value force, Value data);
   bool                memory_stage_write(std::string_view symbol, Value enable, Value address, Value data);
+  // Phase-barrier entry writes, emitted into a native commit object.
+  bool                memory_commit(std::string_view symbol);
 
   // Values cross the ABI as packed little-endian 64-bit words. `index` is the
   // logical output number; physical word offsets are derived from the exact
   // output widths when the object is finalized.
   bool add_output(size_t index, Value value, std::string& error);
+  // Compare against `previous_word` (the current-state bank for a pending
+  // register), store into `word`, and OR dirty masks when the value changes.
+  bool add_state_output(size_t word, size_t previous_word, Value value, const std::vector<Dirty_mask>& dirty, std::string& error);
+  // Phase-barrier copy. Source and destination spans must not overlap.
+  bool copy_state(size_t destination, size_t source, size_t words, std::string& error);
+
+  // Finalize the ABI and return exact bitcode with only the entry symbol
+  // normalized. Equal keys can share code; mutable instance storage is still
+  // supplied separately. Do not add operations after requesting this key.
+  std::string sharing_key(std::string& error, bool track_changed = true);
 
   // Verify, optimize, and emit a self-contained native object. The module
   // exports:
@@ -118,7 +151,18 @@ public:
   // (`slop_update`, or `_din.identical(state)`), where the old value is already
   // the live object rather than a marshalled copy. `changed` is still a
   // parameter, so the ABI and the adapter's call do not change shape.
-  bool write_object(std::string_view path, std::string& error, bool track_changed = true);
+  // An optional sidecar allows a verified IR/object pair to skip optimization
+  // and machine-code generation. Empty disables reuse. No graph-global key
+  // or mutable binding offsets are added to the kernel identity.
+  bool write_object(std::string_view path, std::string& error, bool track_changed = true, std::string_view cache_path = {},
+                    bool* reused = nullptr);
+
+  // Package a state-ABI kernel with its allocation/initialization descriptor.
+  // Only `descriptor` is exported; code, offsets, and defaults stay local to
+  // this object. The first public_words are boundary storage, and the tail is
+  // private to each instance. Unspecified initial words are zero.
+  bool write_state_object(std::string_view path, std::string_view descriptor, size_t public_words,
+                          const std::vector<livehd::sim::Native_initial_word>& initial, std::string& error);
 
   // IR inspection for code-generator tests; not the simulator build path.
   bool write_bitcode(std::string_view path, std::string& error, bool track_changed = true);
@@ -129,6 +173,7 @@ public:
                                   std::string_view object_path, std::string& error);
 
 private:
+  bool seal(std::string& error, bool track_changed);
   bool write_module(std::string_view path, std::string& error, bool track_changed, bool native);
   class Impl;
   std::unique_ptr<Impl> impl_;

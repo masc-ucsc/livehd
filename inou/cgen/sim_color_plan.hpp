@@ -385,7 +385,10 @@ public:
   // `fence_ratio` = sites per interface word a single-use module needs to keep
   // its own colors (<0 = the built-in default, 0 = fence every such module).
   static Color_plan         discover(hhds::Graph* root, bool include_observations = true, bool separate_runtime_calls = false,
-                                     uint64_t live_words = 0, int64_t fence_ratio = -1);
+                                     uint64_t live_words = 0, int64_t fence_ratio = -1, std::string_view previous_cuts_path = {});
+  // Reuse prior terminal anchors, while still enforcing all dependency,
+  // activation and pressure constraints. These are placement hints, never code.
+  [[nodiscard]] std::string partition_cuts() const;
   static constexpr uint64_t kDefaultLiveWords  = livehd::sim::kTuneDefaultLiveWords;
   // Best weighted average (pyrope2 x4, pyrope x2, verilog x1) over lhdsuite
   // and lhdtrack on 2026-09-18: within 1% of each benchmark's best on 19/21,
@@ -463,6 +466,8 @@ private:
   std::vector<Value_use>             value_uses_;
   std::vector<Boundary_slot>         boundary_slots_;
   std::vector<Color>                 colors_;
+  std::string                        partition_header_;
+  std::vector<Plan_id>               partition_cuts_;
   std::vector<Color_dependency>      color_dependencies_;
   std::vector<Kernel_class>          kernel_classes_;
   std::vector<std::vector<size_t>>   canonical_members_;

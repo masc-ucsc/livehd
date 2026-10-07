@@ -1,0 +1,558 @@
+{
+  "binary_sha256": "4f8eafb9e09d0949c3053e8efec3ad68b7272d9b75db3357813610cef9781b66",
+  "jobs": 8,
+  "cpu": 0,
+  "runs": {
+    "dino_llvm_cold_setup": {
+      "seconds": 0.44552875915542245,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-final-incremental/dino_llvm_cold_setup.json"
+      ]
+    },
+    "dino_llvm_cold_compile": {
+      "seconds": 6.2738657768350095,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-final-incremental/dino_llvm_cold_compile.json"
+      ]
+    },
+    "dino_llvm_exec0": {
+      "seconds": 2.0594230480492115,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-final-incremental/dino/llvm/SW/sim/drv.bin",
+        "+cycles=5000000",
+        "--result-json",
+        "/tmp/lhd-final-incremental/dino_llvm_exec0.json"
+      ]
+    },
+    "dino_llvm_exec1": {
+      "seconds": 2.057674191892147,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-final-incremental/dino/llvm/SW/sim/drv.bin",
+        "+cycles=5000000",
+        "--result-json",
+        "/tmp/lhd-final-incremental/dino_llvm_exec1.json"
+      ]
+    },
+    "dino_llvm_exec2": {
+      "seconds": 2.0459921348374337,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-final-incremental/dino/llvm/SW/sim/drv.bin",
+        "+cycles=5000000",
+        "--result-json",
+        "/tmp/lhd-final-incremental/dino_llvm_exec2.json"
+      ]
+    },
+    "dino_llvm_warm0": {
+      "seconds": 0.20317330490797758,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-final-incremental/dino_llvm_warm0.json"
+      ]
+    },
+    "dino_llvm_warm1": {
+      "seconds": 0.1998085358645767,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-final-incremental/dino_llvm_warm1.json"
+      ]
+    },
+    "dino_llvm_edit_setup": {
+      "seconds": 0.3762135680299252,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-final-incremental/dino_llvm_edit_setup.json"
+      ]
+    },
+    "dino_llvm_edit_compile": {
+      "seconds": 4.594032780034468,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-final-incremental/dino_llvm_edit_compile.json"
+      ]
+    },
+    "dino_llvm_edit_exec": {
+      "seconds": 0.04537270893342793,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-final-incremental/dino/llvm/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-final-incremental/dino_llvm_edit_exec.json"
+      ]
+    },
+    "minion_llvm_cold_setup": {
+      "seconds": 98.62796974997036,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-final-incremental/minion_llvm_cold_setup.json"
+      ]
+    },
+    "minion_llvm_cold_compile": {
+      "seconds": 47.829532434931025,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-final-incremental/minion_llvm_cold_compile.json"
+      ]
+    },
+    "minion_llvm_exec0": {
+      "seconds": 2.519143891055137,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-final-incremental/minion/llvm/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-final-incremental/minion_llvm_exec0.json"
+      ]
+    },
+    "minion_llvm_exec1": {
+      "seconds": 2.4727131959516555,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-final-incremental/minion/llvm/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-final-incremental/minion_llvm_exec1.json"
+      ]
+    },
+    "minion_llvm_exec2": {
+      "seconds": 2.4744176149833947,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-final-incremental/minion/llvm/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-final-incremental/minion_llvm_exec2.json"
+      ]
+    },
+    "minion_llvm_warm0": {
+      "seconds": 35.29363757185638,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-final-incremental/minion_llvm_warm0.json"
+      ]
+    },
+    "minion_llvm_warm1": {
+      "seconds": 35.483967343112454,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-final-incremental/minion_llvm_warm1.json"
+      ]
+    },
+    "minion_llvm_edit_setup": {
+      "seconds": 67.50877694692463,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-final-incremental/minion_llvm_edit_setup.json"
+      ]
+    },
+    "minion_llvm_edit_compile": {
+      "seconds": 6.1751457781065255,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-final-incremental/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-final-incremental/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-final-incremental/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-final-incremental/minion_llvm_edit_compile.json"
+      ]
+    },
+    "minion_llvm_edit_exec": {
+      "seconds": 2.5233963190112263,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-final-incremental/minion/llvm/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-final-incremental/minion_llvm_edit_exec.json"
+      ]
+    }
+  },
+  "dino": {
+    "source_mutation": "ALU.prp",
+    "baseline_sha256": "e7ad7dffe8a4ccd3d166966661cec488605ac62141b34525ce77d3217a3cca5e",
+    "backends": {
+      "llvm": {
+        "objects": 10,
+        "cpp_bytes": 396256,
+        "exec_median_s": 2.057674191892147,
+        "edit": {
+          ".llvm.o": {
+            "before": 10,
+            "after": 10,
+            "changed_bytes": [
+              "ALU.ALU.color-kernel-s_95a0dd8b6c93e57d0919df4000b9ea7c.llvm.o",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-kernel-s_ab634487417342cb4d0ea081a6313317.llvm.o"
+            ],
+            "rewritten": [
+              "ALU.ALU.color-kernel-s_95a0dd8b6c93e57d0919df4000b9ea7c.llvm.o",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-kernel-s_ab634487417342cb4d0ea081a6313317.llvm.o"
+            ]
+          },
+          ".llvm.k": {
+            "before": 10,
+            "after": 10,
+            "changed_bytes": [
+              "ALU.ALU.color-kernel-s_95a0dd8b6c93e57d0919df4000b9ea7c.llvm.k",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-kernel-s_ab634487417342cb4d0ea081a6313317.llvm.k"
+            ],
+            "rewritten": [
+              "ALU.ALU.color-kernel-s_95a0dd8b6c93e57d0919df4000b9ea7c.llvm.k",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-kernel-s_ab634487417342cb4d0ea081a6313317.llvm.k"
+            ]
+          },
+          ".cpp": {
+            "before": 37,
+            "after": 37,
+            "changed_bytes": [
+              "ALU.ALU.cpp",
+              "ALU.ALU.tune-id.cpp",
+              "ALU.ALU.tune.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune-id.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune.cpp"
+            ],
+            "rewritten": [
+              "ALU.ALU.cpp",
+              "ALU.ALU.tune-id.cpp",
+              "ALU.ALU.tune.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune-id.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune.cpp"
+            ]
+          },
+          ".hpp": {
+            "before": 34,
+            "after": 34,
+            "changed_bytes": [],
+            "rewritten": []
+          },
+          ".color-cuts.txt": {
+            "before": 8,
+            "after": 8,
+            "changed_bytes": [],
+            "rewritten": []
+          }
+        },
+        "host_objects_rebuilt": [
+          "unity-0.o"
+        ]
+      }
+    }
+  },
+  "minion": {
+    "source_mutation": "txfma_adder.prp",
+    "baseline_sha256": "2ad76159f4b99e6c9497d45d58d64578c35ce1fbfdd2f5306d5fb7cb2cf45845",
+    "backends": {
+      "llvm": {
+        "objects": 2213,
+        "cpp_bytes": 75142664,
+        "exec_median_s": 2.4744176149833947,
+        "edit": {
+          ".llvm.o": {
+            "before": 2213,
+            "after": 2213,
+            "changed_bytes": [
+              "minion_top.minion_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.o",
+              "vpu_lane.vpu_lane.color-kernel-s_eaccacf77802f808f21100ca7b551cb3.llvm.o",
+              "vpu_top.vpu_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.o"
+            ],
+            "rewritten": [
+              "minion_top.minion_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.o",
+              "vpu_lane.vpu_lane.color-kernel-s_eaccacf77802f808f21100ca7b551cb3.llvm.o",
+              "vpu_top.vpu_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.o"
+            ]
+          },
+          ".llvm.k": {
+            "before": 2213,
+            "after": 2213,
+            "changed_bytes": [
+              "minion_top.minion_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.k",
+              "vpu_lane.vpu_lane.color-kernel-s_eaccacf77802f808f21100ca7b551cb3.llvm.k",
+              "vpu_top.vpu_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.k"
+            ],
+            "rewritten": [
+              "minion_top.minion_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.k",
+              "vpu_lane.vpu_lane.color-kernel-s_eaccacf77802f808f21100ca7b551cb3.llvm.k",
+              "vpu_top.vpu_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.k"
+            ]
+          },
+          ".cpp": {
+            "before": 875,
+            "after": 875,
+            "changed_bytes": [
+              "minion_top.minion_top.tune-id.cpp",
+              "minion_top.minion_top.tune.cpp",
+              "txfmafrac_top.txfmafrac_top.color-eval-3.cpp",
+              "txfmafrac_top.txfmafrac_top.tune-id.cpp",
+              "txfmafrac_top.txfmafrac_top.tune.cpp",
+              "vpu_lane.vpu_lane.tune-id.cpp",
+              "vpu_lane.vpu_lane.tune.cpp",
+              "vpu_top.vpu_top.tune-id.cpp",
+              "vpu_top.vpu_top.tune.cpp"
+            ],
+            "rewritten": [
+              "minion_top.minion_top.tune-id.cpp",
+              "minion_top.minion_top.tune.cpp",
+              "txfmafrac_top.txfmafrac_top.color-eval-3.cpp",
+              "txfmafrac_top.txfmafrac_top.tune-id.cpp",
+              "txfmafrac_top.txfmafrac_top.tune.cpp",
+              "vpu_lane.vpu_lane.tune-id.cpp",
+              "vpu_lane.vpu_lane.tune.cpp",
+              "vpu_top.vpu_top.tune-id.cpp",
+              "vpu_top.vpu_top.tune.cpp"
+            ]
+          },
+          ".hpp": {
+            "before": 334,
+            "after": 334,
+            "changed_bytes": [],
+            "rewritten": []
+          },
+          ".color-cuts.txt": {
+            "before": 53,
+            "after": 53,
+            "changed_bytes": [],
+            "rewritten": []
+          }
+        },
+        "host_objects_rebuilt": [
+          "unity-6.o",
+          "minion_top.minion_top.tune.o"
+        ]
+      }
+    }
+  }
+}

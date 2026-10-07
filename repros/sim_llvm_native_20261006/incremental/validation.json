@@ -1,0 +1,27 @@
+{
+  "opt_test_targets_passed": [
+    "//inou/cgen:cgen_llvm_test",
+    "//inou/cgen:cgen_sim_test",
+    "//inou/cgen:sim_color_plan_test",
+    "//inou/cgen:sim_loop_fusion_test",
+    "//inou/cgen:sim_compile_workers_smoke",
+    "//lhd/tests:sim_reachable_smoke",
+    "//lhd/tests:sim_color_llvm_smoke",
+    "//lhd/tests:sim_llvm_memory",
+    "//lhd/tests:lhd_sim_incremental_test",
+    "//lhd/tests:lhd_sim_incremental_test_identity"
+  ],
+  "latest_checkpoint_metadata_tests": [
+    "//inou/cgen:cgen_sim_test",
+    "//lhd/tests:sim_color_llvm_smoke",
+    "//lhd/tests:lhd_sim_incremental_test_identity"
+  ],
+  "lhdtrack_run_id": "20261007T000304",
+  "lhdtrack_passed": 24,
+  "lhdtrack_failed": 0,
+  "lhdtrack_validation": [
+    "make check: 195 tests, 0 problems",
+    "make lint: ok"
+  ],
+  "note": "Focused tests ran at the implementation stages they cover. Large benchmarks are external measurements, not LiveHD test inputs."
+}

@@ -1,0 +1,31 @@
+/*
+:name: llvm_boundary_slices
+:type: simulation
+*/
+// Whole operands and overlapping slices must share transport without changing
+// bit coordinates. Exercise a slice across the 64-bit limb boundary and state.
+pub mod llvm_boundary_slices(d:U130, e:U130) -> (cross:U12@[0], high:U2@[0], low:U8@[0], whole:U130@[0]) {
+  reg saved:U130 = (1 << 129) | (1 << 64) | 0xa5
+  whole = ((saved ^ d) + e)#[0..=129]
+  low = saved#[0..=7] ^ d#[0..=7]
+  cross = saved#[60..=71] ^ d#[60..=71]
+  high = saved#[128..=129] ^ d#[128..=129]
+  saved = d
+}
+
+test llvm_boundary_slices.shared_transport {
+  mut dut = llvm_boundary_slices
+  tick 5 {
+    dut.reset = clock == 0
+    dut.d = (1 << 128) | (0xabc << 60) | 0x39
+    dut.e = 1
+    step
+    const initial = (1 << 129) | (1 << 64) | 0xa5
+    assert(clock == 0 implies dut.whole == ((initial ^ dut.d) + 1))
+    assert(clock == 0 implies dut.low == (initial#[0..=7] ^ dut.d#[0..=7]))
+    assert(clock == 0 implies dut.cross == (initial#[60..=71] ^ dut.d#[60..=71]))
+    assert(clock == 0 implies dut.high == (initial#[128..=129] ^ dut.d#[128..=129]))
+    assert(clock > 0 implies dut.whole == 1)
+    assert(clock > 0 implies (dut.low == 0 and dut.cross == 0 and dut.high == 0))
+  }
+}

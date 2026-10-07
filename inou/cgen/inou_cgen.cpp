@@ -88,6 +88,7 @@ void Inou_cgen::setup() {
                         "sim.unknown_zero: fill every unknown (`?`) literal bit with 0 instead of a 0/1 drawn once "
                         "per literal from the run's seeded PRNG. true also lets the literal fold at C++ compile time",
                         "false");
+  m2.add_label_optional("incremental", "kernel lhd.incremental forwarding", "true");
   m2.add_label_optional("jobs", "native object worker limit (0 = available CPUs)", "0");
   m2.add_label_optional("live_words",
                         "sim.tune.live_words: live 64-bit words one color may keep across its members, N in [1, 2^20] "
@@ -421,6 +422,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // library, so no body changes shape while the memo is alive.
   absl::flat_hash_map<hhds::Gid, uint64_t> digest_memo;
   Cgen_sim::Generation_index               gen_index;  // one gen_digests.json read/write + odir listing per run
+  gen_index.incremental = var.get("incremental") != "false" && var.get("incremental") != "0" && var.get("incremental") != "off";
   const auto                               is_selected_root = [&](std::string_view full, std::string_view entity) {
     return !top.empty() ? (top == full || top == entity) : !instantiated.contains(std::string(full));
   };
@@ -517,7 +519,13 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       wrote_plan = true;  // the previous run's plan is still the current one
       continue;
     }
-    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty(), llvm, tune.live_words, tune.fence);
+    auto plan = livehd::sim::Color_plan::discover(
+        g.get(),
+        observe_on || !vcd_out.empty(),
+        llvm,
+        tune.live_words,
+        tune.fence,
+        gen_index.incremental ? absl::StrCat(dir, "/", livehd::unit_file_stem(full), ".color-cuts.txt") : "");
     plan.write_report(absl::StrCat(dir, "/", livehd::unit_file_stem(full), ".color-plan.txt"));
     if (!plan.complete()) {
       livehd::diag::err("inou.cgen.sim", "color-plan-incomplete", "unsupported")

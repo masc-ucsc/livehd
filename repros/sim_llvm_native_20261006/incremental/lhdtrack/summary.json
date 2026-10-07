@@ -1,0 +1,110 @@
+[
+  {
+    "test": "add_mop",
+    "language": "pyrope",
+    "slop_exec_s": 2.605,
+    "llvm_exec_s": 9.981,
+    "slop_setup_compile_s": 7.75,
+    "llvm_setup_compile_s": 7.75,
+    "llvm_speedup_over_slop": 0.26099589219517083
+  },
+  {
+    "test": "add_mop",
+    "language": "verilog",
+    "slop_exec_s": 1.452,
+    "llvm_exec_s": 1.322,
+    "slop_setup_compile_s": 7.734,
+    "llvm_setup_compile_s": 7.872,
+    "llvm_speedup_over_slop": 1.0983358547655069
+  },
+  {
+    "test": "add_mul_sgn",
+    "language": "pyrope",
+    "slop_exec_s": 1.785,
+    "llvm_exec_s": 1.649,
+    "slop_setup_compile_s": 8.111,
+    "llvm_setup_compile_s": 8.075,
+    "llvm_speedup_over_slop": 1.0824742268041236
+  },
+  {
+    "test": "add_mul_sgn",
+    "language": "verilog",
+    "slop_exec_s": 1.752,
+    "llvm_exec_s": 1.636,
+    "slop_setup_compile_s": 8.048,
+    "llvm_setup_compile_s": 7.982,
+    "llvm_speedup_over_slop": 1.0709046454767726
+  },
+  {
+    "test": "br_amba_axi_isolate_mgr",
+    "language": "pyrope",
+    "slop_exec_s": 1.09,
+    "llvm_exec_s": 1.401,
+    "slop_setup_compile_s": 6.791,
+    "llvm_setup_compile_s": 6.898,
+    "llvm_speedup_over_slop": 0.7780157030692363
+  },
+  {
+    "test": "br_amba_axi_isolate_mgr",
+    "language": "verilog",
+    "slop_exec_s": 1.108,
+    "llvm_exec_s": 1.578,
+    "slop_setup_compile_s": 6.909,
+    "llvm_setup_compile_s": 6.914,
+    "llvm_speedup_over_slop": 0.7021546261089987
+  },
+  {
+    "test": "br_arb_rr",
+    "language": "pyrope",
+    "slop_exec_s": 1.544,
+    "llvm_exec_s": 3.496,
+    "slop_setup_compile_s": 6.572,
+    "llvm_setup_compile_s": 6.534,
+    "llvm_speedup_over_slop": 0.4416475972540046
+  },
+  {
+    "test": "br_arb_rr",
+    "language": "verilog",
+    "slop_exec_s": 0.793,
+    "llvm_exec_s": 0.704,
+    "slop_setup_compile_s": 6.542,
+    "llvm_setup_compile_s": 6.437,
+    "llvm_speedup_over_slop": 1.1264204545454546
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "language": "pyrope",
+    "slop_exec_s": 0.913,
+    "llvm_exec_s": 1.416,
+    "slop_setup_compile_s": 6.847,
+    "llvm_setup_compile_s": 6.966,
+    "llvm_speedup_over_slop": 0.644774011299435
+  },
+  {
+    "test": "br_fifo_flops_push_credit",
+    "language": "verilog",
+    "slop_exec_s": 0.934,
+    "llvm_exec_s": 1.459,
+    "slop_setup_compile_s": 6.855,
+    "llvm_setup_compile_s": 6.942,
+    "llvm_speedup_over_slop": 0.6401644962302947
+  },
+  {
+    "test": "br_flow_arb_rr",
+    "language": "pyrope",
+    "slop_exec_s": 4.139,
+    "llvm_exec_s": 9.839,
+    "slop_setup_compile_s": 6.561,
+    "llvm_setup_compile_s": 6.748,
+    "llvm_speedup_over_slop": 0.42067283260493954
+  },
+  {
+    "test": "br_flow_arb_rr",
+    "language": "verilog",
+    "slop_exec_s": 1.407,
+    "llvm_exec_s": 1.665,
+    "slop_setup_compile_s": 6.659,
+    "llvm_setup_compile_s": 6.731,
+    "llvm_speedup_over_slop": 0.8450450450450451
+  }
+]

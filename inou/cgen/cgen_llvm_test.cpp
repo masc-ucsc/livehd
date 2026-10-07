@@ -4,6 +4,7 @@
 
 #include <bit>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -17,9 +18,93 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
+#include "sim_compile_workers.hpp"
+#include "sim_native_rt.hpp"
+
+TEST(CgenLlvm, SharedCodePreservesBindingsAndIndependentState) {
+  const auto make = [](std::string_view name, uint64_t increment, size_t input_word) {
+    Cgen_llvm   kernel(name, Cgen_llvm::State_layout{3, {{input_word, 64, true}}});
+    std::string error;
+    const auto  sum = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.constant(64, increment), 64, true);
+    EXPECT_TRUE(kernel.add_state_output(2, 2, sum, {}, error)) << error;
+    return kernel;
+  };
+  auto        first               = make("shared_first", 1, 0);
+  auto        second              = make("shared_second", 1, 0);
+  auto        different_operation = make("shared_first", 2, 0);
+  auto        different_binding   = make("shared_first", 1, 1);
+  std::string error;
+  const auto  key = first.sharing_key(error);
+  ASSERT_FALSE(key.empty()) << error;
+  EXPECT_EQ(second.sharing_key(error), key);
+  EXPECT_NE(different_operation.sharing_key(error), key);
+  EXPECT_NE(different_binding.sharing_key(error), key);
+  EXPECT_EQ(first.sharing_key(error), key);
+  const auto path = std::filesystem::temp_directory_path() / "livehd-shared-code.o";
+  ASSERT_TRUE(first.write_object(path.string(), error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(path.string(), error)) << error;
+  const auto fn = objects.lookup("shared_first", error);
+  ASSERT_NE(fn, nullptr) << error;
+  uint64_t a[] = {10, 0, 0};
+  uint64_t b[] = {20, 0, 0};
+  fn(a, nullptr);
+  EXPECT_EQ(a[2], 11u);
+  EXPECT_EQ(b[2], 0u);
+  fn(b, nullptr);
+  EXPECT_EQ(a[2], 11u);
+  EXPECT_EQ(b[2], 21u);
+  std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, CachedObjectsValidateInputsAndObjectBytes) {
+  const auto dir = std::filesystem::temp_directory_path() / "livehd-native-object-cache";
+  std::filesystem::create_directories(dir);
+  const auto object = (dir / "color.o").string();
+  const auto cache  = (dir / "color.key").string();
+  const auto emit   = [&](uint64_t increment, bool reuse, bool expected_hit) {
+    Cgen_llvm::State_layout layout{2, {{0, 64, true}}};
+    Cgen_llvm               kernel("cached_add", layout);
+    std::string             error;
+    const auto sum = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.constant(64, increment), 64, true);
+    ASSERT_TRUE(kernel.add_state_output(1, 1, sum, {}, error)) << error;
+    bool hit = false;
+    ASSERT_TRUE(kernel.write_object(object, error, false, reuse ? cache : "", &hit)) << error;
+    EXPECT_EQ(hit, expected_hit);
+    livehd::sim::Native_objects objects;
+    ASSERT_TRUE(objects.load(object, error)) << error;
+    auto* address = objects.lookup("cached_add", error);
+    ASSERT_NE(address, nullptr) << error;
+    uint64_t state[] = {100, 0};
+    address(state, nullptr);
+    EXPECT_EQ(state[1], 100 + increment);
+  };
+  std::filesystem::remove(cache);
+  emit(1, true, false);
+  const auto written = std::filesystem::last_write_time(object);
+  emit(1, true, true);
+  EXPECT_EQ(std::filesystem::last_write_time(object), written);
+  emit(2, true, false);
+  emit(2, true, true);
+  {
+    std::ofstream output(object);
+    output << "damaged object";
+  }
+  emit(2, true, false);
+  {
+    std::ofstream output(cache);
+    output << "truncated key";
+  }
+  emit(2, true, false);
+  emit(2, false, false);
+  std::filesystem::remove(object);
+  emit(2, true, false);
+  std::filesystem::remove_all(dir);
+}
 
 TEST(CgenLlvm, WideVariableShiftsCompileAsPackedLoops) {
   for (const uint32_t width : {4096u, 4097u, 131064u}) {
@@ -400,4 +485,315 @@ TEST(CgenLlvm, NativeWideCopiesAndDivisionHaveNoRuntimeDependencies) {
     ASSERT_TRUE(kernel.write_object(path.string(), error, false)) << width << ": " << error;
     std::filesystem::remove(path);
   }
+}
+
+TEST(CgenLlvm, StateObjectsRunWithoutHostCompilationAndPreserveAliasing) {
+  const auto  path = std::filesystem::temp_directory_path() / "livehd-native-state-swap.o";
+  Cgen_llvm   kernel("state_swap",
+                     Cgen_llvm::State_layout{
+                         6,
+                         {{0, 64, true}, {1, 64, true}, {2, 9, true, 60}}
+  });
+  std::string error;
+  ASSERT_TRUE(kernel.add_state_output(0,
+                                      0,
+                                      kernel.input(1),
+                                      {
+                                          {4, 1}
+  },
+                                      error))
+      << error;
+  ASSERT_TRUE(kernel.add_state_output(1,
+                                      1,
+                                      kernel.input(0),
+                                      {
+                                          {4, 2}
+  },
+                                      error))
+      << error;
+  ASSERT_TRUE(kernel.add_state_output(5,
+                                      5,
+                                      kernel.input(2),
+                                      {
+                                          {4, 4}
+  },
+                                      error))
+      << error;
+  ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(path.string(), error)) << error;
+  const auto fn = objects.lookup("state_swap", error);
+  ASSERT_NE(fn, nullptr) << error;
+  uint64_t state[] = {11, 29, uint64_t{13} << 60, 17, 8, 0};
+  fn(state, nullptr);
+  EXPECT_EQ(state[0], 29u);
+  EXPECT_EQ(state[1], 11u);
+  EXPECT_EQ(state[4], 15u);  // preserved old flags and both snapshot comparisons
+  EXPECT_EQ(state[5], 285u);
+  state[0] = state[1];
+  state[4] = 8;
+  fn(state, nullptr);
+  EXPECT_EQ(state[4], 8u);  // unchanged outputs must not wake downstream work
+  std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, NativeStateObjectsAndCommitsUseParallelWorkers) {
+  livehd::sim::Compile_workers          workers(2);
+  std::vector<std::future<std::string>> jobs;
+  std::vector<std::filesystem::path>    paths;
+  for (unsigned i = 0; i < 8; ++i) {
+    const auto name = "native_state_" + std::to_string(i);
+    paths.push_back(std::filesystem::temp_directory_path() / (name + ".o"));
+    jobs.push_back(workers.submit([name, path = paths.back()] {
+      Cgen_llvm   kernel(name, Cgen_llvm::State_layout{3, {{0, 64, true}}});
+      auto        next = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.constant(64, 1), 64, true);
+      std::string error;
+      if (!kernel.add_state_output(1,
+                                   0,
+                                   next,
+                                   {
+                                       {2, 1}
+      },
+                                   error)
+          || !kernel.write_object(path.string(), error)) {
+        return error;
+      }
+      return std::string{};
+    }));
+  }
+  Cgen_llvm   commit("native_commit", Cgen_llvm::State_layout{3, {}});
+  std::string error;
+  ASSERT_TRUE(commit.copy_state(0, 1, 1, error)) << error;
+  const auto commit_path = std::filesystem::temp_directory_path() / "livehd-native-commit.o";
+  ASSERT_TRUE(commit.write_object(commit_path.string(), error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(commit_path.string(), error)) << error;
+  auto commit_fn = objects.lookup("native_commit", error);
+  ASSERT_NE(commit_fn, nullptr) << error;
+  for (unsigned i = 0; i < jobs.size(); ++i) {
+    ASSERT_TRUE(jobs[i].get().empty());
+    ASSERT_TRUE(objects.load(paths[i].string(), error)) << error;
+    auto eval_fn = objects.lookup("native_state_" + std::to_string(i), error);
+    ASSERT_NE(eval_fn, nullptr) << error;
+    livehd::sim::Native_instance instance(3);
+    ASSERT_TRUE(instance.schedule(
+        {
+            {  eval_fn, 0, 0},
+            {commit_fn, 2, 1}
+    },
+        error))
+        << error;
+    for (unsigned step = 0; step < 100; ++step) {
+      instance.step();
+      EXPECT_EQ(instance.state()[0], step + 1);
+      EXPECT_EQ(instance.state()[2], 0u);
+    }
+    std::filesystem::remove(paths[i]);
+  }
+  std::filesystem::remove(commit_path);
+}
+
+TEST(CgenLlvm, NativeWideStateCommitHasNoExternalMemcpy) {
+  constexpr size_t words = 2048;
+  Cgen_llvm        kernel("state_commit_wide", Cgen_llvm::State_layout{2 * words, {}});
+  std::string      error;
+  ASSERT_TRUE(kernel.copy_state(0, words, words, error)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-native-wide-commit.o";
+  ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(path.string(), error)) << error;
+  auto fn = objects.lookup("state_commit_wide", error);
+  ASSERT_NE(fn, nullptr) << error;
+  std::vector<uint64_t> state(2 * words);
+  for (size_t i = 0; i < words; ++i) {
+    state[words + i] = i * 13 + 1;
+  }
+  fn(state.data(), nullptr);
+  for (size_t i = 0; i < words; ++i) {
+    EXPECT_EQ(state[i], state[words + i]);
+  }
+  std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, NativeStateRejectsInvalidSpans) {
+  std::string error;
+  Cgen_llvm   kernel("bad_state", Cgen_llvm::State_layout{4, {{0, 64, true}}});
+  EXPECT_FALSE(kernel.add_state_output(4, 0, kernel.input(0), {}, error));
+  EXPECT_FALSE(kernel.add_state_output(0, 4, kernel.input(0), {}, error));
+  EXPECT_FALSE(kernel.add_state_output(0,
+                                       0,
+                                       kernel.input(0),
+                                       {
+                                           {4, 1}
+  },
+                                       error));
+  EXPECT_FALSE(kernel.copy_state(0, 1, 2, error));
+  EXPECT_FALSE(kernel.copy_state(0, 3, 2, error));
+}
+
+TEST(CgenLlvm, NativeMemoryCommitsAtThePhaseBarrierWithoutCppWrappers) {
+  Cgen_llvm::Memory memory;
+  memory.data    = 0;
+  memory.pending = 1;
+  memory.bits    = 13;
+  memory.size    = 8;
+  memory.writes  = 1;
+  Cgen_llvm evaluate("native_memory_evaluate",
+                     Cgen_llvm::State_layout{
+                         3,
+                         {{0, 1, true}, {1, 16, true}, {2, 13, true}}
+  });
+  evaluate.bind_memory("mem", memory);
+  ASSERT_TRUE(evaluate.memory_stage_write("mem", evaluate.input(0), evaluate.input(1), evaluate.input(2)));
+  Cgen_llvm commit("native_memory_commit", Cgen_llvm::State_layout{3, {}});
+  commit.bind_memory("mem", memory);
+  ASSERT_TRUE(commit.memory_commit("mem"));
+  std::string error;
+  const auto  eval_path   = std::filesystem::temp_directory_path() / "livehd-native-memory-evaluate.o";
+  const auto  commit_path = std::filesystem::temp_directory_path() / "livehd-native-memory-commit.o";
+  ASSERT_TRUE(evaluate.write_object(eval_path.string(), error)) << error;
+  ASSERT_TRUE(commit.write_object(commit_path.string(), error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(eval_path.string(), error)) << error;
+  ASSERT_TRUE(objects.load(commit_path.string(), error)) << error;
+  auto eval_fn = objects.lookup("native_memory_evaluate", error);
+  ASSERT_NE(eval_fn, nullptr) << error;
+  auto commit_fn = objects.lookup("native_memory_commit", error);
+  ASSERT_NE(commit_fn, nullptr) << error;
+  uint64_t data[8]     = {};
+  uint64_t pending[5]  = {};
+  void*    resources[] = {data, pending};
+  uint64_t state[]     = {1, 3, 55};
+  eval_fn(state, resources);
+  EXPECT_EQ(data[3], 0u);  // capture must not publish before the commit barrier
+  commit_fn(state, resources);
+  EXPECT_EQ(data[3], 55u);
+  EXPECT_EQ(pending[4], 0u);
+  state[0] = 0;
+  state[2] = 99;
+  eval_fn(state, resources);
+  commit_fn(state, resources);
+  EXPECT_EQ(data[3], 55u);
+  // An out-of-array address never creates a pending write.
+  state[0] = 1;
+  state[1] = 8;
+  eval_fn(state, resources);
+  EXPECT_EQ(pending[4], 0u);
+  commit_fn(state, resources);
+  std::filesystem::remove(eval_path);
+  std::filesystem::remove(commit_path);
+}
+
+TEST(CgenLlvm, ObjectOwnedStateIsPrivateAndIndependentAcrossInstances) {
+  livehd::sim::Compile_workers          workers(2);
+  std::vector<std::future<std::string>> jobs;
+  std::vector<std::filesystem::path>    paths;
+  for (unsigned i = 0; i < 2; ++i) {
+    paths.push_back(std::filesystem::temp_directory_path() / ("livehd-native-private-" + std::to_string(i) + ".o"));
+    jobs.push_back(workers.submit([i, path = paths.back()] {
+      // Deliberately identical local names in different objects. The public
+      // port is word 0; the counter at word 1 is private to this color instance.
+      Cgen_llvm   kernel("private_counter", Cgen_llvm::State_layout{2, {{1, 64, true}}});
+      const auto  next = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.constant(64, 1), 64, true);
+      std::string error;
+      if (!kernel.add_state_output(0,
+                                   0,
+                                   next,
+                                   {
+      },
+                                   error)
+          || !kernel.add_state_output(1, 1, next, {}, error)
+          || !kernel.write_state_object(path.string(), "counter_image_" + std::to_string(i), 1, {{1, 40 + i}}, error)) {
+        return error;
+      }
+      return std::string{};
+    }));
+  }
+  std::unique_ptr<livehd::sim::Native_instance> survivor;
+  {
+    livehd::sim::Native_objects objects;
+    for (unsigned i = 0; i < paths.size(); ++i) {
+      ASSERT_TRUE(jobs[i].get().empty());
+      std::string error;
+      auto        object = llvm::object::ObjectFile::createObjectFile(paths[i].string());
+      ASSERT_TRUE(object) << llvm::toString(object.takeError());
+      size_t exports = 0;
+      for (const auto& symbol : object->getBinary()->symbols()) {
+        auto flags = symbol.getFlags();
+        ASSERT_TRUE(flags) << llvm::toString(flags.takeError());
+        if ((*flags & llvm::object::BasicSymbolRef::SF_Global) != 0) {
+          auto name = symbol.getName();
+          ASSERT_TRUE(name) << llvm::toString(name.takeError());
+          EXPECT_EQ(name->str(), "counter_image_" + std::to_string(i));
+          EXPECT_EQ(*flags & llvm::object::BasicSymbolRef::SF_Undefined, 0u);
+          ++exports;
+        }
+      }
+      EXPECT_EQ(exports, 1u);
+      ASSERT_TRUE(objects.load(paths[i].string(), error)) << error;
+      auto first  = objects.instantiate("counter_image_" + std::to_string(i), error);
+      auto second = objects.instantiate("counter_image_" + std::to_string(i), error);
+      ASSERT_NE(first, nullptr) << error;
+      ASSERT_NE(second, nullptr) << error;
+      ASSERT_EQ(first->state().size(), 1u);
+      ASSERT_EQ(second->state().size(), 1u);
+      EXPECT_EQ(first->state()[0], 0u);
+      for (unsigned cycle = 0; cycle < 100; ++cycle) {
+        first->step();
+        EXPECT_EQ(first->state()[0], 41 + i + cycle);
+      }
+      EXPECT_EQ(second->state()[0], 0u);
+      second->step();
+      EXPECT_EQ(second->state()[0], 41 + i);
+      first->reset();
+      EXPECT_EQ(first->state()[0], 0u);
+      first->step();
+      EXPECT_EQ(first->state()[0], 41 + i);
+      survivor = std::move(second);
+      std::filesystem::remove(paths[i]);
+    }
+  }
+  // Code and constants must outlive their loader while an instance uses them.
+  survivor->step();
+  EXPECT_EQ(survivor->state()[0], 43u);
+}
+
+TEST(CgenLlvm, NativeStateDescriptorRejectsInvalidInitialization) {
+  const auto  path = std::filesystem::temp_directory_path() / "livehd-native-bad-state.o";
+  Cgen_llvm   kernel("private_counter", Cgen_llvm::State_layout{2, {}});
+  std::string error;
+  EXPECT_FALSE(kernel.write_state_object(path.string(), "", 1, {}, error));
+  EXPECT_FALSE(kernel.write_state_object(path.string(), "private_counter", 1, {}, error));
+  EXPECT_FALSE(kernel.write_state_object(path.string(), "image", 3, {}, error));
+  EXPECT_FALSE(kernel.write_state_object(path.string(),
+                                         "image",
+                                         1,
+                                         {
+                                             {2, 42}
+  },
+                                         error));
+  EXPECT_FALSE(kernel.write_state_object(path.string(),
+                                         "image",
+                                         1,
+                                         {
+                                             {1, 42},
+                                             {1, 43}
+  },
+                                         error));
+  // Zero-only defaults need no table. An object with no public words is valid.
+  ASSERT_TRUE(kernel.write_state_object(path.string(),
+                                        "image",
+                                        0,
+                                        {
+                                            {1, 0}
+  },
+                                        error))
+      << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(path.string(), error)) << error;
+  auto instance = objects.instantiate("image", error);
+  ASSERT_NE(instance, nullptr) << error;
+  EXPECT_TRUE(instance->state().empty());
+  instance->step();
+  std::filesystem::remove(path);
 }

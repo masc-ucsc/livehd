@@ -1,0 +1,59 @@
+import hashlib
+import json
+import os
+import pathlib
+import statistics
+import subprocess
+import time
+
+root = pathlib.Path(__file__).parent
+lhd = root / 'toolchain/lhd'
+suite = pathlib.Path('/mada/users/renau/projs/lhdsuite')
+sources = [suite / 'minion/pyrope/minion_top.prp', suite / 'minion/sim/minion_prog_tb.prp']
+env = os.environ.copy()
+env['RUNFILES_DIR'] = str(root / 'toolchain/lhd.runfiles')
+env['CXX'] = '/usr/bin/clang++'
+result = {'binary_sha256': hashlib.sha256(lhd.read_bytes()).hexdigest(), 'jobs': 8, 'stages': {},
+          'source_sha256': {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}}
+
+def run(name, argv):
+    print(name, 'started', flush=True)
+    start = time.perf_counter()
+    with (root / (name + '.log')).open('w') as output:
+        proc = subprocess.run([str(x) for x in argv], env=env, cwd=root, stdout=output, stderr=subprocess.STDOUT)
+    result['stages'][name] = {'seconds': time.perf_counter() - start, 'returncode': proc.returncode,
+                              'argv': [str(x) for x in argv]}
+    (root / 'results.json').write_text(json.dumps(result, indent=2))
+    print(name, result['stages'][name]['seconds'], 'exit', proc.returncode, flush=True)
+    if proc.returncode:
+        raise SystemExit(str(root / (name + '.log')))
+
+args = [lhd, 'sim', *sources, '--workdir', root / 'SW', '--set', 'sim.jobs=8', '--set', 'sim.tune.profile=off',
+        '--set', 'sim.tune.backend=llvm', '--set', 'sim.vcd=false']
+run('setup', args + ['--setup-only', '--result-json', root / 'setup.json'])
+run('compile', args + ['--run-only', '--set', 'sim.compile_only=true', '--set', 'sim.ninja=false',
+                       '--result-json', root / 'compile.json'])
+baseline = pathlib.Path('/tmp/lhd-minion-workers-compare/llvm/SW/sim/drv.bin')
+cpu = min(os.sched_getaffinity(0))
+result['execution_cpu'] = cpu
+for i in range(3):
+    for case, binary in [('before', baseline), ('after', root / 'SW/sim/drv.bin')]:
+        name = f'{case}{i}'
+        run(name, ['taskset', '-c', str(cpu), binary, '+cycles=100000', '--result-json', root / (name + '.json')])
+        data = json.loads((root / (name + '.json')).read_text())
+        tests = data if isinstance(data, list) else data['tests']
+        assert tests and all(test['status'] == 'pass' for test in tests), tests
+        markers = [line for line in (root / (name + '.log')).read_text().splitlines() if 'minion program:' in line]
+        assert markers
+        result['stages'][name]['markers'] = markers
+for case in ['before', 'after']:
+    result[case + '_median_s'] = statistics.median(result['stages'][f'{case}{i}']['seconds'] for i in range(3))
+result['objects'] = len(list((root / 'SW/sim').glob('*.llvm.o')))
+before_warm = {p.name: p.stat().st_mtime_ns for p in (root / 'SW/sim').glob('*.llvm.o')}
+for i in range(2):
+    run(f'warm_setup{i}', args + ['--setup-only', '--result-json', root / f'warm_setup{i}.json'])
+after_warm = {p.name: p.stat().st_mtime_ns for p in (root / 'SW/sim').glob('*.llvm.o')}
+result['warm_objects_rewritten'] = sorted(name for name in before_warm.keys() | after_warm.keys()
+                                         if before_warm.get(name) != after_warm.get(name))
+(root / 'results.json').write_text(json.dumps(result, indent=2))
+print(json.dumps(result, indent=2), flush=True)

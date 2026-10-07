@@ -1,0 +1,40 @@
+import hashlib,json,os,pathlib,shutil,statistics,subprocess,time
+root=pathlib.Path(__file__).parent
+before=pathlib.Path('/tmp/lhd-packed-inputs')
+suite=pathlib.Path('/mada/users/renau/projs/lhdsuite')
+lhd=root/'toolchain/lhd'
+env=os.environ.copy();env['RUNFILES_DIR']=str(root/'toolchain/lhd.runfiles');env['CXX']='/usr/bin/clang++'
+result={'binary_sha256':hashlib.sha256(lhd.read_bytes()).hexdigest(),'jobs':8,'cpu':min(os.sched_getaffinity(0)),
+        'scope':'Fresh host compilation of the exact retained edited simulator sources/native objects; paired execution against the previous batching of the same edited driver.', 'runs':{}}
+def save(): (root/'results.json').write_text(json.dumps(result,indent=2))
+def run(name,argv):
+ print(name,'started',flush=True);t=time.perf_counter()
+ with (root/(name+'.log')).open('w') as f:p=subprocess.run(list(map(str,argv)),env=env,cwd=root,stdout=f,stderr=subprocess.STDOUT)
+ result['runs'][name]={'seconds':time.perf_counter()-t,'returncode':p.returncode,'argv':list(map(str,argv))};save()
+ print(name,result['runs'][name]['seconds'],'exit',p.returncode,flush=True)
+ if p.returncode:raise SystemExit(name+' failed')
+for core,top,mutation in [('dino','PipelinedDualIssueCPU.prp','ALU.prp'),('minion','minion_top.prp','txfma_adder.prp')]:
+ tree=root/core/'tree';shutil.copytree(suite/core/'pyrope',tree,dirs_exist_ok=True);shutil.copy2(suite/core/'tests/bug1'/mutation,tree/mutation)
+ for be in ['slop','llvm']:
+  work=root/core/be/'SW';source=before/core/be/'SW/sim';dest=work/'sim'
+  shutil.copytree(source,dest,ignore=shutil.ignore_patterns('obj','pch','unity','drv.bin','build.log','build.ninja','.ninja_*'),dirs_exist_ok=True)
+  # Byte-for-byte source/object identity is the controlled variable.
+  result[core+'_'+be]={'inputs':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in dest.iterdir() if p.is_file() and p.name.endswith(('.cpp','.hpp','.llvm.o'))}}
+  run(core+'_'+be+'_compile',[lhd,'sim',tree/top,suite/core/'sim'/f'{core}_prog_tb.prp','--workdir',work,'--run-only','--set','sim.compile_only=true','--set','sim.jobs=8','--set','sim.ninja=false','--set','sim.tune.profile=off','--set',f'sim.tune.backend={be}','--set','sim.vcd=false','--result-json',root/(core+'_'+be+'_compile.json')])
+  for case,binary in [('before',source/'drv.bin'),('after',dest/'drv.bin')]:
+   sections=subprocess.check_output(['size','-A',str(binary)],text=True)
+   text_section=next(int(line.split()[1]) for line in sections.splitlines() if line.startswith('.text '))
+   result[core+'_'+be][case+'_elf_bytes']=binary.stat().st_size;result[core+'_'+be][case+'_text_bytes']=text_section
+  save()
+ for i in range(3):
+  for be in ['slop','llvm']:
+   for case,binary in [('before',before/core/be/'SW/sim/drv.bin'),('after',root/core/be/'SW/sim/drv.bin')]:
+    name=f'{core}_{be}_{case}{i}';cycles=5000000 if core=='dino' else 100000
+    run(name,['taskset','-c',str(result['cpu']),binary,f'+cycles={cycles}','--result-json',root/(name+'.json')])
+    tests=json.loads((root/(name+'.json')).read_text());assert tests and all(t['status']=='pass' for t in tests),tests
+    result['runs'][name]['tests']=tests;save()
+ for be in ['slop','llvm']:
+  for case in ['before','after']:
+   result[core+'_'+be][case+'_median_s']=statistics.median(result['runs'][f'{core}_{be}_{case}{i}']['seconds'] for i in range(3))
+ save()
+print('complete',flush=True)

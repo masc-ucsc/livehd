@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 
@@ -66,14 +67,25 @@ void refold_private_body(const std::shared_ptr<hhds::Graph>& graph) {
 
 void specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
   std::map<std::string, std::shared_ptr<hhds::Graph>> specializations;
+  std::set<const hhds::Graph*>                        pending_refold;
+  for (const auto& graph : graphs) {
+    pending_refold.insert(graph.get());
+  }
   bool                                                changed = true;
   while (changed) {
     changed             = false;
     const auto existing = graphs;
     for (const auto& graph : existing) {
-      // Re-fold parent cones after a callee publishes a constant output.
-      Cprop{}.do_trans(graph);
-      Bitwidth{16}.do_trans(graph);
+      // Scan all call sites each round: a callee may have published a constant
+      // since its parent was visited. Only bodies rewritten by this pass need
+      // another expensive fold/inference sweep. The old global retry folded
+      // every unaffected definition after any specialization in the library.
+      if (pending_refold.erase(graph.get()) != 0) {
+        refold_private_body(graph);
+        // A fold can publish an output for a parent already visited this round.
+        // Keep one following scan even if this body's call sites need no edits.
+        changed = true;
+      }
       std::vector<hhds::Node_class> nodes;
       for (auto node : graph->body().nodes()) {
         nodes.push_back(node);
@@ -176,6 +188,7 @@ void specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
             Bitwidth{16}.do_trans(specialized);
             specializations.emplace(key, specialized);
             graphs.push_back(specialized);
+            pending_refold.insert(specialized.get());
             body = std::move(specialized);
           }
           if (loop) {
@@ -184,6 +197,7 @@ void specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
             node.set_subnode(body->get_io());
           }
           changed = true;
+          pending_refold.insert(graph.get());
         }
         // A statically returned value can bypass the instance. Zero trips and
         // early exit must not accidentally acquire the body's constant.
@@ -233,6 +247,7 @@ void specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
               replacement      = gu::fit_to_port(*graph, replacement, std::max(1, gu::bits_of(driver)), !gu::is_unsign(driver));
               replacement.connect_sink(edge.sink);
               changed = true;
+              pending_refold.insert(graph.get());
             }
           }
         }

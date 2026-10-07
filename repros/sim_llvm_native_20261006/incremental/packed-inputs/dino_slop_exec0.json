@@ -1,0 +1,1 @@
+[{"test":"cpu.prog","status":"pass","arguments":["+cycles=5000000"],"parameters":{"cycles":"5000000"},"sim_cycles":5000000,"init_ns":60872,"sim_ns":1164117003,"cpu_ns":1163749305,"cpu_cycles":0,"instructions":0,"pcore_frac":0.0000,"counters":"cputime","rng_draws":0,"ckpt_taken":0,"end_digest":"63cfeacbda730e9b","out_digest":"04597e5f7b13cdb5"}]

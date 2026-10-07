@@ -1,0 +1,25 @@
+{
+  "method": "GDB entry/return breakpoint timing; diagnostic run, not headline benchmark",
+  "inclusive_calls_seconds": {
+    "Cgen_sim::generation_current": [
+      228,
+      1.4097782999742776
+    ],
+    "Cgen_sim::prepare_graph": [
+      228,
+      0.11180854588747025
+    ],
+    "livehd::graph_util::repair_simulator_packed_cycles": [
+      228,
+      2.2964220880530775
+    ],
+    "livehd::sim::fuse_parallel_loops": [
+      228,
+      0.14553762669675052
+    ],
+    "livehd::sim::specialize_constants": [
+      1,
+      53.16304032295011
+    ]
+  }
+}

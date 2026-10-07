@@ -1,0 +1,5 @@
+{
+  "suite_commit": "4857d88e6f6a44bd3c8d1280db1cc42c47061f99",
+  "suite_minion_status": "?? minion/verilog/abc.history\n",
+  "note": "Only untracked abc.history in minion; HDL and testbench unchanged. Both backends use one frozen LiveHD binary/runfiles, fresh workdirs, sequential builds, eight jobs, Clang, tuning and VCD off. Compile-only excludes simulation from build timing. Full C++-free native runtime is not integrated."
+}

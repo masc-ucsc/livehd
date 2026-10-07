@@ -147,6 +147,8 @@ Native object emission uses bounded workers during setup. `sim.jobs` sets the
 same limit for object emission and host compilation. With no explicit limit,
 the worker budget is sampled from available CPUs and load, with at least one
 worker; setup waits for a completed job before starting another at the limit.
+A reusable worker pool spans module generation. A completion by any worker
+releases the next job; waiting for a slow first job does not idle the others.
 Objects are written only when bytes change and are generation-cache artifacts,
 so a missing native object invalidates the generated module. Both host build
 paths link through response files, allowing thousands of color objects without
@@ -233,3 +235,59 @@ RenameTable within 4%).
 
 The [Minion partition stability follow-up](../../repros/minion_partition_stability_20260920/README.md)
 records the arithmetic-role fingerprint bug, allocator changes, and edit measurements.
+
+## Native state/runtime migration
+
+The normal LLVM simulator still uses generated C++ support. The next conversion
+is tracked in [llvm-native-runtime](../../todo/livehd/llvm-native-runtime.html).
+`Cgen_llvm::State_layout` emits kernels that read/write shared packed storage
+directly and update dirty flags in the object. Native commit functions handle
+contiguous register copies and staged memory entries. `sim_native_rt` loads those
+objects and supplies generic storage and scheduling without invoking a host
+compiler. The code-generator tests exercise this interface; full Color_plan and
+testbench-driver integration is still pending.
+
+`write_state_object` emits an allocation/initialization descriptor alongside the
+native entry point. The descriptor is the only exported symbol: code and sparse
+nonzero defaults have local linkage. Boundary words occupy the public prefix;
+remaining words are private to each runtime instance and have no linker symbols.
+`Native_objects::instantiate` allocates and initializes that storage without a
+generated C++ class. Instances retain their object code's lifetime. Repeated
+instances never share mutable state, and reset restores the object defaults.
+
+For incremental simulation, LLVM object filenames and symbols use the color's
+storage identity, not its dense schedule position. Cold discovery retains the
+large pressure-limited partitions. `.color-cuts.txt` saves their terminal anchors;
+subsequent discovery keeps surviving cuts while enforcing the same phase,
+activation, dependency and live-word constraints. An oversized edited interval
+splits locally; the next surviving anchor stops global budget reflow. Tuning
+changes discard incompatible hints.
+
+The LLVM `.llvm.k` sidecar hashes the complete unoptimized IR and emitter/toolchain
+salt, then verifies the object's bytes before skipping optimization and native
+code generation. Missing or damaged pairs are misses. The single
+`lhd.incremental` switch controls generation reuse, partition hints, and these
+native-object lookups. IR construction and shared C++ headers remain costs.
+Repeated-shape identities and full native runtime integration remain migration
+work. The rejected independent-cone splitting experiment inflated Minion from
+4,981 to 28,480 native objects and slowed 100k cycles from 2.51 s to 4.45 s;
+smaller partitions are not the incremental strategy.
+
+Checkpoint plan fingerprints live in the executable root’s small `.tune-id.cpp`,
+so a semantic edit can update checkpoint diagnostics without recompiling unchanged
+module storage/scheduling bodies. The support table remains independent of the
+tuning vector. This is cold immutable metadata, not shared mutable color state.
+
+Within a module, identical finalized LLVM IR shares one native object. Equality
+normalizes only the exported entry symbol; widths, constants, resource bindings
+and the complete ABI remain part of the comparison. Caller-owned mutable state
+stays separate. The host build follows driver includes and the artifact manifest
+to exclude standalone module exports that are unreachable after inlining. Those
+exports remain on disk; this does not yet eliminate their generation cost.
+
+LLVM adapters reuse a whole input/register value already required by a color
+when other reads select slices of that value. LLVM performs the extraction;
+the adapter no longer packs those slices separately. Constant specialization
+still scans the full hierarchy to propagate newly constant outputs, but runs
+constant folding and width inference again only for locally rewritten bodies.
+The parent-before-child regression checks propagation through six definitions.

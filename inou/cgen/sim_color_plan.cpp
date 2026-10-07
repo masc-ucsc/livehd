@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -1222,9 +1223,26 @@ std::optional<bool> update_on_rise(const hhds::Occurrence_node& node, const lc::
 // dirty mark per value) costs more than the register pressure it avoids: 256
 // words gave minion 1.75x, matched_filter 1.15x, RenameTable -4%.
 Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bool separate_runtime_calls, uint64_t live_words,
-                                int64_t fence_ratio) {
+                                int64_t fence_ratio, std::string_view previous_cuts_path) {
   Color_plan plan;
   plan.live_word_budget_ = live_words > 0 ? live_words : kDefaultLiveWords;
+  plan.partition_header_ = std::format("sim-cuts-v1 {} {} {} {}",
+                                       plan.live_word_budget_,
+                                       fence_ratio < 0 ? kDefaultFenceRatio : fence_ratio,
+                                       include_observations,
+                                       separate_runtime_calls);
+  absl::flat_hash_set<Plan_id> previous_cuts;
+  if (!previous_cuts_path.empty()) {
+    std::ifstream input{std::string(previous_cuts_path)};
+    std::string   header;
+    std::getline(input, header);
+    if (header == plan.partition_header_) {
+      Plan_id id;
+      while (input >> std::hex >> id.hi >> id.lo) {
+        previous_cuts.insert(id);
+      }
+    }
+  }
   if (root == nullptr) {
     plan.summary_.complete = false;
     plan.errors_.emplace_back("null simulation root");
@@ -4460,6 +4478,23 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
            || site_module_owner[plan.version_sites_[lhs_version].base_site]
                   != site_module_owner[plan.version_sites_[rhs_version].base_site];
   };
+  // Boundaries are anchored to the terminal value, not to a global count of
+  // preceding operations. An edit may split its old interval when it exceeds
+  // pressure, but the next surviving anchor stops that change propagating.
+  // A cold plan retains the large pressure-limited partitions. State reads
+  // are ordinary sources, and introduce no new component fences.
+  const auto cut_identity = [&](size_t cut_version) {
+    const auto& version = plan.version_sites_[cut_version];
+    return Id_hash("partition-cut")
+        .id(plan.sites_[version.base_site].storage_id)
+        .u(static_cast<uint64_t>(version.slot))
+        .u(static_cast<uint64_t>(version.version))
+        .u(static_cast<uint64_t>(version.role))
+        .u(version.output_port)
+        .u(version.latch_input)
+        .id(version.latch_input ? version.structural_id : Plan_id{})
+        .finish();
+  };
   // Track distinct physical values, not edge uses. Repeated uses of one input
   // cost one live value; a wide scalar costs ceil(width/64) machine words.
   // Outputs remain live through the color ABI, while internal values die at
@@ -4563,6 +4598,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     uint64_t                    input_words    = 0;
     uint64_t                    frontier_words = 0;
     absl::flat_hash_set<size_t> frontier;
+    bool                        prior_boundary = false;
     for (const size_t version : execution_order) {
       const auto version_order = plan.version_sites_[version].execution_order;
       const auto reset_color   = [&] {
@@ -4572,10 +4608,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         frontier_words = 0;
         frontier.clear();
       };
-      const bool can_join = current != Color_plan::invalid_index && color_peak_words[current] <= plan.live_word_budget_
+      const bool can_join = !prior_boundary && current != Color_plan::invalid_index
+                            && color_peak_words[current] <= plan.live_word_budget_
                             && plan.version_sites_[members[current].front()].slot == plan.version_sites_[version].slot
                             && !crosses_control_boundary(current, version)
                             && color_ge[current] <= kSoftColorGe - std::min<uint64_t>(color_ge[version], kSoftColorGe);
+      prior_boundary      = previous_cuts.contains(cut_identity(version));
       if (!can_join) {
         reset_color();
       }
@@ -4661,6 +4699,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     // its whole implementation. An internal cone edit must not move the dirty
     // bit marked by unchanged state commits. Semantic membership above still
     // controls all kernel reuse. Terminal versions belong to only one color.
+    plan.partition_cuts_.push_back(cut_identity(color_members.back()));
     const auto&   terminal          = plan.version_sites_[color_members.back()];
     Pending_color pending_color;
     pending_color.color.storage_id       = Id_hash("color-storage")
@@ -6196,6 +6235,14 @@ std::string Color_plan::report() const {
   }
   result += "occurrence-map end\n";
   return result;
+}
+
+std::string Color_plan::partition_cuts() const {
+  std::string text = partition_header_ + "\n";
+  for (const auto& id : partition_cuts_) {
+    text += std::format("{:016x} {:016x}\n", id.hi, id.lo);
+  }
+  return text;
 }
 
 void Color_plan::write_report(std::string_view path) const {

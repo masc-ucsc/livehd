@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <memory>
 #include <ranges>
 #include <set>
@@ -1023,6 +1025,69 @@ TEST(SimColorPlan, OperandRoleEditPreservesPartitionMembershipAndStorageAbi) {
     EXPECT_EQ(before.boundary_slots()[i].structural_id, after.boundary_slots()[i].structural_id);
     EXPECT_EQ(before.boundary_slots()[i].producer_color, after.boundary_slots()[i].producer_color);
   }
+}
+
+TEST(SimColorPlan, InsertingLogicRepairsOnlyThePreviousPartition) {
+  const auto memberships = [](bool edited) {
+    auto& lib = livehd::Hhds_graph_library::instance(edited ? "lgdb_insert_edit" : "lgdb_insert_base");
+    auto  io  = lib.create_io("top");
+    for (unsigned i = 0; i < 32; ++i) {
+      io->add_input("in" + std::to_string(i), i);
+      io->add_output("out" + std::to_string(i), 32 + i);
+      io->set_bits("in" + std::to_string(i), 8);
+      io->set_bits("out" + std::to_string(i), 8);
+    }
+    io->add_output("tap", 64);
+    io->set_bits("tap", 8);
+    auto graph = io->create_graph();
+    if (!edited) {
+      gu::create_const(*graph, *Dlop::create_integer(0)).connect_sink(graph->get_output_pin("tap"));
+    }
+    for (unsigned i = 0; i < 32; ++i) {
+      auto value = graph->get_input_pin("in" + std::to_string(i));
+      for (unsigned j = 0; j < 8 + unsigned(edited && i == 7); ++j) {
+        auto sum = gu::create_typed_node(*graph, Ntype_op::Sum, 8);
+        sum.set_name("cone" + std::to_string(i) + "_step" + std::to_string(j));
+        value.connect_sink(sum.create_sink_pin(0));
+        gu::create_const(*graph, *Dlop::create_integer(5)).connect_sink(sum.create_sink_pin(0));
+        value = sum.create_driver_pin(0);
+        gu::set_bits(value, 8);
+        if (edited && i == 7 && j == 7) {
+          value.connect_sink(graph->get_output_pin("tap"));
+        }
+      }
+      value.connect_sink(graph->get_output_pin("out" + std::to_string(i)));
+    }
+    const auto plan = livehd::sim::Color_plan::discover(graph.get(), false, false, 16, -1, edited ? "insertion.cuts" : "");
+    if (!edited) {
+      std::ofstream output("insertion.cuts");
+      output << plan.partition_cuts();
+    }
+    EXPECT_TRUE(plan.complete()) << plan.report();
+    std::set<std::set<std::string>> result;
+    for (const auto& color : plan.colors()) {
+      std::set<std::string> members;
+      bool                  edited_cone = false;
+      for (const auto member : color.members) {
+        const auto& version  = plan.version_sites()[member];
+        const auto  name     = std::string(gu::node_name_of(plan.sites()[version.base_site].node.base_node()));
+        edited_cone         |= name.starts_with("cone7_");
+        members.insert(name + ":" + std::to_string(static_cast<unsigned>(version.version)));
+      }
+      if (!edited_cone) {
+        result.insert(std::move(members));
+      }
+    }
+    return result;
+  };
+  const auto before = memberships(false);
+  const auto after  = memberships(true);
+  size_t     reused = 0;
+  for (const auto& members : before) {
+    reused += after.contains(members);
+  }
+  EXPECT_EQ(reused, before.size()) << "unrelated color memberships changed after a one-node insertion";
+  std::filesystem::remove("insertion.cuts");
 }
 
 TEST(SimColorPlan, StructuralHashPreservesPortRolesAndOperandMultiplicity) {

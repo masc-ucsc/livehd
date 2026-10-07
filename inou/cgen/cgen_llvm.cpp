@@ -5,13 +5,14 @@
 #include <algorithm>
 #include <bit>
 #include <limits>
-#include <mutex>
+#include <map>
 #include <optional>
 #include <string_view>
 #include <system_error>
 #include <unordered_map>
 #include <utility>
 
+#include "cgen_salt.hpp"
 #include "file_output.hpp"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -24,6 +25,7 @@
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
@@ -38,7 +40,7 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/SHA256.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
@@ -51,6 +53,7 @@
 #include "llvm/Transforms/Scalar/SROA.h"
 #include "llvm/Transforms/Scalar/SimplifyCFG.h"
 #include "llvm/Transforms/Utils/LowerMemIntrinsics.h"
+#include "sim_llvm_target.hpp"
 
 namespace {
 
@@ -76,6 +79,12 @@ public:
     size_t index = 0;
     Value  value;
   };
+  struct State_output {
+    size_t                  word;
+    size_t                  previous_word;
+    Value                   value;
+    std::vector<Dirty_mask> dirty;
+  };
 
   llvm::LLVMContext                       context;
   std::unique_ptr<llvm::Module>           module;
@@ -87,23 +96,35 @@ public:
   llvm::Value*                            owner    = nullptr;
   std::vector<llvm::Value*>               values;
   std::vector<size_t>                     input_word_offsets;
+  std::vector<uint32_t>                   input_bits;
   std::vector<std::optional<Value>>       deferred_casts;
   std::vector<std::pair<uint32_t, bool>>  input_types;
   std::vector<Output>                     output_values;
   std::string                             error;
-  bool                                    scalar_abi = false;
+  std::string                             cache_path;
+  bool*                                   cache_reused = nullptr;
+  std::optional<bool>                     sealed_changed;
+  bool                                    scalar_abi  = false;
+  bool                                    state_abi   = false;
+  size_t                                  state_words = 0;
+  std::vector<State_output>               state_outputs;
   std::unordered_map<std::string, Memory> memories;
 
-  Impl(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& input_desc, bool use_scalar_abi)
+  Impl(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& input_desc, bool use_scalar_abi,
+       const State_layout* layout = nullptr)
       : module(std::make_unique<llvm::Module>("livehd.sim.color", context))
       , builder(context)
       , input_types(input_desc)
-      , scalar_abi(use_scalar_abi) {
+      , scalar_abi(use_scalar_abi)
+      , state_abi(layout != nullptr)
+      , state_words(layout == nullptr ? 0 : layout->words) {
     auto*                          i64_ptr = llvm::PointerType::getUnqual(context);
     llvm::SmallVector<llvm::Type*> argument_types;
     if (scalar_abi) {
       argument_types.assign(input_types.size(), builder.getInt64Ty());
       argument_types.push_back(i64_ptr);
+    } else if (state_abi) {
+      argument_types.assign(2, i64_ptr);
     } else {
       argument_types.assign(4, i64_ptr);
     }
@@ -111,7 +132,10 @@ public:
     function      = llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage, llvm::StringRef(function_name), *module);
     function->addFnAttr(llvm::Attribute::AlwaysInline);
     auto argument = function->arg_begin();
-    if (!scalar_abi) {
+    if (state_abi) {
+      inputs = outputs = &*argument++;
+      inputs->setName("state");
+    } else if (!scalar_abi) {
       inputs  = &*argument++;
       outputs = &*argument++;
       changed = &*argument++;
@@ -138,7 +162,16 @@ public:
         error = "LLVM color inputs must have a non-zero width";
         return;
       }
-      input_word_offsets.push_back(word_offset);
+      const auto offset = layout == nullptr ? word_offset : layout->inputs[i].word;
+      const auto bit    = layout == nullptr ? 0u : layout->inputs[i].bit;
+      if (state_abi
+          && (bit >= 64 || width > std::numeric_limits<uint32_t>::max() - bit || offset > state_words
+              || word_count(width + bit) > state_words - offset)) {
+        error = "LLVM state input is outside its allocation";
+        return;
+      }
+      input_word_offsets.push_back(offset);
+      input_bits.push_back(bit);
       if (scalar_abi) {
         auto* value = &*argument++;
         value->setName("in");
@@ -280,8 +313,13 @@ public:
 
   llvm::Value* get(Value value) {
     if (value.id < input_types.size() && value.id < values.size() && values[value.id] == nullptr && value.width != 0) {
-      const auto width = input_types[value.id].first;
-      values[value.id] = load_packed(inputs, input_word_offsets[value.id], width, "in");
+      const auto width  = input_types[value.id].first;
+      const auto bit    = input_bits[value.id];
+      auto*      loaded = load_packed(inputs, input_word_offsets[value.id], width + bit, "in");
+      if (bit != 0) {
+        loaded = builder.CreateLShr(loaded, bit);
+      }
+      values[value.id] = cast_integer(builder, loaded, width, true);
     }
     if (value.id < values.size() && values[value.id] == nullptr && deferred_casts[value.id]) {
       const auto source  = *deferred_casts[value.id];
@@ -313,6 +351,14 @@ public:
 
 Cgen_llvm::Cgen_llvm(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& inputs, bool scalar_abi)
     : impl_(std::make_unique<Impl>(function_name, inputs, scalar_abi)) {}
+
+Cgen_llvm::Cgen_llvm(std::string_view function_name, const State_layout& layout) {
+  std::vector<std::pair<uint32_t, bool>> inputs;
+  for (const auto& input : layout.inputs) {
+    inputs.emplace_back(input.width, input.unsign);
+  }
+  impl_ = std::make_unique<Impl>(function_name, inputs, false, &layout);
+}
 
 Cgen_llvm::~Cgen_llvm()                               = default;
 Cgen_llvm::Cgen_llvm(Cgen_llvm&&) noexcept            = default;
@@ -424,7 +470,8 @@ Cgen_llvm::Value Cgen_llvm::dynamic_extract(Value source, Value count, uint32_t 
   const size_t nwords = word_count(source.width);
   llvm::Value* base   = nullptr;
   size_t       offset = 0;
-  if (impl_->inputs != nullptr && source.id < impl_->input_types.size() && impl_->input_types[source.id].first == source.width) {
+  if (impl_->inputs != nullptr && source.id < impl_->input_types.size() && impl_->input_types[source.id].first == source.width
+      && impl_->input_bits[source.id] == 0) {
     base   = impl_->inputs;  // a kernel input: its packed words are already in the input buffer
     offset = impl_->input_word_offsets[source.id];
   } else {
@@ -757,6 +804,16 @@ Cgen_llvm::Value Cgen_llvm::lut(Value table, Value address, uint32_t result_widt
 
 void Cgen_llvm::bind_memory(std::string_view symbol, const Memory& memory) { impl_->memories.emplace(symbol, memory); }
 
+bool Cgen_llvm::memory_commit(std::string_view symbol) {
+  const auto found = impl_->memories.find(std::string(symbol));
+  if (found == impl_->memories.end()) {
+    impl_->error = "LLVM memory commit references an unbound memory";
+    return false;
+  }
+  impl_->commit_memory(found->second);
+  return true;
+}
+
 Cgen_llvm::Value Cgen_llvm::memory_read(std::string_view symbol, Value address, uint32_t result_width, bool result_unsign) {
   const auto it = impl_->memories.find(std::string(symbol));
   if (it == impl_->memories.end() || address.width == 0 || result_width == 0) {
@@ -932,6 +989,10 @@ bool Cgen_llvm::memory_stage_write(std::string_view symbol, Value enable, Value 
 }
 
 bool Cgen_llvm::add_output(size_t index, Value value, std::string& error) {
+  if (impl_->state_abi) {
+    error = "state ABI requires add_state_output";
+    return false;
+  }
   if (value.width == 0 || impl_->get(value) == nullptr) {
     error = impl_->error.empty() ? "invalid LLVM color output" : impl_->error;
     return false;
@@ -940,13 +1001,127 @@ bool Cgen_llvm::add_output(size_t index, Value value, std::string& error) {
   return true;
 }
 
-bool Cgen_llvm::write_object(std::string_view path, std::string& error, bool track_changed) {
+bool Cgen_llvm::add_state_output(size_t word, size_t previous_word, Value value, const std::vector<Dirty_mask>& dirty,
+                                 std::string& error) {
+  const auto fits
+      = [&](size_t offset) { return offset <= impl_->state_words && word_count(value.width) <= impl_->state_words - offset; };
+  if (!impl_->state_abi || value.width == 0 || !fits(word) || !fits(previous_word) || impl_->get(value) == nullptr) {
+    error = "invalid LLVM state output";
+    return false;
+  }
+  for (const auto& mask : dirty) {
+    if (mask.word >= impl_->state_words) {
+      error = "LLVM dirty mask is outside its allocation";
+      return false;
+    }
+  }
+  impl_->state_outputs.push_back({word, previous_word, value, dirty});
+  return true;
+}
+
+bool Cgen_llvm::copy_state(size_t destination, size_t source, size_t words, std::string& error) {
+  if (!impl_->state_abi || destination > impl_->state_words || source > impl_->state_words
+      || words > impl_->state_words - destination || words > impl_->state_words - source
+      || words > std::numeric_limits<uint64_t>::max() / sizeof(uint64_t)) {
+    error = "LLVM state copy is outside its allocation";
+    return false;
+  }
+  if (words == 0 || destination == source) {
+    return true;
+  }
+  if (destination < source + words && source < destination + words) {
+    error = "LLVM state copy spans overlap";
+    return false;
+  }
+  impl_->builder.CreateMemCpy(impl_->word_ptr(impl_->outputs, destination),
+                              llvm::Align(8),
+                              impl_->word_ptr(impl_->inputs, source),
+                              llvm::Align(8),
+                              words * sizeof(uint64_t));
+  return true;
+}
+
+bool Cgen_llvm::write_object(std::string_view path, std::string& error, bool track_changed, std::string_view cache_path,
+                             bool* reused) {
+  impl_->cache_path   = cache_path;
+  impl_->cache_reused = reused;
+  if (reused != nullptr) {
+    *reused = false;
+  }
   return write_module(path, error, track_changed, true);
 }
+
+bool Cgen_llvm::write_state_object(std::string_view path, std::string_view descriptor, size_t public_words,
+                                   const std::vector<livehd::sim::Native_initial_word>& initial, std::string& error) {
+  if (!impl_->state_abi || public_words > impl_->state_words || descriptor.empty()
+      || impl_->module->getNamedValue(llvm::StringRef(descriptor)) != nullptr) {
+    error = "invalid LLVM state descriptor";
+    return false;
+  }
+  auto sorted = initial;
+  std::ranges::sort(sorted, {}, &livehd::sim::Native_initial_word::word);
+  for (size_t i = 0; i < sorted.size(); ++i) {
+    if (sorted[i].word >= impl_->state_words || (i != 0 && sorted[i - 1].word == sorted[i].word)) {
+      error = "invalid LLVM state initializer";
+      return false;
+    }
+  }
+  std::erase_if(sorted, [](const auto& word) { return word.value == 0; });
+
+  auto&                        builder   = impl_->builder;
+  auto*                        word_type = llvm::StructType::get(builder.getInt64Ty(), builder.getInt64Ty());
+  std::vector<llvm::Constant*> words;
+  words.reserve(sorted.size());
+  for (const auto& word : sorted) {
+    words.push_back(llvm::ConstantStruct::get(word_type, {builder.getInt64(word.word), builder.getInt64(word.value)}));
+  }
+  llvm::Constant* defaults = llvm::ConstantPointerNull::get(builder.getPtrTy());
+  if (!words.empty()) {
+    auto* values = llvm::ConstantArray::get(llvm::ArrayType::get(word_type, words.size()), words);
+    auto* table  = new llvm::GlobalVariable(*impl_->module,
+                                            values->getType(),
+                                            true,
+                                            llvm::GlobalValue::PrivateLinkage,
+                                            values,
+                                            "state.defaults");
+    table->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+    defaults = table;
+  }
+  auto* image_type = llvm::StructType::get(builder.getInt64Ty(),
+                                           builder.getInt64Ty(),
+                                           builder.getInt64Ty(),
+                                           builder.getInt64Ty(),
+                                           builder.getPtrTy(),
+                                           builder.getPtrTy());
+  auto* image      = llvm::ConstantStruct::get(image_type,
+                                               {builder.getInt64(livehd::sim::native_state_abi),
+                                                builder.getInt64(impl_->state_words),
+                                                builder.getInt64(public_words),
+                                                builder.getInt64(words.size()),
+                                                defaults,
+                                                impl_->function});
+  new llvm::GlobalVariable(*impl_->module,
+                           image_type,
+                           true,
+                           llvm::GlobalValue::ExternalLinkage,
+                           image,
+                           llvm::StringRef(descriptor));
+  impl_->function->setLinkage(llvm::GlobalValue::InternalLinkage);
+  return write_module(path, error, true, true);
+}
+
 bool Cgen_llvm::write_bitcode(std::string_view path, std::string& error, bool track_changed) {
   return write_module(path, error, track_changed, false);
 }
-bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool track_changed, bool native) {
+bool Cgen_llvm::seal(std::string& error, bool track_changed) {
+  if (impl_->sealed_changed) {
+    if (*impl_->sealed_changed != track_changed) {
+      error = "LLVM color changed-bit ABI cannot change after finalization";
+      return false;
+    }
+    return true;
+  }
+
   if (!impl_->error.empty()) {
     error = impl_->error;
     return false;
@@ -958,7 +1133,35 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
       return false;
     }
   }
-  if (impl_->scalar_abi) {
+  if (impl_->state_abi) {
+    // Values have already been materialized by add_state_output. Snapshot all
+    // comparisons before storing: a swap or pending/current alias must not
+    // observe another output's new value. Accumulate dirty bits in SSA once.
+    std::map<size_t, llvm::Value*> changed;
+    for (const auto& output : impl_->state_outputs) {
+      if (output.dirty.empty()) {
+        continue;
+      }
+      auto* old       = impl_->load_packed(impl_->inputs, output.previous_word, output.value.width, "state.old");
+      auto* different = impl_->builder.CreateICmpNE(old, impl_->get(output.value));
+      for (const auto& mask : output.dirty) {
+        auto* bits = impl_->builder.CreateSelect(different, impl_->builder.getInt64(mask.mask), impl_->builder.getInt64(0));
+        auto [it, inserted] = changed.try_emplace(mask.word, bits);
+        if (!inserted) {
+          it->second = impl_->builder.CreateOr(it->second, bits);
+        }
+      }
+    }
+    for (const auto& output : impl_->state_outputs) {
+      impl_->store_packed(impl_->get(output.value), impl_->outputs, output.word, output.value.width);
+    }
+    for (const auto& [word, bits] : changed) {
+      auto* ptr = impl_->word_ptr(impl_->outputs, word);
+      auto* old = impl_->builder.CreateLoad(impl_->builder.getInt64Ty(), ptr);
+      impl_->builder.CreateStore(impl_->builder.CreateOr(old, bits), ptr);
+    }
+    impl_->builder.CreateRetVoid();
+  } else if (impl_->scalar_abi) {
     if (impl_->output_values.size() != 1 || impl_->output_values.front().value.width > 64) {
       error = "scalar LLVM ABI requires exactly one output no wider than 64 bits";
       return false;
@@ -996,12 +1199,29 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
     return false;
   }
 
-  static std::once_flag initialize_target;
-  std::call_once(initialize_target, [] {
-    llvm::InitializeNativeTarget();
-    llvm::InitializeNativeTargetAsmPrinter();
-    llvm::InitializeNativeTargetAsmParser();
-  });
+  impl_->sealed_changed = track_changed;
+  return true;
+}
+
+std::string Cgen_llvm::sharing_key(std::string& error, bool track_changed) {
+  if (!seal(error, track_changed)) {
+    return {};
+  }
+  const std::string name = impl_->function->getName().str();
+  impl_->function->setName("__lhd_shared_color");
+  llvm::SmallVector<char, 0> bytes;
+  llvm::raw_svector_ostream  stream(bytes);
+  llvm::WriteBitcodeToFile(*impl_->module, stream);
+  impl_->function->setName(name);
+  return {bytes.data(), bytes.size()};
+}
+
+bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool track_changed, bool native) {
+  if (!seal(error, track_changed)) {
+    return false;
+  }
+
+  livehd::sim::initialize_llvm_target();
 
   const llvm::Triple  triple(llvm::sys::getDefaultTargetTriple());
   std::string         lookup_error;
@@ -1028,6 +1248,34 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   }
   impl_->module->setTargetTriple(triple);
   impl_->module->setDataLayout(machine->createDataLayout());
+
+  const auto digest = [](llvm::StringRef bytes) {
+    llvm::SHA256 hash;
+    hash.update(bytes);
+    const auto result = hash.final();
+    return std::string(reinterpret_cast<const char*>(result.data()), result.size());
+  };
+  std::string input_digest;
+  if (native && !impl_->cache_path.empty()) {
+    llvm::SmallVector<char, 0> bitcode;
+    llvm::raw_svector_ostream  stream(bitcode);
+    llvm::WriteBitcodeToFile(*impl_->module, stream);
+    llvm::SHA256 hash;
+    hash.update(llvm::StringRef(bitcode.data(), bitcode.size()));
+    hash.update(std::to_string(livehd::kCgenSrcSalt));
+    const auto key = hash.final();
+    input_digest.assign(reinterpret_cast<const char*>(key.data()), key.size());
+    const auto cached = llvm::MemoryBuffer::getFile(impl_->cache_path);
+    if (cached && (*cached)->getBufferSize() == 64 && (*cached)->getBuffer().take_front(32) == input_digest) {
+      const auto object = llvm::MemoryBuffer::getFile(path);
+      if (object && (*cached)->getBuffer().drop_front(32) == digest((*object)->getBuffer())) {
+        if (impl_->cache_reused != nullptr) {
+          *impl_->cache_reused = true;
+        }
+        return true;
+      }
+    }
+  }
 
   // Keep exact-width bit operations visible to a deliberately bounded scalar
   // pipeline before instruction selection. The generic O2 module pipeline is
@@ -1164,6 +1412,13 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
     File_output out{path};
     out.append(std::string_view(object_buffer.data(), object_buffer.size()));
   }
+  if (!input_digest.empty()) {
+    // Publish only after validation and the object write. A missing, truncated
+    // or mismatched pair is a miss, including interruption between the writes.
+    File_output cached{impl_->cache_path};
+    cached.append(input_digest);
+    cached.append(digest(llvm::StringRef(object_buffer.data(), object_buffer.size())));
+  }
   return true;
 }
 
@@ -1227,12 +1482,7 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
   };
   normalize_stack_probe(*module);
 
-  static std::once_flag initialize_target;
-  std::call_once(initialize_target, [] {
-    llvm::InitializeNativeTarget();
-    llvm::InitializeNativeTargetAsmPrinter();
-    llvm::InitializeNativeTargetAsmParser();
-  });
+  livehd::sim::initialize_llvm_target();
   llvm::Triple triple(module->getTargetTriple());
   if (triple.getTriple().empty()) {
     triple = llvm::Triple(llvm::sys::getDefaultTargetTriple());

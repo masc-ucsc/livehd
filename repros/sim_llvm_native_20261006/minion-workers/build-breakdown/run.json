@@ -1,0 +1,29 @@
+{
+  "start_ns": 1684445399550466,
+  "end_ns": 1684564766926947,
+  "seconds": 119.367376481,
+  "returncode": 0,
+  "argv": [
+    "/tmp/lhd-minion-workers-compare/toolchain/lhd",
+    "sim",
+    "/mada/users/renau/projs/lhdsuite/minion/pyrope/minion_top.prp",
+    "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+    "--workdir",
+    "/tmp/lhd-minion-link-profile/SW",
+    "--run-only",
+    "--set",
+    "sim.compile_only=true",
+    "--set",
+    "sim.ninja=false",
+    "--set",
+    "sim.jobs=8",
+    "--set",
+    "sim.tune.profile=off",
+    "--set",
+    "sim.tune.backend=llvm",
+    "--set",
+    "sim.vcd=false",
+    "--result-json",
+    "/tmp/lhd-minion-link-profile/compile.json"
+  ]
+}

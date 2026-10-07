@@ -1,0 +1,34 @@
+import hashlib,json,os,pathlib,statistics,subprocess,time
+root=pathlib.Path('/tmp/lhd-minion-workers-compare')
+lhd=root/'toolchain/lhd'
+suite=pathlib.Path('/mada/users/renau/projs/lhdsuite')
+inputs=[suite/'minion/pyrope/minion_top.prp',suite/'minion/sim/minion_prog_tb.prp']
+env=os.environ.copy();env['RUNFILES_DIR']=str(root/'toolchain/lhd.runfiles');env['CXX']='/usr/bin/clang++'
+record={'binary_sha256':hashlib.sha256(lhd.read_bytes()).hexdigest(),'commit':(root/'commit.txt').read_text().strip(),'jobs':8,'cycles':100000,'frontend':'Pyrope','cases':{},'source_sha256':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs},'compiler':subprocess.check_output(['/usr/bin/clang++','--version'],text=True).splitlines()[0]}
+def save(): (root/'results.json').write_text(json.dumps(record,indent=2))
+def run(case,stage,argv):
+    print(case,stage,'started',flush=True)
+    out=root/case/(stage+'.log')
+    with out.open('w') as f:
+        f.write(repr([str(x) for x in argv])+'\n');f.flush()
+        start=time.perf_counter();p=subprocess.run([str(x) for x in argv],cwd=root/case,env=env,stdout=f,stderr=subprocess.STDOUT);seconds=time.perf_counter()-start
+    result={'seconds':seconds,'returncode':p.returncode,'argv':[str(x) for x in argv]}
+    record['cases'][case][stage]=result;save()
+    print(case,stage,seconds,'exit',p.returncode,flush=True)
+    if p.returncode: raise SystemExit(str(out))
+for backend in ['slop','llvm']:
+    work=root/backend
+    work.mkdir(exist_ok=False)
+    record['cases'][backend]={}
+    args=[lhd,'sim',*inputs,'--workdir',work/'SW','--set','sim.jobs=8','--set','sim.tune.profile=off','--set','sim.tune.backend='+backend,'--set','sim.vcd=false']
+    run(backend,'setup',args+['--setup-only','--result-json',work/'setup.json'])
+    run(backend,'compile',args+['--run-only','--set','sim.compile_only=true','--set','sim.ninja=false','--result-json',work/'compile.json'])
+    for i in range(3):
+        run(backend,'exec'+str(i),[work/'SW/sim/drv.bin','+cycles=100000','--result-json',work/f'exec{i}.json'])
+        result=json.loads((work/f'exec{i}.json').read_text());tests=result if isinstance(result,list) else result['tests']
+        assert tests and all(t['status']=='pass' for t in tests),tests
+        marker=[s for s in (work/f'exec{i}.log').read_text().splitlines() if 'minion program:' in s]
+        assert marker,work
+        record['cases'][backend]['exec'+str(i)]['marker']=marker
+    data=record['cases'][backend];data['setup_compile_s']=data['setup']['seconds']+data['compile']['seconds'];data['exec_median_s']=statistics.median(data['exec'+str(i)]['seconds'] for i in range(3));save()
+print(json.dumps(record,indent=2),flush=True)

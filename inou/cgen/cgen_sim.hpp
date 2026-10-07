@@ -1,6 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+namespace livehd::sim {
+class Compile_workers;
+}
+
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -165,10 +169,12 @@ public:
   // (or keeps an old, self-invalidating key), so a crash only costs a rebuild.
   // The repair retraction in generation_current() still writes immediately.
   struct Generation_index {
-    absl::flat_hash_map<std::string, Gen_record> digests;
-    bool                                         loaded = false;
-    bool                                         dirty  = false;
-    std::optional<std::vector<std::string>>      files;  // sorted regular-file basenames of odir, as of first use
+    bool                                          incremental = true;  // forwarded from the single lhd.incremental switch
+    std::shared_ptr<livehd::sim::Compile_workers> object_workers;
+    absl::flat_hash_map<std::string, Gen_record>  digests;
+    bool                                          loaded = false;
+    bool                                          dirty  = false;
+    std::optional<std::vector<std::string>>       files;  // sorted regular-file basenames of odir, as of first use
   };
 
 private:

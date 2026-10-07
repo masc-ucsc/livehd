@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <regex>
 #include <string>
 
@@ -39,6 +40,137 @@ std::string emit(const std::shared_ptr<hhds::Graph>& graph, const std::string& n
     }
   }
   return code;
+}
+
+TEST(CgenSim, LlvmObjectsSurviveInsertionAndLongModuleNames) {
+  const std::string dir = "llvm_incremental_objects";
+  const std::string name(200, 'x');
+  std::filesystem::create_directories(dir);
+  const auto generate = [&](bool edited) {
+    auto& lib = livehd::Hhds_graph_library::instance(edited ? "lgdb_llvm_object_edit" : "lgdb_llvm_object_base");
+    auto  io  = lib.create_io(name);
+    for (unsigned i = 0; i < 9; ++i) {
+      io->add_input("a" + std::to_string(i), i);
+      io->add_output("y" + std::to_string(i), 9 + i);
+      io->set_bits("a" + std::to_string(i), 8 + i);
+      io->set_bits("y" + std::to_string(i), 8 + i);
+    }
+    auto graph = io->create_graph();
+    for (unsigned i = 0; i < 9; ++i) {
+      auto value = graph->get_input_pin("a" + std::to_string(i));
+      if (i != 8 || edited) {
+        auto node = gu::create_typed_node(*graph, Ntype_op::Not, 8 + i);
+        value.connect_sink(node.create_sink_pin(0));
+        value = node.create_driver_pin(0);
+        gu::set_bits(value, 8 + i);
+      }
+      value.connect_sink(graph->get_output_pin("y" + std::to_string(i)));
+    }
+    const auto plan = livehd::sim::Color_plan::discover(graph.get(), false, false, 1);
+    EXPECT_TRUE(plan.complete()) << plan.report();
+    Cgen_sim emitter(dir, "", name, "false", &plan, false, false, true, true, false, false, false, true, true, 1);
+    emitter.do_from_graph(graph);
+    std::map<std::string, std::pair<std::string, std::filesystem::file_time_type>> objects;
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+      const auto filename = entry.path().filename().string();
+      EXPECT_LE(filename.size(), 255u);
+      if (filename.ends_with(".llvm.o")) {
+        objects.emplace(filename, std::pair{slurp(entry.path()), entry.last_write_time()});
+      }
+    }
+    return objects;
+  };
+  const auto before = generate(false);
+  const auto after  = generate(true);
+  ASSERT_GE(before.size(), 8u);
+  EXPECT_GT(after.size(), before.size());
+  for (const auto& [filename, content] : before) {
+    const auto found = after.find(filename);
+    ASSERT_NE(found, after.end()) << "unchanged color object was renamed: " << filename;
+    EXPECT_EQ(found->second, content) << "unchanged object bytes or mtime changed: " << filename;
+  }
+  // Removing the added color cleans its object while preserving the originals.
+  EXPECT_EQ(generate(false), before);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(CgenSim, LlvmSemanticEditKeepsModuleSupportUnchanged) {
+  const std::string name = "llvm_checkpoint_identity";
+  std::filesystem::create_directories(name);
+  const auto generate = [&](Ntype_op op) {
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_" + name + std::to_string(static_cast<int>(op)));
+    auto  io  = lib.create_io(name);
+    io->add_input("a", 0);
+    io->add_input("b", 1);
+    io->add_output("y", 2);
+    for (const auto* port : {"a", "b", "y"}) {
+      io->set_bits(port, 8);
+      io->set_unsign(port, true);
+    }
+    auto graph = io->create_graph();
+    auto node  = gu::create_typed_node(*graph, op, 8);
+    graph->get_input_pin("a").connect_sink(node.create_sink_pin(0));
+    graph->get_input_pin("b").connect_sink(node.create_sink_pin(1));
+    auto value = node.create_driver_pin(0);
+    gu::set_ubits(value, 8);
+    value.connect_sink(graph->get_output_pin("y"));
+    const auto plan = livehd::sim::Color_plan::discover(graph.get(), false);
+    EXPECT_TRUE(plan.complete()) << plan.report();
+    Cgen_sim emitter(name, "", name, "false", &plan, false, false, true, true, false, false, false, true, true);
+    emitter.do_from_graph(graph);
+    std::map<std::string, std::string> files;
+    for (const auto& entry : std::filesystem::directory_iterator(name)) {
+      files.emplace(entry.path().filename().string(), slurp(entry.path()));
+    }
+    return files;
+  };
+  const auto before = generate(Ntype_op::And);
+  const auto after  = generate(Ntype_op::Or);
+  EXPECT_EQ(before.at(name + ".cpp"), after.at(name + ".cpp"));
+  EXPECT_EQ(before.at(name + ".hpp"), after.at(name + ".hpp"));
+  EXPECT_EQ(before.at(name + ".tune.cpp"), after.at(name + ".tune.cpp"));
+  EXPECT_NE(before.at(name + ".tune-id.cpp"), after.at(name + ".tune-id.cpp"));
+  size_t native_changes = 0;
+  for (const auto& [file, bytes] : before) {
+    if (file.ends_with(".llvm.o")) {
+      const auto found = after.find(file);
+      ASSERT_NE(found, after.end());
+      native_changes += bytes != found->second;
+    }
+  }
+  EXPECT_EQ(native_changes, 1u);
+  std::filesystem::remove_all(name);
+}
+
+TEST(CgenSim, IdenticalColorsShareOneNativeObject) {
+  const std::string name = "shared_native_colors";
+  auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io   = lib.create_io(name);
+  for (unsigned i = 0; i < 8; ++i) {
+    io->add_input("a" + std::to_string(i), i);
+    io->add_output("y" + std::to_string(i), 8 + i);
+    io->set_bits("a" + std::to_string(i), 8);
+    io->set_bits("y" + std::to_string(i), 8);
+  }
+  auto graph = io->create_graph();
+  for (unsigned i = 0; i < 8; ++i) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Not, 8);
+    graph->get_input_pin("a" + std::to_string(i)).connect_sink(node.create_sink_pin(0));
+    auto value = node.create_driver_pin(0);
+    gu::set_bits(value, 8);
+    value.connect_sink(graph->get_output_pin("y" + std::to_string(i)));
+  }
+  std::filesystem::create_directories(name);
+  const auto plan = livehd::sim::Color_plan::discover(graph.get(), false, false, 1);
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  Cgen_sim emitter(name, "", name, "false", &plan, false, false, true, true, false, false, false, true, true, 1);
+  emitter.do_from_graph(graph);
+  size_t objects = 0;
+  for (const auto& entry : std::filesystem::directory_iterator(name)) {
+    objects += entry.path().filename().string().ends_with(".llvm.o");
+  }
+  EXPECT_EQ(objects, 1u);
+  std::filesystem::remove_all(name);
 }
 
 TEST(CgenSim, DynamicSplicesRespectColorKernelBindings) {
@@ -577,6 +709,42 @@ TEST(CgenSim, TuneIdOnlyForExecutableRoots) {
   EXPECT_EQ(digests.find("\"tune_id_child.tune-id.cpp\""), std::string::npos) << digests;
 }
 }  // namespace
+
+TEST(CgenSim, ConstantSpecializationPropagatesThroughEarlierParents) {
+  auto&                                     library = livehd::Hhds_graph_library::instance("lgdb_sim_constant_chain");
+  std::vector<std::shared_ptr<hhds::Graph>> graphs;
+  for (unsigned level = 0; level < 6; ++level) {
+    auto io = library.create_io("constant_chain_" + std::to_string(level));
+    io->add_input("x", 0);
+    io->add_output("y", 1);
+    for (auto name : {"x", "y"}) {
+      io->set_bits(name, 8);
+      io->set_unsign(name, true);
+    }
+    auto graph = io->create_graph();
+    auto value = graph->get_input_pin("x");
+    if (level != 0) {
+      auto child = gu::create_typed_node(*graph, Ntype_op::Sub);
+      child.set_subnode(graphs.back()->get_io());
+      value.connect_sink(child.create_sink_pin(0));
+      value = child.create_driver_pin(1);
+      gu::set_ubits(value, 8);
+    }
+    auto operation = gu::create_typed_node(*graph, level == 0 ? Ntype_op::And : Ntype_op::Or, 8);
+    value.connect_sink(operation.create_sink_pin(0));
+    gu::create_const(*graph, *Dlop::create_integer(level == 0 ? 0 : (1 << (level - 1)))).connect_sink(operation.create_sink_pin(1));
+    auto result = operation.create_driver_pin(0);
+    gu::set_ubits(result, 8);
+    result.connect_sink(graph->get_output_pin("y"));
+    graphs.push_back(graph);
+  }
+  const auto top = graphs.back();
+  std::ranges::reverse(graphs);  // every parent is visited before its callee
+  livehd::sim::specialize_constants(graphs);
+  const auto value = top->get_output_pin("y").get_driver_pin();
+  ASSERT_TRUE(value.is_const());
+  EXPECT_EQ(gu::const_of(value).to_just_i64(), 31);
+}
 
 TEST(CgenSim, ConstantSpecializationKeepsInstancesAndRolledCarriesSeparate) {
   auto& library = livehd::Hhds_graph_library::instance("lgdb_sim_constant_instances");

@@ -1,0 +1,10 @@
+#!/usr/bin/python3
+import json,os,pathlib,resource,subprocess,sys,time
+args=sys.argv[1:]
+kind='pch' if '-x' in args and args[args.index('-x')+1]=='c++-header' else 'cc' if '-c' in args else 'probe' if '--version' in args else 'link'
+start=time.monotonic_ns();before=resource.getrusage(resource.RUSAGE_CHILDREN)
+p=subprocess.run(['/usr/bin/clang++',*args])
+end=time.monotonic_ns();after=resource.getrusage(resource.RUSAGE_CHILDREN)
+record={'kind':kind,'argv':args,'start_ns':start,'end_ns':end,'seconds':(end-start)/1e9,'cpu_s':after.ru_utime+after.ru_stime-before.ru_utime-before.ru_stime,'returncode':p.returncode}
+pathlib.Path('/tmp/lhd-minion-link-profile/events/'+str(os.getpid())+'.json').write_text(json.dumps(record))
+sys.exit(p.returncode)

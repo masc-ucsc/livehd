@@ -1409,6 +1409,99 @@ std::string finalize_sim_query(const Query_plan& plan, const Sim_catalog& cat, c
   return sb.GetString();
 }
 
+// The compile library retains definitions that simulator preparation inlined
+// away. Their generated code is useful for standalone export, but the driver
+// must not compile/link those orphan modules. Follow literal generated includes
+// and the per-module artifact manifest; names/prefixes alone are ambiguous.
+// Missing/old/malformed manifests conservatively keep the previous full build.
+std::set<std::string> sim_unused_artifacts(const std::string& directory, const std::string& driver) {
+  std::ifstream     index(directory + "/gen_digests.json");
+  const std::string text{std::istreambuf_iterator<char>(index), std::istreambuf_iterator<char>()};
+  rj::Document      doc;
+  doc.Parse(text.data(), text.size());
+  if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("modules") || !doc["modules"].IsObject()) {
+    return {};
+  }
+  std::map<std::string, std::vector<std::string>> modules;
+  std::map<std::string, std::string>              owners;
+  for (const auto& record : doc["modules"].GetObject()) {
+    if (!record.value.IsObject() || !record.value.HasMember("f") || !record.value["f"].IsArray()) {
+      return {};
+    }
+    auto& files = modules[record.name.GetString()];
+    for (const auto& entry : record.value["f"].GetArray()) {
+      if (!entry.IsString()) {
+        return {};
+      }
+      const std::string name = entry.GetString();
+      if (std::filesystem::path(name).filename() != name || !owners.emplace(name, record.name.GetString()).second) {
+        return {};
+      }
+      files.push_back(name);
+    }
+  }
+  std::vector<std::string> pending{std::filesystem::path(driver).filename().string()};
+  // Hand-written support translation units remain build inputs too. Their
+  // includes can reach a generated module independently of the test driver.
+  std::error_code          scan_error;
+  for (const auto& entry : std::filesystem::directory_iterator(directory, scan_error)) {
+    const auto name = entry.path().filename().string();
+    if (name.ends_with(".cpp") && !owners.contains(name)) {
+      pending.push_back(name);
+    }
+  }
+  if (scan_error) {
+    return {};
+  }
+  std::set<std::string> visited;
+  std::set<std::string> reached;
+  while (!pending.empty()) {
+    auto name = std::move(pending.back());
+    pending.pop_back();
+    if (!visited.insert(name).second) {
+      continue;
+    }
+    if (const auto owner = owners.find(name); owner != owners.end() && reached.insert(owner->second).second) {
+      for (const auto& file : modules.at(owner->second)) {
+        if (file.ends_with(".cpp") || file.ends_with(".hpp")) {
+          pending.push_back(file);
+        }
+      }
+    }
+    std::ifstream source(directory + "/" + name);
+    if (!source) {
+      return {};
+    }
+    std::string line;
+    while (std::getline(source, line)) {
+      const auto first = line.find_first_not_of(" \t");
+      if (first == std::string::npos || !std::string_view(line).substr(first).starts_with("#include")) {
+        continue;
+      }
+      const auto begin = line.find('"', first + 8);
+      if (begin == std::string::npos) {
+        continue;
+      }
+      const auto end = line.find('"', begin + 1);
+      if (end == std::string::npos) {
+        continue;
+      }
+      const auto      included = line.substr(begin + 1, end - begin - 1);
+      std::error_code ec;
+      if (std::filesystem::is_regular_file(std::filesystem::path(directory) / included, ec)) {
+        pending.push_back(included);
+      }
+    }
+  }
+  std::set<std::string> unused;
+  for (const auto& [module, files] : modules) {
+    if (!reached.contains(module)) {
+      unused.insert(files.begin(), files.end());
+    }
+  }
+  return unused;
+}
+
 }  // namespace
 
 // `lhd sim <file.prp> [test.name] [--arg k=v ...]` — lower the design's DUT
@@ -1975,8 +2068,9 @@ void sim_command(Options& opts, Result& res) {
   }
   const std::string cxx = sim_host_cxx();
 
-  // The DUT bodies: every non-driver *.cpp in simdir. inou.cgen.sim does NOT emit
-  // the `%`-named `test` units, so these are exactly the real module bodies.
+  // Compile only the modules reached from the actual test driver. Retained
+  // standalone exports from inlined-away definitions are not link inputs.
+  const auto               unused_artifacts = sim_unused_artifacts(simdir, drv_cpp);
   std::vector<std::string> bodies;
   std::vector<std::string> direct_objects;
   {
@@ -1986,6 +2080,9 @@ void sim_command(Options& opts, Result& res) {
         continue;
       }
       auto fn = de.path().filename().string();
+      if (unused_artifacts.contains(fn)) {
+        continue;
+      }
       if (fn.ends_with(".llvm.o")) {
         direct_objects.push_back(de.path().string());
         continue;
@@ -2111,7 +2208,10 @@ void sim_command(Options& opts, Result& res) {
     constexpr std::uintmax_t kUnityMaxBytes    = 256 * 1024;
     constexpr std::uintmax_t kUnityTargetBytes = 1024 * 1024;
     constexpr size_t         kUnityMaxFiles    = 12;
-    constexpr size_t         kUnityMinTus      = 16;
+    // Start once the small files need at least two buckets. After unreachable
+    // exports are removed, Dino has 13 candidates: leaving those separate
+    // costs 9.2 s versus 6.2 s with the same two generated-source batches.
+    constexpr size_t         kUnityMinTus      = kUnityMaxFiles;
     std::vector<size_t>      candidates;
     std::uintmax_t           candidate_bytes = 0;
     for (size_t i = 0; i < bodies.size(); ++i) {  // tus[0, bodies.size()) are the simdir bodies
@@ -2122,6 +2222,11 @@ void sim_command(Options& opts, Result& res) {
       const auto      bytes = fs::file_size(tus[i], ec);
       if (ec || bytes >= kUnityMaxBytes) {
         continue;
+      }
+      std::ifstream source(tus[i]);
+      std::string   first_line;
+      if (!std::getline(source, first_line) || !first_line.starts_with("// Generated")) {
+        continue;  // hand-written support may have translation-unit-local names
       }
       candidates.push_back(i);
       candidate_bytes += bytes;

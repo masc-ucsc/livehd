@@ -1,0 +1,200 @@
+{
+  "binary_sha256": "a31546d9ee6064e3593a3830d2c022ffb33517b2dcae2315cfb390c040803fe5",
+  "commit": "bbec12fd735a833d77123799f37930480c85e7b1",
+  "jobs": 8,
+  "cycles": 100000,
+  "frontend": "Pyrope",
+  "cases": {
+    "slop": {
+      "setup": {
+        "seconds": 134.06544697307982,
+        "returncode": 0,
+        "argv": [
+          "/tmp/lhd-minion-workers-compare/toolchain/lhd",
+          "sim",
+          "/mada/users/renau/projs/lhdsuite/minion/pyrope/minion_top.prp",
+          "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+          "--workdir",
+          "/tmp/lhd-minion-workers-compare/slop/SW",
+          "--set",
+          "sim.jobs=8",
+          "--set",
+          "sim.tune.profile=off",
+          "--set",
+          "sim.tune.backend=slop",
+          "--set",
+          "sim.vcd=false",
+          "--setup-only",
+          "--result-json",
+          "/tmp/lhd-minion-workers-compare/slop/setup.json"
+        ]
+      },
+      "compile": {
+        "seconds": 150.4924099210184,
+        "returncode": 0,
+        "argv": [
+          "/tmp/lhd-minion-workers-compare/toolchain/lhd",
+          "sim",
+          "/mada/users/renau/projs/lhdsuite/minion/pyrope/minion_top.prp",
+          "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+          "--workdir",
+          "/tmp/lhd-minion-workers-compare/slop/SW",
+          "--set",
+          "sim.jobs=8",
+          "--set",
+          "sim.tune.profile=off",
+          "--set",
+          "sim.tune.backend=slop",
+          "--set",
+          "sim.vcd=false",
+          "--run-only",
+          "--set",
+          "sim.compile_only=true",
+          "--set",
+          "sim.ninja=false",
+          "--result-json",
+          "/tmp/lhd-minion-workers-compare/slop/compile.json"
+        ]
+      },
+      "exec0": {
+        "seconds": 2.1797226979397237,
+        "returncode": 0,
+        "argv": [
+          "/tmp/lhd-minion-workers-compare/slop/SW/sim/drv.bin",
+          "+cycles=100000",
+          "--result-json",
+          "/tmp/lhd-minion-workers-compare/slop/exec0.json"
+        ],
+        "marker": [
+          "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+        ]
+      },
+      "exec1": {
+        "seconds": 2.1461419430561364,
+        "returncode": 0,
+        "argv": [
+          "/tmp/lhd-minion-workers-compare/slop/SW/sim/drv.bin",
+          "+cycles=100000",
+          "--result-json",
+          "/tmp/lhd-minion-workers-compare/slop/exec1.json"
+        ],
+        "marker": [
+          "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+        ]
+      },
+      "exec2": {
+        "seconds": 2.159809638047591,
+        "returncode": 0,
+        "argv": [
+          "/tmp/lhd-minion-workers-compare/slop/SW/sim/drv.bin",
+          "+cycles=100000",
+          "--result-json",
+          "/tmp/lhd-minion-workers-compare/slop/exec2.json"
+        ],
+        "marker": [
+          "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+        ]
+      },
+      "setup_compile_s": 284.5578568940982,
+      "exec_median_s": 2.159809638047591
+    },
+    "llvm": {
+      "setup": {
+        "seconds": 142.26270313188434,
+        "returncode": 0,
+        "argv": [
+          "/tmp/lhd-minion-workers-compare/toolchain/lhd",
+          "sim",
+          "/mada/users/renau/projs/lhdsuite/minion/pyrope/minion_top.prp",
+          "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+          "--workdir",
+          "/tmp/lhd-minion-workers-compare/llvm/SW",
+          "--set",
+          "sim.jobs=8",
+          "--set",
+          "sim.tune.profile=off",
+          "--set",
+          "sim.tune.backend=llvm",
+          "--set",
+          "sim.vcd=false",
+          "--setup-only",
+          "--result-json",
+          "/tmp/lhd-minion-workers-compare/llvm/setup.json"
+        ]
+      },
+      "compile": {
+        "seconds": 118.19918185798451,
+        "returncode": 0,
+        "argv": [
+          "/tmp/lhd-minion-workers-compare/toolchain/lhd",
+          "sim",
+          "/mada/users/renau/projs/lhdsuite/minion/pyrope/minion_top.prp",
+          "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+          "--workdir",
+          "/tmp/lhd-minion-workers-compare/llvm/SW",
+          "--set",
+          "sim.jobs=8",
+          "--set",
+          "sim.tune.profile=off",
+          "--set",
+          "sim.tune.backend=llvm",
+          "--set",
+          "sim.vcd=false",
+          "--run-only",
+          "--set",
+          "sim.compile_only=true",
+          "--set",
+          "sim.ninja=false",
+          "--result-json",
+          "/tmp/lhd-minion-workers-compare/llvm/compile.json"
+        ]
+      },
+      "exec0": {
+        "seconds": 2.5143866159487516,
+        "returncode": 0,
+        "argv": [
+          "/tmp/lhd-minion-workers-compare/llvm/SW/sim/drv.bin",
+          "+cycles=100000",
+          "--result-json",
+          "/tmp/lhd-minion-workers-compare/llvm/exec0.json"
+        ],
+        "marker": [
+          "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+        ]
+      },
+      "exec1": {
+        "seconds": 2.5285860791336745,
+        "returncode": 0,
+        "argv": [
+          "/tmp/lhd-minion-workers-compare/llvm/SW/sim/drv.bin",
+          "+cycles=100000",
+          "--result-json",
+          "/tmp/lhd-minion-workers-compare/llvm/exec1.json"
+        ],
+        "marker": [
+          "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+        ]
+      },
+      "exec2": {
+        "seconds": 2.521685572108254,
+        "returncode": 0,
+        "argv": [
+          "/tmp/lhd-minion-workers-compare/llvm/SW/sim/drv.bin",
+          "+cycles=100000",
+          "--result-json",
+          "/tmp/lhd-minion-workers-compare/llvm/exec2.json"
+        ],
+        "marker": [
+          "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+        ]
+      },
+      "setup_compile_s": 260.46188498986885,
+      "exec_median_s": 2.521685572108254
+    }
+  },
+  "source_sha256": {
+    "/mada/users/renau/projs/lhdsuite/minion/pyrope/minion_top.prp": "4c0d115f9ea45515dfb351b4f96e60660bff93cd5090aeb038ddf94c55eaf967",
+    "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp": "dcd1d16f0f1b966a86b96fd94a966bf02f353319cd4febe44394cbd3468768d6"
+  },
+  "compiler": "Debian clang version 19.1.7 (3+b1)"
+}

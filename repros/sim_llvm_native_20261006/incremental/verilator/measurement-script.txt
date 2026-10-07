@@ -1,0 +1,23 @@
+from pathlib import Path
+import json,os,statistics,subprocess,time
+root=Path(__file__).parent
+suite=Path('/mada/users/renau/projs/lhdsuite')
+tools=json.load(open('/mada/users/renau/projs/lhdtrack/var/toolchain/toolchain.json'))
+env=os.environ.copy();env.update(tools['env'].get('verilator',{}))
+verilator=tools['bin']['verilator'];cpu=min(os.sched_getaffinity(0))
+result={'verilator':tools['versions']['verilator'],'cxx':'/usr/bin/clang++','jobs':8,'cpu':cpu,'scope':'Original SystemVerilog with maintained suite twin driver; no cycle-by-cycle equivalence claim against translated Pyrope.','runs':{}}
+def save(): (root/'results.json').write_text(json.dumps(result,indent=2)+'\n')
+def run(name,args,cwd):
+ print(name,'started',flush=True);start=time.perf_counter()
+ with (root/(name+'.log')).open('w') as out:p=subprocess.run(list(map(str,args)),cwd=cwd,env=env,stdout=out,stderr=subprocess.STDOUT)
+ result['runs'][name]={'seconds':time.perf_counter()-start,'returncode':p.returncode,'argv':list(map(str,args))};save()
+ print(name,result['runs'][name]['seconds'],'exit',p.returncode,flush=True)
+ if p.returncode:raise SystemExit(name+' failed')
+for core,top,cycles in [('dino','PipelinedDualIssueCPU',5000000),('minion','minion_top',100000)]:
+ obj=root/core/'obj';obj.mkdir(parents=True,exist_ok=True);vdir=suite/core/'verilog'
+ run(core+'_setup',[verilator,'--cc','--exe','--Mdir',obj,'--top-module',top,'-Wno-fatal','-DSYNTHESIS','-I'+str(vdir),'-F',vdir/'filelist.f',suite/core/'sim'/f'{core}_prog_tb_verilator.cpp'],vdir)
+ run(core+'_compile',['make','-C',obj,'-f',f'V{top}.mk','-j8',f'V{top}','CXX=/usr/bin/clang++','LINK=/usr/bin/clang++','OPT_FAST=-O2','OPT_SLOW=-O2'],root)
+ binary=obj/f'V{top}';sections=subprocess.check_output(['size','-A',binary],text=True)
+ result[core]={'elf_bytes':binary.stat().st_size,'text_bytes':next(int(x.split()[1]) for x in sections.splitlines() if x.startswith('.text ')),'cpp_bytes':sum(p.stat().st_size for p in obj.glob('*.cpp')),'cycles':cycles}
+ for i in range(3):run(core+f'_exec{i}',['taskset','-c',str(cpu),binary,'--cycles',str(cycles)],root)
+ result[core]['exec_median_s']=statistics.median(result['runs'][core+f'_exec{i}']['seconds'] for i in range(3));save()

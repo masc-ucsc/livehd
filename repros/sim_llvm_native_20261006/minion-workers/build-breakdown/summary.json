@@ -1,0 +1,71 @@
+{
+  "profile_wall_s": 119.367376481,
+  "stages_wall_s": {
+    "pch": 3.688668557,
+    "cc": 114.188906932,
+    "link": 1.217754281,
+    "other": 0.27204671100000155
+  },
+  "compile_categories": {
+    "probe": {
+      "jobs": 1,
+      "cpu_s": 0.020571,
+      "summed_wall_s": 0.020718021
+    },
+    "pch": {
+      "jobs": 29,
+      "cpu_s": 18.185282999999995,
+      "summed_wall_s": 18.194705341000002
+    },
+    "evaluator shards": {
+      "jobs": 305,
+      "cpu_s": 547.5325830000005,
+      "summed_wall_s": 547.6627582159999,
+      "cpu_percent_of_cpp": 64.20758250434908
+    },
+    "tuning metadata": {
+      "jobs": 7,
+      "cpu_s": 7.805107,
+      "summed_wall_s": 7.807445884,
+      "cpu_percent_of_cpp": 0.9152826100538606
+    },
+    "module support": {
+      "jobs": 5,
+      "cpu_s": 26.409918,
+      "summed_wall_s": 26.414618476999998,
+      "cpu_percent_of_cpp": 3.097015669144374
+    },
+    "test driver": {
+      "jobs": 1,
+      "cpu_s": 6.894034,
+      "summed_wall_s": 6.89462382,
+      "cpu_percent_of_cpp": 0.808443680954029
+    },
+    "mixed unity batches": {
+      "jobs": 47,
+      "cpu_s": 264.11213200000003,
+      "summed_wall_s": 264.155997485,
+      "cpu_percent_of_cpp": 30.971675535498715
+    },
+    "link": {
+      "jobs": 1,
+      "cpu_s": 1.214141,
+      "summed_wall_s": 1.217754281
+    }
+  },
+  "link_inputs": {
+    "LLVM circuit objects": {
+      "count": 4981,
+      "bytes": 9468256
+    },
+    "C++ host objects": {
+      "count": 365,
+      "bytes": 124732192
+    }
+  },
+  "retained_text_bytes": {
+    "C++ host objects": 32652469,
+    "LLVM circuit objects": 5294264
+  },
+  "method": "Same generated LLVM Minion sources and 4,981 circuit objects copied from the current eight-job benchmark. Fresh host/PCH outputs. CXX wrapper records child CPU and wall time. Separate map-producing relink identifies retained sections and is excluded from build timings. Mixed unity categories cannot be separated accurately per included source."
+}

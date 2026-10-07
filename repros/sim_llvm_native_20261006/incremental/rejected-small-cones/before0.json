@@ -1,0 +1,1 @@
+[{"test":"minion.prog","status":"pass","arguments":["+cycles=100000"],"parameters":{"cycles":"100000"},"sim_cycles":100000,"init_ns":3241350,"sim_ns":2528458113,"cpu_ns":2527366139,"cpu_cycles":0,"instructions":0,"pcore_frac":0.0000,"counters":"cputime","rng_draws":7310,"ckpt_taken":0,"end_digest":"b2258760a5e55f77","out_digest":"41a8d8d7f57f599e"}]

@@ -1,0 +1,91 @@
+{
+  "binary_sha256": "c4042a0bb185986e62a5e3002004b5ff591940c0049b5db3a8db1f289f5ff577",
+  "jobs": 8,
+  "stages": {
+    "setup": {
+      "seconds": 159.23366041504778,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-sim-incremental-locality-large/toolchain/lhd",
+        "sim",
+        "/mada/users/renau/projs/lhdsuite/minion/pyrope/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-sim-incremental-locality-large/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-sim-incremental-locality-large/setup.json"
+      ]
+    },
+    "compile": {
+      "seconds": 125.402210901957,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-sim-incremental-locality-large/toolchain/lhd",
+        "sim",
+        "/mada/users/renau/projs/lhdsuite/minion/pyrope/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-sim-incremental-locality-large/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-sim-incremental-locality-large/compile.json"
+      ]
+    },
+    "before0": {
+      "seconds": 2.511316729011014,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-minion-workers-compare/llvm/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-sim-incremental-locality-large/before0.json"
+      ],
+      "markers": [
+        "minion_prog_tb.prp:195:puts:minion program: retired=41321 last_pc=1032, active through cycle 100000"
+      ]
+    },
+    "after0": {
+      "seconds": 4.529795808950439,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-sim-incremental-locality-large/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-sim-incremental-locality-large/after0.json"
+      ]
+    }
+  },
+  "source_sha256": {
+    "/mada/users/renau/projs/lhdsuite/minion/pyrope/minion_top.prp": "4c0d115f9ea45515dfb351b4f96e60660bff93cd5090aeb038ddf94c55eaf967",
+    "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp": "dcd1d16f0f1b966a86b96fd94a966bf02f353319cd4febe44394cbd3468768d6"
+  },
+  "execution_cpu": 0,
+  "disposition": "rejected: 25,960 objects, 10,299 root colors; still excessive fragmentation"
+}

@@ -1,0 +1,1105 @@
+{
+  "binary_sha256": "3b119d3ecc820923e1f29797fc7eb374a2e92996b52b0d4f94ae2644a01c9e16",
+  "jobs": 8,
+  "cpu": 0,
+  "runs": {
+    "dino_slop_cold_setup": {
+      "seconds": 0.32160817785188556,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_slop_cold_setup.json"
+      ]
+    },
+    "dino_slop_cold_compile": {
+      "seconds": 9.118598961969838,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_slop_cold_compile.json"
+      ]
+    },
+    "dino_llvm_cold_setup": {
+      "seconds": 0.44811567198485136,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_llvm_cold_setup.json"
+      ]
+    },
+    "dino_llvm_cold_compile": {
+      "seconds": 10.320667353924364,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_llvm_cold_compile.json"
+      ]
+    },
+    "dino_slop_exec0": {
+      "seconds": 1.1673698441591114,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/dino/slop/SW/sim/drv.bin",
+        "+cycles=5000000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_slop_exec0.json"
+      ]
+    },
+    "dino_llvm_exec0": {
+      "seconds": 2.2385279678273946,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/dino/llvm/SW/sim/drv.bin",
+        "+cycles=5000000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_llvm_exec0.json"
+      ]
+    },
+    "dino_slop_exec1": {
+      "seconds": 1.1634548001457006,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/dino/slop/SW/sim/drv.bin",
+        "+cycles=5000000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_slop_exec1.json"
+      ]
+    },
+    "dino_llvm_exec1": {
+      "seconds": 2.210716050118208,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/dino/llvm/SW/sim/drv.bin",
+        "+cycles=5000000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_llvm_exec1.json"
+      ]
+    },
+    "dino_slop_exec2": {
+      "seconds": 1.1620496769901365,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/dino/slop/SW/sim/drv.bin",
+        "+cycles=5000000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_slop_exec2.json"
+      ]
+    },
+    "dino_llvm_exec2": {
+      "seconds": 2.210168539080769,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/dino/llvm/SW/sim/drv.bin",
+        "+cycles=5000000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_llvm_exec2.json"
+      ]
+    },
+    "dino_slop_warm0": {
+      "seconds": 1.1016498568933457,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_slop_warm0.json"
+      ]
+    },
+    "dino_slop_warm1": {
+      "seconds": 1.166861189994961,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_slop_warm1.json"
+      ]
+    },
+    "dino_slop_edit_setup": {
+      "seconds": 0.5183596739079803,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_slop_edit_setup.json"
+      ]
+    },
+    "dino_slop_edit_compile": {
+      "seconds": 3.2856327660847455,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_slop_edit_compile.json"
+      ]
+    },
+    "dino_slop_edit_exec": {
+      "seconds": 0.028434030013158917,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/dino/slop/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_slop_edit_exec.json"
+      ]
+    },
+    "dino_llvm_warm0": {
+      "seconds": 1.0180187220685184,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_llvm_warm0.json"
+      ]
+    },
+    "dino_llvm_warm1": {
+      "seconds": 1.006287326104939,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_llvm_warm1.json"
+      ]
+    },
+    "dino_llvm_edit_setup": {
+      "seconds": 0.39125060592778027,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_llvm_edit_setup.json"
+      ]
+    },
+    "dino_llvm_edit_compile": {
+      "seconds": 2.139855407876894,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/dino/tree/PipelinedDualIssueCPU.prp",
+        "/mada/users/renau/projs/lhdsuite/dino/sim/dino_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/dino/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_llvm_edit_compile.json"
+      ]
+    },
+    "dino_llvm_edit_exec": {
+      "seconds": 0.04977630591019988,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/dino/llvm/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/dino_llvm_edit_exec.json"
+      ]
+    },
+    "minion_slop_cold_setup": {
+      "seconds": 134.31799382995814,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_slop_cold_setup.json"
+      ]
+    },
+    "minion_slop_cold_compile": {
+      "seconds": 61.16806459915824,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_slop_cold_compile.json"
+      ]
+    },
+    "minion_llvm_cold_setup": {
+      "seconds": 141.45593642187305,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_llvm_cold_setup.json"
+      ]
+    },
+    "minion_llvm_cold_compile": {
+      "seconds": 47.93470509396866,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_llvm_cold_compile.json"
+      ]
+    },
+    "minion_slop_exec0": {
+      "seconds": 2.241887159878388,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/minion/slop/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_slop_exec0.json"
+      ]
+    },
+    "minion_llvm_exec0": {
+      "seconds": 2.610638661077246,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/minion/llvm/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_llvm_exec0.json"
+      ]
+    },
+    "minion_slop_exec1": {
+      "seconds": 2.125391526147723,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/minion/slop/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_slop_exec1.json"
+      ]
+    },
+    "minion_llvm_exec1": {
+      "seconds": 2.529013015097007,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/minion/llvm/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_llvm_exec1.json"
+      ]
+    },
+    "minion_slop_exec2": {
+      "seconds": 2.207633172860369,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/minion/slop/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_slop_exec2.json"
+      ]
+    },
+    "minion_llvm_exec2": {
+      "seconds": 2.5396042729262263,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/minion/llvm/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_llvm_exec2.json"
+      ]
+    },
+    "minion_slop_warm0": {
+      "seconds": 77.79366872087121,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_slop_warm0.json"
+      ]
+    },
+    "minion_slop_warm1": {
+      "seconds": 77.45621760096401,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_slop_warm1.json"
+      ]
+    },
+    "minion_slop_edit_setup": {
+      "seconds": 106.72003383096308,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_slop_edit_setup.json"
+      ]
+    },
+    "minion_slop_edit_compile": {
+      "seconds": 7.4982249340973794,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/slop/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=slop",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_slop_edit_compile.json"
+      ]
+    },
+    "minion_slop_edit_exec": {
+      "seconds": 2.123473128071055,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/minion/slop/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_slop_edit_exec.json"
+      ]
+    },
+    "minion_llvm_warm0": {
+      "seconds": 77.60950429202057,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_llvm_warm0.json"
+      ]
+    },
+    "minion_llvm_warm1": {
+      "seconds": 77.79646240198053,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_llvm_warm1.json"
+      ]
+    },
+    "minion_llvm_edit_setup": {
+      "seconds": 110.02629561605863,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--setup-only",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_llvm_edit_setup.json"
+      ]
+    },
+    "minion_llvm_edit_compile": {
+      "seconds": 6.085757042979822,
+      "returncode": 0,
+      "argv": [
+        "/tmp/lhd-shared-colors/toolchain/lhd",
+        "sim",
+        "/tmp/lhd-shared-colors/minion/tree/minion_top.prp",
+        "/mada/users/renau/projs/lhdsuite/minion/sim/minion_prog_tb.prp",
+        "--workdir",
+        "/tmp/lhd-shared-colors/minion/llvm/SW",
+        "--set",
+        "sim.jobs=8",
+        "--set",
+        "sim.tune.profile=off",
+        "--set",
+        "sim.tune.backend=llvm",
+        "--set",
+        "sim.vcd=false",
+        "--run-only",
+        "--set",
+        "sim.compile_only=true",
+        "--set",
+        "sim.ninja=false",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_llvm_edit_compile.json"
+      ]
+    },
+    "minion_llvm_edit_exec": {
+      "seconds": 2.5793155080173165,
+      "returncode": 0,
+      "argv": [
+        "taskset",
+        "-c",
+        "0",
+        "/tmp/lhd-shared-colors/minion/llvm/SW/sim/drv.bin",
+        "+cycles=100000",
+        "--result-json",
+        "/tmp/lhd-shared-colors/minion_llvm_edit_exec.json"
+      ]
+    }
+  },
+  "dino": {
+    "source_mutation": "ALU.prp",
+    "baseline_sha256": "e7ad7dffe8a4ccd3d166966661cec488605ac62141b34525ce77d3217a3cca5e",
+    "backends": {
+      "slop": {
+        "objects": 0,
+        "cpp_bytes": 539837,
+        "exec_median_s": 1.1634548001457006,
+        "edit": {
+          ".llvm.o": {
+            "before": 0,
+            "after": 0,
+            "changed_bytes": [],
+            "rewritten": []
+          },
+          ".llvm.k": {
+            "before": 0,
+            "after": 0,
+            "changed_bytes": [],
+            "rewritten": []
+          },
+          ".cpp": {
+            "before": 37,
+            "after": 37,
+            "changed_bytes": [
+              "ALU.ALU.cpp",
+              "ALU.ALU.tune-id.cpp",
+              "ALU.ALU.tune.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-eval-0.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune-id.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune.cpp"
+            ],
+            "rewritten": [
+              "ALU.ALU.cpp",
+              "ALU.ALU.tune-id.cpp",
+              "ALU.ALU.tune.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-eval-0.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune-id.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune.cpp"
+            ]
+          },
+          ".hpp": {
+            "before": 34,
+            "after": 34,
+            "changed_bytes": [],
+            "rewritten": []
+          },
+          ".color-cuts.txt": {
+            "before": 8,
+            "after": 8,
+            "changed_bytes": [],
+            "rewritten": []
+          }
+        }
+      },
+      "llvm": {
+        "objects": 10,
+        "cpp_bytes": 406520,
+        "exec_median_s": 2.210716050118208,
+        "edit": {
+          ".llvm.o": {
+            "before": 10,
+            "after": 10,
+            "changed_bytes": [
+              "ALU.ALU.color-kernel-s_95a0dd8b6c93e57d0919df4000b9ea7c.llvm.o",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-kernel-s_ab634487417342cb4d0ea081a6313317.llvm.o"
+            ],
+            "rewritten": [
+              "ALU.ALU.color-kernel-s_95a0dd8b6c93e57d0919df4000b9ea7c.llvm.o",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-kernel-s_ab634487417342cb4d0ea081a6313317.llvm.o"
+            ]
+          },
+          ".llvm.k": {
+            "before": 10,
+            "after": 10,
+            "changed_bytes": [
+              "ALU.ALU.color-kernel-s_95a0dd8b6c93e57d0919df4000b9ea7c.llvm.k",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-kernel-s_ab634487417342cb4d0ea081a6313317.llvm.k"
+            ],
+            "rewritten": [
+              "ALU.ALU.color-kernel-s_95a0dd8b6c93e57d0919df4000b9ea7c.llvm.k",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-kernel-s_ab634487417342cb4d0ea081a6313317.llvm.k"
+            ]
+          },
+          ".cpp": {
+            "before": 37,
+            "after": 37,
+            "changed_bytes": [
+              "ALU.ALU.cpp",
+              "ALU.ALU.tune-id.cpp",
+              "ALU.ALU.tune.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-eval-0.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune-id.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune.cpp"
+            ],
+            "rewritten": [
+              "ALU.ALU.cpp",
+              "ALU.ALU.tune-id.cpp",
+              "ALU.ALU.tune.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-eval-0.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune-id.cpp",
+              "PipelinedDualIssueCPU.PipelinedDualIssueCPU.tune.cpp"
+            ]
+          },
+          ".hpp": {
+            "before": 34,
+            "after": 34,
+            "changed_bytes": [],
+            "rewritten": []
+          },
+          ".color-cuts.txt": {
+            "before": 8,
+            "after": 8,
+            "changed_bytes": [],
+            "rewritten": []
+          }
+        }
+      }
+    }
+  },
+  "minion": {
+    "source_mutation": "txfma_adder.prp",
+    "baseline_sha256": "2ad76159f4b99e6c9497d45d58d64578c35ce1fbfdd2f5306d5fb7cb2cf45845",
+    "backends": {
+      "slop": {
+        "objects": 0,
+        "cpp_bytes": 106455685,
+        "exec_median_s": 2.207633172860369,
+        "edit": {
+          ".llvm.o": {
+            "before": 0,
+            "after": 0,
+            "changed_bytes": [],
+            "rewritten": []
+          },
+          ".llvm.k": {
+            "before": 0,
+            "after": 0,
+            "changed_bytes": [],
+            "rewritten": []
+          },
+          ".cpp": {
+            "before": 1000,
+            "after": 1000,
+            "changed_bytes": [
+              "minion_top.minion_top.color-eval-17.cpp",
+              "minion_top.minion_top.color-eval-30.cpp",
+              "minion_top.minion_top.color-eval-37.cpp",
+              "minion_top.minion_top.color-eval-40.cpp",
+              "minion_top.minion_top.color-eval-46.cpp",
+              "minion_top.minion_top.color-eval-63.cpp",
+              "minion_top.minion_top.color-eval-69.cpp",
+              "minion_top.minion_top.cpp",
+              "minion_top.minion_top.tune-id.cpp",
+              "minion_top.minion_top.tune.cpp",
+              "txfmafrac_top.txfmafrac_top.color-eval-3.cpp",
+              "txfmafrac_top.txfmafrac_top.cpp",
+              "txfmafrac_top.txfmafrac_top.tune-id.cpp",
+              "txfmafrac_top.txfmafrac_top.tune.cpp",
+              "vpu_lane.vpu_lane.color-eval-3.cpp",
+              "vpu_lane.vpu_lane.cpp",
+              "vpu_lane.vpu_lane.tune-id.cpp",
+              "vpu_lane.vpu_lane.tune.cpp",
+              "vpu_top.vpu_top.color-eval-29.cpp",
+              "vpu_top.vpu_top.color-eval-30.cpp",
+              "vpu_top.vpu_top.color-eval-43.cpp",
+              "vpu_top.vpu_top.color-eval-47.cpp",
+              "vpu_top.vpu_top.color-eval-54.cpp",
+              "vpu_top.vpu_top.color-eval-56.cpp",
+              "vpu_top.vpu_top.color-eval-57.cpp",
+              "vpu_top.vpu_top.cpp",
+              "vpu_top.vpu_top.tune-id.cpp",
+              "vpu_top.vpu_top.tune.cpp"
+            ],
+            "rewritten": [
+              "minion_top.minion_top.color-eval-17.cpp",
+              "minion_top.minion_top.color-eval-30.cpp",
+              "minion_top.minion_top.color-eval-37.cpp",
+              "minion_top.minion_top.color-eval-40.cpp",
+              "minion_top.minion_top.color-eval-46.cpp",
+              "minion_top.minion_top.color-eval-63.cpp",
+              "minion_top.minion_top.color-eval-69.cpp",
+              "minion_top.minion_top.cpp",
+              "minion_top.minion_top.tune-id.cpp",
+              "minion_top.minion_top.tune.cpp",
+              "txfmafrac_top.txfmafrac_top.color-eval-3.cpp",
+              "txfmafrac_top.txfmafrac_top.cpp",
+              "txfmafrac_top.txfmafrac_top.tune-id.cpp",
+              "txfmafrac_top.txfmafrac_top.tune.cpp",
+              "vpu_lane.vpu_lane.color-eval-3.cpp",
+              "vpu_lane.vpu_lane.cpp",
+              "vpu_lane.vpu_lane.tune-id.cpp",
+              "vpu_lane.vpu_lane.tune.cpp",
+              "vpu_top.vpu_top.color-eval-29.cpp",
+              "vpu_top.vpu_top.color-eval-30.cpp",
+              "vpu_top.vpu_top.color-eval-43.cpp",
+              "vpu_top.vpu_top.color-eval-47.cpp",
+              "vpu_top.vpu_top.color-eval-54.cpp",
+              "vpu_top.vpu_top.color-eval-56.cpp",
+              "vpu_top.vpu_top.color-eval-57.cpp",
+              "vpu_top.vpu_top.cpp",
+              "vpu_top.vpu_top.tune-id.cpp",
+              "vpu_top.vpu_top.tune.cpp"
+            ]
+          },
+          ".hpp": {
+            "before": 334,
+            "after": 334,
+            "changed_bytes": [],
+            "rewritten": []
+          },
+          ".color-cuts.txt": {
+            "before": 53,
+            "after": 53,
+            "changed_bytes": [],
+            "rewritten": []
+          }
+        }
+      },
+      "llvm": {
+        "objects": 2226,
+        "cpp_bytes": 75432154,
+        "exec_median_s": 2.5396042729262263,
+        "edit": {
+          ".llvm.o": {
+            "before": 2226,
+            "after": 2226,
+            "changed_bytes": [
+              "minion_top.minion_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.o",
+              "vpu_lane.vpu_lane.color-kernel-s_eaccacf77802f808f21100ca7b551cb3.llvm.o",
+              "vpu_top.vpu_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.o"
+            ],
+            "rewritten": [
+              "minion_top.minion_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.o",
+              "vpu_lane.vpu_lane.color-kernel-s_eaccacf77802f808f21100ca7b551cb3.llvm.o",
+              "vpu_top.vpu_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.o"
+            ]
+          },
+          ".llvm.k": {
+            "before": 2226,
+            "after": 2226,
+            "changed_bytes": [
+              "minion_top.minion_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.k",
+              "vpu_lane.vpu_lane.color-kernel-s_eaccacf77802f808f21100ca7b551cb3.llvm.k",
+              "vpu_top.vpu_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.k"
+            ],
+            "rewritten": [
+              "minion_top.minion_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.k",
+              "vpu_lane.vpu_lane.color-kernel-s_eaccacf77802f808f21100ca7b551cb3.llvm.k",
+              "vpu_top.vpu_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.k"
+            ]
+          },
+          ".cpp": {
+            "before": 876,
+            "after": 876,
+            "changed_bytes": [
+              "minion_top.minion_top.cpp",
+              "minion_top.minion_top.tune-id.cpp",
+              "minion_top.minion_top.tune.cpp",
+              "txfmafrac_top.txfmafrac_top.color-eval-3.cpp",
+              "txfmafrac_top.txfmafrac_top.cpp",
+              "txfmafrac_top.txfmafrac_top.tune-id.cpp",
+              "txfmafrac_top.txfmafrac_top.tune.cpp",
+              "vpu_lane.vpu_lane.cpp",
+              "vpu_lane.vpu_lane.tune-id.cpp",
+              "vpu_lane.vpu_lane.tune.cpp",
+              "vpu_top.vpu_top.cpp",
+              "vpu_top.vpu_top.tune-id.cpp",
+              "vpu_top.vpu_top.tune.cpp"
+            ],
+            "rewritten": [
+              "minion_top.minion_top.cpp",
+              "minion_top.minion_top.tune-id.cpp",
+              "minion_top.minion_top.tune.cpp",
+              "txfmafrac_top.txfmafrac_top.color-eval-3.cpp",
+              "txfmafrac_top.txfmafrac_top.cpp",
+              "txfmafrac_top.txfmafrac_top.tune-id.cpp",
+              "txfmafrac_top.txfmafrac_top.tune.cpp",
+              "vpu_lane.vpu_lane.cpp",
+              "vpu_lane.vpu_lane.tune-id.cpp",
+              "vpu_lane.vpu_lane.tune.cpp",
+              "vpu_top.vpu_top.cpp",
+              "vpu_top.vpu_top.tune-id.cpp",
+              "vpu_top.vpu_top.tune.cpp"
+            ]
+          },
+          ".hpp": {
+            "before": 334,
+            "after": 334,
+            "changed_bytes": [],
+            "rewritten": []
+          },
+          ".color-cuts.txt": {
+            "before": 53,
+            "after": 53,
+            "changed_bytes": [],
+            "rewritten": []
+          }
+        }
+      }
+    }
+  }
+}

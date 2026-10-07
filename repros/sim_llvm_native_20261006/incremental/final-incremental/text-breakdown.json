@@ -1,0 +1,133 @@
+{
+  "scope": "Linked text symbols, deduplicated by start address. Excludes padding and unnamed code; categories are name-based. Retained edited Minion LLVM executable.",
+  "text_symbol_bytes": {
+    "Other code, including shared support and templates": 2600835,
+    "Native color kernels": 1474301,
+    "Generated checkpoint, observation and tuning walkers": 10962017,
+    "C++ color scheduling and commits": 585293,
+    "C++ color evaluators and adapters": 4033167
+  },
+  "symbol_total_bytes": 19655613,
+  "largest_symbols": [
+    {
+      "bytes": 199044,
+      "name": "minion_top_minion_top::__color_eval_part_72(unsigned long)"
+    },
+    {
+      "bytes": 198904,
+      "name": "minion_top_minion_top::__color_eval_part_71(unsigned long)"
+    },
+    {
+      "bytes": 172173,
+      "name": "minion_top_minion_top::__color_eval_part_73(unsigned long)"
+    },
+    {
+      "bytes": 107607,
+      "name": "txfmactl_top_txfmactl_top::observe_signals(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >&) const"
+    },
+    {
+      "bytes": 105641,
+      "name": "txfmactl_top_txfmactl_top::load_state(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)"
+    },
+    {
+      "bytes": 93419,
+      "name": "minion_top_minion_top::__color_eval_part_27(unsigned long)"
+    },
+    {
+      "bytes": 87475,
+      "name": "__sim_const_497689351594_31::observe_signals(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >&) const"
+    },
+    {
+      "bytes": 79375,
+      "name": "minion_top_minion_top::__color_eval_part_28(unsigned long)"
+    },
+    {
+      "bytes": 78860,
+      "name": "__sim_const_497689351594_31::load_state(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)"
+    },
+    {
+      "bytes": 76147,
+      "name": "minion_top_minion_top::__color_eval_part_5(unsigned long)"
+    },
+    {
+      "bytes": 74367,
+      "name": "txfmactl_top_txfmactl_top::describe_signals(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::vector<hlop::ckpt::Signal, std::allocator<hlop::ckpt::Signal> >&) const"
+    },
+    {
+      "bytes": 74224,
+      "name": "minion_top_minion_top::__color_eval_part_11(unsigned long)"
+    },
+    {
+      "bytes": 74156,
+      "name": "minion_top_minion_top::__color_eval_part_7(unsigned long)"
+    },
+    {
+      "bytes": 73282,
+      "name": "minion_top_minion_top::__color_eval_part_1(unsigned long)"
+    },
+    {
+      "bytes": 72946,
+      "name": "__sim_const_952630881769_28::observe_signals(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >&) const"
+    },
+    {
+      "bytes": 72946,
+      "name": "__sim_const_445694809976_79::observe_signals(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >&) const"
+    },
+    {
+      "bytes": 72946,
+      "name": "__sim_const_445694809976_78::observe_signals(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >&) const"
+    },
+    {
+      "bytes": 72946,
+      "name": "__sim_const_445694809976_16::observe_signals(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >&) const"
+    },
+    {
+      "bytes": 72946,
+      "name": "__sim_const_445694809976_15::observe_signals(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >&) const"
+    },
+    {
+      "bytes": 72946,
+      "name": "__sim_const_445694809976_14::observe_signals(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >&) const"
+    },
+    {
+      "bytes": 72946,
+      "name": "__sim_const_445694809976_13::observe_signals(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >&) const"
+    },
+    {
+      "bytes": 72946,
+      "name": "__sim_const_445694809976_12::observe_signals(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >&) const"
+    },
+    {
+      "bytes": 72310,
+      "name": "minion_top_minion_top::__color_eval_part_29(unsigned long)"
+    },
+    {
+      "bytes": 71463,
+      "name": "__sim_const_952630881769_28::load_state(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)"
+    },
+    {
+      "bytes": 71463,
+      "name": "__sim_const_445694809976_79::load_state(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)"
+    },
+    {
+      "bytes": 71463,
+      "name": "__sim_const_445694809976_78::load_state(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)"
+    },
+    {
+      "bytes": 71463,
+      "name": "__sim_const_445694809976_16::load_state(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)"
+    },
+    {
+      "bytes": 71463,
+      "name": "__sim_const_445694809976_15::load_state(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)"
+    },
+    {
+      "bytes": 71463,
+      "name": "__sim_const_445694809976_14::load_state(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)"
+    },
+    {
+      "bytes": 71463,
+      "name": "__sim_const_445694809976_13::load_state(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)"
+    }
+  ]
+}

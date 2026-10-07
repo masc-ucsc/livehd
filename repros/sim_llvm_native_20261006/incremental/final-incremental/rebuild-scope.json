@@ -1,0 +1,25 @@
+{
+  "dino": {
+    "native_changed_total": 2,
+    "linked_native_changes": [
+      "PipelinedDualIssueCPU.PipelinedDualIssueCPU.color-kernel-s_ab634487417342cb4d0ea081a6313317.llvm.o"
+    ],
+    "host_objects_rebuilt": [
+      "unity-0.o"
+    ],
+    "changed_headers": [],
+    "changed_partition_anchors": []
+  },
+  "minion": {
+    "native_changed_total": 3,
+    "linked_native_changes": [
+      "minion_top.minion_top.color-kernel-s_18db4adfa71fb1c1ed56a31249524161.llvm.o"
+    ],
+    "host_objects_rebuilt": [
+      "unity-6.o",
+      "minion_top.minion_top.tune.o"
+    ],
+    "changed_headers": [],
+    "changed_partition_anchors": []
+  }
+}

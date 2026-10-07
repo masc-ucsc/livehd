@@ -1,0 +1,18 @@
+{
+  "fixture": "SimColorPlan.InsertingLogicRepairsOnlyThePreviousPartition",
+  "independent_chains": 32,
+  "chain_operations": 8,
+  "live_word_budget": 16,
+  "edit": "Append one sum to cone 7 and expose its previous terminal value through an existing output port.",
+  "before_fix": {
+    "unaffected_colors": 4,
+    "preserved_memberships": 0
+  },
+  "after_fix": {
+    "policy": "original cold partitioning with saved terminal anchors",
+    "unaffected_colors": 4,
+    "preserved_memberships": 4
+  },
+  "object_fixture": "CgenSim.LlvmObjectsSurviveInsertionAndLongModuleNames",
+  "object_check": "Insertion and removal preserve unchanged object names, contents and mtimes with a 200-byte module name."
+}
