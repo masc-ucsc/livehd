@@ -22,7 +22,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIVEHD_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-COREET_ROOT="${COREET_ROOT:-/soe/czeng14/projects/core-et}"
+COREET_ROOT="${COREET_ROOT:?set COREET_ROOT to the read-only CORE-ET checkout}"
 TOP="${COREET_TOP:?set COREET_TOP=<module>}"
 LHD="${LHD:-$LIVEHD_ROOT/bazel-bin/lhd/lhd}"
 LAKE="${LAKE:-lake}"

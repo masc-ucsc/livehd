@@ -188,7 +188,9 @@ def type_outputs(rel, coreet_root):
 
 
 def main():
-    coreet_root = os.environ.get("COREET_ROOT", "/soe/czeng14/projects/core-et")
+    coreet_root = os.environ.get("COREET_ROOT")
+    if not coreet_root:
+        raise SystemExit("set COREET_ROOT to the read-only CORE-ET checkout")
     mapping = {}
     for rel, idents in PATCHES.items():
         src, out = patch_file(rel, idents, coreet_root)

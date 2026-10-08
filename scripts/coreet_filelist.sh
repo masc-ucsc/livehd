@@ -16,7 +16,7 @@ set -euo pipefail
 #        COREET_ROOT=... COREET_SRCDIR=... scripts/coreet_filelist.sh ...
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COREET_ROOT="${COREET_ROOT:-/soe/czeng14/projects/core-et}"
+COREET_ROOT="${COREET_ROOT:?set COREET_ROOT to the read-only CORE-ET checkout}"
 PRINT_MK="$SCRIPT_DIR/coreet_print.mk"
 TECH="${COREET_TECH:-generic}"
 
@@ -71,7 +71,9 @@ subst_of() {
   printf '%s' "${r:-$1}"
 }
 
-tmp="$(mktemp)"
+runtime_tmp="${TMPDIR:-$(dirname "$SCRIPT_DIR")/generated/core-et/runtime_tmp}"
+mkdir -p "$runtime_tmp"
+tmp="$(mktemp "$runtime_tmp/filelist.XXXXXXXXXX")"
 patched_note=""
 trap 'rm -f "$tmp"' EXIT
 n=0

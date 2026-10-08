@@ -605,3 +605,132 @@ unbounded table is an unbounded certificate.
 
 The decision for each stays recorded here either way, so no later branch can add
 one privately and leave master without it.
+
+## B1/B2 branch preservation audit after the initial port
+
+The PR-endpoint ledger cannot detect work that disappeared before that endpoint.
+This audit therefore compares the entire tracked tree at original B1/B2 commit
+`b04288cca51f79fc663ca2e49c54e1fae6e7f221` with PR endpoint
+`3685a977ee5be31f5939c83617f1264e2d9ddaab`, upstream
+`8bea45dc2aa9aab4d8b279db11a8887c52c1108d`, and port snapshot
+`84800425913f2e4f292ab74e85a0e74ccd7f6734`. B1/B2 is an ancestor of the PR
+endpoint. Its merge base with upstream is
+`e7cab7bfbcfdffa84045c99dbed1deb3846a3184`.
+
+The machine-readable companion is
+[`tests/MASTER_BRANCH_PRESERVATION.json`](tests/MASTER_BRANCH_PRESERVATION.json).
+It records hashes and dispositions for all 87 paths in the original branch's
+contribution relative to that merge base: 62 additions, 23 modifications and
+two deletions. It also lists every original path absent at the PR endpoint.
+
+| Comparison of the 2,833 original tracked files | Identical | Modified | Absent |
+| --- | ---: | ---: | ---: |
+| PR endpoint | 1,990 | 578 | 265 |
+| Upstream `8bea45dc2` | 1,405 | 1,131 | 297 |
+| Port snapshot `848004259`, before this recovery | 1,436 | 1,130 | 267 |
+
+All 265 paths absent at the PR endpoint are also absent at upstream. Many are
+intentional upstream cleanup, so restoring every deleted path would undo current
+master. Modified upstream files outside the original 87-path contribution have
+been compared by blob, not semantically reviewed line by line. These counts
+establish source presence, not behavioral equivalence.
+
+### Benchmark tooling recovered
+
+Commit `848004259` recovered seven scripts. This follow-up recovers the two
+remaining sweep drivers, `scripts/run_vc_sweep.sh` and
+`scripts/run_cva6_vc_sweep.sh`, plus eight committed CVA6 wrappers:
+
+- `cva6_compressed_decoder_gate`
+- `cva6_controller_gate`
+- `cva6_csr_buffer_gate`
+- `cva6_instr_realign_gate`
+- `cva6_instr_scan_gate`
+- `cva6_pmp_gate`
+- `cva6_ras_gate`
+- `cva6_raw_checker_gate`
+
+All eight wrapper files are byte-identical to B1/B2. Comparing merge commit
+`3685a977` with its first parent `61fd1646c` shows all 17 recovered paths
+being deleted at that boundary. This identifies where the loss becomes visible;
+it does not assign intent.
+
+The recovered drivers need small adaptations before their results are credible:
+
+- Derive the active checkout from the script location and require an explicit
+  read-only `COREET_ROOT`; use project-local temporary files by default.
+- Require successful exporter exit status before accepting an artifact. A stale
+  file left by an earlier run cannot turn a failed rerun into `EMITTED`.
+- Feed only the current CVA6 success list into the proof queue, and stop that
+  queue if static certificate gates fail.
+- Require the proof queue's explicit `PROVEN` verdict when writing the CORE-ET
+  report; exit zero alone can accompany a failed axiom gate.
+- Record silent nonzero elaborator exits, including timeouts, as failures.
+- Write new sweep results under the runtime output directory, preserving the
+  committed historical sweep tables.
+
+Validation: all eight wrappers compiled successfully with the current frontend
+using the user-authorized read-only CVA6 inputs. This checks wrapper/frontend
+compatibility only, not Lean proofs. The self-contained
+`python3 pass/lean/tests/sweep_tooling_check.py` check passes five driver
+scenarios covering stale artifacts, failed axiom gates, silent timeouts and
+successful controls. Its fake tools never access sibling benchmarks. Shell
+syntax and whitespace checks also pass.
+
+### Lean preservation and deliberate replacements
+
+All nine original `formal/lean/LeanSemanticPrimitives/Compiler/*.lean` modules
+are byte-identical to B1/B2. `Translation/GraphRefine.lean`,
+`Translation/LGraphModel.lean`, and the two original compiler probes are also
+unchanged. `Translation/OpBridge.lean` has 40 added lines and no deletions:
+`evalNode_bridge`, `evalNodeC_bridge`, `slt_widths_bridge`, and
+`sgt_widths_bridge`.
+
+The absence of `design_cert_export.hpp` and `verified-compiler.{cpp,hpp}` is
+intentional: their responsibilities moved into the shared scanner, certificate
+IR/builder, memory lowering and certificate emitter. The JSON ledger maps these
+replacements. That mapping is not a substitute for the adapter equivalence and
+benchmark gates elsewhere in this document.
+
+The original native fix in `6330d2aac` must also be interpreted against current
+upstream. Raw-D latch bypass is now handled by
+`graph/latch_contract.cpp:latch_transparent_arm`, which returns `din` after hold
+canonicalization; upstream commit `87b0b91a2` added this behavior. The current
+single-edge phase guards remain relevant. The clock-forest shadow fix survives
+under `canonical_top_name`, and the `<print>` include remains. The original
+encoder and simulator changes were shadowed-variable renames. This recovery
+changes no native LEC, graph, single-edge, or simulator implementation.
+
+### Unresolved Isabelle losses found by the broader comparison
+
+These are outside the Lean tooling recovery and remain open for a separate
+restoration/compatibility decision:
+
+| Area | Original B1/B2 progress | State at the port snapshot |
+| --- | --- | --- |
+| Binary-tree library | `Translation_BT.thy`, introduced by `b839fb6b7`, with reusable lookup/key lemmas and a ROOT session entry | Theory and ROOT entry absent; some tree machinery survives only inline in the bakeoff generator |
+| Bridge generation scaffolding | `emit_fast_bridge` option, structured certificate-node data, per-node fast-value definitions | Removed from `pass/isabelle/pass_isabelle.{cpp,hpp}`; this was scaffolding, not a completed full-design bridge theorem |
+| Widening arithmetic shift | Fast emitter uses `scast` on `sem_sra` result | Reverted to `ucast`: widening a negative shifted value zero-extends instead of sign-extending |
+| Signed-shift proof progress | `sint_word_of_int_fits`, explicit stale-lemma label and remaining-obligation notes | Helper and notes removed; the width-conditioned `ucast` lemma is again named `sra_bridge` |
+| Synthetic bridge scaling | `203ddf33e` removes unused `wf_distinct` and splits the combiner before applying directed per-node rules | `wf_distinct by simp` and the single large combiner `simp` are back |
+| Audit evidence | Recorded scaling measurements, oracle/trust-base analysis, signed-SRA bug explanation | 176 lines removed from `pass/isabelle/BRIDGE_BUGS.md` |
+
+For the shift, a four-bit result `1110` represents −2. Widening with `scast`
+gives eight-bit `11111110`; `ucast` gives `00001110` (+14). This is a concrete
+semantic distinction in the Isabelle exporter, not a new change to the Lean
+primitive semantics. The current `sra_bridge` theorem still requires output
+width no larger than input width; its presence does not validate widening.
+
+The scaling regression is established by source comparison against the recorded
+fix, not by a new full-size Isabelle timing run. The lost notes themselves were
+careful that the old 4,912-node measurement was a synthetic chain, not a DINO
+proof. Upstream has also changed Isabelle's graph API, memory stride, Get_mask
+and Concat handling, so replacing the exporter wholesale with the old file would
+lose newer work. Restore individual features only after reviewing those changes.
+
+This audit closes the benchmark-file inventory gap it identified. It does not
+establish complete preservation of all development branches or runtime-only
+configurations. Full DINO and corpus proofs, the remaining Hotmux value/status
+gates, and the approved nonzero-divisor Rem work remain separate acceptance
+items. In particular, no wrapper compile or source hash is counted as a
+certificate equivalence proof.
