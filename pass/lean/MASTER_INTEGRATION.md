@@ -783,3 +783,24 @@ values rather than just emitted spelling. The value facts use Isabelle `eval`
 and therefore carry its code-generator oracle dependency, as the recovered
 historical notes explain. These are targeted restoration checks, not new DINO
 or full-corpus Isabelle proofs. Fast-bridge scaffolding is restored separately.
+
+### Isabelle handoff; return to Lean
+
+The approved Isabelle restoration and its measured results are recorded in
+[`../isabelle/BRIDGE_BUGS.md`](../isabelle/BRIDGE_BUGS.md#master-migration-audit-and-restoration-checkpoint).
+The final generated session passes in 15.24 seconds with 1,158,280 KiB peak RSS;
+it covers the recovered synthetic bridge, signed-shift value regressions,
+combinational/sequential bridge scaffolding, executable small-certificate WF,
+and a concrete sequential fast/certificate equality. The original zero-extending
+shift fails the negative control as expected. Both C++ test targets pass.
+
+Two inherited WF execution/proof issues were fixed while validating the
+restoration: large natural-number IDs require `Code_Target_Nat`, and the final
+WF result needs direct use of its existing soundness lemma after rewriting the
+ID-list equality. Neither changes certificate or node semantics. Default
+non-bridge `cert_wf=skip` fixture output remains unchanged.
+
+The user requested that further work now focus on Lean. The recorded Isabelle
+limitations remain explicit: no completed general emitted fast/certificate
+bridge, no completed unrestricted signed-SRA lemma, no complete Isabelle
+chunked-WF proof, and no new full DINO/corpus Isabelle proof claim.

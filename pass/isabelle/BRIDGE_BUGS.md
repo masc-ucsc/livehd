@@ -686,3 +686,76 @@ a per-node proof. Re-proving it for `scast` needs
 because `sint x` lies in the signed range and dividing by a power of two keeps it
 there. With that, **no width side condition is needed at all**, which is itself
 the tell that the conditional version was papering over the bug.
+
+## Master migration audit and restoration checkpoint
+
+The source audit compares B1/B2 `b04288cca`, PR endpoint `3685a977`, and upstream
+`8bea45dc2`. The first-parent merge at `3685a977` dropped benchmark tooling,
+`Translation_BT`, bridge scaffolding, signed-SRA progress, and the later
+synthetic proof-scaling fixes. The full inventory and pinned hashes are in
+`pass/lean/tests/MASTER_BRANCH_PRESERVATION.json`.
+
+Commit `154c89cf3` restores the binary-tree theory/session entry, signed-SRA
+`scast`, `sint_word_of_int_fits` and the explicit unfinished SRA-bridge notes,
+the directed synthetic combiner, removal of unused `wf_distinct`, and the
+historical evidence above. The next restoration recovers the `emit_fast_bridge`
+option, structured certificate metadata, per-node fast definitions, promoted
+constant definitions and memory refusal. Current graph APIs, memory stride,
+Get_mask and Concat handling are retained. Native LEC is untouched.
+
+The option description now explicitly says that it emits **scaffolding**:
+there is still no generated general fast-model/certificate equivalence theorem.
+Memory certificates still contain counts only. The general `scast` SRA bridge
+is still unfinished; the old width-conditioned `ucast` lemma is explicitly
+labelled stale. Isabelle chunked WF still contains its inherited placeholders;
+this checkpoint does not certify that mode or any full DINO Isabelle bridge.
+
+Validation of the restored code:
+
+| Check | Result | Wall | Peak RSS (KiB) |
+| --- | --- | ---: | ---: |
+| Primitive and complete translation-library build | PASS | 66.00 s | 2,147,352 |
+| Recovered synthetic generator, 32-node `eqns` bridge | PASS | 12.60 s | 1,191,892 |
+| Fresh signed-shift model/certificate, four value facts | PASS | 11.69 s | 1,160,720 |
+| Old `ucast` form substituted into that generated model | Expected FAIL on −4 and −8 inputs | 11.16 s | 1,166,972 |
+| Final combined session from the actual emitter: synthetic bridge, shift facts, combinational/sequential fast values, `cert_wf=eval`, concrete sequential fast/cert equality, memory-stub typecheck | PASS | 15.24 s | 1,158,280 |
+
+The final C++ targets `//pass/isabelle:emission_smoke` and
+`//pass/lean:design_scan_test` also pass (3 Isabelle and 15 Lean test cases).
+The default shift fixture's model and certificate remain byte-identical across
+the bridge-scaffolding restoration. No full-design proof result is inferred
+from these small fixtures. `eval` retains its code-generator oracle dependency.
+
+### Two inherited WF defects exposed by the restoration tests
+
+The initial two-node `cert_wf=eval` run consumed minutes and gigabytes and was
+stopped. The certificate reserves IDs around one and two billion. Without
+`HOL-Library.Code_Target_Nat`, executable natural-number evaluation builds
+unary representations. Importing the standard integer-backed implementation
+made the diagnostic complete quickly, revealing a second issue: the final
+`simp` did not establish the concrete `graph_cert_wf` conclusion. Both the
+missing import and that proof shape occur before this restoration, including
+at the B1/B2 and upstream snapshots.
+
+The emitter now imports `Code_Target_Nat` when executable WF or bridge values
+are requested, explicitly rewrites the certified ID-list equality, and applies
+`graph_cert_wf_bool_sound` directly. The certificate data, primitive definitions
+and theorem statement are unchanged. The fresh final session above validates
+these fixes without dropping a WF obligation or adding a placeholder.
+
+Reproduce the focused check after building `//pass/isabelle:emission_smoke`:
+
+```sh
+pass/isabelle/scripts/check_restoration.sh
+```
+
+`OUT`, `TEST_BIN`, `ISABELLE`, and `ISABELLE_VALIDATION_USER_ROOT` are optional
+configuration variables. The script keeps generated fixtures, logs, temporary
+files and Isabelle user settings/heaps under the project. A fresh isolated home
+may need to build the parent `HOL-Library` heap. Historical and diagnostic logs
+for this checkpoint are under `generated/master_port/isabelle_restore/`.
+
+At the user's request, further Isabelle work stops at this recorded checkpoint
+and the migration returns to Lean validation. Remaining Isabelle work is the
+general fast-model bridge, the unrestricted signed-SRA lemma, complete chunked
+WF without placeholders, and full-design/corpus replay on the current graph API.

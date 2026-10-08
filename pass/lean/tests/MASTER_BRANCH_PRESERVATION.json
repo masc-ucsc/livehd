@@ -1426,5 +1426,56 @@
     "The missing upstream paths include intentional cleanup; do not restore all missing original-tree files.",
     "Isabelle losses remain unresolved and unmodified by this recovery.",
     "Other development branches, runtime-only benchmark configurations, full benchmark proofs, and new adapter semantic gates require their own coverage."
-  ]
+  ],
+  "isabelle_followup": {
+    "authorization": "User approved restoration in separate commits, then requested a recorded checkpoint and return to Lean.",
+    "library_and_signed_shift_commit": "154c89cf3",
+    "report": "pass/isabelle/BRIDGE_BUGS.md#master-migration-audit-and-restoration-checkpoint",
+    "resolved_source_losses": [
+      {
+        "path": "formal/translation_correctness/ROOT",
+        "working_blob": "570f1dd72b44ea8439fc26b41c78378d22bf579a"
+      },
+      {
+        "path": "formal/translation_correctness/Translation_BT.thy",
+        "working_blob": "4f4e9c1b5052b4d72791293febf8acf0ab67ace1"
+      },
+      {
+        "path": "formal/translation_correctness/Translation_OpBridge.thy",
+        "working_blob": "e24c8fa572bce73a207735a17396f236ba8f68f9"
+      },
+      {
+        "path": "pass/isabelle/BRIDGE_BUGS.md",
+        "working_blob": "166d3083cec45e25caf46022783005073e8f0a5d"
+      },
+      {
+        "path": "pass/isabelle/pass_isabelle.cpp",
+        "working_blob": "3832fca14416029b534651fa5deec10a6df17cf8"
+      },
+      {
+        "path": "pass/isabelle/pass_isabelle.hpp",
+        "working_blob": "557ebab92fb03edb46a1ebeeb0d7470ffe5f8b85"
+      },
+      {
+        "path": "pass/isabelle/scripts/bakeoff_gen.py",
+        "working_blob": "34898add5cd493f4c9a277d4f3be08ea21f6e45f"
+      }
+    ],
+    "validation": {
+      "library": "PASS",
+      "synthetic_bridge_nodes": 32,
+      "signed_shift_values": "PASS; old ucast negative control fails",
+      "cpp_targets": "2 PASS (3 Isabelle and 15 Lean cases)",
+      "fresh_combined_isabelle_session": "PASS",
+      "wall_seconds": 15.24,
+      "peak_rss_kib": 1158280
+    },
+    "remaining": [
+      "General emitted fast-model/certificate bridge",
+      "Unrestricted signed-SRA bridge lemma",
+      "Complete Isabelle chunked WF without placeholders",
+      "Full-design/corpus Isabelle replay"
+    ],
+    "scope": "Earlier per-file dispositions describe the pinned audit snapshot; this follow-up records source restorations without claiming the unfinished proofs are complete."
+  }
 }
