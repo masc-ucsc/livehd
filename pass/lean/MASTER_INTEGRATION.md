@@ -734,3 +734,22 @@ configurations. Full DINO and corpus proofs, the remaining Hotmux value/status
 gates, and the approved nonzero-divisor Rem work remain separate acceptance
 items. In particular, no wrapper compile or source hash is counted as a
 certificate equivalence proof.
+
+### Hotmux oracle harness follow-up
+
+The previously built `design_scan_test` binary did not yet contain
+`DesignScan.HotmuxValueOracle`: filtering for that name ran zero tests and exited
+zero. The script checked for a fixture but did not remove an old one first, so a
+rerun could have accepted a fixture from an earlier binary. The harness now
+requires a newly generated, nonempty fixture with value cases, always asks Lake
+to check the imported module's freshness, and prints `PASS` only after all its
+checks finish. No operator or certificate semantics change here.
+
+After rebuilding `//pass/lean:design_scan_test`, all 15 scanner tests pass and
+the real oracle test emits all five expected value cases. Separately,
+`python3 pass/lean/tests/hotmux_oracle_check.py` passes five self-contained
+harness cases: missing test output with a stale fixture, empty case list, a
+`sorry` warning, failed Lean elaboration, and a valid control. These harness and
+C++ results do not yet claim that Lean decided the five real vectors; that still
+requires completion of the shared `CompileDesign` dependency build and the
+actual oracle invocation.

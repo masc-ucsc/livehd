@@ -27,6 +27,9 @@ if [[ -z "$TEST_BIN" ]]; then
   exit 2
 fi
 
+# A missing gtest filter can exit zero without running a test. Never let a
+# fixture from an earlier binary satisfy this run.
+rm -f -- "$FIXTURE"
 echo "[hotmux-oracle] generating $FIXTURE"
 LEAN_HOTMUX_FIXTURE="$FIXTURE" "$TEST_BIN" --gtest_filter='DesignScan.HotmuxValueOracle' >"$OUT/generate.log" 2>&1
 
@@ -36,6 +39,10 @@ if [[ ! -s "$FIXTURE" ]]; then
 fi
 
 cases=$(grep -c '^example' "$FIXTURE" || true)
+if [[ "$cases" -eq 0 ]]; then
+  echo "[hotmux-oracle] FAIL: fixture contains no value cases" >&2
+  exit 1
+fi
 echo "[hotmux-oracle] $cases value case(s) to decide"
 
 cd "$ROOT/formal/lean"
@@ -46,18 +53,15 @@ cd "$ROOT/formal/lean"
 # missing object file rather than an unknown module.
 NEEDED="$(sed -n 's/^import \(LeanSemanticPrimitives.*\)$/\1/p' "$FIXTURE" | head -1)"
 NEEDED="${NEEDED:-LeanSemanticPrimitives.Compiler.CompileDesign}"
-OLEAN=".lake/build/lib/lean/${NEEDED//.//}.olean"
-if [[ ! -f "$OLEAN" ]]; then
-  echo "[hotmux-oracle] building $NEEDED"
-  LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-8}" $LAKE build "$NEEDED" >"$OUT/lake_build.log" 2>&1 || {
-    echo "[hotmux-oracle] FAIL: lake build $NEEDED; see $OUT/lake_build.log" >&2
-    exit 1
-  }
-fi
-echo "[hotmux-oracle] elaborating with $($LAKE env lean --version 2>/dev/null | head -1)"
-if $LAKE env lean "$FIXTURE" >"$OUT/lean.log" 2>&1; then
-  echo "[hotmux-oracle] PASS: all $cases case(s) decided"
-else
+# Always ask Lake to check freshness. An existing .olean can predate source
+# changes; an incremental build is cheap when the dependency graph is current.
+echo "[hotmux-oracle] building $NEEDED"
+LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-8}" "$LAKE" build "$NEEDED" >"$OUT/lake_build.log" 2>&1 || {
+  echo "[hotmux-oracle] FAIL: lake build $NEEDED; see $OUT/lake_build.log" >&2
+  exit 1
+}
+echo "[hotmux-oracle] elaborating with $("$LAKE" env lean --version 2>/dev/null | head -1)"
+if ! "$LAKE" env lean "$FIXTURE" >"$OUT/lean.log" 2>&1; then
   echo "[hotmux-oracle] FAIL: see $OUT/lean.log" >&2
   tail -30 "$OUT/lean.log" >&2
   exit 1
@@ -69,4 +73,5 @@ if grep -q 'sorry' "$OUT/lean.log"; then
   echo "[hotmux-oracle] FAIL: sorry reached the oracle" >&2
   exit 1
 fi
+echo "[hotmux-oracle] PASS: all $cases case(s) decided"
 echo "[hotmux-oracle] note: native_decide facts depend on ofReduceBool by construction"
