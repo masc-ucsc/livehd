@@ -1,0 +1,17 @@
+{
+  "baseline_commit": "1af4e1492",
+  "current_commit": "a49de5a2d",
+  "same_input_baseline_exports": 79,
+  "baseline_accepted": 60,
+  "baseline_async_refused": 19,
+  "accepted_structural_changes": [],
+  "matched_fast_nodes": 100481,
+  "signed_textual_differences": 129,
+  "equal_width_cast_removals": 99,
+  "mixed_width_comparisons": 30,
+  "historical_affected_cases": 21,
+  "historical_async_source_changes": 495,
+  "historical_constant_width_changes": 39,
+  "multi_clock_semantics_included": false,
+  "whole_model_equivalence_proven": false
+}

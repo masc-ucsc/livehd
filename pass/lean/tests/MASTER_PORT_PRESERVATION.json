@@ -1,0 +1,961 @@
+{
+  "base": "c54a435156a528d77afab2111bcb337403a0b42a",
+  "pr": "3685a977ee5be31f5939c83617f1264e2d9ddaab",
+  "upstream": "8bea45dc2aa9aab4d8b279db11a8887c52c1108d",
+  "old_local_master": "d21a73ba9b94b1192629e66237a41894c584ce9a",
+  "files": [
+    {
+      "path": ".github/workflows/ubuntu.yml",
+      "base_blob": "f18bcdb1fe710843f1edc28a144440f2946cac46",
+      "pr_blob": "6a1d70472e56fc61eddbf7a543156c05f001c37d",
+      "upstream_blob": "f2396d1c0bb77ae804ce2734a7938f9407ed1c63",
+      "disposition": "adapted-for-current-master",
+      "working_blob": "b59ff50d8996ae9c35300c84d03b293489349d04",
+      "explanation": "Keep current master single optimized regression job; retain PR push filtering, cancellation, unique cache keys, and cache-save handling. The coverage-filter override is superseded because upstream removed the coverage job."
+    },
+    {
+      "path": ".gitignore",
+      "base_blob": "d7858d3e3d138f34d1c01d4d65f48c97dc8b8ab8",
+      "pr_blob": "e230106408714e61429d1f96ed0a7d98933eeeae",
+      "upstream_blob": "d7858d3e3d138f34d1c01d4d65f48c97dc8b8ab8",
+      "disposition": "preserved-exactly",
+      "working_blob": "e230106408714e61429d1f96ed0a7d98933eeeae"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileDesign.lean",
+      "base_blob": null,
+      "pr_blob": "4f38b480c7f5abff07567ee5f651d04a2357eb97",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "4f38b480c7f5abff07567ee5f651d04a2357eb97"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileGraph.lean",
+      "base_blob": null,
+      "pr_blob": "fce2d6d785ec7d5c10dd224f32d1785efc29e5c3",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "fce2d6d785ec7d5c10dd224f32d1785efc29e5c3"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileOp.lean",
+      "base_blob": null,
+      "pr_blob": "5645fc64af6695e72da1a09f2d92cce8043b99e4",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "5645fc64af6695e72da1a09f2d92cce8043b99e4"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DesignCert.lean",
+      "base_blob": null,
+      "pr_blob": "08c4e670b5a0c07bda19fe25aa1543e82d90971f",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "08c4e670b5a0c07bda19fe25aa1543e82d90971f"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DesignCertWF.lean",
+      "base_blob": null,
+      "pr_blob": "cd2a6a69b4a292a7094ebc15129290a0ce6be30d",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "cd2a6a69b4a292a7094ebc15129290a0ce6be30d"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DesignSemantics.lean",
+      "base_blob": null,
+      "pr_blob": "803cf8f99045e8e892cf9de50cf845fda8c27cf8",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "803cf8f99045e8e892cf9de50cf845fda8c27cf8"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/ResidualIR.lean",
+      "base_blob": null,
+      "pr_blob": "f8f68b9b48c5c4f5f788893ed3619d9ea628da8e",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "f8f68b9b48c5c4f5f788893ed3619d9ea628da8e"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/ResidualSemantics.lean",
+      "base_blob": null,
+      "pr_blob": "159328db47d7feac41f56e23bcbff0d57c89a6ac",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "159328db47d7feac41f56e23bcbff0d57c89a6ac"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/Runtime.lean",
+      "base_blob": null,
+      "pr_blob": "903469b307313e61dcc1913abee0eb46f7b09d49",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "903469b307313e61dcc1913abee0eb46f7b09d49"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/GraphRefine.lean",
+      "base_blob": "580109e7e1457fe882e6e6f79e36b723068a8890",
+      "pr_blob": "e47ee14bc2c4c0c861c0b1a4853931ba428c88a5",
+      "upstream_blob": "580109e7e1457fe882e6e6f79e36b723068a8890",
+      "disposition": "preserved-exactly",
+      "working_blob": "e47ee14bc2c4c0c861c0b1a4853931ba428c88a5"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/LGraphModel.lean",
+      "base_blob": "5f63695a5f696f42e2e6432eacb610be8331723f",
+      "pr_blob": "19b2a8072ff832cb8d79243bd93fb6ca2e4392f6",
+      "upstream_blob": "5f63695a5f696f42e2e6432eacb610be8331723f",
+      "disposition": "preserved-exactly",
+      "working_blob": "19b2a8072ff832cb8d79243bd93fb6ca2e4392f6"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/LegacyCertWF.lean",
+      "base_blob": null,
+      "pr_blob": "922e571394a65656705a0546888d70de4a16a58d",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "922e571394a65656705a0546888d70de4a16a58d"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/OpBridge.lean",
+      "base_blob": "5f5410b47962686af55608317e7615f1c94ad7c5",
+      "pr_blob": "580d1b8ff34016a008f6690de528fcddfe1cdc19",
+      "upstream_blob": "5f5410b47962686af55608317e7615f1c94ad7c5",
+      "disposition": "preserved-exactly",
+      "working_blob": "580d1b8ff34016a008f6690de528fcddfe1cdc19"
+    },
+    {
+      "path": "formal/lean/probes/compiler_smoke.lean",
+      "base_blob": null,
+      "pr_blob": "1c90051f3e4056b0ad4a612dbc41d8b95d5bee4d",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "1c90051f3e4056b0ad4a612dbc41d8b95d5bee4d"
+    },
+    {
+      "path": "formal/lean/probes/defeq_probe.lean",
+      "base_blob": null,
+      "pr_blob": "948567ec30ef2f052c9b546de2b4540e2d589397",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "948567ec30ef2f052c9b546de2b4540e2d589397"
+    },
+    {
+      "path": "lhd/lhd_kernel_internal.hpp",
+      "base_blob": "376937e3d40063f15969762d2f85f3b350ffd7a4",
+      "pr_blob": "d965ea29e4a394c40c66025b4491817d6673eb08",
+      "upstream_blob": "20df553d14f1efe02669fc6bab62d253671c891f",
+      "disposition": "adapted-for-current-master",
+      "working_blob": "37af9a19aa18e9a33f5bccebb4b1b5b0d954ae4f",
+      "explanation": "Retain current master option registry and restore the three implemented Lean chunk controls from the PR."
+    },
+    {
+      "path": "lhd/lhd_options_test.cpp",
+      "base_blob": "c6f0395353cddfd467707630f7d478940685e4fb",
+      "pr_blob": "10737c05990ff9eb29d152d7dab88544bf030a97",
+      "upstream_blob": "901682fcc7a4924e1e917f0dbe8b5c67427af319",
+      "disposition": "adapted-for-current-master",
+      "working_blob": "e9455648e20f56f3e7a0b5c8f3c3dad583f98e6e",
+      "explanation": "Retain upstream tests and add PR checks for the three implemented Lean chunk controls."
+    },
+    {
+      "path": "packages/cvc5.BUILD",
+      "base_blob": "d0c5e2cb41c17196beb44fbad1315e033334311e",
+      "pr_blob": "1cb6c1591eecd08c6e4d3aacdca7b4438cb22825",
+      "upstream_blob": "d0c5e2cb41c17196beb44fbad1315e033334311e",
+      "disposition": "preserved-exactly",
+      "working_blob": "1cb6c1591eecd08c6e4d3aacdca7b4438cb22825"
+    },
+    {
+      "path": "pass/lean/B1_REFACTOR.md",
+      "base_blob": null,
+      "pr_blob": "0706afab05a66522c266dd1d41fa8ea6a2af408f",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "0706afab05a66522c266dd1d41fa8ea6a2af408f"
+    },
+    {
+      "path": "pass/lean/BUILD",
+      "base_blob": "1d2a97eabb8118d96f7e9fc93bc1a0a823f6edc5",
+      "pr_blob": "d25a4f80aae7959f1d5d4909cc25188feccab38b",
+      "upstream_blob": "1d2a97eabb8118d96f7e9fc93bc1a0a823f6edc5",
+      "disposition": "preserved-exactly",
+      "working_blob": "d25a4f80aae7959f1d5d4909cc25188feccab38b"
+    },
+    {
+      "path": "pass/lean/CVA6_COVERAGE_PLAN.md",
+      "base_blob": null,
+      "pr_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d"
+    },
+    {
+      "path": "pass/lean/FUTAMURA_PROJECTIONS.md",
+      "base_blob": null,
+      "pr_blob": "0a2178ddf213e4144640d030243cc742c21aa971",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "0a2178ddf213e4144640d030243cc742c21aa971"
+    },
+    {
+      "path": "pass/lean/GROUNDING_SRA_GETMASK_SEXT.md",
+      "base_blob": null,
+      "pr_blob": "0af0d6ae3b7169f55a96dbfa39fc8ec53fb72d64",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "0af0d6ae3b7169f55a96dbfa39fc8ec53fb72d64"
+    },
+    {
+      "path": "pass/lean/LEGACY_CI_AUDIT.md",
+      "base_blob": null,
+      "pr_blob": "29d11250b2d6cbc0b16efc423f29c112cb1861a4",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "29d11250b2d6cbc0b16efc423f29c112cb1861a4"
+    },
+    {
+      "path": "pass/lean/LEGACY_PROOF_COVERAGE.md",
+      "base_blob": null,
+      "pr_blob": "89438c6fa000615d461b0222637ee2216452aec6",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "89438c6fa000615d461b0222637ee2216452aec6"
+    },
+    {
+      "path": "pass/lean/LEGACY_PROOF_REPLAY.md",
+      "base_blob": null,
+      "pr_blob": "a7cabe2993ad23197da12ff69bbfae849ffd484a",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "a7cabe2993ad23197da12ff69bbfae849ffd484a"
+    },
+    {
+      "path": "pass/lean/LEGACY_REFACTOR.md",
+      "base_blob": null,
+      "pr_blob": "8e4401b99611da2b4ac328529af8683b818665ae",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "8e4401b99611da2b4ac328529af8683b818665ae"
+    },
+    {
+      "path": "pass/lean/LEGACY_SEMANTIC_AUDIT.md",
+      "base_blob": null,
+      "pr_blob": "53d52340ca38bee9998d3067acacfa72d4563dca",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "53d52340ca38bee9998d3067acacfa72d4563dca"
+    },
+    {
+      "path": "pass/lean/MASTER_INTEGRATION.md",
+      "base_blob": null,
+      "pr_blob": "a16379c09d909474117db6db8be386885b7aa434",
+      "upstream_blob": null,
+      "disposition": "historical-content-preserved-with-new-audit",
+      "working_blob": "475e226d57fbab5c69545785cd12aa70e886a570",
+      "explanation": "The prior integration report is retained verbatim, with a separate dated current-master audit appended."
+    },
+    {
+      "path": "pass/lean/PASS_LEAN_RESTRUCTURE_PLAN.md",
+      "base_blob": null,
+      "pr_blob": "460811c46308cf7cca32019e543a1c08101ea531",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "460811c46308cf7cca32019e543a1c08101ea531"
+    },
+    {
+      "path": "pass/lean/README.md",
+      "base_blob": "bb0871a3a0f39a029d119d5e0cc486d9dbd9dd1f",
+      "pr_blob": "c3dd5d058f8cc0acfad010d387aaad6cec10d992",
+      "upstream_blob": "bb0871a3a0f39a029d119d5e0cc486d9dbd9dd1f",
+      "disposition": "preserved-exactly",
+      "working_blob": "c3dd5d058f8cc0acfad010d387aaad6cec10d992"
+    },
+    {
+      "path": "pass/lean/STEP5_BRIDGE_BUGS.md",
+      "base_blob": "4a9b6aaa07abb1848efeaeded17330e3b5459925",
+      "pr_blob": "e60a9ea3c54170dfe868b25d00e536c8d5be68a5",
+      "upstream_blob": "4a9b6aaa07abb1848efeaeded17330e3b5459925",
+      "disposition": "preserved-exactly",
+      "working_blob": "e60a9ea3c54170dfe868b25d00e536c8d5be68a5"
+    },
+    {
+      "path": "pass/lean/SWEEP_b1-b2.tsv",
+      "base_blob": null,
+      "pr_blob": "5d9ed8c1aeea195719c9965895dac605157f7cc8",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "5d9ed8c1aeea195719c9965895dac605157f7cc8"
+    },
+    {
+      "path": "pass/lean/SWEEP_cva6.tsv",
+      "base_blob": null,
+      "pr_blob": "e3018e7390634270dcbc5fa0271d495eb44d5983",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "e3018e7390634270dcbc5fa0271d495eb44d5983"
+    },
+    {
+      "path": "pass/lean/VERIFIED_COMPILER_STATUS.md",
+      "base_blob": null,
+      "pr_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d"
+    },
+    {
+      "path": "pass/lean/certificate_builder.hpp",
+      "base_blob": null,
+      "pr_blob": "d1ea3c090fa8186632786506ee6a9ae7886ee3c6",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "d1ea3c090fa8186632786506ee6a9ae7886ee3c6"
+    },
+    {
+      "path": "pass/lean/certificate_ir.cpp",
+      "base_blob": null,
+      "pr_blob": "f896f77674ffb8800479029310a31ad095561a3b",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "f896f77674ffb8800479029310a31ad095561a3b"
+    },
+    {
+      "path": "pass/lean/certificate_ir.hpp",
+      "base_blob": null,
+      "pr_blob": "1e57d61594c934bec7173fbe7f46b317e4a5cbeb",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "1e57d61594c934bec7173fbe7f46b317e4a5cbeb"
+    },
+    {
+      "path": "pass/lean/certificate_ir_test.cpp",
+      "base_blob": null,
+      "pr_blob": "66d6a12bcf75873e27dae65aa503b41d02a18901",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "66d6a12bcf75873e27dae65aa503b41d02a18901"
+    },
+    {
+      "path": "pass/lean/design_scan.cpp",
+      "base_blob": null,
+      "pr_blob": "b8afc0605ea72def2838adee897b3310a05fd7f8",
+      "upstream_blob": null,
+      "disposition": "adapted-for-current-master",
+      "working_blob": "bd2735460073f06e0a5ba4d71b48423e9d21cca0",
+      "explanation": "Translate current master constant [lo,hi) mask endpoints into the existing owned certificate mask operand; certificate semantics unchanged."
+    },
+    {
+      "path": "pass/lean/design_scan.hpp",
+      "base_blob": null,
+      "pr_blob": "936ccde72b2f4466516d6fecdfef423e5bdd4a70",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "936ccde72b2f4466516d6fecdfef423e5bdd4a70"
+    },
+    {
+      "path": "pass/lean/design_scan_test.cpp",
+      "base_blob": null,
+      "pr_blob": "34ca912ec2c4f5f5ebc877b5d532501161edbc34",
+      "upstream_blob": null,
+      "disposition": "adapted-for-current-master",
+      "working_blob": "476895e8b8b46c2039c868747508d46c38c6e1d8",
+      "explanation": "Retain PR tests and add endpoint-mask arithmetic oracles, invalid-range refusals, and reset-through-mask coverage."
+    },
+    {
+      "path": "pass/lean/emit_design_cert.cpp",
+      "base_blob": null,
+      "pr_blob": "e4be85fc46634fbb1a13f90cffefaa62038d3662",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "e4be85fc46634fbb1a13f90cffefaa62038d3662"
+    },
+    {
+      "path": "pass/lean/emit_design_cert.hpp",
+      "base_blob": null,
+      "pr_blob": "a15884ddbbaf4420511435475f530f90aeaa2859",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "a15884ddbbaf4420511435475f530f90aeaa2859"
+    },
+    {
+      "path": "pass/lean/emit_legacy_cert_wf.cpp",
+      "base_blob": null,
+      "pr_blob": "776f3af0a55f6f22ce3a51a5d206355bd5cc970b",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "776f3af0a55f6f22ce3a51a5d206355bd5cc970b"
+    },
+    {
+      "path": "pass/lean/emit_legacy_cert_wf.hpp",
+      "base_blob": null,
+      "pr_blob": "3556c77de64b3950179c83fce128afa6e662200f",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "3556c77de64b3950179c83fce128afa6e662200f"
+    },
+    {
+      "path": "pass/lean/emit_legacy_fast_bridge.cpp",
+      "base_blob": null,
+      "pr_blob": "5063858f93331e447cd1ff92f765dd3eb91aec7d",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "5063858f93331e447cd1ff92f765dd3eb91aec7d"
+    },
+    {
+      "path": "pass/lean/emit_legacy_fast_bridge.hpp",
+      "base_blob": null,
+      "pr_blob": "4fa1ce340d6b31e52585f3df3df1191647d73ace",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "4fa1ce340d6b31e52585f3df3df1191647d73ace"
+    },
+    {
+      "path": "pass/lean/emit_legacy_fast_model.cpp",
+      "base_blob": null,
+      "pr_blob": "37902e50921ff6f94165bd81d2f4303b2ef5389d",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "37902e50921ff6f94165bd81d2f4303b2ef5389d"
+    },
+    {
+      "path": "pass/lean/emit_legacy_fast_model.hpp",
+      "base_blob": null,
+      "pr_blob": "3659c9e631f2de00fb352582fd281986227970ba",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "3659c9e631f2de00fb352582fd281986227970ba"
+    },
+    {
+      "path": "pass/lean/emit_legacy_graph_cert.cpp",
+      "base_blob": null,
+      "pr_blob": "27856fd3c64c8fc9f14483e912761965bcae1943",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "27856fd3c64c8fc9f14483e912761965bcae1943"
+    },
+    {
+      "path": "pass/lean/emit_legacy_graph_cert.hpp",
+      "base_blob": null,
+      "pr_blob": "086adc52abd56d7f24d928d49e805640280c5cfa",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "086adc52abd56d7f24d928d49e805640280c5cfa"
+    },
+    {
+      "path": "pass/lean/emit_legacy_schema.cpp",
+      "base_blob": null,
+      "pr_blob": "95ba0666f799c5af7364f881b8b6899be4407380",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "95ba0666f799c5af7364f881b8b6899be4407380"
+    },
+    {
+      "path": "pass/lean/emit_legacy_schema.hpp",
+      "base_blob": null,
+      "pr_blob": "d9c36b59a1f090ce41cd56c2a7948172fc82095c",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "d9c36b59a1f090ce41cd56c2a7948172fc82095c"
+    },
+    {
+      "path": "pass/lean/graph_access.cpp",
+      "base_blob": null,
+      "pr_blob": "18b9cbfa4099f817d1a6dffd6080e7140f193f0b",
+      "upstream_blob": null,
+      "disposition": "adapted-for-current-master",
+      "working_blob": "6f4b51c4f39a14c0257b8fade2464b679fda5767",
+      "explanation": "Recognize current master zero-based non-truncating mask windows when tracing reset-input resize chains."
+    },
+    {
+      "path": "pass/lean/graph_access.hpp",
+      "base_blob": null,
+      "pr_blob": "f7f6f9a8882fc88b79751a94a77c6f644c728971",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "f7f6f9a8882fc88b79751a94a77c6f644c728971"
+    },
+    {
+      "path": "pass/lean/lean_format.cpp",
+      "base_blob": null,
+      "pr_blob": "2634a97218aacc738c05c2151679a2a76b5b6be3",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "2634a97218aacc738c05c2151679a2a76b5b6be3"
+    },
+    {
+      "path": "pass/lean/lean_format.hpp",
+      "base_blob": null,
+      "pr_blob": "75dd5e3191b1f584952233fb9300dcfef90439eb",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "75dd5e3191b1f584952233fb9300dcfef90439eb"
+    },
+    {
+      "path": "pass/lean/lean_options.cpp",
+      "base_blob": null,
+      "pr_blob": "6b2369f9181fc6f5ac2daa8e70f84e548c13afd7",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "6b2369f9181fc6f5ac2daa8e70f84e548c13afd7"
+    },
+    {
+      "path": "pass/lean/lean_options.hpp",
+      "base_blob": null,
+      "pr_blob": "3a2a0d356c49120741d51e725e54d97a1765e8e3",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "3a2a0d356c49120741d51e725e54d97a1765e8e3"
+    },
+    {
+      "path": "pass/lean/legacy_model.cpp",
+      "base_blob": null,
+      "pr_blob": "91ede7535422269aa8fd69465b32760ec4185837",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "91ede7535422269aa8fd69465b32760ec4185837"
+    },
+    {
+      "path": "pass/lean/legacy_model.hpp",
+      "base_blob": null,
+      "pr_blob": "7c9064ba7c71ae6b85d10830f0025eebe19b2bd5",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "7c9064ba7c71ae6b85d10830f0025eebe19b2bd5"
+    },
+    {
+      "path": "pass/lean/legacy_model_test.cpp",
+      "base_blob": null,
+      "pr_blob": "dc700e0893107412df52096edd9137c0f461090f",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "dc700e0893107412df52096edd9137c0f461090f"
+    },
+    {
+      "path": "pass/lean/memory_lowering.cpp",
+      "base_blob": null,
+      "pr_blob": "cc84bc34c9b5f7b95678fcbce915ac4f8e149fc5",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "cc84bc34c9b5f7b95678fcbce915ac4f8e149fc5"
+    },
+    {
+      "path": "pass/lean/memory_lowering.hpp",
+      "base_blob": null,
+      "pr_blob": "593a4b64eb4427b18fac6cb6135c2fff768fd07b",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "593a4b64eb4427b18fac6cb6135c2fff768fd07b"
+    },
+    {
+      "path": "pass/lean/pass_lean.cpp",
+      "base_blob": "ec157c6737bda8fb4b43ec5dab7c5a77fdf1fc67",
+      "pr_blob": "a64769228e715e987ff93e67bf8b68d4a1789b3d",
+      "upstream_blob": "73ac207478149f555a27d05efe2c21529a42bb4e",
+      "disposition": "preserved-exactly",
+      "working_blob": "a64769228e715e987ff93e67bf8b68d4a1789b3d"
+    },
+    {
+      "path": "pass/lean/pass_lean.hpp",
+      "base_blob": "12f19d36c93bfbc46806a7dea5b3d6efd815151c",
+      "pr_blob": "6e989d2d483c66e366579301c5c007cc84017009",
+      "upstream_blob": "12f19d36c93bfbc46806a7dea5b3d6efd815151c",
+      "disposition": "preserved-exactly",
+      "working_blob": "6e989d2d483c66e366579301c5c007cc84017009"
+    },
+    {
+      "path": "pass/lean/scripts/cert_lgraph_diff.py",
+      "base_blob": null,
+      "pr_blob": "b6909adc448a1a568414460d75979a3e06c75a27",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "b6909adc448a1a568414460d75979a3e06c75a27"
+    },
+    {
+      "path": "pass/lean/scripts/compare_exports.py",
+      "base_blob": null,
+      "pr_blob": "d46bf0b227f00684cb63e9ab2c921c7fca1a3e90",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "d46bf0b227f00684cb63e9ab2c921c7fca1a3e90"
+    },
+    {
+      "path": "pass/lean/scripts/op_census.py",
+      "base_blob": "7a9bba7352389c25ff6d4677068256dc79d17caa",
+      "pr_blob": "5b620523bad2e82b3128d2e9a21db04ab8e1d1a9",
+      "upstream_blob": "7a9bba7352389c25ff6d4677068256dc79d17caa",
+      "disposition": "preserved-exactly",
+      "working_blob": "5b620523bad2e82b3128d2e9a21db04ab8e1d1a9"
+    },
+    {
+      "path": "pass/lean/scripts/vc_gates.py",
+      "base_blob": null,
+      "pr_blob": "017cbdfa0ad6964e9b0b6ddebc5e6ba530124745",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "017cbdfa0ad6964e9b0b6ddebc5e6ba530124745"
+    },
+    {
+      "path": "pass/lean/tests/B1_REFACTOR_GOLDENS.tsv",
+      "base_blob": null,
+      "pr_blob": "ed9a24f9594bf59a82c242ab636810a642b22c69",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "ed9a24f9594bf59a82c242ab636810a642b22c69"
+    },
+    {
+      "path": "pass/lean/tests/B1_RESET_POLARITY.tsv",
+      "base_blob": null,
+      "pr_blob": "6f0df8871418abfd0d5540c71711979d2bc44681",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "6f0df8871418abfd0d5540c71711979d2bc44681"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_CI_RUNTIME_COMPARISON.json",
+      "base_blob": null,
+      "pr_blob": "624cc6d4eccf2378bb7ecd01050c237ba5e7d6e0",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "624cc6d4eccf2378bb7ecd01050c237ba5e7d6e0"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_CI_SOURCE_PROVENANCE.json",
+      "base_blob": null,
+      "pr_blob": "87ea81e0414a2dab5cb69d46dd7f69ed165fe83a",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "87ea81e0414a2dab5cb69d46dd7f69ed165fe83a"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_PROOF_COVERAGE.json",
+      "base_blob": null,
+      "pr_blob": "d52d373be4d087f5d9694dc5f373a2a23d11bc46",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "d52d373be4d087f5d9694dc5f373a2a23d11bc46"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+      "base_blob": null,
+      "pr_blob": "bee932f50eeb84bede2059f7a529e9770aa752c0",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "bee932f50eeb84bede2059f7a529e9770aa752c0"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_PROOF_INVENTORY.json",
+      "base_blob": null,
+      "pr_blob": "9adee9552acb36aab21699a91bf97a9acb6b34af",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "9adee9552acb36aab21699a91bf97a9acb6b34af"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_REFACTOR_GOLDENS.tsv",
+      "base_blob": null,
+      "pr_blob": "745e254f1ea3af8d3e63261d7a2f89978a434c70",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "745e254f1ea3af8d3e63261d7a2f89978a434c70"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_SCALABILITY_RESULTS.json",
+      "base_blob": null,
+      "pr_blob": "677c514c2aaecd23de6b4ab2486004e17d206e36",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "677c514c2aaecd23de6b4ab2486004e17d206e36"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_SHARED_RESULTS.tsv",
+      "base_blob": null,
+      "pr_blob": "eea0162ba86119a397c59ea926539b2409d14a3f",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "eea0162ba86119a397c59ea926539b2409d14a3f"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_VALIDATION_COVERAGE.json",
+      "base_blob": null,
+      "pr_blob": "157632c749eaf09bc4d192ea9a59989f48129d9f",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "157632c749eaf09bc4d192ea9a59989f48129d9f"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_ADAPTER_PARITY.json",
+      "base_blob": null,
+      "pr_blob": "bc4cc0dd80db6bf8ef92a937508d634c168334a6",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "bc4cc0dd80db6bf8ef92a937508d634c168334a6"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_NATIVE_REGRESSION.json",
+      "base_blob": null,
+      "pr_blob": "710442dcede9082a77df9181c9f1900e59dcb547",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "710442dcede9082a77df9181c9f1900e59dcb547"
+    },
+    {
+      "path": "pass/lean/tests/audit_legacy_parity.py",
+      "base_blob": null,
+      "pr_blob": "9470b7ac5a3e66f848415171611b54bbd1e254a6",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "9470b7ac5a3e66f848415171611b54bbd1e254a6"
+    },
+    {
+      "path": "pass/lean/tests/check_legacy_oracles.py",
+      "base_blob": null,
+      "pr_blob": "1e9745aa62bfd51dfe6b56ada66295883904eac1",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "1e9745aa62bfd51dfe6b56ada66295883904eac1"
+    },
+    {
+      "path": "pass/lean/tests/compare_exports.py",
+      "base_blob": null,
+      "pr_blob": "37d0fa3c63ccbf37edbab56602bd319d3ab0d31d",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "37d0fa3c63ccbf37edbab56602bd319d3ab0d31d"
+    },
+    {
+      "path": "pass/lean/tests/export_graph.cpp",
+      "base_blob": null,
+      "pr_blob": "e4db7116ad6e3f786ad0fc0e0c1a65a40f7662d4",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "e4db7116ad6e3f786ad0fc0e0c1a65a40f7662d4"
+    },
+    {
+      "path": "pass/lean/tests/legacy_fixtures.cpp",
+      "base_blob": null,
+      "pr_blob": "d9847cc973b21cfe647bb9eee8cd844acb7b2c58",
+      "upstream_blob": null,
+      "disposition": "adapted-for-current-master",
+      "working_blob": "aae83862b3896b69dcca02d09f867ac3c4235f48",
+      "explanation": "Construct the historical mask fixtures using the current graph endpoint API."
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/PipelinedCPU.log",
+      "base_blob": null,
+      "pr_blob": "9ef808d380bf2a7069130fd59d473023fd7ced34",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "9ef808d380bf2a7069130fd59d473023fd7ced34"
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/PipelinedCPU.time",
+      "base_blob": null,
+      "pr_blob": "9d84e059ee7f7c6898c9b3d46091d3e7d85640b1",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "9d84e059ee7f7c6898c9b3d46091d3e7d85640b1"
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/PipelinedDualIssueCPU.log",
+      "base_blob": null,
+      "pr_blob": "274be00de6739a5d1eeedc1635e61df3da3567cf",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "274be00de6739a5d1eeedc1635e61df3da3567cf"
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/PipelinedDualIssueCPU.time",
+      "base_blob": null,
+      "pr_blob": "0e2682cd056bfbcdfaed0e1db762ee5d464844fa",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "0e2682cd056bfbcdfaed0e1db762ee5d464844fa"
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/SingleCycleCPU.log",
+      "base_blob": null,
+      "pr_blob": "2a2b283f93cb945160defe9e483ede1de06b48a1",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "2a2b283f93cb945160defe9e483ede1de06b48a1"
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/SingleCycleCPU.time",
+      "base_blob": null,
+      "pr_blob": "bf96792a8f82b61557ce8af0538c2ed2d8164d84",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "bf96792a8f82b61557ce8af0538c2ed2d8164d84"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/SignedWidthTimeline.lean",
+      "base_blob": null,
+      "pr_blob": "640543d14ddac90ba1c07b7e34b294815a9af28a",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "640543d14ddac90ba1c07b7e34b294815a9af28a"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/baseline_same_graph_results.json",
+      "base_blob": null,
+      "pr_blob": "a946ccf5cd42ebb7dfc00f6c322ad7a9e827bbfa",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "a946ccf5cd42ebb7dfc00f6c322ad7a9e827bbfa"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/fast_expression_text_audit.json",
+      "base_blob": null,
+      "pr_blob": "f498d9baf1cbfa697c521bb90b4adf510090f224",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "f498d9baf1cbfa697c521bb90b4adf510090f224"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/same_graph_dino_structure.json",
+      "base_blob": null,
+      "pr_blob": "1ca119a7421b7f703e24e9facc49ce0a3cb44430",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "1ca119a7421b7f703e24e9facc49ce0a3cb44430"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/signed_comparison_widths.json",
+      "base_blob": null,
+      "pr_blob": "c8ac2d4096aeb7f0ecb1be08a1a697c13b31ed78",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "c8ac2d4096aeb7f0ecb1be08a1a697c13b31ed78"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/signed_width_timeline.log",
+      "base_blob": null,
+      "pr_blob": "a9e9ec2fe03378668652314dcd16f98e711b5014",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "a9e9ec2fe03378668652314dcd16f98e711b5014"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/signed_width_timeline_result.json",
+      "base_blob": null,
+      "pr_blob": "18c0f03ed286f1337f15467f8ab5f271e34f83be",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "18c0f03ed286f1337f15467f8ab5f271e34f83be"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/summary.json",
+      "base_blob": null,
+      "pr_blob": "8449a44b3da9f0c1751105d76c0790dd40f9f06d",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "8449a44b3da9f0c1751105d76c0790dd40f9f06d"
+    },
+    {
+      "path": "pass/lean/tests/legacy_wf_index.lean",
+      "base_blob": null,
+      "pr_blob": "3548697b47b84eed1d505463a077f1bf6760786d",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "3548697b47b84eed1d505463a077f1bf6760786d"
+    },
+    {
+      "path": "pass/lean/tests/replay_legacy_proofs.py",
+      "base_blob": null,
+      "pr_blob": "045ce8c37a06fd02f40bcbc26fd8eadd9529bedc",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "045ce8c37a06fd02f40bcbc26fd8eadd9529bedc"
+    },
+    {
+      "path": "pass/lean/tests/width_regress/check.py",
+      "base_blob": null,
+      "pr_blob": "af128e0dce1b403af2b08f773dcc3060ae1f8968",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "af128e0dce1b403af2b08f773dcc3060ae1f8968"
+    },
+    {
+      "path": "pass/lean/tests/width_regress/const_width_regress.sv",
+      "base_blob": null,
+      "pr_blob": "6a4e885146666a79b0574c70aca8cc57b8a33030",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "6a4e885146666a79b0574c70aca8cc57b8a33030"
+    },
+    {
+      "path": "pass/lec/BUILD",
+      "base_blob": "23b37f23fa2b552704769532564b30d0af5d1814",
+      "pr_blob": "1796d7bc7d34554996cf0e45053a29254f13a558",
+      "upstream_blob": "3b17134c5534e6618ecb4123c0ac68f5220770fb",
+      "disposition": "adapted-for-current-master",
+      "working_blob": "c0cdc013636e733cbe05d4181c278bac12bcf169",
+      "explanation": "Retain current master native checker dependencies; preserve the PR static ABC/cvc5 collision regression target."
+    },
+    {
+      "path": "pass/lec/tests/cvc5_link_smoke.cpp",
+      "base_blob": "34dbe8176bc86b24de96ac5ce9953ad570e66991",
+      "pr_blob": "f9b8e2f41fcf2d84561427dbb2622c6508fcf41d",
+      "upstream_blob": "34dbe8176bc86b24de96ac5ce9953ad570e66991",
+      "disposition": "preserved-exactly",
+      "working_blob": "f9b8e2f41fcf2d84561427dbb2622c6508fcf41d"
+    },
+    {
+      "path": "scripts/run_coreet_module_lean.sh",
+      "base_blob": null,
+      "pr_blob": "534bb62b80193c5b6048ef7a25c22363aec591a0",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "534bb62b80193c5b6048ef7a25c22363aec591a0"
+    },
+    {
+      "path": "scripts/run_cva6_alu_lean.sh",
+      "base_blob": "3481e053dffcd57139854ad062f3f4a15cd74fc2",
+      "pr_blob": "34308dc4f33cce9aeb913c7d6e87890bee1d2bc0",
+      "upstream_blob": "3481e053dffcd57139854ad062f3f4a15cd74fc2",
+      "disposition": "preserved-exactly",
+      "working_blob": "34308dc4f33cce9aeb913c7d6e87890bee1d2bc0"
+    },
+    {
+      "path": "scripts/run_cva6_complex_lean_stress.sh",
+      "base_blob": "4f7132106394dfc490e3e6b8459c327019b3f63d",
+      "pr_blob": "f23a3ec2c6f1808642b2813f3bf5cba26d11c3a2",
+      "upstream_blob": "4f7132106394dfc490e3e6b8459c327019b3f63d",
+      "disposition": "preserved-exactly",
+      "working_blob": "f23a3ec2c6f1808642b2813f3bf5cba26d11c3a2"
+    },
+    {
+      "path": "scripts/run_cva6_module_lean_stress.sh",
+      "base_blob": "2acd8a3eecb22764171f010c6edc6f4f719d6dd4",
+      "pr_blob": "469894b18b5792b7a1d001d95b25c3e2d6b6ab44",
+      "upstream_blob": "2acd8a3eecb22764171f010c6edc6f4f719d6dd4",
+      "disposition": "preserved-exactly",
+      "working_blob": "469894b18b5792b7a1d001d95b25c3e2d6b6ab44"
+    },
+    {
+      "path": "scripts/run_dino_lgraph_lean.sh",
+      "base_blob": "e0ad03e927acb32e6209a2f89699c5d281677a42",
+      "pr_blob": "47f661014fd7eb0891bf9d044a413a0827371441",
+      "upstream_blob": "e0ad03e927acb32e6209a2f89699c5d281677a42",
+      "disposition": "preserved-exactly",
+      "working_blob": "47f661014fd7eb0891bf9d044a413a0827371441"
+    },
+    {
+      "path": "scripts/run_lean_queue.sh",
+      "base_blob": null,
+      "pr_blob": "24eb32759105c4af9aaa238edeea3a6539ab9a21",
+      "upstream_blob": null,
+      "disposition": "preserved-exactly",
+      "working_blob": "24eb32759105c4af9aaa238edeea3a6539ab9a21"
+    }
+  ],
+  "validation_status": "in-progress; no integration commit or publication yet",
+  "upstream_overlap_review": {
+    ".github/workflows/ubuntu.yml": "Current master optimized self-contained job retained, with the PR trigger/cache repairs applied.",
+    "lhd/lhd_kernel_internal.hpp": "All current master non-Lean option and API changes retained; only the implemented Lean chunk-control retirement entries removed.",
+    "lhd/lhd_options_test.cpp": "Current master tests retained, with the PR chunk-control checks added.",
+    "pass/lean/pass_lean.cpp": "The current master mask-endpoint changes to the former monolithic implementation are implemented at the refactored design_scan.cpp and graph_access.cpp boundaries. The PR orchestrator remains unchanged.",
+    "pass/lec/BUILD": "Current master checker/dependency changes retained, with the PR static collision smoke configuration added."
+  }
+}

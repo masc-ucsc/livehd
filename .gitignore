@@ -65,3 +65,11 @@ difftest_*/
 
 # lhd --emit-dir lg: scratch output dirs (lg1, lg2, ...)
 /lg[0-9]*/
+
+# Local B1 refactor validation artifacts
+generated/b1_refactor/
+
+# Local master-port validation artifacts (fresh exports, generated Lean files,
+# proof logs). Evidence is summarized in pass/lean/tests/*.json; the raw tree is
+# thousands of files and is not source.
+generated/master_port/

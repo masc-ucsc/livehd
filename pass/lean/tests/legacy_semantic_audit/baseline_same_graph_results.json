@@ -1,0 +1,675 @@
+[
+  {
+    "top": "intpipe_alu",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "3e505f7defbcac41fa1e1c65ca3031c9df27acf636beeec1b3677594a9c3ec97"
+  },
+  {
+    "top": "cva6_alu_export",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "072c679eb9f48e1406a0bcaabf1f1dc816a5af0265f088a4ec26afce5648cd84"
+  },
+  {
+    "top": "cva6_compressed_decoder_gate",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "dee5f44b7e06d5a208b7e0034c1f0ca82205885c077844768272a596ad1033ad"
+  },
+  {
+    "top": "cva6_controller_gate",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_996 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "cva6_csr_buffer_gate",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_276 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "cva6_instr_realign_gate",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_492 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "cva6_instr_scan_gate",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "c534bd806caad9c27146e0d4f6b75b44d555acf552113bf52e2fd843e6d05455"
+  },
+  {
+    "top": "cva6_pmp_gate",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "b8589343ee408a17c89336259ccd85dfae06c670ccbf200513aed11f1e318e10"
+  },
+  {
+    "top": "cva6_ras_gate",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_140 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "cva6_raw_checker_gate",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "246be4b5f39e78caa46c225744a01871cda6a8aeceb16cf0a6b9568faed3e0fa"
+  },
+  {
+    "top": "cva6_tlb_gate",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_4276 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "debug_breakpoint",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "f8b01e88ea80c3acd3694fd0dbe57028180fd1edd2c4eebf83c2f649d72968d0"
+  },
+  {
+    "top": "intpipe_csr_file_conv",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_252 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "intpipe_csr_file_fl_barrier",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_124 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "intpipe_csr_msgs",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_6308 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "intpipe_csr_pmu_read_interface",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_296 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "intpipe_csr_replay",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_648 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "intpipe_decode",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "8ba75f7f627fef4d99b1af01b55e0403256a1aa8b1f97d44b2e884e454a7c003"
+  },
+  {
+    "top": "intpipe_fp_scoreboard",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "77b76445ad3c337cfa520f329bdb5c3eea331d505e5c03c60a4881b9b41fcc26"
+  },
+  {
+    "top": "intpipe_imm",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "684ce527a85883003be1cb8859f8fed7013cc37246c2e1a80863b6087d46dc8f"
+  },
+  {
+    "top": "intpipe_inst_bits_stage",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "a69a89958e36cb39c0947dd801b5a26b70cb37ca0af572c3032b58e191a83a5d"
+  },
+  {
+    "top": "intpipe_int_scoreboard",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "06a3d2b8d44bd53030f6ebd78ffb0e00193c2ff37adb9c7737c53ae4e5e88e03"
+  },
+  {
+    "top": "intpipe_mask_scoreboard",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "c8eddd1d9d8d038cc1faac2a4c94fde02e0e74737b1caea350a6d572df1365ff"
+  },
+  {
+    "top": "intpipe_rf",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "486db4ff464517e756daac084af8dd169cb0b3cab1f18f5db28edf5cea6b183f"
+  },
+  {
+    "top": "minion_dcache_atomic_alu_unit",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "64e6b75747b9ecd38e15b03c5e389d572bdaba2d6e1180cb191eb5d54cea0934"
+  },
+  {
+    "top": "minion_dcache_cache_op_unit",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_3272 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "minion_dcache_cache_op_unit_l2",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_1656 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "minion_dcache_lru_array",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "1e10534fb4a73c45e22373ac2c06f3da57fd6fc31db9084c90d1dab7449ae359"
+  },
+  {
+    "top": "minion_dcache_miss_handler",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "1936d54e14ad874c4f05ac9359e314409506081761a626e858a14dbf98a239d2"
+  },
+  {
+    "top": "minion_dcache_miss_handler_unit",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_8768 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "minion_dcache_pma_unit",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "5595cbe0f27bb1bbc79110d2dde573afb8cd958a1779184cbfc72f84d80bbadc"
+  },
+  {
+    "top": "minion_dcache_scratchpad_ctrl",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "e374155cf1856aafae89b40eac44ed916364b73d0554df04f46f463ce526dcf8"
+  },
+  {
+    "top": "minion_dcache_store_merge_unit",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "a329dc61eb3a6bf280d37415b49101b0f52e90326cb498d0c8279cf533c876ee"
+  },
+  {
+    "top": "minion_dcache_tensor_load",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_13144 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "minion_dcache_writeback_unit",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "b42e4322940dc7bd91e9c600c27725a04d8e81406d21c99cc25cf7b83a9b2cbc"
+  },
+  {
+    "top": "minion_debug_apb_slv",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_668 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "minion_frontend_rvc_expander",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "845a99d86de4443353d13ee8d477a38de7eeeb7a6fb0cf7b4ea2bfcbffb67118"
+  },
+  {
+    "top": "minion_frontend_thread_sched",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_64 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "prim_phase_pair_lo_hi",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "fa98a06f162b72a53256cf8ce2d456a0ca6c27927888562efbaba4886b2841cd"
+  },
+  {
+    "top": "prim_write_commit_en",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "bd1498bf07132c1eecd7e00263f3467a1429df3543975f04942b8ba1373166ab"
+  },
+  {
+    "top": "prim_write_commit_rst_en",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "a51f697e76675a12db3cc5818a748b800f5ca8b657949d260104c84cb5b04238"
+  },
+  {
+    "top": "tima_adder",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "46b1fcc3603b49158ff9950f459a8eb150449ae11eb5afb4f4ccffaee323ca14"
+  },
+  {
+    "top": "txfma_4_2_compressor",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "945bdc600de117e320f5c66bc154fc7359cdf0c16671f56da45cb0bc664897f5"
+  },
+  {
+    "top": "txfma_4_2_compressor_array",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "e16cba8bf148364ec7fc83b8a5a2fc84880792993214b69168b5d5ab91e0054f"
+  },
+  {
+    "top": "txfma_align_shf",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "3cdefeb3aaee567f38ddaa5a990dada8ae7e87b5ae6d8799d6b83599f113e77e"
+  },
+  {
+    "top": "txfma_booth_ppg_32r4_msb",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "14d7de89150ef247c636fd29c466452332920438b5f12cbdaa9cf7ce8270e722"
+  },
+  {
+    "top": "txfma_c0",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "11f0e8541e76e4d720736f5fdd31824c3b7a5f10d9ed24452803048bc0760f6e"
+  },
+  {
+    "top": "txfma_c1",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "78bd9e435e066f302f30956b16dc9ab8773f99117e342a5b8d6fb1c2c91c9cae"
+  },
+  {
+    "top": "txfma_c2",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "e34b3e0fa7c0eb0651242cc890fccfd8f997c05c2363ae58882d8cb7407a4833"
+  },
+  {
+    "top": "txfma_c3",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "3232430982a7ef69d3fd0c6eab0b2e997ed660b48324266fcc43ea5965c4d180"
+  },
+  {
+    "top": "txfma_c4",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "52d2b18a03f2a70311ab22d70e51bd096bf75f6ed6e554e49852b2850d193e3a"
+  },
+  {
+    "top": "txfma_c5",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "3e5d543b1eb303aee2081104596d1092093173676e84102769f47fe8fe9cf03e"
+  },
+  {
+    "top": "txfma_c6",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "e1e797ec8e4b820510b0770e4e62735cfdcca2ac74ffcd567df5e42edeb68645"
+  },
+  {
+    "top": "txfma_csa",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "a653c4c948d1884a85d92bd9f90b3a61382e2ea6518992b109452fbfb49f4f05"
+  },
+  {
+    "top": "txfma_e1",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "737d00f6a578c3ee5275d00c454529848076449f179e0dd7cc8a6652bf3e3cbe"
+  },
+  {
+    "top": "txfma_e2",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "fad848fea0c5cc0334ef58e7be72d26b42ca1feffa7b8958a7ccb84cba9071dc"
+  },
+  {
+    "top": "txfma_e4",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "c614da5f8abd5c70ca004988a99b0a708e730df7a18b6e0821f017a993c569e0"
+  },
+  {
+    "top": "txfma_e6",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "18698fa28780ff153f0fb25567cf92d5eb12150fee58b63dae058d910bf56e21"
+  },
+  {
+    "top": "txfma_ediff_opdorder_logic",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "11abef3dc84663c4b1ca3215f93eb6537f7a6ffceac5c8fdd5c6b4538f91b478"
+  },
+  {
+    "top": "txfma_exp_special_detect",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "40fc4cfc72b9c5f32587f40e23e177b9fce1706e5cb1a784e1407b98e7e6cc40"
+  },
+  {
+    "top": "txfma_f4",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "3cd41998107aa3e4ca7e70bdeb2396c230936d90a3fead997637ef903de38e64"
+  },
+  {
+    "top": "txfma_frac_zero_detect",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "9e09d7ae75289146709fb1ea13c7926ab4e240d14b669c488f9208b9e6f74a4b"
+  },
+  {
+    "top": "txfma_lxd",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "74f69bbf2d008b0bf214d96d974f50c546efa9f80684c2d43391a586d145786a"
+  },
+  {
+    "top": "txfma_norm_shf",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "c11d0af988c1a34d28591fd0cb0ef13ccf20bb202ecd4cc471c7435af1d09e53"
+  },
+  {
+    "top": "txfma_rnd_adder",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "3cc6b7a6478679939b133aca2b7037c3f5ba4af68540381ad07df88ee0b841cc"
+  },
+  {
+    "top": "txfma_trz",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "18829f83f6dd34152fda8ac9b40efeeed0ac7a7e3bdcb62fc460f3d81433869a"
+  },
+  {
+    "top": "txfma_trz2",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "8af7e5c7cc97f9688984021a9a14e9b637ca9173b59a15ed0ec9c7c4cde659f8"
+  },
+  {
+    "top": "txfma_wallace1",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "a5d3cc8c4733befeffb435c79777fc72c3345865f580e0348ff2a330fbd53393"
+  },
+  {
+    "top": "txfma_wallace2",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "ac4499268ff2bd120090e9b0beeebf8c466020b693ac8fbbbf338df7f0d7adba"
+  },
+  {
+    "top": "vpu_bypass",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "04b4b502be7b03a933e7b689f7bf5f9b5a2b7316766ef00fb888a4e742db8e9d"
+  },
+  {
+    "top": "vpu_decoder",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "8417474a4f9ac3f77229fdae537d9c924653e948cba7051c4f6d249b3dbd8f05"
+  },
+  {
+    "top": "vpu_mask",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_3196 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "vpu_ml",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "e646ba3216172e9a01a7df0344f3390b1c64807795859656999f7c9a50613492"
+  },
+  {
+    "top": "vpu_sh_sw",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_2124 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "vpu_tensorfma",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "4f463da71e4616da2cd37d20c72c60f6860fc3d746e1dbcdc1dfa6611499b9ba"
+  },
+  {
+    "top": "vpu_tensorquant",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "78c8ebb86abd500fce788a156347d4c2dd440feaf78417b94d4db689f5659466"
+  },
+  {
+    "top": "vpu_tensorreduce",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "44eabcb3cea225dd36ba99f4539fc3d71831c4b983d144331b62ab769b99a42f"
+  },
+  {
+    "top": "vpu_trans",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 1,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "[ERROR] pass.lean: flop n_1532 has an ASYNCHRONOUS reset (`async` = 1). The legacy model reads Q from the stored state, giving SYNCHRONOUS semantics; use formal.lean.mode=verified_compiler, whose `SourceDesc.flopQAsync` applies the reset to the combinational read as well.\n"
+  },
+  {
+    "top": "vpu_uinst_decoder",
+    "baseline_commit": "1af4e1492",
+    "baseline_status": 0,
+    "input": "copy of current historical_replay graph",
+    "diagnostic": "",
+    "certificate_structure_changes": [],
+    "baseline_sha256": "89fa403f8a5bfd922cc62b13095e78bbe53703f46ddc90339e9ea5e1fc30143a"
+  }
+]

@@ -4,6 +4,13 @@
 is intentionally modeled after `pass.isabelle`, but it is a separate pass and a
 separate proof stack.
 
+On `b1-b2-verified-compiler`, use `formal.lean.mode=verified_compiler` to emit
+an owned-scan-based `DesignCert` for the proved compiler. See
+[B1_REFACTOR.md](B1_REFACTOR.md) for module interfaces and validation. The
+legacy mode described below remains a compatibility path. Both modes now use
+one owned scan and certificate pipeline; see [LEGACY_REFACTOR.md](LEGACY_REFACTOR.md)
+for the L0–L8 library boundaries, behavior changes, and current validation gates.
+
 In macos, you may need to install Lean 4:
 ```
 brew install elan
@@ -28,7 +35,7 @@ brew install elan
 - `pass.lean` is registered as a LiveHD pass and currently emits:
   - concrete Lean input/output/state structures;
   - concrete `<Top>_comb`, `<Top>_next`, and `<Top>_step` definitions for the
-    supported non-memory graph subset;
+    supported bit-vector and memory graph subset;
   - concrete `NodeCert` lists and `GraphCert` data for the same topo-ordered
     graph nodes;
   - `outputsFromCert`, `nextStateFromCert`, `<Top>_comb_cert`,
@@ -63,9 +70,9 @@ been explicitly classified by LEC.  The gate runs BEFORE `pass.lean`:
 ```text
 1. LiveHD compile        RTL -> LGraph                        (lhd compile verilog)
 2. LEC gate              prove/classify RTL == LGraph         (scripts/run_dino_lgraph_lec_gate.sh)
-                           default formal.engine=auto,
-                                   formal.lec.hier=true,
-                                   formal.lec.semdiff=structural
+                           default lec.engine=auto,
+                                   lec.hier=true,
+                                   lec.semdiff=structural
                            accept: PROVEN, or INCONCLUSIVE (recorded);
                            reject: REFUTED  ->  do NOT generate
 3. pass.lean             LGraph -> Lean model + certificate   (--emit-dir lean:)
@@ -74,7 +81,8 @@ been explicitly classified by LEC.  The gate runs BEFORE `pass.lean`:
 ```
 
 `scripts/run_dino_lgraph_lean.sh` runs step 2 automatically before step 3 unless
-`RUN_LEC_GATE=false`. REFUTED and INCONCLUSIVE both abort the run. The
+`RUN_LEC_GATE=false`.  A REFUTED design aborts the run; INCONCLUSIVE is a
+recorded warning (set `LEC_STRICT=true` to make it a hard gate for CI).  The
 RTL-to-LGraph equivalence proven here is what lets steps 3-5 restrict their claim
 to "generated model = LGraph certificate" instead of re-proving RTL semantics.
 
@@ -278,6 +286,96 @@ close by either lemma.  This is latent, not introduced by the fast path; it is
 simply absent from DINO.  Measured absent from `cva6_tlb_gate` too: all **1802**
 GetMask sites have `mask_w ≤ out_w` and none truncate.
 
+#### What dominates a CVA6-scale run: the n-ary `Or` closer, monotone in arity (measured)
+
+**The single biggest per-node cost in the step-5 bridge is `Op_Or` at high arity**, and
+it is a *shape* problem in one lemma, not a scaling property of the proof method.
+
+`orn_bv_bridge` states its RHS as
+`bvenc (bvs.foldl (fun a b => a ||| bv_to_bitvec w b) 0#w)`.  The fast model emits
+`bv_zext a ||| bv_zext b ||| …` — no `0#w` seed, no `bv_to_bitvec` wrappers.  Bridging
+those two shapes forces **`BitVec.zero_or`** and **`bv_to_bitvec_bvenc_zext`** into the
+per-node closer, and the latter has *both* width arguments implicit, so its LHS head is
+`bv_to_bitvec ?w (bvenc ?v)` — `simp only` then matches it against every subterm of the
+goal.  Each extra operand adds another such subterm, so the search grows with arity.
+
+Localised to a single node (`cva6_ras_gate` nid 36, `Op_Or` width 130, four operands of
+widths 65/66/130/131), isolated with the full `phiTree`/`sourceEnv`/`graphCert` context
+but every other recurrence removed — floor 6.0 s:
+
+| proof prefix | wall | marginal |
+|---|---|---|
+| `show` only | 6.0 s | — |
+| `+ rw [orn_bv_bridge]` | 6.0 s | 0 |
+| `+ simp only [fv36]` | 6.0 s | 0 |
+| `+ List.foldl_cons, List.foldl_nil` | 6.0 s | **0 — the fold itself is innocent** |
+| `+ BitVec.zero_or` | 10.1 s | +4.1 s |
+| **`+ bv_to_bitvec_bvenc_zext`** | **32.2 s** | **+22.1 s (85 %)** |
+
+Per-node cost is **monotone in arity**, and arity dominates width:
+
+| arity | width | s/node | source |
+|---|---|---|---|
+| 3–4 | 130 | 11.6 | `ras`, 3 nodes |
+| 47 | 65 | 74 | `instr_scan`, 1 node |
+| 55 | 65 | 75 | `instr_scan`, 1 node |
+| 60 | 65 | 76 | `instr_scan`, 2 nodes |
+
+Attribution on `cva6_instr_scan_gate` (330 s full), stubbing one op group at a time —
+**four nodes are 301 s, i.e. 91 % of the run**, while 301 `GetMask` + 222 `SHL` nodes
+together cost 8 s:
+
+| stubbed group | wall | saving | nodes |
+|---|---|---|---|
+| `Or` arity 60 | 178 s | **152 s** | 2 |
+| `Or` arity 55 | 255 s | **75 s** | 1 |
+| `Or` arity 47 | 256 s | **74 s** | 1 |
+| `SHL` | 324 s | 6 s | 222 |
+| `GetMask` | 328 s | 2 s | 301 |
+| `And`/`EQ`/`MuxN`/`MuxBool`/`Not`/`Ror`/`Sext`/`SRA`/low-arity `Or` | 328–333 s | ~0 | 21–38 each |
+
+**Fix, and its measured effect.**  State the RHS in the fast model's own left-nested
+`|||` shape so neither metavariable lemma is needed and the closer stays on the default
+set — `or1_bridge`, `or3_bridge`, `or4_bridge`, following `or_bridge` (arity 2) and
+`and3_bridge`/`and4_bridge`.  All 7 swept modules still prove (`exit 0`, 0 errors,
+0 sorries):
+
+| module | before | after | remaining fold arities |
+|---|---|---|---|
+| `ras` | 48.3 s | **7.2 s (6.9x)** | none |
+| `instr_realign` | 17.0 s | 11 s | none |
+| `raw_checker` | 24.7 s | 16 s | 7, 8 |
+| `controller` | 45.2 s | 35 s | 6 |
+| `csr_buffer` | 84.7 s | 77 s | 5 |
+| `compressed_decoder` | 179.5 s | 162 s | 5x11, 6x5, 7, 8, 10, 11x3, 12, 18, 19 |
+| `instr_scan` | 339.0 s | 329 s | 47, 55, 60x2 |
+
+The speedup tracks *how much of a module's cost sat on the fold*, which is why `ras`
+(all fold nodes removed) gained 6.9x and `instr_scan` (its four expensive nodes still on
+the fold) gained 3 %.  Extending to arity 5–8 covers everything except `instr_scan`'s
+47–60 and `compressed_decoder`'s 10–19; those high arities likely need a recursive
+n-ary bridge or a closer without the metavariable search rather than one lemma per
+arity — **measure before choosing.**
+
+**Not yet attributed:** `cva6_pmp_gate` (6.2 h) and `cva6_alu_export` (4.3 h).  A
+sampled `Or` probe on `pmp` was killed mid-run, so its ">64 s/node" is a lower bound,
+not a measurement.  Both need the same per-group attribution before assuming they share
+this cause.
+
+**Method notes worth keeping** (each cost real time here):
+- **Size the probe so the signal exceeds the noise.**  A 10-node synthetic sweep gave
+  19.1 s for one point and 8.1 s for the *same file* re-run under low load; three
+  repeats then agreed within ±0.4 s.  The first number was concurrent-job contention
+  and it sent the fix at the wrong arity.
+- **Isolated op-bridge benchmarks cannot see this class of bug.**  The same node shape,
+  same mixed operand widths, same arity and same closer cost ~5 s for 8 nodes
+  standalone.  The cost is proportional to the *surrounding context* simp must search,
+  which is exactly what an isolated benchmark removes.
+- **Attribute by removal, not by correlation.**  Four cost models were fitted and
+  refuted here — machine contention, node width, total term size, and a threshold at
+  arity 3 — each of which merely correlated across a handful of large designs.  Only
+  stub-one-group-and-re-time survived.
+
 ### Lessons learned (step 5)
 
 Getting DINO from "emitted" to "typechecked" took eight bug fixes and two
@@ -360,8 +458,7 @@ designs and cost us a 26-minute run to discover) → the target module.
 **Expected work per module, in the order it will surface:**
 - **New op bridges.** CVA6 reaches ops DINO never used — `Mult`, `Div`/`UDiv`/
   `SDiv`, `SetMask`, wider `Sum` arities.  The emitter already flags an
-  unsupported op with a marked `sorry`, so the static gate catches it
-  immediately; each needs one `OpBridge` lemma in the established
+  unsupported bridge shape with an atomic export failure; each needs one `OpBridge` lemma in the established
   `eval_op OP w [bvenc …] = bvenc (fast …)` shape.
 - **Memories are a hard blocker.** `emit_fast_bridge` is gated on
   `memory_nodes.empty()`, so any module containing arrays is excluded until the
@@ -381,6 +478,97 @@ are fixed.
 
 **Keep a per-module record** (module, node count, wall, peak RSS, new op bridges
 added, blockers hit) so the cost model stays calibrated as designs grow.
+
+### CVA6 per-module record (measured)
+
+| module | nodes | flops | max width | GetMask (all-ones) | wall | peak RSS | result |
+|---|---|---|---|---|---|---|---|
+| `cva6_alu_export` | 6,305 | 0 (comb) | 576 | 2,681 (100 %) | **4 h 15.8 min** † | **25.3 GB** | `exit 0`, 0 errors, 0 sorries — `_comb` proven |
+| `cva6_tlb_gate` | 2,061 | 137 | 513 | 901 (100 %) | **5 h 12.5 min** † | **12.2 GB** | `exit 0`, 0 errors, 0 sorries — `_comb`/`_next`/`_step` all proven |
+
+† **Dominated by ONE serial declaration, not by per-node cost.**  (An earlier note
+here blamed contention — load average ~45 from concurrent work.  That was wrong, and
+the thread accounting refutes it.)  Measured on the `cva6_tlb_gate` run at 72 min in,
+with `LEAN_NUM_THREADS=8` and `CPUQuota=800%`:
+
+| | |
+|---|---|
+| busiest thread | **4301 s CPU, state R (running)** |
+| second busiest | 60 s |
+| idle threads | **61 of 69** |
+| CPU / wall ratio | ~1.0 |
+
+CPU ≈ wall rules starvation out: a starved job accumulates *less* CPU than wall.  This
+is one declaration grinding serially while every other thread has finished — the
+signature SKILL §3 describes.  The ALU showed the same ~1.1 ratio at its 67-minute
+check, so both runs share this cause.
+
+Consequence: **node count does not predict the wall here.**  DINO's
+`PipelinedDualIssueCPU` (10,740 nodes) finished in 57.4 min, while `cva6_alu_export`
+(6,305) took 4.3 h and `cva6_tlb_gate` (2,061 — a third the ALU) took 5.2 h.  The CVA6
+modules are *smaller* than DualIssue and 4–5× slower, so the serial declaration scales
+with something other than node count.
+
+**The combiner is NOT the culprit — measured, not guessed.**  Running the identical
+`cva6_tlb_gate` file with only the combiner's body replaced by `sorry`:
+
+| variant | wall |
+|---|---|
+| full file | 18,750 s |
+| combiner stubbed to `sorry` | **18,666 s** |
+
+The combiner therefore costs **~65 s, 0.3 % of the run** — even at 2,061 nodes with a
+term-fold body.  (An earlier revision of this note named it a suspect; the probe
+refutes that.)  This also retires it as a scaling risk for CVA6-sized designs, and
+means the **chunked combiner** lever listed above would buy nothing here.
+
+Remaining suspect, and the reason Phase 1b exists: `_phiTree_keys_sub`, proven
+`by native_decide`, which compiles the **whole `phiTree` including every value
+closure** — at CVA6 widths (513/576 bits) that is a long serial native-compilation
+step, exactly the risk flagged in SKILL §5.  Confirm the same way (stub only that
+declaration and re-time) **before** optimizing: the culprit was guessed wrong three
+times during the DINO work, and once more here.
+
+Method note worth reusing: stubbing **one declaration** and re-timing is far cheaper
+than bisecting the file into cumulative slices, and it answers the same question.  It
+does not prove the file (the stubbed obligation is assumed), so it is a *localizer*,
+never a result.
+
+**Reproduce:**
+```bash
+# ALU (combinational, explicit file list, derives alu_concrete.sv from upstream)
+LEAN_EMIT_CERT=true LEAN_EMIT_FAST_BRIDGE=true RUN_LEAN=true \
+  scripts/run_cva6_alu_lean.sh
+
+# TLB gate (sequential; slang + gate wrapper, NOT sv2v -- see
+# scripts/CVA6_SV2V_FILELIST_REFERENCE.md for why)
+CVA6_TOP=cva6_tlb_gate \
+CVA6_WRAPPER_FILE=$PWD/scripts/cva6_module_wrappers/cva6_tlb_gate.sv \
+CVA6_FILELIST=$PWD/generated/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.top_cva6.flistplus.f \
+YOSYS_MEMORY_MODE=collect \
+LEAN_EMIT_CERT=true LEAN_EMIT_FAST_BRIDGE=true RUN_LEAN=true \
+  scripts/run_cva6_module_lean_stress.sh
+```
+
+**Node counts move with cprop — do not trust old artifacts.** Estimates taken from
+the June `pass.isabelle` outputs were both wrong after the upstream "cleaner cprop
+with less mask ops" change, in *opposite* directions: the ALU grew 5,638 → 6,305 and
+the TLB shrank 4,126 → 2,061. Run `op_census.py` on a fresh emission for the real
+number.
+
+**Trust footprint of the ALU proof** (audited): 0 `sorry`, 0 `admit`, 0 `axiom`;
+6,305 per-node `_rec` theorems (one per node, all kernel-checked); 6,548 kernel
+`decide`s; and exactly **4** `native_decide` uses — `topo.Nodup`,
+`∀ n ∈ topo, (nodes n).isSome`, `DepOrderedB`, and `BT.keys phiTree ⊆ topo`.  All
+four are *structural* well-formedness facts about a concrete finite graph, not
+semantic claims, so the Lean compiler enters the trusted base only for those; every
+semantic step (per-node recurrences, combiner, closers) is kernel-checked.
+
+**What the first two modules needed** (all three fixes are in the emitter, so later
+modules inherit them): `and3_bridge` for arity-3 `And` (5 nodes in the ALU, 10 in the
+TLB), the `Op_SHL` const port-0 width fix, and `sra_bridge_sext` for a **widening
+SRA** — the last being a real fast-model mistranslation, not a proof gap (Bug 10 in
+`STEP5_BRIDGE_BUGS.md`).
 
 ### Next benchmark after CVA6: CORE-ET / ETASP
 
@@ -414,12 +602,10 @@ Same pipeline and same static gates as CVA6.  Work to scope first:
 
 ## Remaining Implementation Work
 
-1. Port scalable certificate checking.
-   - const-only chunks
-   - simple mixed chunks
-   - concrete dependency-list subset checks
-   - chunked uniqueness
-   - eventually dense topological certificates
+1. Scalable legacy certificate checking is implemented by
+   `emit_legacy_cert_wf` and `LegacyCertWF.lean`: symbolic constant chunks,
+   simple mixed shapes, concrete dependency subsets, and dense-slot uniqueness.
+   See [LEGACY_REFACTOR.md](LEGACY_REFACTOR.md) for options and limits.
 
 2. Emit per-design fast-view bridge theorems — **done, behind
    `--set formal.lean.emit_fast_bridge=true`** (see "Step 5 — fast-view bridge"
@@ -431,10 +617,10 @@ Same pipeline and same static gates as CVA6.  Work to scope first:
 
 3. Memory-node emission — **done** (fast model): function-valued memory state
    fields, read/write/byte-enable policy extraction, any number of read/write
-   ports, read-during-write (`fwd`) policy, sync-read.  **Remaining**: the memory
-   *certificate* is still a stub (counts only); a memory-aware certificate
-   evaluator (`Val = bv | mem`, `Op_MemRead`/`Op_MemWrite[BE]`) + collision /
-   read-first / write-first policy proofs are future work.
+   ports, read-during-write (`fwd`) policy, sync-read.  The memory **certificate**
+   is also done for async/array memories (`type` 0/2), including the step-5 bridge
+   — see "Memory certificate" below.  **Remaining**: sync-read (`type == 1`)
+   certificates, and the `init` pin (ROM contents), which is a *fast-model* gap.
 
 4. Harden operator semantics and tests.
    - `Get_mask` mask width and packing corner cases;
@@ -529,7 +715,7 @@ semantically equivalent to the raw RTL, per design, before any Lean generation:
 impl = lhd compile verilog <design .sv> -> post-cprop LGraph
 ref  = raw RTL (all modules concatenated), independently elaborated
 lhd lec --impl lg:<lg> --ref verilog:<raw.sv> --top <T> --reader yosys-verilog \
-        --set formal.engine=auto --set formal.lec.hier=true --set formal.lec.semdiff=structural
+        --set lec.engine=auto --set lec.hier=true --set lec.semdiff=structural
 ```
 
 Because cprop reshapes the impl side, `semdiff=structural` cannot short-circuit;
@@ -623,10 +809,80 @@ back-port there):
   updated via `sram_sync_read_reg_next`.
 - `bits % wensize == 0` (byte/bit write-enable) still required.
 
-The certificate for a memory-bearing design is still a **stub** (node/flop/memory
-counts + a `_certificate_counts` theorem) because the `BV` bignum certificate
-evaluator is bit-vector-only; the memory-aware evaluator + cert bridge is the
-next step.
+### Memory certificate
+
+A memory-bearing design gets a real graph certificate and proves the step-5 bridge
+(`_comb`/`_next`/`_step` = `_cert`).  It used to get a counts-only stub.
+
+The certificate evaluates the graph at **`CertVal` (`bv | mem`)** rather than `BV`,
+via `evalGraphC` — the additive twin of `evalGraph` in `GraphRefine.lean`.  Additive
+matters: the `BV` path is what every already-proven non-memory design elaborates
+against, so it is byte-identical and none of them needed re-proving.  `DepOrdered` /
+`DepOrderedB` are value-free and shared between the two paths, and with them the
+`native_decide` well-formedness gates.
+
+A Memory node is multi-output (one read-data value per read port plus the array next
+state) while `NodeCert` carries one width and one value, so `cert_memory_expand`
+**decomposes** it:
+
+| piece | becomes |
+|---|---|
+| committed array image | a **source**, like a flop (`CertVal.mem (memenc s.<field>)`) |
+| each write port | one `Op_MemWrite` / `Op_MemWriteBE`, **chained** in `memory_write_fold` order so a later port wins a same-address collision |
+| each read port | one `Op_MemRead` over the image *that port* observes |
+| every port operand | an arity-1 `Op_Or` resize, mirroring `ucast_pin_at` |
+
+The read-port image is the subtle part: read-during-write is per *(read, write)*
+**pair** (`memory_fwd_bit`), so two read ports generally observe different prefixes
+of the write chain.  A single linear chain would be wrong.  Chains are keyed by their
+forwarded-set signature and shared when two reads forward from the same set; the
+all-writes chain is the array next state, decoded back with `memdec`.
+
+The bridge reuses the existing per-op lemmas rather than duplicating them.
+`eval_op_cert` reduces on the operator constructor, so for a concrete operator the
+per-node goal is *defeq* to that constructor applied to the underlying equation:
+
+```lean
+show CertVal.bv (bvenc (fv_n i s)) = CertVal.bv (eval_op <op> w [..])
+refine congrArg CertVal.bv ?_
+-- the ordinary per-op bridge proof, unchanged
+```
+
+so all ~30 `OpBridge` lemmas keep applying verbatim.  Memory nodes take the same
+shape with `CertVal.mem` / `memenc` and the three memory bridges
+(`mem_read_bridge`, `mem_write_bridge`, `mem_write_be_bridge`).
+
+**Two traps, both in `STEP5_BRIDGE_BUGS.md`.**  `memenc` must guard its domain or
+out-of-range indices alias onto a written address (Bug 12), and every port operand
+needs a resize node or a wider address dep indexes past the array — silently
+returning zero rather than erroring (Bug 13).
+
+**Proven** (`exit 0`, 0 errors, 0 `sorryAx`, 3/3 `_refines_fast`):
+
+| design | cert nodes | wall | peak RSS | shape |
+|---|---|---|---|---|
+| `ram1` | 18 | 10 s | — | 1R/1W async, bit-level write mask (`wensize == bits`) |
+| `ram_be` | 66 | 18 s | — | byte-enable write, `byte_w = 4` |
+| `ram_2w` | 26 | 97 s | — | 2 write ports — write chain and `fwd` matrix |
+| `ram_sram` | 42 | 238 s | — | 3 read ports, both `Op_MemWrite` and `Op_MemWriteBE` |
+| **`intpipe_csr_msgs`** | **7,447** | **25.0 min** | **14.1 GB** | CORE-ET: 2×60-bit memory, 7 read / 2 write ports |
+| `SingleCycleCPU` | 4,772 | 22.7 min | 11.7 GB | **non-memory regression** |
+
+`intpipe_csr_msgs` is the first real memory-bearing design proven end-to-end: 7,422
+LGraph nodes plus 25 synthetic from the decomposition, and 4 `Op_MemWriteBE` chain
+nodes because its 7 read ports fall into two distinct forwarded sets.
+
+`SingleCycleCPU` is the regression that matters — 22.7 min / 11.7 GB against a
+23–25 min / 13.3 GB history, with zero `CertVal` / `memenc` / `evalNodeC` / `asBV`
+occurrences in its emitted text.  The `BV` path is untouched.
+
+**Sync-read (`type == 1`) is implemented but unvalidated.**  The mechanism needs no
+new certificate operator — `sram_sync_read_reg_next ren raw cur = if ren then raw
+else cur`, so the read-data register is a source and its next value an `Op_MuxBool`
+over an ungated `Op_MemRead` (a literal enable, closed by `mem_read_en_bridge`).  It
+compiles, but no design I could produce exercises it: yosys would not emit a type-1
+memory from any fixture, and the `tc_sram_gate` wrapper flop-blasts its array.  Treat
+it as unproven until a real type-1 memory appears.
 
 Minimal memory example (async-read / sync-write SRAM), verified to typecheck:
 

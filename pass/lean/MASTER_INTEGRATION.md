@@ -1,0 +1,559 @@
+# Lean refactor integration with master
+
+This integrates master `c54a435156a528d77afab2111bcb337403a0b42a` into refactor commit `61fd1646c1fd3106ce50d166ec02ca55ca19a478`. The shared architecture and the legacy L0–L8 work remain based on [PASS_LEAN_RESTRUCTURE_PLAN.md](PASS_LEAN_RESTRUCTURE_PLAN.md), with the implementation described in [LEGACY_REFACTOR.md](LEGACY_REFACTOR.md).
+
+## Preservation boundary
+
+The owned scan/IR data structures, certificate and memory lowering, verified-compiler emitter, legacy model and emitters, chunked-WF implementation, fast bridge, and `formal/lean` sources are unchanged by this integration. Native LEC and the other compiler/pass implementations come from master without local solver modifications. The previously approved CI and linker repairs remain.
+
+The graph adapter and graph fixtures were ported to the new upstream representation:
+
+| Upstream change | Commit | Adapter change |
+| --- | --- | --- |
+| New graph iteration API | `9cb2b1f7a` | Read body nodes and explicit sink drivers; retain deterministic operand ordering. |
+| Constants stored on constant-pool pins; constant-node API removed | `9adce39b5` | Use `pin.is_const()` and `const_of(pin)`; constants still become owned values at the scan boundary. |
+| Literal pin widths and signed-width accessor | `caa9e9fd9`, `ef46ffa4f` | Use `get_signed_bits()` where the old code used `get_bits()`; preserve intrinsic widths, negative constants, and strict width checks. |
+| One driver per sink; arithmetic operand banks | `42773693a` | Translate sink slots into existing IR bank roles. Sum's even slots are adds and odd slots are subtracts; repeated operands remain separate dependencies. |
+| Memory `init` renamed to `initial` | `fcf5a9d9a` | Read the new graph pin name into the existing initialization field; ROM contents, mutable-memory refusals, forwarding, and reset semantics are unchanged. |
+| Global `formal.strict` removed | `b7a24e0b0` | Use `--set formal.lean.strict=true` (already the default); remove obsolete global forwarding. No compatibility alias is added. |
+
+The exact fetched HLOP dependency sources were also compared: `Dlop::get_signed_bits`, `Blop::get_signed_bits64`, and `Blop::get_signed_bitsn` have the same bodies as their old `get_bits` counterparts after the API rename. This includes wide, multiword constants.
+
+No new Concat/reduction support or change to reset, clock, signed comparison, or memory semantics is included. Unsupported operators remain explicit refusals. New graph databases must be generated with the matching compiler; old serialized graph databases are not portable across this upstream representation change.
+
+## Strict mode
+
+`formal.lean.strict` selects the Lean exporter's existing strict-width policy. At its default `true`, a constant that cannot fit its declared width and a dependency pin with zero/excessive width are rejected. Setting it to `false` relaxes those checks and can substitute a one-bit dependency width. Unsupported operators, X/Z constants, and unsupported memory policies are still rejected independently. It is an export policy, not a theorem-prover strength setting.
+
+## Validation
+
+The isolated GCC 14 / Bazel 9.2.0 debug build passes all three Lean test targets (24 cases) and both native LEC/linker targets (30 cases). Scanner coverage includes the existing asynchronous-reset and synchronous-ROM tests plus new checks for non-dense Sum banks, duplicate operands, and constant-pool widths.
+
+Fresh tiny graphs were generated separately with the pre-merge and integrated binaries. Across all 38 fixtures, every acceptance/refusal result and refusal diagnostic matches. All 77 successful exports are byte-for-byte identical:
+
+- 27 legacy fast-model/certificate exports;
+- 23 legacy exports with `emit_fast_bridge=true`, `cert_wf=chunked`, and chunk size 2;
+- 27 verified-compiler exports.
+
+The 11 default-mode refusals and the 15 bridge/chunked-mode refusals are preserved. Optional proof-shape refusals are not represented as successful proofs. Machine-readable per-fixture evidence is in [MASTER_ADAPTER_PARITY.json](tests/MASTER_ADAPTER_PARITY.json).
+
+Lean elaboration passes for all 23 accepted bridge/chunked-WF fixtures. The 27 accepted fast models pass sampled cross-version oracles in both directions (new fast model against the old verified certificate, and old fast model against the new verified certificate), using 16 seeds and every address of the tiny memories. Independent generated Lean oracles also prove the reset-priority examples and the banked Sum result of 41. No `sorryAx` was accepted. The full `lhd` executable builds. All 22 targeted integration tests pass, including all 17 tests from the historical native CI comparison, the scanner suite, option listing, and formal CLI checks. See [MASTER_NATIVE_REGRESSION.json](tests/MASTER_NATIVE_REGRESSION.json). The historical DINO/block proof evidence remains tied to its recorded pre-integration compiler/library context. These tiny-fixture checks do not establish a new full-design replay against master's frontend.
+
+## Additional CLI findings
+
+Master's retired-option list also hid `formal.lean.cert_chunk_size`, `formal.lean.cert_chunk_limit`, and `formal.lean.cert_wf_fallback`. They are implemented by this refactor, so the three blacklist entries are removed and CLI tests cover their availability. `normalize` stays retired. Native LEC options and implementation are unchanged.
+
+A fresh RTL-to-Lean smoke test for an 8-bit addition followed by XOR produces a `Concat` node under master's frontend. The preserved Lean scanner rejects it explicitly. This is a frontend compatibility limitation, not evidence that an emitted proof passed for that RTL. Translating Concat into existing operations is pending the user's decision; the unchanged certificate/model/proof semantics are not being expanded implicitly.
+
+The restored controls pass `lhd_options_test`, `lhd_list_options_test`, and `lhd_formal_verify_test`. A separate XOR-only RTL fixture exports successfully in both Lean modes, its generated Lean files elaborate, and the generated Verilog is proven equivalent to the RTL by native LEC. The legacy CLI run includes the restored chunk-size control, a full chunked-WF proof, and the fast bridge. Global `formal.strict` is confirmed rejected. The addition/Concat fixture remains a separate recorded failure.
+
+The separate historical `prp-equiv-wire_ring` regression also passes using the unchanged master harness and default solver settings.
+
+
+## Port onto master `8bea45dc2` (validation in progress)
+
+The PR endpoint is `3685a977ee5be31f5939c83617f1264e2d9ddaab`.
+Its net changes relative to `c54a435156a528d77afab2111bcb337403a0b42a`
+are applied to master `8bea45dc2aa9aab4d8b279db11a8887c52c1108d`.
+The original PR branch and a verified Git bundle preserve the prior history.
+The [preservation ledger](tests/MASTER_PORT_PRESERVATION.json) accounts for
+all 117 files in the PR's net change: 108 are byte-identical, eight have
+explicit upstream adaptations or added tests, and this report retains its
+prior content with the current audit appended. New validation records are
+additional files, not replacements for historical records.
+
+All formal Lean sources, certificate definitions and builders, memory lowering,
+legacy models, and emitters are byte-identical to the PR. The existing policies
+for clocks, asynchronous reset Q reads, constant widths, signed comparisons,
+and unsupported operators remain in place. Native LEC implementation and its
+proof procedures come from current master without modifications.
+
+Upstream commit `eb91f09c1` changes Get_mask/Set_mask from mask-value operands
+to constant half-open `[lo, hi)` endpoints. The scanner materializes the
+corresponding mask in owned scan data, preserving the certificate schema.
+The synthesized constant uses the existing intrinsic-width convention, including
+the sign bit on positive multiword constants. The new 67-bit mask regression
+initially caught an undersized synthesized declaration; its owned metadata was
+corrected without relaxing the strict-width rules. The adapter rejects malformed,
+nonconstant, or excessive endpoints. Reset-input tracing
+recognizes zero-based windows that cover the source width. Graph fixtures use
+the new endpoint API. No Concat/reduction support is added implicitly.
+
+Current master's single optimized CI job is retained. The PR's duplicate-trigger
+prevention, concurrency cancellation, unique cache keys, and cache-save handling
+are carried forward. Its coverage-filter change is superseded by upstream's
+removal of the coverage job. The PR's cvc5/ABC static-link collision repair and
+CLI registration of the implemented chunk controls are preserved.
+
+The [validation record](tests/MASTER_PORT_VALIDATION.json) distinguishes current
+checks from historical evidence. All 38 tiny fixtures retain their acceptance
+or refusal in each of the three export modes. Of 77 accepted exports, 74 are
+byte-identical; only the GetMask fixture changes its mask representation from
+`-1` to `255`. Both directions of sampled cross-version oracles pass for all
+27 accepted fast fixtures, and all 23 new tiny bridge/chunked-WF files elaborate.
+The support library was rebuilt into a fresh output directory before these
+checks. All 87 historical block proofs completed, and their artifact hashes
+were rechecked; this does not establish regeneration through current master.
+
+The upstream [optimized macOS regression](https://github.com/masc-ucsc/livehd/actions/runs/37708819790)
+has 4,667 passing tests, one failure, and two skipped tests. Its failure is
+`CgenLlvm.ObjectOwnedStateIsPrivateAndIndependentAcrossInstances`. That native
+implementation is unchanged by this port. Local validation is on Linux and
+does not replace macOS validation.
+
+The five focused C++/CLI/linker targets pass. Twelve independent Lean oracles
+pass for endpoint extraction/replacement (including bit 64 and windows above the
+source width), reset priority, and banked Sum. A fresh in-project XOR RTL fixture
+exports and proves in both modes; the legacy run includes the full chunked-WF
+and fast bridge. The [mask preservation proof](tests/legacy_semantic_audit/MaskEndpointPort.lean)
+also establishes equality for **every** input between the old and new mask
+fixture, covering fast output, the legacy source environment, and the DesignCert
+interpreter. Its preservation theorems contain no `sorryAx`.
+
+Full current-frontend DINO exports, saved DINO proof replay, and the optimized
+regression are not yet accepted. No publication
+should be inferred from this in-progress record.
+
+## Research and completion plan (2026-10-08)
+
+This section supersedes earlier pending decisions in this report. It is a plan,
+not a claim that current frontend benchmarks pass. Implementation is held while
+this plan is reviewed. The user approved Concat lowering, and has now approved
+including Hotmux lowering through existing Lean Mux operations throughout the
+flow. No Hotmux implementation has been added yet.
+
+### Pinned source and upstream findings
+
+A live `git ls-remote` check still identifies master as
+`8bea45dc2aa9aab4d8b279db11a8887c52c1108d`, authored by Jose Renau on
+2026-10-07. The integration checkout already has that HEAD. The latest commit
+changes only `inou/cgen/cgen_llvm.cpp`; the immediately preceding
+`899c706a7` moves graph legalization earlier and updates HHDS. There are 64
+upstream commits since the PR's previous integration base `c54a435`.
+
+The latest master [macOS 26 run](https://github.com/masc-ucsc/livehd/actions/runs/37708819790)
+is completed with failure, not green. The recorded failing test is
+`CgenLlvm.ObjectOwnedStateIsPrivateAndIndependentAcrossInstances`.
+Linux validation cannot establish that this platform-specific failure is fixed.
+
+| Area | Evidence | Required treatment |
+| --- | --- | --- |
+| Mask operands | `eb91f09c1`: Get_mask/Set_mask now use half-open endpoints | Preserve the PR's mask-based certificate operations via owned adapter constants. Existing endpoint and universal fixture preservation proofs pass. |
+| Concat | Present already in `c54a435`; strict lane rules are in `graph/node_util.hpp` | Retain declared MSB-first windows, signed widening inside each window, and strict malformed/over-wide refusals. Approved lowering now passes five exhaustive arithmetic cases and five legacy bridge/chunked-WF proofs. |
+| Hotmux | Present already in `c54a435`; native value encoding in `pass/lec/encode.cpp`; separate obligation handling in `pass/formal/pass_formal.cpp` | Add shared lowering with first-active priority and explicit default behavior. Preserve and report one-hot obligation status separately. Do not attribute introduction of this operator to the latest commit. |
+| Reset/control wrappers | Fresh CVA6 controller rendering shows `Sext(rst_ni)` feeding async reset and `Sext(clk_i)` feeding clock | Trace only wrappers proven to preserve the relevant Boolean/edge condition. Keep asynchronous Q-read, reset polarity, and next-state semantics unchanged. |
+| Clock normalization | `0d26c1d63` documents previously unsound gated-latch lowering; current single_edge also tracks clock-bus bit identity | Preserve the native refusals. A formerly passing proof may have depended on a historical unsound normalization; it must not be recovered by weakening the guard. |
+| Memory and widths | `2d63ad67e` adds offset/out-of-depth memory handling; `eb91f09c1` changes bitwise-input extension; `59b64c714` repairs serialized pins and memory proof initialization | Audit fresh graph shape, ROM contents, initialization, addressing, and signed extension. Keep existing Lean policies; expose any additional semantic mismatch for a decision. |
+| Graph lifecycle/dependencies | `899c706a7`: earlier legalization and HHDS update; current HHDS pin `a632b5b1`, HLOP pin `5945f877`, plus HHDS padding patch | Build against master's pinned dependencies and generate fresh graph databases. Saved graphs from incompatible formats are not a validation substitute. |
+| CI and CLI | Master retains one optimized self-contained macOS job and removes coverage; CLI still retires three implemented Lean chunk controls | Retain current workflow structure, carry the PR's trigger/cache repairs, restore implemented Lean options, and keep normalize retired. |
+
+The five files changed by both the PR and subsequent master are
+`.github/workflows/ubuntu.yml`, `lhd/lhd_kernel_internal.hpp`,
+`lhd/lhd_options_test.cpp`, `pass/lean/pass_lean.cpp`, and `pass/lec/BUILD`.
+Review every resolution explicitly. Native LEC implementation and proof settings
+remain those of master.
+
+### Observed fresh-input compatibility snapshot
+
+All 186 recorded CORE-ET/CVA6 configurations have completed their first frontend
+and export attempts. These counts mean at least one export was accepted, not
+that every model or theorem typechecked:
+
+| Family | Configurations | At least one accepted export | Lean export refused in all attempted modes | Frontend failure | single_edge refusal |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| CORE-ET | 125 | 51 | 30 | 20 | 24 |
+| CVA6 | 61 | 10 | 42 | 9 | 0 |
+
+The first Lean refusal is Hotmux for 50 configurations and async-reset input
+tracing for 22. All three fresh DINO variants reach the Hotmux refusal after
+Concat lowering. The 24 CORE-ET normalization refusals divide into 13 memory
+refusals and 11 clock-gate-latch-phase refusals. Frontend failures include
+combinational-loop reports, two Concat lane-width violations, and source
+elaboration failures. These require baseline reproduction and classification;
+they are not all new Lean bugs or all historical failures.
+
+Of configurations recorded as historical successes, 37 CORE-ET and 44 CVA6
+currently have no accepted export. Their previous proof scopes differ, so this
+is an investigation list rather than an assertion that all 81 are equivalent
+regressions. The inventory includes later recorded attempts and legacy wrappers,
+not just the original sweep tables. Ongoing proof runs are provisional: the
+runtime verified-compiler audit initially requested an unprinted `_compiles`
+audit. The corrected harness must rerun these files and require the actual
+`_step_correct` audit, `_compiles` declaration, successful Lean exit, and no
+`sorryAx`. That harness issue is not a Lean theorem failure.
+
+### Implementation sequence and acceptance gates
+
+1. **Freeze provenance and preserve every PR change.** Retain the original PR
+   checkout, original merge history bundle, and 117-file preservation ledger.
+   Record master/PR hashes, dependency pins, binary hashes, Lean version and
+   library hashes, benchmark inputs, wrapper configuration, and commands.
+   Compare historical source fingerprints where available; otherwise label the
+   old/current source identity as unestablished rather than assuming it.
+   Reconcile each of the five overlap files. Keep old reports as historical
+   evidence, with new evidence explicitly labeled.
+2. **Finish a shared graph adapter inventory.** Inspect every relevant operator,
+   width/sign annotation, reset/clock cone, memory policy, and hierarchy shape
+   in fresh graphs, rather than discovering only the first unsupported node.
+   Preserve endpoint and Concat work already validated. Add minimal standalone
+   fixtures for each observed new representation; keep graph objects unchanged.
+3. **Add Hotmux throughout the Lean flow at the shared scan boundary.** Validate
+   contiguous control/value pairs and optional default. Convert each control
+   using its full nonzero predicate (not just bit zero). Normalize arm widths
+   with the required signed/unsigned extension or truncation, then construct
+   nested existing Mux nodes in first-active priority order. Use zero when no
+   control is active and no default exists. Allocate collision-free stable
+   synthetic IDs and retain original-node provenance in diagnostics.
+
+   Both legacy GraphCert and verified DesignCert will contain the lowered Mux
+   operations. The legacy fast model must consume that same lowered scan/IR;
+   fast bridge, dense-index chunked WF, verified compilation, and correctness
+   proofs then operate on the same dependencies. No new Lean primitive or
+   `Op_Hotmux` is required for this approach. Add independent tests covering
+   no/one/multiple active controls, explicit/implicit defaults, multi-bit
+   controls, signed mixed widths, malformed layouts, fanout, and nesting. Prove
+   both fast/certificate equivalence and the independent priority-value oracle.
+
+   Carry one-hot status into export diagnostics/validation metadata without
+   changing the source graph or declaring an unresolved obligation proved.
+   Distinguish native-proved, deferred, and refuted status. Refuted obligations
+   must remain failures; deferred obligations remain visible alongside value
+   proofs. Certificate WF proves structure, the bridge proves model/certificate
+   values, and neither proves one-hotness or RTL-to-graph correctness. If a
+   Lean proof of one-hotness is desired, that is a separate theorem obligation.
+4. **Repair transparent reset/clock tracing with equivalence evidence.** Start
+   with the observed one-bit Sext wrappers. Prove the condition is unchanged
+   before following a wrapper. Add active-high/low, asserted/deasserted async
+   read, next-state, synchronous-reset, truncating/nontransparent, and clock-bit
+   negative cases. Do not loosen the existing primary-input reset restriction
+   or clock normalization policy to accept arbitrary expressions.
+5. **Classify failures outside Lean before proposing fixes.** Reproduce each
+   frontend/normalization failure using pristine pinned master without Lean
+   emission. Compare the previous accepted procedure and relevant historical
+   commits. Keep native LEC, normalization guards, immutable contract tests, and
+   compiler-warning policy unchanged. Record upstream regressions and historical
+   soundness corrections separately. Bring any required semantic or native-code
+   change back to the user with a minimal reproduction and proposed treatment.
+6. **Run the complete matched validation matrix.** Rebuild all Lean support
+   sources; rerun scanner/certificate/model, CLI, linker, and all optimized
+   repository tests with isolated local runtime directories. Retain the 38 tiny
+   fixtures, cross-version oracles in both directions, and independent lowering
+   oracles. For all three DINO designs, regenerate RTL-to-graph artifacts and
+   check legacy fast typechecking, `emit_fast_bridge=true`, full `cert_wf=chunked`
+   with chunk size 100, and the verified compiler path. Record `/usr/bin/time -v`
+   wall time/RSS and theorem audits for every accepted proof.
+
+   Replay all 125 CORE-ET and 61 CVA6 configurations with recorded readers,
+   filelists, wrappers, normalization, options, and historical proof scope.
+   Rerun earlier refusals/timeouts as well. Track compile, normalization, export,
+   typecheck, bridge, WF, and verified-correctness outcomes separately. A saved
+   artifact replay only establishes library compatibility. Keep unresolved
+   failures explicit and require a disposition for every previously accepted
+   case. Frontend runs using the historical `--ignore-assertions` procedure do
+   not establish the ignored RTL assertions.
+7. **Land only after reviewable evidence.** Refresh the preservation ledger and
+   current validation report, include the L0-L8 source plan reference, and check
+   committed material for private absolute paths. Recheck remote master before
+   publication; if it moves, review the new delta and invalidate affected proof
+   evidence. Produce a normal descendant commit on master and push without
+   forcing history, then link the landed commit from the superseded PR. Do not
+   claim the port is ready while previously accepted cases remain unexplained.
+
+Bazel output, repository cache, and runtime state remain in the approved local
+NVMe allocation for this checkout. No global cache/config change or deletion of
+another checkout's cache is needed. Original dirty workspaces remain untouched.
+
+## Revision 2026-10-08b — audit corrections and whole-programme scope
+
+This section supersedes the **scope** of the preceding section and adds the
+items an audit found missing. Everything already recorded above is retained as
+evidence; nothing here withdraws a prior measurement. Where a number below
+disagrees with an earlier paragraph, the disagreement itself is the finding and
+is called out explicitly rather than silently corrected.
+
+### R1. The target is every branch, not this PR alone
+
+The preceding plan covers only the legacy + verified-compiler pass. The
+programme goal is that **master carries all accumulated progress**, so each
+branch below must land, and each must be named in the landing order because
+they share `formal/lean/LeanSemanticPrimitives/Compiler/`.
+
+| Branch | Checkout | Owns (not present on master) | Shares |
+| --- | --- | --- | --- |
+| `b1-b2-verified-compiler` | `livehd-new` | C++ scan/IR/emitters, `CompileOp/CompileGraph/CompileDesign`, `compileDesign_correct`, chunked WF, fast bridge | `DesignCert`, `Runtime`, `DesignSemantics` |
+| `direction-2-ir-semantics-clean` | `livehd-d2-ir-semantics` | **Multi-clock**: `ClockDesc`, `DesignCert.clocks`, `FlopDesc.clock`, `ClockEdges`/`fires`/`allEdges`; `DirectSemantics`, `DirectCheck`, `DirectSim`, `DirectTrace`, `DirectVsCompiled`, `DirectBench`, `DirectExamples`, `DirectTests` | same three |
+| `direction-3-translation-validation` | `livehd-d3-translation-validation` | `Reify`, `ReifyGen`, `ReifyProof`, `D3Harness`, the `*Defs` module split | same three |
+| `direction-4-incremental` | `livehd-d4-incremental` | `CertIO`, `CertIORoundTrip` (runtime certificate transport; parser recorded as trusted) | same three |
+| `projection` | `livehd-futamura/livehd` | `Projection/` (partial evaluator, `I_hw`, specializer), `SIMULATOR_PLAN.md` | pins `DesignCert`/`interpretDesign` at a fixed revision |
+
+**Schema ownership and landing order.** The two `DesignCert.lean` schemas have
+already diverged: this integration's copy has no clock fields, while D2's
+declares `ClockDesc` and `clocks : Array ClockDesc := #[{ name := "clock" }]`.
+D2's additions are defaulted, so they are a backward-compatible superset and
+every existing certificate literal still elaborates. D2 owns that type.
+Required order, with a gate between each step:
+
+1. B1+B2 lands (this report).
+2. D2 lands its clock-aware `DesignCert`/`Runtime`/`DesignSemantics` on top,
+   together with `interpretDesign_allEdges`, which is what makes the schema
+   change meaning-preserving for one-domain certificates.
+3. D3 and D4 rebase onto the post-D2 schema. Both are Lean-only; neither adds
+   a C++ emitter and neither may introduce a second graph traversal.
+4. Futamura re-pins to the landed revision. Its pin **moves** as soon as step 1
+   lands; that is a required action, not a side effect.
+
+Adopting D2's checker is recorded on that branch (`DIRECTION2_RESULTS.md:658`)
+as regressing **54 of the 147** baseline certificates with `asyncFlagMismatch`
+until they are re-emitted. That re-emission belongs to step 2's gate and must
+not be deferred past it.
+
+### R2. Complete operator disposition — no operator left unaccounted
+
+`Ntype_op` carries 31 real operators and is **byte-identical** at `c54a435` and
+`8bea45dc2`; no operator is new in this rebase. The Lean model `LGraphOp`
+(`Translation/LGraphModel.lean`) has 29 constructors and is identical on
+`b1-b2-verified-compiler`, `direction-2-ir-semantics-clean`,
+`direction-3-translation-validation` and `direction-4-incremental`.
+
+**Therefore: every operator unsupported here is unsupported on every branch.**
+None of this work is stranded elsewhere waiting to be collected.
+
+| Operator | Status in the pass | Supported on another branch? | Disposition for master |
+| --- | --- | --- | --- |
+| `Sum` `Mult` `Div` `And` `Or` `Xor` `Ror` `Not` `EQ` `LT` `GT` `SHL` `SRA` `Mux` `Sext` `Get_mask` `Set_mask` `Memory` | supported (18) | — | keep; parity gates below |
+| `Concat` | lowered in `design_scan.cpp` (strict MSB-first lanes) | no | keep lowering; no `Op_Concat` added |
+| `Hotmux` | **refused** | no | approved: lower to nested `Mux`, first-active priority |
+| `Rem` | **refused** | no | decide: `Op_Rem` in the model, or permanent refusal |
+| `LUT` | **refused** | no | decide: lower to `Op_MuxN`, or permanent refusal |
+| `Rxor` | **refused** | no | decide: lower via `Op_Xor` fold, or permanent refusal |
+| `Popcount` | **refused** | no | decide: lower via adder tree, or permanent refusal |
+| `Latch` | **refused** | no | permanent refusal — level-sensitive state is outside the single-step model |
+| `Fflop` | **refused** | no | permanent refusal pending a flop-flavour decision |
+| `Clock_cell` | **refused** | no | permanent refusal; clock normalization is upstream's job |
+| `Sub` | **refused** | no | permanent refusal — hierarchy is flattened before export |
+| `AttrSet` | **refused** | no | permanent refusal — attribute carrier, no value semantics |
+| `IO` `Flop` | handled outside `scan_op` (ports / state) | — | unchanged |
+
+**Gate O1 — operator census before any lowering work.** The snapshot above
+reports *first* refusal per configuration ("Hotmux for 50 configurations"). A
+first-refusal count cannot bound the remaining work: behind a Hotmux refusal
+there may be `Rem`, `LUT`, `Rxor` or `Popcount` nodes never yet reached. Before
+Hotmux is implemented, run a full census over fresh graphs that records **every**
+distinct operator, width/sign annotation and memory policy per configuration,
+not the first unsupported node. Publish it as `tests/MASTER_OP_CENSUS.json`.
+Implementing Hotmux without this census cannot be claimed to unblock any stated
+number of designs.
+
+**Gate O2 — a disposition for each of the four undecided operators.** `Rem`,
+`LUT`, `Rxor` and `Popcount` need an explicit decision recorded here before
+landing, even if the decision is "permanent refusal". Leaving them undecided is
+what lets progress be lost: a later branch adds one privately and master never
+receives it.
+
+### R3. Four arity refusals present in master and absent from this pass
+
+`pass/lean/pass_lean.cpp` on master (identical at `c54a435` and `8bea45dc2`)
+refuses malformed arities explicitly:
+
+| master line | refusal |
+| ---: | --- |
+| 718 | `Div node n_… is not binary.` |
+| 772 | `LT/GT node n_… is not binary.` |
+| 811 | `SHL node n_… is not binary.` |
+| 826 | `SRA node n_… is not binary.` |
+
+The refactored scanner has **none** of them. `certificate_ir.cpp`'s LT/GT arm
+applies `all(width)` to whatever operands arrive, so a three-operand comparison
+emits a three-dependency `Op_ULT` instead of refusing; `LT`/`GT` are two-banked
+(`Ntype::sink_bank_count` returns 2 for `Sum`, `LT`, `GT`), so folded
+comparisons are representable upstream. `LEGACY_SEMANTIC_AUDIT.md` already lists
+this family under "Nonstandard/malformed arities"; what is new here is that
+**master is now the rebase target**, so these are parity obligations, not
+acceptable inherited drift.
+
+**Gate A1.** Restore all four refusals in the shared scan/IR boundary, with one
+fixture each asserting the refusal and its diagnostic. Until then this report
+must not state that "unsupported operators remain explicit refusals" without
+qualification — malformed *arities* of supported operators currently do not.
+
+### R4. `Operand::port` carries a bank, and the raw pid is discarded
+
+`design_scan.cpp:402` stores `Ntype::sink_bank(node_op(node), e.sink.get_port_id())`
+into the field named `port`. This is correct today: `sink_bank` is the identity
+for unbanked operators, so `Mux`'s selector-at-pid-0 still resolves, and the
+banked operators are exactly the ones whose role is bank-determined. Selecting
+on the raw pid instead would be a silent miscompile — a `Sum` with two addends
+occupies pids `{0, 2}`, so `port == 0` keeps the first and `port == 1` matches
+nothing, dropping the second with no diagnostic.
+
+Two problems remain. The field is named `port` while carrying a bank, and the
+pid is unrecoverable downstream. The approved Hotmux lowering requires
+"contiguous control/value pairs", which is a statement about **pid order**.
+
+**Gate B1.** Split `Operand` into `port` (raw pid) and `bank`
+(`Ntype::sink_bank` of it) before Hotmux lowering begins; update the `Sum` arm
+to select on `bank` explicitly. Add a regression placing a second addend at
+pid 2 with bank 0 and asserting both the add count and the dependency count.
+
+### R5. One frozen benchmark manifest
+
+"Re-run every already-covered benchmark" is not checkable while six
+inventories disagree:
+
+| Source | Count |
+| --- | ---: |
+| `SWEEP_b1-b2.tsv` | 122 rows |
+| `SWEEP_cva6.tsv` | 23 rows |
+| replay matrix in the preceding section | 125 CORE-ET + 61 CVA6 |
+| `tests/LEGACY_PROOF_COVERAGE.json` | 90 results (document headline: 68/90) |
+| `tests/LEGACY_PROOF_INVENTORY.json` | 87 entries |
+| `tests/LEGACY_PROOF_COVERAGE_ADDITIONS.json` | 13 entries |
+
+[`LEGACY_CI_AUDIT.md`](LEGACY_CI_AUDIT.md) separately records 81/90 with nine
+cases lacking completion records. The preceding section's "all 87
+historical block proofs completed" uses the inventory denominator, not the
+coverage denominator; the two sets are not the same and neither is a subset
+claim that has been checked.
+
+**Gate M1.** Produce `tests/MASTER_BENCHMARK_MANIFEST.json`: one row per
+configuration, with its identity, which inventories list it, its historical
+scope (export / typecheck / bridge / WF / verified-correctness), the recorded
+historical outcome, and a required disposition after the rebase. Reconcile the
+denominators explicitly, including entries that appear in only one inventory.
+No "previously accepted case left unexplained" claim can be evaluated before
+this file exists.
+
+### R6. Semantics coverage that is not an operator
+
+The operator table does not capture everything that must reach master. These
+are the non-operator semantics, their owner, and their gate:
+
+| Semantics | Owner | Gate |
+| --- | --- | --- |
+| Multi-clock domains, edge vectors, quiet-domain holds, async reset independent of firing edges | D2 | lands at step 2; includes re-emitting the 54 `asyncFlagMismatch` certificates |
+| Async-reset Q reads, reset polarity, nonzero reset value | B1 (already here) | unchanged; the 495 source-expression changes stay recorded in `LEGACY_SEMANTIC_AUDIT.md` |
+| Mixed-width signed `LT`/`GT`, narrow-result unsigned `Div`, general/dynamic `Sext` | B1 (already here) | unchanged renderer rules; counterexamples stay recorded |
+| Immutable ROM, synchronous ROM read registers | B1 (already here) | unchanged |
+| Memory forwarding matrix, byte enables, write-port order | B1 (already here) | unchanged |
+| Residual reification to named Lean declarations | D3 | step 3; research tooling, not a production path |
+| Runtime certificate parse/load (`DCERT1`) | D4 | step 3; parser recorded as trusted |
+| Partial evaluation / projected simulator | Futamura | step 4; re-pin only, no schema change |
+| `pass.lean` has no multi-clock guard — a two-clock all-posedge design exports a certificate where every flop commits every step | unowned | **open soundness gap**; must be assigned before B1 lands or recorded here as knowingly deferred |
+
+The last row is the one most at risk of being lost: it is recorded on the
+Futamura branch's plan as out of scope there, and it is not an operator, so no
+operator census will surface it.
+
+### R7. Acceptance gates added to the implementation sequence
+
+Insert before the existing step 3 (Hotmux):
+
+- **O1** operator census over fresh graphs, every operator per configuration.
+- **O2** recorded disposition for `Rem`, `LUT`, `Rxor`, `Popcount`.
+- **A1** four arity refusals restored with fixtures.
+- **B1** `Operand` split into `port` and `bank`, with the pid-2 addend regression.
+
+Insert into the existing step 6 (validation matrix):
+
+- **M1** frozen benchmark manifest with per-entry disposition.
+
+Add as a new final step, after the existing step 7:
+
+- **S1** land D2, then D3/D4, then re-pin Futamura, each with its own
+  validation record. The programme is not complete while any branch still
+  holds semantics that master lacks. Record the landed commit for each in this
+  report so the next reader can tell what master contains without reading five
+  branches.
+
+### R8. Implementation status (2026-10-08, this checkout)
+
+Four of the gates added above are implemented and verified here. `//pass/lean:all`
+passes: `certificate_ir_test`, `design_scan_test`, `legacy_model_test`.
+Nothing is committed — the tree still holds the whole 122-file port staged, and
+landing that is step 7's decision, not this work's.
+
+**B1 — `Operand` split into `port` and `bank`. DONE.**
+`design_scan.hpp` now carries both: `port` is the raw sink pid (the operand's
+SLOT, what a lowering needing contiguous control/value pairs reads) and `bank`
+is `Ntype::sink_bank` of it (the operand's ROLE). `certificate_ir.cpp` selects
+`Sum`'s adds/subs and `Mux`'s selector on `bank`; `LT`/`GT` no longer need the
+`operands.size() == 2` guard for width because the arity is now refused earlier.
+
+This also exposed a latent defect in the Concat lowering: the final `Or` pushed
+**pid 0 for every lane**, which was invisible while the field held a bank (`Or`
+folds one bank, so every lane is bank 0) but describes a shape
+one-driver-per-sink-pin forbids. Lane k is now pid k, bank 0. The three
+synthetic `Or`/`Sext`/`SHL` nodes the lowering emits set both fields explicitly.
+
+Regression: `SetMaskAndSumKeepOperandOrder` places its second addend at pid 2
+with bank 0 — the shape that silently loses an operand when a role is read off
+the raw pid — and now asserts the dependency count as well as the add count.
+
+**A1 — four arity refusals restored. DONE.**
+`check_operand_arity` in `design_scan.cpp` refuses a non-binary `Div`, `LT`,
+`GT`, `SHL` or `SRA`, matching master's `pass_lean.cpp` refusals by name. It
+sits at the shared scan boundary, so the legacy emitters and the
+verified-compiler exporter both inherit it; refusing inside one emitter would
+leave the other accepting the node.
+
+Regression: `DesignScan.MalformedBinaryArityIsRefused` walks all five operators
+and asserts **both** directions — the binary form is still accepted, and the
+three-operand form is refused — so the gate cannot pass by over-refusing.
+
+**O1 (mechanism) — the refusal names the whole census. DONE.**
+`scan_op` became `try_scan_op`, returning `std::optional<ScanOp>` instead of
+fataling. The reachable walk records every unsupported operator with the first
+node that used it, and raises **one** refusal afterwards naming all of them plus
+the total unsupported node count.
+
+This is the methodological fix: a first-refusal diagnostic cannot size the
+remaining work, because a second unsupported operator behind the first is never
+reached and never counted. "Lowering Hotmux unblocks 50 configurations" was
+never a claim the old diagnostic could support.
+
+Regression: `DesignScan.UnsupportedOperatorRefusalNamesTheWholeCensus` builds a
+design containing both `Rem` and `Popcount` and asserts the message names each.
+
+**O1 (the run) — NOT DONE.** Producing `tests/MASTER_OP_CENSUS.json` still needs
+the frontend sweep over fresh graphs. The mechanism above is its prerequisite;
+the sweep itself is step 6 work.
+
+**M1 — frozen benchmark manifest. DONE.**
+[`tests/MASTER_BENCHMARK_MANIFEST.json`](tests/MASTER_BENCHMARK_MANIFEST.json)
+reconciles the five committed inventories into one keyed list:
+
+| | |
+| --- | ---: |
+| reconciled entries | **256** |
+| CORE-ET / CVA6 / DINO / small | 209 / 36 / 3 / 8 |
+| by scope: sweep / bridge / unspecified | 145 / 90 / 21 |
+| **listed by exactly one inventory** | **178** |
+
+That last row is the finding. The inventories barely overlap — 178 of 256
+entries appear in only one of them — so the 90-result coverage snapshot and the
+87-entry proof inventory are different sets, not a subset relation, and neither
+subsumes the sweep tables. Every entry carries its recorded historical outcome
+and a disposition field defaulted to `REQUIRED: rerun and record outcome`.
+
+Still missing as a sixth source: the 125 CORE-ET / 61 CVA6 fresh-input
+configuration list quoted earlier in this report is not backed by a committed
+file. It must be added before the replay, or the replay cannot be reconciled
+against this manifest.
+
+### R9. O2 — dispositions for the four undecided operators
+
+All four are expressible with the existing 29 `LGraphOp` constructors, so none
+requires a new Lean primitive. That matches the Hotmux decision: lower at the
+scan boundary, leave the model alone.
+
+| Operator | Semantics (`graph/cell.hpp`) | Proposed lowering | Cost / open question |
+| --- | --- | --- | --- |
+| `Rem` | truncated remainder, sign follows the DIVIDEND (Verilog `%`), binary | `a - trunc(a / b) * b` via `Op_SDiv`/`Op_UDiv` + `Op_Mult` + `Op_Sum` with the product in the subtract bank | `bv_sdiv` already rounds with `trunc_div_int`, so the identity holds for `b ≠ 0`. **`b = 0` needs a decision**: `bv_sdiv` yields 0, so the lowering yields `a`, and LiveHD's `Rem`-by-zero intent must be confirmed rather than inherited |
+| `LUT` | constant lookup table | nested `Op_MuxN` over the table constants, the same shape as the approved Hotmux lowering | table size becomes node count; large LUTs inflate the certificate |
+| `Rxor` | parity (0/1) of the low `b` bits of `a`, `b` a constant count | `b` × `Op_GetMask` to extract each bit, folded with `Op_Xor` | **O(b) nodes** — 64 extra nodes on a 64-bit operand, which lands on certificate size and chunked-WF proof time |
+| `Popcount` | number of set bits (0..`b`) in the low `b` bits | `b` × `Op_GetMask`, zero-extended, summed by `Op_Sum` | **O(b) nodes**, same caveat |
+
+Recommendation: take `Rem` and `LUT` (bounded cost, no width blow-up) and defer
+`Rxor`/`Popcount` behind the census — if they never appear in the corpus, the
+O(width) node cost buys nothing. Either way the decision is recorded here, so no
+later branch can add one privately and leave master without it.
