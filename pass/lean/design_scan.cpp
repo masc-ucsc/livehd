@@ -285,10 +285,30 @@ void lower_hotmux(const LeanCtx& ctx, const Node& node, DesignScan& design, uint
   // arm is the innermost alternative and arm 0 ends up outermost.
   for (size_t i = ins.arms.size(); i-- > 0;) {
     const auto& [control, value] = ins.arms[i];
-    auto        predicate        = emit(ScanOp::Ror,
-                                        1,
-                                        {
-                                     {0, 0, capture_pin(ctx, control)}
+    auto        selector         = capture_pin(ctx, control);
+    // Op_Ror's result width is pinned to 1 by the model's WF rule, and
+    // CertificateBuilder::dep applies the requested width to a CONSTANT source
+    // (a node or port keeps its own). A constant control fed straight into the
+    // reduce-OR would therefore be recorded at one bit and truncated before it
+    // is tested: control 2 would read as 0 and this arm could never fire.
+    // Route it through an arity-1 Or at its own width first -- the same resize
+    // the Concat lowering uses -- so the predicate sees every bit.
+    if (selector.kind == PinKind::Constant) {
+      // Widen to whichever of the DECLARED and INTRINSIC widths is larger. A
+      // folded control often carries no declared bits at all (raw_pin_width is
+      // 0), and taking that width would store the constant at zero bits and
+      // read every control as inactive.
+      const auto bits = std::max({selector.width, selector.intrinsic_width, 1u});
+      selector        = emit(ScanOp::Or,
+                      bits,
+                      {
+                                 {0, 0, selector}
+      });
+    }
+    auto predicate = emit(ScanOp::Ror,
+                          1,
+                          {
+                              {0, 0, std::move(selector)}
     });
     auto        arm              = normalize(value);
     // MuxBool operand order is {selector, false value, true value}.

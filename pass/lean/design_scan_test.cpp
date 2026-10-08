@@ -239,7 +239,29 @@ TEST(DesignScan, HotmuxLowersToPriorityMuxChain) {
             << "operand " << operand.driver.id << " must precede the node that uses it";
       }
     }
-    EXPECT_NO_THROW((void)build_certificate(design, {}));
+    // The predicate must see EVERY bit of its control. Op_Ror's result width is
+    // pinned to 1, and a constant dependency is recorded at the width the arm
+    // requests, so feeding a constant control straight into the reduce-OR would
+    // truncate it to one bit -- control 2 would read as 0 and that arm could
+    // never fire. A structural check alone would not notice, which is why this
+    // asserts the recorded SOURCE WIDTH rather than the shape.
+    const auto cert     = build_certificate(design, {});
+    size_t     ror_seen = 0;
+    for (const auto& n : cert.nodes) {
+      ror_seen += n.op.kind == Operation::Ror;
+    }
+    EXPECT_EQ(ror_seen, 3u) << "every arm must still carry its own predicate";
+
+    // The multi-bit control is the constant 2. Op_Ror's result width is pinned
+    // to 1 and a CONSTANT dependency is recorded at the width the consuming arm
+    // requests, so feeding it straight into the reduce-OR would store it at one
+    // bit: 2 would read as 0 and that arm could never fire. Assert on the
+    // recorded source width, because the lowered SHAPE is identical either way.
+    const auto control = std::find_if(cert.sources.begin(), cert.sources.end(), [](const Source& s) {
+      return s.kind == SourceKind::Const && s.const_int == "2";
+    });
+    ASSERT_NE(control, cert.sources.end()) << "the multi-bit control constant must survive into the certificate";
+    EXPECT_GE(control->width, 2u) << "control 2 was stored at " << control->width << " bit(s), so its reduce-OR reads 0";
   }
 }
 
