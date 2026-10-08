@@ -753,3 +753,33 @@ harness cases: missing test output with a stale fixture, empty case list, a
 C++ results do not yet claim that Lean decided the five real vectors; that still
 requires completion of the shared `CompileDesign` dependency build and the
 actual oracle invocation.
+
+### Approved Isabelle restoration: library, scaling and signed shifts
+
+Following review of the broader audit, the user approved restoring the Isabelle
+losses in separate commits. This first restoration recovers
+`Translation_BT.thy` and its session entry, the original signed-shift proof
+helper and unfinished-proof notes, the directed bakeoff combiner and removal of
+unused `wf_distinct`, and the missing 176 lines of historical audit evidence.
+Those recovered files match B1/B2. The C++ emitter restores only the approved
+`scast` result cast for SRA; current graph traversal, constant representation,
+Get_mask/Concat handling and native LEC remain unchanged.
+
+Measured with `/usr/bin/time -v`, using an isolated project-local Isabelle user
+home, heaps and temporary directory:
+
+| Check | Result | Wall time | Peak RSS (KiB) |
+| --- | --- | ---: | ---: |
+| Semantic primitives and full translation library, including recovered theories | PASS | 66.00 s | 2,147,352 |
+| Restored synthetic bridge generator, 32 nodes (`eqns`) | PASS | 12.60 s | 1,191,892 |
+| Fresh emitted four-to-eight-bit SRA model and certificate, four concrete value checks | PASS | 11.69 s | 1,160,720 |
+| Same generated model changed back to `ucast` as a negative control | Expected FAIL on both negative inputs | 11.16 s | 1,166,972 |
+
+The new `//pass/isabelle:emission_smoke` fixture emits the model, certificate and
+`RestoreShiftOracle.thy` when run with `ISABELLE_EMISSION_FIXTURES` pointing to a
+project-local directory. It covers −4, −8, +6 and zero shifted right by one,
+then widened to eight bits. The negative control fails on −4 and −8; this pins
+values rather than just emitted spelling. The value facts use Isabelle `eval`
+and therefore carry its code-generator oracle dependency, as the recovered
+historical notes explain. These are targeted restoration checks, not new DINO
+or full-corpus Isabelle proofs. Fast-bridge scaffolding is restored separately.

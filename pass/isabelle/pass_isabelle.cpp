@@ -2105,7 +2105,9 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       if (pin_is_const(b)) {
         shift_w = std::max<uint32_t>(shift_w, minimal_unsigned_const_width(pin_const_value(b)));
       }
-      return "((ucast (sem_sra " + ucast_pin_at(ctx, a, value_w) + " " + shift_amount_expr_at(ctx, b, shift_w)
+      // sem_sra returns the operand width. Widen its result with the sign
+      // intact; truncating with scast also preserves the low result bits.
+      return "((scast (sem_sra " + ucast_pin_at(ctx, a, value_w) + " " + shift_amount_expr_at(ctx, b, shift_w)
              + ") :: " + std::to_string(w) + " word))";
     }
 

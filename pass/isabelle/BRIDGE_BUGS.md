@@ -510,3 +510,179 @@ same lever in different clothing, and both are chunking.
 
 Current honest budget for a DINO-scale Isabelle certificate proof: **≈ 5.5 h**,
 exponent ≈ 2.1.
+
+---
+
+## The first DINO-scale run: it closes, and where the 9 hours went
+
+**Synthetic** bridge at N=4912 (DINO SingleCycleCPU's node count), threads=8,
+detached systemd unit:
+
+| | |
+|---|---|
+| wall | **8 h 54 m 39 s** (parallel factor 2.54) |
+| CPU | 22 h 37 m |
+| peak RSS | **64.1 GB** |
+| result | `exit=0`, **0 errors, 0 sorries** |
+
+**Scope, stated precisely:** this is a synthetic chain — every node `Op_Not` of
+the previous, all 8-bit, one dep per node, one source, no outputs or flops. It
+shares DINO's *node count* and nothing else (DINO: GetMask 2093, And 803, SRA
+714, SHL 644, MuxN 150, `Or` up to arity 55, widths 1–127, 36 sources, 33 flops).
+It is a **scaling measurement at DINO's size, not a DINO proof.** Piece C — the
+emitter that would produce DINO's actual bridge — does not exist yet, so no DINO
+bridge file exists to check.
+
+The prediction was 5.5 h; the actual was 8.9 h, a **1.6× underestimate** even
+though the run used 8 threads against a threads=4 fit. Extrapolating from N=800
+underestimates, because the exponent is still climbing at that size.
+
+### Two declarations were essentially the entire run
+
+| line | lemma | time |
+|---|---|---|
+| 39360 | `combiner` | **26,371 s = 7 h 19 m** |
+| 39348 | `wf_distinct` | **15,425 s = 4 h 17 m** |
+| — | every other command | < 223 s |
+
+`combiner` is a single declaration and therefore single-threaded, so its 7 h 19 m
+*is* the 8 h 54 m wall.
+
+`wf_distinct` is `distinct topo_list` by `simp` — ~12 M pairwise numeral
+comparisons as rewrite steps on a 4912-element literal. It is the identical
+pathology already fixed in the other three well-formedness lemmas, and it was
+left on `simp`. Worse, the N=800 profile had flagged it (an unattributed 90.3 s
+entry noted as "probably `wf_distinct`") and it was not acted on.
+
+### Both fixed
+
+- `wf_distinct` → `by eval`. Ground decidable fact; the code generator runs the
+  real `distinct` in compiled ML.
+- `combiner` → **structural fold**. Was one `simp` carrying N rewrite rules
+  against an N-conjunct goal. Now: split the bounded quantifier once with two
+  locally-proved helpers (`ball_set_cons`, `ball_set_nil` — proved here rather
+  than looked up, so nothing depends on a library name), then discharge each
+  small goal with a directed `rule rec_k`, which is O(1) per node. This is the
+  Isabelle form of Lean's `List.forall_mem_cons` term fold.
+
+| N | before | after | gain |
+|---|---|---|---|
+| 400 | 103 s | 76 s | 1.36× |
+| 800 | 430 s | **262 s** | **1.64×** |
+
+**Exponent 2.12 → 1.86.** Naive extrapolation says ≈ 2 h at 4912; given the last
+extrapolation was 1.6× low, budget **2–4 h** and re-measure rather than trust it.
+
+### `by eval` extends the trusted base
+
+`eval` is oracle-based: it trusts the code generator rather than producing
+kernel-checked steps. Five lemmas now use it (`wf_distinct`, `wf_some_ev`,
+`wf_dep`, `phi_keys_sub_ev`, and the harness's own). For an artifact whose point
+is trustworthiness that is a real trade — `code_simp` is the checked-but-slower
+alternative. This is a deliberate choice and should be made explicitly before it
+reaches the emitter.
+
+---
+
+## Trust base: `eval` vs `code_simp`, measured (2026-08-08)
+
+**Which methods extend the trusted base** — checked with `Thm_Deps.all_oracles`
+rather than asserted:
+
+| method | oracle |
+|---|---|
+| `by eval` | **`Code_Generator.holds_by_evaluation`** |
+| `by code_simp` | none |
+| `by simp` | none |
+
+So `eval` runs compiled ML and asserts the result through an oracle: believing it
+means trusting Isabelle's code generator and Poly/ML *in addition to* the kernel.
+`code_simp` uses the same code equations but routes every step through the
+simplifier, so it is kernel-checked. (`code_simp` takes no `add:` argument.)
+
+**Cost, N=800, run back-to-back so both saw the same machine load:**
+
+| variant | wall |
+|---|---|
+| `eval` | 263 s |
+| `code_simp` | **TIMEOUT at 3000 s** (never finished) |
+
+`code_simp` is >11× slower and did not complete in 50 minutes at N=800; at DINO
+scale it would be worse than the original `simp`. **The kernel-checked route is
+not affordable**, so the emitted bridge necessarily carries a code-generator
+dependency for its ground facts. That is a real limitation of the artifact, not a
+footnote: emit a `thm_oracles` audit on the final `_refines_fast` theorems so the
+dependency is reported rather than assumed away.
+
+## `wf_distinct` was dead code — and it cost 4 h 17 m
+
+`distinct topo_list` had **exactly one occurrence in the generated theory: its own
+declaration.** Nothing cited it.
+
+`eval_graph_of_local_agree_all` takes only `dep_ordered`, `some`, `rec` and `src`
+— distinctness drops out of its induction, because a repeated id is simply
+re-evaluated and covered by the inductive hypothesis. It was needed only by
+`dep_ordered_acc_sound`, and once `wf_dep` was discharged directly `by eval` that
+route disappeared. The lemma was left behind.
+
+In the original 8 h 54 m run it was still `by simp` and consumed **4 h 17 m —
+half the wall clock, on a lemma nothing used.** Removing it now saves almost
+nothing (the `eval` conversion had already neutralised it: 263 s at N=800 either
+way); what it buys is **one fewer oracle site**, 4 → 3.
+
+**The lesson is about profiling, not about `distinct`.** A per-command profile
+ranks what is *expensive*; it says nothing about what is *needed*. Both times the
+profile pointed at this lemma the response was to make it faster — first `simp` →
+`eval` — and neither time did anyone check whether it was cited. Check the call
+graph before optimising an entry in a profile.
+
+(A full `graph_cert_wf` claim *does* still require distinctness — but `by eval`,
+never `by simp`.)
+
+---
+
+## Bug 5 — `SRA` widened with `ucast` (zero-extend) instead of `scast`
+
+Found in `pass.lean` first and confirmed identical here.
+
+- **Where:** `emit_node_expr`, `Ntype_op::SRA` arm.
+- **Symptom:** emitted `((ucast (sem_sra <a> <sh>) :: w word))`. `sem_sra`
+  returns a word of the **operand's** width `vw`, so widening to the node width
+  `w` is a separate cast — and `ucast` fills **zeros**.
+- **Why that is wrong:** an arithmetic right shift exists precisely to propagate
+  the sign; widening its result with zeros discards exactly what the operator is
+  for. Two independent confirmations that the *fast model* is the defective side,
+  not the certificate:
+  - the certificate computes `mk_bv w (bv_sint a div 2^amt)`, and `mk_bv w` of a
+    negative integer is its two's complement — i.e. sign-extended;
+  - `inou/cgen/cgen_sim.cpp`, LiveHD's own simulator and the artifact the LEC
+    gate proves equivalent to the RTL, reads the shifted operand as **signed**.
+- **When it bites:** only when `w > vw` *and* the shifted value is negative. For
+  `w \<le> vw` both casts keep the low `w` bits and agree.
+- **Fix:** `scast`. Correct in both directions, so no conditional is needed.
+- **Exposure:** DINO does **not** trigger it — 0 of 1420 SRA sites have
+  `out_w > operand_w`. It is live in the CVA6 ALU nodes where it was found.
+  Regenerated DINO now emits `scast` at all 1428 sites, `ucast` at none.
+
+**How it survived here is the part worth keeping.** While proving `sra_bridge` I
+hit this exact divergence and wrote, in the commit message: *"a wider output
+would zero-extend where the certificate sign-extends."* I then encoded it as a
+**side condition** on the lemma (`LENGTH('w) \<le> LENGTH('v)`) and moved on,
+rather than recognising that the fast model was wrong and the emitter needed
+fixing. A bridge lemma that cannot close is evidence about the *emitter*; adding
+a hypothesis to make it close suppresses that evidence. **When a bridge needs an
+unexpected side condition, suspect the emitter before weakening the lemma.**
+
+That is the third instance in this work of noting something and not acting on it
+(the others: the `bridge_src` keys-subset route, and whether `wf_distinct` was
+cited at all).
+
+### Follow-up owed
+
+`sra_bridge` is now **stale**: it still speaks about `ucast` while the emitter
+emits `scast`, so it is renamed `sra_bridge_ucast_STALE` and must not be used in
+a per-node proof. Re-proving it for `scast` needs
+`sint (word_of_int (sint x div 2^k) :: 'v word) = sint x div 2^k` — lossless
+because `sint x` lies in the signed range and dividing by a power of two keeps it
+there. With that, **no width side condition is needed at all**, which is itself
+the tell that the conditional version was papering over the bug.
