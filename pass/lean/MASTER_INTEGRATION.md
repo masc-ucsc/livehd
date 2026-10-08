@@ -804,3 +804,114 @@ The user requested that further work now focus on Lean. The recorded Isabelle
 limitations remain explicit: no completed general emitted fast/certificate
 bridge, no completed unrestricted signed-SRA lemma, no complete Isabelle
 chunked-WF proof, and no new full DINO/corpus Isabelle proof claim.
+
+### R10. Target directory structure for the landed programme
+
+Once every branch is on master (R1), the code should be reorganized so each
+direction owns a directory and the shared layer is visibly shared. The four
+directories already agreed are `IR-semantics`, `Futamura-projection`,
+`verified-compiler` and the common `certificate-IR`. Five more earn their own
+directory, and each is argued from something this port actually hit rather than
+from taste.
+
+#### The additions
+
+**`graph-adapter/`** — `graph_access.*`, `design_scan.*`, `memory_lowering.*`
+
+The strongest case. This is the ONLY layer that touches HHDS, and every single
+upstream break in this port landed inside it:
+
+| upstream change | adaptation |
+| --- | --- |
+| graph iteration API | `fast_class()` -> `body().nodes()` |
+| constants moved to pool pins | `is_const_pin()` -> `pin.is_const()`; `hydrate_const` -> `const_of` |
+| signed-width accessor | `get_bits()` -> `get_signed_bits()` |
+| one driver per sink pin | `inp_edges()` + sort -> `inp_pins_snapshot()`; operand BANKS |
+| `Ntype_op::Nconst` removed | constants are pins, not nodes |
+| Memory pin 11 renamed | `init` -> `initial` |
+| Get_mask/Set_mask | mask value -> half-open `[lo, hi)` endpoints |
+| async reset wrappers | one-bit `Sext` transparency (R8/step 4) |
+
+Eight adaptations, one directory. As a folder this makes "master moved" a
+single place to look, and it is where the fresh-graph operator census belongs.
+
+**`legacy-model/`** — the five `emit_legacy_*` units, `legacy_model.*`, plus
+`Translation/{FastModelBridge,GraphRefine,LegacyCertWF}.lean`
+
+The largest single mass, and the thing `compileDesign_correct` exists to
+retire. The CORE-ET census makes the case concrete: **all 15 lean-emit failures
+across 122 modules were the legacy fast bridge**, naming operators the model
+already supports (`Op_And` x5, `Op_Xor` x5, `Op_Sum 3` x2, `Op_Sum 16`,
+`Op_Sum 0`, `Op_Mult`). That is a failure mode entirely disjoint from the
+verified-compiler path, which does not use the bridge at all. Two subsystems
+with disjoint failure modes should not share a directory, and isolating this one
+makes its eventual removal a directory delete.
+
+**`lgraph-semantics/`** — `Translation/LGraphModel.lean`, `OpBridge.lean`
+
+Separate from `certificate-IR` because they answer different questions:
+certificate-IR is HOW a design is encoded, this is WHAT an operator means. All
+four branches carry a byte-identical 29-constructor `LGraphOp`. It is the file
+that must never fork, and burying it inside the certificate layer hides that.
+
+**`translation-validation/`** (D3) — `Reify`, `ReifyGen`, `ReifyProof`, `D3Harness`
+
+**`runtime-transport/`** (D4) — `CertIO`, `CertIORoundTrip`
+
+D4 especially: its parser is recorded as TRUSTED. A trust boundary should be a
+directory, not a sentence in a markdown file.
+
+#### Two more that are not directions
+
+**`isabelle-bridge/`** — `pass/isabelle/*`, `formal/translation_correctness/*`
+
+Now in scope: the Isabelle side was restored onto master alongside the Lean
+work. It is a second proof backend over the same graph, so it belongs beside
+the Lean directions rather than inside them.
+
+**`benchmarks/`** — `SWEEP_*.tsv`, `tests/LEGACY_PROOF_*.json`,
+`MASTER_BENCHMARK_MANIFEST.json`, `MASTER_OP_CENSUS.json`, the `run_*.sh` and
+`coreet_*` drivers
+
+Recorded evidence about designs currently sits in `pass/lean/tests/` next to
+gtest unit tests. They have opposite lifecycles -- unit tests are source,
+evidence is dated measurement -- and mixing them is part of how five
+inventories drifted into disagreeing: the manifest found **178 of 256 entries
+listed by only one inventory** (R5).
+
+#### What must NOT be split
+
+`DesignCert.lean`, `Runtime.lean` and `DesignSemantics.lean` stay in exactly ONE
+place in `certificate-IR`. The evidence is the divergence this port already
+has: the landed schema has no `clocks`, while D2's declares `ClockDesc` and
+`clocks : Array ClockDesc := #[{ name := "clock" }]`. That happened BECAUSE each
+branch kept its own copy. A layout giving each direction a private `DesignCert`
+would institutionalize it.
+
+Likewise `lean_options.*` and `pass_lean.cpp` stay as the single EPRP adapter;
+per-direction option parsing is how modes drift apart.
+
+#### The dependency rule, which is the point of the layout
+
+```
+graph-adapter -> certificate-IR -> { verified-compiler, legacy-model,
+                                     runtime-transport, isabelle-bridge }
+                       ^
+               lgraph-semantics      (depended on by all, depends on none)
+```
+
+`IR-semantics` and `Futamura-projection` consume `certificate-IR` and
+`lgraph-semantics`; neither may reach back into `graph-adapter`.
+
+One enforceable check is worth more than the diagram: **no emitter may include a
+graph-adapter header.** That is P5 of PASS_LEAN_RESTRUCTURE_PLAN.md, and as a
+directory boundary it is mechanically checkable in CI rather than aspirational.
+
+#### Sequencing
+
+This reorganization happens AFTER the branches land (R1 step 4) and AFTER the
+benchmark replay, not before. Moving files while D2/D3/D4/Futamura are still
+rebasing would force every one of them to re-target paths mid-flight, and a
+replay whose inputs moved proves nothing about the port. Record the move as a
+pure rename commit, with no content change, so `git log --follow` stays usable
+and the replay can be re-run across it unchanged.
