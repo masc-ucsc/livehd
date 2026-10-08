@@ -67,6 +67,12 @@ struct Flop {
   bool                    active_low   = false;
   std::string             initial      = "0";
   std::optional<uint32_t> reset_input;
+  // When the reset cone does NOT reach a primary input, what the transparent
+  // walk stopped on: `<op> n_<id>`. An asynchronous flop whose reset cannot be
+  // resolved is refused, and the refusal is only actionable if it names the
+  // node that blocked it -- "not driven by a primary input" alone does not say
+  // whether the cone holds an unhandled resize wrapper or real logic.
+  std::string             reset_block;
   std::string             raw_name;
 };
 struct MemoryPort {

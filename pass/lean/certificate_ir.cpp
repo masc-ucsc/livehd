@@ -72,7 +72,12 @@ uint32_t detail::CertificateBuilder::dep(const PinRef& pin, uint32_t width) {
     source.reset_active_low = f.active_low;
     if (f.asynchronous) {
       if (!f.reset_input) {
-        fail("flop n_" + std::to_string(f.id) + " has an ASYNCHRONOUS reset that is not driven by a primary input");
+        // `SourceDesc.flopQAsync` reads the reset out of RuntimeInput, so an
+        // asynchronous reset computed inside the design cannot be expressed.
+        // Name what stopped the transparent walk: an unhandled resize wrapper
+        // is a tracing gap to close, while real logic is a modelling limit.
+        fail("flop n_" + std::to_string(f.id) + " has an ASYNCHRONOUS reset that is not driven by a primary input"
+             + (f.reset_block.empty() ? "" : "; the reset cone stops at " + f.reset_block));
       }
       source.reset_input = input_ordinals.at(*f.reset_input);
     }

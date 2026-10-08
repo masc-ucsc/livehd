@@ -29,6 +29,30 @@ Node_pin resolve_resize_chain(const Node_pin& start) {
       cur = es[0].driver;  // arity-1 Or is the emitter's resize
       continue;
     }
+    if (op == Ntype_op::Sext) {
+      // `Sext(a, b)` keeps the low `b` bits of `a` and sign-extends from bit
+      // b-1. It is transparent to a CONDITION only when the source is ONE BIT
+      // wide: sign-extending a single bit replicates it, so every bit of the
+      // result equals it and a bit-0 test, a nonzero test and the source all
+      // agree. A wider source is NOT transparent -- the truncation to `b` bits
+      // happens first, so `nonzero(Sext(a,b))` asks about the low `b` bits of
+      // `a` rather than about `a`. The amount must also be a known constant and
+      // at least one, or there is no bit to replicate.
+      //
+      // This is the wrapper CVA6's controller and CORE-ET's CSR blocks put
+      // between `rst_ni` and an asynchronous reset pin; without it the flop is
+      // refused as "not driven by a primary input".
+      const auto source = livehd::graph_util::get_driver_of_sink_name(n, "a");
+      const auto amount = livehd::graph_util::get_driver_of_sink_name(n, "b");
+      if (!source.is_invalid() && raw_pin_width(source) == 1 && !amount.is_invalid() && pin_is_const(amount)) {
+        const auto bits = pin_const_value(amount);
+        if (bits.is_just_i64() && bits.to_just_i64() >= 1) {
+          cur = source;
+          continue;
+        }
+      }
+      return cur;
+    }
     if (op == Ntype_op::Get_mask) {
       const auto range  = livehd::graph_util::bit_range(n);
       const auto source = livehd::graph_util::get_driver_of_sink_name(n, "a");

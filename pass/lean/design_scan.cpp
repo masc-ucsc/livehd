@@ -433,6 +433,11 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
         const auto input = resolve_resize_chain(e.driver);
         if (pin_is_input(input)) {
           f.reset_input = ctx.input_source_id.at(input_name_for_pin(ctx, input));
+        } else if (!input.is_invalid()) {
+          // Record where the transparent walk gave up, so an asynchronous
+          // flop's refusal can name it instead of only reporting the symptom.
+          f.reset_block = std::string(Ntype::get_name(node_op(pin_node(input)))) + " n_"
+                          + std::to_string(node_id(pin_node(input)));
         }
       } else if (name == "enable") {
         f.enable          = capture_pin(ctx, e.driver);

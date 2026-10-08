@@ -615,9 +615,17 @@ TEST(DesignScan, SynchronousRomRetainsContentsAndEnable) {
   EXPECT_EQ(cert.sources[0].rom_contents, (std::vector<std::string>{"1", "2", "3"}));
   EXPECT_EQ(cert.nodes.back().op.kind, Operation::MuxBool);
 }
+// Three transparent wrappers may sit between a primary input and an
+// asynchronous reset pin: the emitter's arity-1 Or resize, a zero-based
+// Get_mask window covering the source, and a ONE-BIT Sext. The last is what
+// CVA6's controller and CORE-ET's CSR blocks actually emit; without it those
+// flops are refused as "not driven by a primary input".
 TEST(DesignScan, ActiveLowAsyncResetSurvivesResizingAndControlsNextState) {
-  for (const bool endpoint_resize : {false, true}) {
-    auto& lib = livehd::Hhds_graph_library::instance(endpoint_resize ? "lgdb_scan_reset_endpoint" : "lgdb_scan_reset");
+  enum Wrapper { kOr, kEndpoint, kSext };
+  for (const int wrapper : {kOr, kEndpoint, kSext}) {
+    const bool endpoint_resize = wrapper == kEndpoint;
+    auto&      lib             = livehd::Hhds_graph_library::instance(
+        wrapper == kOr ? "lgdb_scan_reset" : (endpoint_resize ? "lgdb_scan_reset_endpoint" : "lgdb_scan_reset_sext"));
     auto  io  = lib.create_io("reset_fixture");
     io->add_input("clk", 1);
     io->set_bits("clk", 1);
@@ -630,11 +638,21 @@ TEST(DesignScan, ActiveLowAsyncResetSurvivesResizingAndControlsNextState) {
     auto g    = io->create_graph();
     auto flop = create_typed_node(*g, Ntype_op::Flop);
     set_bits(flop.create_driver_pin(0), 8);
-    auto resize = create_typed_node(*g, endpoint_resize ? Ntype_op::Get_mask : Ntype_op::Or);
+    auto resize = create_typed_node(
+        *g, endpoint_resize ? Ntype_op::Get_mask : (wrapper == kSext ? Ntype_op::Sext : Ntype_op::Or));
     set_bits(resize.create_driver_pin(0), 1);
     if (endpoint_resize) {
       set_bits(g->get_input_pin("rst"), 1);
       livehd::graph_util::connect_mask_operands(resize, g->get_input_pin("rst"), 0, 1);
+    } else if (wrapper == kSext) {
+      // Sext(a, b): keep the low b bits of a and sign-extend from bit b-1.
+      // The transparency rule reads the SOURCE PIN's width, which is populated
+      // by set_bits on the pin and not by the io declaration alone -- the
+      // endpoint branch above needs the same call for the same reason.
+      set_bits(g->get_input_pin("rst"), 1);
+      g->get_input_pin("rst").connect_sink(livehd::graph_util::setup_sink_by_name(resize, "a"));
+      livehd::graph_util::create_const(*g, *Dlop::create_integer(1))
+          .connect_sink(livehd::graph_util::setup_sink_by_name(resize, "b"));
     } else {
       g->get_input_pin("rst").connect_sink(resize.create_sink_pin(0));
     }
@@ -680,6 +698,68 @@ example : bv_uint ((reset_fixture_step #[mk_bv 1 0, mk_bv 1 1, mk_bv 1 1]
 )";
       ASSERT_TRUE(out.good());
     }
+  }
+}
+
+// The Sext wrapper is transparent to a CONDITION only for a ONE-BIT source with
+// a constant amount of at least one. Every other shape must keep refusing:
+// Sext(a, b) truncates to the low b bits BEFORE sign-extending, so for a wider
+// source `nonzero(Sext(a,b))` asks about those low bits rather than about `a`,
+// and following it would silently change which condition resets the flop.
+//
+// This is the "do not loosen the primary-input reset restriction" half of the
+// repair. Without it the positive case above could be satisfied by a rule that
+// follows any Sext at all.
+TEST(DesignScan, NonTransparentSextResetWrapperIsStillRefused) {
+  struct Shape {
+    const char* name;
+    uint32_t    source_bits;
+    int64_t     amount;
+    bool        constant_amount;
+  };
+  for (const auto& shape : {Shape{"wide_source", 4, 1, true},
+                            Shape{"zero_amount", 1, 0, true},
+                            Shape{"dynamic_amount", 1, 1, false}}) {
+    auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_scan_reset_bad_") + shape.name);
+    auto  io  = lib.create_io("reset_bad");
+    io->add_input("clk", 1);
+    io->set_bits("clk", 1);
+    io->add_input("rst", 2);
+    io->set_bits("rst", shape.source_bits);
+    io->add_input("clk_unused", 4);
+    io->set_bits("clk_unused", 1);
+    io->add_input("amt", 3);
+    io->set_bits("amt", 4);
+    io->add_output("q", 1);
+    io->set_bits("q", 8);
+    auto g    = io->create_graph();
+    auto flop = create_typed_node(*g, Ntype_op::Flop);
+    set_bits(flop.create_driver_pin(0), 8);
+    auto sext = create_typed_node(*g, Ntype_op::Sext);
+    set_bits(sext.create_driver_pin(0), 1);
+    set_bits(g->get_input_pin("rst"), shape.source_bits);
+    g->get_input_pin("rst").connect_sink(livehd::graph_util::setup_sink_by_name(sext, "a"));
+    if (shape.constant_amount) {
+      livehd::graph_util::create_const(*g, *Dlop::create_integer(shape.amount))
+          .connect_sink(livehd::graph_util::setup_sink_by_name(sext, "b"));
+    } else {
+      g->get_input_pin("amt").connect_sink(livehd::graph_util::setup_sink_by_name(sext, "b"));
+    }
+    sext.create_driver_pin(0).connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "reset_pin")));
+    g->get_input_pin("clk").connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")));
+    auto drive = [&](std::string_view name, int64_t value) {
+      livehd::graph_util::create_const(*g, *Dlop::create_integer(value))
+          .connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, name)));
+    };
+    drive("din", 12);
+    drive("async", 1);
+    flop.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+
+    const auto design = scan_design(*g, {});
+    ASSERT_EQ(design.flops.size(), 1u) << shape.name;
+    EXPECT_FALSE(design.flops[0].reset_input.has_value())
+        << shape.name << ": a non-transparent Sext must not resolve to a primary input";
+    EXPECT_THROW((void)build_certificate(design, {}), std::runtime_error) << shape.name;
   }
 }
 
