@@ -553,7 +553,55 @@ scan boundary, leave the model alone.
 | `Rxor` | parity (0/1) of the low `b` bits of `a`, `b` a constant count | `b` × `Op_GetMask` to extract each bit, folded with `Op_Xor` | **O(b) nodes** — 64 extra nodes on a 64-bit operand, which lands on certificate size and chunked-WF proof time |
 | `Popcount` | number of set bits (0..`b`) in the low `b` bits | `b` × `Op_GetMask`, zero-extended, summed by `Op_Sum` | **O(b) nodes**, same caveat |
 
-Recommendation: take `Rem` and `LUT` (bounded cost, no width blow-up) and defer
-`Rxor`/`Popcount` behind the census — if they never appear in the corpus, the
-O(width) node cost buys nothing. Either way the decision is recorded here, so no
-later branch can add one privately and leave master without it.
+#### R9.1 Remainder by zero is NOT defined as `a` (supersedes the row above)
+
+The `b = 0` question is settled the other way: **do not define `a % 0 = a` in
+this port.** Upstream does not speak with one voice, so adopting any of its
+answers would be a silent choice, not an inheritance:
+
+| Implementation | Remainder by zero |
+| --- | --- |
+| Pinned HLOP constant evaluation | returns `nil` |
+| HLOP simulator | asserts |
+| Native LEC, cvc5 `BITVECTOR_SREM` | returns the dividend |
+
+Matching the solver alone would prove agreement with cvc5, not alignment with
+upstream execution — and the certificate is supposed to mean what the hardware
+means, not what the checker happens to compute.
+
+Disposition:
+
+1. **Support `Rem` only with a known NONZERO CONSTANT divisor.** Refuse a zero
+   divisor and refuse a dynamic divisor that cannot be shown nonzero. Dynamic
+   support may follow later behind an explicit nonzero proof obligation, which
+   is a theorem, not a lowering.
+2. Compute `a - trunc(a / b) * b` at a width sufficient for the operands, then
+   truncate to the result width — not the other way round.
+3. **Signed remainder cannot reuse the existing `Div` mapping.** `ScanOp::Div`
+   lowers to `Operation::UDiv` unconditionally (`certificate_ir.cpp:130`), and
+   the `Operation` enum has **no `SDiv` at all**, although the Lean model does
+   carry `Op_SDiv`. Signed `Rem` therefore needs that plumbing added first.
+4. Tests must cover negative operands, mixed signedness, narrow outputs, wide
+   constants, and the minimum signed value divided by −1.
+
+Recorded separately, because it is inherited rather than introduced here:
+master's own exporter also emits `sem_udiv` / `Op_UDiv` for every `Div`
+regardless of `node_output_is_signed` (`pass_lean.cpp:720` and `:1159`). The
+refactor preserves that faithfully. Whether a signed `Div` is being mis-modelled
+upstream is a separate question from `Rem`, and is not changed by this port.
+
+#### R9.2 `LUT`, `Rxor` and `Popcount` wait on the full census
+
+My earlier recommendation — take `Rem` and `LUT`, defer `Rxor`/`Popcount` — is
+withdrawn. **DINO alone cannot justify deferring them.** All three fresh DINO
+designs now export with an EMPTY census once Hotmux is lowered, which shows only
+that DINO does not use these operators; CORE-ET and CVA6 are 186 configurations
+and have not been swept.
+
+Prioritize `LUT`, `Rxor` and `Popcount` from the full CORE-ET/CVA6 census, not
+from DINO. `LUT` additionally needs an **explicit size bound** before any
+lowering lands: its expansion is one `Op_MuxN` arm per table entry, so an
+unbounded table is an unbounded certificate.
+
+The decision for each stays recorded here either way, so no later branch can add
+one privately and leave master without it.

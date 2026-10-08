@@ -265,6 +265,72 @@ TEST(DesignScan, HotmuxLowersToPriorityMuxChain) {
   }
 }
 
+// Value-level oracle for the Hotmux lowering.
+//
+// The structural test above cannot see a width or priority error: the lowered
+// SHAPE is identical whether or not a control is truncated, and it was in fact
+// identical through two real defects. This emits a DesignCert whose controls are
+// INPUTS, plus independent `native_decide` facts over concrete input vectors, so
+// the lowering is checked by evaluating it rather than by inspecting it.
+//
+// Cases: no control active (falls to the default), one active, a MULTI-BIT
+// control whose bit 0 is clear (the counterexample a bit-0 predicate fails),
+// and OVERLAPPING controls (one-hot violated, first-active must win).
+//
+// Set LEAN_HOTMUX_FIXTURE to a path; pass/lean/scripts/hotmux_oracle.sh runs it.
+TEST(DesignScan, HotmuxValueOracle) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_hotmux_oracle");
+  auto  io  = lib.create_io("hotmux_oracle");
+  for (int k = 0; k < 3; ++k) {
+    const auto name = "c" + std::to_string(k);
+    io->add_input(name, k + 1);
+    io->set_bits(name, 2);
+  }
+  io->add_output("y", 1);
+  io->set_bits("y", 8);
+  auto g    = io->create_graph();
+  auto node = create_typed_node(*g, Ntype_op::Hotmux);
+  set_bits(node.create_driver_pin(0), 8);
+  const std::vector<int> arm_value{11, 22, 33};
+  for (int k = 0; k < 3; ++k) {
+    g->get_input_pin("c" + std::to_string(k)).connect_sink(node.create_sink_pin(2 * k));
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(arm_value[k])).connect_sink(node.create_sink_pin(2 * k + 1));
+  }
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(44)).connect_sink(node.create_sink_pin(6));
+  node.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
+
+  const auto design = scan_design(*g, {});
+  const auto cert   = build_certificate(design, {});
+  ASSERT_EQ(design.inputs.size(), 3u);
+
+  const char* path = std::getenv("LEAN_HOTMUX_FIXTURE");
+  if (path == nullptr) {
+    GTEST_SKIP() << "set LEAN_HOTMUX_FIXTURE to emit the Lean oracle";
+  }
+  std::ofstream out(path);
+  emit_design_cert(design, cert, out);
+  // {control values by NAME} -> expected output. Ordinals are the index in
+  // design.inputs (certificate_ir.cpp:14), so the vector is built from the
+  // scanned order rather than from the declaration order.
+  const std::vector<std::pair<std::vector<int>, int>> cases{
+      {{0, 0, 0}, 44},  // nothing active -> the trailing default
+      {{0, 2, 0}, 22},  // multi-bit control, bit 0 CLEAR -> arm 1 still fires
+      {{1, 1, 0}, 11},  // one-hot VIOLATED -> first active arm wins
+      {{0, 0, 3}, 33},  // last arm, multi-bit control
+      {{2, 0, 0}, 11},  // multi-bit control on the first arm
+  };
+  for (const auto& [by_index, expect] : cases) {
+    std::ostringstream args;
+    for (size_t ordinal = 0; ordinal < design.inputs.size(); ++ordinal) {
+      const auto which = design.inputs[ordinal].name.back() - '0';
+      args << (ordinal ? ", " : "") << "mk_bv 2 " << by_index[static_cast<size_t>(which)];
+    }
+    out << "\nexample : bv_uint ((hotmux_oracle_step #[" << args.str() << "] ⟨#[], #[]⟩).outputs[0]!) = " << expect
+        << " := by native_decide\n";
+  }
+  ASSERT_TRUE(out.good());
+}
+
 TEST(DesignScan, HotmuxWithoutArmsIsRefused) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_hotmux_empty");
   auto  io  = lib.create_io("hotmux_empty");
