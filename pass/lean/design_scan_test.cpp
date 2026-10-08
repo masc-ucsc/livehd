@@ -171,6 +171,92 @@ TEST(DesignScan, UnsupportedOperatorRefusalNamesTheWholeCensus) {
   }
 }
 
+namespace {
+// Build `arms` (control, value) pairs at dense ascending pids, plus an optional
+// trailing default. `hotmux_inputs` asserts that density, so the fixture must
+// drive every pid from 0.
+hhds::Node_class build_hotmux(hhds::Graph& g, const std::vector<std::pair<int, int>>& arms, std::optional<int> fallback,
+                              uint32_t width) {
+  auto node = create_typed_node(g, Ntype_op::Hotmux);
+  set_bits(node.create_driver_pin(0), width);
+  int pid = 0;
+  for (const auto& [control, value] : arms) {
+    livehd::graph_util::create_const(g, *Dlop::create_integer(control)).connect_sink(node.create_sink_pin(pid++));
+    livehd::graph_util::create_const(g, *Dlop::create_integer(value)).connect_sink(node.create_sink_pin(pid++));
+  }
+  if (fallback) {
+    livehd::graph_util::create_const(g, *Dlop::create_integer(*fallback)).connect_sink(node.create_sink_pin(pid));
+  }
+  return node;
+}
+}  // namespace
+
+// Hotmux lowers to the existing Mux vocabulary: one Ror predicate per arm and a
+// first-active-priority chain, with the OUTERMOST alternative keeping the
+// original graph id so existing consumers resolve without a remap.
+//
+// Control 2 is deliberately multi-bit with bit 0 CLEAR: a predicate that tested
+// bit 0 instead of the reduce-OR would select the wrong arm, and no structural
+// check would notice.
+TEST(DesignScan, HotmuxLowersToPriorityMuxChain) {
+  for (const bool explicit_default : {false, true}) {
+    auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_scan_hotmux_") + (explicit_default ? "def" : "zero"));
+    auto  io  = lib.create_io("hotmux");
+    io->add_output("y", 1);
+    io->set_bits("y", 8);
+    auto       g    = io->create_graph();
+    const auto node = build_hotmux(*g,
+                                   {
+                                       {0, 11},
+                                       {2, 22},
+                                       {0, 33}
+    },
+                                   explicit_default ? std::optional<int>(44) : std::nullopt,
+                                   8);
+    node.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
+    const auto design = scan_design(*g, {});
+
+    size_t muxes = 0, rors = 0;
+    for (const auto& n : design.nodes) {
+      muxes += n.op == ScanOp::Mux;
+      rors += n.op == ScanOp::Ror;
+    }
+    EXPECT_EQ(rors, 3u) << "one nonzero predicate per arm";
+    EXPECT_EQ(muxes, 3u) << "one alternative per arm";
+
+    const auto outermost
+        = std::find_if(design.nodes.begin(), design.nodes.end(), [&](const DesignNode& n) { return n.id == node.get_debug_nid(); });
+    ASSERT_NE(outermost, design.nodes.end()) << "the lowered chain must keep the Hotmux's own id";
+    EXPECT_EQ(outermost->op, ScanOp::Mux);
+    ASSERT_EQ(outermost->operands.size(), 3u) << "{selector, false value, true value}";
+    // Dependency-ordered: every operand of the outermost node is already built.
+    for (const auto& operand : outermost->operands) {
+      if (operand.driver.kind == PinKind::Node) {
+        EXPECT_NE(std::find_if(design.nodes.begin(),
+                               outermost,
+                               [&](const DesignNode& n) { return n.id == operand.driver.id; }),
+                  outermost)
+            << "operand " << operand.driver.id << " must precede the node that uses it";
+      }
+    }
+    EXPECT_NO_THROW((void)build_certificate(design, {}));
+  }
+}
+
+TEST(DesignScan, HotmuxWithoutArmsIsRefused) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_hotmux_empty");
+  auto  io  = lib.create_io("hotmux_empty");
+  io->add_output("y", 1);
+  io->set_bits("y", 8);
+  auto g    = io->create_graph();
+  auto node = create_typed_node(*g, Ntype_op::Hotmux);
+  set_bits(node.create_driver_pin(0), 8);
+  // A lone pid 0 is a trailing default with no arm, which is not a multiplexor.
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(7)).connect_sink(node.create_sink_pin(0));
+  node.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
+  EXPECT_THROW(scan_design(*g, {}), std::runtime_error);
+}
+
 TEST(DesignScan, ConstantPoolPreservesUnsizedValuesAndSignedWidths) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_const_pool");
   auto  io  = lib.create_io("constant_pool");

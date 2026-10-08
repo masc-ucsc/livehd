@@ -218,6 +218,95 @@ void lower_concat(const LeanCtx& ctx, const Node& node, DesignScan& design, uint
   design.nodes.push_back(std::move(result));
 }
 
+// Lower a Hotmux into the existing Mux vocabulary.
+//
+// Hotmux is interleaved (control, value) pairs with an optional trailing
+// default; upstream's `hotmux_inputs` owns that pid parsing, so this does not
+// re-derive it. Controls are one-bit and MUTUALLY EXCLUSIVE by contract.
+//
+// Three decisions, all of which the certificate records explicitly rather than
+// assuming:
+//
+//   * The predicate is `Op_Ror` -- reduce-OR -- of the whole control, which is
+//     exactly "any bit set". Testing bit 0 would silently mis-evaluate a
+//     control that upstream widened.
+//   * The arms nest in FIRST-ACTIVE PRIORITY order, arm 0 outermost. Under a
+//     control vector that really is one-hot-or-zero this is the hot arm; under
+//     a VIOLATED one-hot it is defined (first wins) instead of undefined. This
+//     lowering does not prove one-hotness, and nothing downstream may read it
+//     as such -- certificate WF proves structure and the bridge proves
+//     model/certificate agreement, neither proves the contract on the controls.
+//   * With no control active the result is the trailing default, or zero when
+//     the cell declares none.
+//
+// No Op_Hotmux is added to the Lean model: the lowered Mux chain is what both
+// the legacy GraphCert and the verified DesignCert carry, so the fast bridge,
+// chunked WF and compileDesign all operate on the same dependencies.
+void lower_hotmux(const LeanCtx& ctx, const Node& node, DesignScan& design, uint64_t& next_id) {
+  const auto width = node_width(ctx, node);
+  const auto ins   = livehd::graph_util::hotmux_inputs(node);
+  if (ins.arms.empty()) {
+    fatal(ctx, "Hotmux node n_" + std::to_string(node_id(node)) + " has no (control, value) arms");
+  }
+
+  const auto emit = [&](ScanOp op, uint32_t bits, std::vector<Operand> operands) {
+    // Same reservation as the Concat lowering: owned sources and memory
+    // lowering take IDs from 1e9 up, so adapter nodes stay below it.
+    if (next_id >= 1000000000) {
+      fatal(ctx, "Hotmux lowering exhausted the graph-node ID range");
+    }
+    PinRef result;
+    result.id    = static_cast<uint32_t>(next_id++);
+    result.width = bits;
+    design.nodes.push_back({result.id, op, bits, false, std::move(operands)});
+    return result;
+  };
+
+  // Bring an arm to the result width. A SIGNED narrower arm needs its sign
+  // carried explicitly, the same treatment a signed Concat lane gets; a wider
+  // arm is truncated by the Mux operand width, as every other operator does.
+  const auto normalize = [&](const Node_pin& pin) {
+    auto value = capture_pin(ctx, pin);
+    if (value.kind != PinKind::Constant && value.width < width && !livehd::graph_util::is_unsign(pin)) {
+      check_width(ctx, node, value.width, "Hotmux arm");
+      value = emit(ScanOp::Sext,
+                   width,
+                   {
+                       {0, 0,                        value},
+                       {1, 1, natural_operand(value.width)}
+      });
+    }
+    return value;
+  };
+
+  PinRef acc = ins.fallback.is_invalid() ? natural_operand(0) : normalize(ins.fallback);
+
+  // Build innermost-first so `design.nodes` stays dependency-ordered: the LAST
+  // arm is the innermost alternative and arm 0 ends up outermost.
+  for (size_t i = ins.arms.size(); i-- > 0;) {
+    const auto& [control, value] = ins.arms[i];
+    auto        predicate        = emit(ScanOp::Ror,
+                                        1,
+                                        {
+                                     {0, 0, capture_pin(ctx, control)}
+    });
+    auto        arm              = normalize(value);
+    // MuxBool operand order is {selector, false value, true value}.
+    std::vector<Operand> operands{
+        {0, 0, std::move(predicate)},
+        {1, 1,            std::move(acc)},
+        {2, 2,            std::move(arm)}
+    };
+    if (i == 0) {
+      // The outermost alternative keeps the ORIGINAL graph id, so every
+      // consumer that already names this Hotmux resolves without a remap.
+      design.nodes.push_back({node_id(node), ScanOp::Mux, width, false, std::move(operands)});
+    } else {
+      acc = emit(ScanOp::Mux, width, std::move(operands));
+    }
+  }
+}
+
 }  // namespace
 
 DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
@@ -396,6 +485,8 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
         if (reached.insert(id).second) {
           if (node_op(node) == Ntype_op::Concat) {
             lower_concat(ctx, node, design, next_lowered_id);
+          } else if (node_op(node) == Ntype_op::Hotmux) {
+            lower_hotmux(ctx, node, design, next_lowered_id);
           } else if (const auto mapped = try_scan_op(node); !mapped) {
             // CENSUS, do not stop. Record this operator and keep walking, so the
             // refusal below names every unsupported operator in the design
