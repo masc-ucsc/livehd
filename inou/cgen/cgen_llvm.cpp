@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
 #include <limits>
 #include <map>
 #include <optional>
@@ -17,6 +20,7 @@
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -34,10 +38,13 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/PassInstrumentation.h"
+#include "llvm/IR/PassTimingInfo.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Linker/Linker.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Pass.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -58,6 +65,66 @@
 #include "sim_llvm_target.hpp"
 
 namespace {
+
+// LHD_LLVM_TIME_PASSES enables pass/analysis timers for the embedded LLVM.
+// LHD_LLVM_TIME_PASSES_DIR optionally saves one report per kernel or host
+// module; this survives lhd discarding successful host-build stderr.
+class Llvm_pass_profile {
+  bool                                  enabled_ = std::getenv("LHD_LLVM_TIME_PASSES") != nullptr;
+  std::string_view                      stage_;
+  std::string_view                      path_;
+  llvm::PassInstrumentationCallbacks    callbacks_;
+  llvm::TimePassesHandler               timers_{enabled_};
+  std::unique_ptr<llvm::raw_fd_ostream> report_;
+  using Clock = std::chrono::steady_clock;
+  Clock::time_point                                started_;
+  Clock::time_point                                marked_;
+  std::vector<std::pair<std::string_view, double>> phases_;
+
+public:
+  Llvm_pass_profile(std::string_view stage, std::string_view path) : stage_(stage), path_(path) {
+    if (enabled_) {
+      started_ = marked_        = Clock::now();
+      llvm::TimePassesIsEnabled = true;
+      llvm::EnableStatistics();
+      if (const char* directory = std::getenv("LHD_LLVM_TIME_PASSES_DIR")) {
+        const auto      filename = std::filesystem::path(directory)
+                                   / (std::filesystem::path(path).filename().string() + "." + std::string(stage) + ".log");
+        std::error_code ec;
+        report_ = std::make_unique<llvm::raw_fd_ostream>(filename.string(), ec);
+        if (ec) {
+          llvm::errs() << "LLVM timing report: " << ec.message() << '\n';
+          report_.reset();
+        }
+      }
+      timers_.setOutStream(report_ ? *report_ : llvm::errs());
+      timers_.registerCallbacks(callbacks_);
+    }
+  }
+
+  ~Llvm_pass_profile() {
+    if (enabled_) {
+      auto& out = report_ ? *report_ : llvm::errs();
+      out << "LHD LLVM TIMING " << stage_ << " " << path_ << '\n';
+      out << "LHD LLVM ELAPSED " << std::chrono::duration<double>(Clock::now() - started_).count() << '\n';
+      for (const auto& [name, seconds] : phases_) {
+        out << "LHD LLVM PHASE " << name << " " << seconds << '\n';
+      }
+      timers_.print();
+      llvm::reportAndResetTimings(&out);
+    }
+  }
+
+  llvm::PassInstrumentationCallbacks* callbacks() { return enabled_ ? &callbacks_ : nullptr; }
+
+  void mark(std::string_view name) {
+    if (enabled_) {
+      const auto now = Clock::now();
+      phases_.emplace_back(name, std::chrono::duration<double>(now - marked_).count());
+      marked_ = now;
+    }
+  }
+};
 
 constexpr size_t word_count(uint32_t width) { return (static_cast<size_t>(width) + 63) / 64; }
 
@@ -1201,7 +1268,6 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
     error = "LLVM rejected the generated simulator module";
     return false;
   }
-
   impl_->sealed_changed = track_changed;
   return true;
 }
@@ -1454,9 +1520,11 @@ std::string Cgen_llvm::sharing_key(std::string& error, bool track_changed) {
 }
 
 bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool track_changed, bool native) {
+  Llvm_pass_profile profile("kernel", path);
   if (!seal(error, track_changed)) {
     return false;
   }
+  profile.mark("finalize-and-verify");
 
   livehd::sim::initialize_llvm_target();
 
@@ -1485,6 +1553,7 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   }
   impl_->module->setTargetTriple(triple);
   impl_->module->setDataLayout(machine->createDataLayout());
+  profile.mark("target-setup");
 
   const auto digest = [](llvm::StringRef bytes) {
     llvm::SHA256 hash;
@@ -1527,7 +1596,7 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   llvm::ModuleAnalysisManager   module_analyses;
   llvm::PipelineTuningOptions   tuning;
   tuning.LoopUnrolling = false;
-  llvm::PassBuilder pass_builder(machine.get(), tuning);
+  llvm::PassBuilder pass_builder(machine.get(), tuning, std::nullopt, profile.callbacks());
   pass_builder.registerModuleAnalyses(module_analyses);
   pass_builder.registerCGSCCAnalyses(cgscc_analyses);
   pass_builder.registerFunctionAnalyses(function_analyses);
@@ -1542,6 +1611,7 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   llvm::ModulePassManager pipeline;
   pipeline.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(functions)));
   pipeline.run(*impl_->module, module_analyses);
+  profile.mark("ir-optimization");
 
   // Legalizing an oversized integer produces thousands of native operations.
   // Keep such kernels in separate functions so AlwaysInliner cannot combine
@@ -1658,11 +1728,13 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
     cached.append(input_digest);
     cached.append(digest(llvm::StringRef(object_buffer.data(), object_buffer.size())));
   }
+  profile.mark("bitcode-serialize-and-write");
   return true;
 }
 
 bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vector<std::string>& kernel_paths,
                                     std::string_view object_path, std::string& error) {
+  Llvm_pass_profile profile("host-and-kernels", object_path);
   llvm::LLVMContext context;
   const auto        read_module = [&](std::string_view path) -> std::unique_ptr<llvm::Module> {
     auto buffer = llvm::MemoryBuffer::getFile(path);
@@ -1695,6 +1767,7 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
       return false;
     }
   }
+  profile.mark("read-and-link-bitcode");
 
   // The host bitcode was produced by the HOST compiler, and lhd -- not that
   // compiler -- now lowers it. A frontend may therefore have requested a stack
@@ -1746,6 +1819,7 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
     return false;
   }
   module->setDataLayout(machine->createDataLayout());
+  profile.mark("target-setup");
 
   // Which kernels does THIS module actually call? Recorded BEFORE the inliner
   // runs, because afterwards every in-module call site is gone and use_empty()
@@ -1773,7 +1847,7 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
   llvm::ModuleAnalysisManager   module_analyses;
   llvm::PipelineTuningOptions   tuning;
   tuning.LoopUnrolling = false;
-  llvm::PassBuilder pass_builder(machine.get(), tuning);
+  llvm::PassBuilder pass_builder(machine.get(), tuning, std::nullopt, profile.callbacks());
   pass_builder.registerModuleAnalyses(module_analyses);
   pass_builder.registerCGSCCAnalyses(cgscc_analyses);
   pass_builder.registerFunctionAnalyses(function_analyses);
@@ -1798,6 +1872,7 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
   llvm::ModulePassManager cleanup;
   cleanup.addPass(llvm::GlobalDCEPass());
   cleanup.run(*module, module_analyses);
+  profile.mark("ir-optimization");
 
   llvm::SmallVector<char, 0> native_buffer;
   llvm::raw_svector_ostream  native(native_buffer);
@@ -1807,7 +1882,11 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
     return false;
   }
   emit.run(*module);
-  File_output out{object_path};
-  out.append(std::string_view(native_buffer.data(), native_buffer.size()));
+  profile.mark("native-code-generation");
+  {
+    File_output out{object_path};
+    out.append(std::string_view(native_buffer.data(), native_buffer.size()));
+  }
+  profile.mark("native-object-write");
   return true;
 }
