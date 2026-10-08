@@ -17,8 +17,10 @@
 //
 //   2. LOOP SPLIT (split_loops below), on the repaired graph.
 //
-//   3. FREEZE. Every def's structure is recorded so a later pass that reshapes
-//      it can be named (see FROZEN GRAPHS).
+//   3. FREEZE -- separate: the compile kernel runs legalize_design early (after
+//      the first cprop+bitwidth) without freezing, and seal_design() records
+//      every def's structure after the last pass, so a later pass that
+//      reshapes it can be named (see FROZEN GRAPHS).
 //
 // REBUILD (rebuild_def / clone_io_decls) is a forward-walk reconstruction into
 // a fresh, dense body with the input untouched. It is exercised by the tests
@@ -197,10 +199,12 @@ struct Legalize_result {
   std::vector<std::shared_ptr<hhds::Graph>> removed;  // defs deleted from their library (orphaned bodies, stale halves)
 };
 
-// Run legalize over a whole design, then FREEZE every def (when `freeze_graphs`)
-// -- from here on a pass may record attributes but must not change structure.
-// Called once, after the recipe's optimization passes and before anything
-// consumes the graph, NOT as a recipe step (`recipe:O0` has no steps).
+// Run legalize over a whole design: the acyclic repair, the loop split and the
+// one-driver check, then FREEZE every def (when `freeze_graphs`). The compile
+// kernel runs it EARLY -- right after the first cprop+bitwidth, ahead of
+// enableopt, satopt and pass.formal, so every later pass (formal's hierarchy
+// views included) already sees an acyclic design -- with `freeze_graphs`
+// false, and seals the design with seal_design() after the last pass.
 //
 // The caller MUST apply the result to its own view of the design: drop
 // `removed` (their bodies are gone; touching them asserts) and add `added`.
@@ -208,6 +212,15 @@ struct Legalize_result {
 // Semantically a no-op: the split is proven equivalent to the unsplit loop
 // (pass/legalize/tests), and nothing else here changes behavior.
 Legalize_result legalize_design(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool freeze_graphs = true);
+
+// The end of the compile pipeline: re-check one driver per sink pin on the
+// settled design (the passes after legalize may rewire), and FREEZE every def
+// (when `freeze_graphs`) -- from here on a pass may record attributes but must
+// not change structure. With `check_acyclic` it also re-scans for an
+// arc-level combinational cycle a later pass re-created (cprop / enableopt /
+// satopt must not); one found is reported as an internal error. Returns the
+// number of such cycles.
+int seal_design(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool freeze_graphs, bool check_acyclic);
 
 // Check every frozen graph in `graphs` against what legalize recorded. Returns
 // the number that moved. A graph legalize never froze is not claimed and is

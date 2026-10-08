@@ -43,7 +43,6 @@
 #include "semdiff.hpp"
 #include "solve_stats.hpp"
 #include "split_selfref.hpp"  // //graph — repair a self-ref exposed by flattening a comb instance
-#include "acyclic.hpp"        // //pass/legalize — the acyclic repair for lg: sides that skipped compile
 #include "str_tools.hpp"
 #include "taskflow/taskflow.hpp"
 
@@ -4614,29 +4613,10 @@ void lec_command(Options& opts, Result& res) {
       return std::find(o.collapse.begin(), o.collapse.end(), full) != o.collapse.end()
              || std::find(o.collapse.begin(), o.collapse.end(), ent) != o.collapse.end();
     };
-    // The same acyclic repair pass.legalize runs at the end of every compile
-    // (todo/livehd/legalize_acyclic.md): a compiled side is already acyclic and
-    // this only scans it, but an lg: side may come from a producer that never
-    // legalized (`lhd pass abc|usyn|partition --emit-dir lg:`, synth's net/, an
-    // older binary). Each side's OWN defs only: a `--lib` cell model in sub_lib
-    // is shared by both sides, so repairing it would be a cross-side edit.
-    for (auto* side_var : {&ref_var, &impl_var}) {
-      std::vector<std::shared_ptr<hhds::Graph>> own;
-      for (const auto& sp : side_var->graphs) {
-        if (sp && !sub_lib.contains(sp->get_gid())) {
-          own.push_back(sp);
-        }
-      }
-      livehd::legalize::Split_state split;
-      const auto                    fixed = livehd::legalize::make_acyclic(own, split);
-      for (const auto& half : split.added) {
-        side_var->add(half);
-      }
-      if (fixed.instances_inlined + fixed.loops_split + fixed.slices_rewired > 0) {
-        std::print("lec: acyclic repair of the {} side: inlined {} instance(s), split {} loop(s), rewired {} slice(s)\n",
-                   side_var == &ref_var ? "ref" : "impl", fixed.instances_inlined, fixed.loops_split, fixed.slices_rewired);
-      }
-    }
+    // No loop preparation here: pass.legalize, the one owner of combinational
+    // loops, ran on every graph-producing path -- every compile, including the
+    // yosys reader and `lhd compile lg:` -- so each side is acyclic at arc
+    // level already (todo/livehd/legalize_acyclic.md).
 
     std::vector<hhds::Graph*> ref_defs, impl_defs;
     for (const auto& sp : ref_var.graphs) {

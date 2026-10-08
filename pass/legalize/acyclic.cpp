@@ -476,4 +476,22 @@ Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& gra
   return result;
 }
 
+int count_comb_cycles(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::vector<std::string>* where) {
+  Scan_ctx ctx;
+  int      cycles = 0;
+  for (const auto& gp : callee_first(graphs)) {
+    for (const auto& members : scan(gp.get(), ctx).cycles) {
+      ++cycles;
+      if (where != nullptr) {
+        std::string hops;
+        for (size_t i = 0; i < members.size() && i < 16; ++i) {
+          hops += (i == 0 ? "" : " -> ") + pin_name(members[i]);
+        }
+        where->push_back(std::string{gp->get_name()} + ": " + hops + (members.size() > 16 ? " ..." : ""));
+      }
+    }
+  }
+  return cycles;
+}
+
 }  // namespace livehd::legalize

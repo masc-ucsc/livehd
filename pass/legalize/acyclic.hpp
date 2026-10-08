@@ -52,4 +52,9 @@ struct Acyclic_result {
 // land in `state` like legalize's own loop split.
 Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, Split_state& state);
 
+// Read-only: the arc-level combinational cycles left in `graphs` (0 on a
+// legalized design). Each one is described in `where` when given.
+[[nodiscard]] int count_comb_cycles(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
+                                    std::vector<std::string>*                        where = nullptr);
+
 }  // namespace livehd::legalize

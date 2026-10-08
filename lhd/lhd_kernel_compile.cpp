@@ -1744,13 +1744,67 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     active = &fresh;
   }
   if (!already_final) {
+    // pass.legalize -- the one sanctioned structural transform, and the one
+    // owner of combinational loops (todo/livehd/legalize_acyclic.md). It runs
+    // EARLY: right after the first cprop+bitwidth (packed fields are canonical
+    // Concat lanes and widths are known), ahead of enableopt, satopt and
+    // pass.formal, so every later pass -- formal's hierarchy views included --
+    // sees an acyclic design. RULE: only intra-module passes may run before it;
+    // anything hierarchical (cross-definition) runs after. Unconditional, not a recipe step. The FREEZE is
+    // separate (seal_design, after the last pass below).
+    //
+    // The split may create defs (loop halves) and delete defs (orphaned loop
+    // bodies, stale halves); both var.graphs and the active subset are updated
+    // so the later passes, the emits, the cache and the freeze check see the
+    // design as it is.
+    bool       legalized    = false;
+    const auto run_legalize = [&] {
+      legalized = true;
+      if (active->graphs.empty()) {
+        return;
+      }
+      Phase_timer                               phase(res, "pass.legalize");
+      std::vector<std::shared_ptr<hhds::Graph>> design(active->graphs.begin(), active->graphs.end());
+      const auto legalized_design = livehd::legalize::legalize_design(design, /*freeze_graphs=*/false);
+      if (!legalized_design.removed.empty() || !legalized_design.added.empty()) {
+        absl::flat_hash_set<const hhds::Graph*> gone;
+        for (const auto& g : legalized_design.removed) {
+          gone.insert(g.get());
+        }
+        for (auto* v : {&var, active}) {
+          std::erase_if(v->graphs, [&](const std::shared_ptr<hhds::Graph>& g) { return gone.contains(g.get()); });
+          if (v == active && active == &var) {
+            break;
+          }
+        }
+        for (const auto& g : legalized_design.added) {
+          var.add(g);
+          if (active != &var) {
+            active->add(g);
+          }
+        }
+      }
+    };
     for (const auto& [set_name, method] : compile_graph_passes(opts)) {
       if (active->graphs.empty()) {
         break;  // nothing to optimize (validated below if an emit needs graphs)
       }
       Eprp_var::Eprp_dict labels;
       merge_sets(opts, set_name, labels);
+      // Before legalize only INTRA-module work may run (bitfuzz, cprop's
+      // per-body transform, bitwidth -- which reads a callee only through its
+      // declared interface). cprop's loop-invariant hoist edits a loop body and
+      // its parents together, so it waits for the cprop after legalize.
+      if (!legalized && method == "pass.cprop") {
+        labels["loop_hoist"] = "false";
+      }
       run_step(method, *active, labels, opts, res);
+      if (!legalized && method == "pass.bitwidth") {
+        run_legalize();
+      }
+    }
+    if (!legalized) {
+      run_legalize();
     }
 
     // pass.satopt (todo/livehd/2s-satopt A): proof-backed rewrites committed
@@ -1815,41 +1869,17 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       }
     }
 
-    // pass.legalize -- the one sanctioned structural transform between the
-    // optimization passes and every consumer, and the point the design is
-    // FROZEN. Legalization runs independently of optimization settings.
-    //
-    // It runs LAST, after pass.formal, so that every pass that may still
-    // reshape the graph has run before the structure is recorded; formal itself
-    // only annotates (`proven` / `runtime_check`). Everything downstream of
-    // here -- cgen, the emits, and the LEC / synthesis / simulation consumers
-    // -- reads a graph nobody may reshape.
-    //
-    // The split may create defs (loop halves) and delete defs (orphaned loop
-    // bodies, stale halves); both var.graphs and the active subset are updated
-    // so the emits, the cache and the freeze check see the design as it is.
+    // SEAL: after every pass that may still reshape the graph (formal only
+    // annotates), re-check one driver per sink pin on the settled design and
+    // FREEZE it. Everything downstream of here -- cgen, the emits, and the LEC
+    // / synthesis / simulation consumers -- reads a graph nobody may reshape.
+    // With the freeze check on (debug builds) also re-scan that no pass after
+    // legalize re-created a combinational cycle.
     if (!active->graphs.empty()) {
-      Phase_timer                               phase(res, "pass.legalize");
+      Phase_timer                               phase(res, "pass.legalize.seal");
       std::vector<std::shared_ptr<hhds::Graph>> design(active->graphs.begin(), active->graphs.end());
-      const auto                                legalized = livehd::legalize::legalize_design(design, verify_frozen_enabled(opts));
-      if (!legalized.removed.empty() || !legalized.added.empty()) {
-        absl::flat_hash_set<const hhds::Graph*> gone;
-        for (const auto& g : legalized.removed) {
-          gone.insert(g.get());
-        }
-        for (auto* v : {&var, active}) {
-          std::erase_if(v->graphs, [&](const std::shared_ptr<hhds::Graph>& g) { return gone.contains(g.get()); });
-          if (v == active && active == &var) {
-            break;
-          }
-        }
-        for (const auto& g : legalized.added) {
-          var.add(g);
-          if (active != &var) {
-            active->add(g);
-          }
-        }
-      }
+      const bool                                check = verify_frozen_enabled(opts);
+      (void)livehd::legalize::seal_design(design, check, check);
     }
   }
 

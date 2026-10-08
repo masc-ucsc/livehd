@@ -44,7 +44,10 @@ compile_sim() {  # <file> <top>
 expect_loop_error() {  # <file> <top> <label>
   local rc; rc=$(compile_sim "$1" "$2")
   [ "$rc" -ne 0 ] || fail "$3: expected non-zero exit (silent wrong-sim not blocked)"
-  grep -qE '"code":"(comb-loop-through-instance|combinational-loop|color-plan-not-lowerable)"' "$W/out" \
+  # pass.legalize (the one owner of combinational loops, run right after the
+  # first cprop+bitwidth) reports a genuine loop as comb-loop before any
+  # consumer sees it; the other codes are the consumers' own older guards.
+  grep -qE '"code":"(comb-loop|comb-loop-through-loop|comb-loop-through-instance|combinational-loop|color-plan-not-lowerable)"' "$W/out" \
     || fail "$3: expected a comb-loop diagnostic; got: $(cat "$W/out")"
   if grep -q '"code":"color-plan-not-lowerable"' "$W/out"; then
     grep -q 'dependency cycle remains' "$W/out" \

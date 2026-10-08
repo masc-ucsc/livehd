@@ -44,6 +44,11 @@ open. Owner rulings from the 2026-10-06 sim-speed review.
    the second ordinal a carry-in holds the previous carry-out).
 6. Prefer running the repair without bitwidth; if needed the order may be
    `bitwidth, legalize, cprop, bitwidth`.
+7a. (2026-10-07) **Only intra-module passes run before legalize; anything
+   hierarchical runs after.** Today: bitfuzz, cprop's per-body transform and
+   bitwidth (callee read only through its declared interface) before;
+   cprop's loop-invariant hoist (body + parents), enableopt, satopt, formal
+   after.
 7. cprop+bitwidth run ONCE per module, then once more over the coloring
    partitions (colors cross module boundaries), with constants passed across
    colors -- replacing sim's private `specialize_constants` re-runs. No pass
@@ -51,11 +56,16 @@ open. Owner rulings from the 2026-10-06 sim-speed review.
 
 ## Stage 1 -- legalize acyclic repair (DONE 2026-10-06)
 
-`make_acyclic` (pass/legalize/acyclic.cpp), step 1 of `legalize_design`. It
-runs LAST in every `lhd compile` (after pass.formal), again in the sim
-pipeline, and in `lhd lec` on each side's own defs (an `lg:` side may come from
-a producer that never legalized: `lhd pass abc|usyn|partition`, synth's net/,
-an older binary). Per def, callee first, to a fixpoint (64 rounds):
+`make_acyclic` (pass/legalize/acyclic.cpp), step 1 of `legalize_design`. Since
+2026-10-07 legalize runs EARLY in every `lhd compile` -- `lnast.tolg -> cprop ->
+bitwidth -> legalize -> enableopt -> cprop -> bitwidth -> [satopt] -> formal ->
+seal` -- so enableopt, satopt and pass.formal (and its hierarchy views) all see
+an acyclic design; the seal at the end re-checks one driver per sink and
+freezes (debug builds also re-scan that no later pass re-created a loop; the
+full suite never did). Every graph-producing path runs it (Pyrope, slang, the
+yosys reader, `lhd compile lg:`); LEC does not repair loops itself, and a raw
+`lg:` written by a producer that skipped legalize is that producer's bug.
+Per def, callee first, to a fixpoint (64 rounds):
 
 1. **Dependence.** A vertex is a driver pin. Registers, graph inputs and
    constants cut; an async memory read depends on its own address/enable

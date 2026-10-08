@@ -352,8 +352,6 @@ if [ "$fail" -eq 0 ]; then
     echo "$OUT" | grep -E "lec\[hier\]|operand of|feedback"; fail=1
   elif ! echo "$OUT" | grep -q "ESCALATE 'feedback_top'"; then
     echo "FAIL: case 9 did not prove top-down (u's refutation absorbed by feedback_top)"; fail=1
-  elif echo "$OUT" | grep -q "lec: acyclic repair"; then
-    echo "FAIL: case 9 LEC repaired a Moore feedback that is acyclic at arc level"; fail=1
   else echo "ok: a sequential Sub feedback design proves with no LEC-side boundary repair"; fi
 fi
 

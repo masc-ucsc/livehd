@@ -138,7 +138,7 @@ http_archive(
 # HHDS (plain git repo — see the iassert/hlop note above)
 git_repository(
     name = "hhds",
-    commit = "e3ed37a590ed8debc06daacd02400db69158581a",
+    commit = "a632b5b1c144b19654241e05e91216ae5c6eeb6c",
     patch_args = ["-p1"],
     patches = ["//packages:hhds_pin_padding.patch"],
     remote = "https://github.com/masc-ucsc/hhds.git",

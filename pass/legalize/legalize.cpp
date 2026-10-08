@@ -935,6 +935,26 @@ Legalize_result legalize_design(const std::vector<std::shared_ptr<hhds::Graph>>&
   return out;
 }
 
+int seal_design(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool freeze_graphs, bool check_acyclic) {
+  (void)verify_design_single_driver_sinks(graphs, "pass.legalize");
+  int cycles = 0;
+  if (check_acyclic) {
+    std::vector<std::string> where;
+    cycles = count_comb_cycles(graphs, &where);
+    for (const auto& w : where) {
+      livehd::diag::err(kAcyclicPass, "acyclic-invariant", "internal")
+          .msg("a pass after pass.legalize re-created a combinational cycle in {}", w)
+          .emit();
+    }
+  }
+  if (freeze_graphs) {
+    for (const auto& g : graphs) {
+      freeze(g);
+    }
+  }
+  return cycles;
+}
+
 int verify_design_frozen(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view who) {
   int moved = 0;
   for (const auto& g : graphs) {
