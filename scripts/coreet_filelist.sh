@@ -65,8 +65,23 @@ fi
 # is recorded in the .f header so no result silently claims to be about the
 # unpatched source.
 PATCH_MAP="$(dirname "$SCRIPT_DIR")/generated/core-et/patched_src/map.tsv"
+# REFUSE to run unpatched. This used to fall back to the original sources when
+# the map was absent, and silence is the worst possible behaviour here: the
+# unpatched tree fails slang on defects the patcher already fixes, so a sweep
+# run without it reports dozens of `yosys-failed` modules that are not failures
+# of anything under test. A whole 122-module census was published that way, with
+# 49 compile failures where the patched run has 20, before anyone noticed the
+# map had never been generated.
+#
+# Generating it is one command and is idempotent, so there is no case where
+# continuing without it is the helpful choice.
+if [[ ! -r "$PATCH_MAP" ]]; then
+  echo "FATAL: missing $PATCH_MAP" >&2
+  echo "  run: COREET_ROOT=<core-et> python3 scripts/coreet_patch_srcs.py" >&2
+  echo "  (slang rejects defects in the unpatched tree; results without it are not comparable)" >&2
+  exit 2
+fi
 subst_of() {
-  [[ -r "$PATCH_MAP" ]] || { printf '%s' "$1"; return; }
   local r; r="$(awk -F'\t' -v k="$1" '$1==k{print $2}' "$PATCH_MAP" | head -1)"
   printf '%s' "${r:-$1}"
 }
