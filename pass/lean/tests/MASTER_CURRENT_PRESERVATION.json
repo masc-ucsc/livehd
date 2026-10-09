@@ -1,0 +1,1628 @@
+{
+  "schema_version": 1,
+  "snapshot_head": "bb7e96670099d4cbcc953833946b36a003185db2",
+  "upstream": "8bea45dc2aa9aab4d8b279db11a8887c52c1108d",
+  "pr": "3685a977ee5be31f5939c83617f1264e2d9ddaab",
+  "b1b2": "b04288cca51f79fc663ca2e49c54e1fae6e7f221",
+  "scope": "Current follow-up to the two immutable historical preservation snapshots. Source hashes establish retention, not semantic equivalence or whole-program correctness.",
+  "source_plan": "pass/lean/PASS_LEAN_RESTRUCTURE_PLAN.md (L0-L8); port follow-ups are recorded in pass/lean/MASTER_INTEGRATION.md.",
+  "historical_records": [
+    "MASTER_PORT_PRESERVATION.json",
+    "MASTER_BRANCH_PRESERVATION.json"
+  ],
+  "pr_change_count": 117,
+  "pr_exact_at_snapshot": 96,
+  "pr_followup_changes": 16,
+  "pr_files": [
+    {
+      "path": ".github/workflows/ubuntu.yml",
+      "pr_blob": "6a1d70472e56fc61eddbf7a543156c05f001c37d",
+      "initial_port_blob": "b59ff50d8996ae9c35300c84d03b293489349d04",
+      "snapshot_blob": "b59ff50d8996ae9c35300c84d03b293489349d04",
+      "status": "adapted-for-current-master",
+      "explanation": "Keep current master single optimized regression job; retain PR push filtering, cancellation, unique cache keys, and cache-save handling. The coverage-filter override is superseded because upstream removed the coverage job."
+    },
+    {
+      "path": ".gitignore",
+      "pr_blob": "e230106408714e61429d1f96ed0a7d98933eeeae",
+      "initial_port_blob": "e230106408714e61429d1f96ed0a7d98933eeeae",
+      "snapshot_blob": "6d4a568178a934828905f1c4ca333242b843fa5b",
+      "status": "reviewed-followup",
+      "explanation": "Ignore project-local master-port runtime artifacts; source and committed evidence remain tracked."
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileDesign.lean",
+      "pr_blob": "4f38b480c7f5abff07567ee5f651d04a2357eb97",
+      "initial_port_blob": "4f38b480c7f5abff07567ee5f651d04a2357eb97",
+      "snapshot_blob": "4f38b480c7f5abff07567ee5f651d04a2357eb97",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileGraph.lean",
+      "pr_blob": "fce2d6d785ec7d5c10dd224f32d1785efc29e5c3",
+      "initial_port_blob": "fce2d6d785ec7d5c10dd224f32d1785efc29e5c3",
+      "snapshot_blob": "fce2d6d785ec7d5c10dd224f32d1785efc29e5c3",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileOp.lean",
+      "pr_blob": "5645fc64af6695e72da1a09f2d92cce8043b99e4",
+      "initial_port_blob": "5645fc64af6695e72da1a09f2d92cce8043b99e4",
+      "snapshot_blob": "5645fc64af6695e72da1a09f2d92cce8043b99e4",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DesignCert.lean",
+      "pr_blob": "08c4e670b5a0c07bda19fe25aa1543e82d90971f",
+      "initial_port_blob": "08c4e670b5a0c07bda19fe25aa1543e82d90971f",
+      "snapshot_blob": "08c4e670b5a0c07bda19fe25aa1543e82d90971f",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DesignCertWF.lean",
+      "pr_blob": "cd2a6a69b4a292a7094ebc15129290a0ce6be30d",
+      "initial_port_blob": "cd2a6a69b4a292a7094ebc15129290a0ce6be30d",
+      "snapshot_blob": "cd2a6a69b4a292a7094ebc15129290a0ce6be30d",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DesignSemantics.lean",
+      "pr_blob": "803cf8f99045e8e892cf9de50cf845fda8c27cf8",
+      "initial_port_blob": "803cf8f99045e8e892cf9de50cf845fda8c27cf8",
+      "snapshot_blob": "803cf8f99045e8e892cf9de50cf845fda8c27cf8",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/ResidualIR.lean",
+      "pr_blob": "f8f68b9b48c5c4f5f788893ed3619d9ea628da8e",
+      "initial_port_blob": "f8f68b9b48c5c4f5f788893ed3619d9ea628da8e",
+      "snapshot_blob": "f8f68b9b48c5c4f5f788893ed3619d9ea628da8e",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/ResidualSemantics.lean",
+      "pr_blob": "159328db47d7feac41f56e23bcbff0d57c89a6ac",
+      "initial_port_blob": "159328db47d7feac41f56e23bcbff0d57c89a6ac",
+      "snapshot_blob": "159328db47d7feac41f56e23bcbff0d57c89a6ac",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/Runtime.lean",
+      "pr_blob": "903469b307313e61dcc1913abee0eb46f7b09d49",
+      "initial_port_blob": "903469b307313e61dcc1913abee0eb46f7b09d49",
+      "snapshot_blob": "903469b307313e61dcc1913abee0eb46f7b09d49",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/GraphRefine.lean",
+      "pr_blob": "e47ee14bc2c4c0c861c0b1a4853931ba428c88a5",
+      "initial_port_blob": "e47ee14bc2c4c0c861c0b1a4853931ba428c88a5",
+      "snapshot_blob": "e47ee14bc2c4c0c861c0b1a4853931ba428c88a5",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/LGraphModel.lean",
+      "pr_blob": "19b2a8072ff832cb8d79243bd93fb6ca2e4392f6",
+      "initial_port_blob": "19b2a8072ff832cb8d79243bd93fb6ca2e4392f6",
+      "snapshot_blob": "19b2a8072ff832cb8d79243bd93fb6ca2e4392f6",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/LegacyCertWF.lean",
+      "pr_blob": "922e571394a65656705a0546888d70de4a16a58d",
+      "initial_port_blob": "922e571394a65656705a0546888d70de4a16a58d",
+      "snapshot_blob": "922e571394a65656705a0546888d70de4a16a58d",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/OpBridge.lean",
+      "pr_blob": "580d1b8ff34016a008f6690de528fcddfe1cdc19",
+      "initial_port_blob": "580d1b8ff34016a008f6690de528fcddfe1cdc19",
+      "snapshot_blob": "580d1b8ff34016a008f6690de528fcddfe1cdc19",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/probes/compiler_smoke.lean",
+      "pr_blob": "1c90051f3e4056b0ad4a612dbc41d8b95d5bee4d",
+      "initial_port_blob": "1c90051f3e4056b0ad4a612dbc41d8b95d5bee4d",
+      "snapshot_blob": "1c90051f3e4056b0ad4a612dbc41d8b95d5bee4d",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/probes/defeq_probe.lean",
+      "pr_blob": "948567ec30ef2f052c9b546de2b4540e2d589397",
+      "initial_port_blob": "948567ec30ef2f052c9b546de2b4540e2d589397",
+      "snapshot_blob": "948567ec30ef2f052c9b546de2b4540e2d589397",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "lhd/lhd_kernel_internal.hpp",
+      "pr_blob": "d965ea29e4a394c40c66025b4491817d6673eb08",
+      "initial_port_blob": "37af9a19aa18e9a33f5bccebb4b1b5b0d954ae4f",
+      "snapshot_blob": "37af9a19aa18e9a33f5bccebb4b1b5b0d954ae4f",
+      "status": "adapted-for-current-master",
+      "explanation": "Retain current master option registry and restore the three implemented Lean chunk controls from the PR."
+    },
+    {
+      "path": "lhd/lhd_options_test.cpp",
+      "pr_blob": "10737c05990ff9eb29d152d7dab88544bf030a97",
+      "initial_port_blob": "e9455648e20f56f3e7a0b5c8f3c3dad583f98e6e",
+      "snapshot_blob": "e9455648e20f56f3e7a0b5c8f3c3dad583f98e6e",
+      "status": "adapted-for-current-master",
+      "explanation": "Retain upstream tests and add PR checks for the three implemented Lean chunk controls."
+    },
+    {
+      "path": "packages/cvc5.BUILD",
+      "pr_blob": "1cb6c1591eecd08c6e4d3aacdca7b4438cb22825",
+      "initial_port_blob": "1cb6c1591eecd08c6e4d3aacdca7b4438cb22825",
+      "snapshot_blob": "1cb6c1591eecd08c6e4d3aacdca7b4438cb22825",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/B1_REFACTOR.md",
+      "pr_blob": "0706afab05a66522c266dd1d41fa8ea6a2af408f",
+      "initial_port_blob": "0706afab05a66522c266dd1d41fa8ea6a2af408f",
+      "snapshot_blob": "0706afab05a66522c266dd1d41fa8ea6a2af408f",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/BUILD",
+      "pr_blob": "d25a4f80aae7959f1d5d4909cc25188feccab38b",
+      "initial_port_blob": "d25a4f80aae7959f1d5d4909cc25188feccab38b",
+      "snapshot_blob": "fcbdc1b44aaa964346abb1213e286ae8fe45b70e",
+      "status": "reviewed-followup",
+      "explanation": "Add standalone graph census and adapter/bridge test dependencies while retaining split shared libraries."
+    },
+    {
+      "path": "pass/lean/CVA6_COVERAGE_PLAN.md",
+      "pr_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d",
+      "initial_port_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d",
+      "snapshot_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/FUTAMURA_PROJECTIONS.md",
+      "pr_blob": "0a2178ddf213e4144640d030243cc742c21aa971",
+      "initial_port_blob": "0a2178ddf213e4144640d030243cc742c21aa971",
+      "snapshot_blob": "0a2178ddf213e4144640d030243cc742c21aa971",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/GROUNDING_SRA_GETMASK_SEXT.md",
+      "pr_blob": "0af0d6ae3b7169f55a96dbfa39fc8ec53fb72d64",
+      "initial_port_blob": "0af0d6ae3b7169f55a96dbfa39fc8ec53fb72d64",
+      "snapshot_blob": "0af0d6ae3b7169f55a96dbfa39fc8ec53fb72d64",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/LEGACY_CI_AUDIT.md",
+      "pr_blob": "29d11250b2d6cbc0b16efc423f29c112cb1861a4",
+      "initial_port_blob": "29d11250b2d6cbc0b16efc423f29c112cb1861a4",
+      "snapshot_blob": "29d11250b2d6cbc0b16efc423f29c112cb1861a4",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/LEGACY_PROOF_COVERAGE.md",
+      "pr_blob": "89438c6fa000615d461b0222637ee2216452aec6",
+      "initial_port_blob": "89438c6fa000615d461b0222637ee2216452aec6",
+      "snapshot_blob": "89438c6fa000615d461b0222637ee2216452aec6",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/LEGACY_PROOF_REPLAY.md",
+      "pr_blob": "a7cabe2993ad23197da12ff69bbfae849ffd484a",
+      "initial_port_blob": "a7cabe2993ad23197da12ff69bbfae849ffd484a",
+      "snapshot_blob": "a7cabe2993ad23197da12ff69bbfae849ffd484a",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/LEGACY_REFACTOR.md",
+      "pr_blob": "8e4401b99611da2b4ac328529af8683b818665ae",
+      "initial_port_blob": "8e4401b99611da2b4ac328529af8683b818665ae",
+      "snapshot_blob": "8e4401b99611da2b4ac328529af8683b818665ae",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/LEGACY_SEMANTIC_AUDIT.md",
+      "pr_blob": "53d52340ca38bee9998d3067acacfa72d4563dca",
+      "initial_port_blob": "53d52340ca38bee9998d3067acacfa72d4563dca",
+      "snapshot_blob": "53d52340ca38bee9998d3067acacfa72d4563dca",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/MASTER_INTEGRATION.md",
+      "pr_blob": "a16379c09d909474117db6db8be386885b7aa434",
+      "initial_port_blob": "475e226d57fbab5c69545785cd12aa70e886a570",
+      "snapshot_blob": "9523ef72410b04c59a2d73ebc0470182ebd017d1",
+      "status": "reviewed-followup",
+      "explanation": "Append dated decisions, recovery audit and fresh validation results; retain prior report as historical evidence."
+    },
+    {
+      "path": "pass/lean/PASS_LEAN_RESTRUCTURE_PLAN.md",
+      "pr_blob": "460811c46308cf7cca32019e543a1c08101ea531",
+      "initial_port_blob": "460811c46308cf7cca32019e543a1c08101ea531",
+      "snapshot_blob": "460811c46308cf7cca32019e543a1c08101ea531",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/README.md",
+      "pr_blob": "c3dd5d058f8cc0acfad010d387aaad6cec10d992",
+      "initial_port_blob": "c3dd5d058f8cc0acfad010d387aaad6cec10d992",
+      "snapshot_blob": "c3dd5d058f8cc0acfad010d387aaad6cec10d992",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/STEP5_BRIDGE_BUGS.md",
+      "pr_blob": "e60a9ea3c54170dfe868b25d00e536c8d5be68a5",
+      "initial_port_blob": "e60a9ea3c54170dfe868b25d00e536c8d5be68a5",
+      "snapshot_blob": "e60a9ea3c54170dfe868b25d00e536c8d5be68a5",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/SWEEP_b1-b2.tsv",
+      "pr_blob": "5d9ed8c1aeea195719c9965895dac605157f7cc8",
+      "initial_port_blob": "5d9ed8c1aeea195719c9965895dac605157f7cc8",
+      "snapshot_blob": "5d9ed8c1aeea195719c9965895dac605157f7cc8",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/SWEEP_cva6.tsv",
+      "pr_blob": "e3018e7390634270dcbc5fa0271d495eb44d5983",
+      "initial_port_blob": "e3018e7390634270dcbc5fa0271d495eb44d5983",
+      "snapshot_blob": "e3018e7390634270dcbc5fa0271d495eb44d5983",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/VERIFIED_COMPILER_STATUS.md",
+      "pr_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d",
+      "initial_port_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d",
+      "snapshot_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/certificate_builder.hpp",
+      "pr_blob": "d1ea3c090fa8186632786506ee6a9ae7886ee3c6",
+      "initial_port_blob": "d1ea3c090fa8186632786506ee6a9ae7886ee3c6",
+      "snapshot_blob": "d1ea3c090fa8186632786506ee6a9ae7886ee3c6",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/certificate_ir.cpp",
+      "pr_blob": "f896f77674ffb8800479029310a31ad095561a3b",
+      "initial_port_blob": "f896f77674ffb8800479029310a31ad095561a3b",
+      "snapshot_blob": "4f747a8824902147adf8b91900083bd5b024c1b5",
+      "status": "reviewed-followup",
+      "explanation": "Improve the async-reset refusal diagnostic with the blocking cone node; certificate construction semantics unchanged."
+    },
+    {
+      "path": "pass/lean/certificate_ir.hpp",
+      "pr_blob": "1e57d61594c934bec7173fbe7f46b317e4a5cbeb",
+      "initial_port_blob": "1e57d61594c934bec7173fbe7f46b317e4a5cbeb",
+      "snapshot_blob": "1e57d61594c934bec7173fbe7f46b317e4a5cbeb",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/certificate_ir_test.cpp",
+      "pr_blob": "66d6a12bcf75873e27dae65aa503b41d02a18901",
+      "initial_port_blob": "66d6a12bcf75873e27dae65aa503b41d02a18901",
+      "snapshot_blob": "587036530485db966d4f77f0cc2a54866ac258dd",
+      "status": "reviewed-followup",
+      "explanation": "Add validation for explicit malformed binary arity refusals."
+    },
+    {
+      "path": "pass/lean/design_scan.cpp",
+      "pr_blob": "b8afc0605ea72def2838adee897b3310a05fd7f8",
+      "initial_port_blob": "bd2735460073f06e0a5ba4d71b48423e9d21cca0",
+      "snapshot_blob": "03fb75e32182ff354a93f7de148945faabeb9fc6",
+      "status": "reviewed-followup",
+      "explanation": "Add approved Concat/Hotmux lowering into existing operations, restore four upstream binary-arity guards, and record blocked reset-cone provenance."
+    },
+    {
+      "path": "pass/lean/design_scan.hpp",
+      "pr_blob": "936ccde72b2f4466516d6fecdfef423e5bdd4a70",
+      "initial_port_blob": "936ccde72b2f4466516d6fecdfef423e5bdd4a70",
+      "snapshot_blob": "677bfb76adc74d37eb5b9a9cb9f9b2d8309058b7",
+      "status": "reviewed-followup",
+      "explanation": "Add reset-cone diagnostic metadata only; certificate schema unchanged."
+    },
+    {
+      "path": "pass/lean/design_scan_test.cpp",
+      "pr_blob": "34ca912ec2c4f5f5ebc877b5d532501161edbc34",
+      "initial_port_blob": "476895e8b8b46c2039c868747508d46c38c6e1d8",
+      "snapshot_blob": "99ba2f47c13ee07edb6e41aa05a1aa763f874b27",
+      "status": "reviewed-followup",
+      "explanation": "Add arithmetic/value oracles and malformed layout, width, reset-wrapper and arity checks."
+    },
+    {
+      "path": "pass/lean/emit_design_cert.cpp",
+      "pr_blob": "e4be85fc46634fbb1a13f90cffefaa62038d3662",
+      "initial_port_blob": "e4be85fc46634fbb1a13f90cffefaa62038d3662",
+      "snapshot_blob": "e4be85fc46634fbb1a13f90cffefaa62038d3662",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/emit_design_cert.hpp",
+      "pr_blob": "a15884ddbbaf4420511435475f530f90aeaa2859",
+      "initial_port_blob": "a15884ddbbaf4420511435475f530f90aeaa2859",
+      "snapshot_blob": "a15884ddbbaf4420511435475f530f90aeaa2859",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/emit_legacy_cert_wf.cpp",
+      "pr_blob": "776f3af0a55f6f22ce3a51a5d206355bd5cc970b",
+      "initial_port_blob": "776f3af0a55f6f22ce3a51a5d206355bd5cc970b",
+      "snapshot_blob": "776f3af0a55f6f22ce3a51a5d206355bd5cc970b",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/emit_legacy_cert_wf.hpp",
+      "pr_blob": "3556c77de64b3950179c83fce128afa6e662200f",
+      "initial_port_blob": "3556c77de64b3950179c83fce128afa6e662200f",
+      "snapshot_blob": "3556c77de64b3950179c83fce128afa6e662200f",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/emit_legacy_fast_bridge.cpp",
+      "pr_blob": "5063858f93331e447cd1ff92f765dd3eb91aec7d",
+      "initial_port_blob": "5063858f93331e447cd1ff92f765dd3eb91aec7d",
+      "snapshot_blob": "aec0a470ea0d55a32401f019859677badaad8825",
+      "status": "reviewed-followup",
+      "explanation": "Add general mixed-width And/Xor/Sum proof dispatch for previously refused arities; fast-model expressions and primitive evaluation unchanged."
+    },
+    {
+      "path": "pass/lean/emit_legacy_fast_bridge.hpp",
+      "pr_blob": "4fa1ce340d6b31e52585f3df3df1191647d73ace",
+      "initial_port_blob": "4fa1ce340d6b31e52585f3df3df1191647d73ace",
+      "snapshot_blob": "10bee9a5bd520c14e7fd536130d1abfbe3d3e49a",
+      "status": "reviewed-followup",
+      "explanation": "Expose the predicate selecting the additional proof-library import."
+    },
+    {
+      "path": "pass/lean/emit_legacy_fast_model.cpp",
+      "pr_blob": "37902e50921ff6f94165bd81d2f4303b2ef5389d",
+      "initial_port_blob": "37902e50921ff6f94165bd81d2f4303b2ef5389d",
+      "snapshot_blob": "37902e50921ff6f94165bd81d2f4303b2ef5389d",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/emit_legacy_fast_model.hpp",
+      "pr_blob": "3659c9e631f2de00fb352582fd281986227970ba",
+      "initial_port_blob": "3659c9e631f2de00fb352582fd281986227970ba",
+      "snapshot_blob": "3659c9e631f2de00fb352582fd281986227970ba",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/emit_legacy_graph_cert.cpp",
+      "pr_blob": "27856fd3c64c8fc9f14483e912761965bcae1943",
+      "initial_port_blob": "27856fd3c64c8fc9f14483e912761965bcae1943",
+      "snapshot_blob": "27856fd3c64c8fc9f14483e912761965bcae1943",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/emit_legacy_graph_cert.hpp",
+      "pr_blob": "086adc52abd56d7f24d928d49e805640280c5cfa",
+      "initial_port_blob": "086adc52abd56d7f24d928d49e805640280c5cfa",
+      "snapshot_blob": "086adc52abd56d7f24d928d49e805640280c5cfa",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/emit_legacy_schema.cpp",
+      "pr_blob": "95ba0666f799c5af7364f881b8b6899be4407380",
+      "initial_port_blob": "95ba0666f799c5af7364f881b8b6899be4407380",
+      "snapshot_blob": "95ba0666f799c5af7364f881b8b6899be4407380",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/emit_legacy_schema.hpp",
+      "pr_blob": "d9c36b59a1f090ce41cd56c2a7948172fc82095c",
+      "initial_port_blob": "d9c36b59a1f090ce41cd56c2a7948172fc82095c",
+      "snapshot_blob": "d9c36b59a1f090ce41cd56c2a7948172fc82095c",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/graph_access.cpp",
+      "pr_blob": "18b9cbfa4099f817d1a6dffd6080e7140f193f0b",
+      "initial_port_blob": "6f4b51c4f39a14c0257b8fade2464b679fda5767",
+      "snapshot_blob": "aee41205ddd3d7242f633094ebee3ba97baeb6f0",
+      "status": "reviewed-followup",
+      "explanation": "Follow one-bit Sext reset wrappers with a positive constant amount; preserve existing primary-input reset restriction and wider-source refusals."
+    },
+    {
+      "path": "pass/lean/graph_access.hpp",
+      "pr_blob": "f7f6f9a8882fc88b79751a94a77c6f644c728971",
+      "initial_port_blob": "f7f6f9a8882fc88b79751a94a77c6f644c728971",
+      "snapshot_blob": "f7f6f9a8882fc88b79751a94a77c6f644c728971",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/lean_format.cpp",
+      "pr_blob": "2634a97218aacc738c05c2151679a2a76b5b6be3",
+      "initial_port_blob": "2634a97218aacc738c05c2151679a2a76b5b6be3",
+      "snapshot_blob": "2634a97218aacc738c05c2151679a2a76b5b6be3",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/lean_format.hpp",
+      "pr_blob": "75dd5e3191b1f584952233fb9300dcfef90439eb",
+      "initial_port_blob": "75dd5e3191b1f584952233fb9300dcfef90439eb",
+      "snapshot_blob": "75dd5e3191b1f584952233fb9300dcfef90439eb",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/lean_options.cpp",
+      "pr_blob": "6b2369f9181fc6f5ac2daa8e70f84e548c13afd7",
+      "initial_port_blob": "6b2369f9181fc6f5ac2daa8e70f84e548c13afd7",
+      "snapshot_blob": "6b2369f9181fc6f5ac2daa8e70f84e548c13afd7",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/lean_options.hpp",
+      "pr_blob": "3a2a0d356c49120741d51e725e54d97a1765e8e3",
+      "initial_port_blob": "3a2a0d356c49120741d51e725e54d97a1765e8e3",
+      "snapshot_blob": "3a2a0d356c49120741d51e725e54d97a1765e8e3",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/legacy_model.cpp",
+      "pr_blob": "91ede7535422269aa8fd69465b32760ec4185837",
+      "initial_port_blob": "91ede7535422269aa8fd69465b32760ec4185837",
+      "snapshot_blob": "6fb81acb18e1f809b95fc958282011fec521f7d5",
+      "status": "reviewed-followup",
+      "explanation": "Import NaryBridge only when a previously unsupported fold proof needs it."
+    },
+    {
+      "path": "pass/lean/legacy_model.hpp",
+      "pr_blob": "7c9064ba7c71ae6b85d10830f0025eebe19b2bd5",
+      "initial_port_blob": "7c9064ba7c71ae6b85d10830f0025eebe19b2bd5",
+      "snapshot_blob": "7c9064ba7c71ae6b85d10830f0025eebe19b2bd5",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/legacy_model_test.cpp",
+      "pr_blob": "dc700e0893107412df52096edd9137c0f461090f",
+      "initial_port_blob": "dc700e0893107412df52096edd9137c0f461090f",
+      "snapshot_blob": "b130eadcad0b0910874f9b0a062ffda246247223",
+      "status": "reviewed-followup",
+      "explanation": "Add self-contained generated general-fold WF and universal bridge fixtures."
+    },
+    {
+      "path": "pass/lean/memory_lowering.cpp",
+      "pr_blob": "cc84bc34c9b5f7b95678fcbce915ac4f8e149fc5",
+      "initial_port_blob": "cc84bc34c9b5f7b95678fcbce915ac4f8e149fc5",
+      "snapshot_blob": "cc84bc34c9b5f7b95678fcbce915ac4f8e149fc5",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/memory_lowering.hpp",
+      "pr_blob": "593a4b64eb4427b18fac6cb6135c2fff768fd07b",
+      "initial_port_blob": "593a4b64eb4427b18fac6cb6135c2fff768fd07b",
+      "snapshot_blob": "593a4b64eb4427b18fac6cb6135c2fff768fd07b",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/pass_lean.cpp",
+      "pr_blob": "a64769228e715e987ff93e67bf8b68d4a1789b3d",
+      "initial_port_blob": "a64769228e715e987ff93e67bf8b68d4a1789b3d",
+      "snapshot_blob": "a64769228e715e987ff93e67bf8b68d4a1789b3d",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/pass_lean.hpp",
+      "pr_blob": "6e989d2d483c66e366579301c5c007cc84017009",
+      "initial_port_blob": "6e989d2d483c66e366579301c5c007cc84017009",
+      "snapshot_blob": "6e989d2d483c66e366579301c5c007cc84017009",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/scripts/cert_lgraph_diff.py",
+      "pr_blob": "b6909adc448a1a568414460d75979a3e06c75a27",
+      "initial_port_blob": "b6909adc448a1a568414460d75979a3e06c75a27",
+      "snapshot_blob": "b6909adc448a1a568414460d75979a3e06c75a27",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/scripts/compare_exports.py",
+      "pr_blob": "d46bf0b227f00684cb63e9ab2c921c7fca1a3e90",
+      "initial_port_blob": "d46bf0b227f00684cb63e9ab2c921c7fca1a3e90",
+      "snapshot_blob": "d46bf0b227f00684cb63e9ab2c921c7fca1a3e90",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/scripts/op_census.py",
+      "pr_blob": "5b620523bad2e82b3128d2e9a21db04ab8e1d1a9",
+      "initial_port_blob": "5b620523bad2e82b3128d2e9a21db04ab8e1d1a9",
+      "snapshot_blob": "2e97729e00bc79f0cf5660699519c28c8640d8fa",
+      "status": "reviewed-followup",
+      "explanation": "Recognize proved general folds and existing unequal-width signed comparisons; do not reject unknown widths for width-polymorphic bridge lemmas."
+    },
+    {
+      "path": "pass/lean/scripts/vc_gates.py",
+      "pr_blob": "017cbdfa0ad6964e9b0b6ddebc5e6ba530124745",
+      "initial_port_blob": "017cbdfa0ad6964e9b0b6ddebc5e6ba530124745",
+      "snapshot_blob": "017cbdfa0ad6964e9b0b6ddebc5e6ba530124745",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/B1_REFACTOR_GOLDENS.tsv",
+      "pr_blob": "ed9a24f9594bf59a82c242ab636810a642b22c69",
+      "initial_port_blob": "ed9a24f9594bf59a82c242ab636810a642b22c69",
+      "snapshot_blob": "ed9a24f9594bf59a82c242ab636810a642b22c69",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/B1_RESET_POLARITY.tsv",
+      "pr_blob": "6f0df8871418abfd0d5540c71711979d2bc44681",
+      "initial_port_blob": "6f0df8871418abfd0d5540c71711979d2bc44681",
+      "snapshot_blob": "6f0df8871418abfd0d5540c71711979d2bc44681",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_CI_RUNTIME_COMPARISON.json",
+      "pr_blob": "624cc6d4eccf2378bb7ecd01050c237ba5e7d6e0",
+      "initial_port_blob": "624cc6d4eccf2378bb7ecd01050c237ba5e7d6e0",
+      "snapshot_blob": "624cc6d4eccf2378bb7ecd01050c237ba5e7d6e0",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_CI_SOURCE_PROVENANCE.json",
+      "pr_blob": "87ea81e0414a2dab5cb69d46dd7f69ed165fe83a",
+      "initial_port_blob": "87ea81e0414a2dab5cb69d46dd7f69ed165fe83a",
+      "snapshot_blob": "87ea81e0414a2dab5cb69d46dd7f69ed165fe83a",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_PROOF_COVERAGE.json",
+      "pr_blob": "d52d373be4d087f5d9694dc5f373a2a23d11bc46",
+      "initial_port_blob": "d52d373be4d087f5d9694dc5f373a2a23d11bc46",
+      "snapshot_blob": "d52d373be4d087f5d9694dc5f373a2a23d11bc46",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+      "pr_blob": "bee932f50eeb84bede2059f7a529e9770aa752c0",
+      "initial_port_blob": "bee932f50eeb84bede2059f7a529e9770aa752c0",
+      "snapshot_blob": "bee932f50eeb84bede2059f7a529e9770aa752c0",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_PROOF_INVENTORY.json",
+      "pr_blob": "9adee9552acb36aab21699a91bf97a9acb6b34af",
+      "initial_port_blob": "9adee9552acb36aab21699a91bf97a9acb6b34af",
+      "snapshot_blob": "9adee9552acb36aab21699a91bf97a9acb6b34af",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_REFACTOR_GOLDENS.tsv",
+      "pr_blob": "745e254f1ea3af8d3e63261d7a2f89978a434c70",
+      "initial_port_blob": "745e254f1ea3af8d3e63261d7a2f89978a434c70",
+      "snapshot_blob": "745e254f1ea3af8d3e63261d7a2f89978a434c70",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_SCALABILITY_RESULTS.json",
+      "pr_blob": "677c514c2aaecd23de6b4ab2486004e17d206e36",
+      "initial_port_blob": "677c514c2aaecd23de6b4ab2486004e17d206e36",
+      "snapshot_blob": "677c514c2aaecd23de6b4ab2486004e17d206e36",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_SHARED_RESULTS.tsv",
+      "pr_blob": "eea0162ba86119a397c59ea926539b2409d14a3f",
+      "initial_port_blob": "eea0162ba86119a397c59ea926539b2409d14a3f",
+      "snapshot_blob": "eea0162ba86119a397c59ea926539b2409d14a3f",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/LEGACY_VALIDATION_COVERAGE.json",
+      "pr_blob": "157632c749eaf09bc4d192ea9a59989f48129d9f",
+      "initial_port_blob": "157632c749eaf09bc4d192ea9a59989f48129d9f",
+      "snapshot_blob": "157632c749eaf09bc4d192ea9a59989f48129d9f",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_ADAPTER_PARITY.json",
+      "pr_blob": "bc4cc0dd80db6bf8ef92a937508d634c168334a6",
+      "initial_port_blob": "bc4cc0dd80db6bf8ef92a937508d634c168334a6",
+      "snapshot_blob": "bc4cc0dd80db6bf8ef92a937508d634c168334a6",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_NATIVE_REGRESSION.json",
+      "pr_blob": "710442dcede9082a77df9181c9f1900e59dcb547",
+      "initial_port_blob": "710442dcede9082a77df9181c9f1900e59dcb547",
+      "snapshot_blob": "710442dcede9082a77df9181c9f1900e59dcb547",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/audit_legacy_parity.py",
+      "pr_blob": "9470b7ac5a3e66f848415171611b54bbd1e254a6",
+      "initial_port_blob": "9470b7ac5a3e66f848415171611b54bbd1e254a6",
+      "snapshot_blob": "9470b7ac5a3e66f848415171611b54bbd1e254a6",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/check_legacy_oracles.py",
+      "pr_blob": "1e9745aa62bfd51dfe6b56ada66295883904eac1",
+      "initial_port_blob": "1e9745aa62bfd51dfe6b56ada66295883904eac1",
+      "snapshot_blob": "1e9745aa62bfd51dfe6b56ada66295883904eac1",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/compare_exports.py",
+      "pr_blob": "37d0fa3c63ccbf37edbab56602bd319d3ab0d31d",
+      "initial_port_blob": "37d0fa3c63ccbf37edbab56602bd319d3ab0d31d",
+      "snapshot_blob": "37d0fa3c63ccbf37edbab56602bd319d3ab0d31d",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/export_graph.cpp",
+      "pr_blob": "e4db7116ad6e3f786ad0fc0e0c1a65a40f7662d4",
+      "initial_port_blob": "e4db7116ad6e3f786ad0fc0e0c1a65a40f7662d4",
+      "snapshot_blob": "e4db7116ad6e3f786ad0fc0e0c1a65a40f7662d4",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_fixtures.cpp",
+      "pr_blob": "d9847cc973b21cfe647bb9eee8cd844acb7b2c58",
+      "initial_port_blob": "aae83862b3896b69dcca02d09f867ac3c4235f48",
+      "snapshot_blob": "aae83862b3896b69dcca02d09f867ac3c4235f48",
+      "status": "adapted-for-current-master",
+      "explanation": "Construct the historical mask fixtures using the current graph endpoint API."
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/PipelinedCPU.log",
+      "pr_blob": "9ef808d380bf2a7069130fd59d473023fd7ced34",
+      "initial_port_blob": "9ef808d380bf2a7069130fd59d473023fd7ced34",
+      "snapshot_blob": "9ef808d380bf2a7069130fd59d473023fd7ced34",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/PipelinedCPU.time",
+      "pr_blob": "9d84e059ee7f7c6898c9b3d46091d3e7d85640b1",
+      "initial_port_blob": "9d84e059ee7f7c6898c9b3d46091d3e7d85640b1",
+      "snapshot_blob": "9d84e059ee7f7c6898c9b3d46091d3e7d85640b1",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/PipelinedDualIssueCPU.log",
+      "pr_blob": "274be00de6739a5d1eeedc1635e61df3da3567cf",
+      "initial_port_blob": "274be00de6739a5d1eeedc1635e61df3da3567cf",
+      "snapshot_blob": "274be00de6739a5d1eeedc1635e61df3da3567cf",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/PipelinedDualIssueCPU.time",
+      "pr_blob": "0e2682cd056bfbcdfaed0e1db762ee5d464844fa",
+      "initial_port_blob": "0e2682cd056bfbcdfaed0e1db762ee5d464844fa",
+      "snapshot_blob": "0e2682cd056bfbcdfaed0e1db762ee5d464844fa",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/SingleCycleCPU.log",
+      "pr_blob": "2a2b283f93cb945160defe9e483ede1de06b48a1",
+      "initial_port_blob": "2a2b283f93cb945160defe9e483ede1de06b48a1",
+      "snapshot_blob": "2a2b283f93cb945160defe9e483ede1de06b48a1",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_proof_measurements/SingleCycleCPU.time",
+      "pr_blob": "bf96792a8f82b61557ce8af0538c2ed2d8164d84",
+      "initial_port_blob": "bf96792a8f82b61557ce8af0538c2ed2d8164d84",
+      "snapshot_blob": "bf96792a8f82b61557ce8af0538c2ed2d8164d84",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/SignedWidthTimeline.lean",
+      "pr_blob": "640543d14ddac90ba1c07b7e34b294815a9af28a",
+      "initial_port_blob": "640543d14ddac90ba1c07b7e34b294815a9af28a",
+      "snapshot_blob": "640543d14ddac90ba1c07b7e34b294815a9af28a",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/baseline_same_graph_results.json",
+      "pr_blob": "a946ccf5cd42ebb7dfc00f6c322ad7a9e827bbfa",
+      "initial_port_blob": "a946ccf5cd42ebb7dfc00f6c322ad7a9e827bbfa",
+      "snapshot_blob": "a946ccf5cd42ebb7dfc00f6c322ad7a9e827bbfa",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/fast_expression_text_audit.json",
+      "pr_blob": "f498d9baf1cbfa697c521bb90b4adf510090f224",
+      "initial_port_blob": "f498d9baf1cbfa697c521bb90b4adf510090f224",
+      "snapshot_blob": "f498d9baf1cbfa697c521bb90b4adf510090f224",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/same_graph_dino_structure.json",
+      "pr_blob": "1ca119a7421b7f703e24e9facc49ce0a3cb44430",
+      "initial_port_blob": "1ca119a7421b7f703e24e9facc49ce0a3cb44430",
+      "snapshot_blob": "1ca119a7421b7f703e24e9facc49ce0a3cb44430",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/signed_comparison_widths.json",
+      "pr_blob": "c8ac2d4096aeb7f0ecb1be08a1a697c13b31ed78",
+      "initial_port_blob": "c8ac2d4096aeb7f0ecb1be08a1a697c13b31ed78",
+      "snapshot_blob": "c8ac2d4096aeb7f0ecb1be08a1a697c13b31ed78",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/signed_width_timeline.log",
+      "pr_blob": "a9e9ec2fe03378668652314dcd16f98e711b5014",
+      "initial_port_blob": "a9e9ec2fe03378668652314dcd16f98e711b5014",
+      "snapshot_blob": "a9e9ec2fe03378668652314dcd16f98e711b5014",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/signed_width_timeline_result.json",
+      "pr_blob": "18c0f03ed286f1337f15467f8ab5f271e34f83be",
+      "initial_port_blob": "18c0f03ed286f1337f15467f8ab5f271e34f83be",
+      "snapshot_blob": "18c0f03ed286f1337f15467f8ab5f271e34f83be",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/summary.json",
+      "pr_blob": "8449a44b3da9f0c1751105d76c0790dd40f9f06d",
+      "initial_port_blob": "8449a44b3da9f0c1751105d76c0790dd40f9f06d",
+      "snapshot_blob": "8449a44b3da9f0c1751105d76c0790dd40f9f06d",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/legacy_wf_index.lean",
+      "pr_blob": "3548697b47b84eed1d505463a077f1bf6760786d",
+      "initial_port_blob": "3548697b47b84eed1d505463a077f1bf6760786d",
+      "snapshot_blob": "3548697b47b84eed1d505463a077f1bf6760786d",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/replay_legacy_proofs.py",
+      "pr_blob": "045ce8c37a06fd02f40bcbc26fd8eadd9529bedc",
+      "initial_port_blob": "045ce8c37a06fd02f40bcbc26fd8eadd9529bedc",
+      "snapshot_blob": "045ce8c37a06fd02f40bcbc26fd8eadd9529bedc",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/width_regress/check.py",
+      "pr_blob": "af128e0dce1b403af2b08f773dcc3060ae1f8968",
+      "initial_port_blob": "af128e0dce1b403af2b08f773dcc3060ae1f8968",
+      "snapshot_blob": "af128e0dce1b403af2b08f773dcc3060ae1f8968",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/width_regress/const_width_regress.sv",
+      "pr_blob": "6a4e885146666a79b0574c70aca8cc57b8a33030",
+      "initial_port_blob": "6a4e885146666a79b0574c70aca8cc57b8a33030",
+      "snapshot_blob": "6a4e885146666a79b0574c70aca8cc57b8a33030",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "pass/lec/BUILD",
+      "pr_blob": "1796d7bc7d34554996cf0e45053a29254f13a558",
+      "initial_port_blob": "c0cdc013636e733cbe05d4181c278bac12bcf169",
+      "snapshot_blob": "c0cdc013636e733cbe05d4181c278bac12bcf169",
+      "status": "adapted-for-current-master",
+      "explanation": "Retain current master native checker dependencies; preserve the PR static ABC/cvc5 collision regression target."
+    },
+    {
+      "path": "pass/lec/tests/cvc5_link_smoke.cpp",
+      "pr_blob": "f9b8e2f41fcf2d84561427dbb2622c6508fcf41d",
+      "initial_port_blob": "f9b8e2f41fcf2d84561427dbb2622c6508fcf41d",
+      "snapshot_blob": "f9b8e2f41fcf2d84561427dbb2622c6508fcf41d",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "scripts/run_coreet_module_lean.sh",
+      "pr_blob": "534bb62b80193c5b6048ef7a25c22363aec591a0",
+      "initial_port_blob": "534bb62b80193c5b6048ef7a25c22363aec591a0",
+      "snapshot_blob": "844b24d10b82cf6412ae24f475f6ea7e434ee602",
+      "status": "reviewed-followup",
+      "explanation": "Replace a private default benchmark path with an explicit read-only input-root setting."
+    },
+    {
+      "path": "scripts/run_cva6_alu_lean.sh",
+      "pr_blob": "34308dc4f33cce9aeb913c7d6e87890bee1d2bc0",
+      "initial_port_blob": "34308dc4f33cce9aeb913c7d6e87890bee1d2bc0",
+      "snapshot_blob": "34308dc4f33cce9aeb913c7d6e87890bee1d2bc0",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "scripts/run_cva6_complex_lean_stress.sh",
+      "pr_blob": "f23a3ec2c6f1808642b2813f3bf5cba26d11c3a2",
+      "initial_port_blob": "f23a3ec2c6f1808642b2813f3bf5cba26d11c3a2",
+      "snapshot_blob": "f23a3ec2c6f1808642b2813f3bf5cba26d11c3a2",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "scripts/run_cva6_module_lean_stress.sh",
+      "pr_blob": "469894b18b5792b7a1d001d95b25c3e2d6b6ab44",
+      "initial_port_blob": "469894b18b5792b7a1d001d95b25c3e2d6b6ab44",
+      "snapshot_blob": "469894b18b5792b7a1d001d95b25c3e2d6b6ab44",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "scripts/run_dino_lgraph_lean.sh",
+      "pr_blob": "47f661014fd7eb0891bf9d044a413a0827371441",
+      "initial_port_blob": "47f661014fd7eb0891bf9d044a413a0827371441",
+      "snapshot_blob": "47f661014fd7eb0891bf9d044a413a0827371441",
+      "status": "preserved-exactly"
+    },
+    {
+      "path": "scripts/run_lean_queue.sh",
+      "pr_blob": "24eb32759105c4af9aaa238edeea3a6539ab9a21",
+      "initial_port_blob": "24eb32759105c4af9aaa238edeea3a6539ab9a21",
+      "snapshot_blob": "c4b0463ba4aad3d55d147da6ce028ab2d4215132",
+      "status": "reviewed-followup",
+      "explanation": "Build NaryBridge and LegacyCertWF explicitly before accepting generated-file proofs."
+    }
+  ],
+  "b1b2_contribution_count": 87,
+  "b1b2_disposition_counts": {
+    "original-deletion-retained": 2,
+    "upstream-documentation-update": 1,
+    "preserved-exactly": 36,
+    "preserved-with-added-lemmas": 1,
+    "isabelle-source-loss-restored": 7,
+    "upstream-native-implementation-retained": 6,
+    "reviewed-lean-followup": 3,
+    "shared-architecture-refactor": 3,
+    "superseded-by-shared-architecture": 3,
+    "recovered-exactly": 12,
+    "recovered-with-driver-adaptations": 5,
+    "retired-option-and-portability-adaptation": 1,
+    "retired-option-removal": 3,
+    "upstream-driver-adaptation": 4
+  },
+  "b1b2_contribution_files": [
+    {
+      "path": ".claude/skills/prove-cert-equivalence/SKILL.md",
+      "b1b2_blob": null,
+      "snapshot_blob": null,
+      "disposition": "original-deletion-retained"
+    },
+    {
+      "path": "docs/cva6_isabelle_stress.md",
+      "b1b2_blob": "478f755a9b45bb96a40031333493afb704048962",
+      "snapshot_blob": "c07aedebef2d67619a161d70495855f2a75ad6ce",
+      "disposition": "upstream-documentation-update",
+      "explanation": "Memory-port stride documentation updated to the upstream constant."
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileDesign.lean",
+      "b1b2_blob": "4f38b480c7f5abff07567ee5f651d04a2357eb97",
+      "snapshot_blob": "4f38b480c7f5abff07567ee5f651d04a2357eb97",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileGraph.lean",
+      "b1b2_blob": "fce2d6d785ec7d5c10dd224f32d1785efc29e5c3",
+      "snapshot_blob": "fce2d6d785ec7d5c10dd224f32d1785efc29e5c3",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileOp.lean",
+      "b1b2_blob": "5645fc64af6695e72da1a09f2d92cce8043b99e4",
+      "snapshot_blob": "5645fc64af6695e72da1a09f2d92cce8043b99e4",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DesignCert.lean",
+      "b1b2_blob": "08c4e670b5a0c07bda19fe25aa1543e82d90971f",
+      "snapshot_blob": "08c4e670b5a0c07bda19fe25aa1543e82d90971f",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DesignCertWF.lean",
+      "b1b2_blob": "cd2a6a69b4a292a7094ebc15129290a0ce6be30d",
+      "snapshot_blob": "cd2a6a69b4a292a7094ebc15129290a0ce6be30d",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DesignSemantics.lean",
+      "b1b2_blob": "803cf8f99045e8e892cf9de50cf845fda8c27cf8",
+      "snapshot_blob": "803cf8f99045e8e892cf9de50cf845fda8c27cf8",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/ResidualIR.lean",
+      "b1b2_blob": "f8f68b9b48c5c4f5f788893ed3619d9ea628da8e",
+      "snapshot_blob": "f8f68b9b48c5c4f5f788893ed3619d9ea628da8e",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/ResidualSemantics.lean",
+      "b1b2_blob": "159328db47d7feac41f56e23bcbff0d57c89a6ac",
+      "snapshot_blob": "159328db47d7feac41f56e23bcbff0d57c89a6ac",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/Runtime.lean",
+      "b1b2_blob": "903469b307313e61dcc1913abee0eb46f7b09d49",
+      "snapshot_blob": "903469b307313e61dcc1913abee0eb46f7b09d49",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean",
+      "b1b2_blob": null,
+      "snapshot_blob": null,
+      "disposition": "original-deletion-retained"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/GraphRefine.lean",
+      "b1b2_blob": "e47ee14bc2c4c0c861c0b1a4853931ba428c88a5",
+      "snapshot_blob": "e47ee14bc2c4c0c861c0b1a4853931ba428c88a5",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/LGraphModel.lean",
+      "b1b2_blob": "19b2a8072ff832cb8d79243bd93fb6ca2e4392f6",
+      "snapshot_blob": "19b2a8072ff832cb8d79243bd93fb6ca2e4392f6",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/OpBridge.lean",
+      "b1b2_blob": "e60ed6930eca941befe44f866e7f06db6489a169",
+      "snapshot_blob": "580d1b8ff34016a008f6690de528fcddfe1cdc19",
+      "disposition": "preserved-with-added-lemmas",
+      "explanation": "40 added lines; no original lines deleted. Added evalNode_bridge, evalNodeC_bridge, slt_widths_bridge, sgt_widths_bridge."
+    },
+    {
+      "path": "formal/lean/probes/compiler_smoke.lean",
+      "b1b2_blob": "1c90051f3e4056b0ad4a612dbc41d8b95d5bee4d",
+      "snapshot_blob": "1c90051f3e4056b0ad4a612dbc41d8b95d5bee4d",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/lean/probes/defeq_probe.lean",
+      "b1b2_blob": "948567ec30ef2f052c9b546de2b4540e2d589397",
+      "snapshot_blob": "948567ec30ef2f052c9b546de2b4540e2d589397",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/translation_correctness/README.md",
+      "b1b2_blob": "800ea86943cfec90a96b21a721279849f52abb57",
+      "snapshot_blob": "800ea86943cfec90a96b21a721279849f52abb57",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/translation_correctness/ROOT",
+      "b1b2_blob": "570f1dd72b44ea8439fc26b41c78378d22bf579a",
+      "snapshot_blob": "570f1dd72b44ea8439fc26b41c78378d22bf579a",
+      "disposition": "isabelle-source-loss-restored",
+      "evidence": "MASTER_BRANCH_PRESERVATION.json:isabelle_followup; pass/isabelle/BRIDGE_BUGS.md"
+    },
+    {
+      "path": "formal/translation_correctness/Translation_BT.thy",
+      "b1b2_blob": "4f4e9c1b5052b4d72791293febf8acf0ab67ace1",
+      "snapshot_blob": "4f4e9c1b5052b4d72791293febf8acf0ab67ace1",
+      "disposition": "isabelle-source-loss-restored",
+      "evidence": "MASTER_BRANCH_PRESERVATION.json:isabelle_followup; pass/isabelle/BRIDGE_BUGS.md"
+    },
+    {
+      "path": "formal/translation_correctness/Translation_Certificate_Evaluator.thy",
+      "b1b2_blob": "2bf4386dff7ddefaa65ec5bdf7d6078efdff38fe",
+      "snapshot_blob": "2bf4386dff7ddefaa65ec5bdf7d6078efdff38fe",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/translation_correctness/Translation_Combinational.thy",
+      "b1b2_blob": "2e785c48e9519aa1b48793691f10cf9c5f081cbd",
+      "snapshot_blob": "2e785c48e9519aa1b48793691f10cf9c5f081cbd",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/translation_correctness/Translation_Flops.thy",
+      "b1b2_blob": "012f7547c0a8bbb7b66eafdb9dc99234214f36fa",
+      "snapshot_blob": "012f7547c0a8bbb7b66eafdb9dc99234214f36fa",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/translation_correctness/Translation_GraphRefine.thy",
+      "b1b2_blob": "7a5bc05afbf2c9cff2ee7d3ca3d19bb435a8cbf2",
+      "snapshot_blob": "7a5bc05afbf2c9cff2ee7d3ca3d19bb435a8cbf2",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/translation_correctness/Translation_LGraph_Model.thy",
+      "b1b2_blob": "4c361b4c1596b5bde61d45aa4aae8254050fddf5",
+      "snapshot_blob": "4c361b4c1596b5bde61d45aa4aae8254050fddf5",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/translation_correctness/Translation_OpBridge.thy",
+      "b1b2_blob": "e24c8fa572bce73a207735a17396f236ba8f68f9",
+      "snapshot_blob": "e24c8fa572bce73a207735a17396f236ba8f68f9",
+      "disposition": "isabelle-source-loss-restored",
+      "evidence": "MASTER_BRANCH_PRESERVATION.json:isabelle_followup; pass/isabelle/BRIDGE_BUGS.md"
+    },
+    {
+      "path": "formal/translation_correctness/Translation_Op_Lemmas.thy",
+      "b1b2_blob": "b56776c98b573c34f5512ee1c1e285a05fe740d3",
+      "snapshot_blob": "b56776c98b573c34f5512ee1c1e285a05fe740d3",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "formal/translation_correctness/Translation_Step.thy",
+      "b1b2_blob": "2bec399f50457d64be6c3e54813cfc6b1dde112c",
+      "snapshot_blob": "2bec399f50457d64be6c3e54813cfc6b1dde112c",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "inou/cgen/cgen_sim.cpp",
+      "b1b2_blob": "16a9dcd52b75454a0a1a2e70884555cc1a086edc",
+      "snapshot_blob": "ca198b0e8dbff3eea4dcd1e8b55c7a0c5dbca781",
+      "disposition": "upstream-native-implementation-retained",
+      "explanation": "B1/B2 delta renamed shadowed lambda parameter base to bnm; upstream implementation retained. No native changes in this recovery."
+    },
+    {
+      "path": "lhd/lhd_kernel_formal.cpp",
+      "b1b2_blob": "cb2acb8940296ebe5ede5a00f984be51a58240ba",
+      "snapshot_blob": "4aebba466fdf6f600bac27af5bf52a895d4c9b14",
+      "disposition": "upstream-native-implementation-retained",
+      "explanation": "Original build_forest shadow fix is represented by canonical_top_name in upstream. No native changes in this recovery."
+    },
+    {
+      "path": "lhd/tests/single_edge_icg_test.sh",
+      "b1b2_blob": "d3baaafa08139286eb49cd333a472d158280eec2",
+      "snapshot_blob": "af0faba8b5d647b71835176325c5068c34474816",
+      "disposition": "upstream-native-implementation-retained",
+      "explanation": "Upstream replaced the fixture and made external-simulator legs optional; not restored to the historical test. No native changes in this recovery."
+    },
+    {
+      "path": "pass/color/color_reduce.cpp",
+      "b1b2_blob": "51e3eaadb76cfe64870f09da8b993ff450d7d037",
+      "snapshot_blob": "d22daace9ef3c4b7d5921985f500b47d6187359e",
+      "disposition": "upstream-native-implementation-retained",
+      "explanation": "B1/B2 added <print>; include retained upstream. No native changes in this recovery."
+    },
+    {
+      "path": "pass/isabelle/BRIDGE_BUGS.md",
+      "b1b2_blob": "8bde2a83add66600b309565ac6afe4a987e535f1",
+      "snapshot_blob": "166d3083cec45e25caf46022783005073e8f0a5d",
+      "disposition": "isabelle-source-loss-restored",
+      "evidence": "MASTER_BRANCH_PRESERVATION.json:isabelle_followup; pass/isabelle/BRIDGE_BUGS.md"
+    },
+    {
+      "path": "pass/isabelle/pass_isabelle.cpp",
+      "b1b2_blob": "742797cc337632aac4648caf26c55464d20b6716",
+      "snapshot_blob": "3832fca14416029b534651fa5deec10a6df17cf8",
+      "disposition": "isabelle-source-loss-restored",
+      "evidence": "MASTER_BRANCH_PRESERVATION.json:isabelle_followup; pass/isabelle/BRIDGE_BUGS.md"
+    },
+    {
+      "path": "pass/isabelle/pass_isabelle.hpp",
+      "b1b2_blob": "2d12fd2d615d50a10386baa63675b3107076ff16",
+      "snapshot_blob": "557ebab92fb03edb46a1ebeeb0d7470ffe5f8b85",
+      "disposition": "isabelle-source-loss-restored",
+      "evidence": "MASTER_BRANCH_PRESERVATION.json:isabelle_followup; pass/isabelle/BRIDGE_BUGS.md"
+    },
+    {
+      "path": "pass/isabelle/scripts/bakeoff_gen.py",
+      "b1b2_blob": "34898add5cd493f4c9a277d4f3be08ea21f6e45f",
+      "snapshot_blob": "34898add5cd493f4c9a277d4f3be08ea21f6e45f",
+      "disposition": "isabelle-source-loss-restored",
+      "evidence": "MASTER_BRANCH_PRESERVATION.json:isabelle_followup; pass/isabelle/BRIDGE_BUGS.md"
+    },
+    {
+      "path": "pass/isabelle/scripts/op_census.py",
+      "b1b2_blob": "38e84571f8a32ac1b402e82dabb2e53382212b3a",
+      "snapshot_blob": "38e84571f8a32ac1b402e82dabb2e53382212b3a",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/BUILD",
+      "b1b2_blob": "878457b1d75f6b227a3e0ebdafc24267f1b9bf32",
+      "snapshot_blob": "fcbdc1b44aaa964346abb1213e286ae8fe45b70e",
+      "disposition": "reviewed-lean-followup",
+      "explanation": "Add standalone graph census and adapter/bridge test dependencies while retaining split shared libraries."
+    },
+    {
+      "path": "pass/lean/CVA6_COVERAGE_PLAN.md",
+      "b1b2_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d",
+      "snapshot_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/FUTAMURA_PROJECTIONS.md",
+      "b1b2_blob": "0a2178ddf213e4144640d030243cc742c21aa971",
+      "snapshot_blob": "0a2178ddf213e4144640d030243cc742c21aa971",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/GROUNDING_SRA_GETMASK_SEXT.md",
+      "b1b2_blob": "0af0d6ae3b7169f55a96dbfa39fc8ec53fb72d64",
+      "snapshot_blob": "0af0d6ae3b7169f55a96dbfa39fc8ec53fb72d64",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/README.md",
+      "b1b2_blob": "ec9e071993ab6ca41bdefb2bbadd6df2269ce8f7",
+      "snapshot_blob": "c3dd5d058f8cc0acfad010d387aaad6cec10d992",
+      "disposition": "shared-architecture-refactor",
+      "explanation": "See MASTER_PORT_PRESERVATION.json and MASTER_INTEGRATION.md. Byte comparison alone does not prove adapter semantics."
+    },
+    {
+      "path": "pass/lean/STEP5_BRIDGE_BUGS.md",
+      "b1b2_blob": "e60a9ea3c54170dfe868b25d00e536c8d5be68a5",
+      "snapshot_blob": "e60a9ea3c54170dfe868b25d00e536c8d5be68a5",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/SWEEP_b1-b2.tsv",
+      "b1b2_blob": "5d9ed8c1aeea195719c9965895dac605157f7cc8",
+      "snapshot_blob": "5d9ed8c1aeea195719c9965895dac605157f7cc8",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/SWEEP_cva6.tsv",
+      "b1b2_blob": "e3018e7390634270dcbc5fa0271d495eb44d5983",
+      "snapshot_blob": "e3018e7390634270dcbc5fa0271d495eb44d5983",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/VERIFIED_COMPILER_STATUS.md",
+      "b1b2_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d",
+      "snapshot_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/design_cert_export.hpp",
+      "b1b2_blob": "f0faff5d5f45a5cb014150b9c8e5db0493a796ad",
+      "snapshot_blob": null,
+      "disposition": "superseded-by-shared-architecture",
+      "replacements": [
+        "pass/lean/certificate_ir.hpp",
+        "pass/lean/emit_design_cert.hpp"
+      ]
+    },
+    {
+      "path": "pass/lean/pass_lean.cpp",
+      "b1b2_blob": "0097b92b6727a41a5a1e22914f9c4bf4352ca1f6",
+      "snapshot_blob": "a64769228e715e987ff93e67bf8b68d4a1789b3d",
+      "disposition": "shared-architecture-refactor",
+      "explanation": "See MASTER_PORT_PRESERVATION.json and MASTER_INTEGRATION.md. Byte comparison alone does not prove adapter semantics."
+    },
+    {
+      "path": "pass/lean/pass_lean.hpp",
+      "b1b2_blob": "009bb27c3cc37a01391436c5f53a8ce966a7f28d",
+      "snapshot_blob": "6e989d2d483c66e366579301c5c007cc84017009",
+      "disposition": "shared-architecture-refactor",
+      "explanation": "See MASTER_PORT_PRESERVATION.json and MASTER_INTEGRATION.md. Byte comparison alone does not prove adapter semantics."
+    },
+    {
+      "path": "pass/lean/scripts/cert_lgraph_diff.py",
+      "b1b2_blob": "b6909adc448a1a568414460d75979a3e06c75a27",
+      "snapshot_blob": "b6909adc448a1a568414460d75979a3e06c75a27",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/scripts/op_census.py",
+      "b1b2_blob": "5b620523bad2e82b3128d2e9a21db04ab8e1d1a9",
+      "snapshot_blob": "2e97729e00bc79f0cf5660699519c28c8640d8fa",
+      "disposition": "reviewed-lean-followup",
+      "explanation": "Recognize proved general folds and existing unequal-width signed comparisons; do not reject unknown widths for width-polymorphic bridge lemmas."
+    },
+    {
+      "path": "pass/lean/scripts/vc_gates.py",
+      "b1b2_blob": "017cbdfa0ad6964e9b0b6ddebc5e6ba530124745",
+      "snapshot_blob": "017cbdfa0ad6964e9b0b6ddebc5e6ba530124745",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/width_regress/check.py",
+      "b1b2_blob": "af128e0dce1b403af2b08f773dcc3060ae1f8968",
+      "snapshot_blob": "af128e0dce1b403af2b08f773dcc3060ae1f8968",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/tests/width_regress/const_width_regress.sv",
+      "b1b2_blob": "6a4e885146666a79b0574c70aca8cc57b8a33030",
+      "snapshot_blob": "6a4e885146666a79b0574c70aca8cc57b8a33030",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "pass/lean/verified-compiler.cpp",
+      "b1b2_blob": "3825a0c83f7a2fe787a70554b2c9ba8441f6c903",
+      "snapshot_blob": null,
+      "disposition": "superseded-by-shared-architecture",
+      "replacements": [
+        "pass/lean/certificate_ir.cpp",
+        "pass/lean/emit_design_cert.cpp",
+        "pass/lean/design_scan.cpp",
+        "pass/lean/memory_lowering.cpp"
+      ]
+    },
+    {
+      "path": "pass/lean/verified-compiler.hpp",
+      "b1b2_blob": "908b4c205ab0b56669389086ae4e7867b33b1807",
+      "snapshot_blob": null,
+      "disposition": "superseded-by-shared-architecture",
+      "replacements": [
+        "pass/lean/certificate_ir.hpp",
+        "pass/lean/emit_design_cert.hpp"
+      ]
+    },
+    {
+      "path": "pass/lec/encode.cpp",
+      "b1b2_blob": "18f09e4adf5b0df537049fab4f60ea6ca0875ee2",
+      "snapshot_blob": "c65e56719e642571bc93af473648f91ae16b122d",
+      "disposition": "upstream-native-implementation-retained",
+      "explanation": "B1/B2 delta only renamed clk_nm and wr_prefix to avoid shadowing; upstream encoder retained. No native changes in this recovery."
+    },
+    {
+      "path": "pass/single_edge/pass_single_edge.cpp",
+      "b1b2_blob": "3eefb5037f848b4842592d32b132ef141bb873be",
+      "snapshot_blob": "ab41d99e4d7ba523c653104dda1f109f6cc9b3ed",
+      "disposition": "upstream-native-implementation-retained",
+      "explanation": "Original raw-D latch bypass now handled by graph/latch_contract.cpp:latch_transparent_arm returning din after canonicalization (87b0b91a2). Keep current phase guards. No native changes in this recovery."
+    },
+    {
+      "path": "scripts/CVA6_SV2V_FILELIST_REFERENCE.md",
+      "b1b2_blob": "674ef8f3cf27951718f299a9318e74ee31fe4ca0",
+      "snapshot_blob": "674ef8f3cf27951718f299a9318e74ee31fe4ca0",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "scripts/coreet_census_sweep.sh",
+      "b1b2_blob": "0e5797c9436f1738c0af78fc4b622abbed565a3e",
+      "snapshot_blob": "0e5797c9436f1738c0af78fc4b622abbed565a3e",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/coreet_filelist.sh",
+      "b1b2_blob": "20894bed22a10b942f5dba225f67a568a5063e20",
+      "snapshot_blob": "e0909556feb4529dd0f0613ed400a315e85e3e8d",
+      "disposition": "recovered-with-driver-adaptations"
+    },
+    {
+      "path": "scripts/coreet_patch_srcs.py",
+      "b1b2_blob": "d1139ea046778c579d6c8da077a0be1c1acd78bc",
+      "snapshot_blob": "fb1e462069805a3a31671f86edbd8cd452617518",
+      "disposition": "recovered-with-driver-adaptations"
+    },
+    {
+      "path": "scripts/coreet_print.mk",
+      "b1b2_blob": "588dc379427700ea2e16b1cccc33ef0792b3d7b9",
+      "snapshot_blob": "588dc379427700ea2e16b1cccc33ef0792b3d7b9",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/coreet_status.py",
+      "b1b2_blob": "c88b34347a07fc43693325f8d87d0c1dc92ae8b0",
+      "snapshot_blob": "c88b34347a07fc43693325f8d87d0c1dc92ae8b0",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_alu_export.sv",
+      "b1b2_blob": "6f62d4c830819232d45d41868c8534e00ce8707f",
+      "snapshot_blob": "6f62d4c830819232d45d41868c8534e00ce8707f",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_alu_export_pkg.sv",
+      "b1b2_blob": "60b0cb3bcc03456a9f614a16a5f73a5ac60e807e",
+      "snapshot_blob": "60b0cb3bcc03456a9f614a16a5f73a5ac60e807e",
+      "disposition": "preserved-exactly"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_compressed_decoder_gate.sv",
+      "b1b2_blob": "e6dceac291de3458699ddf59a611ed591caf0c78",
+      "snapshot_blob": "e6dceac291de3458699ddf59a611ed591caf0c78",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_controller_gate.sv",
+      "b1b2_blob": "c507ce36dac892d454317e7694201974b38597ed",
+      "snapshot_blob": "c507ce36dac892d454317e7694201974b38597ed",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_csr_buffer_gate.sv",
+      "b1b2_blob": "3ff63087b6ff62c16da985979941d65a774d3492",
+      "snapshot_blob": "3ff63087b6ff62c16da985979941d65a774d3492",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_instr_realign_gate.sv",
+      "b1b2_blob": "50d918a805945e4f6eff3e3cb34b622b4a7f4ea0",
+      "snapshot_blob": "50d918a805945e4f6eff3e3cb34b622b4a7f4ea0",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_instr_scan_gate.sv",
+      "b1b2_blob": "fc2163dd74a80e81886c7f6664a3ea8d173674b9",
+      "snapshot_blob": "fc2163dd74a80e81886c7f6664a3ea8d173674b9",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_pmp_gate.sv",
+      "b1b2_blob": "ac12c47fb5acaa4f7b52042b54d61c5484d30514",
+      "snapshot_blob": "ac12c47fb5acaa4f7b52042b54d61c5484d30514",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_ras_gate.sv",
+      "b1b2_blob": "2b07a9cc69dd70d4e5a474b9c2538399790ee1fa",
+      "snapshot_blob": "2b07a9cc69dd70d4e5a474b9c2538399790ee1fa",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_raw_checker_gate.sv",
+      "b1b2_blob": "a38d74b8f35b099d98a41e8e784b656a73d8b08c",
+      "snapshot_blob": "a38d74b8f35b099d98a41e8e784b656a73d8b08c",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/elab_cva6_wrappers.sh",
+      "b1b2_blob": "a98b9060264b76d88dde84bb4cdf6d83b7bda44d",
+      "snapshot_blob": "d841212988198097ff4d509d7951bc72a0443e4c",
+      "disposition": "recovered-with-driver-adaptations"
+    },
+    {
+      "path": "scripts/gen_cva6_wrappers.py",
+      "b1b2_blob": "666f9a31396724d85d35317bc72d822ea4ba8578",
+      "snapshot_blob": "666f9a31396724d85d35317bc72d822ea4ba8578",
+      "disposition": "recovered-exactly"
+    },
+    {
+      "path": "scripts/run_coreet_module_lean.sh",
+      "b1b2_blob": "74f517f4ee751ee065db1f22b64bb2157e92b562",
+      "snapshot_blob": "844b24d10b82cf6412ae24f475f6ea7e434ee602",
+      "disposition": "retired-option-and-portability-adaptation",
+      "explanation": "Removed dead formal.lean.normalize option; require explicit read-only COREET_ROOT."
+    },
+    {
+      "path": "scripts/run_cva6_alu_lean.sh",
+      "b1b2_blob": "4e1c48519a262c0196db23d1845638c15cbfa172",
+      "snapshot_blob": "34308dc4f33cce9aeb913c7d6e87890bee1d2bc0",
+      "disposition": "retired-option-removal",
+      "explanation": "Only removed dead formal.lean.normalize option relative to B1/B2."
+    },
+    {
+      "path": "scripts/run_cva6_cache_memory_lec.sh",
+      "b1b2_blob": "05d18561f3ef473fdebe2a067d92843eb23f4d97",
+      "snapshot_blob": "b16dc7572ea5ccacd5568726d79132aecc557d93",
+      "disposition": "upstream-driver-adaptation",
+      "explanation": "Retired flags removed; DINO Isabelle driver also requires the current strict LEC-gate verdict. Not a new proof result."
+    },
+    {
+      "path": "scripts/run_cva6_complex_isabelle_stress.sh",
+      "b1b2_blob": "e832b9288bfc6a19330a02cb67eb1b2b7d6a953d",
+      "snapshot_blob": "1d497fa636ee3ebaf9ee2a7cd3391dcd7aa75634",
+      "disposition": "upstream-driver-adaptation",
+      "explanation": "Retired flags removed; DINO Isabelle driver also requires the current strict LEC-gate verdict. Not a new proof result."
+    },
+    {
+      "path": "scripts/run_cva6_module_isabelle_stress.sh",
+      "b1b2_blob": "52b69d56631b0db75a58f5b3426deae1e433a030",
+      "snapshot_blob": "0127035dc6745adc34f9d5f36b817693081a8f43",
+      "disposition": "upstream-driver-adaptation",
+      "explanation": "Retired flags removed; DINO Isabelle driver also requires the current strict LEC-gate verdict. Not a new proof result."
+    },
+    {
+      "path": "scripts/run_cva6_module_lean_stress.sh",
+      "b1b2_blob": "0bb12e8f31862c52fe081a0170fb983e2870282a",
+      "snapshot_blob": "469894b18b5792b7a1d001d95b25c3e2d6b6ab44",
+      "disposition": "retired-option-removal",
+      "explanation": "Only removed dead formal.lean.normalize option relative to B1/B2."
+    },
+    {
+      "path": "scripts/run_cva6_vc_sweep.sh",
+      "b1b2_blob": "eff0b0f23740dedd10790932d58ff12e094cac7d",
+      "snapshot_blob": "9f0fe9ac19ef7181adf3850532b75b65073e849c",
+      "disposition": "recovered-with-driver-adaptations"
+    },
+    {
+      "path": "scripts/run_dino_lgraph_isabelle.sh",
+      "b1b2_blob": "cce58c1069100c18f95c624d8edf62806b713685",
+      "snapshot_blob": "b524ca8d131b301c124669e8c3a624bdbef032c9",
+      "disposition": "upstream-driver-adaptation",
+      "explanation": "Retired flags removed; DINO Isabelle driver also requires the current strict LEC-gate verdict. Not a new proof result."
+    },
+    {
+      "path": "scripts/run_dino_lgraph_lean.sh",
+      "b1b2_blob": "a88b75046349012f9f3336e548aa13b93b1791be",
+      "snapshot_blob": "47f661014fd7eb0891bf9d044a413a0827371441",
+      "disposition": "retired-option-removal",
+      "explanation": "Only removed dead formal.lean.normalize option relative to B1/B2."
+    },
+    {
+      "path": "scripts/run_lean_queue.sh",
+      "b1b2_blob": "24eb32759105c4af9aaa238edeea3a6539ab9a21",
+      "snapshot_blob": "c4b0463ba4aad3d55d147da6ce028ab2d4215132",
+      "disposition": "reviewed-lean-followup",
+      "explanation": "Build NaryBridge and LegacyCertWF explicitly before accepting generated-file proofs."
+    },
+    {
+      "path": "scripts/run_vc_sweep.sh",
+      "b1b2_blob": "000e69562a1f616678b79da3a58094733d70d7c7",
+      "snapshot_blob": "401a3f6a6087a50b14b99343369922fb128e6775",
+      "disposition": "recovered-with-driver-adaptations"
+    }
+  ],
+  "b1b2_whole_tree_comparison": {
+    "modified": 1134,
+    "identical": 1443,
+    "missing": 256
+  },
+  "additional_migration_paths": [
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/NaryBridge.lean",
+      "snapshot_blob": "4a3b484feaf52b368d6a606b6fa8d13368021ba9"
+    },
+    {
+      "path": "formal/translation_correctness/Translation_BT.thy",
+      "snapshot_blob": "4f4e9c1b5052b4d72791293febf8acf0ab67ace1"
+    },
+    {
+      "path": "pass/isabelle/scripts/check_restoration.sh",
+      "snapshot_blob": "1bf3a418181b297b52ad73a4313fdeb038544659"
+    },
+    {
+      "path": "pass/isabelle/tests/emission_smoke.cpp",
+      "snapshot_blob": "4cd80351a3264c811039b5ac865b18c0bf385200"
+    },
+    {
+      "path": "pass/lean/scripts/hotmux_oracle.sh",
+      "snapshot_blob": "920aff6bff68e40f046081c27b8ca7b54ef1635e"
+    },
+    {
+      "path": "pass/lean/scripts/nary_bridge_check.sh",
+      "snapshot_blob": "43d2649f5def2addb1140ee119315a71a483b7b3"
+    },
+    {
+      "path": "pass/lean/scripts/raw_graph_census.py",
+      "snapshot_blob": "00b1562bc0cdac7a6f4644c15b21226d8eac6e32"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_BENCHMARK_MANIFEST.json",
+      "snapshot_blob": "54bb63d5a72d8e4f469e079a9b1827199f7499d8"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_BRANCH_PRESERVATION.json",
+      "snapshot_blob": "9bbaff06f7690ecb323b6e8e0627089325dd80fd"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_BRIDGE_ARITY_AUDIT.json",
+      "snapshot_blob": "978293fce87554e186b71f247381955ce62a3985"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_DINO_REPLAY_RESULTS.json",
+      "snapshot_blob": "04a3ff66aa91fc8d5bbbe79fd4b9bafc0731f0fc"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_NARY_BRIDGE_RESULTS.json",
+      "snapshot_blob": "20726b3d70e2ac89d5ce10c84276e78ac4bb68a9"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_OP_CENSUS.json",
+      "snapshot_blob": "d8dd075d9871040905ee69ce1e003aa49e4b203f"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_PORT_PRESERVATION.json",
+      "snapshot_blob": "dd5ea0d2f57909dfed995811f0e427df3c49b44c"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_PORT_VALIDATION.json",
+      "snapshot_blob": "d1b6793be4833313c2f90113fb018504dd6a1d4f"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_REPLAY_CONFIGURATIONS.json",
+      "snapshot_blob": "d16e9ee7f9a6d21b61d72ca85b199ceac97b4cc8"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_UPSTREAM_FAILURE_REPLAY.json",
+      "snapshot_blob": "14e18a5c5bfb404f31ff2590ccb5b69fd6a08308"
+    },
+    {
+      "path": "pass/lean/tests/graph_census.cpp",
+      "snapshot_blob": "ac12d846f6996f2bc8b11aa64ad6abf64482319e"
+    },
+    {
+      "path": "pass/lean/tests/hotmux_oracle_check.py",
+      "snapshot_blob": "e006020d7ca10486d9e1f518af8a10fddfd1d694"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/MaskEndpointPort.lean",
+      "snapshot_blob": "917cb40a2b39e5945e5df7a1a1e730b9a7e22594"
+    },
+    {
+      "path": "pass/lean/tests/sweep_tooling_check.py",
+      "snapshot_blob": "d38f9e467cb5c7c7363716930706ea34688faecd"
+    },
+    {
+      "path": "scripts/coreet_census_sweep.sh",
+      "snapshot_blob": "0e5797c9436f1738c0af78fc4b622abbed565a3e"
+    },
+    {
+      "path": "scripts/coreet_filelist.sh",
+      "snapshot_blob": "e0909556feb4529dd0f0613ed400a315e85e3e8d"
+    },
+    {
+      "path": "scripts/coreet_patch_srcs.py",
+      "snapshot_blob": "fb1e462069805a3a31671f86edbd8cd452617518"
+    },
+    {
+      "path": "scripts/coreet_print.mk",
+      "snapshot_blob": "588dc379427700ea2e16b1cccc33ef0792b3d7b9"
+    },
+    {
+      "path": "scripts/coreet_status.py",
+      "snapshot_blob": "c88b34347a07fc43693325f8d87d0c1dc92ae8b0"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_compressed_decoder_gate.sv",
+      "snapshot_blob": "e6dceac291de3458699ddf59a611ed591caf0c78"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_controller_gate.sv",
+      "snapshot_blob": "c507ce36dac892d454317e7694201974b38597ed"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_csr_buffer_gate.sv",
+      "snapshot_blob": "3ff63087b6ff62c16da985979941d65a774d3492"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_instr_realign_gate.sv",
+      "snapshot_blob": "50d918a805945e4f6eff3e3cb34b622b4a7f4ea0"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_instr_scan_gate.sv",
+      "snapshot_blob": "fc2163dd74a80e81886c7f6664a3ea8d173674b9"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_pmp_gate.sv",
+      "snapshot_blob": "ac12c47fb5acaa4f7b52042b54d61c5484d30514"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_ras_gate.sv",
+      "snapshot_blob": "2b07a9cc69dd70d4e5a474b9c2538399790ee1fa"
+    },
+    {
+      "path": "scripts/cva6_module_wrappers/cva6_raw_checker_gate.sv",
+      "snapshot_blob": "a38d74b8f35b099d98a41e8e784b656a73d8b08c"
+    },
+    {
+      "path": "scripts/elab_cva6_wrappers.sh",
+      "snapshot_blob": "d841212988198097ff4d509d7951bc72a0443e4c"
+    },
+    {
+      "path": "scripts/gen_cva6_wrappers.py",
+      "snapshot_blob": "666f9a31396724d85d35317bc72d822ea4ba8578"
+    },
+    {
+      "path": "scripts/run_cva6_vc_sweep.sh",
+      "snapshot_blob": "9f0fe9ac19ef7181adf3850532b75b65073e849c"
+    },
+    {
+      "path": "scripts/run_vc_sweep.sh",
+      "snapshot_blob": "401a3f6a6087a50b14b99343369922fb128e6775"
+    }
+  ],
+  "semantic_and_native_checks": {
+    "all_pr_formal_lean_files_byte_identical": 22,
+    "all_b1b2_compiler_modules_byte_identical": 9,
+    "additional_lean_module": "Translation/NaryBridge.lean (proof-only)",
+    "native_lec_files_byte_identical_to_upstream": 74,
+    "lec_build_and_test_exception": "Existing approved static ABC/cvc5 linker smoke configuration and test only; the test is byte-identical to the PR.",
+    "upstream_graph_frontend_normalization_contract_and_warning_files_byte_identical": 3689
+  },
+  "evidence": {
+    "adapter_parity": "MASTER_PORT_VALIDATION.json",
+    "general_fold_export_parity": "MASTER_NARY_BRIDGE_RESULTS.json",
+    "dino": "MASTER_DINO_REPLAY_RESULTS.json",
+    "upstream_failures": "MASTER_UPSTREAM_FAILURE_REPLAY.json"
+  },
+  "limits": [
+    "Full CORE-ET/CVA6 proofs are still running at this snapshot; see the subsequent replay report.",
+    "The seven Isabelle source losses were restored in separate commits. General Isabelle fast/certificate equivalence remains incomplete and is not claimed by source recovery.",
+    "D2/D3/D4/Futamura are separate later migrations; this audit covers the PR and original B1/B2 contributions.",
+    "Upstream missing or modified files outside the original contribution are not restored blindly; their byte differences are not a semantic audit."
+  ],
+  "benchmark_input_integrity": {
+    "unique_files_rechecked": 677,
+    "changed": 0,
+    "missing": 0,
+    "conflicting_hashes": 0,
+    "scope": "Recorded read-only filelists, RTL files and included headers; no upstream source was edited."
+  }
+}

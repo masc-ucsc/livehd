@@ -1077,3 +1077,30 @@ native-deferred Hotmux exclusivity obligation in each design.
 A read-only remote check still reports upstream master at `8bea45dc2` after
 these measurements. CORE-ET/CVA6 block proofs remain in progress; DINO completion
 does not stand in for that separate matrix.
+
+### Refreshed preservation snapshot after DINO and general-fold proofs
+
+[MASTER_CURRENT_PRESERVATION.json](tests/MASTER_CURRENT_PRESERVATION.json)
+refreshes both earlier source ledgers at `bb7e96670` without replacing their
+historical snapshots. All 117 PR-change paths and all 87 original B1/B2
+contribution paths have a current hash and disposition. Of the PR paths, 96
+remain byte-identical to the PR endpoint; the remaining paths retain explicit
+upstream adaptations, added validation, or the approved lowering/proof work.
+Sixteen paths changed after the initial port ledger snapshot and are explained
+individually. The 17 recovered benchmark scripts/wrappers remain present.
+
+All 22 formal Lean files from the PR are still byte-identical, including the
+primitive model, certificate vocabulary, and compiler correctness proofs.
+All nine Compiler modules also match the original B1/B2 branch. `NaryBridge`
+is an additional proof module. Every native LEC file other than the previously
+approved linker-smoke BUILD/test changes matches upstream; that smoke test itself
+matches the PR. The audit also checks 3,689 upstream graph, frontend,
+normalization, contract-named and warning-policy files for exact retention.
+This source check does not claim semantic equivalence for arbitrary upstream
+changes, and it does not include the later D2/D3/D4/Futamura migrations.
+
+The earlier seven unresolved Isabelle source losses have separate restoration
+commits and a recorded checkpoint. General Isabelle fast/certificate equivalence
+remains incomplete; no additional Isabelle work is included here. Rechecking
+677 distinct recorded benchmark input files found no missing or changed files
+and no conflicting recorded hashes. CORE-ET/CVA6 proofs remain in progress.
