@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "snapshot_head": "bb7e96670099d4cbcc953833946b36a003185db2",
+  "snapshot_head": "c3308e2c17f9a289ceb50b9f22d8642904cfae6b",
   "upstream": "8bea45dc2aa9aab4d8b279db11a8887c52c1108d",
   "pr": "3685a977ee5be31f5939c83617f1264e2d9ddaab",
   "b1b2": "b04288cca51f79fc663ca2e49c54e1fae6e7f221",
@@ -11,8 +11,8 @@
     "MASTER_BRANCH_PRESERVATION.json"
   ],
   "pr_change_count": 117,
-  "pr_exact_at_snapshot": 96,
-  "pr_followup_changes": 16,
+  "pr_exact_at_snapshot": 86,
+  "pr_followup_changes": 26,
   "pr_files": [
     {
       "path": ".github/workflows/ubuntu.yml",
@@ -177,8 +177,9 @@
       "path": "pass/lean/CVA6_COVERAGE_PLAN.md",
       "pr_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d",
       "initial_port_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d",
-      "snapshot_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d",
-      "status": "preserved-exactly"
+      "snapshot_blob": "17918a1883f049b7052e25e21a39af8d246a426c",
+      "status": "reviewed-followup",
+      "explanation": "Preserve the historical inventory reference using an external document name without a personal absolute path."
     },
     {
       "path": "pass/lean/FUTAMURA_PROJECTIONS.md",
@@ -219,8 +220,9 @@
       "path": "pass/lean/LEGACY_REFACTOR.md",
       "pr_blob": "8e4401b99611da2b4ac328529af8683b818665ae",
       "initial_port_blob": "8e4401b99611da2b4ac328529af8683b818665ae",
-      "snapshot_blob": "8e4401b99611da2b4ac328529af8683b818665ae",
-      "status": "preserved-exactly"
+      "snapshot_blob": "c8b2f151f4dfe7a382cf55f4494e8afc69cf7e6a",
+      "status": "reviewed-followup",
+      "explanation": "Document bounded inherited records, preserved named fields and values, and the changed positional constructor/Repr representation."
     },
     {
       "path": "pass/lean/LEGACY_SEMANTIC_AUDIT.md",
@@ -233,7 +235,7 @@
       "path": "pass/lean/MASTER_INTEGRATION.md",
       "pr_blob": "a16379c09d909474117db6db8be386885b7aa434",
       "initial_port_blob": "475e226d57fbab5c69545785cd12aa70e886a570",
-      "snapshot_blob": "9523ef72410b04c59a2d73ebc0470182ebd017d1",
+      "snapshot_blob": "39f70ef0756a70d568106300a1f4413195e9c844",
       "status": "reviewed-followup",
       "explanation": "Append dated decisions, recovery audit and fresh validation results; retain prior report as historical evidence."
     },
@@ -241,15 +243,17 @@
       "path": "pass/lean/PASS_LEAN_RESTRUCTURE_PLAN.md",
       "pr_blob": "460811c46308cf7cca32019e543a1c08101ea531",
       "initial_port_blob": "460811c46308cf7cca32019e543a1c08101ea531",
-      "snapshot_blob": "460811c46308cf7cca32019e543a1c08101ea531",
-      "status": "preserved-exactly"
+      "snapshot_blob": "06f32c82b585e1daef4ba9a2f469b4c89db30728",
+      "status": "reviewed-followup",
+      "explanation": "Preserve L0-L8 instructions; make the worktree example use explicit source/destination variables instead of personal absolute paths."
     },
     {
       "path": "pass/lean/README.md",
       "pr_blob": "c3dd5d058f8cc0acfad010d387aaad6cec10d992",
       "initial_port_blob": "c3dd5d058f8cc0acfad010d387aaad6cec10d992",
-      "snapshot_blob": "c3dd5d058f8cc0acfad010d387aaad6cec10d992",
-      "status": "preserved-exactly"
+      "snapshot_blob": "001dc53b65fe650ec9a76e5b4891327c634450fb",
+      "status": "reviewed-followup",
+      "explanation": "Name the external CORE-ET checkout without a personal absolute path."
     },
     {
       "path": "pass/lean/STEP5_BRIDGE_BUGS.md",
@@ -276,8 +280,9 @@
       "path": "pass/lean/VERIFIED_COMPILER_STATUS.md",
       "pr_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d",
       "initial_port_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d",
-      "snapshot_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d",
-      "status": "preserved-exactly"
+      "snapshot_blob": "2e69c4cec14743f7b587ee0ea1cafb5df610a15a",
+      "status": "reviewed-followup",
+      "explanation": "Preserve historical compiler results and name the external plan without a personal absolute path."
     },
     {
       "path": "pass/lean/certificate_builder.hpp",
@@ -365,15 +370,15 @@
       "path": "pass/lean/emit_legacy_fast_bridge.cpp",
       "pr_blob": "5063858f93331e447cd1ff92f765dd3eb91aec7d",
       "initial_port_blob": "5063858f93331e447cd1ff92f765dd3eb91aec7d",
-      "snapshot_blob": "aec0a470ea0d55a32401f019859677badaad8825",
+      "snapshot_blob": "4b6ccfddab0cf172c0a36f56e17dca3a9e3cd41b",
       "status": "reviewed-followup",
-      "explanation": "Add general mixed-width And/Xor/Sum proof dispatch for previously refused arities; fast-model expressions and primitive evaluation unchanged."
+      "explanation": "Add general mixed-width And/Xor/Sum proof dispatch and a nonempty Or lemma to avoid expensive zero matching; fast-model expressions and primitive evaluation unchanged."
     },
     {
       "path": "pass/lean/emit_legacy_fast_bridge.hpp",
       "pr_blob": "4fa1ce340d6b31e52585f3df3df1191647d73ace",
       "initial_port_blob": "4fa1ce340d6b31e52585f3df3df1191647d73ace",
-      "snapshot_blob": "10bee9a5bd520c14e7fd536130d1abfbe3d3e49a",
+      "snapshot_blob": "fdb2283d8ad3218366974b4111a509861a1220d3",
       "status": "reviewed-followup",
       "explanation": "Expose the predicate selecting the additional proof-library import."
     },
@@ -409,8 +414,9 @@
       "path": "pass/lean/emit_legacy_schema.cpp",
       "pr_blob": "95ba0666f799c5af7364f881b8b6899be4407380",
       "initial_port_blob": "95ba0666f799c5af7364f881b8b6899be4407380",
-      "snapshot_blob": "95ba0666f799c5af7364f881b8b6899be4407380",
-      "status": "preserved-exactly"
+      "snapshot_blob": "87b7254f5759d429b230134ebbed77dbcb921be7",
+      "status": "reviewed-followup",
+      "explanation": "Bound physical records at 64 fields using inherited chunks; exact ordered field/type preservation, universal fixture conversions and full reproofs are recorded."
     },
     {
       "path": "pass/lean/emit_legacy_schema.hpp",
@@ -423,7 +429,7 @@
       "path": "pass/lean/graph_access.cpp",
       "pr_blob": "18b9cbfa4099f817d1a6dffd6080e7140f193f0b",
       "initial_port_blob": "6f4b51c4f39a14c0257b8fade2464b679fda5767",
-      "snapshot_blob": "aee41205ddd3d7242f633094ebee3ba97baeb6f0",
+      "snapshot_blob": "452a73f9b6102c81542e0a7113370da6907eeb62",
       "status": "reviewed-followup",
       "explanation": "Follow one-bit Sext reset wrappers with a positive constant amount; preserve existing primary-input reset restriction and wider-source refusals."
     },
@@ -466,9 +472,9 @@
       "path": "pass/lean/legacy_model.cpp",
       "pr_blob": "91ede7535422269aa8fd69465b32760ec4185837",
       "initial_port_blob": "91ede7535422269aa8fd69465b32760ec4185837",
-      "snapshot_blob": "6fb81acb18e1f809b95fc958282011fec521f7d5",
+      "snapshot_blob": "c55a5092bd2d9fa751ce934ed7307adec1321376",
       "status": "reviewed-followup",
-      "explanation": "Import NaryBridge only when a previously unsupported fold proof needs it."
+      "explanation": "Import NaryBridge and OrBridge only when the generated proof uses their lemmas."
     },
     {
       "path": "pass/lean/legacy_model.hpp",
@@ -481,9 +487,9 @@
       "path": "pass/lean/legacy_model_test.cpp",
       "pr_blob": "dc700e0893107412df52096edd9137c0f461090f",
       "initial_port_blob": "dc700e0893107412df52096edd9137c0f461090f",
-      "snapshot_blob": "b130eadcad0b0910874f9b0a062ffda246247223",
+      "snapshot_blob": "97aa27cca7a06d31c3255c35a0ffb1bfc99dbe9d",
       "status": "reviewed-followup",
-      "explanation": "Add self-contained generated general-fold WF and universal bridge fixtures."
+      "explanation": "Add self-contained general-fold WF and universal bridge fixtures, Or width/arity cases, and large-record preservation and execution fixtures."
     },
     {
       "path": "pass/lean/memory_lowering.cpp",
@@ -531,7 +537,7 @@
       "path": "pass/lean/scripts/op_census.py",
       "pr_blob": "5b620523bad2e82b3128d2e9a21db04ab8e1d1a9",
       "initial_port_blob": "5b620523bad2e82b3128d2e9a21db04ab8e1d1a9",
-      "snapshot_blob": "2e97729e00bc79f0cf5660699519c28c8640d8fa",
+      "snapshot_blob": "386ccedb9042bc49d5576e85c3b79474db318390",
       "status": "reviewed-followup",
       "explanation": "Recognize proved general folds and existing unequal-width signed comparisons; do not reject unknown widths for width-polymorphic bridge lemmas."
     },
@@ -822,54 +828,57 @@
       "path": "scripts/run_cva6_alu_lean.sh",
       "pr_blob": "34308dc4f33cce9aeb913c7d6e87890bee1d2bc0",
       "initial_port_blob": "34308dc4f33cce9aeb913c7d6e87890bee1d2bc0",
-      "snapshot_blob": "34308dc4f33cce9aeb913c7d6e87890bee1d2bc0",
-      "status": "preserved-exactly"
+      "snapshot_blob": "ce279a059e5325ec69574d3fcce7c4468fa90770",
+      "status": "reviewed-followup",
+      "explanation": "Require CVA6_ROOT explicitly; preserve the ALU source derivation, filelist and proof procedure."
     },
     {
       "path": "scripts/run_cva6_complex_lean_stress.sh",
       "pr_blob": "f23a3ec2c6f1808642b2813f3bf5cba26d11c3a2",
       "initial_port_blob": "f23a3ec2c6f1808642b2813f3bf5cba26d11c3a2",
-      "snapshot_blob": "f23a3ec2c6f1808642b2813f3bf5cba26d11c3a2",
-      "status": "preserved-exactly"
+      "snapshot_blob": "83556aa7acc1862b639b6647eea8f7337e9a7b76",
+      "status": "reviewed-followup",
+      "explanation": "Require CVA6_ROOT explicitly and use user-relative Bender lookup; preserve frontend and export procedure."
     },
     {
       "path": "scripts/run_cva6_module_lean_stress.sh",
       "pr_blob": "469894b18b5792b7a1d001d95b25c3e2d6b6ab44",
       "initial_port_blob": "469894b18b5792b7a1d001d95b25c3e2d6b6ab44",
-      "snapshot_blob": "469894b18b5792b7a1d001d95b25c3e2d6b6ab44",
-      "status": "preserved-exactly"
+      "snapshot_blob": "0a3450d0a54d82c5e71e2c2d5ecc704155450c19",
+      "status": "reviewed-followup",
+      "explanation": "Require CVA6_ROOT explicitly and use user-relative Bender lookup; preserve frontend and export procedure."
     },
     {
       "path": "scripts/run_dino_lgraph_lean.sh",
       "pr_blob": "47f661014fd7eb0891bf9d044a413a0827371441",
       "initial_port_blob": "47f661014fd7eb0891bf9d044a413a0827371441",
-      "snapshot_blob": "47f661014fd7eb0891bf9d044a413a0827371441",
-      "status": "preserved-exactly"
+      "snapshot_blob": "2e8905b1646f7e16b137b6f025e7591386af8ea2",
+      "status": "reviewed-followup",
+      "explanation": "Require explicit RTL inputs instead of a personal default and reject directory mismatches with the existing optional native gate; preserve native solver behavior and Lean proof procedure."
     },
     {
       "path": "scripts/run_lean_queue.sh",
       "pr_blob": "24eb32759105c4af9aaa238edeea3a6539ab9a21",
       "initial_port_blob": "24eb32759105c4af9aaa238edeea3a6539ab9a21",
-      "snapshot_blob": "c4b0463ba4aad3d55d147da6ce028ab2d4215132",
+      "snapshot_blob": "e1375eca41f9f00ee2a180e1351cceb6aaf9d376",
       "status": "reviewed-followup",
-      "explanation": "Build NaryBridge and LegacyCertWF explicitly before accepting generated-file proofs."
+      "explanation": "Build NaryBridge, OrBridge and LegacyCertWF explicitly before accepting generated-file proofs; use ELAN_HOME or user-relative Elan lookup."
     }
   ],
   "b1b2_contribution_count": 87,
   "b1b2_disposition_counts": {
     "original-deletion-retained": 2,
     "upstream-documentation-update": 1,
-    "preserved-exactly": 36,
+    "preserved-exactly": 34,
     "preserved-with-added-lemmas": 1,
     "isabelle-source-loss-restored": 7,
     "upstream-native-implementation-retained": 6,
-    "reviewed-lean-followup": 3,
-    "shared-architecture-refactor": 3,
+    "reviewed-lean-followup": 9,
     "superseded-by-shared-architecture": 3,
+    "shared-architecture-refactor": 2,
     "recovered-exactly": 12,
     "recovered-with-driver-adaptations": 5,
     "retired-option-and-portability-adaptation": 1,
-    "retired-option-removal": 3,
     "upstream-driver-adaptation": 4
   },
   "b1b2_contribution_files": [
@@ -1118,8 +1127,9 @@
     {
       "path": "pass/lean/CVA6_COVERAGE_PLAN.md",
       "b1b2_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d",
-      "snapshot_blob": "6bed78aed706996f0685bbf6dcf198d0bd758a7d",
-      "disposition": "preserved-exactly"
+      "snapshot_blob": "17918a1883f049b7052e25e21a39af8d246a426c",
+      "disposition": "reviewed-lean-followup",
+      "explanation": "Preserve the historical inventory reference using an external document name without a personal absolute path."
     },
     {
       "path": "pass/lean/FUTAMURA_PROJECTIONS.md",
@@ -1136,9 +1146,9 @@
     {
       "path": "pass/lean/README.md",
       "b1b2_blob": "ec9e071993ab6ca41bdefb2bbadd6df2269ce8f7",
-      "snapshot_blob": "c3dd5d058f8cc0acfad010d387aaad6cec10d992",
-      "disposition": "shared-architecture-refactor",
-      "explanation": "See MASTER_PORT_PRESERVATION.json and MASTER_INTEGRATION.md. Byte comparison alone does not prove adapter semantics."
+      "snapshot_blob": "001dc53b65fe650ec9a76e5b4891327c634450fb",
+      "disposition": "reviewed-lean-followup",
+      "explanation": "Name the external CORE-ET checkout without a personal absolute path."
     },
     {
       "path": "pass/lean/STEP5_BRIDGE_BUGS.md",
@@ -1161,8 +1171,9 @@
     {
       "path": "pass/lean/VERIFIED_COMPILER_STATUS.md",
       "b1b2_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d",
-      "snapshot_blob": "4fcffa87ac76a74694f7772cc015841a3a1c461d",
-      "disposition": "preserved-exactly"
+      "snapshot_blob": "2e69c4cec14743f7b587ee0ea1cafb5df610a15a",
+      "disposition": "reviewed-lean-followup",
+      "explanation": "Preserve historical compiler results and name the external plan without a personal absolute path."
     },
     {
       "path": "pass/lean/design_cert_export.hpp",
@@ -1197,7 +1208,7 @@
     {
       "path": "pass/lean/scripts/op_census.py",
       "b1b2_blob": "5b620523bad2e82b3128d2e9a21db04ab8e1d1a9",
-      "snapshot_blob": "2e97729e00bc79f0cf5660699519c28c8640d8fa",
+      "snapshot_blob": "386ccedb9042bc49d5576e85c3b79474db318390",
       "disposition": "reviewed-lean-followup",
       "explanation": "Recognize proved general folds and existing unequal-width signed comparisons; do not reject unknown widths for width-polymorphic bridge lemmas."
     },
@@ -1373,9 +1384,9 @@
     {
       "path": "scripts/run_cva6_alu_lean.sh",
       "b1b2_blob": "4e1c48519a262c0196db23d1845638c15cbfa172",
-      "snapshot_blob": "34308dc4f33cce9aeb913c7d6e87890bee1d2bc0",
-      "disposition": "retired-option-removal",
-      "explanation": "Only removed dead formal.lean.normalize option relative to B1/B2."
+      "snapshot_blob": "ce279a059e5325ec69574d3fcce7c4468fa90770",
+      "disposition": "reviewed-lean-followup",
+      "explanation": "Require CVA6_ROOT explicitly; preserve the ALU source derivation, filelist and proof procedure."
     },
     {
       "path": "scripts/run_cva6_cache_memory_lec.sh",
@@ -1401,9 +1412,9 @@
     {
       "path": "scripts/run_cva6_module_lean_stress.sh",
       "b1b2_blob": "0bb12e8f31862c52fe081a0170fb983e2870282a",
-      "snapshot_blob": "469894b18b5792b7a1d001d95b25c3e2d6b6ab44",
-      "disposition": "retired-option-removal",
-      "explanation": "Only removed dead formal.lean.normalize option relative to B1/B2."
+      "snapshot_blob": "0a3450d0a54d82c5e71e2c2d5ecc704155450c19",
+      "disposition": "reviewed-lean-followup",
+      "explanation": "Require CVA6_ROOT explicitly and use user-relative Bender lookup; preserve frontend and export procedure."
     },
     {
       "path": "scripts/run_cva6_vc_sweep.sh",
@@ -1421,16 +1432,16 @@
     {
       "path": "scripts/run_dino_lgraph_lean.sh",
       "b1b2_blob": "a88b75046349012f9f3336e548aa13b93b1791be",
-      "snapshot_blob": "47f661014fd7eb0891bf9d044a413a0827371441",
-      "disposition": "retired-option-removal",
-      "explanation": "Only removed dead formal.lean.normalize option relative to B1/B2."
+      "snapshot_blob": "2e8905b1646f7e16b137b6f025e7591386af8ea2",
+      "disposition": "reviewed-lean-followup",
+      "explanation": "Require explicit RTL inputs instead of a personal default and reject directory mismatches with the existing optional native gate; preserve native solver behavior and Lean proof procedure."
     },
     {
       "path": "scripts/run_lean_queue.sh",
       "b1b2_blob": "24eb32759105c4af9aaa238edeea3a6539ab9a21",
-      "snapshot_blob": "c4b0463ba4aad3d55d147da6ce028ab2d4215132",
+      "snapshot_blob": "e1375eca41f9f00ee2a180e1351cceb6aaf9d376",
       "disposition": "reviewed-lean-followup",
-      "explanation": "Build NaryBridge and LegacyCertWF explicitly before accepting generated-file proofs."
+      "explanation": "Build NaryBridge, OrBridge and LegacyCertWF explicitly before accepting generated-file proofs; use ELAN_HOME or user-relative Elan lookup."
     },
     {
       "path": "scripts/run_vc_sweep.sh",
@@ -1440,14 +1451,18 @@
     }
   ],
   "b1b2_whole_tree_comparison": {
-    "modified": 1134,
-    "identical": 1443,
+    "modified": 1136,
+    "identical": 1441,
     "missing": 256
   },
   "additional_migration_paths": [
     {
       "path": "formal/lean/LeanSemanticPrimitives/Translation/NaryBridge.lean",
       "snapshot_blob": "4a3b484feaf52b368d6a606b6fa8d13368021ba9"
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Translation/OrBridge.lean",
+      "snapshot_blob": "18158f2f4eeb761761d16f2ffdc9a2e89fb82ce5"
     },
     {
       "path": "formal/translation_correctness/Translation_BT.thy",
@@ -1466,8 +1481,12 @@
       "snapshot_blob": "920aff6bff68e40f046081c27b8ca7b54ef1635e"
     },
     {
+      "path": "pass/lean/scripts/large_record_check.sh",
+      "snapshot_blob": "269cf1560b5c0d857f37a0e0588b830e4c594787"
+    },
+    {
       "path": "pass/lean/scripts/nary_bridge_check.sh",
-      "snapshot_blob": "43d2649f5def2addb1140ee119315a71a483b7b3"
+      "snapshot_blob": "2f1b94419e8e1047645036ddb65987eda37c8276"
     },
     {
       "path": "pass/lean/scripts/raw_graph_census.py",
@@ -1486,6 +1505,10 @@
       "snapshot_blob": "978293fce87554e186b71f247381955ce62a3985"
     },
     {
+      "path": "pass/lean/tests/MASTER_CURRENT_PRESERVATION.json",
+      "snapshot_blob": "4b8dec6300a14a3e7cf3e5fc878b23a559c0fb90"
+    },
+    {
       "path": "pass/lean/tests/MASTER_DINO_REPLAY_RESULTS.json",
       "snapshot_blob": "04a3ff66aa91fc8d5bbbe79fd4b9bafc0731f0fc"
     },
@@ -1498,12 +1521,20 @@
       "snapshot_blob": "d8dd075d9871040905ee69ce1e003aa49e4b203f"
     },
     {
+      "path": "pass/lean/tests/MASTER_OR_PROOF_RESULTS.json",
+      "snapshot_blob": "6a9497ea4b0883367121d66b27cf90fed6ced007"
+    },
+    {
       "path": "pass/lean/tests/MASTER_PORT_PRESERVATION.json",
       "snapshot_blob": "dd5ea0d2f57909dfed995811f0e427df3c49b44c"
     },
     {
       "path": "pass/lean/tests/MASTER_PORT_VALIDATION.json",
       "snapshot_blob": "d1b6793be4833313c2f90113fb018504dd6a1d4f"
+    },
+    {
+      "path": "pass/lean/tests/MASTER_RECORD_LAYOUT_RESULTS.json",
+      "snapshot_blob": "f3f714f02bc1587bb0dd288310991278d4bf41a7"
     },
     {
       "path": "pass/lean/tests/MASTER_REPLAY_CONFIGURATIONS.json",
@@ -1524,6 +1555,10 @@
     {
       "path": "pass/lean/tests/legacy_semantic_audit/MaskEndpointPort.lean",
       "snapshot_blob": "917cb40a2b39e5945e5df7a1a1e730b9a7e22594"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/SextCondition.lean",
+      "snapshot_blob": "fecf2dc2300f697e3c9a63a35877d8566d00546d"
     },
     {
       "path": "pass/lean/tests/sweep_tooling_check.py",
@@ -1601,7 +1636,10 @@
   "semantic_and_native_checks": {
     "all_pr_formal_lean_files_byte_identical": 22,
     "all_b1b2_compiler_modules_byte_identical": 9,
-    "additional_lean_module": "Translation/NaryBridge.lean (proof-only)",
+    "additional_lean_modules": [
+      "Translation/NaryBridge.lean (proof-only)",
+      "Translation/OrBridge.lean (proof-only)"
+    ],
     "native_lec_files_byte_identical_to_upstream": 74,
     "lec_build_and_test_exception": "Existing approved static ABC/cvc5 linker smoke configuration and test only; the test is byte-identical to the PR.",
     "upstream_graph_frontend_normalization_contract_and_warning_files_byte_identical": 3689
@@ -1609,6 +1647,8 @@
   "evidence": {
     "adapter_parity": "MASTER_PORT_VALIDATION.json",
     "general_fold_export_parity": "MASTER_NARY_BRIDGE_RESULTS.json",
+    "record_layout": "MASTER_RECORD_LAYOUT_RESULTS.json",
+    "or_proof_scaling": "MASTER_OR_PROOF_RESULTS.json",
     "dino": "MASTER_DINO_REPLAY_RESULTS.json",
     "upstream_failures": "MASTER_UPSTREAM_FAILURE_REPLAY.json"
   },
@@ -1617,12 +1657,5 @@
     "The seven Isabelle source losses were restored in separate commits. General Isabelle fast/certificate equivalence remains incomplete and is not claimed by source recovery.",
     "D2/D3/D4/Futamura are separate later migrations; this audit covers the PR and original B1/B2 contributions.",
     "Upstream missing or modified files outside the original contribution are not restored blindly; their byte differences are not a semantic audit."
-  ],
-  "benchmark_input_integrity": {
-    "unique_files_rechecked": 677,
-    "changed": 0,
-    "missing": 0,
-    "conflicting_hashes": 0,
-    "scope": "Recorded read-only filelists, RTL files and included headers; no upstream source was edited."
-  }
+  ]
 }

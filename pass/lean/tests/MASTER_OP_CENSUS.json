@@ -32890,5 +32890,5 @@
     }
   ],
   "shape_key": "width:signed_bit:arity; values are occurrence counts",
-  "memory_pin_tuple": "name, kind, declared_width, value; wide values are represented by the raw census width"
+  "memory_pin_fields": "Each memory pin is an object with name, kind, width and value; wide values are represented by the raw census width."
 }

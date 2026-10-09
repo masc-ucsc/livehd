@@ -1200,3 +1200,61 @@ uses `PATH`, the supplied `BENDER`, and user-relative Elan/Bender locations.
 No RTL selection, frontend flags, normalization, or proof procedure changes when
 the same input paths are supplied. These are optional benchmark runners, not
 authorization for default tests to inspect sibling repositories.
+
+### Historical successes that no longer reach Lean on master
+
+Nine configurations carrying a historical PROVEN label stop before the Lean
+pass. Each failure reproduces with the same exit and diagnostic category on
+pristine `8bea45dc2`; the full 53-case baseline comparison is in
+[MASTER_UPSTREAM_FAILURE_REPLAY.json](tests/MASTER_UPSTREAM_FAILURE_REPLAY.json).
+The historical labels have different scopes and are retained individually in
+[MASTER_REPLAY_CONFIGURATIONS.json](tests/MASTER_REPLAY_CONFIGURATIONS.json).
+
+| Family | Configuration | Fresh upstream failure |
+| --- | --- | --- |
+| CORE-ET | `minion_dcache_cache_op_unit_l2` | Clock-gate latch-phase refusal |
+| CORE-ET | `minion_dcache_cache_op_unit` | Clock-gate latch-phase refusal |
+| CORE-ET | `minion_dcache_reduce` | Clock-gate latch-phase refusal |
+| CORE-ET | `minion_dcache_tensor_load` | Concat driver wider than its declared lane |
+| CORE-ET | `vpu_trans` | Clock-gate latch-phase refusal |
+| CORE-ET | `prim_write_commit_en` | Clock-gate latch-phase refusal |
+| CORE-ET | `prim_phase_pair_lo_hi` | Clock-gate latch-phase refusal |
+| CVA6 | `pmp_data_if` | Combinational-loop detection |
+| CVA6 | `legacy_cva6_tlb_gate` | Combinational-loop detection |
+
+The clock-phase guard was introduced by upstream `0d26c1d63` to reject
+unsound latch lowering; the Concat lane guard comes from `dc07e3242`. This replay
+preserves both checks. The two combinational-loop failures are reproduced
+upstream, but their complete frontend root causes are not diagnosed here.
+None of these nine is reported as a current successful Lean proof. In
+particular, the historical `minion_dcache_reduce` PROVEN label described the
+verified-compiler procedure, while its legacy scope was only export.
+
+The DINO wrapper additionally checks that its optional native gate and Lean
+export use the same RTL directories. The existing gate accepts only a common
+root with the standard three names, so custom directory overrides require the
+already available explicit `RUN_LEC_GATE=false` mode. Mismatches fail before
+invoking the gate. This prevents an unset common root from selecting the native
+script's historical default while Lean reads custom inputs. The native gate and
+solver are unchanged; its current behavior rejects inconclusive results too.
+
+### Final DINO artifacts: all twelve checks complete
+
+The final bounded-record and Or-proof emitter has now passed every DINO mode.
+[MASTER_DINO_REPLAY_RESULTS.json](tests/MASTER_DINO_REPLAY_RESULTS.json) retains
+the initial twelve-job measurement as a historical checkpoint and records the
+current artifact hashes and proof attempts separately. Full chunked-WF plus
+comb/next/step bridge results are:
+
+| Design | Wall seconds | Peak RSS GiB |
+| --- | ---: | ---: |
+| SingleCycle | 448.670 | 7.779 |
+| Pipelined | 505.790 | 8.797 |
+| DualIssue | 1,092.794 | 11.840 |
+
+Every WF chunk is included; no fallback, missing theorem audit, failed Lean exit
+or `sorryAx` is accepted. The final `intpipe_decode` whole-block bridge also
+passes in 1,602.71 seconds; its previous proof passed in 4,586 seconds. These
+shared-host runs have different recorded scheduling contexts, so the measured
+improvement is not an isolated performance experiment. Corpus reproofs remain
+in progress at this checkpoint; DINO completion does not mark them complete.
