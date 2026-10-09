@@ -6,7 +6,7 @@ set -euo pipefail
 # Validation pipeline (plan Step 5) — order matters:
 #   1. LiveHD compile   RTL -> LGraph
 #   2. LEC gate         prove/classify RTL == LGraph   (run_dino_lgraph_lec_gate.sh)
-#                       REFUTED aborts; INCONCLUSIVE warns (LEC_STRICT=true = hard)
+#                       the current native gate rejects both REFUTED and INCONCLUSIVE
 #   3. pass.lean        LGraph -> Lean model + certificate   (this script)
 #   4. Lean typecheck   lake env lean <Top>_Lgraph.lean      (RUN_LEAN=true)
 #   5. cert bridge      generated model = graph certificate  (per-design theorems)
@@ -38,6 +38,18 @@ DUAL_DIR="${DUAL_DIR:-${HAGENT_BUILD:+$HAGENT_BUILD/build_dualissue_d}}"
 : "${SC_DIR:?set HAGENT_BUILD or SC_DIR to the SingleCycle RTL directory}"
 : "${PIPE_DIR:?set HAGENT_BUILD or PIPE_DIR to the Pipelined RTL directory}"
 : "${DUAL_DIR:?set HAGENT_BUILD or DUAL_DIR to the DualIssue RTL directory}"
+
+# The existing native gate accepts only a common root with these three names.
+# Reject mismatched overrides before it can check different RTL from pass.lean.
+if [[ "$RUN_LEC_GATE" == "true" ]]; then
+  : "${HAGENT_BUILD:?the native gate requires HAGENT_BUILD; for Lean-only custom inputs set RUN_LEC_GATE=false}"
+  if [[ "$SC_DIR" != "$HAGENT_BUILD/build_singlecyclecpu_d" ||
+        "$PIPE_DIR" != "$HAGENT_BUILD/build_pipelined_d" ||
+        "$DUAL_DIR" != "$HAGENT_BUILD/build_dualissue_d" ]]; then
+    echo "FATAL: the native gate uses HAGENT_BUILD's standard directories; custom RTL directories require RUN_LEC_GATE=false" >&2
+    exit 2
+  fi
+fi
 
 OUT="${OUT:-$LIVEHD_ROOT/generated/dino_lgraph_lean}"
 LOG_DIR="$OUT/logs"
@@ -119,13 +131,13 @@ run_design() {
 }
 
 # Step 2 (pipeline order): LEC frontend gate — prove RTL == LGraph before any
-# theorem-prover generation.  REFUTED aborts; INCONCLUSIVE is a recorded warning
-# unless LEC_STRICT=true.  Skip with RUN_LEC_GATE=false (e.g. model-only bring-up).
+# theorem-prover generation. The current native gate rejects both REFUTED and
+# INCONCLUSIVE. Skip with RUN_LEC_GATE=false (e.g. model-only bring-up).
 if [[ "$RUN_LEC_GATE" == "true" ]]; then
   echo "[pipeline] step 2/5: LEC gate (RTL == LGraph) before pass.lean"
   if ! LHD="$LHD" HAGENT="$HAGENT_BUILD" OUT="$OUT/lec_gate" LEC_STRICT="${LEC_STRICT:-false}" \
        bash "$SCRIPT_DIR/run_dino_lgraph_lec_gate.sh"; then
-    echo "FATAL: LEC gate reported REFUTED (or strict INCONCLUSIVE); not generating Lean" >&2
+    echo "FATAL: LEC gate failed or returned an unproved result; not generating Lean" >&2
     exit 3
   fi
 else
