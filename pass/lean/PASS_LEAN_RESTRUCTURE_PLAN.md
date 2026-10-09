@@ -1,14 +1,19 @@
 # `pass.lean` Shared-Architecture and Legacy Refactor Plan
 
-Status: revised after the B1+B2 modular refactor\
-Implementation baseline: `origin/b1-b2-verified-compiler` at `1af4e1492`\
-Primary code: `pass/lean/`\
-Integration branch to create: `refactor/pass-lean-shared-architecture`
+Status: L0-L8 implemented on master; full branch migration and restored-flat
+proof acceptance remain open.
 
-This plan starts from the architecture that now exists. It does not recreate
-`DesignScan`, `CertificateIR`, or the verified compiler exporter under new
-names. The remaining large C++ problem is the 2,717-line
-`pass/lean/legacy_model.cpp` compatibility path.
+Audited implementation: `4342b312bb1aee60cde01e45b04a73de274b997c`.
+Original B1+B2 planning baseline: `1af4e1492`. Primary code: `pass/lean/`.
+
+The shared architecture and legacy extraction described below have landed.
+`legacy_model.cpp` is now 54 lines of orchestration, with separate schema,
+fast-model, GraphCert, WF and bridge emitters. The original phases and baseline
+measurements remain as historical requirements. They do not establish that all
+research branches have migrated or that every restored flat artifact passes.
+[Section 14](#14-current-master-audit-and-corrective-migration-gates) records
+current source preservation, missing work, reproduced failures and acceptance
+gates. Continue development on master without recreating the former PR branch.
 
 ## 1. Terminology: EPRP
 
@@ -96,7 +101,7 @@ The distinction between the two certificate names is important:
 - Legacy `GraphCert` is another presentation of `CertificateIR`; it is not
   allowed to be built independently from HHDS.
 
-## 4. Current Status
+## 4. Historical B1+B2 Baseline Status
 
 The original common-infrastructure phases are no longer proposals:
 
@@ -309,20 +314,21 @@ No behavior-changing fix may be hidden in a move commit. Land a semantic fix in
 a separate commit with a tiny C++ test, a Lean oracle when applicable, and a
 corpus delta report.
 
-## 7. Target File and Bazel Layout
+## 7. Implemented File and Bazel Layout
 
-Keep the existing flat `pass/lean` architecture and add these libraries:
+The current flat `pass/lean` architecture provides these libraries:
 
 ```text
 //pass/lean:lean_graph_scan          existing
 //pass/lean:lean_certificate_ir      existing
-//pass/lean:lean_emitters            existing verified emitter
-//pass/lean:lean_legacy_schema       planned
-//pass/lean:lean_legacy_fast_model   planned
-//pass/lean:lean_legacy_graph_cert   planned
-//pass/lean:lean_legacy_cert_wf      planned
-//pass/lean:lean_legacy_bridge       planned
-//pass/lean:lean_legacy_emitter      planned orchestration
+//pass/lean:lean_format              shared formatting only
+//pass/lean:lean_emitters            verified emitter
+//pass/lean:lean_legacy_schema       implemented
+//pass/lean:lean_legacy_fast_model   implemented
+//pass/lean:lean_legacy_graph_cert   implemented
+//pass/lean:lean_legacy_cert_wf      implemented
+//pass/lean:lean_legacy_bridge       implemented
+//pass/lean:lean_legacy_emitter      implemented orchestration
 //pass/lean:pass_lean                EPRP registration only
 //pass/lean:lean_export_tests        shared tests
 ```
@@ -413,17 +419,22 @@ mapping.
 
 ### IVP, D3, D4, and FP
 
-IVP is reusable Lean infrastructure and should be merged only after checking it
-does not make definitional reductions used by legacy proofs opaque.
+IVP is reusable Lean infrastructure. Its model/refinement definitions and
+definitional-equality probe are already preserved on master (section 14); do
+not overwrite them with old branch copies.
 
 D3 must reify or validate the canonical `DesignCert`; it gets no C++ exporter.
 D4 serializes and loads the canonical certificate; it gets no graph traversal.
 FP treats `DesignCert` as the static source program for specialization; it gets
 no fork of `pass_lean.cpp`.
 
-## 9. Integration Order
+## 9. Historical Integration Order
 
-Create a clean worktree from the completed modular commit:
+The following command records the original isolated PR workflow. That refactor
+is now on master; do not create this historical branch again. Section 14
+specifies the remaining migrations on master.
+
+Original worktree creation:
 
 ```bash
 cd "$LIVEHD_SOURCE"
@@ -441,7 +452,8 @@ Execute in this order:
 5. L7-L8: isolate the optional bridge and delete graph-coupled legacy state.
 6. Integrate D2 schema/semantics without adding another exporter.
 7. Integrate D4 transport over the same certificate.
-8. Rebase Lean-only D3, IVP, CE, and FP experiments as consumers.
+8. Port D3, IVP, CE, and FP as consumers, preserving their independent proofs
+   and accounting for branch tooling. Current dispositions are in section 14.
 
 Do not start from `direction-2-ir-semantics`; doing so would discard the newer
 owned scan and typed Certificate IR already validated across the saved corpus.
@@ -512,8 +524,9 @@ The completed nested-record proofs remain historical evidence, not acceptance
 of the restored flat artifacts. See [MASTER_INTEGRATION.md](MASTER_INTEGRATION.md).
 
 The standalone 128-field allocator crash is fixed in the tested Lean 4.34.1
-release; [upstream PR #7786](https://github.com/leanprover/lean4/pull/7786)
-merged that allocator change. A separate constructor-field limit still applies.
+release. [Upstream PR #7786](https://github.com/leanprover/lean4/pull/7786)
+upgraded the allocator, but this audit has not established that commit as the
+cause of the observed fix. A separate constructor-field limit still applies.
 The exactly-256-field boundary also has a distinct
 [checking fix, PR #15075](https://github.com/leanprover/lean4/pull/15075).
 Neither fix provides support for arbitrarily large executable flat records.
@@ -526,3 +539,248 @@ Neither fix provides support for arbitrarily large executable flat records.
 | U3 | After U2 | Repeat standalone 64/128-field Nat and BitVec execution tests and constructor-boundary diagnostics. Recheck the original schemas for CORE-ET `txfmactl_top` (289 state fields) and CVA6 `bht` (256), `csr_regfile` (534), `fpu_wrap` (282), `frontend` (409), and `issue_stage` (326). Record an unsupported flat constructor as a limitation; ask the user to decide any representation change separately. Do not substitute nesting, `noncomputable`, skipped execution, or weaker proofs silently. |
 | U4 | After U2/U3 | Replay the recorded 186 CORE-ET/CVA6 configurations and all three DINO designs. Cover the 341 previously accepted artifact/mode pairs, all DINO verified-compiler, legacy-fast, full chunked-WF, and full bridge checks. Record each failure/refusal explicitly. Preserve the 53 upstream compile/normalization dispositions; do not change native LEC or frontend guards to make the matrix pass. |
 | U5 | After U4 | Record exact toolchain/dependency commits, source and artifact hashes, `/usr/bin/time -v` wall time/RSS, theorem/axiom audits, and unresolved cases. Require all chunks and complete comb/next/step bridge theorems, no missing audit, fallback, or `sorryAx`. Compare flat models and certificates with the preserved baseline; bring any semantic difference to the user before changing it. Full legacy acceptance remains open wherever the flat-record limit prevents execution or typechecking. |
+
+
+## 14. Current master audit and corrective migration gates
+
+### 14.1 Snapshot, evidence and preservation boundary
+
+This audit examined `4342b312b`. A read-only remote query reported master at
+`94c5967c6`; `8bea45dc2` remains the historical pristine upstream comparison
+base, not the current remote tip. No fetch, rebase, push, toolchain upgrade or
+semantic implementation change was performed by this audit.
+
+[MASTER_REBASE_AUDIT.json](tests/MASTER_REBASE_AUDIT.json) records full commit
+IDs, all 21 inspected branch refs, contribution counts, missing Lean/script
+paths, reproduction inputs and hashes, results and required gates. Counts
+compare each branch's contribution against its merge base, rather than treating
+every old inherited file as work to recover. Identical blobs establish source
+retention, not theorem validity or RTL equivalence. The independent Futamura
+checkout is recorded separately because its local ref is stale.
+
+The PR preservation boundary remains intact:
+
+- All 117 PR change entries are present; 87 remain byte-identical to the PR
+  endpoint. The remaining files include documented adapter, test, tooling and
+  report follow-ups, not unexplained omissions.
+- Of 87 B1/B2 contribution entries, 82 are present and 52 byte-identical. The
+  five absent entries have recorded dispositions: two original deletions and
+  three old exporters superseded by the shared architecture.
+- All 22 PR formal Lean files and nine B1 compiler modules remain byte-identical.
+  IVP's `LGraphModel`, `GraphRefine` and `defeq_probe` are also preserved exactly.
+- The 74 protected native LEC files and 3,689 protected upstream graph,
+  frontend, normalization, contract and warning-policy files match `8bea45dc2`
+  under the audit's recorded exclusions for existing approved build repairs.
+- The restored flat schema emitter matches its original pre-nesting version.
+  Shared `lean_format` is already split out; `normalize` is already removed.
+
+The old 117-file PR ledger cannot detect work omitted before the PR endpoint.
+Likewise a stale branch name cannot inventory an independent live checkout.
+Use the contribution inventory and a destination/disposition ledger for every
+migration. Review modified files and deleted files as well as new files;
+never count absence alone as evidence that every old file must be restored.
+
+### 14.2 Direction disposition and landing order
+
+| Direction / audited source | Current disposition | Remaining gate |
+| --- | --- | --- |
+| B1+B2 `b04288cca`, PR `3685a977e` | Shared architecture and L0-L8 preserved; adapter follow-ups recorded | Keep preservation boundary and replay current artifacts |
+| D2 clean `c21200e0c` | Not landed: 38 Lean contribution files and 30 script paths absent; 16 Lean contributions differ | Port full clock/async/memory schema, eight Direct modules and validation tools; do not replay 133 commits or overwrite current Compiler copies |
+| D3 `78a3e0d8c` | Not landed: 82 Lean contribution files absent; 13 differ | Recover translation validation, definition splits, bounded-amount repairs and memory/flop/scaling evidence with current schema proofs |
+| D4 `f6ad1fe29` | Not landed: 125 Lean contribution files absent; 15 differ; transport tooling absent | Recover slot/runtime repairs, total parser/renderer roundtrip and C++ serializer/publication as shared-IR consumers |
+| FP actual checkout `9bb41a09d` | All 67 Projection files, including 38 Lean modules, absent | Explicit semantic-pin migration and independent theorem rebuild; local `projection` ref `aa2f8134a` is not this implementation |
+| IVP `827e53233` | Core model/refinement and defeq probe already retained | Keep definitions transparent; validate current legacy proofs after future changes |
+| VS `aa2f8134a` | No unique staged-compiler implementation found | Superseded by B1+B2 unless distinct evidence is recovered |
+| CE `e7947110e` | Gate-1 cost study only; two probe files absent | Recover `GATE1_DERIVATION_COST.md` and `mkgate.py` as research evidence; do not claim a complete elaborator or DINO proof |
+| CL `07319df15`, GP `f22f9812e` | Geometry/layout modules, frontend tool and findings absent | Record as separate pending certificates/research; do not fold them into RTL DesignCert semantics |
+| Historical Lean certificate/translation/CVA6/CORE-ET refs | Inventoried; overlapping old exporter/model copies | Account for unique results/tooling without restoring superseded graph traversal |
+| Isabelle | Previous source restoration/audit checkpoint retained | No new Isabelle proof acceptance claimed; current work remains focused on Lean |
+| ACL2/Rocq | Inventoried as separate backend branches | Deferred from this Lean migration; no implicit backend port |
+
+Land migration slices on master in this order: first repair proof/replay
+acceptance tooling; then port D2 schema with compatibility proofs; then reconcile
+D3/D4 shared runtime repairs and narrow module imports; then port versioned D4
+transport; then migrate FP with an explicit semantic pin. CE/CL/GP evidence has
+its own disposition and does not block the production compiler by pretending
+those experiments are implemented. At each slice preserve current adapter,
+Hotmux/Concat, reset, signed-rendering and legacy-bridge fixes; maintain one
+scan, memory lowering and certificate builder. The user-owned upgrade in
+section 13 is a separate prerequisite for acceptance of affected flat models.
+
+### 14.3 Clock, reset and memory schema gap (A02)
+
+The current scan captures clock pins, but `FlopDriver`, `MemoryDriver` and the
+Lean certificate omit clock-domain/edge metadata. A fresh two-posedge-clock
+fixture exports and typechecks. Its interpreter changes old flop values
+`#[1, 2]` to `#[7, 9]` in one logical step. Clock input levels are not edge
+vectors: this model cannot express firing only A while B holds. The generic
+compiler theorem proves agreement with this clockless interpreter; it does not
+prove independent RTL clock behavior. Upgrading Lean does not fix this gap.
+
+Until D2 lands, require a deliberate choice between refusing unsupported clock
+configurations and explicitly documenting an all-domains-fire interpretation;
+do not infer either contract silently. Port D2's complete metadata: `ClockDesc`,
+`DesignCert.clocks`, `FlopDesc.clock` **and `asyncReset`**, `MemoryDesc.clock`,
+`ClockEdges` and the `fires`/`allEdges` rules. Include DirectCheck's clock-range,
+async-flag and edge-consistency checks, edge-independent asynchronous reset,
+quiet-domain hold and memory clock behavior. Prove existing default certificates
+agree under `allEdges`, then re-emit and compare the current corpus. The old
+54/147 `asyncFlagMismatch` count is historical, not a measured current result.
+Any asynchronous Q-read/reset difference from the preserved model must be
+presented to the user before adopting changed semantics.
+
+### 14.4 Runtime repairs are code migrations, not Lean upgrade fixes (A03/A04)
+
+Small current-model probes reproduce `Nat.pow exponent is too big` for SHL,
+SRA and Sext with amount `8589934576`. The SHL certificate first reports
+`compilesOk = true`; compiled execution then panics. Normal small/boundary
+controls pass. D3 commit `936870351` and D4 commit `2d98f605e` contain bounded
+implementations and eager-semantics equality proofs absent from current master.
+Port one consistent version, not both overlapping module copies. Guard SHL by
+result width, SRA by source width with sign saturation, and preserve Sext's
+zero/source-width/out-of-range cases. Rebuild the recorded equivalence theorems
+for evaluator, denotation and residual semantics; test zero, exact boundary,
+large amounts and the original runtime blocks. These branch proof sources were
+inspected, not rebuilt in this audit.
+
+Current `slotsFrom 0 108666` succeeds under `#eval` but overflows in `lean --run`
+at an 8192 KiB main-thread stack. D4 commit `5d5239411` supplies an accumulator
+and `slotsFrom_eq_range'`, preserving membership/uniqueness interfaces. Port it
+with equality proofs and rerun the main-thread and large hpdcache runtime gates.
+Do not claim a universal failure from the successful worker-thread `#eval` case.
+
+D3's `*Defs` splits, narrower imports and D3/D4 memory/flop/scaling modules also
+need destination entries and fresh branch-specific gates. The existing
+186-configuration export matrix does not cover every branch runtime procedure.
+Add those cases, inputs, modes and required theorem identities to the replay
+manifest before claiming all earlier progress reproduced.
+
+### 14.5 D4 transport and FP compatibility (A05/A06)
+
+D4 is not Lean-only: it also has a C++ DCERT1 serializer, serializer/parity
+checks, runtime scripts and `atomic_publish.hpp`. Its Lean parser is total,
+and `CertIORoundTrip` proves `parseCert (renderCert D) = .ok D`. The old plan's
+partial/unverified parser description is stale. That theorem covers the Lean
+renderer/parser pair; it does not prove the C++ encoder agrees or establish the
+provenance of arbitrary external bytes. Port the serializer as a consumer of
+`CertificateIR`, preserving canonical slot/opcode/constant encodings, refusals
+and parity tests; never copy the old graph-coupled exporter.
+
+DCERT1 omits clock, asynchronous-reset flag and memory-clock fields. Its old
+roundtrip proof therefore cannot cover all post-D2 certificates unchanged.
+Choose a versioned metadata-complete format with compatibility tests, or refuse
+unsupported metadata explicitly; do not decode missing fields into defaults
+and call that general equivalence. Preserve the staged-write/rollback tests.
+The original two-file publication procedure is not crash-atomic as a pair.
+
+The actual FP checkout pins shared semantics to `90583be13`, not to a moving
+tracking target. Seven of eight shared files are identical to that pin; the
+model's `bv_shl_step` overlay has three universal `rfl` checks. Replace the
+old automatic-repin instruction with an explicit equivalent-preserving schema
+migration, overlay checks, all 38 module builds and theorem audits. Keep the
+FP correctness path independent of Compiler implementation imports, so later
+cross-track comparisons remain independent.
+
+### 14.6 Runner and proof-acceptance corrections (A08-A11/A13)
+
+These are required repairs to the Lean tooling; native `lhd lec` remains
+unchanged:
+
+| Finding | Fresh evidence | Required correction and regression |
+| --- | --- | --- |
+| Retired `formal.strict` forwarded to native LEC | Current native invocation exits 2 with usage error; CORE-ET runner continues after nonzero LEC, even when strict was requested | Remove only obsolete runner setting; classify PROVEN/REFUTED/UNKNOWN/usage/infrastructure and fail required gates. Keep Lean's separate `formal.lean.strict` export option |
+| Patch-map presence guard insufficient | A copied script with a map for another checkout exits 0 and uses original unpatched sources | Check logical source root, source/derived hashes and every required substitution; refuse stale/mismatched maps |
+| Queue audit based on line counts | Copied queue with fake tools reports PROVEN for `unrelated.theorem` using `untrusted_axiom`; sequential next/step audits absent | Require exact identities, complete required comb/next/step and chunk/global-WF theorem set, and an explicit axiom policy. Test wrong identity, missing audits/chunks, custom axiom, imported sorry and native failures alongside a positive control |
+| Positive node-count gate rejects valid empty graph | One-source, zero-node constant-output export typechecks with its step theorem and no `sorryAx` | Accept valid source-only certificates while retaining WF and compiler theorem checks |
+| Hotmux status not retained at export boundary | Separate census/compile diagnostics exist, but shared lowering erases Hotmux identity in certificate artifacts | Carry origin and native-proved/deferred/refuted one-hot status into export diagnostics or sidecar; do not imply the priority-value proof proves one-hotness |
+| Malformed Hotmux pin order can assert | Adapter calls graph helper with dense-pin assertion before validating layout | Prevalidate adapter inputs; add gapped/malformed-pin structured-refusal controls without changing graph helper/native semantics |
+
+The fake-tool queue probe demonstrates an acceptance bug, not a forged Lean
+proof. The frozen one-time replay's separate theorem-identity checks must not
+be conflated with this weaker live queue. The repaired policy must explicitly
+account for trusted standard axioms and generated `native_decide` facts; banning
+all reduction axioms is not a substitute for defining the proof trust boundary.
+The inline CORE-ET Lean runner must also build exact imported library modules
+or use the shared queue, rather than relying on potentially stale `.olean`s.
+
+Patch provenance must record both declaration-reorder repairs and both
+output-logic insertions in the current patcher. The older 125-configuration
+CORE-ET matrix already contains 44 configurations using patched sources; the
+separate 122-module unpatched triage invalidation does not invalidate that
+whole matrix. Keep protocol, patched input hashes, binary hashes and proof
+status separate. A zero unsupported-op census applies only to observed graphs:
+the 189-configuration census observed 160 graphs and could not observe 29.
+Do not infer absent Rem/LUT/Rxor/Popcount use in those unobserved designs.
+
+### 14.7 Inherited signed Div and approved Rem policy (A12)
+
+The IR has UDiv but no SDiv; Div currently maps to UDiv regardless of sign.
+A fresh legacy signed division fixture evaluates `-32 / 3` to `74`, rather
+than the signed quotient's 8-bit representation `246`. This is inherited,
+not introduced by the refactor. The verified export also emits UDiv, but its
+`_compiles` theorem fails because CompileOp does not support division; it is
+not a successful verified-compiler equivalence proof. The current native
+encoder selects signed division from operand signedness and handles mixed
+widths; changing only the result-sign branch would be insufficient.
+
+Record the discrepancy and bring any semantic correction to the user before
+implementation. Require signed/unsigned/mixed-width value oracles, IR plumbing,
+primitive/compiler coverage and differential tests for an approved repair.
+The approved Rem policy remains **constant nonzero divisor only**, refusing
+zero and dynamic divisors unless a future explicit nonzero theorem justifies
+them. Do not implement signed Rem through UDiv or adopt solver-only `% 0`
+behavior as upstream execution semantics.
+
+### 14.8 Restored-flat acceptance and replay (A07)
+
+Of the 341 restored current artifact hashes, 328 match historical successful
+logs and 13 lack such evidence. Hash matches alone are not fresh acceptance
+against the current matching toolchain/library. The 22 withdrawn nested proofs
+remain historical. Four old RUNNING statuses below are stale records; no
+associated proof jobs were active during the audit.
+
+| Family / mode | Current artifacts without an exact-hash successful result | Disposition |
+| --- | --- | --- |
+| CORE-ET legacy-fast | `txfmactl_top` | Recorded flat-constructor failure |
+| CVA6 legacy-fast | `csr_regfile`, `fpu_wrap`, `frontend`, `issue_stage` | Recorded flat-constructor failures |
+| CORE-ET legacy-bridge | `txfma_wallace1`, `txfma_wallace2` | Unfinished historical attempts, not active runs |
+| CVA6 legacy-bridge | `legacy_cva6_alu_export`, `legacy_cva6_pmp_gate` | Unfinished historical attempts, not active runs |
+| CORE-ET legacy-bridge | `txfma_c0`, `vpu_ml`, `vpu_tensorfma` | Restored-flat/new-Or proof combination lacks completed result |
+| DINO legacy-bridge | `PipelinedDualIssueCPU` | Restored-flat/new-Or proof combination lacks completed result |
+
+Fresh declaration probes on Lean 4.31.0 and installed 4.34.1 accept 255 and
+256 Nat fields and reject 257 with `constructor ... has too many fields`.
+Declaration success does not establish safe execution at 256, including the
+separate exactly-256 metadata bug. The limit applies to constructor fields,
+not a general 256-flop promise: input/output, memories and synthesized state
+can create other large records. Measure each actual schema and execution
+boundary after the user's matching Lean/Mathlib upgrade. Preserve flat records;
+do not reintroduce nesting or change the model to bypass the limit.
+
+Replay the 186 CORE-ET/CVA6 configurations, all three DINO variants and recovered
+branch-specific runtime cases. Each DINO needs verified compiler, legacy-fast,
+**full** chunked-WF and **full** bridge checks with exact theorem audits and
+`/usr/bin/time -v` wall/RSS. Keep upstream failures/refusals explicit and
+separate from Lean proof results. Do not weaken native LEC, reset/memory guards,
+proof completeness or refusal behavior to improve acceptance counts.
+
+### 14.9 Audit validation and completion conditions
+
+This audit rebuilt the optimized tools and passed the three Lean Bazel test
+targets (cached results), five sweep-tooling checks and six Hotmux-oracle checks.
+The inspected runners pass shell syntax checks. The small source-only and
+two-clock exports typecheck; runtime panic, stack, stale-map and queue-audit
+probes have explicit inputs/results/hashes in the evidence record. Six
+constructor declaration probes cover two installed toolchains. No full DINO,
+CORE-ET/CVA6, source-branch theorem suite or native regression replay was
+performed by this audit. No implementation or toolchain pins were changed.
+
+Acceptance remains open until each migration contribution has a destination or
+explicit disposition, every semantic adaptation has the required equivalence
+proof/user decision, and the current replay satisfies its complete gates.
+Optional future directory grouping also requires Lean import and BUILD updates
+and hash/proof checks; a compiling module move cannot always be content-free.
+The no-graph-header emitter boundary follows sections 3 and L3-L8, not a
+nonexistent P5 phase. Keep any shared legacy naming/value helpers in a neutral
+layer if disentangling the current GraphCert-to-fast-model helper dependency;
+this layering cleanup is lower priority than the acceptance defects above.

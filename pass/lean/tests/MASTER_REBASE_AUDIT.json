@@ -1,0 +1,2272 @@
+{
+  "schema_version": 1,
+  "snapshot_head": "4342b312bb1aee60cde01e45b04a73de274b997c",
+  "historical_pr_endpoint": "3685a977ee5be31f5939c83617f1264e2d9ddaab",
+  "historical_upstream_base": "8bea45dc2aa9aab4d8b279db11a8887c52c1108d",
+  "observed_remote_master": "94c5967c664e5089c204a857a8db06a8f2f7c43e",
+  "scope": "Read-only implementation/branch audit and self-contained probes. This record does not claim complete migration, fresh full benchmark proofs, RTL equivalence, or branch proof-library rebuilds.",
+  "protection_checks": {
+    "native_lec": {
+      "count": 74,
+      "differences": []
+    },
+    "protected_upstream": {
+      "count": 3689,
+      "differences": []
+    },
+    "pr_formal_lean": {
+      "count": 22,
+      "differences": []
+    },
+    "b1_compiler": {
+      "count": 9,
+      "differences": []
+    },
+    "schema_restored": true,
+    "legacy_orchestration_lines": 54
+  },
+  "preservation_ledgers": {
+    "MASTER_PORT_PRESERVATION.json": {
+      "entries": 117,
+      "present": 117,
+      "byte_identical_to_source": 87,
+      "missing": []
+    },
+    "MASTER_BRANCH_PRESERVATION.json": {
+      "entries": 87,
+      "present": 82,
+      "byte_identical_to_source": 52,
+      "missing": [
+        {
+          "path": ".claude/skills/prove-cert-equivalence/SKILL.md",
+          "recorded_disposition": "original-deletion-retained"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean",
+          "recorded_disposition": "original-deletion-retained"
+        },
+        {
+          "path": "pass/lean/design_cert_export.hpp",
+          "recorded_disposition": "superseded-by-shared-architecture"
+        },
+        {
+          "path": "pass/lean/verified-compiler.cpp",
+          "recorded_disposition": "superseded-by-shared-architecture"
+        },
+        {
+          "path": "pass/lean/verified-compiler.hpp",
+          "recorded_disposition": "superseded-by-shared-architecture"
+        }
+      ]
+    }
+  },
+  "branch_contribution_inventory": [
+    {
+      "branch": "b1-b2-verified-compiler",
+      "tip": "b04288cca51f79fc663ca2e49c54e1fae6e7f221",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 51,
+      "commits_master_only": 337,
+      "all_contribution_files": 87,
+      "lean_contribution_counts": {
+        "identical": 22,
+        "different": 8,
+        "absent": 3
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [
+        {
+          "path": "pass/lean/design_cert_export.hpp",
+          "branch_blob": "f0faff5d5f45a5cb014150b9c8e5db0493a796ad"
+        },
+        {
+          "path": "pass/lean/verified-compiler.cpp",
+          "branch_blob": "3825a0c83f7a2fe787a70554b2c9ba8441f6c903"
+        },
+        {
+          "path": "pass/lean/verified-compiler.hpp",
+          "branch_blob": "908b4c205ab0b56669389086ae4e7867b33b1807"
+        }
+      ],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "refactor/pass-lean-shared-architecture",
+      "tip": "3685a977ee5be31f5939c83617f1264e2d9ddaab",
+      "merge_base": "c54a435156a528d77afab2111bcb337403a0b42a",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 71,
+      "commits_master_only": 93,
+      "all_contribution_files": 117,
+      "lean_contribution_counts": {
+        "identical": 85,
+        "different": 19
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [],
+      "lean_deletions": []
+    },
+    {
+      "branch": "direction-2-ir-semantics",
+      "tip": "de07a9bbc8a5f29c5dedd658cd50c98a40127e7e",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 125,
+      "commits_master_only": 337,
+      "all_contribution_files": 197,
+      "lean_contribution_counts": {
+        "different": 16,
+        "identical": 16,
+        "absent": 37
+      },
+      "new_script_files_absent_from_master": [
+        "scripts/BUILD",
+        "scripts/census_merge.py",
+        "scripts/cert_reemit_diff.sh",
+        "scripts/coreet_d2_census.sh",
+        "scripts/coreet_d2_census_report.py",
+        "scripts/coreet_equiv7.sh",
+        "scripts/coreet_lowering_diffsim.py",
+        "scripts/coverage_ledger.py",
+        "scripts/cycle_provenance.sh",
+        "scripts/lean_local_lake.sh",
+        "scripts/lean_validate.sh",
+        "scripts/lean_validate_join.py",
+        "scripts/lec_gate_verdict.sh",
+        "scripts/lgraph_cycle_stages.sh",
+        "scripts/lgraph_scc.py",
+        "scripts/mem_lean_diffsim.py",
+        "scripts/mutate_check.py",
+        "scripts/mutation_specs/cert_dag_order_sorter.json",
+        "scripts/mutation_specs/lec_gate_proof_signal.json",
+        "scripts/mutation_specs/memory_dependency_model.json",
+        "scripts/mutation_specs/module_params.json",
+        "scripts/mutation_specs/packed_field_intervals.json",
+        "scripts/mutation_specs/split_selfref_debug_stream.json",
+        "scripts/mutation_specs/split_selfref_oracle.json",
+        "scripts/mutation_specs/split_selfref_signed_reader.json",
+        "scripts/mutation_specs/sweep_partial_rows.json",
+        "scripts/mutation_specs/sweep_timeout_cleanup.json",
+        "scripts/packed_field_intervals.py",
+        "scripts/proc_ifx_scc_compare.sh"
+      ],
+      "absent_lean_contributions": [
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectBench.lean",
+          "branch_blob": "8efd85444cebbc2270d8d34950a96d0366d2914b"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectCheck.lean",
+          "branch_blob": "c663255385235396ab692fb25d4d102fa082d23e"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectExamples.lean",
+          "branch_blob": "64cde961f317d9b767fd9f1d374eccbda10ee448"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectSemantics.lean",
+          "branch_blob": "68b614d4868a739889ca7565d2cb3eefe2fe14a2"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectSim.lean",
+          "branch_blob": "a764555c6b4944c40b37bcd679865b097ab603d1"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectTests.lean",
+          "branch_blob": "4846805505c817f4139f95346c3a69f615668851"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectTrace.lean",
+          "branch_blob": "aad0f79cbc4fda045967d6f4df2b4580011c0cf7"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectVsCompiled.lean",
+          "branch_blob": "03d0ba20e7fe6b8e7d6d619eefada9e85b96ac25"
+        },
+        {
+          "path": "formal/lean/Main.lean",
+          "branch_blob": "de75b83ffce9e6db3c86cc4c9e96748dd0858f04"
+        },
+        {
+          "path": "pass/lean/CENSUS_D2_122.tsv",
+          "branch_blob": "2f0d88b8e8531be7d9ea516dc3efa4932718cbaa"
+        },
+        {
+          "path": "pass/lean/CENSUS_D2_122_BASELINE_PROVISIONAL.tsv",
+          "branch_blob": "2ac5068cb8efeb7cd3b5bf8b9e8960c843df36a8"
+        },
+        {
+          "path": "pass/lean/CENSUS_D2_122_MANIFEST.json",
+          "branch_blob": "ba9a416a3052047f8a2efd8442df1c048f2be5be"
+        },
+        {
+          "path": "pass/lean/COREET_MODULES.txt",
+          "branch_blob": "2872a8e27156ece377a792089a4bfd6e5ab7f892"
+        },
+        {
+          "path": "pass/lean/COVERAGE_LEDGER.md",
+          "branch_blob": "56eeb437d1843e278fc177f6d7e89aaa54329a35"
+        },
+        {
+          "path": "pass/lean/CYCLE_PROVENANCE.txt",
+          "branch_blob": "76a90b8af2e2a6315ff786c527a338e33c3261d7"
+        },
+        {
+          "path": "pass/lean/D2_EVIDENCE_OVERRIDES.tsv",
+          "branch_blob": "b96e8f0e0b4d3fdc38c5a5383abd40c935fa739b"
+        },
+        {
+          "path": "pass/lean/DIRECTION2_IMPLEMENTATION.md",
+          "branch_blob": "c15191582356f8e6a5384df80dd261aff2ed7258"
+        },
+        {
+          "path": "pass/lean/DIRECTION2_IR_SEMANTICS.md",
+          "branch_blob": "dc8c8e7f67001da081a44899a4e0965938463ce5"
+        },
+        {
+          "path": "pass/lean/DIRECTION2_RESULTS.md",
+          "branch_blob": "99c0b6ed512aaa8ac7e97924de68965bbaf309ff"
+        },
+        {
+          "path": "pass/lean/EQUIV7_DIFFSIM.txt",
+          "branch_blob": "1009a3e30e1f6dad60276839c73691c82730c83f"
+        },
+        {
+          "path": "pass/lean/GATED_MODULES.tsv",
+          "branch_blob": "5a88afbd4ea08e2234377174db70a2a418311a49"
+        },
+        {
+          "path": "pass/lean/IR_Semantics_pass.cpp",
+          "branch_blob": "cdbac88df5ece2ae5ea2114a83d76419cd560b30"
+        },
+        {
+          "path": "pass/lean/LEAN_ACCEPTANCE.txt",
+          "branch_blob": "09bd4dc0615d26f61606899d3a84ec9261091d23"
+        },
+        {
+          "path": "pass/lean/MODULE_PARAMS.tsv",
+          "branch_blob": "3bf552204f7240e4addab64d6280dabe9efacb67"
+        },
+        {
+          "path": "pass/lean/PR624_REBASE.md",
+          "branch_blob": "f5aac6c4b2bf2bdcc0e81a597ef8b8b04fd6f6fa"
+        },
+        {
+          "path": "pass/lean/SWEEP_direction2.tsv",
+          "branch_blob": "61820f4a7370abe739e67f697b21ebd188b7f3a6"
+        },
+        {
+          "path": "pass/lean/SWEEP_direction2_phaseA.tsv",
+          "branch_blob": "9b5d58de6c4087a9008e55c30aaeb1cca27415c6"
+        },
+        {
+          "path": "pass/lean/SWEEP_direction2_phaseB.tsv",
+          "branch_blob": "44ea108ab6593cb279f71a1ad318f75437eb27fb"
+        },
+        {
+          "path": "pass/lean/SWEEP_multiclock6.tsv",
+          "branch_blob": "6016fb8b2eb47d9f71833036e6514e72c316ef24"
+        },
+        {
+          "path": "pass/lean/SWEEP_single_edge_memory17.tsv",
+          "branch_blob": "1bfd2238cbc58394b1f990de449f4b10e9cf316e"
+        },
+        {
+          "path": "pass/lean/cert_dag_order_test.cpp",
+          "branch_blob": "846cdae0cdf0e8317213abbfc6cfd56299b2670a"
+        },
+        {
+          "path": "pass/lean/design_cert_export.hpp",
+          "branch_blob": "6d16d8d8d75597ac32f999e691459de16da23563"
+        },
+        {
+          "path": "pass/lean/lean_common.cpp",
+          "branch_blob": "18780a9d4254ed8faa36daa4aa7128467ce15df9"
+        },
+        {
+          "path": "pass/lean/lean_common.hpp",
+          "branch_blob": "3a10609d1501ec4e4ad34be732896f4bf7db28d8"
+        },
+        {
+          "path": "pass/lean/scripts/cert_shape_check.py",
+          "branch_blob": "7e4ee96857f81245cfb10c105143fe9126b2aafa"
+        },
+        {
+          "path": "pass/lean/scripts/direct_sweep.py",
+          "branch_blob": "e926527b854df115c01d400e0646c262542829b9"
+        },
+        {
+          "path": "pass/lean/scripts/make_sim_launcher.py",
+          "branch_blob": "829e1a55d5eff4aabdc6a9045e0d469112e7af81"
+        }
+      ],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "direction-2-ir-semantics-clean",
+      "tip": "c21200e0c46dcd06152ce7be968122b33239de57",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 133,
+      "commits_master_only": 337,
+      "all_contribution_files": 224,
+      "lean_contribution_counts": {
+        "different": 16,
+        "identical": 16,
+        "absent": 38
+      },
+      "new_script_files_absent_from_master": [
+        "scripts/BUILD",
+        "scripts/census_merge.py",
+        "scripts/cert_reemit_diff.sh",
+        "scripts/coreet_d2_census.sh",
+        "scripts/coreet_d2_census_report.py",
+        "scripts/coreet_equiv7.sh",
+        "scripts/coreet_lowering_diffsim.py",
+        "scripts/coverage_ledger.py",
+        "scripts/cycle_provenance.sh",
+        "scripts/lean_local_lake.sh",
+        "scripts/lean_validate.sh",
+        "scripts/lean_validate_join.py",
+        "scripts/lec_gate_verdict.sh",
+        "scripts/lgraph_cycle_stages.sh",
+        "scripts/lgraph_scc.py",
+        "scripts/mem_lean_diffsim.py",
+        "scripts/mutate_check.py",
+        "scripts/mutation_specs/cert_dag_order_sorter.json",
+        "scripts/mutation_specs/lec_gate_proof_signal.json",
+        "scripts/mutation_specs/memory_dependency_model.json",
+        "scripts/mutation_specs/module_params.json",
+        "scripts/mutation_specs/packed_field_intervals.json",
+        "scripts/mutation_specs/split_selfref_debug_stream.json",
+        "scripts/mutation_specs/split_selfref_oracle.json",
+        "scripts/mutation_specs/split_selfref_signed_reader.json",
+        "scripts/mutation_specs/sweep_partial_rows.json",
+        "scripts/mutation_specs/sweep_timeout_cleanup.json",
+        "scripts/mux_ring_census.py",
+        "scripts/packed_field_intervals.py",
+        "scripts/proc_ifx_scc_compare.sh"
+      ],
+      "absent_lean_contributions": [
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectBench.lean",
+          "branch_blob": "8efd85444cebbc2270d8d34950a96d0366d2914b"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectCheck.lean",
+          "branch_blob": "c663255385235396ab692fb25d4d102fa082d23e"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectExamples.lean",
+          "branch_blob": "64cde961f317d9b767fd9f1d374eccbda10ee448"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectSemantics.lean",
+          "branch_blob": "68b614d4868a739889ca7565d2cb3eefe2fe14a2"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectSim.lean",
+          "branch_blob": "a764555c6b4944c40b37bcd679865b097ab603d1"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectTests.lean",
+          "branch_blob": "4846805505c817f4139f95346c3a69f615668851"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectTrace.lean",
+          "branch_blob": "aad0f79cbc4fda045967d6f4df2b4580011c0cf7"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectVsCompiled.lean",
+          "branch_blob": "03d0ba20e7fe6b8e7d6d619eefada9e85b96ac25"
+        },
+        {
+          "path": "formal/lean/Main.lean",
+          "branch_blob": "de75b83ffce9e6db3c86cc4c9e96748dd0858f04"
+        },
+        {
+          "path": "pass/lean/CENSUS_D2_122.tsv",
+          "branch_blob": "2f0d88b8e8531be7d9ea516dc3efa4932718cbaa"
+        },
+        {
+          "path": "pass/lean/CENSUS_D2_122_BASELINE_PROVISIONAL.tsv",
+          "branch_blob": "2ac5068cb8efeb7cd3b5bf8b9e8960c843df36a8"
+        },
+        {
+          "path": "pass/lean/CENSUS_D2_122_MANIFEST.json",
+          "branch_blob": "ba9a416a3052047f8a2efd8442df1c048f2be5be"
+        },
+        {
+          "path": "pass/lean/COREET_MODULES.txt",
+          "branch_blob": "2872a8e27156ece377a792089a4bfd6e5ab7f892"
+        },
+        {
+          "path": "pass/lean/COVERAGE_LEDGER.md",
+          "branch_blob": "56eeb437d1843e278fc177f6d7e89aaa54329a35"
+        },
+        {
+          "path": "pass/lean/CYCLE_PROVENANCE.txt",
+          "branch_blob": "5bc87c4b6650e4e616b8fcce87b879d207366d4b"
+        },
+        {
+          "path": "pass/lean/D2_EVIDENCE_OVERRIDES.tsv",
+          "branch_blob": "b96e8f0e0b4d3fdc38c5a5383abd40c935fa739b"
+        },
+        {
+          "path": "pass/lean/DIRECTION2_IMPLEMENTATION.md",
+          "branch_blob": "c15191582356f8e6a5384df80dd261aff2ed7258"
+        },
+        {
+          "path": "pass/lean/DIRECTION2_IR_SEMANTICS.md",
+          "branch_blob": "dc8c8e7f67001da081a44899a4e0965938463ce5"
+        },
+        {
+          "path": "pass/lean/DIRECTION2_RESULTS.md",
+          "branch_blob": "99c0b6ed512aaa8ac7e97924de68965bbaf309ff"
+        },
+        {
+          "path": "pass/lean/EQUIV7_DIFFSIM.txt",
+          "branch_blob": "1009a3e30e1f6dad60276839c73691c82730c83f"
+        },
+        {
+          "path": "pass/lean/GATED_MODULES.tsv",
+          "branch_blob": "5a88afbd4ea08e2234377174db70a2a418311a49"
+        },
+        {
+          "path": "pass/lean/IR_Semantics_pass.cpp",
+          "branch_blob": "cdbac88df5ece2ae5ea2114a83d76419cd560b30"
+        },
+        {
+          "path": "pass/lean/LEAN_ACCEPTANCE.txt",
+          "branch_blob": "09bd4dc0615d26f61606899d3a84ec9261091d23"
+        },
+        {
+          "path": "pass/lean/MODULE_PARAMS.tsv",
+          "branch_blob": "3bf552204f7240e4addab64d6280dabe9efacb67"
+        },
+        {
+          "path": "pass/lean/PR624_REBASE.md",
+          "branch_blob": "f5aac6c4b2bf2bdcc0e81a597ef8b8b04fd6f6fa"
+        },
+        {
+          "path": "pass/lean/SWEEP_direction2.tsv",
+          "branch_blob": "61820f4a7370abe739e67f697b21ebd188b7f3a6"
+        },
+        {
+          "path": "pass/lean/SWEEP_direction2_phaseA.tsv",
+          "branch_blob": "9b5d58de6c4087a9008e55c30aaeb1cca27415c6"
+        },
+        {
+          "path": "pass/lean/SWEEP_direction2_phaseB.tsv",
+          "branch_blob": "44ea108ab6593cb279f71a1ad318f75437eb27fb"
+        },
+        {
+          "path": "pass/lean/SWEEP_multiclock6.tsv",
+          "branch_blob": "6016fb8b2eb47d9f71833036e6514e72c316ef24"
+        },
+        {
+          "path": "pass/lean/SWEEP_single_edge_memory17.tsv",
+          "branch_blob": "1bfd2238cbc58394b1f990de449f4b10e9cf316e"
+        },
+        {
+          "path": "pass/lean/TXFMAFRAC_PLAINPROC_MILESTONE.md",
+          "branch_blob": "53f21e43b40ee0d1628fccffee291cd747405d97"
+        },
+        {
+          "path": "pass/lean/cert_dag_order_test.cpp",
+          "branch_blob": "846cdae0cdf0e8317213abbfc6cfd56299b2670a"
+        },
+        {
+          "path": "pass/lean/design_cert_export.hpp",
+          "branch_blob": "6d16d8d8d75597ac32f999e691459de16da23563"
+        },
+        {
+          "path": "pass/lean/lean_common.cpp",
+          "branch_blob": "18780a9d4254ed8faa36daa4aa7128467ce15df9"
+        },
+        {
+          "path": "pass/lean/lean_common.hpp",
+          "branch_blob": "3a10609d1501ec4e4ad34be732896f4bf7db28d8"
+        },
+        {
+          "path": "pass/lean/scripts/cert_shape_check.py",
+          "branch_blob": "7e4ee96857f81245cfb10c105143fe9126b2aafa"
+        },
+        {
+          "path": "pass/lean/scripts/direct_sweep.py",
+          "branch_blob": "e926527b854df115c01d400e0646c262542829b9"
+        },
+        {
+          "path": "pass/lean/scripts/make_sim_launcher.py",
+          "branch_blob": "829e1a55d5eff4aabdc6a9045e0d469112e7af81"
+        }
+      ],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "direction-3-translation-validation",
+      "tip": "78a3e0d8c10c3e1ce1627d8d54fa898ee4416d43",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 147,
+      "commits_master_only": 337,
+      "all_contribution_files": 166,
+      "lean_contribution_counts": {
+        "different": 13,
+        "absent": 82,
+        "identical": 17
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileDesignDefs.lean",
+          "branch_blob": "ca7e8f880cef7f48ea63ae328c1cfb1ff59e1e4f"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileGraphDefs.lean",
+          "branch_blob": "874d0f4ef2d035aa6e7aec51998632db52866637"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileOpDefs.lean",
+          "branch_blob": "fbb5d2268d0627492c9378775f83b3df34f0b2ce"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/D3Harness.lean",
+          "branch_blob": "30f0c0ff0ff05cc059ecf7f9ac48fdddcf2a75d3"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/Reify.lean",
+          "branch_blob": "7c699b9590167be5aed9e738df6b8a5a855a01fe"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/ReifyGen.lean",
+          "branch_blob": "362adce9e870ff019d11da54bb5f3b65fba7ed25"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/ReifyProof.lean",
+          "branch_blob": "d94629f8fbba155c3288dd8dfe18c31d2dc87bcf"
+        },
+        {
+          "path": "formal/lean/probes/.gitignore",
+          "branch_blob": "b839400a29b9105b7cbe8ce6700afa74ab6328f7"
+        },
+        {
+          "path": "formal/lean/probes/d3_base.lean",
+          "branch_blob": "fe7d5c03fc4e510c1dd56b6f20f46c464a58760c"
+        },
+        {
+          "path": "formal/lean/probes/d3_bench.lean",
+          "branch_blob": "1db329355f83e7b54fe078c2db14ed37065465b7"
+        },
+        {
+          "path": "formal/lean/probes/d3_bench2.lean",
+          "branch_blob": "2988c6b0a0fb2246bccecb9a1272ad9f829dc798"
+        },
+        {
+          "path": "formal/lean/probes/d3_chunked_proof_test.lean",
+          "branch_blob": "ab35cb2cf8571758cc216d2825f2523531503b25"
+        },
+        {
+          "path": "formal/lean/probes/d3_ctlA_1024.lean",
+          "branch_blob": "093e92dda798fb35731b66abe7ee648b98fa0041"
+        },
+        {
+          "path": "formal/lean/probes/d3_ctlA_256.lean",
+          "branch_blob": "afd7356d80dddb55adcfe9bb1a1d08a62d09f22f"
+        },
+        {
+          "path": "formal/lean/probes/d3_ctlA_4096.lean",
+          "branch_blob": "394023202353a5950cdaff9a42a177c2774dee2f"
+        },
+        {
+          "path": "formal/lean/probes/d3_ctlA_64.lean",
+          "branch_blob": "c79fa6a9b3d8ba9c233fec0de195cde17ea50a7e"
+        },
+        {
+          "path": "formal/lean/probes/d3_ctlA_8.lean",
+          "branch_blob": "e0c8988e921ddb35b92ed1ddaf3ac3276b76abf5"
+        },
+        {
+          "path": "formal/lean/probes/d3_ctlB_256.lean",
+          "branch_blob": "43aef829be49f363eb9019f00f504a356b6c2ea9"
+        },
+        {
+          "path": "formal/lean/probes/d3_example_composed_8.lean",
+          "branch_blob": "0fac14a86295bcb53ce527d8e3cbdb81ca068459"
+        },
+        {
+          "path": "formal/lean/probes/d3_example_naive_8.lean",
+          "branch_blob": "e9f234a6d0d831138a4950d66fdc8a257df3af04"
+        },
+        {
+          "path": "formal/lean/probes/d3_flop_gen_test.lean",
+          "branch_blob": "4ed40c71ca882ae66d9c8d7e48393076eb6d6f6b"
+        },
+        {
+          "path": "formal/lean/probes/d3_flopnext_test.lean",
+          "branch_blob": "a35e1ef19604b503c9a098cdb59a57fff860f260"
+        },
+        {
+          "path": "formal/lean/probes/d3_harness_test.lean",
+          "branch_blob": "745db98199446633ffa8af9ac24405f0b3277680"
+        },
+        {
+          "path": "formal/lean/probes/d3_incremental_gen_test.lean",
+          "branch_blob": "56f74188ff0c59322c6cf53a28c42465f9642b5c"
+        },
+        {
+          "path": "formal/lean/probes/d3_incremental_walk_test.lean",
+          "branch_blob": "d3cbbc7f4bdfd57c1dd025d011716efbe831f8ff"
+        },
+        {
+          "path": "formal/lean/probes/d3_liveness_test.lean",
+          "branch_blob": "dbb1584282f92b25b2c2d75ff0ae77bc95a785e6"
+        },
+        {
+          "path": "formal/lean/probes/d3_memory_gen_test.lean",
+          "branch_blob": "10c0a47a116d90d6da057d1ff7e23e264d8fe401"
+        },
+        {
+          "path": "formal/lean/probes/d3_memory_semantics_test.lean",
+          "branch_blob": "bdea305a1e0df48ec16fc07b60f27d69c6040210"
+        },
+        {
+          "path": "formal/lean/probes/d3_mut_slot.lean",
+          "branch_blob": "14c008a01f03e1c7607ccb356666920206d75712"
+        },
+        {
+          "path": "formal/lean/probes/d3_mut_width.lean",
+          "branch_blob": "c3bec38acd8091a2d6f1cd90a46bdc50b2c5fea9"
+        },
+        {
+          "path": "formal/lean/probes/d3_real_csr.lean",
+          "branch_blob": "9ed0febdf2a7f9b2508383a91d2500cff43c5c79"
+        },
+        {
+          "path": "formal/lean/probes/d3_reify_test.lean",
+          "branch_blob": "43ec3de303cbb057e9d120e7fd78f3cb54723180"
+        },
+        {
+          "path": "formal/lean/probes/d3_shared_test.lean",
+          "branch_blob": "4c472e4c1320d8a74d1c2756051c4bb40e3af48b"
+        },
+        {
+          "path": "formal/lean/probes/d3_shift_boundary_test.lean",
+          "branch_blob": "2cc99ce0eabb03db7ebfaea157e746c1123d60d3"
+        },
+        {
+          "path": "formal/lean/probes/d3_simp_128.lean",
+          "branch_blob": "3ff5301ef37cc01f820d19bb0fac26c8750395c4"
+        },
+        {
+          "path": "formal/lean/probes/d3_simp_16.lean",
+          "branch_blob": "b45166598d2290775082f277ec5a53da709e9616"
+        },
+        {
+          "path": "formal/lean/probes/d3_simp_2.lean",
+          "branch_blob": "47caeed9e8612264aee35b94981cb05815680e21"
+        },
+        {
+          "path": "formal/lean/probes/d3_simp_32.lean",
+          "branch_blob": "1c370bcbec02626e9055b3a409ca1e707fd446fd"
+        },
+        {
+          "path": "formal/lean/probes/d3_simp_4.lean",
+          "branch_blob": "81b4ec8d7cb626402c3954de304095e8c83ae05a"
+        },
+        {
+          "path": "formal/lean/probes/d3_simp_64.lean",
+          "branch_blob": "c04c4b055266430a70b473146b20ac6f30a4f21b"
+        },
+        {
+          "path": "formal/lean/probes/d3_simp_8.lean",
+          "branch_blob": "666f8e361de75229e593e3cfc319f83570de8d62"
+        },
+        {
+          "path": "formal/lean/probes/d3_stimulus_test.lean",
+          "branch_blob": "6af27e635c60dba3c280dd09edd7ac9db3dccb4f"
+        },
+        {
+          "path": "formal/lean/probes/d3_trap_1024.lean",
+          "branch_blob": "c8f7fe533b434324ecf209cab4c86ff2593de583"
+        },
+        {
+          "path": "formal/lean/probes/d3_trap_256.lean",
+          "branch_blob": "ed92919bb2b960e3f32d5dc2a82688be1b843218"
+        },
+        {
+          "path": "formal/lean/probes/d3_trap_4096.lean",
+          "branch_blob": "fc46865359e79b2c321ad202e3e66e22abe78ed0"
+        },
+        {
+          "path": "formal/lean/probes/d3_trap_64.lean",
+          "branch_blob": "1007fad467cdf84e0cbc97d0bd1110d40be50000"
+        },
+        {
+          "path": "formal/lean/probes/d3_trap_8.lean",
+          "branch_blob": "fb09cc3c9def7ab4a54f57e05fa10cc6351a89bd"
+        },
+        {
+          "path": "formal/lean/probes/d3c_4.lean",
+          "branch_blob": "2c954962b2ad224d5aa0aaddd6ad53040d5f76d3"
+        },
+        {
+          "path": "formal/lean/probes/d3p_8.lean",
+          "branch_blob": "6cf1960d16ff08a8cfe359ea59bcf2a23d5d7489"
+        },
+        {
+          "path": "pass/lean/DESIGN_FACTS_MEASUREMENT.md",
+          "branch_blob": "f9fffc3842b7f4fcb05b1850364aab2442488c6a"
+        },
+        {
+          "path": "pass/lean/DIRECTION3_TRANSLATION_VALIDATION.md",
+          "branch_blob": "1670e7c9e9482f4065b6d3fe95834a42759b499b"
+        },
+        {
+          "path": "pass/lean/MODEL_FACTS_MEASUREMENT.md",
+          "branch_blob": "d5652f572bfa12d19bc43228d19e994c911909ab"
+        },
+        {
+          "path": "pass/lean/MODULE_PROOF_CANARY.md",
+          "branch_blob": "a11ad8b33c2478b5b573b45ca78854736cf075ba"
+        },
+        {
+          "path": "pass/lean/d3_scaling.tsv",
+          "branch_blob": "196423357381650ddc3191f8a99e5dc5cf416c93"
+        },
+        {
+          "path": "pass/lean/d3_scaling2.tsv",
+          "branch_blob": "7c7ed9838e898bcb543ce59683a0faeef8884a28"
+        },
+        {
+          "path": "pass/lean/d3_scaling_phase1.tsv",
+          "branch_blob": "196423357381650ddc3191f8a99e5dc5cf416c93"
+        },
+        {
+          "path": "pass/lean/design_cert_export.hpp",
+          "branch_blob": "f0faff5d5f45a5cb014150b9c8e5db0493a796ad"
+        },
+        {
+          "path": "pass/lean/manifests/PROVENANCE.tsv",
+          "branch_blob": "832d2dbee991f6da197ebfc580d77c81b9abdbf0"
+        },
+        {
+          "path": "pass/lean/manifests/coreet_122.tsv",
+          "branch_blob": "31a9c4ee069abb664c626c860675b99d92fc9396"
+        },
+        {
+          "path": "pass/lean/manifests/coreet_stages_80.lock.tsv",
+          "branch_blob": "402956e4c9521e0eb8d9e445ce4e247dcc1549a2"
+        },
+        {
+          "path": "pass/lean/manifests/cva6_30.tsv",
+          "branch_blob": "85c85d8ada89100396c4af487cadac302820962a"
+        },
+        {
+          "path": "pass/lean/manifests/cva6_30_frozen.tsv",
+          "branch_blob": "142eca39f2707250ea4f158f6ea04550b54f5625"
+        },
+        {
+          "path": "pass/lean/manifests/cva6_corpus.tsv",
+          "branch_blob": "828296111b6e1fa2e5d4cf8455e34218a303a932"
+        },
+        {
+          "path": "pass/lean/manifests/cva6_no_certificate.tsv",
+          "branch_blob": "657c1362770e3e48ccfd8a33101c7823d8c59ae6"
+        },
+        {
+          "path": "pass/lean/scripts/d3_bench.sh",
+          "branch_blob": "e8cf1cf89033b5ac6499c0c756633c024f3cb4f0"
+        },
+        {
+          "path": "pass/lean/scripts/d3_bench2.sh",
+          "branch_blob": "6e60005bf97867dbd112d72f6aa23825819714df"
+        },
+        {
+          "path": "pass/lean/scripts/d3_cgroup_test.py",
+          "branch_blob": "fca05a7c4cc3b25a0cf4c94d90d87f4d7c99332d"
+        },
+        {
+          "path": "pass/lean/scripts/d3_gen.py",
+          "branch_blob": "93c9b0b4b88aabc757ae1570e97d2905de93df60"
+        },
+        {
+          "path": "pass/lean/scripts/d3_gen_modules.py",
+          "branch_blob": "f157e74afacd728ac4c539526d92e83ba0b4b347"
+        },
+        {
+          "path": "pass/lean/scripts/d3_guarded_build.py",
+          "branch_blob": "9aba3c0ed70597309d8a8332c8d56320f595b9c3"
+        },
+        {
+          "path": "pass/lean/scripts/d3_join.py",
+          "branch_blob": "7bf5d5249c5f468fbd25f433b5be877769210cbb"
+        },
+        {
+          "path": "pass/lean/scripts/d3_manifest.py",
+          "branch_blob": "b0b2b6412852f4339fe270c6bbbece93a0120b7d"
+        },
+        {
+          "path": "pass/lean/scripts/d3_manifest_test.py",
+          "branch_blob": "e3d9e0e1a79a9a73acc060f546ab5356f44a5a98"
+        },
+        {
+          "path": "pass/lean/scripts/d3_merge.py",
+          "branch_blob": "9836a544176ba1a1879bf7feee3ddee71c81bd03"
+        },
+        {
+          "path": "pass/lean/scripts/d3_merge_test.py",
+          "branch_blob": "6b932de20ee414336ffef35dc2716e5aa98ede6c"
+        },
+        {
+          "path": "pass/lean/scripts/d3_module_proof.py",
+          "branch_blob": "6e89d153db4ab2d7007c45faee7684a45e53911e"
+        },
+        {
+          "path": "pass/lean/scripts/d3_proof_test.py",
+          "branch_blob": "a0a9d928c005ff6bd757c000049ffc69858c6fce"
+        },
+        {
+          "path": "pass/lean/scripts/d3_runner_test.py",
+          "branch_blob": "fb387d7a5369dddfbf43ecc9a04bb1febcc05349"
+        },
+        {
+          "path": "pass/lean/scripts/d3_scheduler_test.py",
+          "branch_blob": "88b6fc52d2f8a01ac939194f54287fea4b642293"
+        },
+        {
+          "path": "pass/lean/scripts/d3_sweep.py",
+          "branch_blob": "097dc9455f6416313b9f9eb77025faff32128421"
+        },
+        {
+          "path": "pass/lean/scripts/d3_sweep_cancel_test.py",
+          "branch_blob": "3f602d9cd54be6b0b7be25d60d9af2cf7d7eff14"
+        },
+        {
+          "path": "pass/lean/scripts/d3_sweep_parser_test.py",
+          "branch_blob": "bf04f4367937d295ca8d0fe1db6a21dbfd1c6e64"
+        }
+      ],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "direction-4-incremental",
+      "tip": "f6ad1fe29f8f15aeda045115864fd81a34c33aef",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 126,
+      "commits_master_only": 337,
+      "all_contribution_files": 229,
+      "lean_contribution_counts": {
+        "absent": 125,
+        "identical": 15,
+        "different": 15
+      },
+      "new_script_files_absent_from_master": [
+        "scripts/build_cva6_foundation.sh",
+        "scripts/classify_d4_rows.sh",
+        "scripts/coreet_preflight.sh",
+        "scripts/d4_emit_in_scope.sh",
+        "scripts/d4_scope_verdict.sh",
+        "scripts/lean_cert_to_dcert.py",
+        "scripts/replay_d4_certs.sh",
+        "scripts/run_d4_runtime_sweep.sh",
+        "scripts/verify_d4_run.sh"
+      ],
+      "absent_lean_contributions": [
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/CertIO.lean",
+          "branch_blob": "a35fde949afc13d1974809f18bf5775fbb0fcdc8"
+        },
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Compiler/CertIORoundTrip.lean",
+          "branch_blob": "7f3fd63b05a12a4cf25386528a4354c9aa85520d"
+        },
+        {
+          "path": "formal/lean/probes/d4_loadone.lean",
+          "branch_blob": "fec43cd3802c80de427f9c740c74dd5996649275"
+        },
+        {
+          "path": "formal/lean/probes/d4_shl_regression.lean",
+          "branch_blob": "90e5b55dc1f101dc36d316c567c644f571d94b51"
+        },
+        {
+          "path": "formal/lean/probes/d4_sweep_row.lean",
+          "branch_blob": "08184317a0ca034b3fa1cdffff87ed60b24ff151"
+        },
+        {
+          "path": "formal/lean/probes/d4_write_tiny_cert.lean",
+          "branch_blob": "386c3473448a8258e764508d71cb52587c6af2a3"
+        },
+        {
+          "path": "pass/lean/DIRECTION4_INCREMENTAL.md",
+          "branch_blob": "36cdbdb2701d33671a2009e235958ea9e5229d1e"
+        },
+        {
+          "path": "pass/lean/atomic_publish.hpp",
+          "branch_blob": "034b676bc0eb95c7efb6adc67166e21ee2e1d686"
+        },
+        {
+          "path": "pass/lean/dcert_serializer_smoke.cpp",
+          "branch_blob": "489944332a9c5c7c31fd94afb7aeeff9e547c615"
+        },
+        {
+          "path": "pass/lean/design_cert_export.hpp",
+          "branch_blob": "264d832d493dea4a83c0788adf099477a62b2cd6"
+        },
+        {
+          "path": "pass/lean/tests/d4/BUILD",
+          "branch_blob": "5c8537b4982f2d664df3e66c1fb8d75316821160"
+        },
+        {
+          "path": "pass/lean/tests/d4/CVA6_MODULE_SET_PROVENANCE.md",
+          "branch_blob": "85535ff75460e801837295cba7c4447beba50219"
+        },
+        {
+          "path": "pass/lean/tests/d4/README.md",
+          "branch_blob": "189f0d1de90cf83c152482bafe1f7959943b59e8"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122.list",
+          "branch_blob": "c5c7423e9caa8dc6830810b55fa6920c4a5c3903"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_fresh_cgroup_records.tsv",
+          "branch_blob": "9ed1217ee5bb311855be56fb6c9cf5e2f49957f1"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_fresh_classification.txt",
+          "branch_blob": "c06b27367313d570ac1ad7fce738d96735d21807"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_fresh_gates.tsv",
+          "branch_blob": "cbf1635d21ed634ba2898bd75f6958e85d5a013b"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_fresh_provenance.txt",
+          "branch_blob": "8968a64c7b337c408cfdfcac1b2abca7285ed581"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_fresh_reconciliation.txt",
+          "branch_blob": "046a9ff9539eedcee9c8e6dca9265f6b661fe04d"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_fresh_rows.tsv",
+          "branch_blob": "4cad83756afa377e1e534bf4d6a7a34837985655"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_r2_cgroup_records.tsv",
+          "branch_blob": "dac28abf4ce7818144f207f91aed9da24f864fc3"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_r2_classification.txt",
+          "branch_blob": "95e035393c2107d5385aaf3d1c2eb0a46c925c69"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_r2_gates.tsv",
+          "branch_blob": "b948d4cd331c0de337d209ce2574a7160d9b9569"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_r2_provenance.txt",
+          "branch_blob": "7b1e0e28de3e5276638403ee4d09931c52aaa224"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_r2_reconciliation.txt",
+          "branch_blob": "efe08f1642861aa1eb909b5775755d06e4018f79"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_r2_rows.tsv",
+          "branch_blob": "84d42b837e0959e3b98a3700679aee17d3e55a36"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_runtime_provenance.txt",
+          "branch_blob": "bbb5812cd09efd5534db3dc1b27544622298cb2e"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_runtime_rows.tsv",
+          "branch_blob": "4155afced1a510ea7779e96f0ea466a4d34f2a05"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_122_sext_replay.tsv",
+          "branch_blob": "1aaa27d470a332b3779279ad20dea77ad1e25117"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_83_modules.txt",
+          "branch_blob": "872a3d243080abb3aba27a45051d8d5cd521ce63"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_85_replay_digest_compare.tsv",
+          "branch_blob": "83bfc357e9255cb554c250ad73d975a31d5f3e3c"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_85_replay_provenance.txt",
+          "branch_blob": "9f67224ea95598e89797e3b7d2e123b7be96aeec"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_85_replay_rows.tsv",
+          "branch_blob": "0f9e01db1d5867ba7be034368ba1680c5f899bfb"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_emission_fanout.list",
+          "branch_blob": "c2e17ddab3bb6583fd0ec5d56f0415186db4fbe2"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_emission_fanout.sh",
+          "branch_blob": "cabf22fcad6c506b068521e0eca29761b18595df"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_emission_fanout.tsv",
+          "branch_blob": "a1f893dd30ce82fb16cd54dfc80dcba323f5da2c"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_emission_fanout_controls.sh",
+          "branch_blob": "ee268c5d4d4d9f69e5e9b60edbbbe7c88ab75795"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_frontend_ab.sh",
+          "branch_blob": "8c7b62983d01a12ed43e4d5305f0b31046e28e61"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_frontend_refusal_probe.sh",
+          "branch_blob": "b36cbfeeaa41bae00d7023296f179780256ead5a"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_frontend_refusals.tsv",
+          "branch_blob": "13300b4691c14fd682be7afdd15db38cfe17b9d8"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_gate_bypass_ab.tsv",
+          "branch_blob": "3166e2bec00a10976bdcd332ad13fc1385f46ce1"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_gate_latch_failclosed_ab.tsv",
+          "branch_blob": "29fb82f1e96395be9bd90c375857a4e26a54f3d0"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_gate_pilot_cgroup_records.tsv",
+          "branch_blob": "4b6214f93be9cd8d04679a0e4007458b150ad03e"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_gate_pilot_gates.tsv",
+          "branch_blob": "724ecde92ea51f385d141a202b55b8ea6269882a"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_gate_pilot_provenance.txt",
+          "branch_blob": "bc49a0946bfd0f9350b229c1d963871a118d95c4"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_gate_pilot_rows.tsv",
+          "branch_blob": "90af004e46fd71c1fedab68e3e46bf3923e53c23"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_memory_pilot_gates.sh",
+          "branch_blob": "ea26e9eac62438a320ea5a624eaf9804ab1ba19c"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_memory_pilot_gates.tsv",
+          "branch_blob": "7b6c84a12656bea5804f9357951e557718818e6e"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_preflight_controls.sh",
+          "branch_blob": "917d8cd26170552dd4404c8ae230943de6f570ce"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_prelaunch_provenance.txt",
+          "branch_blob": "1d1e86ffdeea076b885c790bbab4686dde3eb789"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_run_cgroup_records.sh",
+          "branch_blob": "aa1ddb726a8ab2289308d27d199924cb1fd580c5"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_run_gates.sh",
+          "branch_blob": "e788796b0c1df7fbfa0310f38829bd9b68e8aa40"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_run_reconcile.py",
+          "branch_blob": "7eae0e54ab5ec85af38e5d18e9d01bcb3a0cb7a8"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_sext_replay.sh",
+          "branch_blob": "b34b136a802d5af6481af4c8ac5358944f0b77fa"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_srconly_cgroup_records.tsv",
+          "branch_blob": "0cec28536499dc36f0ddeea3eceafc05d8230b83"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_srconly_gates.tsv",
+          "branch_blob": "e5c3b44a62531da0b3889d7b5d8671a0507e3cda"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_srconly_provenance.txt",
+          "branch_blob": "4e275c3efc9bd38bb4d7b82ab5b75c210440ebcf"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_srconly_rows.tsv",
+          "branch_blob": "7f89c75c80a4f027fd6b12c72374e5be9d7904f6"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_tensor_load.list",
+          "branch_blob": "65e14e232f6bdd2c9f2ab94a8e38a841c37d7b7b"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_tensor_load_cgroup_records.tsv",
+          "branch_blob": "1a926e4cdd59a349bc22775b861eb192d8d2ebf0"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_tensor_load_gates.tsv",
+          "branch_blob": "cdce2c1955941ec9aa16981c832b97c7d7929dc2"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_tensor_load_provenance.txt",
+          "branch_blob": "9b7aa3ae723b46322c48681a00b8c8169c0efcac"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_tensor_load_rows.tsv",
+          "branch_blob": "3080c0a5b2d218ce2f09bcca694dd483a3bb72d5"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_type1_cgroup_records.tsv",
+          "branch_blob": "9455cccac2805a23350b0f0132b7957cd82f95e4"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_type1_gates.tsv",
+          "branch_blob": "420c8502f6d0e7d9738b1d76606fc8de8823458f"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_type1_provenance.txt",
+          "branch_blob": "623b72f421703e103bef1044554bf6e55537c25f"
+        },
+        {
+          "path": "pass/lean/tests/d4/coreet_type1_rows.tsv",
+          "branch_blob": "2bf4a1ecc0038c9f6cf74ab7bc3cc08e0881a315"
+        },
+        {
+          "path": "pass/lean/tests/d4/counter_domain_controls.sh",
+          "branch_blob": "c870108d96d0024ae38c8e5346a9f7bfcb7f1e4f"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_30.list",
+          "branch_blob": "d3a39d045d0f38cf964c4d7d57fd36284ba23bcc"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_30_cgroup_records.tsv",
+          "branch_blob": "eea59a191075e5822ddd1e384b1347eb9f0916f4"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_30_classification.txt",
+          "branch_blob": "ddc54cad4e5a50d0b2d79d83a8cb276d02c31b77"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_30_provenance.txt",
+          "branch_blob": "bb257a37a0c0b90e449fdb7beb5d3b8a92940d55"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_30_rows.tsv",
+          "branch_blob": "5daccb527dbcf680274c1ca44bd11422190d90e2"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_30_static_gates.tsv",
+          "branch_blob": "55fd1031368ca637999f1be4942c319078c52566"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_30_verification.txt",
+          "branch_blob": "f1b9355e23bad0604c413eb2b4fb6133e4978529"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_30_vs_foundation.tsv",
+          "branch_blob": "000ede3ec1362b77822ae682b4d1f755b830a9dd"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_78.list",
+          "branch_blob": "a4532122e6fb57207119a4483d63dedd31c0878c"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_csr_regfile_dg.sh",
+          "branch_blob": "ed2ea861b27f44ecf46b0f64d5a74bf8435d850c"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_csr_regfile_dg.tsv",
+          "branch_blob": "a289ced350fb883b71646884e08e4daec193bf55"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_csr_regfile_dg_controls.sh",
+          "branch_blob": "4b2a04b8630b55741a67cfdb170aa0dff0d039d0"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_foundation_controls.sh",
+          "branch_blob": "0951111184090a2040da86db61a696b547315951"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_foundation_provenance.txt",
+          "branch_blob": "ca6ba6c1a4e93aad1533d5c496769c4ccab2f0f7"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_foundation_wrappers.tsv",
+          "branch_blob": "bb19903a3bc4d41b4181152d4ddbc74d88619369"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_hpdcache_subsystem_differential.txt",
+          "branch_blob": "8572ed2ba736c090e71b5499dae425c61d18783b"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_hpdcache_subsystem_refixed_cgroup.txt",
+          "branch_blob": "959cf241630aba75cb445599f78891a18490a5a9"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_hpdcache_subsystem_refixed_provenance.txt",
+          "branch_blob": "05462dff363953f8f912f50a279cd762c7dcb773"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_hpdcache_subsystem_refixed_rows.tsv",
+          "branch_blob": "d06c88be78f60f01d85ce6fdc338fdee21c26821"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_hpdcache_wrapper_focused.txt",
+          "branch_blob": "cc5cf0efc694ffef503aa27c97681bcbec4d52d4"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_hpdcache_wrapper_focused_cgroup.txt",
+          "branch_blob": "8458788e3b2c79b657937a6ab0a47823ac4cc3bc"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_hpdcache_wrapper_focused_provenance.txt",
+          "branch_blob": "c6f2edd70f1f12b3c6fd0142c0416dce52a13378"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_hpdcache_wrapper_focused_rows.tsv",
+          "branch_blob": "7e17efe612fbe1e5da11b05d830d163dfb7fa518"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_pilot_six_provenance.txt",
+          "branch_blob": "985fc1494fd0b8f7ecc321b95b891dbedf69eeb1"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_pilot_six_rows.tsv",
+          "branch_blob": "0201fcd1940d3eac1fc6c73860ebb9a77d25a750"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_run_gates.sh",
+          "branch_blob": "798599b061d4e7bf5b2a4ad17093db1013630899"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_unpacked_bridge.list",
+          "branch_blob": "6e848fd55360e9eac13708d04a123d472028fb22"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_unpacked_bridge_controls.sh",
+          "branch_blob": "b4fd880857a17c67ac1beabd17b0541feb8649a5"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_unpacked_bridge_provenance.txt",
+          "branch_blob": "40930789c96ef9ad8eb09d62895d501bf3315fad"
+        },
+        {
+          "path": "pass/lean/tests/d4/cva6_unpacked_bridge_rows.tsv",
+          "branch_blob": "168969281ab994757b5fddd36e40ae82135465a3"
+        },
+        {
+          "path": "pass/lean/tests/d4/d4_build_binding.sh",
+          "branch_blob": "4dca1531a24eefed2f5a0e3c1e1a77f505c41b2b"
+        },
+        {
+          "path": "pass/lean/tests/d4/d4_evidence_provenance.sh",
+          "branch_blob": "34421eb25aefa4fb0cd05d32ea223e30a42683af"
+        },
+        {
+          "path": "pass/lean/tests/d4/dcert_delta.py",
+          "branch_blob": "d919927ed4c7316d6259992e47c545b9159f8043"
+        },
+        {
+          "path": "pass/lean/tests/d4/dcert_delta_controls.sh",
+          "branch_blob": "a9319a6f866a7780f21697abb688e3ce746b8bc2"
+        },
+        {
+          "path": "pass/lean/tests/d4/dcert_mutate.py",
+          "branch_blob": "77cd09157c9a73d43f9a04c7586e08ff2edf2ee1"
+        },
+        {
+          "path": "pass/lean/tests/d4/differential_exemption_controls.sh",
+          "branch_blob": "07236b7da2fbdcbf38f3fb633180902be6852d33"
+        },
+        {
+          "path": "pass/lean/tests/d4/emission_fanout.py",
+          "branch_blob": "bb039d85780da8448329909f9e90bf628d9d093b"
+        },
+        {
+          "path": "pass/lean/tests/d4/emission_fanout_test.sh",
+          "branch_blob": "36d107980c766a71c1a65ab885fcbb398f4c0e6a"
+        },
+        {
+          "path": "pass/lean/tests/d4/emit_ceiling_controls.sh",
+          "branch_blob": "8ce8147b7bb4327394e46da7f082673436240f61"
+        },
+        {
+          "path": "pass/lean/tests/d4/frontend_evidence_controls.sh",
+          "branch_blob": "db3738bf5b86a6878c09a4a7f5e3363c0590fdf0"
+        },
+        {
+          "path": "pass/lean/tests/d4/getmask_const_width_regress.sh",
+          "branch_blob": "1cac9842bc9dd38d6736c25dc26b67f3767fdff3"
+        },
+        {
+          "path": "pass/lean/tests/d4/lake_contract_controls.sh",
+          "branch_blob": "c9fce25a8448844eaa45918b3f4b52b82ef5c389"
+        },
+        {
+          "path": "pass/lean/tests/d4/packed_dim_order_controls.sh",
+          "branch_blob": "5f2a23ba225d8b019fb507f41a93c1b84ef01b93"
+        },
+        {
+          "path": "pass/lean/tests/d4/pilot_coreet.list",
+          "branch_blob": "e7138bbc3bb8b9a73bd529ff1a9f644cf61d092d"
+        },
+        {
+          "path": "pass/lean/tests/d4/pilot_cva6.list",
+          "branch_blob": "bd1a32685e675d92405532a9f267b1fc13019ed1"
+        },
+        {
+          "path": "pass/lean/tests/d4/pilot_cva6_six.list",
+          "branch_blob": "bc3c255f960419ed4e110d1bf8f76a3fad2cee38"
+        },
+        {
+          "path": "pass/lean/tests/d4/replay_driver_controls.sh",
+          "branch_blob": "de775d90bd8c3b7d8b11009b3bda05c258746471"
+        },
+        {
+          "path": "pass/lean/tests/d4/replay_gate_controls.sh",
+          "branch_blob": "af9fd689d4e6986c3d97e51325f4de7a11ec9c41"
+        },
+        {
+          "path": "pass/lean/tests/d4/resolve_lhd_artifact.sh",
+          "branch_blob": "c90d29cceba13da8ea2f21d9df1962399cfb204d"
+        },
+        {
+          "path": "pass/lean/tests/d4/run_driver_controls.sh",
+          "branch_blob": "80afe64b00bf928e0589d927078e59af09950487"
+        },
+        {
+          "path": "pass/lean/tests/d4/sext_amount_exemption_controls.sh",
+          "branch_blob": "7c19f6809aa7f4acdc35ef54c206bef84cacd7b7"
+        },
+        {
+          "path": "pass/lean/tests/d4/shl_regression.sh",
+          "branch_blob": "cd49854cfa4262c3f81f3150ac0aa732d9258b91"
+        },
+        {
+          "path": "pass/lean/tests/d4/static_gate_policy_controls.sh",
+          "branch_blob": "9857ebf27f5d83526af96ee3fb99a0f1f38d74bf"
+        },
+        {
+          "path": "pass/lean/tests/d4/verify_controls.sh",
+          "branch_blob": "e0da81e038036837099a6f56fb58e68e555eb5c1"
+        },
+        {
+          "path": "pass/lean/tests/d4/verify_frontend_tables.py",
+          "branch_blob": "59adc95e747649b3f26bc372c37f076a7bd48e44"
+        },
+        {
+          "path": "pass/lean/tests/d4/with_authenticated_lhd.sh",
+          "branch_blob": "e90bb931f6e9749771d9b2948aa72aff120abf86"
+        },
+        {
+          "path": "pass/lean/tests/dcert_parity.cpp",
+          "branch_blob": "1e034527bc7e7ffd3071a635d298c020376b9bf9"
+        }
+      ],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "projection",
+      "tip": "aa2f8134af064c765aaed3cac759edf481863e4f",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 42,
+      "commits_master_only": 337,
+      "all_contribution_files": 57,
+      "lean_contribution_counts": {
+        "different": 7,
+        "identical": 1
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "verified-staged-compiler",
+      "tip": "aa2f8134af064c765aaed3cac759edf481863e4f",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 42,
+      "commits_master_only": 337,
+      "all_contribution_files": 57,
+      "lean_contribution_counts": {
+        "different": 7,
+        "identical": 1
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "interpreter-value-polymorphic",
+      "tip": "827e532335f4f260b05e221a073538aa6f41b6ea",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 44,
+      "commits_master_only": 337,
+      "all_contribution_files": 59,
+      "lean_contribution_counts": {
+        "identical": 5,
+        "different": 5
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "certifying-elaborator",
+      "tip": "e7947110e60ade2f834a008d1d23656e3615ada9",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 44,
+      "commits_master_only": 337,
+      "all_contribution_files": 60,
+      "lean_contribution_counts": {
+        "different": 7,
+        "absent": 2,
+        "identical": 2
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [
+        {
+          "path": "formal/lean/probes/GATE1_DERIVATION_COST.md",
+          "branch_blob": "c800eb865dd37f8a7c008323bc89e239a76b19f1"
+        },
+        {
+          "path": "formal/lean/probes/mkgate.py",
+          "branch_blob": "713acd37899c57462aaab34f377818bfd6a885ac"
+        }
+      ],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "certifying-layout",
+      "tip": "07319df15bf8c873c0b360ae2470d6fd8fbb3b00",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 52,
+      "commits_master_only": 337,
+      "all_contribution_files": 91,
+      "lean_contribution_counts": {
+        "different": 9,
+        "identical": 22,
+        "absent": 2
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [
+        {
+          "path": "formal/lean/LeanSemanticPrimitives/Geometry/Rect.lean",
+          "branch_blob": "a1cf80c32b4825d037c26ea65a83cd5496953862"
+        },
+        {
+          "path": "pass/lean/design_cert_export.hpp",
+          "branch_blob": "f0faff5d5f45a5cb014150b9c8e5db0493a796ad"
+        }
+      ],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "geometry-proof",
+      "tip": "f22f9812e3832f99735754bf26f0cfd535156516",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 52,
+      "commits_master_only": 337,
+      "all_contribution_files": 90,
+      "lean_contribution_counts": {
+        "identical": 22,
+        "different": 8,
+        "absent": 5
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [
+        {
+          "path": "pass/lean/B0_FINDINGS.md",
+          "branch_blob": "0478b7ba0ae65e1b0f4fa71eba5f8c30dd487290"
+        },
+        {
+          "path": "pass/lean/L3_FRONTEND_SCOPE.md",
+          "branch_blob": "686b2fe12647813a2729d99755c543edb1e31b3e"
+        },
+        {
+          "path": "pass/lean/PLAN_B_GDS_PROOF.md",
+          "branch_blob": "1ddb2b283c08f85f03bec2b90d2d4f32acb273da"
+        },
+        {
+          "path": "pass/lean/design_cert_export.hpp",
+          "branch_blob": "f0faff5d5f45a5cb014150b9c8e5db0493a796ad"
+        },
+        {
+          "path": "pass/lean/scripts/l3_netlist_to_cert.py",
+          "branch_blob": "7bcda2fbfa300c4295e3340e9ea477f3d48608da"
+        }
+      ],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "feat/pass-lean-certificate-proof",
+      "tip": "6c82390306fd936cc8ccb0c835283b15ae017f37",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 2,
+      "commits_master_only": 337,
+      "all_contribution_files": 11,
+      "lean_contribution_counts": {
+        "different": 5
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "feat/pass-lean-translation",
+      "tip": "d8e95a977dbf6497f83d0528483749560e949054",
+      "merge_base": "8f75d8c23bdce533f49a604aba248945ff417561",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 2,
+      "commits_master_only": 513,
+      "all_contribution_files": 12,
+      "lean_contribution_counts": {
+        "identical": 1,
+        "different": 4
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [],
+      "lean_deletions": []
+    },
+    {
+      "branch": "feat/pass-unlimited-width",
+      "tip": "2bd9caed0d7a54044278f87b54523a20e45a3fb1",
+      "merge_base": "2bd9caed0d7a54044278f87b54523a20e45a3fb1",
+      "ancestor_of_current_head": true,
+      "commits_branch_only": 0,
+      "commits_master_only": 424,
+      "all_contribution_files": 0,
+      "lean_contribution_counts": {},
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [],
+      "lean_deletions": []
+    },
+    {
+      "branch": "pass-Lean-CVA6",
+      "tip": "addfa74bb39fd5af030c1134d27da6532a0cc857",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 35,
+      "commits_master_only": 337,
+      "all_contribution_files": 51,
+      "lean_contribution_counts": {
+        "different": 8
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "pass-Lean-Core-ET",
+      "tip": "4ba5c4ec5215fc160fce22986d5dfa0d1b07f9b9",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 43,
+      "commits_master_only": 337,
+      "all_contribution_files": 58,
+      "lean_contribution_counts": {
+        "different": 7,
+        "identical": 2
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "isabelle-certificate-proof",
+      "tip": "bf8fd352cbd7172076fd036801380389a8ef4b0c",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 27,
+      "commits_master_only": 337,
+      "all_contribution_files": 37,
+      "lean_contribution_counts": {
+        "different": 5
+      },
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "fix/isabelle-get-mask-sext-width",
+      "tip": "396845fea0f34f4a950eeeaf4d851a359cf2d136",
+      "merge_base": "b0c7405674a1052594a5c76af6844928c350632f",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 1,
+      "commits_master_only": 514,
+      "all_contribution_files": 1,
+      "lean_contribution_counts": {},
+      "new_script_files_absent_from_master": [],
+      "absent_lean_contributions": [],
+      "lean_deletions": []
+    },
+    {
+      "branch": "ACL2_pass",
+      "tip": "b65aa438a449cda0c53d0840ea6e8088ce2ffa9d",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 26,
+      "commits_master_only": 337,
+      "all_contribution_files": 146,
+      "lean_contribution_counts": {
+        "different": 5
+      },
+      "new_script_files_absent_from_master": [
+        "scripts/install_acl2.sh",
+        "scripts/run_dino_lgraph_acl2.sh"
+      ],
+      "absent_lean_contributions": [],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    },
+    {
+      "branch": "Rocq_pass",
+      "tip": "a995cbc20bafa2fbf86858af21592bfab659523d",
+      "merge_base": "e7cab7bfbcfdffa84045c99dbed1deb3846a3184",
+      "ancestor_of_current_head": false,
+      "commits_branch_only": 22,
+      "commits_master_only": 337,
+      "all_contribution_files": 56,
+      "lean_contribution_counts": {
+        "different": 5
+      },
+      "new_script_files_absent_from_master": [
+        "scripts/run_dino_lgraph_rocq.sh"
+      ],
+      "absent_lean_contributions": [],
+      "lean_deletions": [
+        "formal/lean/LeanSemanticPrimitives/Translation/Add2BridgeExample.lean"
+      ]
+    }
+  ],
+  "actual_projection_checkout": {
+    "branch": "projection",
+    "source_checkout_label": "livehd-futamura/livehd (independent repository)",
+    "local_ref_tip": "aa2f8134af064c765aaed3cac759edf481863e4f",
+    "actual_checkout_tip": "9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6",
+    "projection_tree_files": 67,
+    "projection_lean_modules": 38,
+    "projection_files_absent_from_master": [
+      "formal/lean/LeanSemanticPrimitives/Projection/Audit.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/BTA.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/BindingTime.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/CertLoad.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Demo.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/DesignEncoding.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Encoding.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Gate0.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/HardwareAdequacy.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/HardwareInterpreter.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/MixProgram.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/ObjectLanguage.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/ObjectLanguageSemantics.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/OperatorBridge.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/PartialEvaluator.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/PartialEvaluatorCorrect.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/ProjectedStep.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/ProjectionCorrect.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/InterpreterVariant.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/LookupMirrorCheck.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/MixProgramSummary.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/PartialEvaluatorFast.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/PartialEvaluatorShift.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/PartialEvaluatorSummary.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/ProtoAudit.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/RewriteTotal.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/RunnerSupport.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/S2aMirrorCheck.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/VariantAdequacy.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/VariantExec.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Proto/VariantTransport.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/ResidualFragment.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/RuntimeEncoding.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/SHARED_SEMANTICS.md",
+      "formal/lean/LeanSemanticPrimitives/Projection/SIMULATOR_PLAN.md",
+      "formal/lean/LeanSemanticPrimitives/Projection/Scaling.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/SecondProjection.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/SimulatorContract.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/Surface.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/SurfaceSemantics.lean",
+      "formal/lean/LeanSemanticPrimitives/Projection/census/README.md",
+      "formal/lean/LeanSemanticPrimitives/Projection/census/coreet_operator_census.py",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/BLOCKER_HANDOFF.md",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/PERFORMANCE_INVESTIGATION_PLAN.md",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/PHASE6_NOTES.md",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/PHASE6_PERF.md",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/PROMOTION_OBLIGATIONS.md",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/SPECIALIZER_OPTIMIZATION_PLAN.md",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/check_certio.sh",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/experiments.jsonl",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/README.md",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.chainD-128.incl.txt",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.chainD-128.out.gz",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.chainD-128.self.txt",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.chainD-32.incl.txt",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.chainD-32.out.gz",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.chainD-32.self.txt",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.chainD-64.incl.txt",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.chainD-64.out.gz",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.chainD-64.self.txt",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.fastfork-128.incl.txt",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.fastfork-128.out.gz",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.zerofix-128.incl.txt",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/callgrind.zerofix-128.out.gz",
+      "formal/lean/LeanSemanticPrimitives/Projection/certio/perf-artifacts/perf.chainD-256.self.txt",
+      "formal/lean/LeanSemanticPrimitives/Projection/overlays/bv_shl_step.patch",
+      "formal/lean/LeanSemanticPrimitives/Projection/overlays/check_overlay.sh"
+    ],
+    "shared_semantics_base": "90583be1349acbd25f740b176a406aa8bbe1251c",
+    "overlay": "bv_shl_step helper and two SHL call-site substitutions; recorded universal rfl checks",
+    "pin_policy": "The shared base is a semantic reference, not a moving tracking target; explicit equivalent-preserving migration required."
+  },
+  "runtime_reproductions": [
+    {
+      "case": "sra_runtime",
+      "exit": 1,
+      "wall_seconds": 1.122,
+      "fixture_sha256": "ff95a264e7c3f513d85b15de9a4bf30293651ac3bbe3ab8aee9ab81dfec59b80",
+      "log_sha256": "aade23fe7e645ed081eca9d66b8aad233ff8862aaa483cecda98bbb99db73f2d",
+      "panic": true,
+      "slots_recursion_failure": false,
+      "compilesOk_true": false
+    },
+    {
+      "case": "sext_runtime",
+      "exit": 1,
+      "wall_seconds": 1.122,
+      "fixture_sha256": "f1e317d7a4ac43e428a35fde368476628b614fb6101e7b7a64a1feb07aafa466",
+      "log_sha256": "aade23fe7e645ed081eca9d66b8aad233ff8862aaa483cecda98bbb99db73f2d",
+      "panic": true,
+      "slots_recursion_failure": false,
+      "compilesOk_true": false
+    },
+    {
+      "case": "slots_runtime",
+      "exit": 0,
+      "wall_seconds": 16.719,
+      "fixture_sha256": "08fa4d39de607e23184a69119acc0ecf0e0ba95b03c9b52efd6327d89d7c6676",
+      "log_sha256": "4250f028790baf366a85b64fdf9f7753db67b586588a8b63bf8fb6a631c6ae71",
+      "panic": false,
+      "slots_recursion_failure": false,
+      "compilesOk_true": false
+    },
+    {
+      "case": "shl_control",
+      "exit": 0,
+      "wall_seconds": 1.129,
+      "fixture_sha256": "8f2ec1b20cae05a76d0f802228f1ee38f251b7309fa3a060d06159a192618893",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "panic": false,
+      "slots_recursion_failure": false,
+      "compilesOk_true": false
+    },
+    {
+      "case": "sra_control",
+      "exit": 0,
+      "wall_seconds": 1.123,
+      "fixture_sha256": "bb1862a193480972e16b96470610730b178af97f5ee77f67eeae735d80a451c6",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "panic": false,
+      "slots_recursion_failure": false,
+      "compilesOk_true": false
+    },
+    {
+      "case": "sext_control",
+      "exit": 0,
+      "wall_seconds": 0.721,
+      "fixture_sha256": "7ed1fb40cd74c1acee7b7d78f85051dd2cb8bd3fde01a5c849f24a1b2ab053fd",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "panic": false,
+      "slots_recursion_failure": false,
+      "compilesOk_true": false
+    },
+    {
+      "case": "shl_runtime",
+      "exit": 1,
+      "wall_seconds": 22.573,
+      "fixture_sha256": "5b76257de3881fdae98ff4bddada907d6bbe4c60da42db892b387d1bdd22e780",
+      "log_sha256": "357b42ce867bb0ed2bdfe254f74d53727a703af2c480f95dc37252821fd3c5c5",
+      "panic": true,
+      "slots_recursion_failure": false,
+      "compilesOk_true": true
+    }
+  ],
+  "slots_main_thread_reproduction": {
+    "case": "slotsFrom 108666 via lean --run at 8192 KiB main-thread stack",
+    "exit": 1,
+    "stack_kib": 8192,
+    "recursion_failure": true,
+    "fixture_sha256": "9d3d0751a92d8dc77cc2ae7cbb4a7d22b1e65bb77a15802e89251176a2aa1267",
+    "log_sha256": "7039c548cebf638f1240e1248bad1600cccc1b178a910e032a6fca2a7464ec7b"
+  },
+  "constructor_declaration_reproductions": [
+    {
+      "version": "4.31.0",
+      "fields": 255,
+      "type": "Nat",
+      "deriving": "Inhabited",
+      "exit": 0,
+      "constructor_limit": false,
+      "fixture_sha256": "4722a6e41a4b22203990698a32cda8b2918ffdd3cef67eff6c43b98fb77fed64",
+      "log_sha256": "77d3fd2dc1cbf1899e2fa0bd918b6ed7b4552262ce198dee5ad50d29353743e7"
+    },
+    {
+      "version": "4.31.0",
+      "fields": 256,
+      "type": "Nat",
+      "deriving": "Inhabited",
+      "exit": 0,
+      "constructor_limit": false,
+      "fixture_sha256": "501f99aa88151cf0a363582c2a3bcbae7cd445bcdb31000489c07340d0014750",
+      "log_sha256": "77d3fd2dc1cbf1899e2fa0bd918b6ed7b4552262ce198dee5ad50d29353743e7"
+    },
+    {
+      "version": "4.31.0",
+      "fields": 257,
+      "type": "Nat",
+      "deriving": "Inhabited",
+      "exit": 1,
+      "constructor_limit": true,
+      "fixture_sha256": "359611df946437e56721d74ec2ba921c3332c5ef73ff7fe63d014145972d36b8",
+      "log_sha256": "4b3cf0edd6b6ff124b87fc9aefc105eff3cce79505bcbf813384d794f0c5415b"
+    },
+    {
+      "version": "4.34.1",
+      "fields": 255,
+      "type": "Nat",
+      "deriving": "Inhabited",
+      "exit": 0,
+      "constructor_limit": false,
+      "fixture_sha256": "4722a6e41a4b22203990698a32cda8b2918ffdd3cef67eff6c43b98fb77fed64",
+      "log_sha256": "77d3fd2dc1cbf1899e2fa0bd918b6ed7b4552262ce198dee5ad50d29353743e7"
+    },
+    {
+      "version": "4.34.1",
+      "fields": 256,
+      "type": "Nat",
+      "deriving": "Inhabited",
+      "exit": 0,
+      "constructor_limit": false,
+      "fixture_sha256": "501f99aa88151cf0a363582c2a3bcbae7cd445bcdb31000489c07340d0014750",
+      "log_sha256": "77d3fd2dc1cbf1899e2fa0bd918b6ed7b4552262ce198dee5ad50d29353743e7"
+    },
+    {
+      "version": "4.34.1",
+      "fields": 257,
+      "type": "Nat",
+      "deriving": "Inhabited",
+      "exit": 1,
+      "constructor_limit": true,
+      "fixture_sha256": "359611df946437e56721d74ec2ba921c3332c5ef73ff7fe63d014145972d36b8",
+      "log_sha256": "b20721762e825547533a46a7229f3b9136db0c59b936f8fb41e71f92a1276a0f"
+    }
+  ],
+  "export_value_reproductions": [
+    {
+      "case": "signed_div_legacy",
+      "exit": 0,
+      "sorryAx": false,
+      "errors": 0,
+      "fixture_sha256": "29d8f03aecdbec70fab0d9aaaa46b241028e519323fa30586efb400d6b29f353",
+      "log_sha256": "93a73825c1b761d11bf2b3f4dff760d07888d3fde05dcf55f1da84aa6041a5a8",
+      "values": [
+        "74"
+      ]
+    },
+    {
+      "case": "dual_clock",
+      "exit": 0,
+      "sorryAx": false,
+      "errors": 0,
+      "fixture_sha256": "4cfebd3c935024d3472b8c2bae5960f2b932a2b5ef5722597bd8de62be171926",
+      "log_sha256": "bfa02f954d6df11d37a153c15eb881571656904d3d9ad3fcaad6dc18f2100c4a",
+      "values": [
+        "#[7, 9]"
+      ]
+    }
+  ],
+  "retired_option_reproduction": {
+    "exit": 2,
+    "retired_option_reported": true
+  },
+  "patch_map_reproduction": {
+    "case": "patch map belongs to a different input checkout",
+    "exit": 0,
+    "unpatched_source_silently_selected": true,
+    "derived_source_selected": false,
+    "scope": "Self-contained fake source and a copied current script; no sibling benchmark access."
+  },
+  "queue_acceptance_reproduction": {
+    "exit": 0,
+    "reported_verdict": "PROVEN",
+    "expected_audit": "sample_Lgraph.sample_comb_refines_fast",
+    "fake_actual_audit": "unrelated.theorem",
+    "fake_actual_axiom": "untrusted_axiom",
+    "counterexample": "Queue accepts unrelated audit and unexpected axiom when line count is sufficient; sequential fixture also has no next/step audit.",
+    "scope": "Self-contained copied current queue with local fake tools, no actual proof claimed."
+  },
+  "source_only_export": {
+    "compile_exit": 0,
+    "node_origin_lines": 0,
+    "sources": 1,
+    "required_declarations_present": true,
+    "static_gate_would_fail": "n_nod > 0 required by run_coreet_module_lean.sh; current emitted source-only DesignCert has zero nodes."
+  },
+  "restored_artifact_coverage": {
+    "total": 341,
+    "exact_hash_historical_successes": 328,
+    "without_exact_hash_success": [
+      {
+        "family": "CORE-ET",
+        "case": "txfma_c0",
+        "top": "txfma_c0",
+        "mode": "legacy_bridge",
+        "artifact_sha256": "846fcf76914cf8eafecb9207ffa5af5031f3a595270d5f76d2334842395c4a3c",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": []
+      },
+      {
+        "family": "CORE-ET",
+        "case": "txfmactl_top",
+        "top": "txfmactl_top",
+        "mode": "legacy_fast",
+        "artifact_sha256": "c91b7b24528c1caf54ab0f56f4d3789845e0336aa04f9c032ae5ace2e6c7dc69",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": [
+          "FAILED"
+        ]
+      },
+      {
+        "family": "CORE-ET",
+        "case": "txfma_wallace1",
+        "top": "txfma_wallace1",
+        "mode": "legacy_bridge",
+        "artifact_sha256": "e30ca3a116ff5192aa07376adc1ecc368b99f00b9df5daacc63b9f866d0d0a47",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": [
+          "RUNNING"
+        ]
+      },
+      {
+        "family": "CORE-ET",
+        "case": "txfma_wallace2",
+        "top": "txfma_wallace2",
+        "mode": "legacy_bridge",
+        "artifact_sha256": "f20dbf74dde17f58cb998f562d59360b69bd27867d016dac21d404993952d3c5",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": [
+          "RUNNING"
+        ]
+      },
+      {
+        "family": "CORE-ET",
+        "case": "vpu_ml",
+        "top": "vpu_ml",
+        "mode": "legacy_bridge",
+        "artifact_sha256": "897290b5c1eb0aa5d5d9fc19e76aed6d508edede72a209e3521e38b98a339e82",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": []
+      },
+      {
+        "family": "CORE-ET",
+        "case": "vpu_tensorfma",
+        "top": "vpu_tensorfma",
+        "mode": "legacy_bridge",
+        "artifact_sha256": "81eaa2c3287aba23cecc4cc9786c50f8cbeae02bc7dfa266b225fccf20c7da72",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": []
+      },
+      {
+        "family": "CVA6",
+        "case": "csr_regfile",
+        "top": "csr_regfile_gate",
+        "mode": "legacy_fast",
+        "artifact_sha256": "36740750ba962d5fa72f068e68ae9d1607633cd4a1be88b51011bc2d32e8defd",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": [
+          "FAILED"
+        ]
+      },
+      {
+        "family": "CVA6",
+        "case": "fpu_wrap",
+        "top": "fpu_wrap_gate",
+        "mode": "legacy_fast",
+        "artifact_sha256": "35440c98d115623613674f03f9bc12a737a69fbd417023e95915eaee0d6049c3",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": [
+          "FAILED"
+        ]
+      },
+      {
+        "family": "CVA6",
+        "case": "frontend",
+        "top": "frontend_gate",
+        "mode": "legacy_fast",
+        "artifact_sha256": "80f000fc5ceef7ddb4e7e3c96169d13cb9652552069ef4909b4d9c6093cbd6b8",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": [
+          "FAILED"
+        ]
+      },
+      {
+        "family": "CVA6",
+        "case": "issue_stage",
+        "top": "issue_stage_gate",
+        "mode": "legacy_fast",
+        "artifact_sha256": "2919d9f6fc2c412a7a0c7da9c75d676b957ac6f3dd3131ca780b6444f0d7ca2f",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": [
+          "FAILED"
+        ]
+      },
+      {
+        "family": "CVA6",
+        "case": "legacy_cva6_alu_export",
+        "top": "cva6_alu_export",
+        "mode": "legacy_bridge",
+        "artifact_sha256": "93535dd8806923fe2e015914bdd3d0b7e66ae3c5f560a6f64dc5b17abb76b838",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": [
+          "RUNNING"
+        ]
+      },
+      {
+        "family": "CVA6",
+        "case": "legacy_cva6_pmp_gate",
+        "top": "cva6_pmp_gate",
+        "mode": "legacy_bridge",
+        "artifact_sha256": "4ec3e4f35bbb0940fbe8500642241a2a707729db43cacf4a54b012c89c88a318",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": [
+          "RUNNING"
+        ]
+      },
+      {
+        "family": "DINO",
+        "case": "PipelinedDualIssueCPU",
+        "top": "PipelinedDualIssueCPU",
+        "mode": "legacy_bridge",
+        "artifact_sha256": "9d28cdc67ecca37c38ef24397279ca3af49ccfff9fb683b60d6902209fda9951",
+        "exact_hash_historical_success": false,
+        "historical_verdicts": []
+      }
+    ],
+    "qualification": "Matching artifact hashes in historical logs do not substitute for a complete proof with current matching library/toolchain. Four RUNNING dispositions are stale, not active jobs."
+  },
+  "fixtures": {
+    "shl_runtime.lean": {
+      "source": "import LeanSemanticPrimitives.Compiler.CompileDesign\nopen Compiler\ndef D : DesignCert := { sources := #[.const 8 1, .const 64 8589934576], nodes := #[{ op := .Op_SHL, width := 8, deps := #[0, 1], origin := 1 }], outputs := #[{ slot := 2, width := 8 }], flops := #[], memories := #[] }\n#eval compilesOk D\n#eval bv_uint ((compileAndRun D #[] default).outputs[0]!)\n",
+      "sha256": "5b76257de3881fdae98ff4bddada907d6bbe4c60da42db892b387d1bdd22e780"
+    },
+    "sra_runtime.lean": {
+      "source": "import LeanSemanticPrimitives.Translation.LGraphModel\n#eval bv_uint (eval_op .Op_SRA 8 [mk_bv 4 (-1), mk_bv 64 8589934576])\n",
+      "sha256": "ff95a264e7c3f513d85b15de9a4bf30293651ac3bbe3ab8aee9ab81dfec59b80"
+    },
+    "sext_runtime.lean": {
+      "source": "import LeanSemanticPrimitives.Translation.LGraphModel\n#eval bv_uint (eval_op .Op_Sext 8 [mk_bv 4 (-1), mk_bv 64 8589934576])\n",
+      "sha256": "f1e317d7a4ac43e428a35fde368476628b614fb6101e7b7a64a1feb07aafa466"
+    },
+    "slots_run.lean": {
+      "source": "import LeanSemanticPrimitives.Compiler.DesignCert\nopen Compiler\ndef main : IO Unit := IO.println (DesignCert.slotsFrom 0 108666).length\n",
+      "sha256": "9d3d0751a92d8dc77cc2ae7cbb4a7d22b1e65bb77a15802e89251176a2aa1267"
+    },
+    "shl_control.lean": {
+      "source": "import LeanSemanticPrimitives.Translation.LGraphModel\n#guard bv_uint (eval_op .Op_SHL 8 [mk_bv 8 1, mk_bv 8 7]) == 128\n",
+      "sha256": "8f2ec1b20cae05a76d0f802228f1ee38f251b7309fa3a060d06159a192618893"
+    },
+    "sra_control.lean": {
+      "source": "import LeanSemanticPrimitives.Translation.LGraphModel\n#guard bv_uint (eval_op .Op_SRA 8 [mk_bv 4 (-1), mk_bv 8 4]) == 255\n",
+      "sha256": "bb1862a193480972e16b96470610730b178af97f5ee77f67eeae735d80a451c6"
+    },
+    "sext_control.lean": {
+      "source": "import LeanSemanticPrimitives.Translation.LGraphModel\n#guard bv_uint (eval_op .Op_Sext 8 [mk_bv 4 (-1), mk_bv 8 4]) == 255\n#guard bv_uint (eval_op .Op_Sext 8 [mk_bv 4 (-1), mk_bv 8 5]) == 15\n",
+      "sha256": "7ed1fb40cd74c1acee7b7d78f85051dd2cb8bd3fde01a5c849f24a1b2ab053fd"
+    },
+    "dual_clock.sv": {
+      "source": "module dual_clock(input logic clk_a, clk_b, input logic [7:0] d_a, d_b,\n                  output logic [7:0] q_a, q_b);\n  always_ff @(posedge clk_a) q_a <= d_a;\n  always_ff @(posedge clk_b) q_b <= d_b;\nendmodule\n",
+      "sha256": "f4b5b8b928f26eaf781fdd7d8098db88952051261376aaaa9db32c5b1506b16d"
+    },
+    "signed_div.sv": {
+      "source": "module signed_div(input logic signed [7:0] a, b, output logic signed [7:0] q);\n  assign q = a / b;\nendmodule\n",
+      "sha256": "fc4ad526746ee3ec9ed90f437482091aa6f4e3132e41a92a601b2caea8898af5"
+    },
+    "const_only.sv": {
+      "source": "module const_only(output logic [7:0] y);\n  assign y = 8'h2a;\nendmodule\n",
+      "sha256": "fc9e434964f12eb9dfc4cc6392b46a205d860174d555fc89feb1427d3265115e"
+    }
+  },
+  "branch_runtime_repair_commits": [
+    "9368703518e673db551dd969b1d1b373a3377b44",
+    "2d98f605e4a23e289ac59c3f0a90b25eed0204c3",
+    "5d523941127f27e3b3f1b78cc68ee31556a3f5f8"
+  ],
+  "validation": {
+    "bazel": "Three Lean test targets passed (cached); optimized lhd executable built. Native regression suite was not rerun in this audit.",
+    "python": "sweep_tooling_check.py: 5 passed; hotmux_oracle_check.py: 6 passed.",
+    "shell": "bash -n passed: scripts/run_coreet_module_lean.sh, scripts/coreet_filelist.sh, scripts/run_lean_queue.sh, pass/lean/scripts/hotmux_oracle.sh.",
+    "discarded_attempts": "A low address-space limit prevented Lean thread creation; malformed initial hand-written fixtures were corrected. A signed-Div verified evaluation is not accepted because the generated compilation theorem fails. Those harness failures are not proof results.",
+    "probes_environment": "Project Lean 4.31.0 and existing support artifacts; constructor declarations additionally checked with installed Lean 4.34.1. No project toolchain pins changed.",
+    "limits": "Large source-branch theorem suites and complete DINO/CORE-ET/CVA6 proofs were not rerun during this audit.",
+    "record_checks": "Audit JSON counts and commit hashes, private-path exclusion, local Markdown links and git diff --check passed."
+  },
+  "findings": [
+    {
+      "id": "A01",
+      "status": "open migration",
+      "title": "Branch coverage is incomplete",
+      "evidence": "D2/D3/D4 contributions, actual Futamura checkout, CE probes and geometry work are not fully on master. Branch ancestry alone is not a preservation test.",
+      "required_validation_or_action": "Inventory every contribution by logical source, source commit and current destination/disposition; preserve intentional supersessions and validate every adapted implementation."
+    },
+    {
+      "id": "A02",
+      "status": "semantic acceptance gap",
+      "title": "Clock domains are scanned but not certified",
+      "evidence": "Fresh two-clock export typechecks and commits both flops; no edge vector/domain metadata can express firing only one clock. Generic correctness proves agreement with the clockless interpreter.",
+      "required_validation_or_action": "Port D2 ClockDesc, flop clock/asyncReset, memory clock, edge rules and DirectCheck. Decide a guard or explicit all-domains-fire contract until complete; require backward-compatible allEdges proofs and async-reset/memory edge tests."
+    },
+    {
+      "id": "A03",
+      "status": "reproduced runtime bug",
+      "title": "D3/D4 bounded-amount repairs absent",
+      "evidence": "SHL certificate compilesOk is true, then large-amount evaluation panics; SRA and Sext primitive probes also panic. Source branch repairs include eager-equivalence proofs.",
+      "required_validation_or_action": "Port one consistent guarded SHL/SRA/Sext implementation and reprove pointwise equivalence across eval, denote and residual; run zero/boundary/huge-amount and original branch runtime gates."
+    },
+    {
+      "id": "A04",
+      "status": "reproduced runtime bug",
+      "title": "Tail-recursive slot construction absent",
+      "evidence": "slotsFrom 108666 succeeds under #eval but overflows via lean --run at an 8192 KiB main-thread stack. D4 has an accumulator implementation and equality proof.",
+      "required_validation_or_action": "Port slotsFrom accumulator with range equality and unchanged public theorems; run the main-thread and full large runtime-certificate gates at recorded stack limits."
+    },
+    {
+      "id": "A05",
+      "status": "transport migration gap",
+      "title": "D4 includes C++ transport and a proved Lean roundtrip",
+      "evidence": "D4 has total parseCert, pure renderCert, parse/render roundtrip, C++ DCERT1 serializer and staged pair publication. DCERT1 omits D2 clock/async metadata.",
+      "required_validation_or_action": "Port serializer as a CertificateIR consumer; choose versioned clock-aware format or explicit refusal. Prove new schema roundtrip and C++/Lean parity. Preserve rollback tests; do not describe a two-file pair as crash-atomic."
+    },
+    {
+      "id": "A06",
+      "status": "projection migration gap",
+      "title": "Local projection ref is stale",
+      "evidence": "Actual independent projection checkout has 67 files including 38 Lean modules, all absent, pinned to D2 semantic base 90583be1 with a proved SHL overlay.",
+      "required_validation_or_action": "Use actual checkout commit; explicitly migrate the fixed semantic pin and preserve overlay equalities. Rebuild all projection modules and theorem audits without introducing compiler dependence into the independent correctness path."
+    },
+    {
+      "id": "A07",
+      "status": "acceptance incomplete",
+      "title": "Restored flat proof coverage has 13 gaps",
+      "evidence": "328 of 341 current artifact hashes match historical successful logs; 13 do not. Four old RUNNING rows have no active jobs. Nested proofs do not validate flat artifacts.",
+      "required_validation_or_action": "After user-owned matching Lean/Mathlib upgrade, rebuild exact imports and replay all current artifacts with wall/RSS and whole theorem/axiom audits. Measure actual record fields and execution boundaries; no nesting workaround."
+    },
+    {
+      "id": "A08",
+      "status": "reproduced runner bug",
+      "title": "CORE-ET runner invokes retired native LEC option",
+      "evidence": "formal.strict causes current lhd lec usage exit 2; runner treats nonzero LEC outcomes as nonfatal even with strict requested.",
+      "required_validation_or_action": "Repair runner invocation/classification only: remove retired option, classify native PROVEN/REFUTED/UNKNOWN/usage/infrastructure separately and fail required gates. Preserve native checker and proof procedure."
+    },
+    {
+      "id": "A09",
+      "status": "reproduced provenance bug",
+      "title": "Patch-map existence is insufficient",
+      "evidence": "Copied current filelist script accepts a map for another checkout and silently selects original unpatched sources.",
+      "required_validation_or_action": "Validate logical input root, source hashes, required substitutions and derived hashes. Record two declaration moves and two output-logic insertions separately. Keep 122-module triage separate from the 125-configuration matrix."
+    },
+    {
+      "id": "A10",
+      "status": "reproduced proof acceptance bug",
+      "title": "Queue accepts unrelated theorem and unknown axiom",
+      "evidence": "A copied queue with fake tools reports PROVEN for an unrelated theorem depending on untrusted_axiom; sequential next/step audits can be absent when expected count is derived only from emitted print lines.",
+      "required_validation_or_action": "Require exact expected theorem identities and required comb/next/step/chunk/global-WF audits independent of print count; allow only documented trusted axioms/native_decide facts. Add positive and negative acceptance controls."
+    },
+    {
+      "id": "A11",
+      "status": "reproduced runner bug",
+      "title": "Source-only certificates rejected by static gate",
+      "evidence": "Fresh constant-output export has one source and zero nodes; Lean typecheck is valid but CORE-ET runner requires a positive node count.",
+      "required_validation_or_action": "Accept structurally valid empty node arrays, retain full certificate/compile correctness gates and add source-only/empty-graph positive controls."
+    },
+    {
+      "id": "A12",
+      "status": "inherited semantic mismatch",
+      "title": "Signed Div exported as UDiv",
+      "evidence": "Legacy signed -32 / 3 evaluates to 74; verified export uses UDiv but generated compiles theorem fails because division is unsupported by CompileOp. Native encoder chooses signedness from operands, not simply result signedness.",
+      "required_validation_or_action": "Bring signed division behavior to user before changing semantics; add SDiv plumbing and operand-width/sign oracles only with approval. Approved Rem policy remains constant nonzero divisors only, with signed semantics separately proved."
+    },
+    {
+      "id": "A13",
+      "status": "diagnostic and refusal gap",
+      "title": "Hotmux lowering lacks export-local one-hot provenance",
+      "evidence": "Graph census/compile logs record one-hot status, but lowering erases Hotmux identity in emitted certificate. Graph helper asserts dense pins before adapter validates them.",
+      "required_validation_or_action": "Carry native-proved/deferred/refuted status and origin into export diagnostics/sidecar; prove values independently of one-hot assumptions. Prevalidate malformed layouts and require structured refusal rather than assertion abort."
+    },
+    {
+      "id": "A14",
+      "status": "documentation error",
+      "title": "Historical plan text misstates current implementation",
+      "evidence": "Header still describes uncreated PR branch and monolithic legacy emitter. R1/R10 describe D4 as Lean-only, auto-moving FP pin and content-free Lean module moves.",
+      "required_validation_or_action": "Mark original phases historical, retain evidence, and use current master migration gates. Include lean_format split, actual import/BUILD adaptations and dependency boundary checks."
+    }
+  ],
+  "source_only_typecheck": {
+    "case": "const_only_verified",
+    "exit": 0,
+    "wall_seconds": 33.943,
+    "fixture_sha256": "ca02fcb5e7d7e2c6f804af2f8e420e18d92439ef68cbd9c990004b48845a9b11",
+    "log_sha256": "8fb0000b25beae3bee5b9b42a4cef80783cfa765ab0bf1927578a11830a13ba4",
+    "step_correct_audit_present": true,
+    "sorryAx": false
+  }
+}

@@ -1,5 +1,13 @@
 # Lean refactor integration with master
 
+> **Current migration audit:** The audit of `4342b312b` preserves the PR and
+> B1/B2 source boundaries, but finds missing D2/D3/D4/FP work and reproduced
+> runtime/runner acceptance defects. It does not claim all branches landed or
+> a complete restored-flat replay. See [plan section 14](PASS_LEAN_RESTRUCTURE_PLAN.md#14-current-master-audit-and-corrective-migration-gates)
+> and [MASTER_REBASE_AUDIT.json](tests/MASTER_REBASE_AUDIT.json).
+> Earlier snapshots below remain historical evidence; R12 supplies the current
+> migration dispositions and supersedes the noted stale R1/R10/R11 claims.
+
 > **Current record-layout policy:** Automatic nesting above 64 fields has been
 > withdrawn at the user's request. The original flat schema emitter is restored.
 > Nested-layout measurements below describe historical checkpoints and do not
@@ -291,7 +299,7 @@ they share `formal/lean/LeanSemanticPrimitives/Compiler/`.
 | `b1-b2-verified-compiler` | `livehd-new` | C++ scan/IR/emitters, `CompileOp/CompileGraph/CompileDesign`, `compileDesign_correct`, chunked WF, fast bridge | `DesignCert`, `Runtime`, `DesignSemantics` |
 | `direction-2-ir-semantics-clean` | `livehd-d2-ir-semantics` | **Multi-clock**: `ClockDesc`, `DesignCert.clocks`, `FlopDesc.clock`, `ClockEdges`/`fires`/`allEdges`; `DirectSemantics`, `DirectCheck`, `DirectSim`, `DirectTrace`, `DirectVsCompiled`, `DirectBench`, `DirectExamples`, `DirectTests` | same three |
 | `direction-3-translation-validation` | `livehd-d3-translation-validation` | `Reify`, `ReifyGen`, `ReifyProof`, `D3Harness`, the `*Defs` module split | same three |
-| `direction-4-incremental` | `livehd-d4-incremental` | `CertIO`, `CertIORoundTrip` (runtime certificate transport; parser recorded as trusted) | same three |
+| `direction-4-incremental` | `livehd-d4-incremental` | `CertIO`, `CertIORoundTrip`, C++ DCERT1 serializer and staged publication (see R12 for current roundtrip/provenance scope) | same three |
 | `projection` | `livehd-futamura/livehd` | `Projection/` (partial evaluator, `I_hw`, specializer), `SIMULATOR_PLAN.md` | pins `DesignCert`/`interpretDesign` at a fixed revision |
 
 **Schema ownership and landing order.** The two `DesignCert.lean` schemas have
@@ -305,10 +313,12 @@ Required order, with a gate between each step:
 2. D2 lands its clock-aware `DesignCert`/`Runtime`/`DesignSemantics` on top,
    together with `interpretDesign_allEdges`, which is what makes the schema
    change meaning-preserving for one-domain certificates.
-3. D3 and D4 rebase onto the post-D2 schema. Both are Lean-only; neither adds
-   a C++ emitter and neither may introduce a second graph traversal.
-4. Futamura re-pins to the landed revision. Its pin **moves** as soon as step 1
-   lands; that is a required action, not a side effect.
+3. Port D3 proofs and D4 transport onto the post-D2 schema. D4 also has a C++
+   serializer/publication path; make it a consumer of the shared CertificateIR,
+   with no second graph traversal and explicit clock-aware wire compatibility.
+4. Migrate Futamura's fixed semantic pin explicitly with equivalence checks.
+   Its independent checkout is ahead of the stale local ref; neither landing
+   B1/B2 nor D2 moves that pin automatically. See R12 and plan section 14.
 
 Adopting D2's checker is recorded on that branch (`DIRECTION2_RESULTS.md:658`)
 as regressing **54 of the 147** baseline certificates with `asyncFlagMismatch`
@@ -912,7 +922,8 @@ graph-adapter -> certificate-IR -> { verified-compiler, legacy-model,
 `lgraph-semantics`; neither may reach back into `graph-adapter`.
 
 One enforceable check is worth more than the diagram: **no emitter may include a
-graph-adapter header.** That is P5 of PASS_LEAN_RESTRUCTURE_PLAN.md, and as a
+graph-adapter header.** That follows sections 3 and L3-L8 of
+PASS_LEAN_RESTRUCTURE_PLAN.md, and as a
 directory boundary it is mechanically checkable in CI rather than aspirational.
 
 #### Sequencing
@@ -920,9 +931,10 @@ directory boundary it is mechanically checkable in CI rather than aspirational.
 This reorganization happens AFTER the branches land (R1 step 4) and AFTER the
 benchmark replay, not before. Moving files while D2/D3/D4/Futamura are still
 rebasing would force every one of them to re-target paths mid-flight, and a
-replay whose inputs moved proves nothing about the port. Record the move as a
-pure rename commit, with no content change, so `git log --follow` stays usable
-and the replay can be re-run across it unchanged.
+replay must identify the inputs and implementation it validates. Keep movement
+separate from semantic changes and record path mappings. Lean module moves may
+require import and BUILD changes, so do not promise a compiling content-free
+rename. Preserve history where possible and rerun the affected proof gates.
 
 
 ## Fresh replay and raw census checkpoint (2026-10-08)
@@ -1473,11 +1485,14 @@ Two Lean limits, both measured on this machine rather than inferred:
 The bisection is exact: 127 fields evaluate, 129 segfault; 256 fields compile,
 257 do not. Elaboration is not at fault -- the same 128-field structure
 `#check`s cleanly and only `#eval` crashes -- so the first limit is in the
-interpreter. A toolchain upgrade therefore moves the legacy ceiling from 128 to
-256 and no further.
+interpreter. An upgrade removes that measured crash, but does not make
+arbitrarily large flat constructors executable. Declaration success at exactly
+256 fields is not an execution guarantee; see R12's fresh boundary probes.
 
-A legacy `<Top>_state` record carries ONE CONSTRUCTOR FIELD PER FLOP
-(`emit_legacy_schema.cpp:120`), so the legacy path's ceiling is 256 flops.
+A legacy `<Top>_state` record includes one field per flop, alongside any other
+state fields. Input/output and memory records also have constructors. The limit
+is measured in fields of each actual record, not a general 256-flop ceiling.
+Keep the flat representation and record affected limitations for the user.
 
 The verified compiler has no such limit, and this is now demonstrated on a real
 block rather than argued. `txfmactl_top`, **289 flops**, exported in
@@ -1505,20 +1520,101 @@ is NOT established as the fix by anything recorded here.
 When `direction-2-ir-semantics-clean` lands (R1 step 2), its scope is the
 CLOCK SCHEMA and its direct interpreter, and nothing else. Specifically:
 
-IN scope -- `ClockDesc`, `DesignCert.clocks`, `FlopDesc.clock`,
-`ClockEdges`/`fires`/`allEdges`, `srcFlopNext`'s edge rule, the `Legacy` copies
+IN scope -- `ClockDesc`, `DesignCert.clocks`, `FlopDesc.clock` and
+`FlopDesc.asyncReset`, `MemoryDesc.clock`, `ClockEdges`/`fires`/`allEdges`,
+`srcFlopNext`'s edge rule, the `Legacy` copies
 and `interpretDesign_allEdges` that make the schema change meaning-preserving,
-D2's own `Direct*` modules, and the re-emission of the 54 of 147 certificates
-its checker regresses with `asyncFlagMismatch`.
+D2's own `Direct*` modules and validation tools, and fresh checker-driven
+re-emission. The recorded 54/147 `asyncFlagMismatch` count is historical; rerun
+the checker on the current corpus instead of assuming that count still holds.
 
 OUT of scope -- the Futamura branch's `Projection/` tree and its partial
 evaluator, D3's `Reify*`, and D4's `CertIO*`. D2's `DirectSim` and the Futamura
 projected simulator are DIFFERENT simulators over the same certificate; landing
 them together would make it impossible to tell which one a later result is
 about, and the projection branch additionally pins `DesignCert` at a fixed
-revision that only moves once D2's schema has landed.
+revision requiring an explicit compatibility migration after D2 lands.
 
 The rebase must be SEMANTIC, not a replay: D2 is 133 commits ahead of its own
 base and 335 behind current master, and it carries its own copies of
 `Compiler/*.lean`. Port the type change onto the landed schema; do not replay
 133 commits across a graph API that moved underneath them.
+
+
+## R12. Current implementation and all-direction audit
+
+Audit snapshot: `4342b312bb1aee60cde01e45b04a73de274b997c`.
+A read-only remote query returned `94c5967c6` for master. The pristine upstream
+comparison remains `8bea45dc2`, not a claim about the current remote tip.
+The complete corrective plan is [section 14](PASS_LEAN_RESTRUCTURE_PLAN.md#14-current-master-audit-and-corrective-migration-gates);
+[MASTER_REBASE_AUDIT.json](tests/MASTER_REBASE_AUDIT.json) contains full branch
+hashes, missing contribution paths, reproduction fixtures and result hashes.
+This documentation/evidence audit changes no implementation or toolchain pins.
+
+The PR ledger has all 117 entries present (87 byte-identical); B1/B2's five
+absent contribution entries are recorded original deletions or superseded
+exporters. All 22 PR formal files and nine B1 compiler modules remain exact.
+The flat schema is restored. The 74 protected native LEC files and 3,689
+protected upstream graph/frontend/normalization/contract/warning files remain
+identical under the recorded comparison exclusions. This source-retention
+result does not establish that later direction branches have landed.
+
+The branch inventory shows D2/D3/D4's schema, proof, runtime and tooling work
+still absent. The actual independent Futamura checkout is `9bb41a09d`, with 67
+missing Projection files (38 Lean modules), whereas this repository's local
+`projection` ref points to the old `aa2f8134a`. IVP's core definitions and probe
+are already exact; VS has no unique implementation; CE has only its missing
+cost-study probes, not a finished elaborator. CL/GP remain separate pending
+research. Historical Lean refs and separate Isabelle/ACL2/Rocq directions have
+explicit inventory/disposition rather than an implicit claim of completion.
+
+The fresh probes establish these required gates:
+
+- A two-clock certificate typechecks but lacks independent clock-edge state;
+  the interpreter updates both flops. Port D2's flop async/clock and memory
+  clock metadata, edge rules, checker and compatibility proofs before claiming
+  RTL clock fidelity. Record a temporary guard/contract decision explicitly.
+- Current large-amount SHL, SRA and Sext evaluate with a `Nat.pow` panic; SHL's
+  compile check succeeds first. D3/D4 contain bounded repairs with equality
+  proofs. Recover these separately from the user-owned Lean upgrade.
+- Slot construction over 108,666 slots succeeds in a `#eval` worker but fails
+  via `lean --run` at an 8 MiB main-thread stack. Port D4's proved accumulator.
+- D4 has a total parser and proved Lean render/parse roundtrip, plus a C++
+  serializer/publication path. Its clockless DCERT1 format needs an explicit
+  post-D2 compatibility decision; Lean roundtrip alone does not prove C++ byte
+  agreement or external provenance. Two-file publication is not crash-atomic.
+- The restored CORE-ET runner still sends retired `formal.strict` to native
+  LEC, then tolerates its usage failure. Repair runner invocation and verdict
+  classification only; do not modify native LEC.
+- A patch map for another checkout passes the existence guard and silently
+  selects unpatched input. Require source/substitution/derived hash checks.
+  Keep the 122-module triage separate from the older 125-configuration matrix,
+  which already has 44 configurations using patched sources.
+- A fake-tool probe of the copied queue reports PROVEN for a different theorem
+  using an untrusted axiom. Require identities and full comb/next/step/WF audits
+  independently of the number of print lines. The frozen replay's separate
+  identity checks are a distinct procedure.
+- A valid one-source/zero-node certificate typechecks (33.943 s; step audit
+  present, no `sorryAx`), but the CORE-ET static gate rejects its node count.
+- Signed Div still maps to UDiv: legacy `-32 / 3` evaluates to 74. The verified
+  compilation theorem refuses division, so it is not a successful verified
+  proof. Any correction needs the user's semantic decision and operand-sign
+  tests; approved Rem remains constant nonzero-divisor only.
+- Hotmux's census diagnostics exist, but export-local origin/one-hot status and
+  malformed dense-pin prevalidation remain open.
+
+Of the 341 restored artifact hashes, 328 match historical successful logs;
+13 do not. Section 14 names all 13 with exact hashes in the evidence JSON.
+Four historical RUNNING records are stale, not active jobs. Withdrawn nested
+proofs are not flat acceptance. Fresh 255/256/257-field declarations confirm
+that 257 still fails on both 4.31.0 and 4.34.1; declaration success does not
+validate boundary execution. Keep flat records and the user-owned upgrade,
+then replay all current artifacts plus recovered branch runtime gates with
+matching libraries, complete audits and wall/RSS measurements.
+
+Audit checks: optimized tools built; three Lean Bazel test targets passed
+(cached), five sweep-tooling and six Hotmux-oracle checks passed, inspected
+runners passed syntax checks, and the recorded small runtime/export/boundary
+probes ran. Full benchmark, source-branch proof-library and native regression
+suites were not rerun in this audit. The all-direction migration and full
+restored-flat acceptance remain open.
