@@ -1119,3 +1119,40 @@ one-bit value before sign extension, preserving its Boolean condition without
 replicating every bit. The adapter code and certificate/model semantics are
 unchanged. Wider sources, zero amounts and dynamic amounts remain refused by
 the tracing rule's existing negative tests.
+
+### Bounded legacy records: a newly exercised inherited limitation
+
+The fresh `txfmactl_top` legacy-fast check failed because its 289-field state
+record exceeds Lean's executable constructor capacity. Its historical legacy
+scope was export; the older PROVEN label described the verified-compiler path.
+Both the original B1/B2 exporter and the PR schema emitter emitted unbounded
+flat records. The current corpus also contains five CVA6 state records with
+256, 534, 282, 409 and 326 fields, respectively. This failure does not implicate
+native LEC or a changed node interpretation.
+
+A separate minimal execution experiment exposed a stricter practical issue:
+in the pinned Lean 4.31 interpreter, reading a default field from a flat
+128-field Nat or BitVec record terminated with signal 11, whereas a 64-field
+record executed. The schema emitter now bounds physical records at 64 fields
+using inherited chunks. Field names, order, widths and values remain intact.
+Generated helper types, positional `.mk` constructors and `Repr` nesting change;
+clients should use the preserved named fields and record-literal syntax.
+Certificate IR, primitive semantics, and fast-model operation expressions are
+unchanged.
+
+[MASTER_RECORD_LAYOUT_RESULTS.json](tests/MASTER_RECORD_LAYOUT_RESULTS.json)
+records six fresh fixtures. The 64/65 and 255/256 boundaries and a 534-field
+mixed-width fixture prove exact input/output/state conversions in both directions
+by `rfl`, every next-state field for arbitrary inputs, and executable native
+checks. The 256-field fixture also proves full WF and all three bridge theorems.
+A separate fixture checks function-valued memory fields and updates. No missing
+audit or `sorryAx` is accepted. The first prototype retained a large flat boundary
+and reproduced the interpreter crash; a separate fixture initially lacked its
+helper lemma import. Both failed runs are retained, and all final fixtures pass.
+
+Regenerating all 341 accepted artifacts leaves 319 byte-identical. The remaining
+22, across 16 configurations, change only their structure declarations: all
+ordered fields and the entire following function/certificate/proof text match.
+All 127 verified-compiler exports are byte-identical. Every affected artifact is
+being checked again, including DualIssue's three legacy modes; previous DINO
+measurements remain a historical checkpoint until that reproof finishes.

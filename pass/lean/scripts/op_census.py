@@ -243,7 +243,7 @@ def main():
     path = args[0]
     text = open(path).read()
 
-    mtop = re.search(r"^structure (\w+)_in where", text, re.M)
+    mtop = re.search(r"^structure (\w+)_in(?: where| extends )", text, re.M)
     top = mtop.group(1) if mtop else "?"
 
     nodes = {}

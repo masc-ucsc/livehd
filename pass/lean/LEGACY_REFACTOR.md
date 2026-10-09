@@ -214,3 +214,11 @@ changes. Current bridge success is not a claim of general old/new equivalence.
 ## Integration with master
 
 [MASTER_INTEGRATION.md](MASTER_INTEGRATION.md) records the upstream graph API port, preservation boundary, strict-option migration, and validation against the pre-merge refactor.
+
+The master port additionally bounds generated input/output/state records at
+64 physical fields through inherited helper structures. This addresses Lean
+code-generation and interpreter limits found during the full replay. Named
+selectors and field values are preserved; positional constructors and `Repr`
+formatting change for larger records. Certificate and fast-operation semantics
+remain unchanged. See [the master integration audit](MASTER_INTEGRATION.md) and
+[record-layout evidence](tests/MASTER_RECORD_LAYOUT_RESULTS.json).
