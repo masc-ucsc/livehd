@@ -1,6 +1,14 @@
 {
-  "schema_version": 1,
-  "change": "Nest legacy records above 64 fields into bounded inherited records. Preserve ordered fields, selectors, and model/certificate evaluation; helper structure names, positional constructors and Repr nesting change.",
+  "schema_version": 2,
+  "status": "HISTORICAL_NESTING_WORKAROUND_WITHDRAWN",
+  "current_policy": {
+    "legacy_record_layout": "original flat schema",
+    "reason": "User rejected emitter representation changes as a workaround for an upstream Lean bug.",
+    "toolchain_upgrade": "Pending user; see PASS_LEAN_RESTRUCTURE_PLAN.md section 13.",
+    "nested_proofs": "Historical only; not acceptance of current flat artifacts.",
+    "remaining_limitation": "Executable flat constructor-size limit remains separate from the allocator crash."
+  },
+  "change": "Historical experiment: nest legacy records above 64 fields. Withdrawn; current emitter restores the original flat schema.",
   "trigger": {
     "case": "CORE-ET/txfmactl_top",
     "state_fields": 289,
@@ -15,7 +23,7 @@
     "control": "64-field flat record executes; recursively nested larger records execute.",
     "scope": "Observed local interpreter failure; no claim about all Lean execution backends."
   },
-  "proof_harness": "pass/lean/scripts/large_record_check.sh",
+  "proof_harness": "Historical harness pass/lean/scripts/large_record_check.sh in commit c26c85f7f; removed with the nesting workaround.",
   "fixtures": [
     {
       "fixture": "record_64",
@@ -130,9 +138,9 @@
   "context_sha256": "dcf48d539836a96416b042af518c63fd5ee4be92f7a9fd7154be2af6a7f8662a",
   "exporter_sha256": "bf7761708ff9d0450bc8c09011a90c7cc934ea10ea2dc032e7f5d869a2b47fbc",
   "full_block_reproofs": {
-    "status": "COMPLETE",
+    "status": "HISTORICAL_NESTED_LAYOUT_COMPLETE",
     "successful_jobs": 22,
-    "scope": "Latest model layout with the final proof tactics. Any subsequent Or-only proof rewrite is included in the current artifact hash; all earlier attempts are retained.",
+    "scope": "Completed checks for the withdrawn nested layout; hashes and prior attempts are historical, not acceptance of the restored flat model.",
     "records": [
       {
         "family": "CORE-ET",

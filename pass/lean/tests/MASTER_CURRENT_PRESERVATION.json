@@ -1657,5 +1657,18 @@
     "The seven Isabelle source losses were restored in separate commits. General Isabelle fast/certificate equivalence remains incomplete and is not claimed by source recovery.",
     "D2/D3/D4/Futamura are separate later migrations; this audit covers the PR and original B1/B2 contributions.",
     "Upstream missing or modified files outside the original contribution are not restored blindly; their byte differences are not a semantic audit."
-  ]
+  ],
+  "post_snapshot_record_layout_withdrawal": {
+    "status": "USER_DIRECTED_RESTORATION",
+    "snapshot_note": "The existing file ledger describes snapshot_head, not the current restored layout.",
+    "restored_schema_source": "c26c85f7f^:pass/lean/emit_legacy_schema.cpp",
+    "intentionally_removed": [
+      "pass/lean/scripts/large_record_check.sh",
+      "LegacyModel.LargeRecordFixtures",
+      "LegacyModel.LargeMemoryRecordFixture"
+    ],
+    "scope": "Withdraw the later nesting workaround; no B1/B2 or PR contribution is removed. Keep the separate Or proof optimization.",
+    "evidence": "pass/lean/tests/MASTER_FLAT_RECORD_RESTORE_RESULTS.json",
+    "upgrade_plan": "pass/lean/PASS_LEAN_RESTRUCTURE_PLAN.md section 13"
+  }
 }

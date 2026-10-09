@@ -1,5 +1,13 @@
 # Lean refactor integration with master
 
+> **Current record-layout policy:** Automatic nesting above 64 fields has been
+> withdrawn at the user's request. The original flat schema emitter is restored.
+> Nested-layout measurements below describe historical checkpoints and do not
+> establish acceptance of restored flat artifacts. Lean/Mathlib remain at 4.31.0;
+> the user owns the upgrade in [plan section 13](PASS_LEAN_RESTRUCTURE_PLAN.md#13-user-owned-lean-upgrade-after-withdrawing-record-nesting).
+> The separate large-constructor limit remains unresolved. No replacement
+> representation workaround is introduced.
+
 This integrates master `c54a435156a528d77afab2111bcb337403a0b42a` into refactor commit `61fd1646c1fd3106ce50d166ec02ca55ca19a478`. The shared architecture and the legacy L0–L8 work remain based on [PASS_LEAN_RESTRUCTURE_PLAN.md](PASS_LEAN_RESTRUCTURE_PLAN.md), with the implementation described in [LEGACY_REFACTOR.md](LEGACY_REFACTOR.md).
 
 ## Preservation boundary
@@ -1120,7 +1128,9 @@ replicating every bit. The adapter code and certificate/model semantics are
 unchanged. Wider sources, zero amounts and dynamic amounts remain refused by
 the tracing rule's existing negative tests.
 
-### Bounded legacy records: a newly exercised inherited limitation
+### Bounded legacy records: a newly exercised inherited limitation (historical nested layout)
+
+This checkpoint used the subsequently withdrawn nesting workaround.
 
 The fresh `txfmactl_top` legacy-fast check failed because its 289-field state
 record exceeds Lean's executable constructor capacity. Its historical legacy
@@ -1133,7 +1143,7 @@ native LEC or a changed node interpretation.
 A separate minimal execution experiment exposed a stricter practical issue:
 in the pinned Lean 4.31 interpreter, reading a default field from a flat
 128-field Nat or BitVec record terminated with signal 11, whereas a 64-field
-record executed. The schema emitter now bounds physical records at 64 fields
+record executed. The temporary schema emitter bounded physical records at 64 fields
 using inherited chunks. Field names, order, widths and values remain intact.
 Generated helper types, positional `.mk` constructors and `Repr` nesting change;
 clients should use the preserved named fields and record-literal syntax.
@@ -1238,7 +1248,9 @@ invoking the gate. This prevents an unset common root from selecting the native
 script's historical default while Lean reads custom inputs. The native gate and
 solver are unchanged; its current behavior rejects inconclusive results too.
 
-### Final DINO artifacts: all twelve checks complete
+### Final DINO artifacts: all twelve checks complete (historical nested layout)
+
+This checkpoint used the subsequently withdrawn nesting workaround.
 
 The final bounded-record and Or-proof emitter has now passed every DINO mode.
 [MASTER_DINO_REPLAY_RESULTS.json](tests/MASTER_DINO_REPLAY_RESULTS.json) retains
@@ -1259,7 +1271,9 @@ shared-host runs have different recorded scheduling contexts, so the measured
 improvement is not an isolated performance experiment. Corpus reproofs remain
 in progress at this checkpoint; DINO completion does not mark them complete.
 
-### Record-layout diagnosis and completed reproof
+### Record-layout diagnosis and completed reproof (historical nested layout)
+
+This checkpoint used the subsequently withdrawn nesting workaround.
 
 The bounded-record repair has now passed all **22 affected artifact checks**
 across 16 configurations, including DualIssue's legacy model, full chunked WF,
@@ -1321,8 +1335,8 @@ The separate exactly-256-field metadata problem has its own upstream report,
 [PR #15075](https://github.com/leanprover/lean4/pull/15075) on September 8, 2026.
 It reinforces the earlier qualification that BHT's original 256-field
 **declaration** typechecking is not evidence of safe execution. It is distinct
-from the 128-field allocation crash; bounded nesting addresses both layouts
-without changing the model's field values.
+from the 128-field allocation crash. The temporary bounded layout avoided
+both failures, but that representation change has now been withdrawn.
 
 ### Large Or proofs over abstract operands
 
@@ -1356,3 +1370,37 @@ checks preserve every model/certificate definition, original theorem statement,
 and other proof. Full reproofs of those 49 artifacts, including all DINO bridges,
 are in progress at this checkpoint. The earlier long attempts remain in the
 audit history.
+
+### Flat-record restoration and user-owned toolchain upgrade
+
+The user rejected changing the generated representation to accommodate the
+Lean runtime bug. `emit_legacy_schema.cpp` is restored byte-for-byte from the
+parent of `c26c85f7f`; the two nesting-only C++ fixtures and their optional Lean
+harness are removed. The census parser again reads the original flat schema.
+The separate large-Or proof optimization remains intact. No primitive or
+certificate semantics, dependency pins, Isabelle code, or native LEC code
+change in this restoration.
+
+The original 64/128-field standalone experiment and cross-version research are
+retained in [MASTER_RECORD_LAYOUT_RESULTS.json](tests/MASTER_RECORD_LAYOUT_RESULTS.json).
+Its 22 successful nested reproofs are explicitly historical. Upgrading Lean is
+pending the user, with the matching Mathlib update and complete replay gates in
+[plan section 13](PASS_LEAN_RESTRUCTURE_PLAN.md#13-user-owned-lean-upgrade-after-withdrawing-record-nesting).
+The allocator repair alone does not remove the separate constructor-size limit;
+full flat-model acceptance is not claimed for affected large records.
+
+Restoration validation passes all three focused C++ suites and builds both
+`lhd` and `lean_export_graph`. Regenerating all 341 accepted artifacts gives
+319 byte-identical outputs and 22 schema-only restorations across 16
+configurations. Every legacy schema exactly matches its pre-nesting output;
+all ordered fields, function/certificate definitions and proof text are
+unchanged. All 127 verified-compiler artifacts remain byte-identical. See
+[MASTER_FLAT_RECORD_RESTORE_RESULTS.json](tests/MASTER_FLAT_RECORD_RESTORE_RESULTS.json).
+
+The separate abstract-Or proof queue has 45 completed proofs and four attempts
+without terminal results (`txfma_wallace1`, `txfma_wallace2`,
+`legacy_cva6_alu_export`, and `legacy_cva6_pmp_gate`). No Lean process or replay
+supervisor remains live at this checkpoint; stale RUNNING records do not count
+as passes. The restoration report retains exact artifact hashes to distinguish
+unchanged proofs from the withdrawn nested layout. This export comparison is
+not a claim that the full restored flat-model proof matrix has passed.

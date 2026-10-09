@@ -501,3 +501,28 @@ The restructure is complete when:
 - VS is explicitly superseded or justified by a distinct theorem.
 - CE is either completed as an optional legacy bridge generator or retained as
   a documented cost experiment, never presented as the production compiler.
+
+## 13. User-owned Lean upgrade after withdrawing record nesting
+
+**Status: pending user upgrade.** The project remains pinned to Lean 4.31.0
+and Mathlib v4.31.0. At the user's direction, the automatic nesting of legacy
+records above 64 fields is withdrawn. Restore the original flat schema emitter;
+do not introduce a different model representation to work around Lean bugs.
+The completed nested-record proofs remain historical evidence, not acceptance
+of the restored flat artifacts. See [MASTER_INTEGRATION.md](MASTER_INTEGRATION.md).
+
+The standalone 128-field allocator crash is fixed in the tested Lean 4.34.1
+release; [upstream PR #7786](https://github.com/leanprover/lean4/pull/7786)
+merged that allocator change. A separate constructor-field limit still applies.
+The exactly-256-field boundary also has a distinct
+[checking fix, PR #15075](https://github.com/leanprover/lean4/pull/15075).
+Neither fix provides support for arbitrarily large executable flat records.
+
+| Step | Owner / status | Required work and acceptance |
+| --- | --- | --- |
+| U0 | Agent / complete | Restore the original flat schema, remove nesting-only fixtures and harness, and regenerate all 341 accepted exports. Check that only the 22 previously nested schemas change back, every ordered field is preserved, and all model/certificate definitions and proof text remain identical. Keep historical nested evidence explicitly marked as withdrawn. Completed comparison: 319 identical exports, 22 schema-only restorations, 127 unchanged verified exports; see [restoration evidence](tests/MASTER_FLAT_RECORD_RESTORE_RESULTS.json). |
+| U1 | User / pending | Upgrade `formal/lean/lean-toolchain` and the Mathlib revision in `formal/lean/lakefile.toml` together, then regenerate `formal/lean/lake-manifest.json` as a separate commit. The researched candidate is [Lean v4.34.1](https://github.com/leanprover/lean4/releases/tag/v4.34.1) with [Mathlib v4.34.1](https://github.com/leanprover-community/mathlib4/blob/v4.34.1/lean-toolchain). Recheck the target release if upgrading later. No pins change as part of the restoration. |
+| U2 | After U1 | Preserve the old logs and hashes; finish or isolate any old-toolchain jobs before changing their library environment. Rebuild the support library and dependencies with the matching toolchain, including `LeanSemanticPrimitives.Compiler.CompileDesign` and the legacy bridge/WF modules. Do not reuse old-version `.olean` files or rely only on the lightweight default Lake target. |
+| U3 | After U2 | Repeat standalone 64/128-field Nat and BitVec execution tests and constructor-boundary diagnostics. Recheck the original schemas for CORE-ET `txfmactl_top` (289 state fields) and CVA6 `bht` (256), `csr_regfile` (534), `fpu_wrap` (282), `frontend` (409), and `issue_stage` (326). Record an unsupported flat constructor as a limitation; ask the user to decide any representation change separately. Do not substitute nesting, `noncomputable`, skipped execution, or weaker proofs silently. |
+| U4 | After U2/U3 | Replay the recorded 186 CORE-ET/CVA6 configurations and all three DINO designs. Cover the 341 previously accepted artifact/mode pairs, all DINO verified-compiler, legacy-fast, full chunked-WF, and full bridge checks. Record each failure/refusal explicitly. Preserve the 53 upstream compile/normalization dispositions; do not change native LEC or frontend guards to make the matrix pass. |
+| U5 | After U4 | Record exact toolchain/dependency commits, source and artifact hashes, `/usr/bin/time -v` wall time/RSS, theorem/axiom audits, and unresolved cases. Require all chunks and complete comb/next/step bridge theorems, no missing audit, fallback, or `sorryAx`. Compare flat models and certificates with the preserved baseline; bring any semantic difference to the user before changing it. Full legacy acceptance remains open wherever the flat-record limit prevents execution or typechecking. |

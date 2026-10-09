@@ -3,33 +3,9 @@
 
 #include <algorithm>
 #include <set>
-#include <span>
 
 #include "lean_format.hpp"
 namespace lean_export {
-namespace {
-// Bound physical records for both Lean code generation and its interpreter.
-// A flat record can typecheck below the runtime's 256-object limit and still
-// crash during interpreter evaluation (128 fields reproduces it in Lean 4.31).
-// Inherited chunks retain selectors, field order and record-literal syntax.
-void emit_record(std::ostream& os, const std::string& name, std::span<const std::string> fields, bool repr) {
-  constexpr size_t limit = 64;
-  if (fields.size() > limit) {
-    const auto left   = name + "_chunk0";
-    const auto right  = name + "_chunk1";
-    const auto middle = fields.size() / 2;
-    emit_record(os, left, fields.first(middle), repr);
-    emit_record(os, right, fields.subspan(middle), repr);
-    os << "structure " << name << " extends " << left << ", " << right << " where\n";
-  } else {
-    os << "structure " << name << " where\n";
-    for (const auto& field : fields) {
-      os << field;
-    }
-  }
-  os << (repr ? "deriving Repr, Inhabited\n\n" : "deriving Inhabited\n\n");
-}
-}  // namespace
 std::string LegacyNames::flop_field(const FlopDriver& f) const {
   return f.read_port ? read_registers.at({f.origin, *f.read_port}) : flops.at(f.origin);
 }
@@ -84,40 +60,39 @@ LegacyNames legacy_names(const DesignScan& d, std::string_view top) {
 }
 void emit_legacy_schema(const DesignScan& d, const LegacyNames& n, std::ostream& os) {
   auto ports = [&](const char* role, const std::vector<Port>& ps, const std::vector<std::string>& names) {
-    std::vector<std::string> fields;
+    os << "structure " << n.base << "_" << role << " where\n";
     if (ps.empty()) {
-      fields.push_back("  " + std::string(role) + "_dummy : BitVec 1\n");
+      os << "  " << role << "_dummy : BitVec 1\n";
     }
     for (size_t i = 0; i < ps.size(); ++i) {
-      fields.push_back("  " + names[i] + " : BitVec " + std::to_string(ps[i].width) + "\n");
+      os << "  " << names[i] << " : BitVec " << ps[i].width << "\n";
     }
-    emit_record(os, n.base + "_" + role, fields, true);
+    os << "deriving Repr, Inhabited\n\n";
   };
   ports("in", d.inputs, n.inputs);
   ports("out", d.outputs, n.outputs);
   if (!n.sequential) {
     return;
   }
-  std::vector<std::string>        fields;
+  os << "structure " << n.base << "_state where\n";
   std::map<uint32_t, const Flop*> flops;
   for (const auto& f : d.flops) {
     flops.emplace(f.id, &f);
   }
   for (const auto& [id, f] : flops) {
-    fields.push_back("  " + n.flops.at(id) + " : BitVec " + std::to_string(f->width) + "\n");
+    os << "  " << n.flops.at(id) << " : BitVec " << f->width << "\n";
   }
   for (const auto& [id, m] : d.memories) {
     if (!m.is_rom) {
-      fields.push_back("  " + n.memories.at(id) + " : (BitVec " + std::to_string(m.addr_width) + " -> BitVec "
-                       + std::to_string(m.bits) + ")\n");
+      os << "  " << n.memories.at(id) << " : (BitVec " << m.addr_width << " -> BitVec " << m.bits << ")\n";
     }
     if (m.sync) {
       for (auto p : m.read_ports) {
-        fields.push_back("  " + n.read_registers.at({id, p}) + " : BitVec " + std::to_string(m.bits) + "\n");
+        os << "  " << n.read_registers.at({id, p}) << " : BitVec " << m.bits << "\n";
       }
     }
   }
-  emit_record(os, n.base + "_state", fields, n.memories.empty());
+  os << (n.memories.empty() ? "deriving Repr, Inhabited\n\n" : "deriving Inhabited\n\n");
 }
 void emit_legacy_field_mapping(const DesignScan& d, const LegacyNames& n, std::ostream& os) {
   os << "\n-- Field mapping (Lean selector -> RTL name).\n";

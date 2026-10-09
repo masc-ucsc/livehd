@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "COMPLETE: all 12 current DINO artifacts passed",
+  "status": "HISTORICAL_CHECKPOINT_RECORD_NESTING_WITHDRAWN",
   "source_generation": "Fresh RTL compiled at the recorded baseline, then re-exported with the final Lean emitter. All verified artifacts remain byte-identical; legacy record-layout and Or-proof deltas are accounted for separately.",
   "base_commit": "8bea45dc2aa9aab4d8b279db11a8887c52c1108d",
   "compiler_snapshot": "5129e8c070ffaa1e2c5df973cb555aea3f7bdf80",
@@ -707,5 +707,12 @@
   },
   "final_emitter_commit": "4d750b298454b4c5f3691ff7567cf8d2e2f2c47d",
   "final_exporter_sha256": "4b8a713737e834ae16b34a458d6ccbb0a577c8388f43f4588ab6a05f891b5fec",
-  "report_snapshot_head": "c3308e2c17f9a289ceb50b9f22d8642904cfae6b"
+  "report_snapshot_head": "c3308e2c17f9a289ceb50b9f22d8642904cfae6b",
+  "record_layout_disposition": {
+    "status": "HISTORICAL_CHECKPOINT",
+    "reason": "The bounded-record emitter used by this checkpoint has been withdrawn. Recorded successes remain valid only for their exact artifact hashes; revalidate changed flat artifacts.",
+    "current_evidence": "MASTER_FLAT_RECORD_RESTORE_RESULTS.json",
+    "upgrade_plan": "PASS_LEAN_RESTRUCTURE_PLAN.md section 13"
+  },
+  "checkpoint_status_before_withdrawal": "COMPLETE: all 12 current DINO artifacts passed"
 }
