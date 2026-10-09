@@ -245,8 +245,34 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
         srcfacts += base_name + "_src" + std::to_string(d) + " " + A + ", ";
       }
     }
-    const std::string mem_closer;
-    const std::string eval_node_fn = mem_mode ? "evalNodeC" : "evalNode";
+    const std::string     mem_closer;
+    const std::string     eval_node_fn = mem_mode ? "evalNodeC" : "evalNode";
+    const bool            abstract_or  = info.op.kind == Operation::Or && info.deps.size() > 4;
+    std::vector<uint32_t> abstract_deps;
+    if (abstract_or) {
+      // Check the fold proof before substituting potentially large circuit
+      // expressions. Otherwise kernel checking repeatedly unfolds those
+      // expressions inside the simplifier's congruence proofs.
+      std::map<uint32_t, std::string> variables;
+      std::string                     parameters, operands;
+      for (const auto dep : info.deps) {
+        if (!variables.contains(dep)) {
+          const auto name = "a" + std::to_string(variables.size());
+          variables.emplace(dep, name);
+          abstract_deps.push_back(dep);
+          parameters += " (" + name + " : BitVec " + std::to_string(width_of(dep)) + ")";
+        }
+        if (!operands.empty()) {
+          operands += ", ";
+        }
+        operands += "bvenc " + variables.at(dep);
+      }
+      const auto expression = render_fast_expr(lower_fast_expr(c, info), info, [&](uint32_t dep) { return variables.at(dep); });
+      ofs << "theorem " << base_name << "_or_value" << info.id << parameters << " : bvenc (" << expression << ") = eval_op ("
+          << format_op(info.op) << ") " << info.width << " [" << operands << "] := by\n"
+          << "  rw [" << bridge_call << "]\n"
+          << "  simp only [" << closer << "]\n\n";
+    }
     ofs << "theorem " << base_name << "_rec" << info.id << " " << P << " : " << base_name << "_phi " << A << " " << info.id << " = "
         << eval_node_fn << " " << G << " (" << base_name << "_phi " << A << ") " << info.id << " := by\n";
     if (supported) {
@@ -288,6 +314,17 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
       } else {
         ofs << "  show bvenc (" << base_name << "_fv" << info.id << " " << A << ") = eval_op (" << format_op(info.op) << ") "
             << info.width << " [" << deplist << "]\n";
+      }
+      if (abstract_or) {
+        if (!srcfacts.empty()) {
+          ofs << "  rw [" << srcfacts.substr(0, srcfacts.size() - 2) << "]\n";
+        }
+        ofs << "  exact " << base_name << "_or_value" << info.id;
+        for (const auto dep : abstract_deps) {
+          ofs << " " << raw_dep(dep);
+        }
+        ofs << "\n";
+        continue;
       }
       if (sext_mode) {
         ofs << "  first\n";

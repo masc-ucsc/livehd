@@ -1323,3 +1323,36 @@ It reinforces the earlier qualification that BHT's original 256-field
 **declaration** typechecking is not evidence of safe execution. It is distinct
 from the 128-field allocation crash; bounded nesting addresses both layouts
 without changing the model's field values.
+
+### Large Or proofs over abstract operands
+
+Two remaining full CORE-ET bridges motivated a separate proof-scaling repair.
+An isolated `vpu_mask` recurrence with 128 operands at width 128 spent 627.3
+seconds in kernel declaration checking and 758.4 seconds overall. An isolated
+55-operand, width-760 recurrence from `minion_dcache_miss_handler_unit` reached
+the 900-second diagnostic limit. These diagnostics retained the actual generated
+model/certificate definitions and prior declarations; they did not substitute
+for full-block acceptance.
+
+The emitter now proves each large Or expression over abstract `BitVec` operands
+before applying that theorem to the circuit's actual dependency expressions.
+It uses the same fast-expression builder, dependency widths and order, including
+repeated dependencies. Source equalities retain their existing proofs. This
+keeps circuit expressions out of fold simplification and its generated proof
+term. The resulting recurrence has the original theorem statement. No primitive,
+model, certificate, or well-formedness predicate changes.
+
+The two isolated proofs then pass in 118.9 and 49.0 seconds respectively, with
+only `propext`, `Classical.choice`, and `Quot.sound` in their axiom audits. These
+are shared-host measurements including the common declaration prefix, not an
+isolated performance claim. An alternative diagnostic that skipped executable
+compilation of proof helpers did not resolve the long kernel check; that
+alternative is not part of the emitter change.
+
+All three focused C++ suites and all 14 mixed-width/fold Lean fixtures pass.
+Across 341 fresh exports, 292 are byte-identical and 49 change only the new
+abstract-operand lemmas and their node-proof applications. Exact reconstruction
+checks preserve every model/certificate definition, original theorem statement,
+and other proof. Full reproofs of those 49 artifacts, including all DINO bridges,
+are in progress at this checkpoint. The earlier long attempts remain in the
+audit history.
