@@ -15,18 +15,6 @@
     "control": "64-field flat record executes; recursively nested larger records execute.",
     "scope": "Observed local interpreter failure; no claim about all Lean execution backends."
   },
-  "typecheck_limit_configurations": {
-    "CORE-ET": {
-      "txfmactl_top": 289
-    },
-    "CVA6": {
-      "bht": 256,
-      "csr_regfile": 534,
-      "fpu_wrap": 282,
-      "frontend": 409,
-      "issue_stage": 326
-    }
-  },
   "proof_harness": "pass/lean/scripts/large_record_check.sh",
   "fixtures": [
     {
@@ -626,6 +614,77 @@
         "ordered_field_names_and_types_identical": true,
         "fields": 113
       }
+    }
+  ],
+  "records_at_or_above_256_fields": {
+    "CORE-ET": {
+      "txfmactl_top": 289
+    },
+    "CVA6": {
+      "bht": 256,
+      "csr_regfile": 534,
+      "fpu_wrap": 282,
+      "frontend": 409,
+      "issue_stage": 326
+    }
+  },
+  "isolated_original_schema_typechecks": [
+    {
+      "fixture": "bht_gate_state.lean",
+      "exit": 0,
+      "constructor_limit": false
+    },
+    {
+      "fixture": "csr_regfile_gate_state.lean",
+      "exit": 1,
+      "constructor_limit": true
+    },
+    {
+      "fixture": "fpu_wrap_gate_state.lean",
+      "exit": 1,
+      "constructor_limit": true
+    },
+    {
+      "fixture": "frontend_gate_state.lean",
+      "exit": 1,
+      "constructor_limit": true
+    },
+    {
+      "fixture": "issue_stage_gate_state.lean",
+      "exit": 1,
+      "constructor_limit": true
+    },
+    {
+      "fixture": "txfmactl_top_state.lean",
+      "exit": 1,
+      "constructor_limit": true
+    }
+  ],
+  "isolated_schema_interpretation": "Five records above 256 fields fail the compiler field check. The 256-field BHT declaration alone typechecks; it is included in the broader interpreter-safety repair, not counted as a reproduced compiler refusal.",
+  "superseded_original_attempts_stopped": [
+    {
+      "case": "csr_regfile",
+      "reason": "Obsolete flat layout: exact original state declaration independently fails the Lean constructor field check. Whole-model retry uses the bounded layout.",
+      "artifact_sha256": "36740750ba962d5fa72f068e68ae9d1607633cd4a1be88b51011bc2d32e8defd",
+      "isolated_fixture_sha256": "a91fccbe4d27fb80b4f4705ce1b0962cb2efcc1e87235bfc2339c8feccf93031"
+    },
+    {
+      "case": "fpu_wrap",
+      "reason": "Obsolete flat layout: exact original state declaration independently fails the Lean constructor field check. Whole-model retry uses the bounded layout.",
+      "artifact_sha256": "35440c98d115623613674f03f9bc12a737a69fbd417023e95915eaee0d6049c3",
+      "isolated_fixture_sha256": "94163203cbbeb2f14bc7845027bedd74da78e036de828279bc029a89ee51d316"
+    },
+    {
+      "case": "frontend",
+      "reason": "Obsolete flat layout: exact original state declaration independently fails the Lean constructor field check. Whole-model retry uses the bounded layout.",
+      "artifact_sha256": "80f000fc5ceef7ddb4e7e3c96169d13cb9652552069ef4909b4d9c6093cbd6b8",
+      "isolated_fixture_sha256": "059d2e0ccd7eb9a7a738ca9ce43cd3b58f1c2f58468250df8163c62db3785d99"
+    },
+    {
+      "case": "issue_stage",
+      "reason": "Obsolete flat layout: exact original state declaration independently fails the Lean constructor field check. Whole-model retry uses the bounded layout.",
+      "artifact_sha256": "2919d9f6fc2c412a7a0c7da9c75d676b957ac6f3dd3131ca780b6444f0d7ca2f",
+      "isolated_fixture_sha256": "076b4b06c05808bb6bceb76e4172e1c1ffc95f9dbda5188ecf2b6edebf99496b"
     }
   ]
 }

@@ -1156,3 +1156,11 @@ ordered fields and the entire following function/certificate/proof text match.
 All 127 verified-compiler exports are byte-identical. Every affected artifact is
 being checked again, including DualIssue's three legacy modes; previous DINO
 measurements remain a historical checkpoint until that reproof finishes.
+
+The exact isolated original state declarations refine that diagnosis: the five
+records **above** 256 fields reproduce the compiler error, while BHT's exactly
+256-field declaration alone typechecks. BHT is part of the broader execution
+repair, not a reproduced compiler refusal. Four obsolete whole-file attempts
+were interrupted after those exact declaration failures were reproduced; their
+logs, timing and interruption reasons are retained. This does not count as a
+completed old-model proof. The corrected whole-model checks continue separately.
