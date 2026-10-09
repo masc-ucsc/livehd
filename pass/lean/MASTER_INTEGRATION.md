@@ -1619,126 +1619,214 @@ probes ran. Full benchmark, source-branch proof-library and native regression
 suites were not rerun in this audit. The all-direction migration and full
 restored-flat acceptance remain open.
 
-### R12. The D2 port, planned from the measured delta
+## R13. The D2 port, measured and audited
 
-Checked before proposing, not after. D2 is 133 commits ahead of its own base and
-335 behind master, but the delta that actually has to move is small and almost
-entirely additive.
+Planning checkpoint: `68c0e5e18`, audited against D2 clean `c21200e0c`.
+The semantic-port approach is retained; replaying D2's 133 commits is not the
+migration procedure. The original 177-edit measurement is a correct subtotal,
+but omits three shared compiler/residual modules. The plan below includes the
+full dependency path and corrects the clock-gate and memory premises.
+[MASTER_D2_PORT_PLAN_AUDIT.json](tests/MASTER_D2_PORT_PLAN_AUDIT.json) records
+full hashes, measurements, source comparisons and fresh isolated proof results.
+This is a plan audit, not the implemented D2 port.
 
-#### R12.1 What changes in the shared Lean modules
+### R13.1 Complete Lean slice and compatibility conditions
 
-| module | master | D2 | diff lines |
-| --- | ---: | ---: | ---: |
-| `DesignCert.lean` | 219 | 254 | 35 |
-| `Runtime.lean` | 69 | 101 | 32 |
-| `DesignSemantics.lean` | 76 | 166 | 110 |
+Git `diff --numstat` between the planning checkpoint and D2 measures:
 
-**The schema change is purely additive and every new field is defaulted:**
+| Module | Master lines | D2 lines | Added | Deleted | Edits |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `DesignCert.lean` | 219 | 254 | 35 | 0 | 35 |
+| `Runtime.lean` | 69 | 101 | 32 | 0 | 32 |
+| `DesignSemantics.lean` | 76 | 166 | 100 | 10 | 110 |
+| `ResidualIR.lean` | 139 | 145 | 6 | 0 | 6 |
+| `ResidualSemantics.lean` | 230 | 236 | 14 | 8 | 22 |
+| `CompileDesign.lean` | 366 | 369 | 19 | 16 | 35 |
+| **Total** | **1,099** | **1,271** | **206** | **34** | **240** |
+
+Port these six modules coherently, plus the eight `Direct*` modules. Six other
+modules in their dependency closure are byte-identical to master. The new
+fields of existing certificate descriptors are additive and defaulted:
 
 ```lean
-structure ClockDesc where            -- provenance only; the semantics reads ORDINALS
-  name : String
+structure ClockDesc where
+  name : String                       -- supplied when creating a clock entry
 FlopDesc:    clock      : Nat  := 0
              asyncReset : Bool := false
-MemoryDesc:  clock      : Nat  := 0        -- per MEMORY, not per port
+MemoryDesc:  clock      : Nat  := 0
 DesignCert:  clocks     : Array ClockDesc := #[{ name := "clock" }]
 ```
 
-No existing certificate literal breaks, and the default is semantically exact
-rather than merely convenient: a certificate that spells no `clocks` IS a
-one-domain design with everything on ordinal 0, which is what every
-pre-provenance certificate already meant.
+Old named certificate literals can still elaborate. Their defaults preserve
+the old clockless interpreter's every-step commit behavior under `allEdges`.
+That is not evidence that every old RTL design had only one clock, or that its
+lost provenance has been recovered.
 
-`Runtime.lean` adds `ClockEdges := Array Bool`, `fires` (an undeclared ordinal
-never fires -- the fail-safe reading), `allEdges`, and two size/fire lemmas.
-
-Two design decisions there constrain the C++ side and must not be "simplified"
-in the port:
-
-* `asyncReset` lives on the COMMIT side as well as the read side. A synchronous
-  reset is sampled at the edge like `din`, so in a step where a flop's clock is
-  quiet it must HOLD, not reset -- a distinction the one-clock model never had
-  to make. The checker ties it to `SourceDesc.flopQAsync` via
-  `asyncFlagMismatch`, which is where the 54-of-147 re-emissions come from.
-* `MemoryDesc.clock` is per MEMORY because the Memory cell has one `posclk` and
-  `pass.single_edge` already refuses a memory whose committing ports disagree
-  (`memory-mixed-edge`). A per-port ordinal could only ever be replicated.
-
-#### R12.2 The one breaking change, and its blast radius
-
-`interpretDesign` grows a positional argument:
+The actual conservativity theorem has hypotheses:
 
 ```lean
-interpretDesign (D) (i) (s)                     -- master
-interpretDesign (D) (e : ClockEdges) (i) (s)    -- D2
+interpretDesign_allEdges (D)
+  (hf : ∀ f ∈ D.flops, f.clock < D.clocks.size)
+  (hm : ∀ m ∈ D.memories, m.clock < D.clocks.size) (i) (s) :
+  interpretDesign D (allEdges D) i s = interpretDesignLegacy D i s
 ```
 
-Everything that mentions it changes arity. On master that is:
+Defaults satisfy these bounds. `compilesOk D = true` does not prove them:
+a freshly checked D2 probe compiles a certificate with an empty clock table,
+whose allEdges step holds state while Legacy commits. Validate clock metadata
+separately and discharge the bounds in the compatibility theorem; do not add
+an unsupported implication from compile acceptance to clock well-formedness.
 
-* `compileAndRun_correct` (`CompileDesign.lean:357`), the once-and-for-all
-  theorem;
-* `emit_design_cert.cpp:137`, which writes
-  `<Top>_step inp st = interpretDesign <Top>_designCert inp st` into every
-  export;
-* **943 emitted artifacts** that assert it.
+`fires e c` only reads the edge array, with missing entries defaulting to false.
+It does not know the declared clock table, so a present entry at an undeclared
+ordinal can fire. Checked runs require both valid clock ordinals and
+`e.size = D.clocks.size`; D2's `checkDesign` and `checkRuntime` supply those
+checks. The general compiler theorem remains a semantic equality even for
+malformed edge vectors, not an assertion of RTL validity.
 
-Those artifacts live under `generated/` and are gitignored, so they are
-REGENERABLE rather than lost -- the cost is a re-emission sweep, not recovery.
-That is a separate cost from the 54 `asyncFlagMismatch` re-emissions, which are
-a CHECKER-level regression on already-correct certificates.
+### R13.2 Arbitrary-edge compiler, allEdges compatibility export
 
-D2 already supplies the clean migration and it should be used rather than
-reinvented: `interpretDesignLegacy` is kept VERBATIM, `srcFlopNext_fires` /
-`srcMemNext_fires` collapse the new rule to the one-clock rule when the clock
-fires, and `interpretDesign_allEdges` proves that under the all-fire stimulus
-the two agree -- as a theorem, not a claim.
+`interpretDesign`, `denoteResidual` and `compileAndRun` all gain `ClockEdges`.
+This is not just a theorem-signature change. Port:
 
-**Decision: emit against the clock-aware `interpretDesign` with `allEdges`, not
-against `interpretDesignLegacy`.** Keeping Legacy as the emitter target would
-avoid the re-emission but would leave the verified compiler permanently
-one-clock, which is the whole point of landing D2. `interpretDesign_allEdges` is
-what makes the move meaning-preserving.
+- Residual flop `clock`/`asyncReset` and memory `clock` descriptors;
+- `compileFlop`/`compileMemory` propagation;
+- Edge-sensitive target flop/memory commits and quiet-domain holds;
+- `flopNext_agree`, `compileDesign_correct` and `compileAndRun_correct` for
+  **every** edge vector, input and state, as already proved on D2.
 
-#### R12.3 The C++ side is a merge, not a copy
+Retain the recorded decision to target clock-aware semantics with `allEdges`
+for the existing generated two-argument compatibility step:
 
-D2's clock provenance lives in its OWN exporter, `IR_Semantics_pass.cpp` (668
-lines), which the restructure plan already marks for deletion: P6 says merge
-`verified-compiler.cpp` and `IR_Semantics_pass.cpp` into `emit_design_cert.cpp`
-with Direction 2's clock-aware schema as canonical, and P8 says delete the
-duplicates afterwards.
+```lean
+def Top_step : RuntimeInput → RuntimeState → RuntimeResult :=
+  compileAndRun Top_designCert (allEdges Top_designCert)
+-- Top_step inp st = interpretDesign Top_designCert (allEdges Top_designCert) inp st
+```
 
-Master today emits NO clock information at all (`emit_design_cert.cpp`: zero
-mentions of clock; `design_scan.cpp` captures `f.clock` as a pin but resolves no
-domain). So the port must take from D2:
+The library must still expose arbitrary-edge `compileAndRun`; its generic
+correctness theorem cannot be restricted to allEdges. The exported compatibility
+wrapper is an all-domains-fire schedule, not a proof for every RTL schedule.
+Prove its agreement with the preserved old interpreter using the explicit
+clock-bound hypotheses. A separate edge-aware caller can use the generic
+function and D2 DirectSim. Do not target Legacy just to avoid the signature
+migration, and do not advertise the allEdges wrapper alone as multi-clock RTL
+fidelity. Legacy fast/GraphCert/bridge comparisons remain the preserved
+all-fire procedure unless a separately reviewed edge-aware legacy model exists.
 
-* domain identity as `latch_contract`'s ROOT NET -- the same notion
-  `pass.single_edge` uses, so a domain here is a domain there;
-* `resolve_icg` handling, since a gated clock is the same domain;
-* the refusal when a clock cone does not resolve to a root net, rather than
-  guessing an ordinal;
-* the implicit-clock join rule (an implicit clock joins the unique other root
-  when there is exactly one, otherwise it is its own domain named `clock`).
+The tracked caller inventory includes `compiler_smoke.lean`,
+`design_scan_test.cpp`, `check_legacy_oracles.py`,
+`legacy_semantic_audit/MaskEndpointPort.lean` and the emitter. Adapt these
+fixtures and script generators without weakening their existing assertions.
+The planning checkpoint's **943** is a textual generated-artifact count, not
+943 distinct current acceptance cases. Preserve old logs/artifacts and generate
+new outputs with source/library/toolchain hashes; do not overwrite historical
+snapshots. The historical 54/147 async-flag checker regressions are a separate
+count to remeasure on the current corpus.
 
-These belong in `design_scan.cpp` (domain resolution, which is HHDS-facing) and
-`emit_design_cert.cpp` (emitting `clocks` and the per-element ordinals), per the
-layering in R10. `IR_Semantics_pass.cpp` is then deleted, not kept alongside.
+### R13.3 Clock resolution, memory policy and the owned IR
 
-#### R12.4 Order of work
+D2's 668-line `IR_Semantics_pass.cpp` is an old exporter and is already absent
+from master. Do not restore it merely to delete it. Port its relevant behavior
+through the canonical plan's shared scan/IR boundary (sections 3, 5 and D2 in
+section 8), then record the duplicate exporter as superseded. The former P6/P8
+citations do not exist in the current L0-L8 plan.
 
-1. Port the three shared Lean modules and D2's eight `Direct*` modules. Build
-   `formal/lean` green before touching C++.
-2. Grow `compileAndRun_correct` to the new arity and add the one-clock corollary
-   the emitter will target.
-3. Teach `design_scan.cpp` domain resolution and `emit_design_cert.cpp` the
-   `clocks` array plus per-flop/per-memory ordinals; delete
-   `IR_Semantics_pass.cpp`.
-4. Re-emit and re-check: the three DINO designs, the 77 READY CORE-ET modules,
-   and the 54 `asyncFlagMismatch` certificates. A re-emission sweep is required
-   before any claim that the landing preserved meaning.
-5. Only then D3/D4, then the Futamura re-pin.
+Clock resolution belongs in `design_scan.cpp`, using the current upstream
+read-only clock analysis API. Store owned provenance in `DesignScan`, carry it
+through `CertificateIR`, `certificate_ir.cpp` and `memory_lowering.cpp`, then
+format it in `emit_design_cert.cpp`. Grow the owned clock table and normal and
+synthetic driver descriptors explicitly. The emitter must not consult HHDS or
+reconstruct domains. Preserve current ordering/IDs, async-reset Q reads,
+operator/memory lowering and legacy proof semantics.
 
-Scope is fixed by R11.4 and is not revisited here: D2's own work only, and NOT
-the Futamura `Projection/` tree, D3's `Reify*` or D4's `CertIO*`.
+**D2 refuses unnormalized gates.** Its exporter calls `resolve_icg` to diagnose
+a gate still on the clock pin and fails; it does not accept the root while
+dropping the gate's enables. It also refuses falling-edge/inverted commits and
+unresolvable or constant clock cones. Preserve these guards with current clock
+analysis, including recognized Clock_cell chains and unsupported division or
+polarity. Accept a normalized gate only when its enable is already represented;
+a new gate-to-enable lowering requires separate equivalence tests and review.
+Do not change `single_edge`, native LEC or graph contracts to make export pass.
 
-The rebase is SEMANTIC. Port the type change onto the landed schema; do not
-replay 133 commits across a graph API that moved underneath them.
+Root-net identity is necessary but not sufficient for bus clocks.
+`Commit_class.net_key()` identifies a root input by name; current master's
+`single_edge` separately tracks selected clock bits and refuses ambiguous
+`clks[0]`/`clks[1]` use. The port must preserve bit discrimination or refuse
+ambiguous/unresolved selections, rather than merging them into one ordinal.
+Apply deterministic ordinal ordering and the implicit-clock join rule only
+after resolving actual domains: join the unique explicit domain, otherwise
+retain an explicit implicit-domain entry rather than guessing.
+
+**One MemoryDesc is a certificate restriction, not a hardware guarantee.**
+Current cells have per-port `clock_pin` and one global `posclk` polarity;
+global polarity does not imply a shared clock root. The `memory-mixed-edge`
+normalizer guard cited by the earlier draft exists on D2, not on this master.
+Master's `single_edge` skips Memory during clock-class collection and has a
+separate divider/memory refusal. The Lean scanner must enforce its own common-
+domain policy across every committing write and synchronous-read port:
+resolve roots/polarity, join only justified implicit clocks, and refuse distinct
+roots, unsupported falling edges, constants, gates or unresolved cones. Skip
+asynchronous read ports because they do not commit. Retain existing supported
+memory types and refusals; do not silently import D2's other frontend/memory
+normalizer changes.
+
+Synthetic synchronous-read flops inherit their memory/port domain and have no
+async reset. Include synchronous ROMs: they have registered reads even though
+there is no mutable MemoryDesc. An asynchronous ROM creates no state/domain
+obligation. Normal flops copy `asyncReset` from the scan and maintain consistency
+with `SourceDesc.flopQAsync`; synchronous reset holds when its clock is quiet,
+while async reset acts on both visible Q and committed state without an edge.
+
+D2 also exports an IO/clock sidecar: ordinal mapping, `runtime_input_arity` and
+`used_by_model` distinguish ignored inputs and preserve ordinal gaps. Give it,
+trace/validation scripts and publication tests explicit destination/disposition
+entries. Keep staged pair-write failure behavior accurate; it is not crash-
+atomic publication and must not be advertised as such.
+
+### R13.4 Port order and acceptance
+
+1. Port the six shared Lean modules and eight Direct modules, updating active
+   tracked Lean callers and generators. Build a coherent library and audit
+   arbitrary-edge correctness plus the bounded allEdges compatibility theorem.
+2. Add owned scan/IR clock provenance, normal and synthetic driver propagation
+   and the scanner refusal/identity rules above. Emit clock metadata and the
+   allEdges compatibility wrapper, with no duplicate graph exporter.
+3. Add focused gates: quiet synchronous reset, quiet asynchronous reset/Q read,
+   simultaneous/independent domains, memory hold/commit, synchronous ROM/read
+   registers, mixed memory roots, gates/inversions/constants, bus-bit ambiguity,
+   implicit-domain joins, invalid ordinals/vectors and graph-closed emission.
+   Include direct-vs-compiled and allEdges-vs-preserved legacy comparisons.
+4. Re-emit using the authoritative **125 CORE-ET + 61 CVA6 configuration**
+   manifest and all **three DINO** designs; retain upstream failures/refusals and
+   per-mode dispositions. The 77 READY triage rows are not the replay manifest.
+   Remeasure async-flag mismatches instead of assuming exactly 54 fixes.
+5. Run current verified, legacy-fast, full chunked-WF and full bridge procedures
+   with theorem identities, complete axiom audits and `/usr/bin/time -v`.
+   Preserve flat records; affected acceptance still requires the user-owned
+   matching Lean/Mathlib upgrade and cannot skip constructor limits silently.
+6. Record proof/binary/input/artifact hashes, source adaptations and every
+   contribution's destination/disposition, including D2 validation tools.
+   Only after these gates port D3/D4, then explicitly migrate FP's fixed pin.
+
+Scope remains D2, not Projection/Reify/CertIO. Any reset, clock, memory or other
+semantic difference from the preserved model must be presented to the user
+before adopting changed behavior beyond the recorded compatibility contracts.
+
+### R13.5 Audit validation and limits
+
+A fresh project-local isolated build of D2 `c21200e0c` compiled all 20 modules
+in this dependency closure: six dependencies identical to master, six changed
+shared modules and eight Direct modules. `DirectTests` passed its guards.
+Two additional probes confirm the valid-default/invalid-clock compatibility
+boundary and missing-entry/extra-entry edge behavior. Axiom audits for
+`interpretDesign_allEdges`, `compileDesign_correct`, `compileAndRun_correct`
+and `Direct.directStep_eq_compileAndRun` contain only their recorded standard
+axioms and no `sorryAx`. Measurements, input hashes, per-module wall time/RSS
+and probe sources are in the evidence JSON.
+
+This validates the D2 proof snapshot, not a ported C++ exporter or fresh full
+DINO/CORE-ET/CVA6 run on master. No implementation, native code, toolchain pin
+or record layout changed. The prior 943 generated-file count was not recounted
+here; acceptance is governed by the committed manifests and exact current
+artifact/mode results, not a count of historical copies.

@@ -784,3 +784,43 @@ The no-graph-header emitter boundary follows sections 3 and L3-L8, not a
 nonexistent P5 phase. Keep any shared legacy naming/value helpers in a neutral
 layer if disentangling the current GraphCert-to-fast-model helper dependency;
 this layering cleanup is lower priority than the acceptance defects above.
+
+
+### 14.10 Audit of the measured D2 port plan
+
+The `68c0e5e18` plan retains the semantic-port approach and clock-aware allEdges
+compatibility target, with corrections recorded in
+[MASTER_INTEGRATION.md R13](MASTER_INTEGRATION.md#r13-the-d2-port-measured-and-audited)
+and [MASTER_D2_PORT_PLAN_AUDIT.json](tests/MASTER_D2_PORT_PLAN_AUDIT.json).
+The three-module 177-edit subtotal expands to **240 edits across six shared
+modules**, plus eight Direct modules: include ResidualIR, ResidualSemantics and
+CompileDesign, and generalize the actual executor as well as its theorem to
+arbitrary ClockEdges. Keep the existing generated step as an explicit allEdges
+compatibility wrapper, not a general RTL schedule claim.
+
+`interpretDesign_allEdges` requires valid flop/memory clock bounds;
+`compilesOk` does not supply them. `fires` defaults a missing edge entry to false,
+but cannot detect that a present entry names a domain absent from a certificate.
+Validate clock ordinals and edge-vector length independently. Old defaults
+preserve the old interpreter, not the missing provenance of old RTL exports.
+
+The C++ slice includes owned scan **and CertificateIR/builder/memory lowering**
+metadata, including synthetic read flops and synchronous ROMs. D2 refuses
+unnormalized gated clocks; do not discard gate enables while accepting their
+root. Preserve falling-edge/unresolved-clock refusals and current master's
+clock-bus-bit guard. One MemoryDesc limits accepted committing ports to a common
+supported domain; current master's single_edge lacks the cited D2 mixed-memory
+clock guard, so enforce this policy in the Lean scanner without modifying
+upstream/native code. Account for D2 sidecars and validation tools explicitly.
+
+Update all tracked caller fixtures/generators and replay the full 186 CORE-ET/
+CVA6 configurations, all three DINO variants and all required modes. The 77
+READY triage count, historical 54/147 async mismatches and reported 943 generated
+copies describe different scopes, not interchangeable acceptance counts.
+Preserve historical proof artifacts and the user-owned flat-record upgrade.
+
+Fresh audit validation built all 20 D2 dependency modules in isolation, ran
+DirectTests and two boundary probes, and checked four theorem axiom reports
+without `sorryAx`. These are D2 branch-library results; the clock-aware C++ port
+and full current benchmark replay remain pending. No implementation or semantic
+change is made by this audit.
