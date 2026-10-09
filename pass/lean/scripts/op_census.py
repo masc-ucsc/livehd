@@ -94,9 +94,7 @@ def dispatch_status(op, arity, dep_widths, out_width=None):
     if op == "Op_Or" and arity == 4:
         return ("ok", "or4_bridge (fold-free)")
     if op == "Op_Or":
-        # Falls back to the fold, whose closer needs the metavariable-headed
-        # bv_to_bitvec_bvenc_zext -- measured at ~22 s on a single width-130 node.
-        return ("ok", "orn_bv_bridge (n-ary, SLOW closer)")
+        return ("ok", "orn_nonempty_bv_bridge" if arity > 0 else "orn_bv_bridge (empty)")
     if op == "Op_Xor" and arity == 2:
         return ("ok", "xor_bridge")
     if op == "Op_Xor":

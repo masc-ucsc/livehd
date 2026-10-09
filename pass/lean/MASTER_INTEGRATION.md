@@ -1164,3 +1164,28 @@ repair, not a reproduced compiler refusal. Four obsolete whole-file attempts
 were interrupted after those exact declaration failures were reproduced; their
 logs, timing and interruption reasons are retained. This does not count as a
 completed old-model proof. The corrected whole-model checks continue separately.
+
+### Large Or proof scaling without model changes
+
+The full corpus exposed long node proofs where the existing Or simplifier tried
+to match `BitVec.zero_or` against large dependency expressions. The new
+`Translation/OrBridge.lean` eliminates the initial zero in a general theorem
+before those expressions are substituted. The emitter selects it above four
+operands, retaining the existing small-arity proofs and empty-fold behavior.
+Neither the fast expression nor the certificate operation changes.
+
+[MASTER_OR_PROOF_RESULTS.json](tests/MASTER_OR_PROOF_RESULTS.json) records the
+exact 44-arm, one-bit node from `intpipe_decode`: the old proof timed out at
+600 seconds; the new proof passed in 90.20 seconds with 7,573,664 KiB peak RSS.
+The same declaration prefix alone took 51.19 seconds. These are isolated node
+measurements, not a claim that the full block finished. The theorem uses only
+standard Lean axioms. All 14 emitted fold fixtures pass full WF and universal
+bridge checks, including new 6/44/55-arm Or fixtures with mixed input widths and
+8/1/760-bit outputs.
+
+Regenerating all 341 artifacts leaves 292 byte-identical. Exact reconstruction
+of the other 49 deltas confirms that they contain only the extra import and
+equivalent Or node-proof rewrites. All model and certificate definitions are
+identical. Full reproofs of all 49 changed bridges are in progress, with the
+three slow corpus blocks and DINO prioritized. The three Lean C++ targets and
+CLI/exporter build pass; shell/Python syntax and whitespace checks pass.

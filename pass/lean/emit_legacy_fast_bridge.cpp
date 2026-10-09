@@ -17,6 +17,11 @@ bool needs_nary_bridge(const CertificateIR& c) {
            || (n.op.kind == Operation::Sum && !(arity == 2 && (n.op.parameter == 1 || n.op.parameter == 2)));
   });
 }
+bool needs_or_bridge(const CertificateIR& c) {
+  return std::any_of(c.nodes.begin(), c.nodes.end(), [](const CertNode& n) {
+    return n.op.kind == Operation::Or && n.deps.size() > 4;
+  });
+}
 void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, const LegacyNames& names, std::ostream& ofs) {
   const auto&                     base_name  = names.base;
   const bool                      sequential = names.sequential;
@@ -156,6 +161,11 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
       bridge_call = "or3_bridge";
     } else if (info.op.kind == Operation::Or && info.deps.size() == 4) {
       bridge_call = "or4_bridge";
+    } else if (info.op.kind == Operation::Or && !info.deps.empty()) {
+      bridge_call = "orn_nonempty_bv_bridge";
+      closer
+          = "List.foldl_cons, List.foldl_nil, bv_to_bitvec_bvenc_zext, "
+            "bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
     } else if (info.op.kind == Operation::Or) {
       bridge_call = "orn_bv_bridge";
       closer

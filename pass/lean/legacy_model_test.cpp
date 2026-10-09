@@ -153,6 +153,52 @@ TEST(LegacyModel, NaryMixedWidthBridgeFixtures) {
   }
 }
 
+TEST(LegacyModel, LargeOrBridgeFixtures) {
+  struct Shape {
+    const char* name;
+    uint32_t    arity;
+    uint32_t    width;
+  };
+  for (const auto& shape : {
+           Shape{      "or_six",  6,   8},
+           Shape{"or_fortyfour", 44,   1},
+           Shape{     "or_wide", 55, 760}
+  }) {
+    DesignScan d;
+    d.name = shape.name;
+    DesignNode node{10, ScanOp::Or, shape.width, false, {}};
+    for (uint32_t i = 0; i < shape.arity; ++i) {
+      const uint32_t width = i % 3 == 0 ? 1 : i % 3 == 1 ? 8 : 17;
+      d.inputs.push_back({"x" + std::to_string(i), 2000000000 + i, width, {}});
+      node.operands.push_back({i, i, input(2000000000 + i, width)});
+    }
+    d.nodes.push_back(node);
+    d.outputs.push_back({
+        "y",
+        0,
+        shape.width,
+        PinRef{PinKind::Node, 10, 0, shape.width, 0, {}}
+    });
+    const auto        c = build_certificate(d, {});
+    LegacyEmitOptions options;
+    options.emit_fast_bridge = true;
+    options.cert_wf          = LeanCertWFMode::Chunked;
+    std::ostringstream out;
+    emit_legacy_model(d, c, options, out);
+    EXPECT_NE(out.str().find("import LeanSemanticPrimitives.Translation.OrBridge"), std::string::npos);
+    EXPECT_NE(out.str().find("orn_nonempty_bv_bridge"), std::string::npos);
+    EXPECT_EQ(out.str().find("BitVec.zero_or"), std::string::npos);
+    out << "\nnamespace " << d.name << "_Lgraph\n"
+        << "example : (" << d.name << "_comb default).out_y = 0 := by native_decide\n"
+        << "example : (" << d.name << "_comb { (default : " << d.name << "_in) with in_x0 := 1 }).out_y = 1 := by native_decide\n"
+        << "end " << d.name << "_Lgraph\n";
+    if (const char* destination = std::getenv("LEAN_OR_BRIDGE_OUTPUT")) {
+      const auto path = std::filesystem::path(destination) / (d.name + "_Lgraph.lean");
+      write_atomic(path.string(), [&](std::ostream& stream) { stream << out.str(); });
+    }
+  }
+}
+
 TEST(LegacyModel, LargeRecordFixtures) {
   const char* destination = std::getenv("LEAN_LARGE_RECORD_OUTPUT");
   for (const uint32_t count : {64u, 65u, 255u, 256u, 534u}) {

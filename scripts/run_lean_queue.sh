@@ -56,6 +56,7 @@ echo "[queue] building the Lean support library before any check..."
 if ! ( cd "$ROOT/formal/lean" && "$LAKE" build LeanSemanticPrimitives \
                                         LeanSemanticPrimitives.Translation.OpBridge \
                                         LeanSemanticPrimitives.Translation.NaryBridge \
+                                        LeanSemanticPrimitives.Translation.OrBridge \
                                         LeanSemanticPrimitives.Translation.LegacyCertWF \
                                         LeanSemanticPrimitives.Compiler.CompileDesign ); then
   echo "[queue] FATAL: the Lean support library does not build; refusing to check anything" >&2
