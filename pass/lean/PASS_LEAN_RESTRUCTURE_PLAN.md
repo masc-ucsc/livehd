@@ -824,3 +824,26 @@ DirectTests and two boundary probes, and checked four theorem axiom reports
 without `sorryAx`. These are D2 branch-library results; the clock-aware C++ port
 and full current benchmark replay remain pending. No implementation or semantic
 change is made by this audit.
+
+### 14.11 D2 Step 1 implementation checkpoint
+
+R13 Step 1 is complete on master over `5eaee438c`: six shared Lean modules and
+eight Direct modules match D2 clean `c21200e0c` byte for byte. All tracked callers
+and generators now use explicit `allEdges`. The verified emitter independently
+checks compiler acceptance and flop/memory clock bounds, emits the clock-aware
+step theorem, and proves compatibility with the preserved every-step interpreter
+using those bounds. It does not infer clock well-formedness from compilation.
+
+[MASTER_INTEGRATION.md R13.6](MASTER_INTEGRATION.md#r136-step-1-implementation-and-fresh-focused-validation)
+and [MASTER_D2_STEP1_RESULTS.json](tests/MASTER_D2_STEP1_RESULTS.json) record the
+fresh checks: three Bazel tests, exact library target builds, 114 tiny export
+comparisons, 68 successful Lean checks, two expected compiler refusals, two
+independent invalid-clock rejections and 27 legacy value comparisons. The tiny
+bridge checks include full chunked-WF and complete comb/next/step obligations for
+those fixtures. They do not establish full DINO scalability.
+
+Step 2 clock/reset provenance and scanner guards remain pending; current emitted
+certificate data still uses defaults and preserves the all-fire procedure.
+The full 186 CORE-ET/CVA6 configurations, three DINO variants and recovered
+branch runtime procedures remain acceptance gates. Keep the user-owned matching
+Lean/Mathlib upgrade, flat schemas, native code and historical evidence intact.

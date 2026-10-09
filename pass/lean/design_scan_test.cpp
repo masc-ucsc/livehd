@@ -519,8 +519,8 @@ TEST(DesignScan, EndpointMasksPreserveExtractionAndReplacement) {
         out << "\nexample : ([0, 1, 15, 127, 128, 171, 255, 2^64 + 2^63 + 3] : List Nat).all (fun a => "
                "([0, 1, 3, 15, 255] : List Nat).all (fun v => "
                "bv_uint ((interpretDesign "
-            << name
-            << "_designCert (inputs a v) ⟨#[], #[]⟩).outputs[0]!) == Int.ofNat (expected a v))) = true := by native_decide\n";
+            << name << "_designCert (allEdges " << name
+            << "_designCert) (inputs a v) ⟨#[], #[]⟩).outputs[0]!) == Int.ofNat (expected a v))) = true := by native_decide\n";
         ASSERT_TRUE(out.good());
       }
     }
@@ -641,8 +641,9 @@ TEST(DesignScan, ConcatLowersDeclaredWindowsWithoutMutatingGraph) {
       // Exhaust every input bit pattern, including negative signed lanes.
       // Wide outputs test sign extension and offsets across bit 64.
       out << "example : (List.range (2^" << c.a_bits << ")).all (fun a => (List.range (2^" << c.b_bits
-          << ")).all (fun b => bv_uint ((interpretDesign " << name << "_designCert #[mk_bv " << c.a_bits << " (Int.ofNat a), mk_bv "
-          << c.b_bits << " (Int.ofNat b)] ⟨#[], #[]⟩).outputs[0]!) == expected a b)) = true := by native_decide\n";
+          << ")).all (fun b => bv_uint ((interpretDesign " << name << "_designCert (allEdges " << name << "_designCert) #[mk_bv "
+          << c.a_bits << " (Int.ofNat a), mk_bv " << c.b_bits
+          << " (Int.ofNat b)] ⟨#[], #[]⟩).outputs[0]!) == expected a b)) = true := by native_decide\n";
       ASSERT_TRUE(out.good());
       std::filesystem::create_directories(library_name);
       livehd::Hhds_graph_library::save(library_name);

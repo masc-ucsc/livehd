@@ -18,6 +18,12 @@ so "my dependencies precede me" becomes the single arithmetic condition
 `d < sources.size + i` (`DepsBounded`), and *all three* structural facts follow
 from it as theorems (`wf_nodup`, `wf_depOrdered`, `wf_isSome`) rather than being
 checked per design.  Original LGraph ids survive only as debugging metadata.
+
+**Clocks.**  `clocks` names the design's clock domains and every `FlopDesc` /
+`MemoryDesc` carries the ORDINAL of the one it commits on.  The step semantics
+(`interpretDesign`) takes an edge vector saying which domains fire; a certificate
+that spells no `clocks` is the one-domain design every pre-provenance certificate
+was, and `interpretDesign_allEdges` proves it still means the same thing.
 -/
 import LeanSemanticPrimitives.Translation.LGraphModel
 
@@ -93,6 +99,16 @@ structure OutputDesc where
   width : Nat
 deriving Repr, Inhabited, DecidableEq
 
+/-- One clock domain.  PROVENANCE ONLY: the semantics reads clock ORDINALS
+(`FlopDesc.clock`, `MemoryDesc.clock`) against the per-step edge vector
+(`ClockEdges`); the name is the resolved root net — `latch_contract`'s net key,
+a primary input's name or `implicit` for a Pyrope module clock — so a trace can
+be related back to the RTL.  Ordinal 0 is the design's reference clock: the net
+carrying the most state, the same rule `pass.single_edge` picks its reference by. -/
+structure ClockDesc where
+  name : String
+deriving Repr, Inhabited, DecidableEq
+
 /-- Every pin `graph/cell.cpp` gives a Flop, not just the three the manual
 emitter reads.  `resetValue` and `resetActiveLow` exist precisely because the
 manual emitter dropped `initial` and conflated `negreset`; transcribing the
@@ -107,6 +123,15 @@ structure FlopDesc where
   resetValue     : Int
   /-- `true` for `negreset` (active low), `false` for `reset_pin` (active high) -/
   resetActiveLow : Bool
+  /-- ordinal into `DesignCert.clocks` of the edge this flop commits on -/
+  clock          : Nat := 0
+  /-- the reset is ASYNCHRONOUS: it acts whether or not `clock` fires this step.
+  The READ side of the same fact is `SourceDesc.flopQAsync`, and the checker ties
+  the two (`asyncFlagMismatch`).  It is needed on the COMMIT side because a
+  SYNCHRONOUS reset is sampled at the edge like `din`: in a step where this flop's
+  clock is quiet it must hold, not reset — a distinction the one-clock model
+  never had to make. -/
+  asyncReset     : Bool := false
 deriving Repr, Inhabited, DecidableEq
 
 /-- A memory's next image is the slot holding the last write of its write chain.
@@ -115,6 +140,11 @@ structure MemoryDesc where
   aw      : Nat
   dw      : Nat
   nextImg : Nat
+  /-- ordinal of the clock every committing port of this memory is on.  One per
+  MEMORY, not per port: the Memory cell has one `posclk`, and `pass.single_edge`
+  refuses a memory whose committing ports disagree (`memory-mixed-edge`), so a
+  per-port ordinal could only ever be replicated. -/
+  clock   : Nat := 0
 deriving Repr, Inhabited, DecidableEq
 
 /-- The whole design. -/
@@ -124,6 +154,11 @@ structure DesignCert where
   outputs  : Array OutputDesc
   flops    : Array FlopDesc
   memories : Array MemoryDesc
+  /-- The clock domains.  The default is the ONE implicit domain: a certificate
+  that does not spell `clocks` is a one-clock design with every element on
+  ordinal 0 — exactly what every certificate emitted before clock provenance
+  existed meant. -/
+  clocks   : Array ClockDesc := #[{ name := "clock" }]
 deriving Repr, Inhabited
 
 --------------------------------------------------------------------------------

@@ -1628,7 +1628,7 @@ but omits three shared compiler/residual modules. The plan below includes the
 full dependency path and corrects the clock-gate and memory premises.
 [MASTER_D2_PORT_PLAN_AUDIT.json](tests/MASTER_D2_PORT_PLAN_AUDIT.json) records
 full hashes, measurements, source comparisons and fresh isolated proof results.
-This is a plan audit, not the implemented D2 port.
+R13.1-R13.5 record that plan audit. R13.6 records the subsequent Step 1 port.
 
 ### R13.1 Complete Lean slice and compatibility conditions
 
@@ -1786,12 +1786,13 @@ atomic publication and must not be advertised as such.
 
 ### R13.4 Port order and acceptance
 
-1. Port the six shared Lean modules and eight Direct modules, updating active
-   tracked Lean callers and generators. Build a coherent library and audit
-   arbitrary-edge correctness plus the bounded allEdges compatibility theorem.
+1. **Complete; see R13.6.** Port the six shared Lean modules and eight Direct
+   modules, updating active tracked Lean callers and generators. Build a coherent
+   library and audit arbitrary-edge correctness plus the bounded allEdges
+   compatibility theorem.
 2. Add owned scan/IR clock provenance, normal and synthetic driver propagation
-   and the scanner refusal/identity rules above. Emit clock metadata and the
-   allEdges compatibility wrapper, with no duplicate graph exporter.
+   and the scanner refusal/identity rules above. Emit clock metadata through the
+   Step 1 allEdges compatibility wrapper, with no duplicate graph exporter.
 3. Add focused gates: quiet synchronous reset, quiet asynchronous reset/Q read,
    simultaneous/independent domains, memory hold/commit, synchronous ROM/read
    registers, mixed memory roots, gates/inversions/constants, bus-bit ambiguity,
@@ -1830,3 +1831,58 @@ DINO/CORE-ET/CVA6 run on master. No implementation, native code, toolchain pin
 or record layout changed. The prior 943 generated-file count was not recounted
 here; acceptance is governed by the committed manifests and exact current
 artifact/mode results, not a count of historical copies.
+
+### R13.6 Step 1 implementation and fresh focused validation
+
+Step 1 is implemented on master over `5eaee438c`. The six shared compiler modules
+and eight Direct modules are byte-identical to D2 clean `c21200e0c`. The four
+tracked caller fixtures/generators listed in R13.2 now pass explicit `allEdges`;
+their value checks and intentional compiler refusals remain in place.
+[MASTER_D2_STEP1_RESULTS.json](tests/MASTER_D2_STEP1_RESULTS.json) records source,
+binary and artifact hashes, theorem identities, axiom reports and per-proof
+wall time/RSS.
+
+The verified emitter retains its two-argument `_step` as
+`compileAndRun D (allEdges D)`. It emits three separate obligations:
+`_compiles`, `_clock_bounds` for both flops and memories, and `_step_correct`
+instantiating arbitrary-edge compiler correctness. `_step_legacy_correct`
+then composes that equality with `interpretDesign_allEdges`, using the two
+explicit bounds witnesses. Both step theorems are printed for axiom auditing.
+No clock-bound implication is inferred from `compilesOk`.
+
+Fresh focused checks on the current library:
+
+- All three Lean Bazel tests pass; optimized exporter, fixture generator and
+  `lhd` build. The four explicit library targets build successfully.
+- Across 38 repository-owned tiny graphs and three modes, all 114 C++ export
+  acceptance/refusal results match the frozen replay exporter at `5129e8c07`.
+  All 27 verified certificate definitions match; 27 legacy-fast and 23
+  bridge/chunked-WF exports are byte-identical. This baseline is recorded
+  explicitly; it is not the Step 1 parent commit.
+- The 72 Lean jobs comprise 68 successful checks: 25 verified artifacts with
+  both step theorems, 23 complete tiny bridge/chunked-WF proofs, 17 scanner value
+  oracles, two tracked caller fixtures and one four-theorem library audit.
+  The other four are expected controls: two compiler refusals (Div/SetMask)
+  and two invalid-clock bounds rejections. Each invalid-clock control first
+  proves compiler acceptance and then fails solely at its false bounds check.
+- All 27 accepted legacy artifacts typecheck in the existing 16-seed value
+  comparison, including output/state and every tiny RAM address. The two
+  compiler-refused cases use the interpreter oracle and separately confirm
+  compiler refusal. The remaining 11 fixture rows retain C++ export refusals.
+
+The four library theorem audits contain only their recorded standard axioms;
+successful generated proofs additionally contain their recorded `native_decide`
+facts. No successful result uses `sorryAx`. The temporary audit matcher was
+corrected to qualify namespace-local theorem names, and negative fixtures were
+isolated from subsequent declarations; neither repair changed a production
+proof or accepted a missing audit.
+
+This checkpoint completes the API/caller portion of Step 1, not Step 2 or the
+full migration acceptance. Certificate data emission is unchanged from the
+parent, so current C++ exports still rely on the default domain and reset flag.
+Owned clock provenance, async-reset flag propagation, synthetic read domains,
+memory/clock refusals, sidecars and their focused gates remain pending. The
+allEdges wrapper preserves every-step behavior; it does not recover RTL clock
+provenance. Full 186-configuration CORE-ET/CVA6 and three-DINO replay, flat-record
+upgrade acceptance and D3/D4/FP migration remain open. Lean/Mathlib pins, flat
+record layout and native LEC/frontend/graph code were not changed.

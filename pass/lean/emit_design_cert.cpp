@@ -89,8 +89,8 @@ void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostr
   };
 
   os << "-- Emitted by pass.lean in `formal.lean.mode=verified_compiler`.\n";
-  os << "-- This file contains NO semantic model and NO proof script: the compiler\n";
-  os << "-- `Compiler.compileDesign` is proved correct once, for every accepted design,\n";
+  os << "-- The model comes from the verified compiler; the checks and theorems below\n";
+  os << "-- instantiate its generic correctness and all-fire compatibility results.\n";
   os << "-- by `Compiler.compileDesign_correct`.  Slots are dense: sources occupy\n";
   os << "-- 0.." << (d.sources.size() ? d.sources.size() - 1 : 0) << " and node i occupies " << d.sources.size() << "+i.\n";
   os << "import LeanSemanticPrimitives.Compiler.CompileDesign\n\n";
@@ -125,17 +125,33 @@ void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostr
   os << "/-- Compile-and-run.  The model IS the verified compiler applied to this\n";
   os << "certificate -- there is no separately emitted model to disagree with it. -/\n";
   os << "def " << base << "_step : RuntimeInput → RuntimeState → RuntimeResult :=\n";
-  os << "  compileAndRun " << base << "_designCert\n\n";
-  os << "/-- The whole per-design obligation: ONE boolean check.\n\n";
+  os << "  compileAndRun " << base << "_designCert (allEdges " << base << "_designCert)\n\n";
+  os << "/-- Compiler acceptance, independent of clock-bound well-formedness.\n\n";
   os << "`native_decide`, not `.get!`: a compile failure is a BUILD failure rather\n";
   os << "than a runtime panic with the hypothesis left undischarged.  (`decide` is\n";
   os << "not usable -- `Array.map` is not kernel-reducible.) -/\n";
   os << "theorem " << base << "_compiles : compilesOk " << base << "_designCert = true := by\n";
   os << "  native_decide\n\n";
-  os << "/-- The theorem, by direct instantiation.  No per-design proof script. -/\n";
+  // Compiler acceptance does not establish clock bounds. Check those
+  // independently before invoking the all-fire compatibility theorem.
+  os << "/-- Declared clock bounds, checked independently of compiler acceptance. -/\n";
+  os << "theorem " << base << "_clock_bounds :\n";
+  os << "    (∀ f ∈ " << base << "_designCert.flops, f.clock < " << base << "_designCert.clocks.size) ∧\n";
+  os << "    (∀ m ∈ " << base << "_designCert.memories, m.clock < " << base << "_designCert.clocks.size) := by\n";
+  os << "  native_decide\n\n";
+  os << "/-- The all-fire instance of arbitrary-edge compiler correctness. -/\n";
   os << "theorem " << base << "_step_correct : ∀ inp st,\n";
-  os << "    " << base << "_step inp st = interpretDesign " << base << "_designCert inp st :=\n";
-  os << "  compileAndRun_correct " << base << "_designCert " << base << "_compiles\n\n";
+  os << "    " << base << "_step inp st = interpretDesign " << base << "_designCert (allEdges " << base
+     << "_designCert) inp st :=\n";
+  os << "  compileAndRun_correct " << base << "_designCert " << base << "_compiles (allEdges " << base << "_designCert)\n\n";
+  os << "/-- Compatibility with the preserved every-step interpreter, using the\n";
+  os << "independent clock-bound witness rather than assuming it from compilation. -/\n";
+  os << "theorem " << base << "_step_legacy_correct : ∀ inp st,\n";
+  os << "    " << base << "_step inp st = interpretDesignLegacy " << base << "_designCert inp st := by\n";
+  os << "  intro inp st\n";
+  os << "  exact (" << base << "_step_correct inp st).trans\n";
+  os << "    (interpretDesign_allEdges " << base << "_designCert " << base << "_clock_bounds.1 " << base
+     << "_clock_bounds.2 inp st)\n\n";
   os << "/-- For evaluation only.  Deliberately NOT mentioned in any theorem\n";
   os << "statement -- see the comment above. -/\n";
   os << "def " << base << "_residual : ResidualProgram :=\n";
@@ -143,6 +159,7 @@ void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostr
   os << "  | .ok R    => R\n";
   os << "  | .error _ => default\n\n";
   os << "#print axioms " << base << "_step_correct\n";
+  os << "#print axioms " << base << "_step_legacy_correct\n";
 }
 
 void emit_design_cert(const DesignScan& design, const CertificateIR& certificate, std::ostream& os) {

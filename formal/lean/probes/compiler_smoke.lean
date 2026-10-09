@@ -11,7 +11,7 @@ def noState : RuntimeState := ⟨#[], #[]⟩
 def run (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) : Option (Array BV) :=
   match compileDesign D with
   | .error _ => none
-  | .ok R    => some (denoteResidual R i s).outputs
+  | .ok R    => some (denoteResidual R (allEdges D) i s).outputs
 
 --------------------------------------------------------------------------------
 -- 1. add:  y = a + b
@@ -80,7 +80,7 @@ def dFlop : DesignCert :=
 def flopNextOf (i : RuntimeInput) (q : Int) : Option (Array BV) :=
   match compileDesign dFlop with
   | .error _ => none
-  | .ok R    => some (denoteResidual R i ⟨#[mk_bv 8 q], #[]⟩).nextState.flops
+  | .ok R    => some (denoteResidual R (allEdges dFlop) i ⟨#[mk_bv 8 q], #[]⟩).nextState.flops
 --        din  en  nrst        q
 #eval flopNextOf #[mk_bv 8 7, mk_bv 1 1, mk_bv 1 0] 99   -- nrst=0 -> ACTIVE -> 0x5A = 90
 #eval flopNextOf #[mk_bv 8 7, mk_bv 1 1, mk_bv 1 1] 99   -- nrst=1, en=1 -> din = 7
@@ -135,13 +135,13 @@ def dBadArity : DesignCert :=
 -- it is worth writing down here.
 --------------------------------------------------------------------------------
 
-def dAdd_step : RuntimeInput → RuntimeState → RuntimeResult := compileAndRun dAdd
+def dAdd_step : RuntimeInput → RuntimeState → RuntimeResult := compileAndRun dAdd (allEdges dAdd)
 
 theorem dAdd_compiles : compilesOk dAdd = true := by native_decide
 
 theorem dAdd_step_correct : ∀ inp st,
-    dAdd_step inp st = interpretDesign dAdd inp st :=
-  compileAndRun_correct dAdd dAdd_compiles
+    dAdd_step inp st = interpretDesign dAdd (allEdges dAdd) inp st :=
+  compileAndRun_correct dAdd dAdd_compiles (allEdges dAdd)
 
 #eval (dAdd_step #[mk_bv 8 3, mk_bv 8 4] noState).outputs   -- expect 7
 #print axioms dAdd_step_correct

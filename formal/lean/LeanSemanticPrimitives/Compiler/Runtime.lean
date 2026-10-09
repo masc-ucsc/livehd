@@ -28,6 +28,38 @@ structure RuntimeResult where
   outputs   : Array BV
 deriving Inhabited
 
+--------------------------------------------------------------------------------
+-- Clocks
+--------------------------------------------------------------------------------
+
+/-- Which clocks fire in one step, positionally over `DesignCert.clocks`.
+
+One step is one BATCH of `pass/lec`'s microstep schedule
+(`pass/lec/phase_sched.hpp`): every element whose clock fires evaluates against
+the pre-step state and commits simultaneously; an element whose clock is quiet
+holds.  A source period of two unrelated clocks is therefore a SEQUENCE of steps,
+each with its own edge vector, and the one-clock model every earlier certificate
+was written against is the constant vector `allEdges`. -/
+abbrev ClockEdges := Array Bool
+
+/-- Does clock `c` fire this step?  An UNDECLARED ordinal never fires — the
+fail-safe reading (state holds) — and `checkDesign` + `checkRuntime` together
+make the case unreachable for a checked run. -/
+def fires (e : ClockEdges) (c : Nat) : Bool := e[c]?.getD false
+
+/-- The one-clock stimulus: every declared clock fires.  This is what a
+certificate emitted before clock provenance existed means
+(`interpretDesign_allEdges`), and the simulator's default when a trace line
+names no edges. -/
+def allEdges (D : DesignCert) : ClockEdges := Array.replicate D.clocks.size true
+
+theorem allEdges_size (D : DesignCert) : (allEdges D).size = D.clocks.size := by
+  simp [allEdges]
+
+theorem fires_allEdges {D : DesignCert} {c : Nat} (h : c < D.clocks.size) :
+    fires (allEdges D) c = true := by
+  simp [fires, allEdges, h]
+
 /-- Slot-space environment.  An `Array`, not a `Nat → CertVal`: lookup must be
 O(1) because `denoteResidual` actually runs.  (The *interpreter* may use the
 nested `Nat → V` environment — it is only ever reasoned about, via

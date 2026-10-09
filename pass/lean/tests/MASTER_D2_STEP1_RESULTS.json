@@ -1,0 +1,4296 @@
+{
+  "schema_version": 1,
+  "parent_master": "5eaee438c65ee6916a2e83d7aa57613c01d32c47",
+  "d2_source": "c21200e0c46dcd06152ce7be968122b33239de57",
+  "scope": "R13 Step 1: clock-aware shared library and Direct modules, tracked callers and allEdges emitter compatibility. Step 2 metadata and full benchmark acceptance remain pending.",
+  "source_port": [
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/CompileDesign.lean",
+      "sha256": "fc4ee680868c487e4e8dff514d95a614a12e86e963233cc984c514765c07f5fb",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DesignCert.lean",
+      "sha256": "4dca49e3dece6f2592a035789a2ba07ff11614d43f78de97df5e9c032e5d2d91",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DesignSemantics.lean",
+      "sha256": "caa24c583a5867d2f44d513895a4db5a320e475eb18b3f1d08fa5c73562a3cd7",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectBench.lean",
+      "sha256": "a0c9cefdef450662a00ce2e3ffa933cd860d120ec1515209cca1d35e98744603",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectCheck.lean",
+      "sha256": "ca66103f2c4900939cb5886747c69fc4046dad29da9ccc88cec6d29c5b9e75e4",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectExamples.lean",
+      "sha256": "5e1d853095f1c6ed11aa1c84c7dcce8dc2557a9fae7d7473761b7a79d9eacac0",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectSemantics.lean",
+      "sha256": "860a6c9e21f1c313e948a30cbe748df342e69f04c96c34fc6dcb15673847f4e7",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectSim.lean",
+      "sha256": "57ab469f204fa5978449d913f8212e8ebde80e15895b454578304b4c28e68f71",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectTests.lean",
+      "sha256": "604807614a5480b8d32f24b0b1a720b9d09b909bf671811895bb8d84595e44e8",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectTrace.lean",
+      "sha256": "7f518b377a117e759886b8f2491d563b09a3a430cccb40f1a3dc3a4e6b706fbd",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/DirectVsCompiled.lean",
+      "sha256": "42fc3ad77eb8cb30d829c2b42f11bafe0318cc74083e07b8b0056f16141d7e92",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/ResidualIR.lean",
+      "sha256": "89ca628328fc63737d3e3fb59e6f40995262fd70fe8198d8a7c3cc6b04193522",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/ResidualSemantics.lean",
+      "sha256": "08770552a09da3d595299b94bbdbffb4b3ec94f380b759c88753ea9fac8d4cee",
+      "identical_to_d2": true
+    },
+    {
+      "path": "formal/lean/LeanSemanticPrimitives/Compiler/Runtime.lean",
+      "sha256": "17cb74e8e42e986e30920f2459c1567b501cb143126f4f98f195761bbd82fd9c",
+      "identical_to_d2": true
+    }
+  ],
+  "caller_and_generator_sources": [
+    {
+      "path": "formal/lean/probes/compiler_smoke.lean",
+      "sha256": "2d2edf20fcf8e61c14e753dd496bdfa8f4eec030947842128b20ac9c0edcf301"
+    },
+    {
+      "path": "pass/lean/design_scan_test.cpp",
+      "sha256": "110d9d39cf6b4fedbcc43934e7c65154b280449f12b7c0d4a4de9c505b91372f"
+    },
+    {
+      "path": "pass/lean/emit_design_cert.cpp",
+      "sha256": "cdd878ed67c1ee3cc89a15d989c9a5fa60381fccc2e09f3e7d398a88a82b8cf1"
+    },
+    {
+      "path": "pass/lean/tests/check_legacy_oracles.py",
+      "sha256": "881b4e4f06faa62193bb2fcc627d4a333da4a97030ee7fb6854d2a760aeda562"
+    },
+    {
+      "path": "pass/lean/tests/legacy_semantic_audit/MaskEndpointPort.lean",
+      "sha256": "90ecb9f7d0ec020fa4d7f97adc243d6aa3fe84c84cd04fdd0d822827c129a158"
+    }
+  ],
+  "preservation": {
+    "parent_certificate_emission_sections": [
+      {
+        "from": "// ---- sources",
+        "until": "os << \"-- Emitted by pass.lean",
+        "identical_to_parent": true,
+        "sha256": "9da1cd76520e093c3b2a05666949da5ede856bab17444ce135e8b604c4fe3123"
+      },
+      {
+        "from": "os << \"def \" << base << \"_designCert",
+        "until": "// The residual program is DERIVED",
+        "identical_to_parent": true,
+        "sha256": "f1154491cc68a0d1bf42d288553413e60bc2885343ce1d4867246406b8d6dbf8"
+      }
+    ],
+    "frozen_export_baseline_revision": "5129e8c070ffaa1e2c5df973cb555aea3f7bdf80",
+    "frozen_baseline_caveat": "The frozen exporter is from an earlier replay, not the Step 1 parent. Tiny comparisons do not establish full-corpus preservation. No graph scan, IR, lowering or legacy emitter code changes occur in Step 1.",
+    "frozen_baseline_source_differences": [
+      "pass/lean/emit_design_cert.cpp",
+      "pass/lean/emit_legacy_fast_bridge.cpp",
+      "pass/lean/emit_legacy_fast_bridge.hpp",
+      "pass/lean/legacy_model.cpp",
+      "pass/lean/graph_access.cpp"
+    ]
+  },
+  "toolchain": {
+    "lean_pin": "leanprover/lean4:v4.31.0",
+    "lean_version": "Lean (version 4.31.0, x86_64-unknown-linux-gnu, commit 68218e876d2a38b1985b8590fff244a83c321783, Release)",
+    "mathlib_input_rev": "v4.31.0",
+    "mathlib_rev": "fabf563a7c95a166b8d7b6efca11c8b4dc9d911f",
+    "pins_changed": false,
+    "record_layout": "preserved flat records"
+  },
+  "bazel_checks": [
+    {
+      "target_group": "//pass/lean:lean_export_tests plus lean_export_graph, lean_legacy_fixtures and lhd",
+      "exit": 0,
+      "wall_seconds": 20.057,
+      "log_sha256": "918df313223ad6659b2e371d316b96232e670e3b22a3eb2bfce8fe00e163b63e",
+      "tests": [
+        {
+          "target": "//pass/lean:certificate_ir_test",
+          "cached": false,
+          "seconds": 0.1
+        },
+        {
+          "target": "//pass/lean:design_scan_test",
+          "cached": false,
+          "seconds": 0.1
+        },
+        {
+          "target": "//pass/lean:legacy_model_test",
+          "cached": false,
+          "seconds": 0.1
+        }
+      ]
+    },
+    {
+      "target_group": "same targets after formatting",
+      "exit": 0,
+      "wall_seconds": 13.178,
+      "log_sha256": "09ac7b46c08e3286bd41b22aa3529ab9219056b6029dde8bfa69192ca4245b4d",
+      "tests": [
+        {
+          "target": "//pass/lean:certificate_ir_test",
+          "cached": true,
+          "seconds": 0.1
+        },
+        {
+          "target": "//pass/lean:legacy_model_test",
+          "cached": true,
+          "seconds": 0.1
+        },
+        {
+          "target": "//pass/lean:design_scan_test",
+          "cached": false,
+          "seconds": 0.1
+        }
+      ]
+    },
+    {
+      "target_group": "//pass/lean:design_scan_test after removing unrelated formatting",
+      "exit": 0,
+      "wall_seconds": 12.365,
+      "log_sha256": "8fb5f852a59c1a8783b66c44b8d388834588eb60ca0d806782e308522e94f5b1",
+      "tests": [
+        {
+          "target": "//pass/lean:design_scan_test",
+          "cached": false,
+          "seconds": 0.1
+        }
+      ]
+    }
+  ],
+  "lake_build": {
+    "targets": [
+      "LeanSemanticPrimitives.Compiler.CompileDesign",
+      "LeanSemanticPrimitives.Compiler.DirectTests",
+      "LeanSemanticPrimitives.Compiler.DirectBench",
+      "LeanSemanticPrimitives.Compiler.DirectSim"
+    ],
+    "exit": 0,
+    "wall_seconds": 12.562,
+    "log_sha256": "ad7a56f9c530dd78de1e71243fceee64a8f0a89e582d025f49f95f67d96f556e"
+  },
+  "fixture_input": {
+    "path": "pass/lean/tests/legacy_fixtures.cpp",
+    "sha256": "95c4cc31c602699fec0afbd2120df9ec83965bbf303140120fbb9b9ff6188743",
+    "origin": "Repository-owned graph fixture generator; no sibling benchmark access."
+  },
+  "fixture_export": {
+    "tops": 38,
+    "wall_seconds": 2.106,
+    "old_binary_sha256": "320c6d78579754498637c0c52529bd3840bd2c01c2476187b8b9160d94bb1d4a",
+    "new_binary_sha256": "3e45393c756ea5708b56b2b9247c79a68706a53d29983b4228ca876dd988e62c",
+    "results": [
+      {
+        "group": "tiny",
+        "top": "tiny_sum",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "d7801e83755bf16c533c437808ab1b0a002047beed0336cdcc2c450aa9cf6b50",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sum",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "c0d82b86d6b189eabb77d4fed4d9ee5805d93422dc4216da112e75765befeb19",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sum",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "c2266f922b1859191a74a443676673c11a3a837c55d9f9a692910513f08c092a",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_mult",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "97a8200b33270a2d5c439b29fcd875077d83072e19b56148cf36df28722b44f8",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_mult",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "5bcbb4bc7b6146a90e9e577ff0907d81b2c43ad42ba5c768e44f0c4db92e49eb",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_mult",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_div",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "7d32c4ec0bfbc8949f42e3e79d1d3474d9d39dd5de77d42ce780529fb8cb0de2",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_div",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "5b369ad06de8fd67a1f7f3202b5d6156b1c4a4218e1ee1b60b3cd802be6b3052",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_div",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_and",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "1bced24a144f34795347d2a31cca3a6e6d07c3db30df3a00e5c185e681cc10d1",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_and",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "a3df89e815f79eb1804d4470491397aa86bac5f980f94fb79d7df2f250931b9d",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_and",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "41db51030f94f38c1c267990410847b19c5e7cbf38cd379ff8328dbbe335c6b5",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_or",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "957d7b83e8cf22c362213e985c6bf91459004d138d76870a9c61ae2a068884ea",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_or",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "adfea83721abdb5dbc9e9f5022df9cc00abdbfd7dfaab94de2ce5570a2caec98",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_or",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "299bfa9cdf6cb714aa0d2a726136ddf1e69d217858efc577cf9f932619005903",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_xor",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "4165fd44d082d737e8f9a9f932208e05c9f1bb779e43f31b9dea2fbb211e35e5",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_xor",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "bfa77a4afe0a3cb6e702acadb4749fad57bdb03a5f9e0ff8cb9969b2d6fbff21",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_xor",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "08a28676515da6ef648bead3940d447706ccf994453549499340defcd17ebbaa",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_ror",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "d1d9e41b2a0718cfd8c597f3c4c61e25995eeb68ae521dd1dd4a46a38ff790b8",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_ror",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "ee05c85e1b3923a7f3c0c707d3c82f0c45241fd52903b34b7bcb098ff4a00e0f",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_ror",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "cc8337f8531679a93beda1f3252113c4a20c5820bad2c1c88696f7469824f708",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_eq",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "2ec75ba99625aba61518c6056ad4d74d4889ba55bec8fbb40db3176b450b3ea8",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_eq",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "a212880d427b249e4c83a04d5a1c4fd64f796c6878f9312eb5af18792f1e4967",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_eq",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "26c4e7a4e09834c8b354117b7b527175f27da45422edc4d8b626527c1c407bd0",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_not",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "fff67d643437a02b9f0b6f22230376428d7eb030f17947e235c9b1d1571ba3fc",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_not",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "ba531916e3ebef51eb5ff3c887ee41fcd2bd8f30a4df5fa3c4b268e348f19544",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_not",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "28aa1a53d9a7846f06e88977803789f834fa0cbe8d981eafb7875a21ccce631a",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_lt",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "4a4e24e599a2a5ad1d722adbd6b2ed5b959cd0ada828224ddf59ea6610ce8875",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_lt",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "aa44d59515f13840c233b8f8dad1f34414fb540ee16b9b3b2fe629658a398879",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_lt",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "4ed939f704bd9080239973d693102a83d9144b1c7bbfef2ed118dd0039923992",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_gt",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "cc996145ae070def35d915864640c65ae051315a2cdd927124ed7c3c0cc594c6",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_gt",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "fdca6de132df0449ea6cc4362743c3629296ca92f9a543a1c389a9c01a57be4f",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_gt",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "1b8277d48b045e59b7975be54401614779b0b110948ab9bd2942bbc4475125a8",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_shl",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "ce10a53405e0ca750a7969441f2be67bac70ac86c8d45ee79a40521620caed42",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_shl",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "97202f3263adaf916091148d6a834c4444b88ecb6d1a86b67553ebbe72397989",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_shl",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "02ff7026d9408321d3f622133588eae4ebe989647e43a81cafe712e58ada9492",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sra",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "4ec542275931f3fd8204e070644d4bf1edfd1af848b31f0c0a735e95095d029c",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sra",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "f7e0306df4d844878fb5a6ed63cadc35b89b152addde71cfb84db4d8f941a35a",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sra",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "d39195fb6048f54c698d4466e487f02f0954c5e72c4e20d5e719612d0227ea6b",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_mux",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "b919ca3a84e94b6d43911cab9ddef3cf24dca8ae38fe0463dd6f80fb4812e6db",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_mux",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "b3b5efccca3f6bbe29c2bc063544bab8c0c27a48ee102b91ea10f665c4d50e4e",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_mux",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "d524b600be399e6868193faabd67dd01f53fd94082433809d7642f778b13f7aa",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sext",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "3dfd6ebf424d46d20e96ae3a5b331f079e3b0d2fb079bc98d92bfc89ea9fe867",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sext",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "73496b27175a8c8110ae340b7d5456528eb71b79031c26f5a117cf009d44300e",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sext",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_getmask",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "0f38a2e5a3cf566a09d4fdf92160aaa9137df8232c515bacd61f8d1fb6cd5099",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_getmask",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "38744afc9ed16f3190b12b4aea77714d3470d38afdc647672eeb3eddf14ab153",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_getmask",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "c2114e51c02dae056840efcdef675f2183dcd8e704373b9b1b5bee94e1bff556",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_setmask",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "7265d790391c8eab5010c7ee3ae9505554a95e3fc7de8a0f9f9e6c7c9fa1ddc0",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_setmask",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "086c51ef30d959a9c67bbc9695750e63057cef0fcb561673121d16dc9e8d1c6c",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_setmask",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_unsupported",
+        "mode": "verified",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_unsupported",
+        "mode": "legacy",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_unsupported",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_reset",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "126bbac313c1a95a60f46dc29808955481ff93f1c3d42b12d4987ba89608cf4e",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_reset",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "4948eac90b0404b48b910cbbadc58feb40e66a7e313e0ce5a131016a0d04747e",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_reset",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "c5106490dcb4f2e9c4dceb577d6bf3ee4fda01a4c9982b7237654f5d57045eb5",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_async",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "2b02d77432d82864e7be57b92f6eef66298b8ef1d65b9c8cf062772f54cde75f",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_async",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "1e076535361d52e3b6868d1e862b71ac7785ca88c97a19a1d2105cd9622e8d45",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_async",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "0cf511b10cc393363904f27ebb133bf71b6e3c51cbb17c9c4032740452745887",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_active_low",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "535712be72f9fb85a8c9c46234d6d7279a1a16c6f322d5f198a3c13543120bf8",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_active_low",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "9eee6991125cdc26e6ada6b0da62080b5576eea7b6625bfab6d49057e31cabec",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_active_low",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "e9e98826fbbe0f49b1d250b98e080c3c26b7ae160972971129730d5f2c5c1dd5",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_nonzero",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "dc36b11cbacf20ff2a237b41859b38fbdb50da71f58884280174f372fe5dbbea",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_nonzero",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "79cb6434105b1dbd194b57c6266f713fa83fcfe879821ed7d7d6d10e3660cfd5",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_nonzero",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "95ad5eacf9ab497b3c4f862064721c9c40f646a4d32b04785acd1409868da7d8",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_negedge",
+        "mode": "verified",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_negedge",
+        "mode": "legacy",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_negedge",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_pipeline",
+        "mode": "verified",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_pipeline",
+        "mode": "legacy",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_pipeline",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_ram",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "d76c4c1e789e8d23b2fedf84d81fdc28c770ed970aa23703ef5d3fd26180d5fe",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_ram",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "b7da6bc976f3679692875afa4381c253ac3ff51424b5212fd83bdd27cc7d6776",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_ram",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "06f0815f4ec21c4e9bc73468b41cb0378d223a8e1cf78cd57a94668950119a5d",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sync_ram",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "bee2249360332440c6f922b1d4f23ded9250236fd7ef164e445e3f00a61aa698",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sync_ram",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "22f32348ee1c718d66e3f24cb722c9cbfd337fcd315ff361e72b856ced8840e4",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sync_ram",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "84cf00b3ae7a2bc2de9423b6cc0c3be33c9af32b829c379917613c2b2baeff5c",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_byte_ram",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "5879f019368a94c316d00b1b925c1dcd85ea2390fb7754bea52e87f379eb4386",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_byte_ram",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "b001bdbb3333d4c113957e9c5b82aded5772f43ae1f38081a13e4a07b1746875",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_byte_ram",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "36609ad5ff29eba0edd29dee292533c3668d67fffd5fa070241e379b74cc728e",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_forward_ram",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "5dc1dcb33c65dff6fa222075ce6a320a3ab2013bb28b1fa0937c7bffdd2a6eeb",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_forward_ram",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "06f8f86ddb0acd67d8426d5c59c9f37651718e814757719600c384305b85ef8f",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_forward_ram",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "98b54876cae326356fcad89529909af267d8eec32b748d7279858b25d063ec31",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_rom",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "2834be84d609d5e29e27a77c76b29bb3c9b29f5155ed50a0b12a9db3de392715",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_rom",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "c7a8176b7f4012d2c2ffcf5446fe72a3d7cc45e0c16820b997cf046afda58ca9",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_rom",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "7533a0cc78ddea149a1884f945ca0cd37252d281b2a3818ff0cdf51a719e10e0",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sync_rom",
+        "mode": "verified",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "d85914ddaf1b22f694dd370eda65cec5943f049f94c311c871c552f5687ac74b",
+        "certificate_definition_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sync_rom",
+        "mode": "legacy",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "a216b9cbebab6edeef43c83d8a78d0c32e01498e143bbaf3f2f1f385af475665",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_sync_rom",
+        "mode": "bridge",
+        "before_exit": 0,
+        "after_exit": 0,
+        "acceptance_preserved": true,
+        "sha256": "0e541bd7323214c881077ce86479bcdc28e17ffe11d01f484058556b6764555e",
+        "byte_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_ram_init",
+        "mode": "verified",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_ram_init",
+        "mode": "legacy",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_ram_init",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_whole_array",
+        "mode": "verified",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_whole_array",
+        "mode": "legacy",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_whole_array",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_undef",
+        "mode": "verified",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_undef",
+        "mode": "legacy",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_undef",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_unknown_fwd",
+        "mode": "verified",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_unknown_fwd",
+        "mode": "legacy",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_unknown_fwd",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_bad_type",
+        "mode": "verified",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_bad_type",
+        "mode": "legacy",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_bad_type",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_bad_wensize",
+        "mode": "verified",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_bad_wensize",
+        "mode": "legacy",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_bad_wensize",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_array_init",
+        "mode": "verified",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_array_init",
+        "mode": "legacy",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_array_init",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_dynamic_init",
+        "mode": "verified",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_dynamic_init",
+        "mode": "legacy",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      },
+      {
+        "group": "tiny",
+        "top": "tiny_dynamic_init",
+        "mode": "bridge",
+        "before_exit": 1,
+        "after_exit": 1,
+        "acceptance_preserved": true,
+        "refusal_log_identical": true
+      }
+    ],
+    "modes": {
+      "verified": [
+        "verified_compiler"
+      ],
+      "legacy": [
+        "legacy"
+      ],
+      "bridge": [
+        "legacy",
+        "emit_fast_bridge=true",
+        "cert_wf=chunked",
+        "cert_chunk_size=2"
+      ]
+    },
+    "summary": {
+      "configurations": 38,
+      "mode_comparisons": 114,
+      "verified_cpp_exports": 27,
+      "verified_certificate_definitions_identical": 27,
+      "legacy_exports_byte_identical": 27,
+      "bridge_exports_byte_identical": 23
+    }
+  },
+  "scanner_oracle_generation": {
+    "tests": [
+      "DesignScan.HotmuxValueOracle",
+      "DesignScan.HotmuxSignedValueOracle",
+      "DesignScan.EndpointMasksPreserveExtractionAndReplacement",
+      "DesignScan.ConcatLowersDeclaredWindowsWithoutMutatingGraph"
+    ],
+    "lean_artifacts": 17,
+    "hotmux_vectors": {
+      "unsigned": 5,
+      "signed": 16
+    },
+    "exit": 0,
+    "log_sha256": "27745c9da08205c359329e328bf273e68408a44881b2abe4ff5a2d859da52e42"
+  },
+  "proof_procedure": {
+    "command": "taskset -c <six available CPUs> /usr/bin/time -v -o <timing> lean -j 2 <artifact>",
+    "cwd": "formal/lean",
+    "library": "Current formal/lean/.lake/build/lib/lean and its matching package dependencies; not the historical generated library.",
+    "concurrent_jobs": 2,
+    "lean_threads": 2,
+    "timeout_seconds_per_job": 180,
+    "audit": "Exact qualified theorem identities; both verified step theorems; global WF and comb plus next/step for stateful bridges; no sorryAx or unlisted axioms in successful audits.",
+    "library_standard_axioms": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "generated_native_facts": "Generated native_decide facts and Lean.ofReduceBool/ofReduceBool are accepted explicitly and recorded separately from generic library theorem axioms.",
+    "harness_corrections": [
+      "Resolve namespace-local theorem audit identities and multiline axiom lists.",
+      "Stop negative clock fixtures after the bounds witness; require exactly one native_decide-false error and a successful audited compiles theorem."
+    ],
+    "summary": {
+      "PROVEN": 68,
+      "COMPILER_REFUSAL_CONFIRMED": 2,
+      "CLOCK_BOUNDS_REFUSED": 2
+    }
+  },
+  "proof_results": [
+    {
+      "mode": "verified",
+      "case": "tiny_sum",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 25.099,
+      "peak_rss_kib": 6526660,
+      "artifact_sha256": "d7801e83755bf16c533c437808ab1b0a002047beed0336cdcc2c450aa9cf6b50",
+      "log_sha256": "1a141fdfc53a656b0e95d54e6998583620df93ac0d3875ba7fee0c42762b8c53",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_sum_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sum_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sum_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sum_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_sum_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_sum_step_correct",
+        "tiny_sum_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_sum",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 25.398,
+      "peak_rss_kib": 6541316,
+      "artifact_sha256": "c2266f922b1859191a74a443676673c11a3a837c55d9f9a692910513f08c092a",
+      "log_sha256": "92ad680d509100105c88050c65066f80ead586740c67a571bd07518f7169a731",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_sum_Lgraph.tiny_sum_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sum_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_sum_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_sum_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_sum_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_sum_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sum_Lgraph.tiny_sum_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sum_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_sum_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_sum_bridge_some._native.native_decide.ax_1_1",
+            "tiny_sum_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_sum_Lgraph.tiny_sum_graphCert_wf",
+        "tiny_sum_Lgraph.tiny_sum_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_mult",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 18.156,
+      "peak_rss_kib": 6657732,
+      "artifact_sha256": "97a8200b33270a2d5c439b29fcd875077d83072e19b56148cf36df28722b44f8",
+      "log_sha256": "c3d37ae6a23ccff5e26892b32d6c2b87b4c06bcc7dec8e7bf51dcabbf21d28c2",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_mult_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_mult_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_mult_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_mult_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_mult_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_mult_step_correct",
+        "tiny_mult_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_div",
+      "exit": 0,
+      "verdict": "COMPILER_REFUSAL_CONFIRMED",
+      "wall_seconds": 18.076,
+      "peak_rss_kib": 6652404,
+      "artifact_sha256": "a3e11c42e54e8169aa1674be6c5f92d88a6b5b39d26f0d2ab3acf1c4838724b4",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_and",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 19.109,
+      "peak_rss_kib": 6658452,
+      "artifact_sha256": "1bced24a144f34795347d2a31cca3a6e6d07c3db30df3a00e5c185e681cc10d1",
+      "log_sha256": "2cc2199218b80d476dc3ba62edfe850a4a49f97323d674718fad79753b8a0a5e",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_and_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_and_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_and_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_and_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_and_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_and_step_correct",
+        "tiny_and_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_and",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 19.631,
+      "peak_rss_kib": 6674496,
+      "artifact_sha256": "41db51030f94f38c1c267990410847b19c5e7cbf38cd379ff8328dbbe335c6b5",
+      "log_sha256": "e022075af16c7396f3d32b5386f114ee2ff0ae1c27892348f56609f9a5400ab4",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_and_Lgraph.tiny_and_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_and_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_and_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_and_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_and_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_and_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_and_Lgraph.tiny_and_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_and_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_and_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_and_bridge_some._native.native_decide.ax_1_1",
+            "tiny_and_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_and_Lgraph.tiny_and_graphCert_wf",
+        "tiny_and_Lgraph.tiny_and_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_or",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 17.572,
+      "peak_rss_kib": 6659024,
+      "artifact_sha256": "957d7b83e8cf22c362213e985c6bf91459004d138d76870a9c61ae2a068884ea",
+      "log_sha256": "55ef012eb61448128fc7201bb59886ae1fd48665efb8c5aa375a812dceb49ec7",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_or_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_or_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_or_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_or_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_or_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_or_step_correct",
+        "tiny_or_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_or",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 17.774,
+      "peak_rss_kib": 6673724,
+      "artifact_sha256": "299bfa9cdf6cb714aa0d2a726136ddf1e69d217858efc577cf9f932619005903",
+      "log_sha256": "1aecc5df06217b1089315ee97877a56a3baae57a7b14d01deb37f2d9f826153d",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_or_Lgraph.tiny_or_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_or_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_or_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_or_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_or_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_or_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_or_Lgraph.tiny_or_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_or_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_or_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_or_bridge_some._native.native_decide.ax_1_1",
+            "tiny_or_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_or_Lgraph.tiny_or_graphCert_wf",
+        "tiny_or_Lgraph.tiny_or_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_xor",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 16.914,
+      "peak_rss_kib": 6659580,
+      "artifact_sha256": "4165fd44d082d737e8f9a9f932208e05c9f1bb779e43f31b9dea2fbb211e35e5",
+      "log_sha256": "24186e39795f3214ed0ef51fd143f9ca48c341e01d6c9fa38e1b23b0b98312f0",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_xor_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_xor_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_xor_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_xor_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_xor_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_xor_step_correct",
+        "tiny_xor_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_xor",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 17.122,
+      "peak_rss_kib": 6671880,
+      "artifact_sha256": "08a28676515da6ef648bead3940d447706ccf994453549499340defcd17ebbaa",
+      "log_sha256": "4b339bc453a47f01e58c4bf39d38591f69aa1c1c65e70de84286f76b5607088e",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_xor_Lgraph.tiny_xor_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_xor_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_xor_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_xor_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_xor_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_xor_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_xor_Lgraph.tiny_xor_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_xor_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_xor_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_xor_bridge_some._native.native_decide.ax_1_1",
+            "tiny_xor_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_xor_Lgraph.tiny_xor_graphCert_wf",
+        "tiny_xor_Lgraph.tiny_xor_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_ror",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 17.068,
+      "peak_rss_kib": 6659796,
+      "artifact_sha256": "d1d9e41b2a0718cfd8c597f3c4c61e25995eeb68ae521dd1dd4a46a38ff790b8",
+      "log_sha256": "00e069073560e805c50f668feb4026706f4e5aad4ab373e6fa757025b7a24400",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_ror_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_ror_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_ror_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_ror_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_ror_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_ror_step_correct",
+        "tiny_ror_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_ror",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 17.322,
+      "peak_rss_kib": 6674388,
+      "artifact_sha256": "cc8337f8531679a93beda1f3252113c4a20c5820bad2c1c88696f7469824f708",
+      "log_sha256": "9f974204e8189cbae73c7f99799eb96f3b455eac975f5f28b18f0fc514cde7a4",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_ror_Lgraph.tiny_ror_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_ror_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_ror_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_ror_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_ror_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_ror_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_ror_Lgraph.tiny_ror_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_ror_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_ror_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_ror_bridge_some._native.native_decide.ax_1_1",
+            "tiny_ror_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_ror_Lgraph.tiny_ror_graphCert_wf",
+        "tiny_ror_Lgraph.tiny_ror_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_eq",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 15.667,
+      "peak_rss_kib": 6659292,
+      "artifact_sha256": "2ec75ba99625aba61518c6056ad4d74d4889ba55bec8fbb40db3176b450b3ea8",
+      "log_sha256": "e888e71f0ed367b56cdf253f21c9193d5b7e2ad28fb022c762bf1409cdb93276",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_eq_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_eq_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_eq_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_eq_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_eq_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_eq_step_correct",
+        "tiny_eq_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_eq",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 15.518,
+      "peak_rss_kib": 6672592,
+      "artifact_sha256": "26c4e7a4e09834c8b354117b7b527175f27da45422edc4d8b626527c1c407bd0",
+      "log_sha256": "0bac636b4735c66c434f2942c28b5f2e314440eb1da629ea65058ea1bab5aa4a",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_eq_Lgraph.tiny_eq_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_eq_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_eq_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_eq_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_eq_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_eq_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_eq_Lgraph.tiny_eq_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_eq_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_eq_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_eq_bridge_some._native.native_decide.ax_1_1",
+            "tiny_eq_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_eq_Lgraph.tiny_eq_graphCert_wf",
+        "tiny_eq_Lgraph.tiny_eq_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_not",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 14.207,
+      "peak_rss_kib": 6658224,
+      "artifact_sha256": "fff67d643437a02b9f0b6f22230376428d7eb030f17947e235c9b1d1571ba3fc",
+      "log_sha256": "3ac526a377fb98e0149696768112ee636a572b7619277072685293b2ec802c4b",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_not_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_not_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_not_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_not_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_not_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_not_step_correct",
+        "tiny_not_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_not",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 14.363,
+      "peak_rss_kib": 6665984,
+      "artifact_sha256": "28aa1a53d9a7846f06e88977803789f834fa0cbe8d981eafb7875a21ccce631a",
+      "log_sha256": "540fbb7dffb16ea7960848ab51c540f99cece60009246fc93c739e548e10e178",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_not_Lgraph.tiny_not_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_not_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_not_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_not_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_not_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_not_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_not_Lgraph.tiny_not_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_not_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_not_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_not_bridge_some._native.native_decide.ax_1_1",
+            "tiny_not_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_not_Lgraph.tiny_not_graphCert_wf",
+        "tiny_not_Lgraph.tiny_not_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_lt",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 16.266,
+      "peak_rss_kib": 6658524,
+      "artifact_sha256": "4a4e24e599a2a5ad1d722adbd6b2ed5b959cd0ada828224ddf59ea6610ce8875",
+      "log_sha256": "1bd5f2199e30a88896402745724607776bf35698dfd48e51562307439ecd3303",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_lt_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_lt_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_lt_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_lt_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_lt_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_lt_step_correct",
+        "tiny_lt_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_lt",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 16.318,
+      "peak_rss_kib": 6674128,
+      "artifact_sha256": "4ed939f704bd9080239973d693102a83d9144b1c7bbfef2ed118dd0039923992",
+      "log_sha256": "bd7f0cf1ecc99ad6e3187530f1d7d9b288840d3825822ef3efb3ac8145f4bb5d",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_lt_Lgraph.tiny_lt_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_lt_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_lt_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_lt_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_lt_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_lt_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_lt_Lgraph.tiny_lt_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_lt_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_lt_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_lt_bridge_some._native.native_decide.ax_1_1",
+            "tiny_lt_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_lt_Lgraph.tiny_lt_graphCert_wf",
+        "tiny_lt_Lgraph.tiny_lt_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_gt",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 14.362,
+      "peak_rss_kib": 6658008,
+      "artifact_sha256": "cc996145ae070def35d915864640c65ae051315a2cdd927124ed7c3c0cc594c6",
+      "log_sha256": "41d2767647ae7387bb75090db5adc81e7459721828398fff824821baa2b0030a",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_gt_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_gt_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_gt_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_gt_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_gt_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_gt_step_correct",
+        "tiny_gt_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_gt",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 14.862,
+      "peak_rss_kib": 6668712,
+      "artifact_sha256": "1b8277d48b045e59b7975be54401614779b0b110948ab9bd2942bbc4475125a8",
+      "log_sha256": "f2ccf6afeff37512a6fa5594b8a0c77a2f4641dd3609dbef3d42efb8ab2e8e44",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_gt_Lgraph.tiny_gt_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_gt_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_gt_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_gt_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_gt_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_gt_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_gt_Lgraph.tiny_gt_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_gt_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_gt_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_gt_bridge_some._native.native_decide.ax_1_1",
+            "tiny_gt_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_gt_Lgraph.tiny_gt_graphCert_wf",
+        "tiny_gt_Lgraph.tiny_gt_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_shl",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 17.27,
+      "peak_rss_kib": 6657824,
+      "artifact_sha256": "ce10a53405e0ca750a7969441f2be67bac70ac86c8d45ee79a40521620caed42",
+      "log_sha256": "7e58698531be9d55ede7edec1eb9a8ad75b1f2032ce3699628ac7adcd20ec118",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_shl_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_shl_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_shl_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_shl_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_shl_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_shl_step_correct",
+        "tiny_shl_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_shl",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 17.672,
+      "peak_rss_kib": 6672372,
+      "artifact_sha256": "02ff7026d9408321d3f622133588eae4ebe989647e43a81cafe712e58ada9492",
+      "log_sha256": "97f07d9255c999f6ea52ef1f4cab2c5c1f0e4b96c43bad6a53fd7089ae38aa6a",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_shl_Lgraph.tiny_shl_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_shl_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_shl_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_shl_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_shl_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_shl_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_shl_Lgraph.tiny_shl_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_shl_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_shl_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_shl_bridge_some._native.native_decide.ax_1_1",
+            "tiny_shl_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_shl_Lgraph.tiny_shl_graphCert_wf",
+        "tiny_shl_Lgraph.tiny_shl_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_sra",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 19.574,
+      "peak_rss_kib": 6657540,
+      "artifact_sha256": "4ec542275931f3fd8204e070644d4bf1edfd1af848b31f0c0a735e95095d029c",
+      "log_sha256": "fd81720a480be2d8a121809ab24b5f552607e019c8534bd7c2d95b1fd9c68b38",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_sra_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sra_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sra_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sra_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_sra_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_sra_step_correct",
+        "tiny_sra_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_sra",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 19.377,
+      "peak_rss_kib": 6668432,
+      "artifact_sha256": "d39195fb6048f54c698d4466e487f02f0954c5e72c4e20d5e719612d0227ea6b",
+      "log_sha256": "237cf0ce551165139bc57cd6701c98b44c2b6a2d5161c4c1969bbaf1231adb97",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_sra_Lgraph.tiny_sra_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sra_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_sra_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_sra_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_sra_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_sra_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sra_Lgraph.tiny_sra_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sra_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_sra_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_sra_bridge_some._native.native_decide.ax_1_1",
+            "tiny_sra_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_sra_Lgraph.tiny_sra_graphCert_wf",
+        "tiny_sra_Lgraph.tiny_sra_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_mux",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 19.226,
+      "peak_rss_kib": 6658160,
+      "artifact_sha256": "b919ca3a84e94b6d43911cab9ddef3cf24dca8ae38fe0463dd6f80fb4812e6db",
+      "log_sha256": "0bc0298c4af68e6a4571e858fe0c2c8934280a6046bcdc2d975e6d1a288a795c",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_mux_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_mux_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_mux_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_mux_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_mux_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_mux_step_correct",
+        "tiny_mux_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_mux",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 19.629,
+      "peak_rss_kib": 6673684,
+      "artifact_sha256": "d524b600be399e6868193faabd67dd01f53fd94082433809d7642f778b13f7aa",
+      "log_sha256": "778465ddcf2e5d2423836c5644f168fc22b2956b0ac812c9c2c42d11757c1e20",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_mux_Lgraph.tiny_mux_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_mux_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_mux_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_mux_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_mux_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_mux_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_mux_Lgraph.tiny_mux_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_mux_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_mux_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_mux_bridge_some._native.native_decide.ax_1_1",
+            "tiny_mux_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_mux_Lgraph.tiny_mux_graphCert_wf",
+        "tiny_mux_Lgraph.tiny_mux_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_sext",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 18.679,
+      "peak_rss_kib": 6658244,
+      "artifact_sha256": "3dfd6ebf424d46d20e96ae3a5b331f079e3b0d2fb079bc98d92bfc89ea9fe867",
+      "log_sha256": "6e2060788c69fdd1a8e7a34862f65ef1b323a4c552664f454095723f41cc8b4a",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_sext_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sext_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sext_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sext_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_sext_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_sext_step_correct",
+        "tiny_sext_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_getmask",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 18.478,
+      "peak_rss_kib": 6658400,
+      "artifact_sha256": "0f38a2e5a3cf566a09d4fdf92160aaa9137df8232c515bacd61f8d1fb6cd5099",
+      "log_sha256": "7a2fc2e6c3e31797e85b414d94bf33f540b9b6d3fc289bc279871fa854a03b77",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_getmask_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_getmask_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_getmask_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_getmask_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_getmask_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_getmask_step_correct",
+        "tiny_getmask_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_getmask",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 18.624,
+      "peak_rss_kib": 6673336,
+      "artifact_sha256": "c2114e51c02dae056840efcdef675f2183dcd8e704373b9b1b5bee94e1bff556",
+      "log_sha256": "6fa9d753b8ef47daac22e335cd60f4d54e611985cc4e67ff21bd88196de4f474",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_getmask_Lgraph.tiny_getmask_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_getmask_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_getmask_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_getmask_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_getmask_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_getmask_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_getmask_Lgraph.tiny_getmask_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_getmask_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_getmask_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_getmask_bridge_some._native.native_decide.ax_1_1",
+            "tiny_getmask_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_getmask_Lgraph.tiny_getmask_graphCert_wf",
+        "tiny_getmask_Lgraph.tiny_getmask_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_setmask",
+      "exit": 0,
+      "verdict": "COMPILER_REFUSAL_CONFIRMED",
+      "wall_seconds": 18.574,
+      "peak_rss_kib": 6653888,
+      "artifact_sha256": "ea9af12f9803e2db908f946dd524baf8aeedee62cea616c726e3939088a12311",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_reset",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 16.167,
+      "peak_rss_kib": 6656624,
+      "artifact_sha256": "126bbac313c1a95a60f46dc29808955481ff93f1c3d42b12d4987ba89608cf4e",
+      "log_sha256": "f197d0243d2d1df8702defcc84c4e3b7499e24d3a34b39425bc9eeea6ad1da8d",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_reset_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_reset_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_reset_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_reset_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_reset_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_reset_step_correct",
+        "tiny_reset_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_reset",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 16.27,
+      "peak_rss_kib": 6674196,
+      "artifact_sha256": "c5106490dcb4f2e9c4dceb577d6bf3ee4fda01a4c9982b7237654f5d57045eb5",
+      "log_sha256": "6c26196825f65769a16241d8a7afaad43056bca8316a95df23d698f21e32dbe5",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_reset_Lgraph.tiny_reset_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_reset_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_reset_graphCert_wf._native.native_decide.ax_1_2"
+          ]
+        },
+        {
+          "theorem": "tiny_reset_Lgraph.tiny_reset_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Quot.sound",
+            "tiny_reset_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_reset_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_reset_bridge_some._native.native_decide.ax_1_1",
+            "tiny_reset_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_reset_Lgraph.tiny_reset_next_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_reset_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_reset_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_reset_bridge_some._native.native_decide.ax_1_1",
+            "tiny_reset_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_reset_Lgraph.tiny_reset_step_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_reset_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_reset_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_reset_bridge_some._native.native_decide.ax_1_1",
+            "tiny_reset_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_reset_Lgraph.tiny_reset_graphCert_wf",
+        "tiny_reset_Lgraph.tiny_reset_comb_refines_fast",
+        "tiny_reset_Lgraph.tiny_reset_next_refines_fast",
+        "tiny_reset_Lgraph.tiny_reset_step_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_async",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 18.821,
+      "peak_rss_kib": 6658676,
+      "artifact_sha256": "2b02d77432d82864e7be57b92f6eef66298b8ef1d65b9c8cf062772f54cde75f",
+      "log_sha256": "3848f757c66763913f52eecc09d0f7bd1d68eadb7477105d431bfbfd1d38881a",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_async_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_async_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_async_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_async_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_async_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_async_step_correct",
+        "tiny_async_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_async",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 19.378,
+      "peak_rss_kib": 6673624,
+      "artifact_sha256": "0cf511b10cc393363904f27ebb133bf71b6e3c51cbb17c9c4032740452745887",
+      "log_sha256": "fb1dac3d9990b81fb8a79436a39da63f0184e6002395d07fe79a345c99e2c10f",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_async_Lgraph.tiny_async_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_async_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_async_graphCert_wf._native.native_decide.ax_1_2"
+          ]
+        },
+        {
+          "theorem": "tiny_async_Lgraph.tiny_async_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Quot.sound",
+            "tiny_async_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_async_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_async_bridge_some._native.native_decide.ax_1_1",
+            "tiny_async_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_async_Lgraph.tiny_async_next_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_async_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_async_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_async_bridge_some._native.native_decide.ax_1_1",
+            "tiny_async_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_async_Lgraph.tiny_async_step_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_async_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_async_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_async_bridge_some._native.native_decide.ax_1_1",
+            "tiny_async_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_async_Lgraph.tiny_async_graphCert_wf",
+        "tiny_async_Lgraph.tiny_async_comb_refines_fast",
+        "tiny_async_Lgraph.tiny_async_next_refines_fast",
+        "tiny_async_Lgraph.tiny_async_step_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_active_low",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 18.121,
+      "peak_rss_kib": 6659192,
+      "artifact_sha256": "535712be72f9fb85a8c9c46234d6d7279a1a16c6f322d5f198a3c13543120bf8",
+      "log_sha256": "98f9098aada87ac9a159a396060ef8155d8cd856c37aa3c26a09da4a54f7a0ce",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_active_low_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_active_low_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_active_low_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_active_low_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_active_low_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_active_low_step_correct",
+        "tiny_active_low_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_active_low",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 18.779,
+      "peak_rss_kib": 6674328,
+      "artifact_sha256": "e9e98826fbbe0f49b1d250b98e080c3c26b7ae160972971129730d5f2c5c1dd5",
+      "log_sha256": "bd080dce0d1b6a514c69741ca5d689f479452e8c3b5f9322d7e69bcf35ca9bf7",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_active_low_Lgraph.tiny_active_low_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_active_low_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_active_low_graphCert_wf._native.native_decide.ax_1_2"
+          ]
+        },
+        {
+          "theorem": "tiny_active_low_Lgraph.tiny_active_low_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Quot.sound",
+            "tiny_active_low_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_active_low_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_active_low_bridge_some._native.native_decide.ax_1_1",
+            "tiny_active_low_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_active_low_Lgraph.tiny_active_low_next_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_active_low_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_active_low_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_active_low_bridge_some._native.native_decide.ax_1_1",
+            "tiny_active_low_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_active_low_Lgraph.tiny_active_low_step_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_active_low_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_active_low_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_active_low_bridge_some._native.native_decide.ax_1_1",
+            "tiny_active_low_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_active_low_Lgraph.tiny_active_low_graphCert_wf",
+        "tiny_active_low_Lgraph.tiny_active_low_comb_refines_fast",
+        "tiny_active_low_Lgraph.tiny_active_low_next_refines_fast",
+        "tiny_active_low_Lgraph.tiny_active_low_step_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_nonzero",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 19.129,
+      "peak_rss_kib": 6657424,
+      "artifact_sha256": "dc36b11cbacf20ff2a237b41859b38fbdb50da71f58884280174f372fe5dbbea",
+      "log_sha256": "d3e7d5d184f76d33ef5e7f1d251c75509f58ea74da3a486ba5713b24ebd47cdd",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_nonzero_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_nonzero_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_nonzero_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_nonzero_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_nonzero_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_nonzero_step_correct",
+        "tiny_nonzero_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_nonzero",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 19.781,
+      "peak_rss_kib": 6670504,
+      "artifact_sha256": "95ad5eacf9ab497b3c4f862064721c9c40f646a4d32b04785acd1409868da7d8",
+      "log_sha256": "bb666b4e7f67c82834a8fb87a86fb1c16e64f4bf8e4b68d24f64eb427c8ad4af",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_nonzero_Lgraph.tiny_nonzero_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_nonzero_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_nonzero_graphCert_wf._native.native_decide.ax_1_2"
+          ]
+        },
+        {
+          "theorem": "tiny_nonzero_Lgraph.tiny_nonzero_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Quot.sound",
+            "tiny_nonzero_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_nonzero_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_nonzero_bridge_some._native.native_decide.ax_1_1",
+            "tiny_nonzero_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_nonzero_Lgraph.tiny_nonzero_next_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_nonzero_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_nonzero_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_nonzero_bridge_some._native.native_decide.ax_1_1",
+            "tiny_nonzero_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_nonzero_Lgraph.tiny_nonzero_step_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_nonzero_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_nonzero_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_nonzero_bridge_some._native.native_decide.ax_1_1",
+            "tiny_nonzero_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_nonzero_Lgraph.tiny_nonzero_graphCert_wf",
+        "tiny_nonzero_Lgraph.tiny_nonzero_comb_refines_fast",
+        "tiny_nonzero_Lgraph.tiny_nonzero_next_refines_fast",
+        "tiny_nonzero_Lgraph.tiny_nonzero_step_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_ram",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 16.82,
+      "peak_rss_kib": 6662488,
+      "artifact_sha256": "d76c4c1e789e8d23b2fedf84d81fdc28c770ed970aa23703ef5d3fd26180d5fe",
+      "log_sha256": "07b5cd829178c1046946c951611b7ff4db754eea114bde387cd1e64963c9faa6",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_ram_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_ram_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_ram_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_ram_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_ram_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_ram_step_correct",
+        "tiny_ram_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_ram",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 16.015,
+      "peak_rss_kib": 6682852,
+      "artifact_sha256": "06f0815f4ec21c4e9bc73468b41cb0378d223a8e1cf78cd57a94668950119a5d",
+      "log_sha256": "0c357d769f0f467c69be35dd5ed5a7e98fd8564f208d7be57041eba55696939e",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_ram_Lgraph.tiny_ram_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_ram_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_ram_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_ram_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_ram_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_ram_wf_chunk1_wf._native.native_decide.ax_1_1",
+            "tiny_ram_wf_chunk1_wf._native.native_decide.ax_1_2",
+            "tiny_ram_wf_chunk2_wf._native.native_decide.ax_1_1",
+            "tiny_ram_wf_chunk2_wf._native.native_decide.ax_1_2",
+            "tiny_ram_wf_chunk3_wf._native.native_decide.ax_1_1",
+            "tiny_ram_wf_chunk3_wf._native.native_decide.ax_1_2",
+            "tiny_ram_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_ram_Lgraph.tiny_ram_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_ram_Lgraph.tiny_ram_next_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_ram_Lgraph.tiny_ram_step_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_ram_Lgraph.tiny_ram_graphCert_wf",
+        "tiny_ram_Lgraph.tiny_ram_comb_refines_fast",
+        "tiny_ram_Lgraph.tiny_ram_next_refines_fast",
+        "tiny_ram_Lgraph.tiny_ram_step_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_sync_ram",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.305,
+      "peak_rss_kib": 6660604,
+      "artifact_sha256": "bee2249360332440c6f922b1d4f23ded9250236fd7ef164e445e3f00a61aa698",
+      "log_sha256": "196a51a71dc5f8044692220a072f77dd51ef8475a1e68f81a8f0f398b4a533ea",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_sync_ram_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_ram_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sync_ram_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_ram_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_sync_ram_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_sync_ram_step_correct",
+        "tiny_sync_ram_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_sync_ram",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.906,
+      "peak_rss_kib": 6682984,
+      "artifact_sha256": "84cf00b3ae7a2bc2de9423b6cc0c3be33c9af32b829c379917613c2b2baeff5c",
+      "log_sha256": "f64471dbbfed2dd2f5380da4922efa48fe3b0efa0a729da7a1b9e2da05ff7351",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_sync_ram_Lgraph.tiny_sync_ram_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_ram_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_sync_ram_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_sync_ram_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_sync_ram_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_sync_ram_wf_chunk1_wf._native.native_decide.ax_1_1",
+            "tiny_sync_ram_wf_chunk1_wf._native.native_decide.ax_1_2",
+            "tiny_sync_ram_wf_chunk2_wf._native.native_decide.ax_1_1",
+            "tiny_sync_ram_wf_chunk2_wf._native.native_decide.ax_1_2",
+            "tiny_sync_ram_wf_chunk3_wf._native.native_decide.ax_1_1",
+            "tiny_sync_ram_wf_chunk3_wf._native.native_decide.ax_1_2",
+            "tiny_sync_ram_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sync_ram_Lgraph.tiny_sync_ram_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_sync_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_sync_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_sync_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sync_ram_Lgraph.tiny_sync_ram_next_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_sync_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_sync_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_sync_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sync_ram_Lgraph.tiny_sync_ram_step_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_sync_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_sync_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_sync_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_sync_ram_Lgraph.tiny_sync_ram_graphCert_wf",
+        "tiny_sync_ram_Lgraph.tiny_sync_ram_comb_refines_fast",
+        "tiny_sync_ram_Lgraph.tiny_sync_ram_next_refines_fast",
+        "tiny_sync_ram_Lgraph.tiny_sync_ram_step_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_byte_ram",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.557,
+      "peak_rss_kib": 6657688,
+      "artifact_sha256": "5879f019368a94c316d00b1b925c1dcd85ea2390fb7754bea52e87f379eb4386",
+      "log_sha256": "a3c9f6780afa055276578de0e8cd6678fb4ed9ab3316fab0dfa28139b42430f0",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_byte_ram_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_byte_ram_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_byte_ram_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_byte_ram_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_byte_ram_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_byte_ram_step_correct",
+        "tiny_byte_ram_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_byte_ram",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.757,
+      "peak_rss_kib": 6682672,
+      "artifact_sha256": "36609ad5ff29eba0edd29dee292533c3668d67fffd5fa070241e379b74cc728e",
+      "log_sha256": "d29c9635f8c6343da35341a58d57a364ee985777809022b173a66e25d2f62c4d",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_byte_ram_Lgraph.tiny_byte_ram_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_byte_ram_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_byte_ram_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_byte_ram_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_byte_ram_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_byte_ram_wf_chunk1_wf._native.native_decide.ax_1_1",
+            "tiny_byte_ram_wf_chunk1_wf._native.native_decide.ax_1_2",
+            "tiny_byte_ram_wf_chunk2_wf._native.native_decide.ax_1_1",
+            "tiny_byte_ram_wf_chunk2_wf._native.native_decide.ax_1_2",
+            "tiny_byte_ram_wf_chunk3_wf._native.native_decide.ax_1_1",
+            "tiny_byte_ram_wf_chunk3_wf._native.native_decide.ax_1_2",
+            "tiny_byte_ram_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_byte_ram_Lgraph.tiny_byte_ram_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_byte_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_byte_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_byte_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_byte_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_byte_ram_Lgraph.tiny_byte_ram_next_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_byte_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_byte_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_byte_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_byte_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_byte_ram_Lgraph.tiny_byte_ram_step_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_byte_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_byte_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_byte_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_byte_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_byte_ram_Lgraph.tiny_byte_ram_graphCert_wf",
+        "tiny_byte_ram_Lgraph.tiny_byte_ram_comb_refines_fast",
+        "tiny_byte_ram_Lgraph.tiny_byte_ram_next_refines_fast",
+        "tiny_byte_ram_Lgraph.tiny_byte_ram_step_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_forward_ram",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 13.259,
+      "peak_rss_kib": 6661596,
+      "artifact_sha256": "5dc1dcb33c65dff6fa222075ce6a320a3ab2013bb28b1fa0937c7bffdd2a6eeb",
+      "log_sha256": "293da0f90e82ed2babbe4da609fed44d82d0895395c5dd9579be152b8708e94d",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_forward_ram_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_forward_ram_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_forward_ram_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_forward_ram_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_forward_ram_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_forward_ram_step_correct",
+        "tiny_forward_ram_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_forward_ram",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 13.308,
+      "peak_rss_kib": 6684284,
+      "artifact_sha256": "98b54876cae326356fcad89529909af267d8eec32b748d7279858b25d063ec31",
+      "log_sha256": "2faf76b1e2f1f73e6884d312ca7e40a366e437c4bd09f620b72a1514796a2d7d",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_forward_ram_Lgraph.tiny_forward_ram_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_forward_ram_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_forward_ram_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_forward_ram_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_forward_ram_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_forward_ram_wf_chunk1_wf._native.native_decide.ax_1_1",
+            "tiny_forward_ram_wf_chunk1_wf._native.native_decide.ax_1_2",
+            "tiny_forward_ram_wf_chunk2_wf._native.native_decide.ax_1_1",
+            "tiny_forward_ram_wf_chunk2_wf._native.native_decide.ax_1_2",
+            "tiny_forward_ram_wf_chunk3_wf._native.native_decide.ax_1_1",
+            "tiny_forward_ram_wf_chunk3_wf._native.native_decide.ax_1_2",
+            "tiny_forward_ram_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_forward_ram_Lgraph.tiny_forward_ram_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_forward_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_forward_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_forward_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_forward_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_forward_ram_Lgraph.tiny_forward_ram_next_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_forward_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_forward_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_forward_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_forward_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_forward_ram_Lgraph.tiny_forward_ram_step_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_forward_ram_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_forward_ram_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_forward_ram_bridge_some._native.native_decide.ax_1_1",
+            "tiny_forward_ram_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_forward_ram_Lgraph.tiny_forward_ram_graphCert_wf",
+        "tiny_forward_ram_Lgraph.tiny_forward_ram_comb_refines_fast",
+        "tiny_forward_ram_Lgraph.tiny_forward_ram_next_refines_fast",
+        "tiny_forward_ram_Lgraph.tiny_forward_ram_step_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_rom",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.206,
+      "peak_rss_kib": 6658304,
+      "artifact_sha256": "2834be84d609d5e29e27a77c76b29bb3c9b29f5155ed50a0b12a9db3de392715",
+      "log_sha256": "b2d27d8aaaa29ab3e806f64a2bc597786957d753039561d92070cc65d14a0f78",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_rom_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_rom_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_rom_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_rom_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_rom_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_rom_step_correct",
+        "tiny_rom_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_rom",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.556,
+      "peak_rss_kib": 6672824,
+      "artifact_sha256": "7533a0cc78ddea149a1884f945ca0cd37252d281b2a3818ff0cdf51a719e10e0",
+      "log_sha256": "c3b534398697cfd9226856979aa4a1ddb3d8b9368add4a2cdc2a82874163c598",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_rom_Lgraph.tiny_rom_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_rom_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_rom_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_rom_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_rom_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_rom_wf_chunk1_wf._native.native_decide.ax_1_1",
+            "tiny_rom_wf_chunk1_wf._native.native_decide.ax_1_2",
+            "tiny_rom_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_rom_Lgraph.tiny_rom_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_rom_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_rom_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_rom_bridge_some._native.native_decide.ax_1_1",
+            "tiny_rom_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_rom_Lgraph.tiny_rom_graphCert_wf",
+        "tiny_rom_Lgraph.tiny_rom_comb_refines_fast"
+      ]
+    },
+    {
+      "mode": "verified",
+      "case": "tiny_sync_rom",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.958,
+      "peak_rss_kib": 6660948,
+      "artifact_sha256": "d85914ddaf1b22f694dd370eda65cec5943f049f94c311c871c552f5687ac74b",
+      "log_sha256": "bee81f9d44d57e4757e5e7389a568fb5d08581c02412f908cdaef7c4acc5640e",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_sync_rom_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_rom_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sync_rom_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_rom_clock_bounds._native.native_decide.ax_1_1",
+            "tiny_sync_rom_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_sync_rom_step_correct",
+        "tiny_sync_rom_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "bridge",
+      "case": "tiny_sync_rom",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 13.258,
+      "peak_rss_kib": 6674184,
+      "artifact_sha256": "0e541bd7323214c881077ce86479bcdc28e17ffe11d01f484058556b6764555e",
+      "log_sha256": "59619a2cbdad0e5b9ac3b27589171f67131ee8bda064d378fbd514f452af8b70",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_sync_rom_Lgraph.tiny_sync_rom_graphCert_wf",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_rom_graphCert_wf._native.native_decide.ax_1_1",
+            "tiny_sync_rom_graphCert_wf._native.native_decide.ax_1_2",
+            "tiny_sync_rom_wf_chunk0_wf._native.native_decide.ax_1_1",
+            "tiny_sync_rom_wf_chunk0_wf._native.native_decide.ax_1_2",
+            "tiny_sync_rom_wf_chunk1_wf._native.native_decide.ax_1_1",
+            "tiny_sync_rom_wf_chunk1_wf._native.native_decide.ax_1_2",
+            "tiny_sync_rom_wf_ids_enumeration._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sync_rom_Lgraph.tiny_sync_rom_comb_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_rom_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_sync_rom_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_sync_rom_bridge_some._native.native_decide.ax_1_1",
+            "tiny_sync_rom_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sync_rom_Lgraph.tiny_sync_rom_next_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_rom_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_sync_rom_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_sync_rom_bridge_some._native.native_decide.ax_1_1",
+            "tiny_sync_rom_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "tiny_sync_rom_Lgraph.tiny_sync_rom_step_refines_fast",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "tiny_sync_rom_bridge_depord._native.native_decide.ax_1_1",
+            "tiny_sync_rom_bridge_nodup._native.native_decide.ax_1_1",
+            "tiny_sync_rom_bridge_some._native.native_decide.ax_1_1",
+            "tiny_sync_rom_phiTree_keys_sub._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_sync_rom_Lgraph.tiny_sync_rom_graphCert_wf",
+        "tiny_sync_rom_Lgraph.tiny_sync_rom_comb_refines_fast",
+        "tiny_sync_rom_Lgraph.tiny_sync_rom_next_refines_fast",
+        "tiny_sync_rom_Lgraph.tiny_sync_rom_step_refines_fast"
+      ]
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "HotmuxOracle",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.055,
+      "peak_rss_kib": 6661808,
+      "artifact_sha256": "03d865f6267658257e20b11b8568728e0bafb454a3e7d02f34df86a4a662e8b4",
+      "log_sha256": "2fb438bdb3ef0b9e8e413b7e089d0d5116c11a73c8a8b2d9fdd2bbfa34607a4e",
+      "axiom_audits": [
+        {
+          "theorem": "hotmux_oracle_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "hotmux_oracle_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "hotmux_oracle_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "hotmux_oracle_clock_bounds._native.native_decide.ax_1_1",
+            "hotmux_oracle_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "hotmux_oracle_step_correct",
+        "hotmux_oracle_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "HotmuxSignedOracle",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.406,
+      "peak_rss_kib": 6663596,
+      "artifact_sha256": "5b3362d9db1c0d87cccaedf80152f1873d75ebe4dd6cfc3251b212e1be1dac56",
+      "log_sha256": "6a570d124811c07f3a038308aa82ecadc7a0b92b2a3fa0e66bfef101baafdb3c",
+      "axiom_audits": [
+        {
+          "theorem": "hotmux_signed_oracle_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "hotmux_signed_oracle_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "hotmux_signed_oracle_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "hotmux_signed_oracle_clock_bounds._native.native_decide.ax_1_1",
+            "hotmux_signed_oracle_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "hotmux_signed_oracle_step_correct",
+        "hotmux_signed_oracle_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "concat_negative_constant",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.206,
+      "peak_rss_kib": 6658848,
+      "artifact_sha256": "ead9295f5a316ce5eb5fdbdff70fdffb84daf6c7a4321a631fa561348e889fda",
+      "log_sha256": "abcc4460ea284f9d998f1c4d90562ff46a3681eb619f4c99310660445edb6bd4",
+      "axiom_audits": [
+        {
+          "theorem": "concat_negative_constant_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "concat_negative_constant_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "concat_negative_constant_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "concat_negative_constant_clock_bounds._native.native_decide.ax_1_1",
+            "concat_negative_constant_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "concat_negative_constant_step_correct",
+        "concat_negative_constant_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "concat_padding",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.307,
+      "peak_rss_kib": 6657836,
+      "artifact_sha256": "4bd63f90a4e0824f1d792efe0b1e6ba2950ee1fe85e36e720f1ac1a998e1f6d9",
+      "log_sha256": "77bbd8dd6c2a5ee59f60b9b835513b1f62179521011a9b6658b7f253e6efabd8",
+      "axiom_audits": [
+        {
+          "theorem": "concat_padding_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "concat_padding_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "concat_padding_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "concat_padding_clock_bounds._native.native_decide.ax_1_1",
+            "concat_padding_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "concat_padding_step_correct",
+        "concat_padding_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "concat_signed",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 13.209,
+      "peak_rss_kib": 6664396,
+      "artifact_sha256": "68194bc47dc90e0f4f49bf2ee3ac994aafe46bf5fd136bdd44cc09ef80986004",
+      "log_sha256": "0c7ebf94a1d2c6de53dd3acab50bc2f39a100e665ecdfd7c08f7a3fdeaa27b8f",
+      "axiom_audits": [
+        {
+          "theorem": "concat_signed_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "concat_signed_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "concat_signed_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "concat_signed_clock_bounds._native.native_decide.ax_1_1",
+            "concat_signed_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "concat_signed_step_correct",
+        "concat_signed_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "concat_wide_signed",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.807,
+      "peak_rss_kib": 6660224,
+      "artifact_sha256": "753d06335781ac448463898e0e89718e23740d3c15ca04afda94389789024d8d",
+      "log_sha256": "62a9c7346d7c38ee78b2f2ab103d8c2292a4a8ae430722a86a7ce6152015af18",
+      "axiom_audits": [
+        {
+          "theorem": "concat_wide_signed_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "concat_wide_signed_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "concat_wide_signed_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "concat_wide_signed_clock_bounds._native.native_decide.ax_1_1",
+            "concat_wide_signed_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "concat_wide_signed_step_correct",
+        "concat_wide_signed_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "concat_wide_unsigned",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 16.117,
+      "peak_rss_kib": 6658104,
+      "artifact_sha256": "74623eccc9383aa19cbe7c6126f0e639eaecada537c39d546838a9fd2eadaa75",
+      "log_sha256": "df1fc9a27a96f68690db735a71018d18252f8e9b6a776651f2519c43aef22e21",
+      "axiom_audits": [
+        {
+          "theorem": "concat_wide_unsigned_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "concat_wide_unsigned_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "concat_wide_unsigned_step_legacy_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "concat_wide_unsigned_clock_bounds._native.native_decide.ax_1_1",
+            "concat_wide_unsigned_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "concat_wide_unsigned_step_correct",
+        "concat_wide_unsigned_step_legacy_correct"
+      ]
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "get_window_0_8",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 11.753,
+      "peak_rss_kib": 6653588,
+      "artifact_sha256": "6cbd92c736821a6bb75bbc5a5c39ed0ec01f105588c83119a22057240addeeaf",
+      "log_sha256": "c8ffaf5a30e6a8ba81ac6f2b2e7e90da320402c73fba61ee63a9475b975a02eb",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "get_window_3_6",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.908,
+      "peak_rss_kib": 6654236,
+      "artifact_sha256": "be51c46bf7f20700bddd014cd8f559cbf9994454879745cf91340dc48333ccd0",
+      "log_sha256": "42395d60de1b3c7072d6356f662c9bcc26f9a0754eeb671c00f89b6e47d92d6c",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "get_window_63_67",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.856,
+      "peak_rss_kib": 6653348,
+      "artifact_sha256": "1808769eb51bcb428459b30168130b3d4b928bec7729678485b947a68abc301c",
+      "log_sha256": "43e02a5fb3c1e956fd28c8d595f0f41c9933bca19e4f778035b3c93844cd1aff",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "get_window_7_8",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.403,
+      "peak_rss_kib": 6652640,
+      "artifact_sha256": "a64afcbe7c7c3e606be8cb33c40a3e715aff222207be860f113f47b3d1318f3b",
+      "log_sha256": "96e428151912997ac84d3890c3c35deaedf6159d8febcdae323f96b4919cf05e",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "get_window_8_12",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.354,
+      "peak_rss_kib": 6652644,
+      "artifact_sha256": "83e4f13a6aea276b80ffb0a686724223a45bbfecaf50144cc140f866ae8dcbe7",
+      "log_sha256": "3c0beafba6feba285438102d7cd8793c9f78311e2d5246f4e3df30b95ca283c9",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "set_window_0_8",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 13.158,
+      "peak_rss_kib": 6653140,
+      "artifact_sha256": "d47eaccbc57c7be5c5d1201d7eb582a104272a1e548fe2558f3a93b87fc1e650",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "set_window_3_6",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 13.008,
+      "peak_rss_kib": 6652924,
+      "artifact_sha256": "1cdad461fb802b6d7c689b76617ba5c59486d90d7b7e1e2e346f6eef13ac9483",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "set_window_63_67",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.406,
+      "peak_rss_kib": 6651420,
+      "artifact_sha256": "a8e2f428610803b7a67209130c3cfd851ad67a9bbf75d81adbd555a45ca9e092",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "set_window_7_8",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.255,
+      "peak_rss_kib": 6653672,
+      "artifact_sha256": "e84aeae0f131ea227577c51e8f650c371026385cdd7ae6a77fa7548602a1c157",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "scanner_oracle",
+      "case": "set_window_8_12",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.105,
+      "peak_rss_kib": 6654452,
+      "artifact_sha256": "2da27cc3626c206ea677185b4ffe47a6d104d63ba51f9ba5ee50514dd31a808b",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "axiom_audits": [],
+      "checked_theorem_names": []
+    },
+    {
+      "mode": "tracked_caller",
+      "case": "compiler_smoke",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 13.208,
+      "peak_rss_kib": 6660984,
+      "artifact_sha256": "2d2edf20fcf8e61c14e753dd496bdfa8f4eec030947842128b20ac9c0edcf301",
+      "log_sha256": "d4836a6c9204f0b00c5cbeea0b7f9d21f42c9fffc4f8944bc3c56643443768c6",
+      "axiom_audits": [
+        {
+          "theorem": "dAdd_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "dAdd_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "dAdd_step_correct"
+      ]
+    },
+    {
+      "mode": "tracked_caller",
+      "case": "MaskEndpointPort",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.607,
+      "peak_rss_kib": 6673872,
+      "artifact_sha256": "90ecb9f7d0ec020fa4d7f97adc243d6aa3fe84c84cd04fdd0d822827c129a158",
+      "log_sha256": "38ed61e32d01ac3feeb04c473c7fdc15042d0796d3e9424175235e176891cd3f",
+      "axiom_audits": [
+        {
+          "theorem": "old_getmask_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "old_getmask_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "new_getmask_step_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound",
+            "new_getmask_compiles._native.native_decide.ax_1_1"
+          ]
+        },
+        {
+          "theorem": "mask_fast_preserved",
+          "axioms": [
+            "propext",
+            "Quot.sound"
+          ]
+        },
+        {
+          "theorem": "mask_interpreter_preserved",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "old_getmask_step_correct",
+        "new_getmask_step_correct",
+        "mask_fast_preserved",
+        "mask_source_preserved",
+        "mask_interpreter_preserved"
+      ]
+    },
+    {
+      "mode": "library_audit",
+      "case": "LibraryAxioms",
+      "exit": 0,
+      "verdict": "PROVEN",
+      "wall_seconds": 12.155,
+      "peak_rss_kib": 6645584,
+      "artifact_sha256": "6fc42ef03494e7cc02fbf20030306f556c478c03652e6cf3c85791824970fafa",
+      "log_sha256": "de8caea41dc88f72babec7cc4644826b938f87d05985883e91c2d6b0a8a2ee9b",
+      "axiom_audits": [
+        {
+          "theorem": "Compiler.compileAndRun_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound"
+          ]
+        },
+        {
+          "theorem": "Compiler.interpretDesign_allEdges",
+          "axioms": [
+            "propext",
+            "Quot.sound"
+          ]
+        },
+        {
+          "theorem": "Compiler.compileDesign_correct",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound"
+          ]
+        },
+        {
+          "theorem": "Compiler.Direct.directStep_eq_compileAndRun",
+          "axioms": [
+            "propext",
+            "Classical.choice",
+            "Quot.sound"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "Compiler.compileAndRun_correct",
+        "Compiler.interpretDesign_allEdges",
+        "Compiler.compileDesign_correct",
+        "Compiler.Direct.directStep_eq_compileAndRun"
+      ]
+    },
+    {
+      "mode": "negative_clock",
+      "case": "tiny_reset",
+      "exit": 1,
+      "verdict": "CLOCK_BOUNDS_REFUSED",
+      "wall_seconds": 19.581,
+      "peak_rss_kib": 6492848,
+      "artifact_sha256": "954623a798a7615bdc31a671e49ca87a899de08b85d41854d54dc0316a08d453",
+      "log_sha256": "07ca351e3f841d8e5ee4d8b82b8b28613179d3ceebb2dc08ed6856c9db798faf",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_reset_compiles",
+          "axioms": [
+            "propext",
+            "tiny_reset_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_reset_compiles"
+      ]
+    },
+    {
+      "mode": "negative_clock",
+      "case": "tiny_ram",
+      "exit": 1,
+      "verdict": "CLOCK_BOUNDS_REFUSED",
+      "wall_seconds": 19.532,
+      "peak_rss_kib": 6489692,
+      "artifact_sha256": "c0e122aba88780372302ad856fe267c4424d23cfa74fe8e417fb90c1d2405a48",
+      "log_sha256": "268d772ddacfb6b2c226f944c5debdada780ce23d4dc34cb2af4fdb6d8d7b7e7",
+      "axiom_audits": [
+        {
+          "theorem": "tiny_ram_compiles",
+          "axioms": [
+            "propext",
+            "tiny_ram_compiles._native.native_decide.ax_1_1"
+          ]
+        }
+      ],
+      "checked_theorem_names": [
+        "tiny_ram_compiles"
+      ]
+    }
+  ],
+  "invalid_clock_controls": [
+    {
+      "case": "tiny_reset",
+      "change": "Set one flop clock ordinal to 1 while retaining the default singleton clock table.",
+      "compiler_acceptance_proved": true,
+      "only_error": "native_decide evaluated the clock-bound conjunction to false",
+      "source": "-- Emitted by pass.lean in `formal.lean.mode=verified_compiler`.\n-- The model comes from the verified compiler; the checks and theorems below\n-- instantiate its generic correctness and all-fire compatibility results.\n-- by `Compiler.compileDesign_correct`.  Slots are dense: sources occupy\n-- 0..3 and node i occupies 4+i.\nimport LeanSemanticPrimitives.Compiler.CompileDesign\n\nset_option maxRecDepth 1000000\nset_option maxHeartbeats 0\n\nopen Compiler\n\ndef tiny_reset_designCert : DesignCert :=\n  {\n    sources  := #[\n        SourceDesc.flopQ 0 8\n      , SourceDesc.const 8 ((Int.ofNat 12))\n      , SourceDesc.input 1 1\n      , SourceDesc.input 0 1\n      ]\n    nodes    := #[]\n    outputs  := #[\n        { slot := 0, width := 8 }\n      ]\n    flops    := #[\n        { width := 8, din := 1, enable := some 3, resetPin := some 2, resetValue := (0), resetActiveLow := false, clock := 1 }\n      ]\n    memories := #[]\n  }\n\n/-- Compile-and-run.  The model IS the verified compiler applied to this\ncertificate -- there is no separately emitted model to disagree with it. -/\ndef tiny_reset_step : RuntimeInput \u2192 RuntimeState \u2192 RuntimeResult :=\n  compileAndRun tiny_reset_designCert (allEdges tiny_reset_designCert)\n\n/-- Compiler acceptance, independent of clock-bound well-formedness.\n\n`native_decide`, not `.get!`: a compile failure is a BUILD failure rather\nthan a runtime panic with the hypothesis left undischarged.  (`decide` is\nnot usable -- `Array.map` is not kernel-reducible.) -/\ntheorem tiny_reset_compiles : compilesOk tiny_reset_designCert = true := by\n  native_decide\n\n#print axioms tiny_reset_compiles\n\n/-- Declared clock bounds, checked independently of compiler acceptance. -/\ntheorem tiny_reset_clock_bounds :\n    (\u2200 f \u2208 tiny_reset_designCert.flops, f.clock < tiny_reset_designCert.clocks.size) \u2227\n    (\u2200 m \u2208 tiny_reset_designCert.memories, m.clock < tiny_reset_designCert.clocks.size) := by\n  native_decide\n\n"
+    },
+    {
+      "case": "tiny_ram",
+      "change": "Set one memory clock ordinal to 1 while retaining the default singleton clock table.",
+      "compiler_acceptance_proved": true,
+      "only_error": "native_decide evaluated the clock-bound conjunction to false",
+      "source": "-- Emitted by pass.lean in `formal.lean.mode=verified_compiler`.\n-- The model comes from the verified compiler; the checks and theorems below\n-- instantiate its generic correctness and all-fire compatibility results.\n-- by `Compiler.compileDesign_correct`.  Slots are dense: sources occupy\n-- 0..3 and node i occupies 4+i.\nimport LeanSemanticPrimitives.Compiler.CompileDesign\n\nset_option maxRecDepth 1000000\nset_option maxHeartbeats 0\n\nopen Compiler\n\ndef tiny_ram_designCert : DesignCert :=\n  {\n    sources  := #[\n        SourceDesc.memImg 0 2 8\n      , SourceDesc.const 8 ((Int.ofNat 171))\n      , SourceDesc.input 0 2\n      , SourceDesc.input 1 2\n      ]\n    nodes    := #[\n        { op := LGraphOp.Op_Or, width := 2, deps := #[2], origin := 1000000001 }\n      , { op := LGraphOp.Op_Or, width := 2, deps := #[3], origin := 1000000002 }\n      , { op := LGraphOp.Op_MemRead, width := 8, deps := #[0, 4, 5], origin := 1000000003 }\n      , { op := LGraphOp.Op_Or, width := 2, deps := #[2], origin := 1000000004 }\n      , { op := LGraphOp.Op_Or, width := 8, deps := #[1], origin := 1000000006 }\n      , { op := LGraphOp.Op_Or, width := 1, deps := #[3], origin := 1000000007 }\n      , { op := LGraphOp.Op_MemWrite, width := 8, deps := #[0, 7, 8, 9], origin := 1000000008 }\n      ]\n    outputs  := #[\n        { slot := 6, width := 8 }\n      ]\n    flops    := #[]\n    memories := #[\n        { aw := 2, dw := 8, nextImg := 10, clock := 1 }\n      ]\n  }\n\n/-- Compile-and-run.  The model IS the verified compiler applied to this\ncertificate -- there is no separately emitted model to disagree with it. -/\ndef tiny_ram_step : RuntimeInput \u2192 RuntimeState \u2192 RuntimeResult :=\n  compileAndRun tiny_ram_designCert (allEdges tiny_ram_designCert)\n\n/-- Compiler acceptance, independent of clock-bound well-formedness.\n\n`native_decide`, not `.get!`: a compile failure is a BUILD failure rather\nthan a runtime panic with the hypothesis left undischarged.  (`decide` is\nnot usable -- `Array.map` is not kernel-reducible.) -/\ntheorem tiny_ram_compiles : compilesOk tiny_ram_designCert = true := by\n  native_decide\n\n#print axioms tiny_ram_compiles\n\n/-- Declared clock bounds, checked independently of compiler acceptance. -/\ntheorem tiny_ram_clock_bounds :\n    (\u2200 f \u2208 tiny_ram_designCert.flops, f.clock < tiny_ram_designCert.clocks.size) \u2227\n    (\u2200 m \u2208 tiny_ram_designCert.memories, m.clock < tiny_ram_designCert.clocks.size) := by\n  native_decide\n\n"
+    }
+  ],
+  "legacy_value_oracles": {
+    "script": "pass/lean/tests/check_legacy_oracles.py",
+    "script_sha256": "881b4e4f06faa62193bb2fcc627d4a333da4a97030ee7fb6854d2a760aeda562",
+    "successful_artifacts": 27,
+    "cpp_export_refusals": 11,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      7,
+      8,
+      15,
+      16,
+      31,
+      63,
+      127,
+      128,
+      129,
+      171,
+      255
+    ],
+    "checks": "Legacy fast vs GraphCert vs verified output and next state; every tiny RAM address. Intentional Div/SetMask compiler refusals use interpretDesign with allEdges and prove compilesOk=false.",
+    "results": [
+      {
+        "top": "tiny_sum",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "500d20d4f1cbbc3894ee434078264c64093767e5f6dbea1474694964bb59b08e",
+        "log_sha256": "1a141fdfc53a656b0e95d54e6998583620df93ac0d3875ba7fee0c42762b8c53"
+      },
+      {
+        "top": "tiny_mult",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "c65a38327a60a21ea3d86370b50f5873e926e3c37295f75736383a8ce9c51acd",
+        "log_sha256": "c3d37ae6a23ccff5e26892b32d6c2b87b4c06bcc7dec8e7bf51dcabbf21d28c2"
+      },
+      {
+        "top": "tiny_div",
+        "status": 0,
+        "compiler_refusal": true,
+        "artifact_sha256": "69d0dad3dd947bff021b16b1974a9c0dad83c18e3d3fdf1d32bfcdedef54defb",
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "top": "tiny_and",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "03d7af34efb8e6f01bcd486e4a9993a9f49fde2313d38c1ed918a281bb32c6be",
+        "log_sha256": "2cc2199218b80d476dc3ba62edfe850a4a49f97323d674718fad79753b8a0a5e"
+      },
+      {
+        "top": "tiny_or",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "d59b306ce8daafb75b8c8cef857451024b5a918b46a6b578b660da33f8990541",
+        "log_sha256": "55ef012eb61448128fc7201bb59886ae1fd48665efb8c5aa375a812dceb49ec7"
+      },
+      {
+        "top": "tiny_xor",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "935f98555fabb76a8eb19f50f0b849d152d3b5b7cb7ecfe72ebb4b90931cda43",
+        "log_sha256": "24186e39795f3214ed0ef51fd143f9ca48c341e01d6c9fa38e1b23b0b98312f0"
+      },
+      {
+        "top": "tiny_ror",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "63f1dd81777866e69a4e1c3935d459f5f13d3a7d6e1b270cd2029478c2c27929",
+        "log_sha256": "00e069073560e805c50f668feb4026706f4e5aad4ab373e6fa757025b7a24400"
+      },
+      {
+        "top": "tiny_eq",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "2c410fe85755daa99cb4cfcf848d61ba61ab3a8e446c1e8104b932242ef6205b",
+        "log_sha256": "e888e71f0ed367b56cdf253f21c9193d5b7e2ad28fb022c762bf1409cdb93276"
+      },
+      {
+        "top": "tiny_not",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "a4e2581650cff0d4d50a24d34687250069e5a1e6026729c43b29aa930a7d82dc",
+        "log_sha256": "3ac526a377fb98e0149696768112ee636a572b7619277072685293b2ec802c4b"
+      },
+      {
+        "top": "tiny_lt",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "8d505257e1b9deecb4c80831a096987e4a0a6d7752f2d5e432a9b58d195bb97d",
+        "log_sha256": "1bd5f2199e30a88896402745724607776bf35698dfd48e51562307439ecd3303"
+      },
+      {
+        "top": "tiny_gt",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "03b71ab15be3368fcbc70416eb0acf4aff4e149f75bda8631f7d96dee1deed8f",
+        "log_sha256": "41d2767647ae7387bb75090db5adc81e7459721828398fff824821baa2b0030a"
+      },
+      {
+        "top": "tiny_shl",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "b693458621bb123610fa4a698d8f18c51319ad2b5d63633b5b756f75d23b7bd8",
+        "log_sha256": "7e58698531be9d55ede7edec1eb9a8ad75b1f2032ce3699628ac7adcd20ec118"
+      },
+      {
+        "top": "tiny_sra",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "1cc01e74a773481489e39e8ca188ee8f3dcb3016333b6ac2c45a0591b71df294",
+        "log_sha256": "fd81720a480be2d8a121809ab24b5f552607e019c8534bd7c2d95b1fd9c68b38"
+      },
+      {
+        "top": "tiny_mux",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "811097d63479521bac7bae86ae6df2cde8dfb61c72fa94c07b2b78dc89fb7855",
+        "log_sha256": "0bc0298c4af68e6a4571e858fe0c2c8934280a6046bcdc2d975e6d1a288a795c"
+      },
+      {
+        "top": "tiny_sext",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "801c622d539731df9af43ba27f285bb3fb997efe1c5703cbd31032c33c04d195",
+        "log_sha256": "6e2060788c69fdd1a8e7a34862f65ef1b323a4c552664f454095723f41cc8b4a"
+      },
+      {
+        "top": "tiny_getmask",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "968d5f7da5c7c14668aae388c123757a74c20b8b67befa9bc5e9c43312d0b841",
+        "log_sha256": "7a2fc2e6c3e31797e85b414d94bf33f540b9b6d3fc289bc279871fa854a03b77"
+      },
+      {
+        "top": "tiny_setmask",
+        "status": 0,
+        "compiler_refusal": true,
+        "artifact_sha256": "3ddefb34b08b9a4131b6661ebe9ec396029249be8ede3fe7645a563969c81b33",
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "top": "tiny_unsupported",
+        "status": "refused"
+      },
+      {
+        "top": "tiny_reset",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "c603d77f5b19d3634e570b2229c9c9095976d70661e7d211b81a89ba98334bb3",
+        "log_sha256": "f197d0243d2d1df8702defcc84c4e3b7499e24d3a34b39425bc9eeea6ad1da8d"
+      },
+      {
+        "top": "tiny_async",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "76eb6c8b652d5f0a96f1c55da06e96c25b3418e9ef3f0ced53e901d8d17f9f9e",
+        "log_sha256": "3848f757c66763913f52eecc09d0f7bd1d68eadb7477105d431bfbfd1d38881a"
+      },
+      {
+        "top": "tiny_active_low",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "7f42b6602b9bb0e880c0fd504ed9f28937f6dc2ffdf64c5027895fa93a4b349b",
+        "log_sha256": "98f9098aada87ac9a159a396060ef8155d8cd856c37aa3c26a09da4a54f7a0ce"
+      },
+      {
+        "top": "tiny_nonzero",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "839b23f8362b14f5dda90a567fecbb1e0d9bbbccfc0a773cd800af813cb3fa4f",
+        "log_sha256": "d3e7d5d184f76d33ef5e7f1d251c75509f58ea74da3a486ba5713b24ebd47cdd"
+      },
+      {
+        "top": "tiny_negedge",
+        "status": "refused"
+      },
+      {
+        "top": "tiny_pipeline",
+        "status": "refused"
+      },
+      {
+        "top": "tiny_ram",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "793e002120b242d8cf488ab12bf3203e1f1f7239d106f84abc6cac0f2beb2327",
+        "log_sha256": "07b5cd829178c1046946c951611b7ff4db754eea114bde387cd1e64963c9faa6"
+      },
+      {
+        "top": "tiny_sync_ram",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "dec8fccc4157029a1371a7b57a90313982cd4c8b2956101f1b6130984d1a2bba",
+        "log_sha256": "196a51a71dc5f8044692220a072f77dd51ef8475a1e68f81a8f0f398b4a533ea"
+      },
+      {
+        "top": "tiny_byte_ram",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "18162f410fa21a8f390429f74d4eeda893b625812794d1989eab98213cfb23b1",
+        "log_sha256": "a3c9f6780afa055276578de0e8cd6678fb4ed9ab3316fab0dfa28139b42430f0"
+      },
+      {
+        "top": "tiny_forward_ram",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "8b6b39f188534a0748792fc9dbc0fc0e47e5fbb529f9bb4665155a07e0557393",
+        "log_sha256": "293da0f90e82ed2babbe4da609fed44d82d0895395c5dd9579be152b8708e94d"
+      },
+      {
+        "top": "tiny_rom",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "33a552ee34b3cebf3659fe7a1cc39dd4c5099990063948882f51af5b8ad766d9",
+        "log_sha256": "b2d27d8aaaa29ab3e806f64a2bc597786957d753039561d92070cc65d14a0f78"
+      },
+      {
+        "top": "tiny_sync_rom",
+        "status": 0,
+        "compiler_refusal": false,
+        "artifact_sha256": "b8b5b3235c7a12f0c096f3bf08f525839b9add64f5538642f1d9f569d009f5db",
+        "log_sha256": "bee81f9d44d57e4757e5e7389a568fb5d08581c02412f908cdaef7c4acc5640e"
+      },
+      {
+        "top": "tiny_ram_init",
+        "status": "refused"
+      },
+      {
+        "top": "tiny_whole_array",
+        "status": "refused"
+      },
+      {
+        "top": "tiny_undef",
+        "status": "refused"
+      },
+      {
+        "top": "tiny_unknown_fwd",
+        "status": "refused"
+      },
+      {
+        "top": "tiny_bad_type",
+        "status": "refused"
+      },
+      {
+        "top": "tiny_bad_wensize",
+        "status": "refused"
+      },
+      {
+        "top": "tiny_array_init",
+        "status": "refused"
+      },
+      {
+        "top": "tiny_dynamic_init",
+        "status": "refused"
+      }
+    ]
+  },
+  "remaining": [
+    "Owned graph-clock provenance and normal/synthetic driver propagation.",
+    "Async-reset commit flag propagation and direct-check consistency.",
+    "Scanner memory/clock guards, deterministic domain identity, sidecars and focused edge-aware tests.",
+    "Fresh 125 CORE-ET plus 61 CVA6 configurations and all three DINO variants in all required modes with full chunked-WF/bridge wall time and RSS.",
+    "User-owned matching Lean/Mathlib upgrade acceptance for flat-record limits.",
+    "D3/D4 runtime/transport and FP pin migrations."
+  ],
+  "unchanged_boundaries": [
+    "Native LEC",
+    "Frontend and graph contracts",
+    "Toolchain pins",
+    "Legacy model composition and record layout"
+  ]
+}

@@ -154,7 +154,7 @@ def old_getmask_designCert : DesignCert :=
 /-- Compile-and-run.  The model IS the verified compiler applied to this
 certificate -- there is no separately emitted model to disagree with it. -/
 def old_getmask_step : RuntimeInput → RuntimeState → RuntimeResult :=
-  compileAndRun old_getmask_designCert
+  compileAndRun old_getmask_designCert (allEdges old_getmask_designCert)
 
 /-- The whole per-design obligation: ONE boolean check.
 
@@ -166,8 +166,8 @@ theorem old_getmask_compiles : compilesOk old_getmask_designCert = true := by
 
 /-- The theorem, by direct instantiation.  No per-design proof script. -/
 theorem old_getmask_step_correct : ∀ inp st,
-    old_getmask_step inp st = interpretDesign old_getmask_designCert inp st :=
-  compileAndRun_correct old_getmask_designCert old_getmask_compiles
+    old_getmask_step inp st = interpretDesign old_getmask_designCert (allEdges old_getmask_designCert) inp st :=
+  compileAndRun_correct old_getmask_designCert old_getmask_compiles (allEdges old_getmask_designCert)
 
 /-- For evaluation only.  Deliberately NOT mentioned in any theorem
 statement -- see the comment above. -/
@@ -208,7 +208,7 @@ def new_getmask_designCert : DesignCert :=
 /-- Compile-and-run.  The model IS the verified compiler applied to this
 certificate -- there is no separately emitted model to disagree with it. -/
 def new_getmask_step : RuntimeInput → RuntimeState → RuntimeResult :=
-  compileAndRun new_getmask_designCert
+  compileAndRun new_getmask_designCert (allEdges new_getmask_designCert)
 
 /-- The whole per-design obligation: ONE boolean check.
 
@@ -220,8 +220,8 @@ theorem new_getmask_compiles : compilesOk new_getmask_designCert = true := by
 
 /-- The theorem, by direct instantiation.  No per-design proof script. -/
 theorem new_getmask_step_correct : ∀ inp st,
-    new_getmask_step inp st = interpretDesign new_getmask_designCert inp st :=
-  compileAndRun_correct new_getmask_designCert new_getmask_compiles
+    new_getmask_step inp st = interpretDesign new_getmask_designCert (allEdges new_getmask_designCert) inp st :=
+  compileAndRun_correct new_getmask_designCert new_getmask_compiles (allEdges new_getmask_designCert)
 
 /-- For evaluation only.  Deliberately NOT mentioned in any theorem
 statement -- see the comment above. -/
@@ -242,8 +242,8 @@ theorem mask_source_preserved (a : BitVec 8) (n : Nat) :
   new_getmask_Lgraph.new_getmask_sourceEnv ⟨a⟩ n := by rfl
 
 theorem mask_interpreter_preserved (i : RuntimeInput) (s : RuntimeState) :
-  interpretDesign old_getmask_designCert i s =
-  interpretDesign new_getmask_designCert i s := by
+  interpretDesign old_getmask_designCert (allEdges old_getmask_designCert) i s =
+  interpretDesign new_getmask_designCert (allEdges new_getmask_designCert) i s := by
   have henv : srcEnv old_getmask_designCert i s = srcEnv new_getmask_designCert i s := by
     funext k
     cases k with

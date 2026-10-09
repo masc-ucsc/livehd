@@ -32,7 +32,7 @@ def check(row):
         # These are intentional CompileOp refusals on the baseline branch.
         # Retain its DesignCert and use interpretDesign as the independent oracle.
         vtext = vtext[:vtext.index('/-- Compile-and-run.')]
-        vtext += f'\ndef {top}_step := interpretDesign {top}_designCert\n'
+        vtext += f'\ndef {top}_step := interpretDesign {top}_designCert (allEdges {top}_designCert)\n'
         vtext += f'example : compilesOk {top}_designCert = false := by native_decide\n'
     imports = ['import LeanSemanticPrimitives.Translation.OpBridge',
                'import LeanSemanticPrimitives.Compiler.CompileDesign']
