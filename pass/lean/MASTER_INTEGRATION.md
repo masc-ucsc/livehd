@@ -1104,3 +1104,18 @@ commits and a recorded checkpoint. General Isabelle fast/certificate equivalence
 remains incomplete; no additional Isabelle work is included here. Rechecking
 677 distinct recorded benchmark input files found no missing or changed files
 and no conflicting recorded hashes. CORE-ET/CVA6 proofs remain in progress.
+
+### Universal one-bit reset-wrapper condition audit
+
+[SextCondition.lean](tests/legacy_semantic_audit/SextCondition.lean) proves that
+the emitted Sext expression preserves bit zero, zero/nonzero, and both reset
+polarities for every one-bit source, positive sign position, and positive
+result width. All four theorem audits use only `propext`, `Classical.choice`
+and `Quot.sound`; the file typechecks without warnings or `sorryAx`.
+
+This also corrects a comment in the adapter: only sign position one replicates
+the source bit across the result. A larger sign position zero-extends that
+one-bit value before sign extension, preserving its Boolean condition without
+replicating every bit. The adapter code and certificate/model semantics are
+unchanged. Wider sources, zero amounts and dynamic amounts remain refused by
+the tracing rule's existing negative tests.

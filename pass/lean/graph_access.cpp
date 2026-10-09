@@ -31,13 +31,13 @@ Node_pin resolve_resize_chain(const Node_pin& start) {
     }
     if (op == Ntype_op::Sext) {
       // `Sext(a, b)` keeps the low `b` bits of `a` and sign-extends from bit
-      // b-1. It is transparent to a CONDITION only when the source is ONE BIT
-      // wide: sign-extending a single bit replicates it, so every bit of the
-      // result equals it and a bit-0 test, a nonzero test and the source all
-      // agree. A wider source is NOT transparent -- the truncation to `b` bits
-      // happens first, so `nonzero(Sext(a,b))` asks about the low `b` bits of
-      // `a` rather than about `a`. The amount must also be a known constant and
-      // at least one, or there is no bit to replicate.
+      // b-1. For a ONE-BIT source and positive amount/result width, both bit
+      // zero and the nonzero predicate equal the source condition. Amount 1
+      // replicates the source bit; larger amounts zero-extend it before the
+      // sign extension and still preserve that condition. See the universal
+      // SextCondition.lean audit. Wider sources are not followed: truncation
+      // to `b` bits can discard the only set bit. The amount must be a known
+      // constant of at least one; a zero amount produces zero.
       //
       // This is the wrapper CVA6's controller and CORE-ET's CSR blocks put
       // between `rst_ni` and an asynchronous reset pin; without it the flop is
