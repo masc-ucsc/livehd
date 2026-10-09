@@ -1050,3 +1050,30 @@ After the general-fold emitter change, all three Lean C++ targets pass again,
 and the CLI/exporter binaries build. The clean pristine-master audit checkout
 has been moved outside this repository so ordinary `//...` searches cannot
 rediscover its build files.
+
+
+### Complete fresh DINO proof measurement
+
+[MASTER_DINO_REPLAY_RESULTS.json](tests/MASTER_DINO_REPLAY_RESULTS.json) records
+all twelve successful fresh jobs. Each design was regenerated from RTL, and
+all files were reproduced byte-for-byte by the general-fold emitter. WF uses
+all chunks of size 100 with no fallback. The bridge run also checks whole-graph
+WF and audits all three `comb_refines_fast`, `next_refines_fast` and
+`step_refines_fast` theorems. No missing audit or `sorryAx` was accepted.
+
+| Design | Verified compiler seconds / GiB RSS | Fast typecheck seconds / GiB RSS | Full chunked WF seconds / GiB RSS | Full WF + bridge seconds / GiB RSS |
+| --- | ---: | ---: | ---: | ---: |
+| SingleCycleCPU | 21.4 / 6.43 | 14.0 / 0.75 | 42.6 / 6.92 | 517.2 / 8.00 |
+| PipelinedCPU | 23.6 / 6.48 | 23.1 / 0.80 | 61.5 / 7.07 | 541.8 / 8.79 |
+| PipelinedDualIssueCPU | 38.6 / 6.75 | 133.9 / 1.33 | 180.8 / 8.09 | 1044.4 / 12.12 |
+
+Measurements use `/usr/bin/time -v`. Designs run concurrently, with each design's
+four modes sequential and eight Lean threads per process; the corpus uses a
+separate CPU allocation. The full-WF result establishes structural certificate
+well-formedness. The bridge result separately establishes fast/certificate
+model equivalence. Neither establishes RTL-to-graph correctness or the one
+native-deferred Hotmux exclusivity obligation in each design.
+
+A read-only remote check still reports upstream master at `8bea45dc2` after
+these measurements. CORE-ET/CVA6 block proofs remain in progress; DINO completion
+does not stand in for that separate matrix.
