@@ -1618,3 +1618,127 @@ runners passed syntax checks, and the recorded small runtime/export/boundary
 probes ran. Full benchmark, source-branch proof-library and native regression
 suites were not rerun in this audit. The all-direction migration and full
 restored-flat acceptance remain open.
+
+### R12. The D2 port, planned from the measured delta
+
+Checked before proposing, not after. D2 is 133 commits ahead of its own base and
+335 behind master, but the delta that actually has to move is small and almost
+entirely additive.
+
+#### R12.1 What changes in the shared Lean modules
+
+| module | master | D2 | diff lines |
+| --- | ---: | ---: | ---: |
+| `DesignCert.lean` | 219 | 254 | 35 |
+| `Runtime.lean` | 69 | 101 | 32 |
+| `DesignSemantics.lean` | 76 | 166 | 110 |
+
+**The schema change is purely additive and every new field is defaulted:**
+
+```lean
+structure ClockDesc where            -- provenance only; the semantics reads ORDINALS
+  name : String
+FlopDesc:    clock      : Nat  := 0
+             asyncReset : Bool := false
+MemoryDesc:  clock      : Nat  := 0        -- per MEMORY, not per port
+DesignCert:  clocks     : Array ClockDesc := #[{ name := "clock" }]
+```
+
+No existing certificate literal breaks, and the default is semantically exact
+rather than merely convenient: a certificate that spells no `clocks` IS a
+one-domain design with everything on ordinal 0, which is what every
+pre-provenance certificate already meant.
+
+`Runtime.lean` adds `ClockEdges := Array Bool`, `fires` (an undeclared ordinal
+never fires -- the fail-safe reading), `allEdges`, and two size/fire lemmas.
+
+Two design decisions there constrain the C++ side and must not be "simplified"
+in the port:
+
+* `asyncReset` lives on the COMMIT side as well as the read side. A synchronous
+  reset is sampled at the edge like `din`, so in a step where a flop's clock is
+  quiet it must HOLD, not reset -- a distinction the one-clock model never had
+  to make. The checker ties it to `SourceDesc.flopQAsync` via
+  `asyncFlagMismatch`, which is where the 54-of-147 re-emissions come from.
+* `MemoryDesc.clock` is per MEMORY because the Memory cell has one `posclk` and
+  `pass.single_edge` already refuses a memory whose committing ports disagree
+  (`memory-mixed-edge`). A per-port ordinal could only ever be replicated.
+
+#### R12.2 The one breaking change, and its blast radius
+
+`interpretDesign` grows a positional argument:
+
+```lean
+interpretDesign (D) (i) (s)                     -- master
+interpretDesign (D) (e : ClockEdges) (i) (s)    -- D2
+```
+
+Everything that mentions it changes arity. On master that is:
+
+* `compileAndRun_correct` (`CompileDesign.lean:357`), the once-and-for-all
+  theorem;
+* `emit_design_cert.cpp:137`, which writes
+  `<Top>_step inp st = interpretDesign <Top>_designCert inp st` into every
+  export;
+* **943 emitted artifacts** that assert it.
+
+Those artifacts live under `generated/` and are gitignored, so they are
+REGENERABLE rather than lost -- the cost is a re-emission sweep, not recovery.
+That is a separate cost from the 54 `asyncFlagMismatch` re-emissions, which are
+a CHECKER-level regression on already-correct certificates.
+
+D2 already supplies the clean migration and it should be used rather than
+reinvented: `interpretDesignLegacy` is kept VERBATIM, `srcFlopNext_fires` /
+`srcMemNext_fires` collapse the new rule to the one-clock rule when the clock
+fires, and `interpretDesign_allEdges` proves that under the all-fire stimulus
+the two agree -- as a theorem, not a claim.
+
+**Decision: emit against the clock-aware `interpretDesign` with `allEdges`, not
+against `interpretDesignLegacy`.** Keeping Legacy as the emitter target would
+avoid the re-emission but would leave the verified compiler permanently
+one-clock, which is the whole point of landing D2. `interpretDesign_allEdges` is
+what makes the move meaning-preserving.
+
+#### R12.3 The C++ side is a merge, not a copy
+
+D2's clock provenance lives in its OWN exporter, `IR_Semantics_pass.cpp` (668
+lines), which the restructure plan already marks for deletion: P6 says merge
+`verified-compiler.cpp` and `IR_Semantics_pass.cpp` into `emit_design_cert.cpp`
+with Direction 2's clock-aware schema as canonical, and P8 says delete the
+duplicates afterwards.
+
+Master today emits NO clock information at all (`emit_design_cert.cpp`: zero
+mentions of clock; `design_scan.cpp` captures `f.clock` as a pin but resolves no
+domain). So the port must take from D2:
+
+* domain identity as `latch_contract`'s ROOT NET -- the same notion
+  `pass.single_edge` uses, so a domain here is a domain there;
+* `resolve_icg` handling, since a gated clock is the same domain;
+* the refusal when a clock cone does not resolve to a root net, rather than
+  guessing an ordinal;
+* the implicit-clock join rule (an implicit clock joins the unique other root
+  when there is exactly one, otherwise it is its own domain named `clock`).
+
+These belong in `design_scan.cpp` (domain resolution, which is HHDS-facing) and
+`emit_design_cert.cpp` (emitting `clocks` and the per-element ordinals), per the
+layering in R10. `IR_Semantics_pass.cpp` is then deleted, not kept alongside.
+
+#### R12.4 Order of work
+
+1. Port the three shared Lean modules and D2's eight `Direct*` modules. Build
+   `formal/lean` green before touching C++.
+2. Grow `compileAndRun_correct` to the new arity and add the one-clock corollary
+   the emitter will target.
+3. Teach `design_scan.cpp` domain resolution and `emit_design_cert.cpp` the
+   `clocks` array plus per-flop/per-memory ordinals; delete
+   `IR_Semantics_pass.cpp`.
+4. Re-emit and re-check: the three DINO designs, the 77 READY CORE-ET modules,
+   and the 54 `asyncFlagMismatch` certificates. A re-emission sweep is required
+   before any claim that the landing preserved meaning.
+5. Only then D3/D4, then the Futamura re-pin.
+
+Scope is fixed by R11.4 and is not revisited here: D2's own work only, and NOT
+the Futamura `Projection/` tree, D3's `Reify*` or D4's `CertIO*`.
+
+The rebase is SEMANTIC. Port the type change onto the landed schema; do not
+replay 133 commits across a graph API that moved underneath them.
