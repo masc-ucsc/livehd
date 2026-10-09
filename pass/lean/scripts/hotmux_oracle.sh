@@ -21,6 +21,8 @@ LAKE="${LAKE:-lake}"
 
 mkdir -p "$OUT"
 FIXTURE="$OUT/HotmuxOracle.lean"
+SIGNED_FIXTURE="$OUT/HotmuxSignedOracle.lean"
+fixtures=("$FIXTURE" "$SIGNED_FIXTURE")
 
 if [[ -z "$TEST_BIN" ]]; then
   echo "set TEST_BIN to the built pass/lean design_scan_test binary" >&2
@@ -29,20 +31,24 @@ fi
 
 # A missing gtest filter can exit zero without running a test. Never let a
 # fixture from an earlier binary satisfy this run.
-rm -f -- "$FIXTURE"
+rm -f -- "${fixtures[@]}"
 echo "[hotmux-oracle] generating $FIXTURE"
-LEAN_HOTMUX_FIXTURE="$FIXTURE" "$TEST_BIN" --gtest_filter='DesignScan.HotmuxValueOracle' >"$OUT/generate.log" 2>&1
+LEAN_HOTMUX_FIXTURE="$FIXTURE" LEAN_HOTMUX_SIGNED_FIXTURE="$SIGNED_FIXTURE" \
+  "$TEST_BIN" --gtest_filter='DesignScan.HotmuxValueOracle:DesignScan.HotmuxSignedValueOracle' >"$OUT/generate.log" 2>&1
 
-if [[ ! -s "$FIXTURE" ]]; then
-  echo "[hotmux-oracle] FAIL: no fixture produced; see $OUT/generate.log" >&2
-  exit 1
-fi
-
-cases=$(grep -c '^example' "$FIXTURE" || true)
-if [[ "$cases" -eq 0 ]]; then
-  echo "[hotmux-oracle] FAIL: fixture contains no value cases" >&2
-  exit 1
-fi
+cases=0
+for fixture in "${fixtures[@]}"; do
+  if [[ ! -s "$fixture" ]]; then
+    echo "[hotmux-oracle] FAIL: no fixture produced at $fixture; see $OUT/generate.log" >&2
+    exit 1
+  fi
+  count=$(grep -c '^example' "$fixture" || true)
+  if [[ "$count" -eq 0 ]]; then
+    echo "[hotmux-oracle] FAIL: fixture contains no value cases: $fixture" >&2
+    exit 1
+  fi
+  cases=$((cases + count))
+done
 echo "[hotmux-oracle] $cases value case(s) to decide"
 
 cd "$ROOT/formal/lean"
@@ -61,17 +67,18 @@ LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-8}" "$LAKE" build "$NEEDED" >"$OUT/lake_bu
   exit 1
 }
 echo "[hotmux-oracle] elaborating with $("$LAKE" env lean --version 2>/dev/null | head -1)"
-if ! "$LAKE" env lean "$FIXTURE" >"$OUT/lean.log" 2>&1; then
-  echo "[hotmux-oracle] FAIL: see $OUT/lean.log" >&2
-  tail -30 "$OUT/lean.log" >&2
-  exit 1
-fi
-
-# A decided `native_decide` still rests on ofReduceBool; report it rather than
-# leaving the trust story implicit.
-if grep -q 'sorry' "$OUT/lean.log"; then
-  echo "[hotmux-oracle] FAIL: sorry reached the oracle" >&2
-  exit 1
-fi
+for fixture in "${fixtures[@]}"; do
+  log="$OUT/$(basename "$fixture" .lean).log"
+  if ! /usr/bin/time -v -o "$log.time" "$LAKE" env lean "$fixture" >"$log" 2>&1; then
+    echo "[hotmux-oracle] FAIL: see $log" >&2
+    tail -30 "$log" >&2
+    exit 1
+  fi
+  if grep -q 'sorry' "$log"; then
+    echo "[hotmux-oracle] FAIL: sorry reached the oracle" >&2
+    exit 1
+  fi
+done
+# native_decide still rests on ofReduceBool; report the dependency explicitly.
 echo "[hotmux-oracle] PASS: all $cases case(s) decided"
 echo "[hotmux-oracle] note: native_decide facts depend on ofReduceBool by construction"

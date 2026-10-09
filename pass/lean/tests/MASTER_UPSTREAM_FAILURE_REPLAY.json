@@ -1,0 +1,2364 @@
+{
+  "upstream": "8bea45dc2aa9aab4d8b279db11a8887c52c1108d",
+  "binary_sha256": "c8d27f4be90439f61c75609229d8845256d6f2cc666dd60f01fe2f548ce05096",
+  "entries": [
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_128x64_1r1w_lram",
+      "top": "minion_dcache_128x64_1r1w_lram",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.324,
+        "peak_rss_kib": 212272,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.171,
+        "peak_rss_kib": 52576,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "minion_dcache_128x64_1r1w_lram: memory `memory_356:u_rf_hi.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_dcache_128x64_1r1w_lram': memory `memory_356:u_rf_hi.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_128x72_1r1w_lram",
+      "top": "minion_dcache_128x72_1r1w_lram",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.325,
+        "peak_rss_kib": 213180,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.173,
+        "peak_rss_kib": 52588,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "minion_dcache_128x72_1r1w_lram: memory `memory_356:u_rf_hi.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_dcache_128x72_1r1w_lram': memory `memory_356:u_rf_hi.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_buffer_array",
+      "top": "minion_dcache_buffer_array",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.271,
+        "peak_rss_kib": 215384,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.04,
+        "peak_rss_kib": 54132,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "minion_dcache_buffer_array: memory `memory_1116:u_rf_buffer_array.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_dcache_buffer_array': memory `memory_1116:u_rf_buffer_array.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_cache_op_unit_l2",
+      "top": "minion_dcache_cache_op_unit_l2",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.321,
+        "peak_rss_kib": 216944,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.039,
+        "peak_rss_kib": 54900,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "clock-gate-latch-phase",
+            "category": "unsupported",
+            "message": "minion_dcache_cache_op_unit_l2: state element `flop_1512:cacheop_reprate_count_q` is clocked through a gate whose enable latch `latch_1036:u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_dcache_cache_op_unit_l2': state element `flop_1512:cacheop_reprate_count_q` is clocked through a gate whose enable latch `latch_1036:u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_data_array",
+      "top": "minion_dcache_data_array",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.371,
+        "peak_rss_kib": 216136,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.039,
+        "peak_rss_kib": 53324,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "minion_dcache_data_array: memory `memory_2764:gen_lram_block[0].u_lram.u_rf_hi.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_dcache_data_array': memory `memory_2764:gen_lram_block[0].u_lram.u_rf_hi.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_metadata_array",
+      "top": "minion_dcache_metadata_array",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.321,
+        "peak_rss_kib": 214604,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.074,
+        "peak_rss_kib": 54928,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "minion_dcache_metadata_array: memory `memory_1788:gen_tag_way[0].u_mem_array.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_dcache_metadata_array': memory `memory_1788:gen_tag_way[0].u_mem_array.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_cache_op_unit",
+      "top": "minion_dcache_cache_op_unit",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 1.324,
+        "peak_rss_kib": 216852,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.071,
+        "peak_rss_kib": 56084,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "clock-gate-latch-phase",
+            "category": "unsupported",
+            "message": "minion_dcache_cache_op_unit: state element `flop_3280:abort_operation_q` is clocked through a gate whose enable latch `latch_1616:u_cgate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_dcache_cache_op_unit': state element `flop_3280:abort_operation_q` is clocked through a gate whose enable latch `latch_1616:u_cgate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_reduce",
+      "top": "minion_dcache_reduce",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.471,
+        "peak_rss_kib": 218496,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.04,
+        "peak_rss_kib": 53820,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "clock-gate-latch-phase",
+            "category": "unsupported",
+            "message": "minion_dcache_reduce: state element `flop_3568:addr_msb_err_q` is clocked through a gate whose enable latch `latch_2964:u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_dcache_reduce': state element `flop_3568:addr_msb_err_q` is clocked through a gate whose enable latch `latch_2964:u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_tlb_array",
+      "top": "minion_dcache_tlb_array",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.321,
+        "peak_rss_kib": 216100,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.039,
+        "peak_rss_kib": 54176,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "minion_dcache_tlb_array: memory `memory_2028:u_tlb.u_tlb_cache_rf.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_dcache_tlb_array': memory `memory_2028:u_tlb.u_tlb_cache_rf.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_tlb",
+      "top": "minion_tlb",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.321,
+        "peak_rss_kib": 214660,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.071,
+        "peak_rss_kib": 54124,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "minion_tlb: memory `memory_1660:u_tlb_cache_rf.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_tlb': memory `memory_1660:u_tlb_cache_rf.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_mul_div_top",
+      "top": "intpipe_mul_div_top",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.823,
+        "peak_rss_kib": 217688,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.072,
+        "peak_rss_kib": 56220,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "clock-gate-latch-phase",
+            "category": "unsupported",
+            "message": "intpipe_mul_div_top: state element `latch_3132:u_prim_mul_div.mul_div_ctl.u_mdctl_dw_pair.q_hi_reg` is clocked through a gate whose enable latch `latch_3732:u_prim_mul_div.mul_div_ctl.u_quot_adj_ph_pair.hi_en_1p` is not transparent exactly on the phase opposite the gated edge"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'intpipe_mul_div_top': state element `latch_3132:u_prim_mul_div.mul_div_ctl.u_mdctl_dw_pair.q_hi_reg` is clocked through a gate whose enable latch `latch_3732:u_prim_mul_div.mul_div_ctl.u_quot_adj_ph_pair.hi_en_1p` is not transparent exactly on the phase opposite the gated edge"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_frontend_thread_buffer",
+      "top": "minion_frontend_thread_buffer",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 1.023,
+        "peak_rss_kib": 216200,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.071,
+        "peak_rss_kib": 57052,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "clock-gate-latch-phase",
+            "category": "unsupported",
+            "message": "minion_frontend_thread_buffer: state element `flop_16808:buffer_access_fault[0]` is clocked through a gate whose enable latch `latch_1072:u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_frontend_thread_buffer': state element `flop_16808:buffer_access_fault[0]` is clocked through a gate whose enable latch `latch_1072:u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_replay_queue",
+      "top": "minion_dcache_replay_queue",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.722,
+        "peak_rss_kib": 219212,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.071,
+        "peak_rss_kib": 56060,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "minion_dcache_replay_queue: memory `memory_10848:u_replayq_push.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_dcache_replay_queue': memory `memory_10848:u_replayq_push.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_adder",
+      "top": "txfma_adder",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 1,
+        "timeout": false,
+        "wall_seconds": 0.22,
+        "peak_rss_kib": 213096,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "yosys-failed",
+            "category": "io",
+            "message": "cmd:read_slang --top txfma_adder --ignore-timing --no-proc --ignore-assertions --relax-enum-conversions <projects>/livehd-pass-lean-master/generated/master_port/lean_replay/upstream_compare/CORE-ET/txfma_adder/anchor.sv -f <projects>/livehd-new/generated/core-et/filelists/txfma_adder.f failed"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": false
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_tensor_load",
+      "top": "minion_dcache_tensor_load",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 1,
+        "timeout": false,
+        "wall_seconds": 1.424,
+        "peak_rss_kib": 220724,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "concat-lane-width",
+            "category": "internal",
+            "message": "internal: Concat lane 0 (of 8, MSB-first) driver 'mux_19104' occupies 2 bits but its declared window is 1 -- a lane driver may only be NARROWER than its window (LGraph may narrow, never widen); truncating it would shift every lane above it"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_csr_file",
+      "top": "intpipe_csr_file",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 2.478,
+        "peak_rss_kib": 231452,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'intpipe_csr_file': sext -> get_mask -> sra -> sext -> get_mask -> concat -> or -> sra -> sext -> get_mask -> concat -> or"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'intpipe_csr_file': sext -> get_mask -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> or -> sra ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'intpipe_csr_file': sra -> sext -> get_mask -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sext -> get_mask -> sra -> sext -> get_mask ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_frontend",
+      "top": "minion_frontend",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 4.132,
+        "peak_rss_kib": 246860,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.275,
+        "peak_rss_kib": 65824,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "clock-gate-latch-phase",
+            "category": "unsupported",
+            "message": "minion_frontend: state element `flop_63832:gen_thread_buf[0].u_tb.buffer_access_fault[0]` is clocked through a gate whose enable latch `latch_4388:gen_thread_buf[0].u_tb.u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'minion_frontend': state element `flop_63832:gen_thread_buf[0].u_tb.buffer_access_fault[0]` is clocked through a gate whose enable latch `latch_4388:gen_thread_buf[0].u_tb.u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_top",
+      "top": "minion_dcache_top",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 1,
+        "timeout": false,
+        "wall_seconds": 7.742,
+        "peak_rss_kib": 335356,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "concat-lane-width",
+            "category": "internal",
+            "message": "internal: Concat lane 0 (of 2, MSB-first) driver 'mux_94508' occupies 2 bits but its declared window is 1 -- a lane driver may only be NARROWER than its window (LGraph may narrow, never widen); truncating it would shift every lane above it"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_top",
+      "top": "intpipe_top",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 4.881,
+        "peak_rss_kib": 252016,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'intpipe_top': sext -> get_mask -> sra -> sext -> get_mask -> concat -> or -> sra -> sext -> get_mask -> concat -> or"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'intpipe_top': sext -> get_mask -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> or -> sra ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'intpipe_top': sra -> sext -> get_mask -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sext -> get_mask -> sra -> sext -> get_mask ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "core_top",
+      "top": "core_top",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 61.45,
+        "peak_rss_kib": 1364904,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'core_top': sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> get_mask -> concat -> get_mask -> concat -> get_mask -> concat -> or -> sra ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'core_top': sext -> get_mask -> sra -> sext -> get_mask -> concat -> or -> sra -> sext -> get_mask -> concat -> or"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'core_top': sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sext -> get_mask -> or -> sra -> sext -> get_mask -> concat -> or"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'core_top': sext -> get_mask -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> or -> sra ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'core_top': sra -> sext -> get_mask -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sext -> get_mask -> sra -> sext -> get_mask ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_top_fake",
+      "top": "txfma_top_fake",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 1,
+        "timeout": false,
+        "wall_seconds": 0.22,
+        "peak_rss_kib": 214708,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "yosys-failed",
+            "category": "io",
+            "message": "cmd:read_slang --top txfma_top_fake --ignore-timing --no-proc --ignore-assertions --relax-enum-conversions <projects>/livehd-pass-lean-master/generated/master_port/lean_replay/upstream_compare/CORE-ET/txfma_top_fake/anchor.sv -f <projects>/livehd-new/generated/core-et/filelists/txfma_top_fake.f failed"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": false
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_ctrl",
+      "top": "vpu_ctrl",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 3.279,
+        "peak_rss_kib": 230740,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.12,
+        "peak_rss_kib": 58760,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "clock-gate-latch-phase",
+            "category": "unsupported",
+            "message": "vpu_ctrl: state element `flop_22232:trans.ex_state_q[24:20]` is clocked through a gate whose enable latch `latch_8732:trans.u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'vpu_ctrl': state element `flop_22232:trans.ex_state_q[24:20]` is clocked through a gate whose enable latch `latch_8732:trans.u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_lane",
+      "top": "vpu_lane",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 5.685,
+        "peak_rss_kib": 310360,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': mux -> sext -> mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': sext -> mux -> mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': mux -> mux -> mux -> sext -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': get_mask -> sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': get_mask -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': mux -> mux -> sext -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': get_mask -> sext -> mux -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': mux -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': mux -> mux -> sext -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': sext -> mux -> mux -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': sext -> mux -> sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': mux -> mux -> sext -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': sext -> mux -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_lane': mux -> mux -> sext -> sext -> sext -> mux"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_lane_tima",
+      "top": "vpu_lane_tima",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.271,
+        "peak_rss_kib": 214668,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.071,
+        "peak_rss_kib": 54200,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "clock-gate-latch-phase",
+            "category": "unsupported",
+            "message": "vpu_lane_tima: state element `flop_1060:u_tima.f2_in1_q` is clocked through a gate whose enable latch `latch_916:u_cgate_tima.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'vpu_lane_tima': state element `flop_1060:u_tima.f2_in1_q` is clocked through a gate whose enable latch `latch_916:u_cgate_tima.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_rf",
+      "top": "vpu_rf",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.271,
+        "peak_rss_kib": 213044,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.04,
+        "peak_rss_kib": 52544,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "vpu_rf: memory `memory_348:gen_latch.u_rf.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'vpu_rf': memory `memory_348:gen_latch.u_rf.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensora_rf",
+      "top": "vpu_tensora_rf",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.271,
+        "peak_rss_kib": 214652,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.072,
+        "peak_rss_kib": 53388,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "vpu_tensora_rf: memory `memory_152:u_rf.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'vpu_tensora_rf': memory `memory_152:u_rf.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensorb_rf",
+      "top": "vpu_tensorb_rf",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.221,
+        "peak_rss_kib": 213848,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.04,
+        "peak_rss_kib": 52584,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "vpu_tensorb_rf: memory `memory_144:u_rf.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'vpu_tensorb_rf': memory `memory_144:u_rf.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensorc_rf",
+      "top": "vpu_tensorc_rf",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.22,
+        "peak_rss_kib": 213024,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.039,
+        "peak_rss_kib": 54924,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "vpu_tensorc_rf: memory `memory_144:u_rf.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'vpu_tensorc_rf': memory `memory_144:u_rf.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensortmp_rf",
+      "top": "vpu_tensortmp_rf",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.231,
+        "peak_rss_kib": 214648,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.074,
+        "peak_rss_kib": 53432,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "memory-unsupported",
+            "category": "unsupported",
+            "message": "vpu_tensortmp_rf: memory `memory_144:u_rf.rf_q` would commit on every sub-step under a phase divider"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'vpu_tensortmp_rf': memory `memory_144:u_rf.rf_q` would commit on every sub-step under a phase divider"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_top",
+      "top": "minion_top",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 149.278,
+        "peak_rss_kib": 2533112,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': mux -> sext -> mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': sext -> mux -> mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': mux -> mux -> mux -> sext -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': get_mask -> sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': get_mask -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': mux -> mux -> sext -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': get_mask -> sext -> mux -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': mux -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': mux -> mux -> sext -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': sext -> mux -> mux -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': get_mask -> concat -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> get_mask -> concat -> or -> sra -> sext -> get_mask -> concat -> or ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': get_mask -> concat -> get_mask -> concat -> get_mask -> concat -> get_mask -> concat -> get_mask -> concat -> get_mask -> concat -> get_mask -> concat -> sra -> sext ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> or -> sra -> sext -> get_mask -> concat -> or"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': sext -> get_mask -> sra -> sext -> get_mask -> concat -> or -> sra -> sext -> get_mask -> concat -> or"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sext -> get_mask -> or -> sra -> sext -> get_mask -> concat -> or"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': sext -> get_mask -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> or -> sra ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': sra -> sext -> get_mask -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sext ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': sext -> mux -> sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': mux -> mux -> sext -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': sext -> mux -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'minion_top': mux -> mux -> sext -> sext -> sext -> mux"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_trans",
+      "top": "vpu_trans",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 1.073,
+        "peak_rss_kib": 216916,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.07,
+        "peak_rss_kib": 53792,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "clock-gate-latch-phase",
+            "category": "unsupported",
+            "message": "vpu_trans: state element `flop_1648:ex_state_q[24:20]` is clocked through a gate whose enable latch `latch_988:u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'vpu_trans': state element `flop_1648:ex_state_q[24:20]` is clocked through a gate whose enable latch `latch_988:u_clk_gate.en_latch` is not transparent exactly on the phase opposite the gated edge"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfmaexp_top",
+      "top": "txfmaexp_top",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 0.827,
+        "peak_rss_kib": 225356,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmaexp_top': mux -> mux -> sext"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f3",
+      "top": "txfma_f3",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 0.573,
+        "peak_rss_kib": 241476,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f3': get_mask -> sext -> mux -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f3': mux -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f3': mux -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f3': get_mask -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f3': mux -> mux -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f3': mux -> mux -> sext -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f3': mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f3': get_mask -> sext -> mux -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f3': mux -> mux -> mux"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfmafrac_top",
+      "top": "txfmafrac_top",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 5.821,
+        "peak_rss_kib": 292488,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': get_mask -> sext -> mux -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': mux -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': mux -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': get_mask -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': mux -> mux -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': mux -> mux -> sext -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': get_mask -> sext -> mux -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': mux -> mux -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': mux -> sext -> mux -> sext -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': mux -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': mux -> sext -> mux -> get_mask -> sext -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfmafrac_top': mux -> get_mask -> sext -> mux"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_top",
+      "top": "txfma_top",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 8.348,
+        "peak_rss_kib": 303752,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': mux -> sext -> mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': sext -> mux -> mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': mux -> mux -> mux -> sext -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': get_mask -> sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': get_mask -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': mux -> mux -> sext -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': get_mask -> sext -> mux -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': mux -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': mux -> mux -> sext -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': sext -> mux -> mux -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': sext -> mux -> sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': mux -> mux -> sext -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': sext -> mux -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_top': mux -> mux -> sext -> sext -> sext -> mux"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_txfma_trans_top",
+      "top": "vpu_txfma_trans_top",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 6.539,
+        "peak_rss_kib": 307864,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': mux -> sext -> mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': sext -> mux -> mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': mux -> mux -> mux -> sext -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': get_mask -> sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': get_mask -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': mux -> mux -> sext -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': get_mask -> sext -> mux -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': mux -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': mux -> mux -> sext -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': sext -> mux -> mux -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': sext -> mux -> sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': mux -> mux -> sext -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': sext -> mux -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_txfma_trans_top': mux -> mux -> sext -> sext -> sext -> mux"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_top",
+      "top": "vpu_top",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 58.438,
+        "peak_rss_kib": 1166124,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': mux -> sext -> mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': sext -> mux -> mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': mux -> mux -> mux -> sext -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': get_mask -> sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': get_mask -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': mux -> mux -> sext -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': get_mask -> sext -> mux -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': mux -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': mux -> mux -> sext -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': sext -> mux -> mux -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': sext -> mux -> sext -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': mux -> mux -> sext -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': sext -> mux -> mux -> mux -> sext -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'vpu_top': mux -> mux -> sext -> sext -> sext -> mux"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_e5",
+      "top": "txfma_e5",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 0.472,
+        "peak_rss_kib": 238456,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_e5': mux -> mux -> sext"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f5",
+      "top": "txfma_f5",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 0.322,
+        "peak_rss_kib": 239180,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f5': mux -> mux"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f2",
+      "top": "txfma_f2",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 0.673,
+        "peak_rss_kib": 252348,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f2': mux -> sext -> mux -> sext"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f6",
+      "top": "txfma_f6",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 0.322,
+        "peak_rss_kib": 238388,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f6': mux -> mux -> sext -> get_mask -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f6': mux -> sext -> mux -> sext -> get_mask -> sext -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f6': mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f6': mux -> sext -> mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f6': sext -> mux -> mux -> sext -> get_mask"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f6': get_mask -> mux -> mux -> sext"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f0",
+      "top": "txfma_f0",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 0.321,
+        "peak_rss_kib": 239904,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f0': mux -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f0': mux -> mux -> sext -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f0': mux -> mux -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f0': mux -> sext -> mux -> sext -> mux"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f0': mux -> sext -> mux -> sext"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'txfma_f0': mux -> mux -> sext"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "prim_write_commit_en",
+      "top": "prim_write_commit_en",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.221,
+        "peak_rss_kib": 212356,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.071,
+        "peak_rss_kib": 54176,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "clock-gate-latch-phase",
+            "category": "unsupported",
+            "message": "prim_write_commit_en: state element `latch_20:q_o` is clocked through a gate whose enable latch `latch_24:en_1p` is not transparent exactly on the phase opposite the gated edge"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'prim_write_commit_en': state element `latch_20:q_o` is clocked through a gate whose enable latch `latch_24:en_1p` is not transparent exactly on the phase opposite the gated edge"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "prim_phase_pair_lo_hi",
+      "top": "prim_phase_pair_lo_hi",
+      "stage": "NORMALIZATION_FAILED",
+      "compile": {
+        "exit": 0,
+        "timeout": false,
+        "wall_seconds": 0.221,
+        "peak_rss_kib": 213112,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      },
+      "single_edge": {
+        "exit": 7,
+        "timeout": false,
+        "wall_seconds": 0.071,
+        "peak_rss_kib": 54156,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "clock-gate-latch-phase",
+            "category": "unsupported",
+            "message": "prim_phase_pair_lo_hi: state element `latch_48:q_hi_reg` is clocked through a gate whose enable latch `latch_32:hi_en_1p` is not transparent exactly on the phase opposite the gated edge"
+          },
+          {
+            "code": "normalize-refused",
+            "category": "unsupported",
+            "message": "pass.single_edge refused 'prim_phase_pair_lo_hi': state element `latch_48:q_hi_reg` is clocked through a gate whose enable latch `latch_32:hi_en_1p` is not transparent exactly on the phase opposite the gated edge"
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6",
+      "top": "cva6_gate",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 123.558,
+        "peak_rss_kib": 3334320,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'cva6_gate': sext -> get_mask -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> sra -> sext ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'cva6_gate': concat -> get_mask -> concat -> lt -> get_mask -> concat -> lt -> eq -> and -> get_mask -> ror -> eq -> get_mask -> concat -> sext -> mux ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_hpdcache_subsystem",
+      "top": "cva6_hpdcache_subsystem_gate",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 24.389,
+        "peak_rss_kib": 828600,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'cva6_hpdcache_subsystem_gate': concat -> get_mask -> concat -> lt -> get_mask -> concat -> lt -> eq -> and -> get_mask -> ror -> eq -> get_mask -> concat -> sext -> mux ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_hpdcache_wrapper",
+      "top": "cva6_hpdcache_wrapper_gate",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 27.586,
+        "peak_rss_kib": 806144,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'cva6_hpdcache_wrapper_gate': concat -> get_mask -> concat -> lt -> get_mask -> concat -> lt -> eq -> and -> get_mask -> ror -> eq -> get_mask -> concat -> sext -> mux ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_mmu",
+      "top": "cva6_mmu_gate",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 2.676,
+        "peak_rss_kib": 307496,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'cva6_mmu_gate': sext -> get_mask -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_tlb",
+      "top": "cva6_tlb_gate",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 0.822,
+        "peak_rss_kib": 263004,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'cva6_tlb_gate': sext -> get_mask -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "ex_stage",
+      "top": "ex_stage_gate",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 11.698,
+        "peak_rss_kib": 448592,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'ex_stage_gate': sext -> get_mask -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "load_store_unit",
+      "top": "load_store_unit_gate",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 5.283,
+        "peak_rss_kib": 368072,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'load_store_unit_gate': sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sext -> get_mask -> sra -> sext ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'load_store_unit_gate': sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> or -> sra -> sext -> get_mask ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'load_store_unit_gate': sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> or -> sra -> sext -> get_mask -> shl -> or"
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'load_store_unit_gate': sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sext -> get_mask -> sra -> sext -> get_mask -> shl -> sra -> sext ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'load_store_unit_gate': sext -> get_mask -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> or -> sra ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'load_store_unit_gate': sext -> get_mask -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "pmp_data_if",
+      "top": "pmp_data_if_gate",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 1.323,
+        "peak_rss_kib": 303960,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'pmp_data_if_gate': sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> or -> sra -> sext -> get_mask ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'pmp_data_if_gate': sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sext -> get_mask -> sra -> sext ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'pmp_data_if_gate': sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl ..."
+          },
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'pmp_data_if_gate': sra -> sext -> get_mask -> shl -> sext -> get_mask -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_tlb_gate",
+      "top": "cva6_tlb_gate",
+      "stage": "COMPILE_FAILED",
+      "compile": {
+        "exit": 6,
+        "timeout": false,
+        "wall_seconds": 0.42,
+        "peak_rss_kib": 253720,
+        "timeout_seconds": 1800,
+        "address_space_limit_gib": null,
+        "diagnostics": [
+          {
+            "code": "comb-loop",
+            "category": "time",
+            "message": "combinational loop in 'cva6_tlb_gate': sext -> get_mask -> sra -> sext -> get_mask -> shl -> sra -> sext -> get_mask -> shl -> sra -> sext -> mux -> mux -> mux -> get_mask ..."
+          }
+        ],
+        "matches_port_exit": true,
+        "matches_port_error_categories": true,
+        "matches_port_messages": true
+      }
+    }
+  ],
+  "ported_binary_sha256": "dd599509b067c8050b5ed041476cddae0700c54187464710f4a345477cae8668",
+  "scope": "Fresh RTL compilation and, where applicable, fresh single_edge normalization on pristine upstream and the frozen port binary. Neither side invokes Lean for these failure reproductions.",
+  "privacy": "Workspace and runtime prefixes in native diagnostic messages are replaced by logical identifiers; original logs remain local."
+}

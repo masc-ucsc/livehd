@@ -983,3 +983,36 @@ fails upstream Concat lane-width validation before Lean. Their native source
 implementations match pinned master; a separate pristine-master binary comparison
 is in progress. No native LEC, frontend, normalization or warning-policy change
 is made to bypass these failures. The migration is not ready to publish yet.
+
+
+### Completed proof prerequisites and upstream reproduction
+
+The fresh serialized library build succeeds (8,571 targets), including
+`CompileDesign`, `LegacyCertWF` and `OpBridge`. All 21 concrete Hotmux value
+checks pass: the original five control/priority vectors plus 16 checks covering
+variable signed and unsigned arms, signed defaults, implicit zero, minimum
+negative values and overlapping controls. These `native_decide` checks retain
+the explicit `ofReduceBool` trust dependency. Six local harness checks reject
+stale, absent, incomplete, failed or sorry-bearing fixtures before success.
+
+[MASTER_UPSTREAM_FAILURE_REPLAY.json](tests/MASTER_UPSTREAM_FAILURE_REPLAY.json)
+records the completed pristine `8bea45dc2` comparison. All 29 compilation failures
+and 24 normalization refusals reproduce with matching exit codes and error
+categories, using the same reader, RTL filelists, flags and normalization
+procedure. Both sides freshly compile the RTL; neither invokes Lean in these
+failure reproductions. The separate pristine build succeeded without source
+changes. These failures are therefore independent of the Lean refactor.
+
+[MASTER_BRIDGE_ARITY_AUDIT.json](tests/MASTER_BRIDGE_ARITY_AUDIT.json) records
+all 27 bridge refusals and their historical/current node shapes. All 27 old
+artifact hashes match their committed historical inventories. Draft general
+mixed-width And/Xor/Sum bridge theorems have now typechecked against the fresh
+library, using only `propext`, `Classical.choice` and `Quot.sound`; emitter
+integration and complete block replay remain outstanding. This extends proof
+coverage without changing either model's evaluation rules.
+
+The three DINO designs and accepted CORE-ET/CVA6 exports are now undergoing fresh
+timed proofs. The initial broad native regression command accidentally discovered
+the nested temporary baseline checkout; that run was stopped and retained as a
+harness failure, then restarted over all 67 tracked Bazel packages while honoring
+the existing ignore rules and test filters. Its result is still pending.

@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <sstream>
 #include <tuple>
@@ -327,6 +328,95 @@ TEST(DesignScan, HotmuxValueOracle) {
     }
     out << "\nexample : bv_uint ((hotmux_oracle_step #[" << args.str() << "] ⟨#[], #[]⟩).outputs[0]!) = " << expect
         << " := by native_decide\n";
+  }
+  ASSERT_TRUE(out.good());
+}
+
+// Variable controls and arms exercise signed extension independently of
+// priority selection. The second output has no explicit default.
+TEST(DesignScan, HotmuxSignedValueOracle) {
+  using namespace livehd::graph_util;
+  auto&                                               lib = livehd::Hhds_graph_library::instance("lgdb_scan_hotmux_signed_oracle");
+  auto                                                io  = lib.create_io("hotmux_signed_oracle");
+  const std::vector<std::pair<std::string, uint32_t>> inputs{
+      {      "c0", 2},
+      {      "c1", 2},
+      {      "c2", 2},
+      {       "a", 4},
+      {       "b", 4},
+      {       "v", 5},
+      {"fallback", 3}
+  };
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    io->add_input(inputs[i].first, i + 1);
+    io->set_bits(inputs[i].first, inputs[i].second);
+  }
+  io->add_output("explicit_default", 1);
+  io->set_bits("explicit_default", 8);
+  io->add_output("implicit_zero", 2);
+  io->set_bits("implicit_zero", 8);
+  auto g = io->create_graph();
+  for (const auto& [name, width] : inputs) {
+    auto pin = g->get_input_pin(name);
+    set_bits(pin, width);
+    if (name == "a" || name == "v" || name == "fallback") {
+      set_sign(pin);
+    } else {
+      set_unsign(pin);
+    }
+  }
+  for (const bool fallback : {true, false}) {
+    auto node = create_typed_node(*g, Ntype_op::Hotmux);
+    set_bits(node.create_driver_pin(0), 8);
+    const std::vector<std::string> values{"a", "b", "v"};
+    for (size_t i = 0; i < values.size(); ++i) {
+      g->get_input_pin("c" + std::to_string(i)).connect_sink(node.create_sink_pin(2 * i));
+      g->get_input_pin(values[i]).connect_sink(node.create_sink_pin(2 * i + 1));
+    }
+    if (fallback) {
+      g->get_input_pin("fallback").connect_sink(node.create_sink_pin(6));
+    }
+    node.create_driver_pin(0).connect_sink(g->get_output_pin(fallback ? "explicit_default" : "implicit_zero"));
+  }
+  const auto design = scan_design(*g, {});
+  const auto cert   = build_certificate(design, {});
+  ASSERT_EQ(design.inputs.size(), inputs.size());
+  ASSERT_EQ(design.outputs.size(), 2u);
+  const char* path = std::getenv("LEAN_HOTMUX_SIGNED_FIXTURE");
+  if (!path) {
+    GTEST_SKIP() << "set LEAN_HOTMUX_SIGNED_FIXTURE to emit the Lean value checks";
+  }
+  std::ofstream out(path);
+  emit_design_cert(design, cert, out);
+  struct Case {
+    std::vector<int> values;  // c0,c1,c2,a,b,v,fallback; bit patterns, not signed integers
+    int              explicit_value;
+    int              implicit_value;
+  };
+  const std::vector<Case> cases{
+      {{0, 0, 0, 12, 12, 16, 6}, 254,   0}, // signed trailing default -2, or implicit zero
+      {{0, 2, 0, 12, 12, 16, 6},  12,  12}, // unsigned four-bit arm stays +12
+      {{2, 0, 0, 12, 12, 16, 6}, 252, 252}, // signed four-bit arm -4 becomes eight-bit 252
+      { {1, 1, 0, 8, 15, 16, 6}, 248, 248}, // first active wins with signed minimum -8
+      {{0, 0, 3, 12, 12, 16, 6}, 240, 240}, // signed five-bit minimum -16
+      {{0, 0, 2, 12, 12, 15, 6},  15,  15}, // positive signed arm
+      { {1, 0, 0, 7, 12, 16, 6},   7,   7}, // positive first arm
+      {{0, 0, 0, 12, 12, 16, 3},   3,   0}, // positive signed default
+  };
+  for (const auto& c : cases) {
+    std::ostringstream args;
+    for (size_t i = 0; i < design.inputs.size(); ++i) {
+      const auto& input = design.inputs[i];
+      const auto  found = std::find_if(inputs.begin(), inputs.end(), [&](const auto& p) { return p.first == input.name; });
+      ASSERT_NE(found, inputs.end());
+      args << (i ? ", " : "") << "mk_bv " << input.width << " " << c.values[std::distance(inputs.begin(), found)];
+    }
+    for (size_t i = 0; i < design.outputs.size(); ++i) {
+      const auto& name = design.outputs[i].name;
+      ASSERT_TRUE(name == "explicit_default" || name == "implicit_zero");
+      out << "\nexample : bv_uint ((hotmux_signed_oracle_step #[" << args.str() << "] ⟨#[], #[]⟩).outputs[" << i
+          << "]!) = " << (name == "explicit_default" ? c.explicit_value : c.implicit_value) << " := by native_decide\n";
+    }
   }
   ASSERT_TRUE(out.good());
 }

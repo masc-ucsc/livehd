@@ -31,6 +31,8 @@ set -eu
 printf 'import LeanSemanticPrimitives.Compiler.CompileDesign\\n' > "$LEAN_HOTMUX_FIXTURE"
 [[ "$MODE" == empty ]] && exit 0
 printf 'example : True := by trivial\\n' >> "$LEAN_HOTMUX_FIXTURE"
+[[ "$MODE" == unsigned_only ]] && exit 0
+cp "$LEAN_HOTMUX_FIXTURE" "$LEAN_HOTMUX_SIGNED_FIXTURE"
 ''')
         test_bin.chmod(0o755)
         lake = project / 'lake'
@@ -51,8 +53,9 @@ fi
         lake.chmod(0o755)
         env = os.environ | dict(TEST_BIN=str(test_bin), LAKE=str(lake), OUT=str(out),
                                 EXPECTED_LEAN_DIR=str(lean), BUILD_MARKER=str(out / 'built'))
-        for mode in ('missing', 'empty', 'sorry', 'fail', 'valid'):
-            (out / 'HotmuxOracle.lean').write_text('example : True := by trivial\n')
+        for mode in ('missing', 'empty', 'unsigned_only', 'sorry', 'fail', 'valid'):
+            for name in ('HotmuxOracle.lean', 'HotmuxSignedOracle.lean'):
+                (out / name).write_text('example : True := by trivial\n')
             proc = subprocess.run(['bash', str(script)], env=env | {'MODE': mode},
                                   text=True, stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, timeout=20)
@@ -62,7 +65,7 @@ fi
             if mode == 'missing':
                 assert 'no fixture produced' in proc.stdout, proc.stdout
         assert (out / 'built').read_text() == 'built', 'Lake freshness check was skipped'
-    print('5 Hotmux oracle harness checks passed')
+    print('6 Hotmux oracle harness checks passed')
 
 
 if __name__ == '__main__':
