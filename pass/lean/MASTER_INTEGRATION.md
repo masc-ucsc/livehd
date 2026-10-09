@@ -1286,3 +1286,40 @@ physical records addresses that inherited compatibility gap; it does not
 change node semantics. Named fields and model values are preserved, while
 positional constructors and `Repr` nesting change. The threshold of 64 is our
 conservative tested layout choice, not a claimed universal Lean field limit.
+
+### Upstream record-crash report and version comparison
+
+The subsequent upstream search found
+[Lean issue #14148](https://github.com/leanprover/lean4/issues/14148), filed on
+June 22, 2026. It describes constructors exceeding mimalloc's direct-small
+allocation limit. Our standalone crash's `mi_malloc_small` backtrace and the
+unconditional allocator call in the installed 4.31.0 header strongly match
+that report. A [maintainer comment](https://github.com/leanprover/lean4/issues/14148#issuecomment-4772436754)
+identifies [PR #7786](https://github.com/leanprover/lean4/pull/7786) as addressing
+it; that PR merged on July 15, 2026. The issue itself remained open when checked.
+This is a source/backtrace match, not a patched-runtime bisect.
+
+Fresh execution of the identical self-contained fixtures gives:
+
+| Installed Linux toolchain | 64-field Nat / BitVec controls | 128-field Nat / BitVec reproduction |
+|---|---|---|
+| 4.26.0-nightly-2025-11-18 | Both pass | Both SIGSEGV |
+| 4.31.0 (project pin) | Both pass | Both SIGSEGV |
+| 4.32.1 | Both pass | Both SIGSEGV |
+| 4.33.1 | Both pass | Both SIGSEGV |
+| 4.34.1 | Both pass | Both pass |
+
+The crash therefore predates 4.31. These are newly executed comparisons on
+installed toolchains, not claims about earlier LiveHD proof logs. The 4.34.1
+header selects a general allocator when the object exceeds the small-allocation
+limit. The [record-layout evidence](tests/MASTER_RECORD_LAYOUT_RESULTS.json)
+contains exact toolchain commits, fixture hashes and return codes. No project
+pin or dependency changed, and a whole-project upgrade has not been validated.
+
+The separate exactly-256-field metadata problem has its own upstream report,
+[#15072](https://github.com/leanprover/lean4/issues/15072), closed by
+[PR #15075](https://github.com/leanprover/lean4/pull/15075) on September 8, 2026.
+It reinforces the earlier qualification that BHT's original 256-field
+**declaration** typechecking is not evidence of safe execution. It is distinct
+from the 128-field allocation crash; bounded nesting addresses both layouts
+without changing the model's field values.

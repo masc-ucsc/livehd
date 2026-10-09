@@ -2433,6 +2433,199 @@
       }
     ],
     "backtrace_observation": "The standalone 128-field Nat reproduction faults in mi_malloc_small inside libleanshared.so during lean_eval_const. This localizes the failure to the Lean execution stack; the exact upstream defect and older-version behavior have not been established.",
+    "version_comparison": {
+      "scope": "Self-contained unchanged 64/128-field Nat and BitVec fixtures, run with explicitly selected installed executables and no project imports. Project toolchain and libraries unchanged.",
+      "versions": [
+        {
+          "toolchain": "Lean (version 4.26.0-nightly-2025-11-18, x86_64-unknown-linux-gnu, commit 5a4226f2bdcc6299df76285b1d30f238546c09fe, Release)",
+          "results": [
+            {
+              "fixture": "flat_64_Nat.lean",
+              "artifact_sha256": "311abeb0bbcc3b9085741c41793127b39587f2e54ef77f21108317b46ee52f12",
+              "return_code": 0,
+              "signal": null,
+              "wall_seconds": 7.648,
+              "output": "0\n"
+            },
+            {
+              "fixture": "flat_128_Nat.lean",
+              "artifact_sha256": "5b93bdc5748b4b53111a90bb7083a91576159dce8e81a30e4b3a0cc60b38c537",
+              "return_code": -11,
+              "signal": 11,
+              "wall_seconds": 12.444,
+              "output": ""
+            },
+            {
+              "fixture": "flat_64_BitVec8.lean",
+              "artifact_sha256": "6b2b9ef950b8cd6bf04940ea2e562cba82e0a1204cfec6226d41925439e26ce1",
+              "return_code": 0,
+              "signal": null,
+              "wall_seconds": 3.679,
+              "output": "0x00#8\n"
+            },
+            {
+              "fixture": "flat_128_BitVec8.lean",
+              "artifact_sha256": "f4121acf28aa4b1300bab1fdd57ce3a0d76828edcd21fe91295eb4e02c5ddba6",
+              "return_code": -11,
+              "signal": 11,
+              "wall_seconds": 12.183,
+              "output": ""
+            }
+          ]
+        },
+        {
+          "toolchain": "Lean (version 4.32.1, x86_64-unknown-linux-gnu, commit f054605aea4b840552cca2e725580bffd1e1b704, Release)",
+          "results": [
+            {
+              "fixture": "flat_64_Nat.lean",
+              "artifact_sha256": "311abeb0bbcc3b9085741c41793127b39587f2e54ef77f21108317b46ee52f12",
+              "return_code": 0,
+              "signal": null,
+              "wall_seconds": 8.668,
+              "output": "0\n"
+            },
+            {
+              "fixture": "flat_128_Nat.lean",
+              "artifact_sha256": "5b93bdc5748b4b53111a90bb7083a91576159dce8e81a30e4b3a0cc60b38c537",
+              "return_code": -11,
+              "signal": 11,
+              "wall_seconds": 1.733,
+              "output": ""
+            },
+            {
+              "fixture": "flat_64_BitVec8.lean",
+              "artifact_sha256": "6b2b9ef950b8cd6bf04940ea2e562cba82e0a1204cfec6226d41925439e26ce1",
+              "return_code": 0,
+              "signal": null,
+              "wall_seconds": 1.576,
+              "output": "0x00#8\n"
+            },
+            {
+              "fixture": "flat_128_BitVec8.lean",
+              "artifact_sha256": "f4121acf28aa4b1300bab1fdd57ce3a0d76828edcd21fe91295eb4e02c5ddba6",
+              "return_code": -11,
+              "signal": 11,
+              "wall_seconds": 1.744,
+              "output": ""
+            }
+          ]
+        },
+        {
+          "toolchain": "Lean (version 4.33.1, x86_64-unknown-linux-gnu, commit 819816b2e0a3bf405af45ae5c7af2491d8f5bee6, Release)",
+          "results": [
+            {
+              "fixture": "flat_64_Nat.lean",
+              "artifact_sha256": "311abeb0bbcc3b9085741c41793127b39587f2e54ef77f21108317b46ee52f12",
+              "return_code": 0,
+              "signal": null,
+              "wall_seconds": 9.009,
+              "output": "0\n"
+            },
+            {
+              "fixture": "flat_128_Nat.lean",
+              "artifact_sha256": "5b93bdc5748b4b53111a90bb7083a91576159dce8e81a30e4b3a0cc60b38c537",
+              "return_code": -11,
+              "signal": 11,
+              "wall_seconds": 1.877,
+              "output": ""
+            },
+            {
+              "fixture": "flat_64_BitVec8.lean",
+              "artifact_sha256": "6b2b9ef950b8cd6bf04940ea2e562cba82e0a1204cfec6226d41925439e26ce1",
+              "return_code": 0,
+              "signal": null,
+              "wall_seconds": 1.642,
+              "output": "0x00#8\n"
+            },
+            {
+              "fixture": "flat_128_BitVec8.lean",
+              "artifact_sha256": "f4121acf28aa4b1300bab1fdd57ce3a0d76828edcd21fe91295eb4e02c5ddba6",
+              "return_code": -11,
+              "signal": 11,
+              "wall_seconds": 1.708,
+              "output": ""
+            }
+          ]
+        },
+        {
+          "toolchain": "Lean (version 4.34.1, x86_64-unknown-linux-gnu, commit 5045d0056413266e57c625dcd7c365b10e377c52, Release)",
+          "results": [
+            {
+              "fixture": "flat_64_Nat.lean",
+              "artifact_sha256": "311abeb0bbcc3b9085741c41793127b39587f2e54ef77f21108317b46ee52f12",
+              "return_code": 0,
+              "signal": null,
+              "wall_seconds": 8.795,
+              "output": "0\n"
+            },
+            {
+              "fixture": "flat_128_Nat.lean",
+              "artifact_sha256": "5b93bdc5748b4b53111a90bb7083a91576159dce8e81a30e4b3a0cc60b38c537",
+              "return_code": 0,
+              "signal": null,
+              "wall_seconds": 1.611,
+              "output": "0\n"
+            },
+            {
+              "fixture": "flat_64_BitVec8.lean",
+              "artifact_sha256": "6b2b9ef950b8cd6bf04940ea2e562cba82e0a1204cfec6226d41925439e26ce1",
+              "return_code": 0,
+              "signal": null,
+              "wall_seconds": 1.602,
+              "output": "0x00#8\n"
+            },
+            {
+              "fixture": "flat_128_BitVec8.lean",
+              "artifact_sha256": "f4121acf28aa4b1300bab1fdd57ce3a0d76828edcd21fe91295eb4e02c5ddba6",
+              "return_code": 0,
+              "signal": null,
+              "wall_seconds": 1.966,
+              "output": "0x00#8\n"
+            }
+          ]
+        }
+      ]
+    },
+    "upstream_research": {
+      "checked_at_utc": "2026-10-09T03:50:30.839642+00:00",
+      "matching_runtime_issue": {
+        "url": "https://github.com/leanprover/lean4/issues/14148",
+        "number": 14148,
+        "state": "open",
+        "created_at": "2026-06-22T18:29:10Z",
+        "title": "`lean_alloc_ctor` crashes under mimalloc for constructors larger than `MI_SMALL_SIZE_MAX`",
+        "maintainer_comment_url": "https://github.com/leanprover/lean4/issues/14148#issuecomment-4772436754",
+        "explanation": "The report describes valid Lean constructor allocations exceeding mimalloc's direct-small allocation size. Our 128-field standalone crash has the matching mi_malloc_small stack location, and the pinned header unconditionally calls that function. This is a strong source/backtrace match; no patched-runtime bisect was performed."
+      },
+      "allocator_fix": {
+        "url": "https://github.com/leanprover/lean4/pull/7786",
+        "merged_at": "2026-07-15T19:03:40Z",
+        "merge_commit_sha": "171f24d1c7ca8a24ce8a7b305330c33ead7a08df",
+        "maintainer_linked_from_issue": true
+      },
+      "separate_256_field_boundary_issue": {
+        "url": "https://github.com/leanprover/lean4/issues/15072",
+        "state": "closed",
+        "created_at": "2026-09-08T16:47:21Z",
+        "distinction": "Exactly 256 object fields overflow the runtime field-count metadata. This is distinct from the 128-field allocator crash; an accepted declaration alone does not establish safe execution.",
+        "fix_url": "https://github.com/leanprover/lean4/pull/15075",
+        "fix_merged_at": "2026-09-08T21:15:09Z",
+        "fix_commit": "9e3f6c6c8671b3270684c4ce46b40449929f93f2"
+      },
+      "installed_header_comparison": {
+        "unconditional_mi_malloc_small": [
+          "4.26.0-nightly-2025-11-18",
+          "4.31.0",
+          "4.32.1",
+          "4.33.1"
+        ],
+        "conditional_mi_malloc_small_or_mi_malloc": [
+          "4.34.1"
+        ]
+      },
+      "project_toolchain_changed": false,
+      "full_project_validation_on_newer_toolchain": false
+    },
     "minimal_source_template": "structure T where\n  -- n fields: f0 through f(n-1), each Nat or BitVec 8\nderiving Inhabited\n#eval (default : T).f0\n"
   }
 }
