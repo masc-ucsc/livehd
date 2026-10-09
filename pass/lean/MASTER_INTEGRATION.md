@@ -1404,3 +1404,121 @@ supervisor remains live at this checkpoint; stale RUNNING records do not count
 as passes. The restoration report retains exact artifact hashes to distinguish
 unchanged proofs from the withdrawn nested layout. This export comparison is
 not a claim that the full restored flat-model proof matrix has passed.
+
+### R11. Corrected CORE-ET census, scaling evidence, and the D2 scope boundary
+
+#### R11.1 The earlier census was measured without its prerequisite
+
+The 122-module census recorded earlier in this report ran while
+`generated/core-et/patched_src/` did not exist. `coreet_filelist.sh` substituted
+the slang-clean derived sources only when that map was present and SILENTLY used
+the unpatched tree otherwise, so the sweep measured a corpus slang rejects for
+defects `coreet_patch_srcs.py` already fixes.
+
+Re-running the identical 122 modules with the map generated:
+
+| stage | without patches | WITH patches |
+| --- | ---: | ---: |
+| `static-gates` READY | 38 | **77** |
+| `compile` FAIL | 49 | **20** |
+| `single_edge` FAIL | 19 | 22 |
+| `lean-emit` FAIL | 15 | **1** |
+| `static-gates` FAIL | 1 | 2 |
+
+The earlier conclusion -- that the frontend was the dominant blocker and that
+46 `yosys-failed` modules were step-5 investigation work -- was an artifact of
+the missing prerequisite, not a property of the corpus. Any figure quoted from
+the unpatched run is void.
+
+`scripts/coreet_filelist.sh` now FAILS when the map is absent, with the command
+to generate it, so the mistake cannot repeat silently.
+
+#### R11.2 The two improvements have different causes, and they are disjoint
+
+The runs are not a clean A/B: the binary changed between them. Separating the
+causes matters, because crediting both to the patcher would misdirect the next
+piece of work.
+
+| improvement | cause |
+| --- | --- |
+| `compile` 49 -> 20 | the SOURCE patches (`coreet_patch_srcs.py`) |
+| `lean-emit` 15 -> 1 | the BRIDGE commits, principally `31c1f00d9` |
+
+The evidence for the split is that five of the recovered modules --
+`intpipe_alu`, `txfma_csa`, `vpu_mask`, `debug_breakpoint`, `txfma_wallace1` --
+contain ZERO patched files in their filelists, so no source patch could have
+touched them, yet all five moved from `lean-emit FAIL` to READY. The commits in
+the gap are `4c29167dd` (abstract large Or operands), `31c1f00d9` (mixed-width
+n-ary legacy bridges) and `e19a33736`. The 15 failures named `Op_And`, `Op_Xor`,
+`Op_Sum 3`, `Op_Sum 16` and `Op_Mult`, which is exactly the mixed-width n-ary
+dispatch gap `31c1f00d9` closes.
+
+One module still refuses: `tima_top`, `legacy fast bridge does not support
+LGraphOp.Op_Mult at node 688`. That is the remaining bridge gap, and it is a
+single named case rather than a statistic.
+
+Unchanged across both runs: **ZERO operator refusals**. No `Hotmux`, `Rem`,
+`LUT`, `Rxor` or `Popcount`, and the all-operators refusal message never fired.
+R9.2's disposition stands on the patched numbers as well as the unpatched ones.
+
+#### R11.3 The verified compiler has no flop ceiling; the legacy model does
+
+Two Lean limits, both measured on this machine rather than inferred:
+
+| limit | threshold | toolchains |
+| --- | --- | --- |
+| interpreter SIGSEGV evaluating a flat record | >= 128 fields | 4.31.0, 4.32.2, 4.33.1 broken; **4.34.0 and 4.34.1 fine** |
+| `constructor ... has too many fields` | >= 257 fields | **every** toolchain, including 4.34.1 |
+
+The bisection is exact: 127 fields evaluate, 129 segfault; 256 fields compile,
+257 do not. Elaboration is not at fault -- the same 128-field structure
+`#check`s cleanly and only `#eval` crashes -- so the first limit is in the
+interpreter. A toolchain upgrade therefore moves the legacy ceiling from 128 to
+256 and no further.
+
+A legacy `<Top>_state` record carries ONE CONSTRUCTOR FIELD PER FLOP
+(`emit_legacy_schema.cpp:120`), so the legacy path's ceiling is 256 flops.
+
+The verified compiler has no such limit, and this is now demonstrated on a real
+block rather than argued. `txfmactl_top`, **289 flops**, exported in
+`verified_compiler` mode:
+
+```
+flopQ sources:       289      (past the 256 constructor ceiling)
+flat state records:    0      (no `structure *_state` is emitted at all)
+typecheck:          exit 0    57.7 s, 7.2 GB peak RSS, sorryAx 0
+txfmactl_top_step_correct depends on: [propext, Classical.choice, Quot.sound, ...]
+```
+
+State lives in `RuntimeState` ARRAYS indexed by ordinal; array length is not
+constructor arity, so there is no field-count limit to reach. This was the one
+module above 256 flops in the corpus that the frontend can elaborate -- and it
+only elaborates WITH the patches, which is how the two findings connect.
+
+Note on attribution: the fix for the SIGSEGV is confirmed present in 4.34.0 by
+measurement. leanprover/lean4 PR #7786 is titled "perf: upgrade to mimalloc 3",
+a performance change rather than a declared bug fix; it is a plausible cause but
+is NOT established as the fix by anything recorded here.
+
+#### R11.4 D2 lands D2's work only
+
+When `direction-2-ir-semantics-clean` lands (R1 step 2), its scope is the
+CLOCK SCHEMA and its direct interpreter, and nothing else. Specifically:
+
+IN scope -- `ClockDesc`, `DesignCert.clocks`, `FlopDesc.clock`,
+`ClockEdges`/`fires`/`allEdges`, `srcFlopNext`'s edge rule, the `Legacy` copies
+and `interpretDesign_allEdges` that make the schema change meaning-preserving,
+D2's own `Direct*` modules, and the re-emission of the 54 of 147 certificates
+its checker regresses with `asyncFlagMismatch`.
+
+OUT of scope -- the Futamura branch's `Projection/` tree and its partial
+evaluator, D3's `Reify*`, and D4's `CertIO*`. D2's `DirectSim` and the Futamura
+projected simulator are DIFFERENT simulators over the same certificate; landing
+them together would make it impossible to tell which one a later result is
+about, and the projection branch additionally pins `DesignCert` at a fixed
+revision that only moves once D2's schema has landed.
+
+The rebase must be SEMANTIC, not a replay: D2 is 133 commits ahead of its own
+base and 335 behind current master, and it carries its own copies of
+`Compiler/*.lean`. Port the type change onto the landed schema; do not replay
+133 commits across a graph API that moved underneath them.
