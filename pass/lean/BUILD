@@ -123,6 +123,13 @@ cc_binary(
 )
 
 cc_binary(
+    name = "lean_graph_census",
+    srcs = ["tests/graph_census.cpp"],
+    copts = COPTS,
+    deps = [":lean_graph_scan", "//graph"],
+)
+
+cc_binary(
     name = "lean_legacy_fixtures",
     srcs = ["tests/legacy_fixtures.cpp"],
     copts = COPTS,

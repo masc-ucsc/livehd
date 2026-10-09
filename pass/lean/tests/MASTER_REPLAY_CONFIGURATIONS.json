@@ -1,0 +1,2990 @@
+{
+  "schema_version": 1,
+  "scope": "Fresh RTL replay of 125 CORE-ET and 61 CVA6 historical configurations; DINO is tracked separately.",
+  "input_policy": "One-time user-authorized read-only external benchmark inputs; no sibling discovery in repository tests.",
+  "reader": "yosys-slang",
+  "compile_options": [
+    "yosys.setundef=zero",
+    "--ignore-assertions"
+  ],
+  "core_et_additional_option": "--relax-enum-conversions",
+  "normalization": {
+    "CORE-ET": "pass single_edge",
+    "CVA6": "none (preserved historical procedure)"
+  },
+  "export_options": {
+    "strict": true,
+    "max_width": 1048576,
+    "cert_wf": "skip"
+  },
+  "mode_expansion": "verified_compiler when listed; legacy_fast for every compiled configuration; legacy_bridge for historical_legacy_scope=bridge.",
+  "entries": [
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_csr_file_fl_barrier",
+      "top": "intpipe_csr_file_fl_barrier",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_csr_file_fl_barrier.f",
+        "sha256": "56f2a0cb1e10a6dab21022e0564c0a2ae9b9e54066b47cb8ca38b92fef17773a"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_csr_pmu_read_interface",
+      "top": "intpipe_csr_pmu_read_interface",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_csr_pmu_read_interface.f",
+        "sha256": "2893b7c758b4b6eb08ce57c8512c3912656cf2c7f0440e4beaadc6c6f679b253"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "debug_breakpoint",
+      "top": "debug_breakpoint",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/debug_breakpoint.f",
+        "sha256": "c95ef2170626ab0a8099721ed1e9b92f8899b1aec4a7a52b710f2fdf94f354d9"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_csr_file_conv",
+      "top": "intpipe_csr_file_conv",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_csr_file_conv.f",
+        "sha256": "584adade9f6c9e45854b1ab1b87f3212da75ab8cead0797d96fbee79916cd0a2"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_fp_scoreboard",
+      "top": "intpipe_fp_scoreboard",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_fp_scoreboard.f",
+        "sha256": "0b8ad66fcf3810db6e351c1dcf0b6ce03bd5df1899aac32b0b0d976ecb9d4912"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_csr_replay",
+      "top": "intpipe_csr_replay",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_csr_replay.f",
+        "sha256": "9fefe48a4116b7d4251af45edfb4e77cbf37b36ee13e38309eb9d0edef67079a"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_imm",
+      "top": "intpipe_imm",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_imm.f",
+        "sha256": "61b8ca56faeef1145ff0ff7d6c8bbb565339702023af98d5b25cae31faeda0a7"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_inst_bits_stage",
+      "top": "intpipe_inst_bits_stage",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_inst_bits_stage.f",
+        "sha256": "103fccf6b616f73688c2ebb2447e254476167380601a922c6469aa7d37882832"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_128x64_1r1w_lram",
+      "top": "minion_dcache_128x64_1r1w_lram",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_128x64_1r1w_lram.f",
+        "sha256": "a485dda224fde79b5305fa64c8e131f01c1636e1fbf29198fc27c6c584bb65e1"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_int_scoreboard",
+      "top": "intpipe_int_scoreboard",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_int_scoreboard.f",
+        "sha256": "3f6a61201b0b3f9f71fa7593cc57c34333b90d5ac07f4aadb56af71955e29f54"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_mask_scoreboard",
+      "top": "intpipe_mask_scoreboard",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_mask_scoreboard.f",
+        "sha256": "4468b52e6b33eecf1ef4f00d314dc229da435b19ede912a1c4fb57abf9f30c50"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_128x72_1r1w_lram",
+      "top": "minion_dcache_128x72_1r1w_lram",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_128x72_1r1w_lram.f",
+        "sha256": "069f46b5879f2cbc11bfeaee41411194d076ad33e4cac1cf8824fd5ac33b56ae"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_buffer_array",
+      "top": "minion_dcache_buffer_array",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_buffer_array.f",
+        "sha256": "4a856ad26509a344f5905a6a75664f592bcac7892b6739d8528f3fb7db8c4a44"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_atomic_alu_unit",
+      "top": "minion_dcache_atomic_alu_unit",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_atomic_alu_unit.f",
+        "sha256": "4dab9e449b19b7c9bdf7639e1495cc602c283d6d29d1ed73ce5ff8867e16ac78"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_csr_msgs",
+      "top": "intpipe_csr_msgs",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_csr_msgs.f",
+        "sha256": "a69a0c9e123a4599d5e7dd6a09bacbdbc0990e9fa77827aec9281ed7703df21e"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_cache_op_unit_l2",
+      "top": "minion_dcache_cache_op_unit_l2",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_cache_op_unit_l2.f",
+        "sha256": "4f62349dc3fe51e8fa6c47d835b2d413a9104705c8e6495e10bd775e773aa55e"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_alu",
+      "top": "intpipe_alu",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_alu.f",
+        "sha256": "adf2512b142dc66c3de7a558b89c2ef077ca9f4806bd59958f10fae05513b9a2"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_data_array",
+      "top": "minion_dcache_data_array",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_data_array.f",
+        "sha256": "e25faabd43c1256cff2cba627a0399d5d013a296bd7e734ffeebce2d60cfdd0e"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_lru_array",
+      "top": "minion_dcache_lru_array",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_lru_array.f",
+        "sha256": "2444fd07bd4ae1d1f970e414d2eefda875e181e6a0286102fbcf5923e04f8919"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_metadata_array",
+      "top": "minion_dcache_metadata_array",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_metadata_array.f",
+        "sha256": "72693494b7a8314511f903eebc268ecd04ee88706a3a908e3c404ec1cf1051e8"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_cache_op_unit",
+      "top": "minion_dcache_cache_op_unit",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_cache_op_unit.f",
+        "sha256": "758e1ba85e2e41ff3ef2528ae0a47a2d45363d892515b009cf12ca1d563d3bfa"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_pma_unit",
+      "top": "minion_dcache_pma_unit",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_pma_unit.f",
+        "sha256": "b11089b875236f1b09d1a65ebd3d20dac00ab49a20463795377b1d5e883ffa88"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_decode",
+      "top": "intpipe_decode",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_decode.f",
+        "sha256": "14332a902870044e7873544a01d41c7630b4508439ca4f4e7bc704500327fd83"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_scratchpad_ctrl",
+      "top": "minion_dcache_scratchpad_ctrl",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_scratchpad_ctrl.f",
+        "sha256": "2d766bd962a1aa9a850447f52e55b1e5c16839aaae031a60454780d326b64564"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_miss_handler",
+      "top": "minion_dcache_miss_handler",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_miss_handler.f",
+        "sha256": "9c1f52dc6c341138b2cd870048c3dff42a4f5cf99fd6ee71404a214bf6f922d4"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_texsend",
+      "top": "minion_dcache_texsend",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_texsend.f",
+        "sha256": "f026d7f5a6de064977d63ba9320b412b3535d6dd5e9f025523d624dfc20946e2"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_store_merge_unit",
+      "top": "minion_dcache_store_merge_unit",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_store_merge_unit.f",
+        "sha256": "a89b9a5461e76c2cf42dbc6d627956bf57627c43ed0e8a291b745642eedbc81b"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_reduce",
+      "top": "minion_dcache_reduce",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_reduce.f",
+        "sha256": "5d58916ec326f53083c760378db4f6edaf9cf8b2fac6e0dfcba131dd51579121"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_tlb_array",
+      "top": "minion_dcache_tlb_array",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_tlb_array.f",
+        "sha256": "afc8301d8aeddaeaff8f70d525c6392051900735acd814a37779c05c05e8a6f8"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_writeback_unit",
+      "top": "minion_dcache_writeback_unit",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_writeback_unit.f",
+        "sha256": "235f47d1fe659d295e3fd83b7623405083887993903f902039ba07ebc6555d2b"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_miss_handler_unit",
+      "top": "minion_dcache_miss_handler_unit",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_miss_handler_unit.f",
+        "sha256": "9f5b1af12a48b4012034a63f9f050dc0a9bc65fa8370e922e150bc238941e50f"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_frontend_rvc_expander",
+      "top": "minion_frontend_rvc_expander",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_frontend_rvc_expander.f",
+        "sha256": "bb0162f00e320125d6bc3fa4a61b51cfefefce4f110e2ebf2d4e56f3ae34d0f2"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_debug_apb_slv",
+      "top": "minion_debug_apb_slv",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_debug_apb_slv.f",
+        "sha256": "48215b5f1773ab9ba4b5f0632b75e69425b8686c6f2fa3d2a222f48ab68bfcf6"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_frontend_thread_sched",
+      "top": "minion_frontend_thread_sched",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_frontend_thread_sched.f",
+        "sha256": "80ec42d2daa9bdba5c799e32a19864fd6bcf082ef9e1ae6735fe9dda5f81cac4"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_tlb",
+      "top": "minion_tlb",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_tlb.f",
+        "sha256": "07d699a07166157814d4822cdbada8fae3b461689e4b0a744744cf48d15db1dc"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_mul_div_top",
+      "top": "intpipe_mul_div_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_mul_div_top.f",
+        "sha256": "39259a12cd19007685890aed4ce3bb92052c7c97fd1fca7816ee349a5d323c64"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_frontend_thread_buffer",
+      "top": "minion_frontend_thread_buffer",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_frontend_thread_buffer.f",
+        "sha256": "782fc76e46a04e1e0737504a310a11824b50135f3bbcb13994629d4312dda46b"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_replay_queue",
+      "top": "minion_dcache_replay_queue",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_replay_queue.f",
+        "sha256": "b9def868ed95fed230c92a17ce6dec07c1816094c023f312dc4f54f7db987b56"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "tima_adder",
+      "top": "tima_adder",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/tima_adder.f",
+        "sha256": "268889756fe3c26bd485a2b2d08768e1ab4abbe823bee6c8269b8cfab73c9927"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "null_vpu",
+      "top": "null_vpu",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/null_vpu.f",
+        "sha256": "a46d41f1eafbd965af9f4406264fb61ab8ecbce452f081fc5f963606a9430ff2"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "trans_exp_rom_case_c0",
+      "top": "trans_exp_rom_case_c0",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/trans_exp_rom_case_c0.f",
+        "sha256": "b01f9d8ff382333c15a4b74b882e43b0f2a0848a3f6e8158a934dee73ae5dd7c"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "tima_top",
+      "top": "tima_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/tima_top.f",
+        "sha256": "1364711d0247c73ec8019d4f8581e9556a5b0fa0338c29140d37d7a794dc0791"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "trans_exp_rom_case_c1c2",
+      "top": "trans_exp_rom_case_c1c2",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/trans_exp_rom_case_c1c2.f",
+        "sha256": "3e7287d456dcee6aceeb02fa2d05615bd212f4855b07b069af5f2ce6a89bc7a1"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "trans_log_rom_case_c1c2",
+      "top": "trans_log_rom_case_c1c2",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/trans_log_rom_case_c1c2.f",
+        "sha256": "82852cf6b1b93308a377044bcd107879c989ea8d7fa40ae462ee4c09a581eb45"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "trans_log_rom_case_c0",
+      "top": "trans_log_rom_case_c0",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/trans_log_rom_case_c0.f",
+        "sha256": "a417cef83c33a071835372e27655b8f5f9fdfae4dcfe019878ec1fb9215622b9"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "trans_rcp_rom_case_c0",
+      "top": "trans_rcp_rom_case_c0",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/trans_rcp_rom_case_c0.f",
+        "sha256": "147ff3e67ddc5081a41af1b1083bae3d65b40ac386bdf7d07d114609589afd3b"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "trans_rcp_rom_case_c1c2",
+      "top": "trans_rcp_rom_case_c1c2",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/trans_rcp_rom_case_c1c2.f",
+        "sha256": "dfeaf5c37670f30d913a5b1a0030990c1bc0804a82737455651b977217b7b9b3"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "trans_rsqrt_rom_case_c0",
+      "top": "trans_rsqrt_rom_case_c0",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/trans_rsqrt_rom_case_c0.f",
+        "sha256": "8c0224b054dfc6a2ba50ed8b42d8965a8cf934121ffe99716294cdcc1d32bbb1"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "trans_rsqrt_rom_case_c1c2",
+      "top": "trans_rsqrt_rom_case_c1c2",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/trans_rsqrt_rom_case_c1c2.f",
+        "sha256": "092b31736524175826f2a5bbdc38670668206ed0e12fcae5d78f8e51223d9574"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "trans_sin_rom_case_c0",
+      "top": "trans_sin_rom_case_c0",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/trans_sin_rom_case_c0.f",
+        "sha256": "c69cbee8605048479399b7a13de5baf4715318d47ab3ee56b582d226c301a00e"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "trans_sin_rom_case_c1c2",
+      "top": "trans_sin_rom_case_c1c2",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/trans_sin_rom_case_c1c2.f",
+        "sha256": "17d29c29d31d16aeec82eeeaa277171068e7994bb0b5a45df702b0a4da4b2952"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_4_2_compressor",
+      "top": "txfma_4_2_compressor",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_4_2_compressor.f",
+        "sha256": "6d5c3685c9b72d7cb609bb841d8907a1ffa8699db64833c10d41800f0e8621f7"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_adder",
+      "top": "txfma_adder",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(filelist)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_adder.f",
+        "sha256": "c4f4d07c583ce93a2c6b354be448aac397c19c6bd138fee53b89b3b63efa4c8c"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_align_shf",
+      "top": "txfma_align_shf",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_align_shf.f",
+        "sha256": "11650ea0f8f047639e4c58c9edfcdfaa1bb605e8d4ede5bd632b5002352ced56"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "trans_top",
+      "top": "trans_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/trans_top.f",
+        "sha256": "946589b0eddaddbc0989388a3d67e5ab7a082596ad51878e9fb343bccf94a1cb"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_booth_ppg_32r4_msb",
+      "top": "txfma_booth_ppg_32r4_msb",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_booth_ppg_32r4_msb.f",
+        "sha256": "4d578e68eda46b7cc47a2f14e59dee4e207b2f57292760bf5f806ef561bd8ffe"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_booth_ppg_32r4",
+      "top": "txfma_booth_ppg_32r4",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_booth_ppg_32r4.f",
+        "sha256": "2ef102c736cfcc7959b8e0105cef4478ee4044e8677827cdb88a71d7d1c2955c"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_booth_ppg_32r4_norm",
+      "top": "txfma_booth_ppg_32r4_norm",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_booth_ppg_32r4_norm.f",
+        "sha256": "0d7f4f9a969da456cf437c46f4fbcd573a25af6910635e280c8305bf318d1b4d"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_tensor_load",
+      "top": "minion_dcache_tensor_load",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_tensor_load.f",
+        "sha256": "c8befadce85be562b1996030899426166a1d10b7ab30289b0a650d4ec376a427"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_c1",
+      "top": "txfma_c1",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_c1.f",
+        "sha256": "e04fbaeb18091c38d1406a1bdee934d7266bc1526250279c541cac985974a9c3"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_c0",
+      "top": "txfma_c0",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_c0.f",
+        "sha256": "73d31bc02579dc24e7df2c15b30d6e19404c5c3e8417a041da122ad83935be3f"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_4_2_compressor_array",
+      "top": "txfma_4_2_compressor_array",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_4_2_compressor_array.f",
+        "sha256": "4622d67f8ddcbc0e6cde73bef596aee86d5aca49a8c9eb2cf07f5bcc92d80e2d"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_c2",
+      "top": "txfma_c2",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_c2.f",
+        "sha256": "a7f4c250b2b80d11965da0899156b918a9475537c8cc5119519e0fcde06f975a"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_c3",
+      "top": "txfma_c3",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_c3.f",
+        "sha256": "dbd40c0b57b3e1acf5db290bf4541aa1e01a4db5f9fe111624fa5fd7a694f37f"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_csa",
+      "top": "txfma_csa",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_csa.f",
+        "sha256": "2a57bb5e60ce84fbf164696d5dc08eb7934fe137745bb7a93b8d10a131ab2e52"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_c4",
+      "top": "txfma_c4",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_c4.f",
+        "sha256": "c35edb7c84be1564f11eb20d1a6b0a47e9ced45ec7c3b15e8cf378b7d26fc766"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_c5",
+      "top": "txfma_c5",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_c5.f",
+        "sha256": "3349a652662a1ee2577670400abbd5e3649b749c0cbfbe2cff982fe6d5eca3c1"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_c6",
+      "top": "txfma_c6",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_c6.f",
+        "sha256": "903f9df3bbb4ada2b4742449077b26a7e74b98705837a777b5f03151aa6df049"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_csr_file",
+      "top": "intpipe_csr_file",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_csr_file.f",
+        "sha256": "05fe08a64d066d6d26cdb5cb27adce4e532f19f90837cf5efe13431e70268562"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfmactl_top",
+      "top": "txfmactl_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfmactl_top.f",
+        "sha256": "87f573ffbc9a3409a3dd97243bf4c3ac2b6a78292a3420723975b61045fc20d9"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_e4",
+      "top": "txfma_e4",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_e4.f",
+        "sha256": "e1d192bbf0030bb8ce00838a1d021339a34aa3e55b5ae994a4a2f54d3e981728"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_e1",
+      "top": "txfma_e1",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_e1.f",
+        "sha256": "625554cb623e42691f2045dbc4749ec9c8d45dcd502cbc4f5c32ef1c3400117f"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_e6",
+      "top": "txfma_e6",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_e6.f",
+        "sha256": "86e8d151fa9c65ff952f2dc3d71e592eb6634d2ef007921ad87acfd73bb983b2"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_exp_special_detect",
+      "top": "txfma_exp_special_detect",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_exp_special_detect.f",
+        "sha256": "936571f34a939a7055ea2b46981c1a79757546e0c4b4d4c015a0a115d9cf7ef2"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_e2",
+      "top": "txfma_e2",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_e2.f",
+        "sha256": "e2ae9476287f12caac8ca01d4639d979cfc0a41322a78f1d9e816e3e796dc6e7"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_ediff_opdorder_logic",
+      "top": "txfma_ediff_opdorder_logic",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_ediff_opdorder_logic.f",
+        "sha256": "ad91f5a97b77b9b2f50966c801ef7888a10c0fa34ee279dd2057f6267d6fad71"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_frontend",
+      "top": "minion_frontend",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_frontend.f",
+        "sha256": "f906a180c63843cf2402ef10f186063093739112f2f1e302f96a6dfc8758aed2"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_rf",
+      "top": "intpipe_rf",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_rf.f",
+        "sha256": "461a325f2f8e0d85da8076d0d959d992caadc489463a2043e6c27b34938552db"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f4",
+      "top": "txfma_f4",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_f4.f",
+        "sha256": "cc0f040a79a24609b9e09a64a08598bd1240b96d1a042c5ecbec53310f6b925d"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f1",
+      "top": "txfma_f1",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_f1.f",
+        "sha256": "301f4d551cd220f5a7023fa1f27561a64a4fa48e7ae54477ccbc19311749b551"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_top",
+      "top": "minion_dcache_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_dcache_top.f",
+        "sha256": "48fbc733d2c6b98669290ee7880bedad1ecd2914f91c13a0dcddc71caf1e6923"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_top",
+      "top": "intpipe_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/intpipe_top.f",
+        "sha256": "91436fbc6751ff3513e415e27859558d14f25d282e0d7eaeb32b58aa2f1f1f61"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_frac_zero_detect",
+      "top": "txfma_frac_zero_detect",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_frac_zero_detect.f",
+        "sha256": "801e5f1f727b06a17e213c8093226539b817702f28119d61fe6f2713b1ba0e7b"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_lxd",
+      "top": "txfma_lxd",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_lxd.f",
+        "sha256": "2ea8846b53518a66675f678fdee0d3727c57e74219e584b58a64733139920d18"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_norm_shf",
+      "top": "txfma_norm_shf",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_norm_shf.f",
+        "sha256": "e57937d7e80e0d3d4b5c4d42254c9b78426dc6f2ba3bd793cc7834c0754d82cf"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_rnd_adder",
+      "top": "txfma_rnd_adder",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_rnd_adder.f",
+        "sha256": "d018dd8d39fc3fc23d278c7c41720be37155123bbd7bd3e6f243501aebaf1dc5"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "core_top",
+      "top": "core_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/core_top.f",
+        "sha256": "90cf05e06a2a282ae579ce660bb3b8a48de9283885edc22b1a10d5b2d933a69f"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_top_fake",
+      "top": "txfma_top_fake",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(filelist)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_top_fake.f",
+        "sha256": "66aeac0049e2340861932e6e7bd841abb1e450686fe237fa6bc3d413ca48199a"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_trz",
+      "top": "txfma_trz",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_trz.f",
+        "sha256": "441bb5a778c9aedce2b59e74208f89ffc0d6772d3172e5c9b63c9c3267e3f3ad"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_trz2",
+      "top": "txfma_trz2",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_trz2.f",
+        "sha256": "0a8f83bdfe199499fb772c6b860ea694d11e1e60236be64ff7cf29b0496fb3b7"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_wallace1",
+      "top": "txfma_wallace1",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_wallace1.f",
+        "sha256": "d2f073b3060e70e8c7d2517dbdf3cbefb938ad7bfd9d93a3e9b27858eb5d8b33"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_wallace2",
+      "top": "txfma_wallace2",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_wallace2.f",
+        "sha256": "0f1e007697c68b226f6a4b95b072762c1ebba37c20549e18282df7db9b991e5c"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_bypass",
+      "top": "vpu_bypass",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_bypass.f",
+        "sha256": "b6d8add31a02b05193760b6e3b47e29d95ecc76986cfce7eff0b62a92f4ede7a"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_ctrl",
+      "top": "vpu_ctrl",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_ctrl.f",
+        "sha256": "b0915ea5d5da2cc10054e3411a5a089b6cb17651320a7527265c788d93818c3e"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_decoder",
+      "top": "vpu_decoder",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_decoder.f",
+        "sha256": "39fcfadc66793f7f43055f54d2d87556648578833bf7bf3dc81eddf8622d5050"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_lane",
+      "top": "vpu_lane",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_lane.f",
+        "sha256": "05a081ed04440e0292be3ab3436c320055232c56ed051b4be4888ed483418a04"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_lane_tima",
+      "top": "vpu_lane_tima",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_lane_tima.f",
+        "sha256": "545cd05546587eb82eec19050e1bf5de8e83e126039a3cf94b2245c14f179470"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_mask",
+      "top": "vpu_mask",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_mask.f",
+        "sha256": "03e315e4ae0861f6f521b3b39c30a1032871fcc5ca05e75f1fc911c58a0d1534"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_ml",
+      "top": "vpu_ml",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_ml.f",
+        "sha256": "2840c577fd4ebfb7ebca80478a157b626eef3cc70af61541652e4fd183068f64"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_rf",
+      "top": "vpu_rf",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_rf.f",
+        "sha256": "146ef8dc2c7d0af356cd1b4d5bc7c22ff959c428270513e042ab48080b437706"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_sh_sw",
+      "top": "vpu_sh_sw",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_sh_sw.f",
+        "sha256": "808976e2f56ce79a889d5b2638ba312771eef8620ef6dac830f1afef9d514dc7"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensora_rf",
+      "top": "vpu_tensora_rf",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_tensora_rf.f",
+        "sha256": "2934637cfe851d3e6250d82e4f97aa4f33a8450943653ef1c8d094eeca1a8521"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensorb_rf",
+      "top": "vpu_tensorb_rf",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_tensorb_rf.f",
+        "sha256": "8930b645fb495c28a091d92bc40cecb9982f91cc6ebe5e79e21272f6fa466de6"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensorc_rf",
+      "top": "vpu_tensorc_rf",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_tensorc_rf.f",
+        "sha256": "e5ae7e4f38ccce7851aeb433ad02fd1079b5f77645f8a93f9b9cbf2cfac4ffd7"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensorfma",
+      "top": "vpu_tensorfma",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_tensorfma.f",
+        "sha256": "16f06ffd77b8f2ac4f2278af48c46b4518f0e17283195e764d8f273eb165b446"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensorquant",
+      "top": "vpu_tensorquant",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_tensorquant.f",
+        "sha256": "f06093c564fb1c6337d243b30014e9397ee6f358dc4281ac074e50597e5ade31"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensorreduce",
+      "top": "vpu_tensorreduce",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_tensorreduce.f",
+        "sha256": "17e7fbb8de27612b7a499c4fdab3e601f2ae9f9b3364c12010d5f11b6f81334c"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensortmp_rf",
+      "top": "vpu_tensortmp_rf",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_tensortmp_rf.f",
+        "sha256": "c8f9ebf6a316046a71675a22cc9172c30622d7e23042c86fddfee5a1ed483359"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_top",
+      "top": "minion_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(timeout)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/minion_top.f",
+        "sha256": "c2eb64be029330b644b00159a21fc9daefe0d42704d004b5a7829dcb6728707d"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_trans",
+      "top": "vpu_trans",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_trans.f",
+        "sha256": "c9763f3ca5a9afe62cf317d0294763f0009890695431408f874328b5d49213b9"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfmaexp_top",
+      "top": "txfmaexp_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(timeout)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfmaexp_top.f",
+        "sha256": "60b11770e2e6cd4f0d1ceac1c1ed0f13c947bfd1f6953865567c48e2156b3107"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_uinst_decoder",
+      "top": "vpu_uinst_decoder",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_uinst_decoder.f",
+        "sha256": "aec5870146cd05211043ddbba7a97a322f50c4552e831ac8dc2ba362cc3a3032"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f3",
+      "top": "txfma_f3",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(timeout)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_f3.f",
+        "sha256": "575d613b1990a1a1d5e351d05f6ecaab299bdcd6af497eb1ed92a8b259a4a3b3"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfmafrac_top",
+      "top": "txfmafrac_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(timeout)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfmafrac_top.f",
+        "sha256": "e65c9a57f2eb9adf18869dabf4bb85a46d7ec24dac7e220701efa3dd6bf86c73"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_top",
+      "top": "txfma_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(timeout)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_top.f",
+        "sha256": "04ce927d1c96459c57a00298fa80141cc6c9a70c4c0885aea6cc7f96b0577776"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_txfma_trans_top",
+      "top": "vpu_txfma_trans_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(compile)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_txfma_trans_top.f",
+        "sha256": "c01b9487668ac5641d276e6880bb0c80aadf50e2cda4a17c5c3611db688d48a1"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_top",
+      "top": "vpu_top",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(timeout)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/vpu_top.f",
+        "sha256": "a6244903672019d2865c0d682ffa99d251303b8c893dc0af1a5547d4c27c9ee1"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_e5",
+      "top": "txfma_e5",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(timeout)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_e5.f",
+        "sha256": "ac72d535de4ee9c18844e6e78746884699bc48b990b5521111555948ebc1a54a"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f5",
+      "top": "txfma_f5",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(timeout)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_f5.f",
+        "sha256": "aae1ea612ecfa2a3610ea4238d2c3beb1be52a2b48b0f949c8e266dcf375f300"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f2",
+      "top": "txfma_f2",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(timeout)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_f2.f",
+        "sha256": "2e9890bc98d4ac5da7644cb7007b8b6ff26f6d4fbc0813935d006ecadc0b0cbb"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f6",
+      "top": "txfma_f6",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(timeout)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_f6.f",
+        "sha256": "47ec255e365948659a775cb6671f2830b3d12744e7886a2cdb11487d5a632819"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f0",
+      "top": "txfma_f0",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "export",
+      "historical_verdict": "NO_EMIT(timeout)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/txfma_f0.f",
+        "sha256": "e7850896f7fb07b2f08362d32e98e9a0d3c0b502a5e298fedeb6a1545450e902"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "prim_write_commit_en",
+      "top": "prim_write_commit_en",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/prim_write_commit_en.f",
+        "sha256": "aa0b7a4cb3bd432af2b06db7dd7315fb512900b45aced240dac13d339a80a584"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "prim_write_commit_rst_en",
+      "top": "prim_write_commit_rst_en",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/prim_write_commit_rst_en.f",
+        "sha256": "36fa345d4939e939027259860de416aca2064e7dfdc8653a17c31da53b2a8f46"
+      }
+    },
+    {
+      "family": "CORE-ET",
+      "case": "prim_phase_pair_lo_hi",
+      "top": "prim_phase_pair_lo_hi",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/core-et/filelists/prim_phase_pair_lo_hi.f",
+        "sha256": "50fb6f0ea17578ce59ef09dc4c3bb4c90f92c1366a4e80cf8ec66612dfaa9f61"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "aes",
+      "top": "aes_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/aes/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_aes_gate.f",
+        "sha256": "9b5695a4cf30a8482d2e5f062eba7bfb431bb35670d2c76be966da43d40eeeae"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "alu",
+      "top": "alu_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/alu/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_alu_gate.f",
+        "sha256": "8e29b5dea557fd14fb317267b601b4983d12e732e6422caecf8844fe0ce0ac87"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "alu_wrapper",
+      "top": "alu_wrapper_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/alu_wrapper/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_alu_wrapper_gate.f",
+        "sha256": "ea2566f887a4b35780a53b4b4270cda656bf763341d9926648b32efee2ed633b"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "amo_buffer",
+      "top": "amo_buffer_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/amo_buffer/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_amo_buffer_gate.f",
+        "sha256": "9a32c297659f29428a162073d5786224bdc529a702a0e9157b6325fc4ba372eb"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "ariane_regfile",
+      "top": "ariane_regfile_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/ariane_regfile/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_ariane_regfile_gate.f",
+        "sha256": "4195802c794a1dcc37e00aa874ad2182e861de730fcf2f02db666bead60b67b1"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "bht",
+      "top": "bht_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/bht/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_bht_gate.f",
+        "sha256": "768024e76668cee8467d8400187861cef80bda1107abfeb0859c6af7ca0688cf"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "branch_unit",
+      "top": "branch_unit_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/branch_unit/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_branch_unit_gate.f",
+        "sha256": "52065d9ce72eac27fc4278d7cb4efaaa15465a1f7cadb939eddd74a7c22c0fc9"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "btb",
+      "top": "btb_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/btb/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_btb_gate.f",
+        "sha256": "f51723325d88ced231ce8674d8ec12c0a9ea57ba84fa67a67347d8fd736d2338"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "commit_stage",
+      "top": "commit_stage_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/commit_stage/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_commit_stage_gate.f",
+        "sha256": "522374ac01b6bc361aa2a7aea1f17a055b7ee34ba9aebf123e9e43cd9fe46625"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "compressed_decoder",
+      "top": "compressed_decoder_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/compressed_decoder/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_compressed_decoder_gate.f",
+        "sha256": "8b831ab403fb9f3a1bbf9d210d64687a6e8dbf2ad99211363d6a39f234b36194"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "controller",
+      "top": "controller_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/controller/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_controller_gate.f",
+        "sha256": "e409c6b6dbcb10e54d53a2402f96c57ff124bfebd81208e012bf7d53df1f3117"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "csr_buffer",
+      "top": "csr_buffer_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/csr_buffer/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_csr_buffer_gate.f",
+        "sha256": "bd4b8d0fb2870d7067dc725507c6be21ef5650e428efa6dd21a260a1165b5f32"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "csr_regfile",
+      "top": "csr_regfile_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/csr_regfile/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_csr_regfile_gate.f",
+        "sha256": "1286ad50e1438b9035e620aa6ca84e1a4ac17f5ef36083041ad4d7db27ec4e9b"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6",
+      "top": "cva6_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "recorded attempt",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cva6/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_gate.f",
+        "sha256": "a6550d634ee0f12f6001aac6f01b2bebdc1165bacec913fade81221121a8dda3"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_fifo_v3",
+      "top": "cva6_fifo_v3_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cva6_fifo_v3/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_fifo_v3_gate.f",
+        "sha256": "50c7ac828f00403c1a01452a744ce901779c94ca20545d054db31881971d41f2"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_hpdcache_if_adapter",
+      "top": "cva6_hpdcache_if_adapter_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cva6_hpdcache_if_adapter/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_hpdcache_if_adapter_gate.f",
+        "sha256": "9f7cf50a45db7cd7072769966f60e7a842d426f62536acbdc542bc90176488b4"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_hpdcache_subsystem",
+      "top": "cva6_hpdcache_subsystem_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "FAIL(2 errors)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cva6_hpdcache_subsystem/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_hpdcache_subsystem_gate.f",
+        "sha256": "a23ec4d96d9ae51fc7e824a792d74ea3004aaeec1ab3a26b844d8a104fe7b3e2"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_hpdcache_wrapper",
+      "top": "cva6_hpdcache_wrapper_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "FAIL(2 errors)",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cva6_hpdcache_wrapper/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_hpdcache_wrapper_gate.f",
+        "sha256": "24ac03f5839b7dd608ed8bf0ae76441e42b5767cc1387658e4360be498a784fa"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_icache",
+      "top": "cva6_icache_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cva6_icache/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_icache_gate.f",
+        "sha256": "116ab2191fe9fef0f313fc1903b1bf9d04062e64ec885c31fb601a768e737a2f"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_mmu",
+      "top": "cva6_mmu_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "recorded attempt",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cva6_mmu/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_mmu_gate.f",
+        "sha256": "fc73960e90d1f262005e808cd5cf376f7c64d79183e311217379e2bb2e3a9efb"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_ptw",
+      "top": "cva6_ptw_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cva6_ptw/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_ptw_gate.f",
+        "sha256": "c660aec63f057ea6d0831f956602c8f8d2a612b909d6527aec0185cbe5fc6d96"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_shared_tlb",
+      "top": "cva6_shared_tlb_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cva6_shared_tlb/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_shared_tlb_gate.f",
+        "sha256": "ebbf5c198a3bcc67fcbfae8270cb2fededbf422b2f2a5eaafd8b3f84b415c239"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cva6_tlb",
+      "top": "cva6_tlb_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "NO_EMIT",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cva6_tlb/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_tlb_gate.f",
+        "sha256": "6e118ff137e097e8cf5c4b7f5bd1539d65b8cd4458522a64ee3c4c34ec6f6281"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cvxif_compressed_if_driver",
+      "top": "cvxif_compressed_if_driver_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cvxif_compressed_if_driver/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cvxif_compressed_if_driver_gate.f",
+        "sha256": "b1e0c86f42c489cfb2b6e96937c5a7f9020ad174ab8c1d8b539002894eaed586"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cvxif_fu",
+      "top": "cvxif_fu_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cvxif_fu/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cvxif_fu_gate.f",
+        "sha256": "0d3e8036867b6f808834182f29b999a9d09d73bd5b4f734defb1444ac8ced553"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "cvxif_issue_register_commit_if_driver",
+      "top": "cvxif_issue_register_commit_if_driver_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/cvxif_issue_register_commit_if_driver/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cvxif_issue_register_commit_if_driver_gate.f",
+        "sha256": "00623575bbb9ccfbe0519adaca720f3eaf4eb0a8f55e2ba0f2191341455e7dda"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "decoder",
+      "top": "decoder_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/decoder/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_decoder_gate.f",
+        "sha256": "33c7add4667f8804f6d48d4d6c0d245aecc8686f3aebd05980643c32914a6e5c"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "ex_stage",
+      "top": "ex_stage_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "recorded attempt",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/ex_stage/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_ex_stage_gate.f",
+        "sha256": "6a9b9312281fada2f16222574ec454251522e5a35db98c626d615f20ca63c808"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "fpu_wrap",
+      "top": "fpu_wrap_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/fpu_wrap/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_fpu_wrap_gate.f",
+        "sha256": "cdbd1dc2b60b77ede6b54b95039eea856a1ba330cf943d8b44b22b218ab7483d"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "frontend",
+      "top": "frontend_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/frontend/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_frontend_gate.f",
+        "sha256": "bc3b2bd1fe57b29da04af20ad8ee1e73300841a165c8b32e147da1aafc58c974"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "id_stage",
+      "top": "id_stage_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/id_stage/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_id_stage_gate.f",
+        "sha256": "ad5e4d20e63b03bd3e98b4c843343b94d501b94c547a7e8ddd5fdb050aedb28e"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "instr_queue",
+      "top": "instr_queue_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/instr_queue/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_instr_queue_gate.f",
+        "sha256": "457552960b87875aa7707f8a0578265526942fe247d08fb979e0c01b8bd8e3fc"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "instr_realign",
+      "top": "instr_realign_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/instr_realign/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_instr_realign_gate.f",
+        "sha256": "7cbeedab97c09293c2923ffd13304ecad71eb5fdef8d050d4da82e6ef3a3805e"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "instr_scan",
+      "top": "instr_scan_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/instr_scan/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_instr_scan_gate.f",
+        "sha256": "68c933ee2041a6d5eb1cdbd2a4c9d7ded33258d81a601bf36572e84320565847"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "issue_read_operands",
+      "top": "issue_read_operands_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/issue_read_operands/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_issue_read_operands_gate.f",
+        "sha256": "62217b4b58298f51f8daa8b228b93bee08c269922b4dabdfc6fc8c401b06f660"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "issue_stage",
+      "top": "issue_stage_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/issue_stage/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_issue_stage_gate.f",
+        "sha256": "a5e1da7da23c4eca2e4b6e51eae1ea7883c9a177844889adb253c8f534dff18a"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "load_store_unit",
+      "top": "load_store_unit_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "recorded attempt",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/load_store_unit/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_load_store_unit_gate.f",
+        "sha256": "110846b2541128fcd3f3e476eb8cc2eb473f31ae0518b17a002bd6db07eb1a0d"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "load_unit",
+      "top": "load_unit_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/load_unit/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_load_unit_gate.f",
+        "sha256": "1de38ca3e071300dd1c5f4d9c140f23539bd6319a76080541f72174356ac4a4e"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "lsu_bypass",
+      "top": "lsu_bypass_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/lsu_bypass/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_lsu_bypass_gate.f",
+        "sha256": "041def7dd041e8270e1584d77ac8386090e1d4b13d069bce5305b0c6722024c4"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "mult",
+      "top": "mult_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/mult/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_mult_gate.f",
+        "sha256": "1314cac902c972b4334d59c5eff204d3e6c473bf91e29b1d7b5ce3deafcf221f"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "multiplier",
+      "top": "multiplier_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/multiplier/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_multiplier_gate.f",
+        "sha256": "e4467b3cef84bcc13cf31d291ae6863786b9028f21626f06b3fcf749c70bdf79"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "perf_counters",
+      "top": "perf_counters_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/perf_counters/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_perf_counters_gate.f",
+        "sha256": "1666fbe80f585828863e46736a608a3b23e531f879594a17ddf98e3f04a5bfbd"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "pmp",
+      "top": "pmp_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/pmp/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_pmp_gate.f",
+        "sha256": "cec7238deefa22a6e2cbf79829e8c5d219e07ab02b679564bb9eb417cb87e4f5"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "pmp_data_if",
+      "top": "pmp_data_if_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/pmp_data_if/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_pmp_data_if_gate.f",
+        "sha256": "f4ca5a89e21e5299f06af82e70fbd533f464715fa44f7b400857debb228f0785"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "pmp_entry",
+      "top": "pmp_entry_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/pmp_entry/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_pmp_entry_gate.f",
+        "sha256": "84786a6eeda0c55aac89ff1b68c0eadab4c4cd48f037907ce785b030ae8d416b"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "ras",
+      "top": "ras_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/ras/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_ras_gate.f",
+        "sha256": "e44a7155cd967e0723f10569eabdee4257f19e28e644b2d9a1e7b29e9c3ff790"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "raw_checker",
+      "top": "raw_checker_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/raw_checker/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_raw_checker_gate.f",
+        "sha256": "6ee739362e9b1e9a60f5d31d61ddf3093d9c3d165574b5416cb1fe641ca1600b"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "scoreboard",
+      "top": "scoreboard_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/scoreboard/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_scoreboard_gate.f",
+        "sha256": "8d80eaa43defa6bc049707445e26ae28f0fae8be35153250283204c7e82d6f08"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "serdiv",
+      "top": "serdiv_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/serdiv/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_serdiv_gate.f",
+        "sha256": "4613c2bcfce6aa50d506f5a8e41685b1f8ce6f60e87076b192a98548d83ddae3"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "store_buffer",
+      "top": "store_buffer_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/store_buffer/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_store_buffer_gate.f",
+        "sha256": "3fe7b41fc5137bf8a9bc8c95158606f9f884a3a30ee3ea7a40c75c54023b99cf"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "store_unit",
+      "top": "store_unit_gate",
+      "modes": [
+        "verified_compiler",
+        "legacy"
+      ],
+      "historical_legacy_scope": null,
+      "historical_verdict": "PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_vc/mod/store_unit/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_store_unit_gate.f",
+        "sha256": "ae941dbfd55e9a0fc10e26bf05ac2968cbd5d4a7df67eb43030d3162cee5b65e"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_alu_export",
+      "top": "cva6_alu_export",
+      "modes": [
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "preflight_log": "generated/cva6_alu_lean/logs/preflight.log",
+        "extraction": "Lines beginning FILE=, preserving order",
+        "reconstructed_filelist_sha256": "3bd9feb110d72aa34f7f30fd651d978ed93aea55ae49efda5bb6efe98567224b"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_tlb_gate",
+      "top": "cva6_tlb_gate",
+      "modes": [
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_tlb_lean/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_tlb_gate.f",
+        "sha256": "58fbdb04c990589827c6b85316d3e29d294de106c6eaf64c15ef6d6f904d3a25"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_compressed_decoder_gate",
+      "top": "cva6_compressed_decoder_gate",
+      "modes": [
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_sweep/compressed_decoder/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_compressed_decoder_gate.f",
+        "sha256": "a51d3fdbe3736e8a65f5c03be6dadc2c205b36a5845ad88a80d446a13f83db1c"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_controller_gate",
+      "top": "cva6_controller_gate",
+      "modes": [
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_sweep/controller/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_controller_gate.f",
+        "sha256": "84fc9e5a9492020d3277d6980c4d4f6ba7f61e9906d9a2df3853aa8ba31478fd"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_csr_buffer_gate",
+      "top": "cva6_csr_buffer_gate",
+      "modes": [
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_sweep/csr_buffer/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_csr_buffer_gate.f",
+        "sha256": "c577db7f41f28f0e739fb8364177079f3e8148d76d5f804c3ee1cfb9ab65ab01"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_instr_realign_gate",
+      "top": "cva6_instr_realign_gate",
+      "modes": [
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_sweep/instr_realign/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_instr_realign_gate.f",
+        "sha256": "c9327804d50d577e4a4ec3cecdb83eb1b95986e53c6c2231ffea937205432f3f"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_instr_scan_gate",
+      "top": "cva6_instr_scan_gate",
+      "modes": [
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_sweep/instr_scan/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_instr_scan_gate.f",
+        "sha256": "26725e8b29a0475ebf57209dfc2917ce88a25ea1a4c47344c073864e9f11a2f7"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_pmp_gate",
+      "top": "cva6_pmp_gate",
+      "modes": [
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_sweep/pmp/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_pmp_gate.f",
+        "sha256": "8b3eec31d5f2e5b068aaf27d51fa702ecbbb58a8691c92782ee8468e184452c6"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_ras_gate",
+      "top": "cva6_ras_gate",
+      "modes": [
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_sweep/ras/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_ras_gate.f",
+        "sha256": "14fffade66cf0cc4291c93758fb309fe489349be63473bf0cea0e5accc0d9671"
+      }
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_raw_checker_gate",
+      "top": "cva6_raw_checker_gate",
+      "modes": [
+        "legacy"
+      ],
+      "historical_legacy_scope": "bridge",
+      "historical_verdict": "legacy PROVEN",
+      "input_record": {
+        "root": "historical-validation-checkout",
+        "filelist": "generated/cva6_sweep/raw_checker/generated_inputs/cv64a6_imafdc_sv39_hpdcache_wb_cva6_raw_checker_gate.f",
+        "sha256": "42b846603a264ee99bb210230137b8cfa59f791232c14304fb5d8a7e363e053f"
+      }
+    }
+  ]
+}

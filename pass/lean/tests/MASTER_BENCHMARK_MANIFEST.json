@@ -5,7 +5,8 @@
     "tests/LEGACY_PROOF_INVENTORY.json",
     "tests/LEGACY_PROOF_COVERAGE_ADDITIONS.json",
     "SWEEP_b1-b2.tsv",
-    "SWEEP_cva6.tsv"
+    "SWEEP_cva6.tsv",
+    "tests/MASTER_REPLAY_CONFIGURATIONS.json"
   ],
   "reconciliation": {
     "total_entries": 256,
@@ -23,9 +24,7 @@
     "listed_by_exactly_one_inventory": 178,
     "note": "The 90-result coverage snapshot and the 87-entry inventory are different sets, not a subset relation; the sweep tables are per-module and carry no proof scope. Counts below are the reconciled union."
   },
-  "pending_decision": [
-    "The 125 CORE-ET / 61 CVA6 fresh-input configuration list in MASTER_INTEGRATION.md is not yet backed by a committed file; add it as a sixth source before the replay."
-  ],
+  "pending_decision": [],
   "entries": [
     {
       "family": "DINO",
@@ -5258,5 +5257,11 @@
       "disposition": "REQUIRED: rerun and record outcome",
       "inventory_count": 1
     }
-  ]
+  ],
+  "configuration_reconciliation": {
+    "file": "MASTER_REPLAY_CONFIGURATIONS.json",
+    "CORE-ET": 125,
+    "CVA6": 61,
+    "note": "The 256 entries above retain their historical scope granularity. CORE-ET has 125 unique tops. CVA6 includes configured *_gate wrappers and separate historical legacy configurations; wrapper names are not additional RTL modules."
+  }
 }

@@ -915,3 +915,71 @@ rebasing would force every one of them to re-target paths mid-flight, and a
 replay whose inputs moved proves nothing about the port. Record the move as a
 pure rename commit, with no content change, so `git log --follow` stays usable
 and the replay can be re-run across it unchanged.
+
+
+## Fresh replay and raw census checkpoint (2026-10-08)
+
+The complete input matrix is now committed in
+[MASTER_REPLAY_CONFIGURATIONS.json](tests/MASTER_REPLAY_CONFIGURATIONS.json):
+125 CORE-ET and 61 CVA6 configurations, including the separate historical legacy
+exports and configured CVA6 wrappers. It reconciles the per-scope historical
+inventory; all 125 distinct CORE-ET tops are represented. External filelists
+are identified by logical root, relative name and hash. This was a one-time,
+explicitly authorized read-only benchmark replay, not a repository test that
+searches sibling checkouts.
+
+Fresh exports used frozen binaries built from the production sources at
+`5129e8c07`, with the preserved readers, filelists, normalization and options.
+These are **export results**, not accepted Lean proof results:
+
+| Family | Configurations | Reached Lean export | Compile failures | Normalization refusals | Verified exports | Fast exports | Bridge exports / refusals |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| CORE-ET | 125 | 81 | 20 | 24 | 81 | 81 | 37 / 26 |
+| CVA6 | 61 | 52 | 9 | 0 | 43 | 52 | 8 / 1 |
+
+All three DINO designs separately export in verified-compiler, legacy-fast,
+full chunked-WF, and bridge-plus-full-WF configurations. WF uses chunk size 100,
+no chunk limit and fail-on-unsupported fallback. The fresh timed Lean proofs
+remain pending at this checkpoint. Earlier saved-artifact proofs do not replace
+these new runs.
+
+[MASTER_OP_CENSUS.json](tests/MASTER_OP_CENSUS.json) inspects original graph
+operators before lowering, including graphs subsequently refused by normalization.
+It records 160 observed configurations (including DINO) and 29 unobserved compile
+failures. Every operator has width/sign/arity counts; memory policy pins and
+native one-hot attributes are retained. Unobserved graphs do not count as zero
+occurrences. Reproduce a graph census with `//pass/lean:lean_graph_census` and
+`scripts/raw_graph_census.py --tool ... --graph ... --top ... --compile-log ... --output ...`.
+The three DINO graph directories were hashed before and after inspection and
+were unchanged.
+
+This corrects the earlier claim that CORE-ET had no Hotmux occurrences. A
+successful lowering does not issue an unsupported-operator refusal. The raw
+CORE-ET graphs contain 367 Hotmux nodes, and CVA6 contains 394. DINO's SingleCycle,
+Pipelined and DualIssue graphs contain 2, 5 and 41 respectively. Native formal
+checking proved 1, 4 and 40 DINO obligations, leaving one deferred in each design.
+No observed graph contains Rem, LUT, Rxor or Popcount; no conclusion about those
+operators is drawn for the 29 compilations that failed.
+
+The census distinguishes native-proved, deferred, refuted, unreported and an
+unclassified runtime-check status. Upstream stores the same `runtime_check`
+attribute for deferred and refuted Hotmux checks, so graph attributes alone
+cannot distinguish them. Classification uses the matching compilation diagnostics;
+a native refutation remains a failed compilation. None of these statuses claims
+that Lean proved one-hotness.
+
+All 27 refused bridge cases have historical certificate artifacts available.
+The dispatch limit is inherited: both the B1/B2 and refactored emitters handle
+And arities 2/3/4, binary Xor, and the binary Sum add/subtract forms. Fresh graphs
+now exercise larger arities or unary negation. For example, `debug_breakpoint`
+changes from And arities 2/3 to 2/6; `intpipe_alu` adds a three-input Sum;
+`legacy_cva6_alu_export` adds unary Sum with zero addends. General bridge proof
+support is being investigated while keeping both models' evaluation rules fixed.
+
+Four previously proven CORE-ET configurations (`minion_dcache_cache_op_unit`,
+`minion_dcache_cache_op_unit_l2`, `minion_dcache_reduce`, `vpu_trans`) are now refused
+by upstream clock-gate latch-phase normalization. `minion_dcache_tensor_load`
+fails upstream Concat lane-width validation before Lean. Their native source
+implementations match pinned master; a separate pristine-master binary comparison
+is in progress. No native LEC, frontend, normalization or warning-policy change
+is made to bypass these failures. The migration is not ready to publish yet.
