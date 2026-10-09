@@ -426,9 +426,9 @@ no fork of `pass_lean.cpp`.
 Create a clean worktree from the completed modular commit:
 
 ```bash
-cd /mada/users/czeng14/projects/livehd-new
+cd "$LIVEHD_SOURCE"
 git fetch origin
-git worktree add /mada/users/czeng14/projects/livehd-pass-lean-shared \
+git worktree add "$LIVEHD_REFACTOR_WORKTREE" \
   -b refactor/pass-lean-shared-architecture origin/b1-b2-verified-compiler
 ```
 

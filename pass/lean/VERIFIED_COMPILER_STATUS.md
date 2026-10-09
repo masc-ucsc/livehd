@@ -1,7 +1,7 @@
 # B1+B2 verified compiler — what is built
 
 Branch `b1-b2-verified-compiler`, cut from `interpreter-value-polymorphic`
-(`827e53233`).  Plan: `/soe/czeng14/projects/hagent/b1-b2-plan.md`.
+(`827e53233`).  Plan: `hagent/b1-b2-plan.md` (external planning document).
 
 ## Review status (2026-08-27)
 

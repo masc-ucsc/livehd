@@ -24,7 +24,7 @@ JOBS="${LEAN_JOBS:-8}"
 LAKE="${LAKE:-lake}"
 CPUSET="${LEAN_CPUSET:-0-7}"
 
-export PATH="/mada/users/czeng14/.elan/bin:$PATH"
+export PATH="${ELAN_HOME:-$HOME/.elan}/bin:$PATH"
 export TMPDIR="$ROOT/generated/pass_lean_runtime_tmp"
 export LEAN_NUM_THREADS="$JOBS"
 mkdir -p "$TMPDIR" "$(dirname "$SUMMARY")"

@@ -573,7 +573,7 @@ SRA** — the last being a real fast-model mistranslation, not a proof gap (Bug 
 ### Next benchmark after CVA6: CORE-ET / ETASP
 
 Once CVA6 modules are generating and proving certificate equivalence the way DINO
-does, the next target is **CORE-ET** (`/soe/czeng14/projects/core-et`) — the
+does, the next target is **CORE-ET** (the external `core-et` RTL checkout) — the
 *CORE-ET Agentic Silicon Platform*, an OpenHW Group / Ainekko project whose RTL is
 an active translation of CORE-ET modules into **clean SystemVerilog** (464 `.sv`
 files under `hw/ip/<block>/rtl`, with `dv/` collateral alongside).

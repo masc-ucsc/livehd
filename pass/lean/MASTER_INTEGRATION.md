@@ -1189,3 +1189,14 @@ equivalent Or node-proof rewrites. All model and certificate definitions are
 identical. Full reproofs of all 49 changed bridges are in progress, with the
 three slow corpus blocks and DINO prioritized. The three Lean C++ targets and
 CLI/exporter build pass; shell/Python syntax and whitespace checks pass.
+
+### Portable historical inputs
+
+The final privacy scan found personal absolute paths inherited by restored Lean
+wrappers and historical notes. The notes now name their external source document
+or use explicit worktree variables. CVA6 runners require `CVA6_ROOT`; the DINO
+runner accepts `HAGENT_BUILD` or three explicit RTL directories. Tool lookup
+uses `PATH`, the supplied `BENDER`, and user-relative Elan/Bender locations.
+No RTL selection, frontend flags, normalization, or proof procedure changes when
+the same input paths are supplied. These are optional benchmark runners, not
+authorization for default tests to inspect sibling repositories.

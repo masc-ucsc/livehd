@@ -5,7 +5,7 @@ proven equal to its certificate model. Performance work is subordinate — it bu
 throughput, it is not the goal.
 
 **Target list: the 78 blocks of the CVA6 core hierarchy reachable from module `cva6`**,
-enumerated in `/soe/czeng14/projects/cva6-blockfinding/cva6_blocks.txt` (section 16
+enumerated in the external inventory `cva6-blockfinding/cva6_blocks.txt` (section 16
 TOTALS). Those come first; the 4 CV-X-IF example modules, 2 RVFI modules, 13 CVFPU and
 65 CV-HPDcache modules in that file's later totals come after. **10 of the 78 are
 proven; 68 remain** — see Phase 2 for the full list with per-block status.
@@ -62,7 +62,7 @@ Resolve that by attribution on `compressed_decoder` (stub its ar5/6 group, re-ti
 
 ## Phase 2 — the 78-block CVA6 core hierarchy (the authoritative target list)
 
-**Source of truth:** `/soe/czeng14/projects/cva6-blockfinding/cva6_blocks.txt`
+**Source of truth:** the external inventory `cva6-blockfinding/cva6_blocks.txt`
 (openhwgroup/cva6 @ `6cb200105`). Its section 16 TOTALS gives
 **78 = the CVA6 core hierarchy reachable from module `cva6`**, synthesizable, under
 `core/`. Independently re-extracted from sections 1–9 of that file: 78, exact match.

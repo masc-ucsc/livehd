@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIVEHD_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-CVA6_ROOT="${CVA6_ROOT:-/mada/users/czeng14/projects/cva6-clean/cva6}"
+: "${CVA6_ROOT:?set CVA6_ROOT to the CVA6 source checkout}"
 TARGET="${CVA6_TARGET:-cv64a6_imafdc_sv39_hpdcache_wb}"
 TOP="${CVA6_TOP:-cva6}"
 LHD="${LHD:-$LIVEHD_ROOT/bazel-bin/lhd/lhd}"
@@ -18,8 +18,8 @@ BENDER="${BENDER:-}"
 if [[ -z "$BENDER" ]]; then
   if command -v bender >/dev/null 2>&1; then
     BENDER="$(command -v bender)"
-  elif [[ -x /mada/users/czeng14/.local/bin/bender ]]; then
-    BENDER=/mada/users/czeng14/.local/bin/bender
+  elif [[ -x "$HOME/.local/bin/bender" ]]; then
+    BENDER="$HOME/.local/bin/bender"
   fi
 fi
 

@@ -30,10 +30,14 @@ EMIT_CERT="${LEAN_EMIT_CERT:-true}"
 # against the older per-node generated proof model.
 LEAN_MODE="${LEAN_MODE:-verified_compiler}"
 
-HAGENT_BUILD="${HAGENT_BUILD:-/mada/users/czeng14/projects/hagent/.cache/setup_simplechisel_mcp_2025.11/build}"
-SC_DIR="${SC_DIR:-$HAGENT_BUILD/build_singlecyclecpu_d}"
-PIPE_DIR="${PIPE_DIR:-$HAGENT_BUILD/build_pipelined_d}"
-DUAL_DIR="${DUAL_DIR:-$HAGENT_BUILD/build_dualissue_d}"
+# Supply either the common build root or all three explicit RTL directories.
+HAGENT_BUILD="${HAGENT_BUILD:-}"
+SC_DIR="${SC_DIR:-${HAGENT_BUILD:+$HAGENT_BUILD/build_singlecyclecpu_d}}"
+PIPE_DIR="${PIPE_DIR:-${HAGENT_BUILD:+$HAGENT_BUILD/build_pipelined_d}}"
+DUAL_DIR="${DUAL_DIR:-${HAGENT_BUILD:+$HAGENT_BUILD/build_dualissue_d}}"
+: "${SC_DIR:?set HAGENT_BUILD or SC_DIR to the SingleCycle RTL directory}"
+: "${PIPE_DIR:?set HAGENT_BUILD or PIPE_DIR to the Pipelined RTL directory}"
+: "${DUAL_DIR:?set HAGENT_BUILD or DUAL_DIR to the DualIssue RTL directory}"
 
 OUT="${OUT:-$LIVEHD_ROOT/generated/dino_lgraph_lean}"
 LOG_DIR="$OUT/logs"
