@@ -1258,3 +1258,31 @@ passes in 1,602.71 seconds; its previous proof passed in 4,586 seconds. These
 shared-host runs have different recorded scheduling contexts, so the measured
 improvement is not an isolated performance experiment. Corpus reproofs remain
 in progress at this checkpoint; DINO completion does not mark them complete.
+
+### Record-layout diagnosis and completed reproof
+
+The bounded-record repair has now passed all **22 affected artifact checks**
+across 16 configurations, including DualIssue's legacy model, full chunked WF,
+and complete fast bridge. The
+[record-layout evidence](tests/MASTER_RECORD_LAYOUT_RESULTS.json) records the
+current artifact hashes, proof audits, measured runtime/RSS, and earlier
+attempts. Two other CORE-ET bridge checks remain in progress; they are separate
+from this completed layout reproof.
+
+A fresh standalone reproduction distinguishes the Lean execution problem from
+our emitter's compatibility gap. With no LiveHD or Mathlib imports, a structure
+of 64 `Nat` fields or 64 `BitVec 8` fields executes
+`#eval (default : T).f0`; each corresponding 128-field structure terminates with
+signal 11 on the pinned Lean 4.31.0 Linux release. A debugger backtrace of the
+128-field `Nat` case faults in `mi_malloc_small` inside `libleanshared.so` during
+`lean_eval_const`. This is evidence of a Lean-side execution defect. It does
+not identify the precise upstream cause, establish which earlier versions are
+affected, or imply that all execution backends fail.
+
+The separately diagnosed compiler constructor-field limit is a deliberate
+restriction, not the same failure as this interpreter crash. Both the original
+B1/B2 emitter and the PR refactor emitted unbounded flat records. Bounding the
+physical records addresses that inherited compatibility gap; it does not
+change node semantics. Named fields and model values are preserved, while
+positional constructors and `Repr` nesting change. The threshold of 64 is our
+conservative tested layout choice, not a claimed universal Lean field limit.
