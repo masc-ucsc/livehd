@@ -95,6 +95,64 @@ TEST(LegacyModel, LoweringReadsSemanticWidthsAndSextAmount) {
   c                         = build_certificate(d, {});
   EXPECT_NE(lower_fast_expr(c, c.nodes.front()).text.find("BitVec.toInt @0@"), std::string::npos);
 }
+TEST(LegacyModel, NaryMixedWidthBridgeFixtures) {
+  struct Shape {
+    const char* name;
+    ScanOp op;
+    uint32_t arity;
+    uint32_t addends;
+    uint32_t width;
+  };
+  const std::vector<Shape> shapes{
+      {         "and_one", ScanOp::And,  1,  0,  5},
+      {         "and_six", ScanOp::And,  6,  0,  8},
+      {   "and_seventeen", ScanOp::And, 17,  0, 32},
+      {         "xor_one", ScanOp::Xor,  1,  0,  5},
+      {       "xor_three", ScanOp::Xor,  3,  0,  8},
+      {   "xor_seventeen", ScanOp::Xor, 17,  0, 32},
+      {      "sum_negate", ScanOp::Sum,  1,  0,  5},
+      {       "sum_three", ScanOp::Sum,  3,  3,  8},
+      {     "sum_sixteen", ScanOp::Sum, 16, 16, 32},
+      {       "sum_mixed", ScanOp::Sum,  4,  2,  8},
+      {"sum_subtract_all", ScanOp::Sum,  3,  0,  8},
+  };
+  const char* destination = std::getenv("LEAN_NARY_BRIDGE_OUTPUT");
+  for (const auto& shape : shapes) {
+    SCOPED_TRACE(shape.name);
+    DesignScan d;
+    d.name = shape.name;
+    DesignNode                  node{10, shape.op, shape.width, false, {}};
+    const std::vector<uint32_t> widths{17, 1, 3, 9};
+    for (uint32_t i = 0; i < shape.arity; ++i) {
+      const auto id    = 2000000000 + i;
+      const auto width = widths[i % widths.size()];
+      d.inputs.push_back({"x" + std::to_string(i), id, width, {}});
+      node.operands.push_back({i, shape.op == ScanOp::Sum ? uint32_t(i >= shape.addends) : i, input(id, width)});
+    }
+    d.nodes.push_back(node);
+    d.outputs.push_back({
+        "y",
+        0,
+        shape.width,
+        PinRef{PinKind::Node, 10, 0, shape.width, 0, {}}
+    });
+    const auto        certificate = build_certificate(d, {});
+    LegacyEmitOptions options;
+    options.emit_fast_bridge = true;
+    options.cert_wf          = LeanCertWFMode::Chunked;
+    options.cert_chunk_size  = 2;
+    std::ostringstream out;
+    ASSERT_NO_THROW(emit_legacy_model(d, certificate, options, out));
+    EXPECT_NE(out.str().find("import LeanSemanticPrimitives.Translation.NaryBridge"), std::string::npos);
+    EXPECT_NE(out.str().find("_comb_refines_fast"), std::string::npos);
+    EXPECT_EQ(out.str().find("by sorry"), std::string::npos);
+    if (destination) {
+      const auto path = std::filesystem::path(destination) / (d.name + "_Lgraph.lean");
+      write_atomic(path.string(), [&](std::ostream& stream) { stream << out.str(); });
+    }
+  }
+}
+
 TEST(LegacyModel, UnsupportedProofShapeFailsAtomicallyAndRequiresExplicitFallback) {
   const auto        d = binary(ScanOp::Mult, 8);
   const auto        c = build_certificate(d, {});

@@ -1016,3 +1016,37 @@ timed proofs. The initial broad native regression command accidentally discovere
 the nested temporary baseline checkout; that run was stopped and retained as a
 harness failure, then restarted over all 67 tracked Bazel packages while honoring
 the existing ignore rules and test filters. Its result is still pending.
+
+
+### General fold bridge integration
+
+`Translation/NaryBridge.lean` proves mixed-width And/Xor folds and Sum with any
+add/subtract split, including unary negation. The emitted fast model and
+`eval_op` are unchanged. Existing small-arity bridge dispatch stays in place;
+only previously unhandled shapes select the new lemmas. Generated files import
+the additional module only when those proofs are needed. The benchmark queue
+builds both this module and `LegacyCertWF` explicitly. Its static census also
+recognizes the general folds and the existing unequal-width signed comparisons.
+
+[MASTER_NARY_BRIDGE_RESULTS.json](tests/MASTER_NARY_BRIDGE_RESULTS.json) records
+11 self-contained emitted fixtures with full WF and all-input bridge proofs:
+1/6/17-input And, 1/3/17-input Xor, unary negation, 3/16-input addition, mixed
+addition/subtraction, and all-subtract Sum. Inputs mix widths 17/1/3/9 and outputs
+exercise both narrowing and widening. Run `scripts/nary_bridge_check.sh` with
+`TEST_BIN` pointing to the built `legacy_model_test` binary. The general lemmas
+use only the standard `propext`, `Classical.choice` and `Quot.sound` axioms;
+concrete graph/WF checks retain the established native-decision trust boundary.
+
+All 314 previously successful exports were regenerated and remain byte-identical.
+All 27 former arity refusals now export, and their full block bridge proofs are
+in progress. This is a proof-coverage extension, not a change in model values.
+A focused fixture initially exposed missing concrete list-slicing rewrites in
+the emitted Sum proof; selecting `take_succ_cons`/`drop_succ_cons` fixed the tactic,
+and all 11 fresh fixtures then passed. No failed proof was accepted.
+
+The full optimized Linux port regression passed in 804 seconds: 4,672 passed,
+two skipped (`lhd_usyn_noabc_smoke` and `cone_unavailable_test`), exit zero.
+After the general-fold emitter change, all three Lean C++ targets pass again,
+and the CLI/exporter binaries build. The clean pristine-master audit checkout
+has been moved outside this repository so ordinary `//...` searches cannot
+rediscover its build files.

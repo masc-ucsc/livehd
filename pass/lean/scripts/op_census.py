@@ -5,9 +5,9 @@ Answers, in seconds, the three questions that otherwise cost hours of discovery
 before starting a step-5 bridge run on a new design:
 
   1. Which `(op, arity)` pairs does this design use, and does the step-5 bridge
-     dispatch in `pass/lean/pass_lean.cpp` handle every one of them?  An
-     unhandled pair becomes a `sorry -- TODO(step5)` placeholder, so catching it
-     here replaces finding it after a multi-hour typecheck.
+     dispatch in `pass/lean/emit_legacy_fast_bridge.cpp` handle every one of them?  An
+     unhandled pair is refused atomically by the emitter; this gate reports
+     those shapes before a proof queue is started.
   2. How wide are the nodes?  Width is the CVA6 scaling axis (513/576 bits vs
      DINO's 127), and the GetMask `by decide` side condition is O(w^2) per node.
   3. How many GetMask nodes carry a constant ALL-ONES mask?  Those are the ones
@@ -27,7 +27,7 @@ import sys
 
 # ---------------------------------------------------------------------------
 # The supported set.  This MUST mirror the dispatch chain in
-# pass/lean/pass_lean.cpp (the `bridge_call = ..` if/else ladder, ~line 2113).
+# pass/lean/emit_legacy_fast_bridge.cpp (the `bridge_call = ..` dispatch).
 # Keep the two in sync: this gate is only as good as its fidelity to the emitter.
 # ---------------------------------------------------------------------------
 
@@ -38,7 +38,7 @@ def dispatch_status(op, arity, dep_widths, out_width=None):
 
     status is one of:
       "ok"        -- the emitter emits a real op bridge
-      "unhandled" -- falls through to `sorry -- TODO(step5)`
+      "unhandled" -- refused by the bridge emitter
       "trap"      -- the emitter CLAIMS support but the bridge lemma cannot
                      unify at this arity, so it emits a proof that fails to
                      typecheck (worse than a sorry: it is silent until the run)
@@ -75,6 +75,10 @@ def dispatch_status(op, arity, dep_widths, out_width=None):
         return ("ok", "and3_bridge (fold-free)")
     if op == "Op_And" and arity == 4:
         return ("ok", "and4_bridge (fold-free)")
+    if op == "Op_And" and arity > 0:
+        return ("ok", "andn_bv_bridge (mixed widths)")
+    if op.startswith("Op_Sum "):
+        return ("ok", "sumn_bv_bridge (mixed widths, arbitrary add/subtract split)")
     if op == "Op_Or" and arity == 1:
         # Arity-1 Or takes the shape-matched or1_bridge with the DEFAULT closer; the
         # n-ary fold's closer needs two metavariable-headed simp lemmas that dominate
@@ -95,6 +99,8 @@ def dispatch_status(op, arity, dep_widths, out_width=None):
         return ("ok", "orn_bv_bridge (n-ary, SLOW closer)")
     if op == "Op_Xor" and arity == 2:
         return ("ok", "xor_bridge")
+    if op == "Op_Xor":
+        return ("ok", "xorn_bv_bridge (mixed widths)")
     if op == "Op_Not" and arity == 1:
         return ("ok", "not_bridge")
     if op == "Op_SHL" and arity == 2:
@@ -119,15 +125,15 @@ def dispatch_status(op, arity, dep_widths, out_width=None):
     if op == "Op_Sext" and arity == 2:
         return ("ok", "sext_bridge | sext_bridge_low")
     if op in ("Op_SLT", "Op_SGT") and arity == 2:
-        # slt_bridge / sgt_bridge are stated at a SINGLE width (a b : BitVec cw),
-        # so the emitter only dispatches when both operand widths are equal.
+        # The refactored emitter also has a bridge preserving each operand's
+        # own signed interpretation when the widths differ.
         name = "slt_bridge" if op == "Op_SLT" else "sgt_bridge"
         short = op[3:]
         w0, w1 = dep_widths[0], dep_widths[1]
         if w0 is None or w1 is None:
-            return ("unhandled", "%s with undetermined dep widths (check by hand)" % short)
+            return ("ok", "%s bridge (operand widths selected by emitter)" % short)
         if w0 != w1:
-            return ("unhandled", "%s at unequal widths %d/%d (needs %s_max)" % (short, w0, w1, name))
+            return ("ok", "slt_widths_bridge" if op == "Op_SLT" else "sgt_widths_bridge")
         return ("ok", name)
     return ("unhandled", "no dispatch arm")
 

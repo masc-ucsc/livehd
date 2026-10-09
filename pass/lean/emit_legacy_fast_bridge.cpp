@@ -9,6 +9,14 @@
 #include "emit_legacy_graph_cert.hpp"
 #include "lean_format.hpp"
 namespace lean_export {
+bool needs_nary_bridge(const CertificateIR& c) {
+  return std::any_of(c.nodes.begin(), c.nodes.end(), [](const CertNode& n) {
+    const auto arity = n.deps.size();
+    return (n.op.kind == Operation::And && arity > 0 && arity != 2 && arity != 3 && arity != 4)
+           || (n.op.kind == Operation::Xor && arity != 2)
+           || (n.op.kind == Operation::Sum && !(arity == 2 && (n.op.parameter == 1 || n.op.parameter == 2)));
+  });
+}
 void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, const LegacyNames& names, std::ostream& ofs) {
   const auto&                     base_name  = names.base;
   const bool                      sequential = names.sequential;
@@ -135,6 +143,11 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
       bridge_call = "and4_bridge";
     } else if (info.op.kind == Operation::And && info.deps.size() == 3) {
       bridge_call = "and3_bridge";
+    } else if (info.op.kind == Operation::And && !info.deps.empty()) {
+      bridge_call = "andn_bv_bridge";
+      closer
+          = "List.foldl_cons, List.foldl_nil, bv_to_bitvec_bvenc_zext, "
+            "ofInt_zero_eq, bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
     } else if (info.op.kind == Operation::Or && info.deps.size() == 2) {
       bridge_call = "or_bridge";
     } else if (info.op.kind == Operation::Or && info.deps.size() == 1) {
@@ -150,6 +163,11 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
             "bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
     } else if (info.op.kind == Operation::Xor && info.deps.size() == 2) {
       bridge_call = "xor_bridge";
+    } else if (info.op.kind == Operation::Xor) {
+      bridge_call = "xorn_bv_bridge";
+      closer
+          = "List.foldl_cons, List.foldl_nil, bv_to_bitvec_bvenc_zext, BitVec.zero_xor, "
+            "ofInt_zero_eq, bv_zext_id, Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
     } else if (info.op.kind == Operation::Not && info.deps.size() == 1) {
       bridge_call = "not_bridge";
     } else if (info.op.kind == Operation::SHL && info.deps.size() == 2) {
@@ -188,6 +206,13 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
       bridge_call = width_of(info.deps[0]) == width_of(info.deps[1]) ? "sgt_bridge" : "sgt_widths_bridge";
     } else if ((info.op.kind == Operation::Sum && info.op.parameter == 1) && info.deps.size() == 2) {
       bridge_call = "sum1_bridge";
+    } else if (info.op.kind == Operation::Sum) {
+      bridge_call = "sumn_bv_bridge";
+      closer
+          = "sumn_fast, bvSum, List.take_succ_cons, List.take_zero, List.take_nil, List.drop_succ_cons, "
+            "List.drop_zero, List.drop_nil, List.map_cons, List.map_nil, List.foldl_cons, List.foldl_nil, "
+            "bv_to_bitvec_bvenc_zext, BitVec.zero_add, BitVec.sub_zero, ofInt_zero_eq, bv_zext_id, "
+            "Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
     } else {
       supported = false;
     }
