@@ -342,8 +342,10 @@ once against the live modules. The two outputs are **byte-identical**.
 | `[propext]` | 19 |
 | `[propext, Quot.sound]` | 15 |
 | `[propext, Classical.choice, Quot.sound]` | 10 |
+| **no axioms at all** (`Compiler.Residual.rMaskedUpdateV_correct`) | 1 |
 
-Standard axioms only. **No `sorryAx`, no `native_decide`.** The first probe
+19 + 15 + 10 = 44; the 45th depends on nothing. The first version of this table
+left that row out and so did not add up. Standard axioms only. **No `sorryAx`, no `native_decide`.** The first probe
 guessed that every theorem lived in `Compiler.*` and five names did not
 resolve — the probe was wrong, not the split; it now tracks `namespace`/`end`
 and finds them in `Compiler` and `Compiler.Residual`.
@@ -361,3 +363,178 @@ theorems, the same axioms. It is not new proof content, it does not touch the
 clock/reset schema it was derived from, and it has not been installed into the
 live tree — activation waits for the replay queues to be terminal and
 fingerprinted.
+
+## 11. D4 transport: the exact delta, and the two decisions it forces
+
+Source preparation, from `f6ad1fe29`'s `CertIO.lean` and `CertIORoundTrip.lean`
+(both `sorry`-free there, over the **clockless** schema).
+
+### 11.1 What DCERT1 does not carry
+
+```
+certBytes D = magicBytes                    -- "DCERT1\n"
+           ++ section' srcBytes  D.sources
+           ++ section' nodeBytes D.nodes
+           ++ section' outBytes  D.outputs
+           ++ section' flopBytes D.flops
+           ++ section' memBytes  D.memories
+```
+
+Measured against master's record, three things are missing and one is absent
+entirely:
+
+| master field | DCERT1 |
+| --- | --- |
+| `DesignCert.clocks : Array ClockDesc` | **no section at all** |
+| `FlopDesc.clock : Nat` | not in `flopBody` |
+| `FlopDesc.asyncReset : Bool` | not in `flopBody` |
+| `MemoryDesc.clock : Nat` | `memBody = aw dw nextImg` — not there |
+
+### 11.2 Decision 1 — a `String` cannot ride in a newline-framed record
+
+`ClockDesc.name` is a `String`, and DCERT1 frames records with spaces and
+newlines (`memBody = natBytes aw ++ spc … ++ [chNL]`). A clock named with a
+space or a newline would break the framing silently, and the round-trip theorem
+promises **every** `DesignCert`.
+
+So a clock name is written **length-prefixed**: its UTF-8 byte count, a space,
+then exactly that many bytes. The reader takes the count and then those bytes
+without scanning for a delimiter, so no byte sequence in a name can be
+mistaken for structure. This is what makes the Unicode and whitespace cases in
+D4's required evidence provable rather than merely untested.
+
+### 11.3 Decision 2 — DCERT1 may not silently become a one-clock design
+
+Master's `DesignCert` documents that a certificate which does not spell
+`clocks` is the one implicit domain with everything on ordinal 0 — *"exactly
+what every certificate emitted before clock provenance existed meant."* That is
+a legitimate **schema** default for a record.
+
+A DCERT1 **byte stream** is a different matter: it carries no statement about
+whether its design was single-clock. Reading it as one is an assumption about
+the *design*, not a default of the record — and that is exactly the silent
+metadata defaulting that must not happen for edge-aware execution.
+
+The disposition:
+
+- the magic becomes **`DCERT2`**, and `parseCert` accepts only that;
+- a `DCERT1` stream is a **named refusal** from `parseCert`, not an upgrade;
+- a separate, deliberately-named entry point reads DCERT1 **with the
+  single-clock assumption in its name**, so the assumption cannot be made by
+  accident or inherited by a caller that did not ask for it.
+
+### 11.4 Obligations, none of them discharged yet
+
+1. `renderCert`/`parseCert` extended with the clocks section, `FlopDesc.clock`,
+   `FlopDesc.asyncReset` and `MemoryDesc.clock`;
+2. `parseCert_renderCert` re-established over the **clock-aware** record — D4's
+   proof is ~900 lines over the clockless one, and the promise must not be
+   narrowed to the fields that happen to be covered;
+3. negatives: a flop naming a clock ordinal outside `clocks` must **fail to
+   parse**, not default to 0; truncated input; extra fields; an unsupported
+   version;
+4. names with whitespace, multi-byte UTF-8 and an embedded newline must
+   round-trip;
+5. byte/field parity against a fresh C++ `CertificateIR` serializer;
+6. `Int.toNat` on `Op_Sum` and `Op_MemWriteBE` payloads normalizes negatives to
+   zero — the malformed-data contract is settled **before** any blanket
+   rejection claim;
+7. the stale header calling the reader "UNVERIFIED, and therefore trusted" is
+   corrected: the implementation below it is already `TOTAL, not partial`.
+
+### 11.5 The `Compiler.CertIO` name collision
+
+D4 and FP both define `Compiler.CertIO`, and FP's deliberately drops what D4
+keeps. **Neither is dropped.** They become separate internal modules behind a
+facade, so D4's checked-compiler and bounded-slot behaviour and FP's
+`asyncOK`/transport constraints both survive under their own names. Resolving
+the collision by deleting either side's constraints is not available.
+
+## 12. D3 runtime repairs, carried onto the clock-aware schema
+
+### 12.1 One commit, four guards
+
+All four boundary repairs come from a single D3 commit:
+
+**`9368703518e673db551dd969b1d1b373a3377b44`**, 2026-10-01,
+*"formal/lean: guard the wide-shift arms so a huge shift amount cannot kill
+Lean"* — 258 insertions, 14 deletions across `ResidualSemantics.lean` (+14),
+`LGraphModel.lean` (+54), `OpBridge.lean` (+103) and a 101-line boundary probe.
+
+**Cause, in its own words.** Three CORE-ET modules died at the `reify` gate with
+`INTERNAL PANIC: Nat.pow exponent is too big` — `minion_dcache_tensor_load`,
+`vpu_ml`, `vpu_tensorquant`. Not wide data paths: 1024/1025-bit widths evaluate
+fine. It was raising 2 to a shift **amount**, which is a *value*; those designs
+carry 33-bit amount operands, so the exponent reached ~8.6 × 10⁹. The fix is a
+guard, **not a narrower stimulus** — narrowing would have hidden the panic while
+leaving the semantics able to produce it.
+
+**The three saturation widths are different, and swapping them is a semantic
+change rather than a crash fix:**
+
+| op | saturates at | result |
+| --- | --- | --- |
+| SHL | `k ≥ w`, the **RESULT** width | `0` — `shl_bridge` shifts `(zext a : BitVec w)` |
+| SRA | `k ≥ a.width`, the **SOURCE** width | all sign bits: `mk_bv w 0` when `a.width = 0` or `bv_sint a ≥ 0`, else `mk_bv w (-1)` |
+| Sext | `n = 0` → `0`; `n > a.width` → `mk_bv w (bv_uint a)` (zero extension) | `n = a.width` is the **equality boundary** and keeps SIGN extension — it is not in the `>` arm |
+
+`sem_sra` shifts at the source width and only then widens, so saturating SRA at
+`w` would be wrong wherever `w > a.width`. Value-preservation is proved, not
+asserted: `mk_bv_mul_two_pow_ge`, `shl_guard_eq` and `bv_sra_guard_eq`, so
+`sra_bridge`, `sra_bridge_sext`, `shl_bridge`, `sext_bridge` and
+`sext_bridge_low` keep proving the same statements about the same values.
+
+### 12.2 Carried without the clockless schema
+
+All four are **absent from master**: `k ≥ x.width`, `n > a.width`,
+`bv_sra_guard_eq` and both saturation comments return nothing.
+
+The commit's diff applies to master's files **cleanly, with offsets only** — so
+the guards are orthogonal to the clock work. After applying, checked
+explicitly: master's `inReset && (edge || f.asyncReset)` is still there, and
+D3's clockless `if inReset then …` did **not** come along. Diffing the whole
+files would have brought it.
+
+### 12.3 Build, interface and boundary evidence
+
+| module | exit | wall | peak RSS |
+| --- | ---: | ---: | ---: |
+| `Translation/LGraphModel` | 0 | 14.88 s | 633,412 kB |
+| `Compiler/ResidualSemantics` | 0 | 3.50 s | 495,256 kB |
+| `Translation/OpBridge` | 0 | 47.42 s | 6,809,644 kB |
+| the three `*Defs` | 0 | 2.20–4.91 s | 482,276–489,780 kB |
+| the three wrappers | 0 | 32.74–35.09 s | 6,727,408–6,773,052 kB |
+
+**Interface audit: IDENTICAL to live.** All 45 `#check` shapes and axiom lists
+unchanged by the guards.
+
+**Boundary matrix: `BOUNDARY-MATRIX OK`**, 1.70 s, 473,172 kB — D3's own
+`d3_shift_boundary_test.lean`, 33 `#guard`s, run unchanged. Stimulus bounds were
+not shrunk.
+
+### 12.4 Reify, ReifyGen and D3Harness onto the clock-aware runtime
+
+D3's three modules carry **zero** clock-aware mentions and call the
+**two-argument** `denoteResidual R i s`; master's takes an explicit
+`ClockEdges`. The migration surface is small and was checked rather than
+assumed: `ReifyGen` emits no reference to it, `Reify` mentions it only in prose,
+and the real call sites are **two**, both in `D3Harness` (`agree` and
+`checkerSelfTest`), both with `D` in scope.
+
+Both now pass **`allEdges D` explicitly** — the recorded legacy contract,
+written at the call rather than defaulted somewhere, so the contract the
+harness checks under is visible.
+
+`Reify` then failed on `flopNext env s idx f`: master's `flopNext` takes a
+`ClockEdges`, and its value-level helper `flopNextV` **does not exist on master
+at all** — it is a D3 addition, and D3's is clockless (no edge, no
+`asyncReset`, reset arm `if inReset then …`). So it is carried, not copied:
+`flopNextV` gains `edge` and `asyncReset` and reproduces `flopNext`'s rule
+exactly — a quiet domain holds, except for an asynchronous reset, which does
+not wait for an edge — and `flopNext_eq` is restated with `fires e f.clock` and
+`f.asyncReset` passed explicitly. A reifier that silently assumed a firing edge
+would be stating something false of a quiet domain.
+
+Inserting that helper reproduced the **same** defect as the splitter's: placed
+before `def flopNext`, it landed between that declaration and its doc comment
+and left the comment dangling. Re-inserted above the comment.
