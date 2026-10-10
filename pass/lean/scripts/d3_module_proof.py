@@ -316,6 +316,17 @@ def main() -> int:
                       for x in txt.splitlines()
                       if "d3_guarded_build:" in x and "peak=" in x), 0)
     charge_src = "wrapper"
+    # THE KERNEL'S OWN COUNTER, not an inference from the exit status.
+    #
+    # `d3_guarded_build.py` prints `oom_kill=<n>` from the cgroup's
+    # `memory.events` and returns 137 WHEN KILLED -- but it also passes a
+    # command's own 137 straight through. So 137 alone does not say the cap
+    # acted: measured, a child exiting 137 by itself reports `oom_kill=0`,
+    # while a real kernel OOM at the cap reports `oom_kill>0`. Attributing
+    # memory on the exit status alone labelled both the same.
+    final_oom_kill = next((int(x.split("oom_kill=")[1].split()[0])
+                           for x in txt.splitlines()
+                           if "d3_guarded_build:" in x and "oom_kill=" in x), 0)
     if not charge_kb and cgpath_file.exists():
         try:
             cgdir = pathlib.Path(cgpath_file.read_text().strip())
@@ -358,21 +369,25 @@ def main() -> int:
     # reviewer needs to know: whether the gate was evaluated and disagreed, or
     # was never reached. 143 is SIGTERM, i.e. killed from outside.
     #
-    # 137 IS THE MEMORY GUARD, AND IT WAS LANDING IN `not_proved`.
+    # MEMORY IS ATTRIBUTED ON EVIDENCE, NOT ON THE EXIT STATUS.
     #
-    # `d3_guarded_build.py` returns the command's status, or 137 when the
-    # CGROUP OOM-killed it -- so 137 here is not a guess about a signal, it is
-    # this run's own guard reporting that it stopped the composition. Measured
-    # on `txfma_f4`: all 16 group builds rc=0 under the 10,000,000 kB group
-    # cap, then the composition killed at a cgroup peak of exactly its
-    # 14,000,000 kB `final_max_kb`, with no gate line at all -- and the status
-    # read `not_proved`, which says the gate was evaluated and disagreed. It
-    # was never reached. That is an UNPROVEN-AFTER-A-RESOURCE-STOP, not a
-    # theorem that failed, and the two must not share a label.
+    # A composition stopped by the cap is UNPROVEN AFTER A RESOURCE STOP, not a
+    # theorem that failed, and the two must not share a label -- `not_proved`
+    # says the gate was evaluated and disagreed, when it was never reached.
+    # Measured on `txfma_f4`: all 16 group builds rc=0 under the 10,000,000 kB
+    # group cap, then the composition stopped at a cgroup peak of exactly its
+    # 14,000,000 kB `final_max_kb`, with `oom_kill=3` and no gate line at all.
+    #
+    # But 137 ALONE is not that evidence. `d3_guarded_build.py` returns 137
+    # when the kernel killed something AND passes a command's own 137 straight
+    # through, so a child that simply exits 137 reports `oom_kill=0` and was
+    # being labelled `rss_killed` exactly like a real OOM at the cap. The
+    # kernel's counter decides; a 137 without it is an outside kill, which is
+    # what `killed` already means for 143.
     status = ("proved" if proved else
               "timeout" if rc == RC_TIMEOUT else
-              "rss_killed" if rc == 137 else
-              "killed" if rc == 143 else
+              "rss_killed" if (rc == 137 and final_oom_kill > 0) else
+              "killed" if rc in (137, 143) else
               "not_proved")
     res = {"status": status,
            "gate_axioms_within_allowed": axioms_ok,
@@ -392,6 +407,7 @@ def main() -> int:
                                if l.strip()]
                               if a.phase_markers and phases.exists() else []),
            "final_rc": rc, "final_max_rss_kb": rss, "final_wall_s": round(wall, 2),
+           "final_oom_kill": final_oom_kill,
            "final_cgroup_peak_kb": charge_kb,
            "final_cgroup_peak_source": charge_src,
            "gate_line": gate, "group_builds": rows,

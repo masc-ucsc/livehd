@@ -862,6 +862,79 @@ def resolve_lean():
     return binp, env, digest
 
 
+def clear_stale_result(stale: pathlib.Path) -> str:
+    """Remove a previous `result.json`; return "" or why freshness is unknown.
+
+    FRESHNESS MUST BE ESTABLISHED, NOT ATTEMPTED. The caller used to unlink
+    inside a bare `except OSError: pass`, so when the removal FAILED -- a
+    directory mode of 0555 is enough -- the old file survived, a worker that
+    created nothing exited 0, and that preseeded result was read and credited.
+    If the file is still there afterwards, this run cannot tell its own output
+    from someone else's, and the caller must refuse rather than guess.
+    """
+    if not stale.exists():
+        return ""
+    try:
+        stale.unlink()
+    except OSError as e:
+        return f"{e.__class__.__name__}: {e}"
+    return "still present after unlink" if stale.exists() else ""
+
+
+def read_module_result(path: pathlib.Path) -> "tuple[dict, str]":
+    """Parse a module-proof `result.json`; return `(result, why_unusable)`.
+
+    STRUCTURE AND TYPES, before any field is touched. `json.loads` returns
+    whatever the file holds: a list or a scalar made `res.get(...)` raise
+    AttributeError and a non-string `cert_sha256` made the slice raise
+    TypeError, and BOTH propagated out of the proof stage and erased the
+    `cert..agree` the executable stage had already earned. A malformed result
+    may cost the proof credit and nothing else.
+    """
+    try:
+        raw = json.loads(path.read_text())
+    except Exception as e:  # noqa: BLE001
+        return {}, f"{e.__class__.__name__}: {e}"
+    if not isinstance(raw, dict):
+        return {}, f"result.json is a {type(raw).__name__}, not an object"
+    bad = [k for k in ("status", "cert_sha256") if k in raw and not isinstance(raw[k], str)]
+    if bad:
+        return {}, "non-string " + ", ".join(f"{k}={type(raw[k]).__name__}" for k in bad)
+    return raw, ""
+
+
+def admit_module_result(res: dict, res_err: str, worker_rc: int,
+                        want_cert: str, cert_after: str,
+                        stale_blocked: str) -> list:
+    """Why this module-proof result may NOT be credited; empty means it may.
+
+    The driver's own checks -- gate line, rc, allowed axioms, olean drift --
+    are what `status == "proved"` already means. This is the boundary around
+    them: the worker must have SUCCEEDED, the result must be THIS run's, and
+    it must be about the certificate SELECTION bound, which must still be the
+    bytes on disk.
+    """
+    out = []
+    if stale_blocked:
+        out.append(f"could not clear a previous result.json, so this run's output "
+                   f"is not identifiable ({stale_blocked})")
+    if worker_rc != 0:
+        out.append(f"worker exit {worker_rc}")
+    if cert_after != want_cert:
+        out.append(f"the certificate changed during the proof: selected "
+                   f"{want_cert[:16]}, now {cert_after[:16] or '<absent>'}")
+    if not res:
+        out.append("no usable result.json from this run" + (f": {res_err}" if res_err else ""))
+    else:
+        got = res.get("cert_sha256", "")
+        if got != want_cert:
+            out.append(f"result names certificate {got[:16] or '<absent>'}, "
+                       f"this target is {want_cert[:16]}")
+        if res.get("status") != "proved":
+            out.append(f"driver status {res.get('status') or '<absent>'!s}")
+    return out
+
+
 def run_group(cmd, cwd, timeout, env=None):
     """Run `cmd` in its own session; return (combined output, returncode).
 
@@ -2024,28 +2097,49 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             # and must not be mistaken for this one's. Removed before the
             # worker runs, so the only file that can be read afterwards is the
             # one this invocation produced.
-            stale = mdir / "result.json"
-            had_stale = stale.exists()
-            if had_stale:
-                try:
-                    stale.unlink()
-                except OSError:
-                    pass
+            # Freshness, decided by `clear_stale_result` so the same code a
+            # control can drive directly is the code that runs here.
+            stale_blocked = clear_stale_result(mdir / "result.json")
             nb = _pre.get("bindings") or row.get("bindings") or 0
-            mp = subprocess.run(
+            # THE INPUT IDENTITY IS THE ONE SELECTION BOUND, taken BEFORE the
+            # worker runs. Hashing the certificate afterwards let a worker
+            # append to it and submit the NEW digest: the result matched, the
+            # row still named the old input, and `module_proof=1` was credited
+            # over byte drift. Reproduced against this CLI.
+            want_cert = row.get("cert_sha256") or sha256_of(cert)
+            # THROUGH `run_group`, SO THE AGGREGATE CAP CAN ACT ON IT.
+            #
+            # This was a plain `subprocess.run`, which registers nothing: the
+            # sampler COUNTED the module worker -- its `--out-dir` carries this
+            # run's directory, so `_marked_pids()` sees it and its children --
+            # while `_reap_all()`, which walks `_GROUPS`, could never terminate
+            # it. Measured: a bounded 80 MiB module child under a 90,000 kB
+            # sampled cap was counted at 131,264 kB, the sampler reported no
+            # probe running, the child then completed, and `module_proof=1` was
+            # credited over the cap.
+            #
+            # `run_group` starts it in its own session and registers the pgid,
+            # so the group -- worker, its `lake`/`lean` stages and anything
+            # they spawn -- is terminated together, with `_reap`'s bounded
+            # grace and `_sweep_orphans` as the last resort. The per-group and
+            # final caps inside the worker are untouched; this adds the
+            # aggregate one, which was already supposed to apply.
+            mp_out, mp_rc = run_group(
                 [sys.executable, str(SCRIPTS / "d3_module_proof.py"),
                  "--cert", str(cert), "--module", m, "--bindings", str(nb),
                  "--chunk-size", str(CHUNK_SIZE),
                  *(["--timeout", str(MODULE_PROOF_TIMEOUT)]
                    if MODULE_PROOF_TIMEOUT else []),
                  "--out-dir", str(mdir)],
-                capture_output=True, text=True)
-            res = {}
-            try:
-                res = json.loads((mdir / "result.json").read_text())
-            except Exception as e:  # noqa: BLE001
+                cwd=None, timeout=None)
+            # The certificate must still be the one that was selected. A proof
+            # about bytes that are no longer on disk is about nothing this row
+            # names.
+            cert_after = sha256_of(cert) if cert.exists() else ""
+            res, res_err = read_module_result(mdir / "result.json")
+            if res_err:
                 row["detail"] = (row.get("detail", "") +
-                                 f" module-proof produced no result.json: {e}").strip()
+                                 f" module-proof result unusable: {res_err}").strip()
             # `status == "proved"` is the driver's own verdict: exact gate line,
             # rc 0, allowed axioms, and no olean drift. Anything else is 0 and
             # UNDECIDED -- it never raises `verdict`, which stays whatever the
@@ -2068,20 +2162,8 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             # What is added here is the boundary around them: the worker must
             # have SUCCEEDED, and the result must be THIS run's, about THIS
             # certificate.
-            want_cert = sha256_of(cert)
-            refusals = []
-            if mp.returncode != 0:
-                refusals.append(f"worker exit {mp.returncode}")
-            if not res:
-                refusals.append("no result.json from this run"
-                                + (" (a stale one was removed)" if had_stale else ""))
-            else:
-                got_cert = res.get("cert_sha256", "")
-                if got_cert != want_cert:
-                    refusals.append(f"result names certificate {got_cert[:16] or '<absent>'}, "
-                                    f"this target is {want_cert[:16]}")
-                if res.get("status") != "proved":
-                    refusals.append(f"driver status {res.get('status') or '<absent>'!s}")
+            refusals = admit_module_result(res, res_err, mp_rc, want_cert,
+                                           cert_after, stale_blocked)
             row["module_proof"] = 0 if refusals else 1
             # The admission decision, recorded whether it accepted or refused.
             # `ok` is not the same statement as `module_proof_status=proved`:
@@ -2106,8 +2188,8 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             if res.get("olean_drift"):
                 row["detail"] = (row.get("detail", "") +
                                  " module-proof olean drift during composition").strip()
-            if mp.returncode != 0 and not row["module_proof"]:
-                tail = (mp.stderr or mp.stdout or "").strip().splitlines()
+            if mp_rc != 0 and not row["module_proof"]:
+                tail = (mp_out or "").strip().splitlines()
                 if tail:
                     row["detail"] = (row.get("detail", "") +
                                      f" module-proof: {tail[-1][:160]}").strip()

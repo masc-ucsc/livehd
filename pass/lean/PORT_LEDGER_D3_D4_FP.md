@@ -2415,6 +2415,91 @@ The `d3_scheduler_test` row is the one that matters: it was the failing check
 that exposed §29.5's defect, and it passes now with `killed` non-empty, so the
 two neighbours that had been vacuous are doing work.
 
+### 29.8 Admission bound to the selected input, and to freshness
+
+Three further ways the module result was credited wrongly, each reproduced
+against the actual CLI before the repair:
+
+- **A preseeded result the run could not remove.** The removal sat inside a
+  bare `except OSError: pass`, so a directory mode of `0555` was enough: the
+  old file survived, a worker that created nothing exited 0, and that result
+  was read and credited. Freshness is now **established, not attempted** —
+  `clear_stale_result` reports why it failed and the run refuses, because it
+  cannot tell its own output from someone else's.
+- **A worker that rewrote its own input.** `want_cert` was hashed AFTER the
+  worker ran, so a worker could append a comment to the certificate and submit
+  the new digest: the result matched, the row still named the old input, and
+  the proof was credited over byte drift. The identity is now the one
+  **selection bound**, and the certificate is re-hashed afterwards to confirm
+  it is still those bytes.
+- **Malformed results erased earned work.** `json.loads` returns whatever the
+  file holds; a list or a scalar made `res.get(...)` raise `AttributeError`
+  and a non-string `cert_sha256` made the slice raise `TypeError`, and both
+  propagated out of the proof stage and **destroyed the `cert..agree` the
+  executable stage had already earned**. `read_module_result` validates
+  structure and types first, so a malformed result costs the proof credit and
+  nothing else.
+
+The decision now lives in three functions — `clear_stale_result`,
+`read_module_result`, `admit_module_result` — which `run_one` calls and a
+control can drive directly.
+
+### 29.9 The aggregate cap now reaches the module worker
+
+§29.6 recorded that the sampler **counted** the module worker while
+`_reap_all()` could never terminate it. Measured end to end: a bounded 80 MiB
+module child under a 90,000 KiB sampled cap was counted at 131,264 KiB, the
+sampler reported no probe running, the child completed, and `module_proof=1`
+was credited over the cap.
+
+The worker is now launched through **`run_group`**, the sweep's own mechanism:
+its own session, its pgid registered in `_GROUPS`, so the whole group — the
+worker, its `lake`/`lean` stages and anything they spawn — is terminated
+together, with `_reap`'s bounded grace and `_sweep_orphans` as the last
+resort. **The per-group and final caps inside the worker are untouched**; this
+adds the aggregate one, which was already supposed to apply. No cap value
+changed and no counted memory is hidden.
+
+### 29.10 Memory attributed on evidence, not on the exit status
+
+§29.3 replaced `not_proved` with `rss_killed` for `rc == 137`. That was still
+too coarse. `d3_guarded_build.py` returns 137 when the kernel killed something
+**and** passes a command's own 137 straight through, so a child that simply
+exits 137 reports `oom_kill=0` and was being labelled exactly like a real OOM
+at the cap.
+
+The driver now parses `oom_kill=` from the guard's own line — the kernel's
+counter from `memory.events` — and records it as `final_oom_kill`.
+`rss_killed` requires `rc == 137` **and** `oom_kill > 0`; a 137 without it is
+`killed`, which is what 143 already meant. The real `txfma_f4` composition had
+`oom_kill=3` at a 14,000,000 KiB cap with no proof gate, so it keeps
+`rss_killed` and remains **unproven after a resource stop**.
+
+### 29.11 Controls, isolated
+
+`d3_module_admit_controls.sh` was rewritten. The previous version **overwrote
+the live `d3_module_proof.py`** and restored it from a trap, and its stale leg
+preseeded one directory while the run chose another — so that leg passed
+without ever reading a stale file.
+
+It now drives `clear_stale_result`, `read_module_result` and
+`admit_module_result` in the **live module, imported and never written to**,
+against real filesystem state: actual files, an actual `0555` directory, an
+actual mutated certificate copy, each in its own context. Two alternatives
+were tried and rejected: a copied sweep cannot resolve its Lean root (it looks
+for `generated/formal/lean`), and adding a worker-path seam to production code
+for a test is what `d3_sweep.py`'s own note argues against.
+
+**19 legs, all passing**, including that the live sweep, the live worker and
+the source certificate are byte-identical afterwards. End-to-end CLI evidence
+is kept separately and not duplicated: the RAM fixture gives `module_proof=1
+module_admit=ok` through the real backend (re-confirmed after these changes —
+13.46 s, cgroup peak 779,644 KiB), and `txfma_f4` gives `rss_killed` with the
+proof refused and `verdict=agree` retained.
+
+All six restored D3 tests and the other control suites still pass after the
+change.
+
 ### 29.6 The aggregate limit counts memory it cannot terminate
 
 Observed on the `txfma_f4` module run, and verified rather than inferred:
