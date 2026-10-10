@@ -2113,12 +2113,24 @@ n=8 runs were retained. The two missing ones — naive × chain and naive × far
   column as `GEN_FAIL(rc=N)` with `cpu_s` `NA`, so it can never read as a slow
   pass.
 
-`d3_bench_generation_controls.sh` drives the actual CLI over six legs,
-including a stale artifact pre-seeded at the exact path the row would use.
-**Non-vacuity measured**: the committed bench fails 5 of 6 — the stale leg
-reports `OK`, which is the defect — and the repaired one passes 6 of 6. The
-controls swap a failing stub in for `d3_gen.py` and restore it from a `trap`,
-and the last leg checks the generator is byte-identical afterwards.
+- **The baseline row was never taken.** `timeit` grew a row-directory
+  argument and the baseline call did not, so under `set -u` the command
+  substitution aborted with `$2: unbound variable`: the baseline child never
+  ran, `BT`/`BS` came back empty, and the script wrote a **five-field blank
+  row beneath a six-field header** and exited 0 — a zero subtracted from every
+  measurement, with nothing to show it was never taken. The baseline now has
+  its own evidence directory, writes a fresh artifact, records its hash and
+  emits a complete row through the same path as every other row.
+
+`d3_bench_generation_controls.sh` drives the actual CLI over ten legs,
+including a stale artifact pre-seeded at the exact path the row would use, and
+the baseline's success, nonzero-child and timeout paths.
+**Non-vacuity measured twice**: against the committed `d3_bench2.sh` the
+generation legs fail 5 of 6 — the stale leg reports `OK`, which is the defect
+— and against the committed `d3_bench.sh` all four baseline legs fail, the row
+coming back with five fields and a blank status. The repaired scripts pass 10
+of 10. The controls swap a failing stub in for `d3_gen.py` and restore it from
+a `trap`, and a leg checks the generator is byte-identical afterwards.
 
 Smoke run at n=4, three points, all `OK`, **zero files left in `/tmp`**.
 **Non-vacuity measured**: with `ELAN_HOME` pointed at a stub `lake` that exits
