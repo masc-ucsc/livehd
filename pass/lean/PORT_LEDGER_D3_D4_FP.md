@@ -2333,21 +2333,58 @@ matched the literal `d3_fast R 32` where master's call is clock-aware, so it
 now matches the report call and still requires `R` to be the argument after the
 model — both halves, neither relaxed.
 
-### 29.5 The open failure, stated without a cause
+### 29.5 The restored test found a real defect in the sweep
 
-`d3_scheduler_test`'s **`hard_kill_terminates_running`** fails: `killed` is
-empty. What is established — the hard limit fires and is reported
-(`hard_kill_reported` passes), the queue defers correctly behind it
-(`hard_kill_queued_deferred_not_killed` passes, 4 targets), the probe is a
-stub with `STUB_DELAY=3` against a 0.05 s sampler, and the sampled-kill row
-requires `_RSS_KILL.is_set() and rc != 0` while the probe came back `rc == 0`
-with `verdict=agree`.
+`d3_scheduler_test`'s **`hard_kill_terminates_running`** failed, and the cause
+turned out to be in `d3_sweep.py`, not in the test.
 
-What is **not** established is why the reap left it at `rc == 0`. I first
-assumed a race between a fast probe and the sampler; the 3-second stub delay
-rules that out. **No cause is recorded**, and two neighbouring checks
-(`hard_kill_launched_not_failed`, `hard_kill_resumable`) pass **vacuously**
-over the empty set, so this is worse than one failing check.
+The hard-limit branch announced *"terminating the running probe(s)"*, set
+`_RSS_KILL` and `_RSS_STOP`, reaped, and returned — **all of it
+unconditionally**. When the trip happens BEFORE the first probe launches,
+which it does whenever the driver's own RSS already exceeds the limit, there is
+nothing in `_GROUPS` to reap. The monitor then exits, `_RSS_STOP` defers the
+rest of the queue, and the first probe launches afterwards and runs
+**unwatched**.
+
+Reproduced directly, 1 kB limit, 3-second probe:
+
+```
+d3_sweep: AGGREGATE RSS 41964 kB reached the HARD limit 1 kB -- terminating the
+          running probe(s).
+[1/3] blk00_gate      agree      3.05s rss=11028kB
+```
+
+The line is printed, nothing is killed, and the probe runs its full three
+seconds to `agree`.
+
+**Repaired**: `_reap_all()` returns how many groups it terminated, and the trip
+is latched only when that is non-zero. Otherwise the monitor logs once and
+**keeps sampling**, so the next probe to launch is the one it stops. This can
+only ever kill MORE, never less — it does not weaken the resource policy, it
+makes it do what it already claimed.
+
+After the repair, same reproduction:
+
+```
+d3_sweep: AGGREGATE RSS 42024 kB is already over the HARD limit 1 kB with NO
+          probe running -- nothing to terminate yet, so the limit is not latched
+          and the monitor keeps watching. (logged once)
+d3_sweep: AGGREGATE RSS 54968 kB reached the HARD limit 1 kB -- terminated 1
+          running probe group(s).
+  blk00_gate  run_status=rss_killed  verdict=rss_killed  launched=1
+  blk01_gate  run_status=deferred    launched=0
+  blk02_gate  run_status=deferred    launched=0
+```
+
+**`SCHEDULER-TEST OK`.** And the two neighbours that had been passing
+**vacuously** over an empty `killed` set — `hard_kill_launched_not_failed` and
+`hard_kill_resumable` — now have something to check.
+
+This is what restoring the original procedures is for: the defect was in
+master's sweep, had been there through every run in this port, and only a test
+that asserts the guard ACTS could find it. My first guess at the cause was a
+race between a fast probe and the sampler; the test's own `STUB_DELAY=3` ruled
+that out, which is why it was worth reproducing rather than assuming.
 
 ## 20. D3 replay backlog — repaired
 

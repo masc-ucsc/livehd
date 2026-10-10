@@ -216,12 +216,19 @@ def _reap(pgid: int, grace: float = 3.0) -> None:
     _killpg(pgid, signal.SIGKILL)
 
 
-def _reap_all() -> None:
+def _reap_all() -> int:
+    """Terminate every tracked process group; return how many there were.
+
+    The COUNT is the point: a hard-limit trip that reaped nothing has not
+    stopped anything, and the caller must be able to tell that from a trip
+    that did.
+    """
     with _GROUPS_LOCK:
         groups = list(_GROUPS)
         _GROUPS.clear()
     for g in groups:
         _reap(g, grace=1.0)
+    return len(groups)
 
 
 def _marked_pids() -> list:
@@ -334,6 +341,9 @@ _RSS_STOP = threading.Event()
 # memory and time and keeps no row; it is worth it only when exceeding the
 # budget would hurt someone else on a shared machine.
 _RSS_KILL = threading.Event()
+# Latched so the "over the limit with nothing running" note is logged once
+# rather than on every sample.
+_RSS_IDLE_SAID = {"v": False}
 # Set once the executor has drained, so the sampler can retire instead of
 # sampling an empty process tree forever.
 _WORK_DONE = threading.Event()
@@ -692,15 +702,41 @@ def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
             if total > _RSS_PEAK["kb"]:
                 _RSS_PEAK["kb"] = total
         if kill_kb and total >= kill_kb:
+            # A TRIP THAT REAPS NOTHING HAS NOT STOPPED ANYTHING.
+            #
+            # This announced "terminating the running probe(s)", set
+            # `_RSS_KILL` and `_RSS_STOP`, reaped, and RETURNED -- all of it
+            # unconditionally. When the trip happened BEFORE the first probe
+            # launched, which it does whenever the driver's own RSS already
+            # exceeds the limit, there was nothing in `_GROUPS` to reap: the
+            # monitor then exited, `_RSS_STOP` deferred the rest of the queue,
+            # and the first probe launched afterwards ran to completion
+            # UNWATCHED. Reproduced with a 1 kB limit and a 3-second probe: the
+            # line was printed at 41,964 kB, no row was `rss_killed`, and the
+            # probe finished at 3.05 s with `verdict=agree`.
+            #
+            # So the trip is only latched when it actually terminated
+            # something. Otherwise the monitor keeps sampling, and the next
+            # probe to launch is the one it stops. This can only ever kill
+            # MORE, never less.
+            reaped = _reap_all()
+            if reaped == 0:
+                if not _RSS_IDLE_SAID["v"]:
+                    _RSS_IDLE_SAID["v"] = True
+                    print(f"d3_sweep: AGGREGATE RSS {total} kB is already over the "
+                          f"HARD limit {kill_kb} kB with NO probe running -- nothing "
+                          f"to terminate yet, so the limit is not latched and the "
+                          f"monitor keeps watching. (logged once)", file=sys.stderr)
+                time.sleep(interval)
+                continue
             with _RSS_LOCK:
                 _RSS_PEAK["killed_at_kb"] = total
             print(f"d3_sweep: AGGREGATE RSS {total} kB reached the HARD limit "
-                  f"{kill_kb} kB -- terminating the running probe(s). The row is "
-                  f"recorded as rss_killed, a SCHEDULING outcome and not a gate "
-                  f"failure.", file=sys.stderr)
+                  f"{kill_kb} kB -- terminated {reaped} running probe group(s). The "
+                  f"row is recorded as rss_killed, a SCHEDULING outcome and not a "
+                  f"gate failure.", file=sys.stderr)
             _RSS_KILL.set()
             _RSS_STOP.set()
-            _reap_all()
             return
         if _RSS_STOP.is_set() and not kill_kb:
             # Only when NO hard limit is armed.  Returning here unconditionally
