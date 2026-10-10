@@ -1196,15 +1196,102 @@ runtime admission refusing an empty edge vector, an overlong one, a missing
 input and a wrong flop state while raw `runChecked` keeps its compiler-only
 contract.
 
-### 19.3 What is NOT yet proved
+### 19.3 The universal round trip — now proved
 
-`parseCert_renderCert` over the clock-aware record. The per-record lemmas for
-memory and flop are extended and close; the magic and `certBytes` lemmas are
-extended; what remains is `readClock_reads` — relating `ByteArray.extract` at
-an offset to the name's bytes, then applying the inverse above — and the sixth
-section in the top-level chain. **Until that builds and its axioms are audited,
-the universal round trip is not credited**, and the probe above is tests, not a
-theorem.
+`CertIORoundTrip.lean` builds, exit 0, zero errors, against the frozen staged
+`CertIO`:
+
+```
+Compiler.CertIO.parseCert_renderCert : ∀ (D : Compiler.DesignCert),
+  Compiler.CertIO.parseCert (Compiler.CertIO.renderCert D) = Except.ok D
+
+'Compiler.CertIO.readClock_reads'     depends on axioms: [propext, Classical.choice, Quot.sound]
+'Compiler.CertIO.parseCert_renderCert' depends on axioms: [propext, Classical.choice, Quot.sound]
+```
+
+Unconditional over every `DesignCert` on the clock-aware schema: no ASCII
+restriction on clock names, no semantic-WF hypothesis, no clock-count or
+ordinal bound, no new axiom, no `native_decide`. The source contains zero
+`sorry`, zero `axiom`, zero `native_decide`; the four `decide` uses are kernel
+decisions of closed `UInt8` facts (`isWs chSpace` and the like), which is why
+the axiom set stays at the three standard ones.
+
+The two pieces that were missing:
+
+- **`readClock_reads`.** The clock name is the one field that is not
+  whitespace-delimited — a byte count, one *checked* space, then exactly that
+  many raw UTF-8 bytes — so the reader's obligation is a `ByteArray.extract`
+  fact rather than a digit-scan fact. The bridge from a known list prefix to
+  that slice (`extract_of_known_prefix` → `ofList_byteArray_toList` →
+  `extract_utf8_from_known_prefix`) plus `clockName_utf8_inverse`
+  (`String.fromUTF8? s.toUTF8 = some s`, three tactics) closes it.
+  The reduction itself is factored into **`readClock_of_facts`**: stated over
+  the caller's facts, with an explicit `change` naming the reduced body. My
+  earlier attempt tried to reduce in place and failed — `Option.bind_some` is
+  `o.bind some = o`, not `(some a).bind f = f a`, and even with
+  `Option.bind_eq_bind` the `some`-bind kept the `extract` out of reach of the
+  bounds `simp`.
+- **The sixth section.** `hstart` now carries `section' clkBytes D.clocks` as
+  the memory section's remainder, and the chain applies
+  `readSection readClock clkBody` at `j5`, with `j6`/`hk6`/`hj6` feeding
+  `skipWs_final` and `parseCert.go`.
+
+Frozen evidence (all paired and fresh — kept separate from the earlier
+`d4codec.log` 09:41 / `d4codec.time` 08:36 pair, which is a different run):
+
+| file | sha256 |
+|---|---|
+| `src/…/Compiler/CertIO.lean` | `994ff48666bf019c499a9670a3339d7690c0f7cef4b0349be35ab44f7edd0445` |
+| `build/…/Compiler/CertIO.olean` | `4c73d7746a6bbc42269e91c436aaee4c881b431a276a533768871e2e493d93ee` |
+| `src/…/Compiler/CertIORoundTrip.lean` | `dd68516a87a6a6c119f74c38f41577c8630e0d8ca4a16305b52e30d7a98f7227` |
+| `build/…/Compiler/CertIORoundTrip.olean` | `6ed3d944cadd7b6c69b371cb5188769f44ebf63af220fdcacd3b9b97d652b1d0` |
+| `rt.log` | `7d58b6250f8e0077a01366b64ce44fa3ff819b6d34657181c93aa7de2c3462dc` |
+| `rt.time` | `452cd0bbe66cb08f119a3489abc9196082ee87ca33248f3329631dcd4ad5468c` |
+| `certio.log` (empty) | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| `certio.time` | `6352e49a93808b068671c22d73aca79730cb2eb1750adcdc2805e9f36ca30b5a` |
+
+`CertIORoundTrip`: 0:40.09 wall, 6,964,476 KiB peak.
+
+The repair came from an independent control
+(`automate_workspace/master_rebase/audits/d4_full_roundtrip_port_control_20261010/`),
+which is a **proof repair, not an installation or an acceptance** of the module
+it was derived from; what is credited here is the build above, on this tree.
+
+### 19.4 Inherited documentation corrected to the actual format
+
+Three statements in the staged modules described the predecessor, not this code,
+and are now fixed:
+
+- the wire-format block opened with `DCERT1` and listed an eight-number flop
+  record, no `clock`/`asyncReset`, a three-number memory record and no clocks
+  section. It now states the actual DCERT2 layout, that `clock` is an ordinal
+  written unconditionally, and that a clock record is a count, ONE space and
+  exactly that many raw UTF-8 bytes — with why (a name may contain a space or a
+  newline; not re-encoding is what makes the round trip hold for every name).
+- `parseCert.go`'s cursor comment said `past "DCERT1"`. It now names DCERT2 and
+  says where the magic's trailing newline goes (consumed as leading whitespace
+  by the first `readNat`).
+- the module docstring still charged the deserialiser to the trusted base as
+  "`partial` and unverified". `parseCert` is total and now verified; what stays
+  trusted is the PRODUCER of the bytes. The bullet says so, and says that
+  parsing is not admission.
+
+One inherited claim was **false on this tree**, not merely stale: the round-trip
+header credited the C++ link to "the differential parity test
+`//pass/lean:dcert_parity`". That target does not exist here — `grep` over
+`pass/lean/BUILD` and the C++ sources finds no `dcert_parity` and no DCERT
+serializer at all; `pass/lean` emits the Lean literal. The header now states
+plainly that the translation-validation link is **unsupported** by this file and
+that the runtime input path rests on the literal emitter. Building that link is
+the next deliverable (§21).
+
+### 19.5 What is still NOT credited
+
+- **C++↔Lean parity.** No owned `CertificateIR` serializer, no byte or field
+  parity run, no version/malformed/truncation/trailing controls on the C++ side.
+- **The D4/FP `Compiler.CertIO` facade** is unresolved; nothing is installed
+  into tracked paths from D4 yet.
+
 
 ## 20. D3 replay backlog (recorded, not yet repaired)
 

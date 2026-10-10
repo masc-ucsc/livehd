@@ -4944,6 +4944,7 @@ Three measurements of the same Lean code-generator constructor-arity limit:
 | --- | ---: | --- |
 | `vpu_ml` | 170 | typechecks |
 | `txfmactl_top` | 289 | **fails** (R29.2) |
+| `issue_stage_gate` | 326 | **fails** (R44) |
 | `frontend_gate` | 409 | **fails** |
 | `csr_regfile_gate` | 534 | **fails** (R42) |
 
@@ -4953,6 +4954,21 @@ toolchain, recorded as such with full provenance on each case. Not repaired:
 nesting the record, substituting `noncomputable`, upgrading the toolchain or
 any semantic workaround would each be a change the user has excluded.
 
-CVA6 legacy now stands at **30/61 terminal — 21 accepted typechecks, 7 export
-refusals, 2 typecheck failures** (`csr_regfile`, `frontend`). The queue is
-running and is not restarted.
+CVA6 legacy now stands at **37/61 terminal — 26 accepted typechecks, 8 export
+refusals, 3 typecheck failures**. The queue is running and is not restarted.
+
+Two further dispositions, independently audited and kept as failures:
+
+- **`issue_stage_gate`** — 326 flat `st_` fields; exit 1 with **3**
+  constructor-limit plus **4** `dependsOnNoncomputable` diagnostics (7 total,
+  the same split recorded in R34: the driver's `lean_errors` counts only the
+  first class). 30:10.18 wall, 12,227,900 KiB peak. This is the arity limit
+  again, at a third measured point; not repaired, for the same reason.
+- **`load_store_unit_gate`** — stops earlier than Lean entirely: `pass.legalize`
+  emits **6 combinational-loop diagnostics** and no certificate is exported, so
+  there is no typecheck to report. Recorded as an export refusal, not a Lean
+  failure.
+
+Neither is worked around: no record nesting, no `noncomputable` substitution, no
+toolchain upgrade, no native-contract change. The queue and the baseline library
+are left untouched.
