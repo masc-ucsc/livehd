@@ -1,0 +1,10 @@
+type Writer = (rd:U5, rw:Bool)
+
+comb select(wb_a:Writer, rs:U5) -> (y:Bool) {
+  y = wb_a.rw and wb_a.rd == rs
+}
+
+pub comb forward(rd:U5, rw:Bool, rs:U5) -> (y:Bool) {
+  const wb = (const rd=rd, const rw=rw)
+  y = select(wb_a=wb, rs=rs)
+}

@@ -146,13 +146,13 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
   // already-resolved view.lhs; null/typed-tmp LHS keeps the bulk fast path.
   const auto* lhs_ti_for_coerce = is_assign_node ? lookup_type_info(view.lhs) : nullptr;
   const bool  lhs_unsigned      = lhs_ti_for_coerce != nullptr && lhs_ti_for_coerce->has_type_spec
-                                  && lhs_ti_for_coerce->kind == Numeric_kind::unsigned_int && lhs_ti_for_coerce->bits != 0;
+                            && lhs_ti_for_coerce->kind == Numeric_kind::unsigned_int && lhs_ti_for_coerce->bits != 0;
   // Also materialize the RHS for a SIGNED-int / bounded LHS so the
   // first-write range-fit check (below) can run on it. An unbounded `int`/
   // `uint` (no concrete width or range) has no envelope, so it stays on the
   // fast path (and a present-but-nil range Dlop must not be treated as a
   // bound — that crashes Dlop arithmetic).
-  const bool  lhs_signed_bounded
+  const bool lhs_signed_bounded
       = lhs_ti_for_coerce != nullptr && lhs_ti_for_coerce->has_type_spec && lhs_ti_for_coerce->kind == Numeric_kind::signed_int
         && (lhs_ti_for_coerce->bits != 0 || (lhs_ti_for_coerce->range_max && lhs_ti_for_coerce->range_max->is_integer())
             || (lhs_ti_for_coerce->range_min && lhs_ti_for_coerce->range_min->is_integer()));
@@ -436,10 +436,12 @@ void uPass_attributes::process_attr_set() {
   }
   move_to_parent();
 
-  // Internal Slang process markers select the clock for subsequent memory
-  // stores. They are ordered wiring statements, not immutable type facts:
-  // leave them in the IR for tolg without propagating them through aliases.
-  if (attr_name == "__store_clock_pin" || attr_name == "__store_posclk") {
+  // Process wiring and synthesis policies are ordered statements for tolg,
+  // not immutable value/type facts. In particular, a variable's synthesis
+  // policy anchors its defining cone; copying it through scalar/tuple aliases
+  // both changes its scope and makes dotted synth keys look like field facts.
+  if (attr_name == "__store_clock_pin" || attr_name == "__store_posclk" || attr_name == "__synth_scope"
+      || attr_name.starts_with("synth.")) {
     return;
   }
 

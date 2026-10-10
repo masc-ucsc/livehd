@@ -1,0 +1,17 @@
+/*
+:name: synth_tuple_carrier
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+const Forward = import("synth_tuple_carrier/leaf.forward")
+
+// The slice is read before its tuple wire is driven. Its synthesis metadata
+// creates an attribute-only binding while the imported helper is inlined.
+pub comb top(a:U64, rs:U5, rw:Bool) -> (y:Bool) {
+  wire wb:(instruction:U64) = nil
+  const rd::[synth.color="lane"] = wb.instruction#[7..=11]
+  y = Forward(rd=rd, rs=rs, rw=rw)
+  wb = (const instruction=a)
+}
