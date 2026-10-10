@@ -1076,8 +1076,12 @@ derive every root-dependent path from the one variable — generation, source an
 provenance hashes, loaded compiler artifacts, generated-module caches, the Lake
 workspace and the composition.
 
-**Verified with two distinct complete roots**, every path moving and none
-leaking to the live tree:
+**Verified with two distinct roots.** Stated precisely, because the first
+version of this paragraph said "two distinct complete roots" and they were
+nothing of the kind: `isoA` held only a `.lake`, `isoB` was empty, and neither
+had a lakefile, a `lean-toolchain` or any Lean source. These are
+**placeholder-directory path-binding and digest-sensitivity controls**, not
+project builds. Every path moves and none leaks to the live tree:
 
 | path | isoA | isoB |
 | --- | --- | --- |
@@ -1087,10 +1091,12 @@ leaking to the live tree:
 | `gen.GEN_ROOT` | moved | moved |
 | `driver.LEAN` | moved | moved |
 
-**Drift rejection**, under the isolated root: changing one controlled
+**Digest sensitivity**, under the isolated root: changing one controlled
 `Runtime.olean` moved `artifact_digest()` from `3cc2752f82ef6521` to
-`0563344f9f4f8ec0`. **Default behaviour is unchanged** — with no variable set,
-`LEAN_DIR` is still `formal/lean`.
+`0563344f9f4f8ec0`. That is the digest responding to a change — it is **not**
+CLI drift rejection, which is a run refusing on that basis and remains
+untested. **Default behaviour is unchanged** — with no variable set, `LEAN_DIR`
+is still `formal/lean`.
 
 The stale-module, cgroup and axiom-gate contracts are untouched.
 
@@ -1115,3 +1121,33 @@ exercising it needs a complete isolated *project* — sources, lakefile and its
 own `.lake` — and standing one up while the baseline queue drains would contend
 for the same machine. Deferred, and uncredited until it runs correctly. That
 does not block the D4 and FP work, which is next.
+
+### 18.3 The source fingerprints were still unbound
+
+§18 claimed "every root-dependent path". It was not: `TOOL_FILES` listed all
+**11** Lean sources as `ROOT / "formal/lean/..."`, and `tool_digest` reads those
+paths directly. So with `D3_LEAN_ROOT` set, changing an isolated
+`D3Harness.lean` left **both** `sweep.tool_digest()` and
+`driver.runner_digest()` unchanged — the hash list still named the live
+sources.
+
+Bound to `LEAN_DIR`. The runner's own file stays `__file__`: that is the
+harness's identity and does not move with the Lean root.
+
+Measured after the fix, with a populated isolated root:
+
+| | before | after | |
+| --- | --- | --- | --- |
+| `tool_digest()` | `f507457254cb09cb` | `2da3582ebaf6bab4` | detected |
+| `runner_digest()` | `6f823474d34c1c4f` | `d60f03edd6aa50c0` | detected |
+
+`TOOL_FILES` names the isolated copy and **not** the live one; with no variable
+set it names the live sources again, with `d3_sweep.py` itself as entry 0.
+Baseline library: 25 checked, 0 changed.
+
+### 18.4 What is still open on this
+
+The full CLI source-drift admission — a run **refusing** on a changed digest,
+rather than the digest merely changing — and the imported module-backend tests.
+Both remain untested, and the backend remains deferred and uncredited while the
+baseline queue is live.

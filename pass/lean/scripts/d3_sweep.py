@@ -1299,23 +1299,32 @@ def order_by_rss(targets, path: pathlib.Path):
 # that makes old rows incomparable.
 SCRIPTS = pathlib.Path(__file__).resolve().parent
 
+# THE LEAN SOURCES COME FROM `LEAN_DIR`, the runner script from its own path.
+#
+# These 11 entries read `ROOT / "formal/lean/..."`, so with `D3_LEAN_ROOT` set
+# they still hashed the LIVE sources: changing an isolated `D3Harness.lean`
+# left both `tool_digest()` and the driver's `runner_digest()` unchanged, and
+# the "complete source/provenance binding" claimed in the ledger was not that.
+#
+# The runner's own file stays `__file__`: that is the harness's identity, and
+# it does not move with the Lean root.
 TOOL_FILES = [
     pathlib.Path(__file__).resolve(),
-    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/D3Harness.lean",
-    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/ReifyGen.lean",
-    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/Reify.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/D3Harness.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/ReifyGen.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/Reify.lean",
     # The probe loads the *Defs* modules; the proof modules are kept here anyway
     # -- see CRITICAL_OLEANS for why.
-    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/CompileDesignDefs.lean",
-    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/CompileGraphDefs.lean",
-    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/CompileOpDefs.lean",
-    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/CompileDesign.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/CompileDesignDefs.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/CompileGraphDefs.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/CompileOpDefs.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/CompileDesign.lean",
     # The proof generator. Only `--prove` loads it, but it is part of the
     # harness's identity either way: a change to it changes what `proof=1` means.
-    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/ReifyProof.lean",
-    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/ResidualSemantics.lean",
-    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/Runtime.lean",
-    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/DesignCert.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/ReifyProof.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/ResidualSemantics.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/Runtime.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/DesignCert.lean",
 ]
 
 
