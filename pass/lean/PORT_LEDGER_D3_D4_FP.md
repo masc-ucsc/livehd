@@ -1918,6 +1918,96 @@ modifications and all three CVA6 checkouts carry the same three local RTL edits
 (§25.6). A passing pilot does not close full coverage, and nothing here is
 final integrated acceptance.
 
+## 27. The full 122, and CVA6
+
+### 27.1 CORE-ET 122: dispositions
+
+Serial, optimized `lhd` `9cdba78e6b236e8c` (k8-opt), `EMIT_MAX_RSS_KB`
+8,388,608, 3600/1800 timeouts, ordinary **8192 KiB** stack. 122 rows,
+`reconciled=YES`.
+
+| | |
+|---|---:|
+| EMITTED, PARSED, `compilesOk=true`, **RAN**, with a digest | **76** |
+| EMIT_FAILED, NOT_RUN | **46** |
+
+**ACCEPTED COVERAGE: 76 of 122.** The verification exits nonzero and names
+every one of the 46; none is promoted. Their diagnostics classify as:
+
+| count | cause |
+|---:|---|
+| 12 | `comb-loop` |
+| 6 | `onehot-deferred` |
+| 4 | `bitwidth-unbounded` + `comb-loop` |
+| 4 | static gates (`const width 46 cannot hold value 1152886320234758144`, and similar) |
+| 2 | `concat-lane-width` |
+| 2 | `yosys-failed` |
+| 16 | rc=6/7 with no JSON code in the compile log |
+
+**Fixed-certificate replay: 76/76 PRESERVED**, `runtime_complete=YES`, nothing
+changed, nothing rejected, nothing re-emitted.
+
+### 27.2 Fresh against the retained historical rows
+
+The historical `coreet_122_r2_rows.tsv` is **provenance, not credit**, and the
+two runs differ in ways worth stating rather than averaging away:
+
+| | fresh | historical r2 |
+|---|---:|---:|
+| RAN | 76 | 93 |
+| NOT_RUN | 46 | 29 |
+| runtime status agrees | — | 101 / 122 |
+| ran in both, with a digest | — | 74 |
+| **identical digest** | — | **55 of 74** |
+
+**The 19 digest differences are exactly the designs whose semantics I
+changed.** Every one contains an `Op_SHL` (18) or `Op_Sext` (1) node — the two
+operators that gained guards in `3ffa4415e`. Not a partial correlation: 19 of
+19. And 39 designs containing `Op_SHL` have *identical* digests, which is what
+one expects, since only a shift amount that actually reaches the width can move
+an answer.
+
+That direction is the deliberate one. The unguarded `Op_SHL` evaluated
+`(2 : Int) ^ k` before taking the modulus, and Lean's `Nat.pow` guard panicked
+on the three real CORE-ET exponents; the guard is `shl_bridge`'s own bound.
+What this does **not** say is that the new digests are right and the old ones
+wrong in any sense beyond that: it says the difference is confined to the
+operators whose definitions changed, and nowhere else.
+
+Of the 19 that ran historically and do not now, 14 are rc=7, 4 are rc=3 (static
+gates), 1 is rc=1 (`Concat lane 0 (of 8, MSB-first) driver 'mux_19104' occupies
+2 bits but its declared window is 1`). Two that failed historically now run.
+
+### 27.3 CVA6: foundation, pilot, frozen 30
+
+Foundation built against the clean pinned checkout —
+`cva6-blockfinding`, `6cb20010…`, `cva6_tracked_clean=yes`, target
+`cv64a6_imafdc_sv39_hpdcache_wb`, bender 0.32.0, slang 9.1.214, a 353-line
+filelist and a 278 MB AST. **28 wrappers generated, 0 not in config, 2 failed,
+out of 30 declared.** The manifest pins the revision, config package, filelist,
+AST, generator and wrapper set by hash.
+
+Pilot, same settings as CORE-ET:
+
+| module | emit | runtime | shape | digest |
+|---|---|---|---|---|
+| `alu` | EMITTED | **RAN** | 1589 src, 1982 nodes | `953094210059088727` |
+| `btb` | EMITTED | **RAN** | 1059 src, 1037 nodes, 64 flops | `2825082761692869855` |
+| `cva6_hpdcache_subsystem` | EMIT_FAILED (rc=6) | NOT_RUN | — | — |
+
+Verification re-derives **every** binding — foundation, filelist, config
+package and the declared wrapper corpus all recompute to their recorded hashes,
+and `cva6_root_rev` matches the pin. ACCEPTED COVERAGE 2 of 3, the third named.
+
+The **frozen 30 is running** under the same foundation.
+
+### 27.4 What none of this is
+
+Finite seed-42 all-edges execution. The differential half did not run. A
+passing pilot does not close full coverage, `rowparts` counts are progress and
+not accepted coverage, and no part of this is final integrated master
+acceptance.
+
 ## 20. D3 replay backlog — repaired
 
 Both gaps are closed, and running them found two more.
