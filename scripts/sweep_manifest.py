@@ -40,6 +40,22 @@ def sha(p):
         return None
 
 
+def verify_digest(recorded, current):
+    """-> (state, detail). Never mints a digest from the file as it stands now.
+
+    The orchestrator records a 16-hex PREFIX of sha256; this file computes the
+    full digest. Comparing them means comparing prefixes, and the width
+    difference is exactly why the first version compared nothing at all.
+    """
+    if not recorded or not isinstance(recorded, str):
+        return "unrecorded", "the record carries no digest to check against"
+    n = len(recorded)
+    if current[:n] == recorded:
+        return "match", ""
+    return "mismatch", (f"recorded {recorded}, current {current[:n]} "
+                        f"-- the bytes on disk are not the bytes the record describes")
+
+
 def has_design_cert(p):
     try:
         return "_designCert" in Path(p).read_text(errors="replace")
@@ -55,13 +71,16 @@ def main():
                     help="FAMILY=DIR -- a directory of current artifacts for a family "
                          "whose replay jobs carry no DesignCert (DINO). Recorded with "
                          "its own provenance, never presented as a replay record.")
+    ap.add_argument("--results", type=Path,
+                    help="results directory (default: the replay's). Lets a control drive "
+                         "this CLI against its own fixtures instead of a reimplementation.")
     ap.add_argument("--fingerprint", type=Path,
                     default=ROOT / "generated" / "master_port" / "d2_runtime"
                                  / "library_fingerprint.txt")
     a = ap.parse_args()
 
     invs = a.inventory or [ROOT / "generated" / "master_port" / "replay" / "inventory.json"]
-    results = ROOT / "generated" / "master_port" / "replay" / "results"
+    results = a.results or (ROOT / "generated" / "master_port" / "replay" / "results")
 
     entries = []
     for inv_path in invs:
@@ -87,6 +106,42 @@ def main():
                 if side.exists():
                     e["sidecar"] = str(side.relative_to(ROOT))
                     e["sidecar_sha256"] = sha(side)
+
+                # THE FILE AS IT STANDS NOW IS NOT EVIDENCE OF WHAT WAS PROVED.
+                #
+                # This hashed the file and wrote that down. It never compared it
+                # with the digest the EXPORT recorded -- the two are not even the
+                # same width (the orchestrator stores a 16-hex prefix, this stores
+                # 64), which is proof enough that no comparison was happening.
+                #
+                # Measured externally: flipping one 5-bit source constant from 20
+                # to 19 left the manifest labelling the case `sweepable` and
+                # carrying its PROVEN record, and the sweep then reported ACCEPTED
+                # against the ORIGINAL artifact_sha256. A direct evaluator may
+                # perfectly well admit the changed model; what it may not do is
+                # attribute that run to the original source and proof.
+                #
+                # Absent provenance stays unresolved -- a missing recorded digest
+                # is not a clean one, and it is never minted from the file now.
+                # COMPARE AGAINST THE DIGEST THAT DESCRIBES *THIS* PATH. An
+                # accepted export records `artifact_sha256`; a produced-then-
+                # refused candidate records `artifact_produced_sha256`. Reading
+                # the former for the latter reported five refusals as
+                # "provenance unresolved" when their digest was recorded all
+                # along -- an absent-evidence verdict minted by looking in the
+                # wrong place.
+                rec_digest = (rec.get("artifact_sha256") if art
+                              else rec.get("artifact_produced_sha256"))
+                prov = verify_digest(rec_digest, e["artifact_sha256"])
+                e["artifact_provenance"] = prov[0]
+                if prov[1]:
+                    e["provenance_detail"] = f"artifact: {prov[1]}"
+                if "sidecar" in e:
+                    sp = verify_digest(rec.get("sidecar_sha256"), e["sidecar_sha256"])
+                    e["sidecar_provenance"] = sp[0]
+                    if sp[1]:
+                        e["provenance_detail"] = ((e.get("provenance_detail", "") + "; ")
+                                                  + f"sidecar: {sp[1]}").lstrip("; ")
                 # CLASSIFY ON THE STATE, NOT ON WHICH FIELD HELD THE PATH.
                 #
                 # The first version read `artifact` as "accepted" and
@@ -96,7 +151,31 @@ def main():
                 # field -- so they came through as `sweepable`. Four gate-refused
                 # candidates would have been swept as accepted exports, which is
                 # precisely the promotion this manifest exists to prevent.
-                if not has_design_cert(full):
+                # THE ARTIFACT'S DIGEST GOVERNS THE DISPOSITION; a sidecar that
+                # was never recorded does not.
+                #
+                # A produced-then-refused candidate records `artifact_produced_
+                # sha256` and no sidecar digest at all -- the orchestrator only
+                # writes one on the EXPORTED path. Taking the worst of the two
+                # therefore reported five refusals as "provenance unresolved"
+                # although the artifact digest matched exactly. It is the
+                # ARTIFACT that an export or proof disposition is attributed to.
+                #
+                # A sidecar that IS recorded and disagrees is still a mismatch:
+                # that is contradicted evidence, not absent evidence.
+                prov_state = e.get("artifact_provenance", "match")
+                if e.get("sidecar_provenance") == "mismatch":
+                    prov_state = "mismatch"
+                if prov_state == "mismatch":
+                    # A NAMED NON-SUCCESS. Not swept, not investigated, not
+                    # silently dropped: the bytes on disk are not the bytes the
+                    # record describes, and that has to be visible.
+                    e["classification"] = "provenance_mismatch"
+                    e["why"] = e.get("provenance_detail", "digest disagrees with the record")
+                elif prov_state == "unrecorded":
+                    e["classification"] = "provenance_unresolved"
+                    e["why"] = e.get("provenance_detail", "the record carries no digest to check")
+                elif not has_design_cert(full):
                     e["classification"] = "legacy_only"
                     e["why"] = "the artifact is a legacy GraphCert; it has no DesignCert to check"
                 elif e["export_state"] == "EXPORTED":
@@ -114,23 +193,52 @@ def main():
                 e["why"] = rec.get("detail") or ("not yet run" if not rec else "no artifact recorded")
             entries.append(e)
 
+    # --extra IS A FALLBACK, AND ONLY A FALLBACK.
+    #
+    # The first version appended these unconditionally and relied on
+    # content-hash dedupe to sort it out. That only works when the payloads are
+    # byte-identical: if a FRESH replay export for the same family/case/mode
+    # differs from the retained one at all -- which is the normal case, since a
+    # fresh export has its own run id -- BOTH ran, under the same configured
+    # identity, and the retained one was indistinguishable from a second
+    # current configuration.
+    #
+    # So the current eligible record wins EXPLICITLY, by family/case/mode. A
+    # retained artifact that loses is kept as historical evidence and labelled
+    # as such; it is not run and is not a configuration.
+    eligible = {(e["family"], e["case"], e["mode"]) for e in entries
+                if e["classification"] == "sweepable"}
     for spec in a.extra:
         fam, _, d = spec.partition("=")
         if not d:
             sys.exit(f"--extra wants FAMILY=DIR, got {spec!r}")
         for f in sorted(Path(d).glob("*_Lgraph.lean")):
             top = f.name[: -len("_Lgraph.lean")]
+            ident = (fam, top, "verified_compiler")
             e = {"family": fam, "case": top, "top": top, "mode": "verified_compiler",
                  "inventory": f"--extra {d}", "artifact": str(f.resolve().relative_to(ROOT)),
                  "artifact_sha256": sha(f),
                  "export_state": "(outside the replay)", "proof_state": "(outside the replay)",
-                 "classification": "sweepable" if has_design_cert(f) else "legacy_only",
-                 "provenance": "supplied by --extra; not a replay record. Its freshness is "
-                               "whatever produced that directory, recorded by hash here."}
+                 "artifact_provenance": "unrecorded",
+                 "provenance": ("supplied by --extra: a RETAINED artifact, not a replay "
+                                "record. No export recorded its digest, so its provenance "
+                                "is this hash and the directory it came from.")}
             side = f.with_name(f"{top}_io.json")
             if side.exists():
                 e["sidecar"] = str(side.resolve().relative_to(ROOT))
                 e["sidecar_sha256"] = sha(side)
+            if ident in eligible:
+                e["classification"] = "fallback_superseded"
+                e["why"] = ("a current eligible export exists for this family/case/mode; "
+                            "this retained artifact is kept as historical evidence and is "
+                            "NOT run")
+            elif has_design_cert(f):
+                e["classification"] = "fallback_retained"
+                e["why"] = ("no current eligible export for this family/case/mode, so this "
+                            "RETAINED artifact is used -- and is labelled as retained, not "
+                            "presented as a fresh export")
+            else:
+                e["classification"] = "legacy_only"
             entries.append(e)
 
     # DEDUPE BY PAYLOAD, KEEP EVERY CONFIGURED CASE. Two configurations can emit
@@ -140,7 +248,8 @@ def main():
     first = {}
     for e in entries:
         h = e.get("artifact_sha256")
-        if not h or e["classification"] not in ("sweepable", "gate_refused"):
+        if not h or e["classification"] not in ("sweepable", "gate_refused",
+                                                "fallback_retained"):
             continue
         tag = f"{e['family']}/{e['mode']}/{e['case']}"
         if h in first:
@@ -166,7 +275,7 @@ def main():
         "configured_cases": {k: len(v) for k, v in sorted(fam_cases.items())},
         "counts": counts,
         "to_run": sorted(e["artifact"] for e in first.values()
-                         if e["classification"] == "sweepable"),
+                         if e["classification"] in ("sweepable", "fallback_retained")),
         "investigate_only": sorted(e["artifact"] for e in first.values()
                                    if e["classification"] == "gate_refused"),
         "library_provenance": (a.fingerprint.read_text().splitlines()

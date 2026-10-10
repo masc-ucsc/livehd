@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -186,19 +187,79 @@ def run_timed(cmd, timeout, cwd=None, env=None):
         return out, err, True, (proc.returncode if proc.returncode is not None else -signal.SIGKILL)
 
 
-def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0):
-    base_m = CERT_RE.search(open(path, encoding="utf-8", errors="replace").read(1 << 22))
+def file_sha(p):
+    h = hashlib.sha256()
+    try:
+        with open(p, "rb") as fh:
+            for blk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(blk)
+    except OSError:
+        return ""
+    return h.hexdigest()
+
+
+def provenance_error(path, entry):
+    """Why this input is not the input the manifest describes, or "".
+
+    CHECKED IMMEDIATELY BEFORE THE PROBE, against the bytes about to be read.
+    Measured externally: flipping one 5-bit source constant from 20 to 19 in an
+    accepted certificate, leaving the manifest untouched, produced ACCEPTED and
+    a result row carrying the ORIGINAL artifact_sha256 -- a run attributed to
+    source and proof evidence that did not describe it. A direct evaluator may
+    legitimately admit the changed model; it may not borrow the original's
+    identity to report it.
+    """
+    want = entry.get("artifact_sha256")
+    if not want:
+        return "the manifest carries no artifact digest for this entry"
+    got = file_sha(path)
+    if got[: len(want)] != want:
+        return (f"artifact digest {got[:16]}... does not match the manifest's "
+                f"{want[:16]}...; the bytes on disk are not the bytes the manifest "
+                f"describes")
+    side = entry.get("sidecar")
+    if side:
+        sw = entry.get("sidecar_sha256")
+        sg = file_sha(side)
+        if not sg:
+            return f"the manifest names a sidecar that is not readable: {side}"
+        if sw and sg[: len(sw)] != sw:
+            return (f"sidecar digest {sg[:16]}... does not match the manifest's "
+                    f"{sw[:16]}...")
+    for f in ("family", "case", "mode"):
+        if not entry.get(f):
+            return f"the manifest entry carries no {f}"
+    return ""
+
+
+def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0, entry=None):
+    entry = entry or {}
     name = os.path.basename(path).replace("_Lgraph.lean", "")
     row = {"module": name, "path": path, "verdict": "NO_CERT", "reason": "",
+           "family": entry.get("family", ""), "case": entry.get("case", ""),
+           "mode": entry.get("mode", ""),
+           "artifact_sha256": entry.get("artifact_sha256", ""),
+           "aliases": ",".join(entry.get("aliases", [])),
+           "ran_sha256": "", "probe_sha256": "", "log_sha256": "",
            "sources": "", "nodes": "", "outputs": "", "flops": "", "mems": "",
            "inputs": "", "check_ms": "", "step1_ms": "", "run_ms": "",
            # NOT prefilled from the request: `cycles` must be what the run
            # actually reported, or it is not evidence that any cycle ran.
            "cycles": "", "wall_s": "", "rss_kb": ""}
+    # The manifest is checked BEFORE anything is read for the probe.
+    if entry:
+        why = provenance_error(path, entry)
+        if why:
+            row["verdict"] = "PROVENANCE_MISMATCH"
+            row["reason"] = why
+            return row
+    src = open(path, encoding="utf-8", errors="replace").read()
+    base_m = CERT_RE.search(src)
     if not base_m:
         return row
     base = base_m.group(1)
-    src = open(path, encoding="utf-8", errors="replace").read()
+    # THE HASH OF THE BYTES ACTUALLY USED, not the one the manifest predicted.
+    row["ran_sha256"] = file_sha(path)
     probe = os.path.join(workdir, f"{name}_probe.lean")
     try:
         probe_text = build_probe(src, base, cycles, max_rec_depth)
@@ -211,6 +272,7 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0):
         return row
     with open(probe, "w", encoding="utf-8") as f:
         f.write(probe_text)
+    row["probe_sha256"] = hashlib.sha256(probe_text.encode()).hexdigest()
     cmd = ["/usr/bin/time", "-f", "%e %M", "nice", "-n", "19", "ionice", "-c", "3",
            "lean", probe]
     t0 = time.time()
@@ -221,6 +283,8 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0):
         row["wall_s"] = f"{time.time() - t0:.1f}"
         return row
     row["wall_s"] = f"{time.time() - t0:.1f}"
+    # The RETAINED RUN LOG is evidence too: hash what the probe actually printed.
+    row["log_sha256"] = hashlib.sha256((out + err).encode(errors="replace")).hexdigest()
     saw_rundirect_ok = False
     tail = err.strip().splitlines()
     if tail:
@@ -389,7 +453,8 @@ def main():
     workdir = tempfile.mkdtemp(prefix="d2sweep_", dir=scratch)
     cols = ["family", "case", "mode", "module", "verdict", "reason", "sources", "nodes",
             "outputs", "flops", "mems", "inputs", "check_ms", "step1_ms", "run_ms",
-            "cycles", "wall_s", "rss_kb", "artifact_sha256", "aliases", "path"]
+            "cycles", "wall_s", "rss_kb", "artifact_sha256", "ran_sha256",
+            "probe_sha256", "log_sha256", "aliases", "path"]
     rows = []
     # EVERY FINISHED ROW IS WRITTEN AS IT FINISHES, to `<out>.partial`.
     #
@@ -410,7 +475,7 @@ def main():
             pf.flush()
             with ThreadPoolExecutor(max_workers=args.jobs) as ex:
                 futs = [ex.submit(run_one, p, workdir, args.cycles, args.timeout, lean_env,
-                                  args.max_rec_depth)
+                                  args.max_rec_depth, ident.get(p))
                         for p in files]
                 # AS THEY COMPLETE, not in submission order.  Iterating
                 # `futs` and calling `f.result()` blocks on the FIRST module,
@@ -423,12 +488,6 @@ def main():
                     # The CONFIGURED identity travels with the row. A sweep keyed
                     # only on a module name cannot say which configuration it ran,
                     # and two configurations can share a payload.
-                    e = ident.get(r.get("path"), {})
-                    r["family"] = e.get("family", "")
-                    r["case"] = e.get("case", "")
-                    r["mode"] = e.get("mode", "")
-                    r["artifact_sha256"] = e.get("artifact_sha256", "")
-                    r["aliases"] = ",".join(e.get("aliases", []))
                     rows.append(r)
                     pf.write("\t".join(str(r.get(c, "")) for c in cols) + "\n")
                     pf.flush()
@@ -457,6 +516,31 @@ def main():
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, args.out)
+    # TOOL AND LIBRARY CONTEXT, beside the table rather than implied by it. A
+    # sweep's rows say what ran; this says what it ran UNDER.
+    ctx = {
+        "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "manifest": os.path.abspath(args.manifest) if args.manifest else None,
+        "manifest_sha256": (hashlib.sha256(open(args.manifest, "rb").read()).hexdigest()
+                            if args.manifest else None),
+        "manifest_set": args.manifest_set if args.manifest else None,
+        "cycles": args.cycles, "timeout_s": args.timeout, "jobs": args.jobs,
+        "max_rec_depth": args.max_rec_depth,
+        "lean_dir": LEAN_DIR,
+        "lean_toolchain": (open(os.path.join(LEAN_DIR, "lean-toolchain")).read().strip()
+                           if os.path.exists(os.path.join(LEAN_DIR, "lean-toolchain")) else None),
+        "lean_path": lean_env.get("LEAN_PATH", ""),
+        "rows": len(rows),
+        "verdicts": {k: sum(1 for r in rows if r["verdict"] == k)
+                     for k in sorted({r["verdict"] for r in rows})},
+    }
+    lib = os.path.join(os.path.dirname(LEAN_DIR), "generated", "master_port",
+                       "d2_runtime", "library_fingerprint.txt")
+    if os.path.exists(lib):
+        ctx["library_fingerprint"] = open(lib).read().splitlines()
+    with open(args.out + ".context.json", "w") as f:
+        json.dump(ctx, f, indent=1)
+        f.write("\n")
     # The complete table exists now, so the partial is no longer evidence of
     # anything -- leaving it would make a finished run look interrupted.
     try:

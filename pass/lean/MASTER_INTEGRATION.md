@@ -4570,3 +4570,132 @@ Stage 3 therefore exports the three DINO `verified_compiler` certificates
 `step2b_dino/lean` run as a current output. Those retained artifacts are passed
 as a fallback so that DINO cannot silently vanish from the sweep, and if they
 are used they carry their own provenance note saying exactly what they are.
+
+## R36. Provenance: a run may not borrow another run's identity
+
+Both new manifest layers trusted stale source identity. Caught externally, on
+the committed CLI under pinned Lean, with the accepted `intpipe_imm`
+certificate: changing one 5-bit source constant from 20 to 19 and leaving the
+manifest untouched still returned **ACCEPTED 0**, and the result row printed
+the **original** `artifact_sha256` — the hash of a file that was not the one
+that ran.
+
+A direct evaluator may perfectly well admit the changed model. What it may not
+do is attribute that run to the original source and proof.
+
+### R36.1 The manifest compares, rather than mints
+
+`sweep_manifest.py` hashed the file and wrote that down. It never compared it
+with the digest the **export** recorded — and the two are not even the same
+width (the orchestrator stores a 16-hex prefix, the manifest stored 64), which
+is proof enough that no comparison was happening.
+
+Now: the recorded digest is compared against the current bytes, prefix-wise,
+and the outcome is a **named classification**.
+
+| state | classification | meaning |
+| --- | --- | --- |
+| recorded digest matches | as before | the record describes these bytes |
+| recorded digest differs | `provenance_mismatch` | **not run**, not investigated, not dropped |
+| no recorded digest | `provenance_unresolved` | absent evidence, never minted from the file now |
+
+Two corrections were needed along the way, both found by the counts moving:
+
+- **the digest that describes *this* path.** An accepted export records
+  `artifact_sha256`; a produced-then-refused candidate records
+  `artifact_produced_sha256`. Reading the former for the latter reported five
+  refusals as "unresolved" when their digest had been recorded all along — an
+  absent-evidence verdict minted by looking in the wrong place.
+- **the artifact's digest governs the disposition.** A refused candidate has no
+  recorded sidecar digest at all — the orchestrator writes one only on the
+  EXPORTED path — so taking the worst of the two downgraded eight refusals to
+  "unresolved" although their artifact digest matched exactly. A sidecar that
+  *is* recorded and disagrees is still a mismatch: that is contradicted
+  evidence, not absent evidence.
+
+### R36.2 The sweep verifies immediately before the probe
+
+`direct_sweep.py` now checks, against the bytes it is about to read: the
+artifact digest, the sidecar digest when one is named, and that the entry
+carries `family`, `case` and `mode`. A failure is the named non-success verdict
+**`PROVENANCE_MISMATCH`** and no probe runs.
+
+And it records what actually ran, rather than what was predicted:
+`ran_sha256` (the artifact bytes read), `probe_sha256` (the generated probe),
+`log_sha256` (what the probe printed). Beside the table it writes
+`<out>.context.json` — the manifest path and its own digest, the set that was
+run, cycles/timeout/jobs, `LEAN_DIR`, the pinned toolchain, `LEAN_PATH`, the
+verdict histogram and the library fingerprint. A sweep's rows say what ran;
+that file says what it ran **under**.
+
+### R36.3 `--extra` is a fallback, and only a fallback
+
+It appended the three retained DINO artifacts unconditionally and relied on
+content-hash dedupe. That only works when payloads are byte-identical — and a
+fresh export never is, since it carries its own run id. So both would have run
+under the same configured identity, the retained one indistinguishable from a
+second current configuration.
+
+The current eligible record now wins **explicitly, by family/case/mode**. A
+retained artifact that loses is `fallback_superseded`: kept as historical
+evidence, not run, not a configuration. One that wins because nothing fresh
+exists is `fallback_retained` — run, and **labelled as retained** rather than
+presented as a fresh export.
+
+Current manifest over all 189 configured cases (125 CORE-ET + 61 CVA6 + 3 DINO):
+
+| classification | n |
+| --- | ---: |
+| `sweepable` | 116 |
+| `fallback_retained` (the three DINO, pending their fresh export) | 3 |
+| `gate_refused` (separate investigation) | 8 |
+| `legacy_only` | 150 |
+| `no_artifact` | 179 |
+| `provenance_mismatch` / `provenance_unresolved` | 0 / 0 |
+
+### R36.4 Controls
+
+Six in `direct_sweep_controls.sh` calling the tool's own `provenance_error`:
+a valid entry; a changed artifact; a manifest with no digest; a changed
+sidecar; a missing identity field; and **the mutation asserted to have
+applied** — the first version substituted a string this fixture does not
+contain, so the "mutated" file was byte-identical and the CLI case failed for
+the right reason, nothing had changed. Plus a real-CLI case: a mutated payload
+produces a `PROVENANCE_MISMATCH` row and never `ACCEPTED`.
+
+Five in `sweep_manifest_controls.sh` through that CLI on isolated fixtures:
+matching digests are sweepable; a changed artifact is `provenance_mismatch`
+**and absent from `to_run`**; a record with no digest is
+`provenance_unresolved`; a disagreeing sidecar digest is a mismatch.
+
+## R37. A three-way wait cycle between the drivers
+
+`post_stage2.sh` and `post_stage3.sh` each waited with
+`pgrep -f 'replay_orchestrator\.py run'`. That matches **command text**, so
+stage 2's wait matched stage 3's **launch shell** — a `bash -c` whose argv
+contained the heredoc that wrote stage 3, including the literal orchestrator
+command. Verified: **zero** Python workers alive, and
+
+```
+3854004 (stage 2) waits for the pgrep match to clear
+  └─ the match is 33377, the launch shell, which waits for its child
+       └─ 33381 (stage 3), which waits for 3854004
+```
+
+A real deadlock, not a slow observation. The CORE-ET bridge worker had already
+terminated. This is the `pgrep -f` self-match trap for the third time in this
+work, now with a cycle.
+
+**Structural fix.** `orchestrator_busy.py` identifies a worker by its argv
+**tokens** — `argv[0]` is a python executable, some element is *this
+checkout's* `replay_orchestrator.py`, and `run` is its own element. A launcher
+holds the whole command in one element and cannot satisfy that.
+
+Better still, the waiting is gone: `post_queues.sh` runs all six steps
+**sequentially in one process**, so there is no inter-driver wait left to
+deadlock. The one guard at the top uses the token test. Drivers are now
+launched from a command whose text does not contain the script body.
+
+Both stale drivers' logs confirmed they had done **no work** — only waiting
+lines — so all three waiters were stopped and nothing was restarted. No proof
+job was touched and no result was discarded.

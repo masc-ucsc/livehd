@@ -138,6 +138,96 @@ else
 fi
 [ -e "$WORK/x.tsv" ] && { echo "MISS: a refused manifest sweep still wrote its table"; rc=1; }
 
+# 13..17 PROVENANCE: the bytes that ran must be the bytes the manifest names.
+#
+# Measured externally on the committed CLI under pinned Lean: flipping one
+# 5-bit source constant from 20 to 19 in an accepted certificate, leaving the
+# manifest untouched, returned ACCEPTED 0 and printed the ORIGINAL
+# artifact_sha256 in the result row -- a run attributed to source and proof
+# evidence that did not describe it.
+#
+# These call THE TOOL'S OWN RULE, not a copy of it.
+ROOT="$ROOT" CERT="$CERT" WORK="$WORK" python3 -I - <<'PYEOF'
+import importlib.util, os, hashlib, sys, shutil
+root, cert, work = os.environ["ROOT"], os.environ["CERT"], os.environ["WORK"]
+spec = importlib.util.spec_from_file_location(
+    "ds", os.path.join(root, "pass", "lean", "scripts", "direct_sweep.py"))
+ds = importlib.util.module_from_spec(spec); spec.loader.exec_module(ds)
+fails = []
+def ok(name, cond, detail=""):
+    print(f"{'ok' if cond else 'MISS'}: {name}{(' -- ' + detail) if detail and not cond else ''}")
+    if not cond: fails.append(name)
+
+good = os.path.join(work, "prov_good.lean")
+shutil.copyfile(cert, good)
+h = ds.file_sha(good)
+
+ok("prov_valid", ds.provenance_error(good, {
+    "artifact_sha256": h, "family": "CORE-ET", "case": "txfma_e4",
+    "mode": "verified_compiler"}) == "")
+
+# THE SAME SHAPE AS THE SUPPLIED MUTATION: ONE literal in the certificate
+# body changed, manifest untouched.  The supplied example was a 5-bit source
+# constant 20 -> 19; this fixture has no such constant, so the first numeric
+# literal in a `width :=`/`slot :=`/`mk_bv`/`ofInt` is incremented instead.
+# The mutation is ASSERTED TO HAVE APPLIED -- the first version of this control
+# substituted a string the fixture does not contain, so the "mutated" file was
+# byte-identical and the CLI case failed for the right reason: nothing changed.
+import re as _re
+mut = os.path.join(work, "prov_mutated.lean")
+src = open(good).read()
+changed, n = _re.subn(r"(width := )(\d+)",
+                      lambda m: m.group(1) + str(int(m.group(2)) + 1), src, count=1)
+if n == 0:
+    changed, n = _re.subn(r"((?:mk_bv|ofInt) \d+ \()(\d+)(\))",
+                          lambda m: m.group(1) + str(int(m.group(2)) + 1) + m.group(3),
+                          src, count=1)
+open(mut, "w").write(changed)
+ok("prov_mutation_is_real", n == 1 and changed != src and ds.file_sha(mut) != h,
+   f"the mutation did not apply (n={n})")
+e = ds.provenance_error(mut, {"artifact_sha256": h, "family": "CORE-ET",
+                              "case": "txfma_e4", "mode": "verified_compiler"})
+ok("prov_changed_artifact_refused", "does not match the manifest" in e, e[:70])
+
+ok("prov_no_digest_refused",
+   "carries no artifact digest" in ds.provenance_error(good, {
+       "family": "CORE-ET", "case": "txfma_e4", "mode": "verified_compiler"}))
+
+sc = os.path.join(work, "prov_side.json")
+open(sc, "w").write('{"kind":"lean_design_io"}')
+sh = ds.file_sha(sc)
+open(sc, "w").write('{"kind":"lean_design_io","changed":true}')
+e = ds.provenance_error(good, {"artifact_sha256": h, "sidecar": sc, "sidecar_sha256": sh,
+                               "family": "F", "case": "C", "mode": "M"})
+ok("prov_changed_sidecar_refused", "sidecar digest" in e, e[:70])
+
+ok("prov_identity_required",
+   "carries no mode" in ds.provenance_error(good, {
+       "artifact_sha256": h, "family": "CORE-ET", "case": "txfma_e4"}))
+sys.exit(1 if fails else 0)
+PYEOF
+[ $? -ne 0 ] && rc=1
+
+# ...and through the REAL CLI: a mutated payload must produce a named
+# non-success row, not an ACCEPTED one.
+python3 -I -c "
+import json, hashlib, os
+good = os.path.join('$WORK', 'prov_good.lean')
+h = hashlib.sha256(open(good,'rb').read()).hexdigest()
+m = {'to_run': [os.path.join('$WORK','prov_mutated.lean')],
+     'entries': [{'family':'CORE-ET','case':'txfma_e4','mode':'verified_compiler',
+                  'artifact': os.path.join('$WORK','prov_mutated.lean'),
+                  'artifact_sha256': h}]}
+json.dump(m, open('$WORK/man_prov.json','w'))"
+out="$(cd "$ROOT" && python3 -I pass/lean/scripts/direct_sweep.py --manifest "$WORK/man_prov.json" \
+        --out "$WORK/prov.tsv" --jobs 1 --cycles 1 --timeout 60 2>&1)"
+if [ -f "$WORK/prov.tsv" ] && grep -q 'PROVENANCE_MISMATCH' "$WORK/prov.tsv"; then
+  echo "ok: cli_changed_artifact -> PROVENANCE_MISMATCH row"
+else
+  echo "MISS: cli_changed_artifact -> $(tail -1 "$WORK/prov.tsv" 2>/dev/null | cut -c1-80)"; rc=1
+fi
+grep -q 'ACCEPTED' "$WORK/prov.tsv" 2>/dev/null && { echo "MISS: a mutated payload was ACCEPTED"; rc=1; }
+
 # 8. scratch is project-local, never /tmp -- by CALLING the resolver, not by
 #    grepping the source for a path.
 sd="$(cd "$ROOT" && python3 -I -c "
