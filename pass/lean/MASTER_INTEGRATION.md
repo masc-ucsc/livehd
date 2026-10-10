@@ -1891,7 +1891,11 @@ record layout and native LEC/frontend/graph code were not changed.
 
 Rebase standard, as set by the user: *every benchmark we support must pass —
 the old branch corpus and the blocks master has gained since.* This section
-records the first replay that meets it, and the defects that replay exposed.
+records the first full-flow replay against that standard, and the defects the
+replay exposed. It does **not** meet the standard outright: CVA6 configuration
+reconciliation, runtime traces, the legacy full-bridge and chunked-WF gates, and
+D3/D4/FP all remain open. What is established here is the
+verified_compiler/`allEdges` typecheck tier.
 
 It is a **full** flow — frontend, `pass.lean` export, Lean typecheck, axiom
 audit — not an export census. The earlier CORE-ET census ran
@@ -2013,18 +2017,31 @@ elaboration acceptable.
 | `vpu_ml` | 1 | `const width 29 cannot hold value 4160749568 (needs 32 bits)` |
 | `vpu_tensorfma` | 1 | `const width 29 cannot hold value 4160749568 (needs 32 bits)` |
 
-These four typechecked, passed the axiom audit and are counted among the 81.
-**Their proofs are sound and their models may not be.** `native_decide`
-evaluates the certificate as written, so a constant whose declared width cannot
-hold its value is proven faithfully — against a design that is not the RTL.
-`graph/node_util.hpp:323` calls such a width "a lie". This is the one failure
-class the proof pipeline cannot catch downstream, which is precisely why the
-gate exists and why its absence on the CORE-ET path mattered.
+These four typechecked and passed the axiom audit. They are **conservative gate
+failures awaiting investigation, not confirmed model defects** — an earlier
+draft of this section asserted the stronger claim and was wrong to.
 
-Counting these four, **trustworthy CORE-ET is 77, not 81**, and the corpus total
-is 167 of 171. They are recorded in `CONST_WIDTH_CASES.tsv` alongside the 14
-CVA6 modules the gate refused *before* typecheck. It is **one defect class, 18
-modules, both families** — the single largest open item in the corpus.
+Why the gate cannot settle it on its own: `CertificateBuilder::dep` sets
+`source.width` to the **consumer's** requested width, deliberately, not to the
+raw pin's declared width. The upstream "a width that cannot hold its value is a
+lie" contract (`graph/node_util.hpp:323`) is about the raw pin, which is a
+different number. A narrow emitted constant can therefore be perfectly correct
+modular arithmetic — the consumer genuinely uses only the low bits — or it can
+be a real truncation. The gate flags the shape; it does not distinguish the two.
+
+What *is* established: a certificate is proved as written, so if one of these is
+a real truncation, `native_decide` proves it faithfully against a model that is
+not the RTL. That is the one failure class nothing downstream can catch, which
+is why the gate must run — and why its absence on the CORE-ET path mattered —
+even though a flag is not yet a diagnosis.
+
+Settling each case needs three things the sweep does not have: the **raw pin
+width**, the **consumer operation**, and a **value oracle** on the affected
+output. Until then these four stay counted in the 81 with the qualification
+recorded here; no separate "trustworthy" count is asserted. They are listed in
+`CONST_WIDTH_CASES.tsv` with the 14 CVA6 modules the gate refused *before*
+typecheck — **18 flagged modules across both families**, the largest open
+investigation in the corpus.
 
 A pattern worth checking first: many violations are near a power of two
 (`width 1` / value 2 at 56 occurrences in two hpdcache modules; `width 61` /
@@ -2057,13 +2074,19 @@ driver wider than its declared window —
 `[0] drv=mux_94508 bits=2 window=1`. An earlier draft of this section classified
 them as loops by keyword; reading the full message corrects that.
 
-**24 of the 44 are clock-domain questions**, which is the strongest argument for
-R13.3 step 2 in the corpus: phase dividers and enable-latch gating are exactly
-what `resolve_icg()` and `commit_class_of()` exist to resolve. Two of them are
-the `prim_*` primitives recovered in R14.3 — `prim_phase_pair_lo_hi` and
-`prim_write_commit_en` — which are the minimal reproducers of the enable-latch
-case and the right fixtures to develop step 2 against. The third recovered
-primitive, `prim_write_commit_rst_en`, emits and proves (37.2 s).
+**24 of the 44 are clock-domain questions.** They are **refusal fixtures for
+step 2, not targets it can convert.** `pass.single_edge` runs upstream of the
+Lean scanner and refuses these before `pass.lean` is reached, so no amount of
+clock provenance inside the scanner turns one of them into an emission. Their
+value is that they are the real shapes — phase dividers and enable-latch
+gating — against which a resolver's refusals must be checked. The upstream
+disposition and the native contract stay as they are; nothing upstream will be
+weakened to improve a count.
+
+Two of them, `prim_phase_pair_lo_hi` and `prim_write_commit_en` (recovered in
+R14.3), are the minimal reproducers of the enable-latch case and the right
+fixtures to develop against. The third recovered primitive,
+`prim_write_commit_rst_en`, emits and proves (37.2 s).
 
 **CVA6, 23 of 110 elaborated.**
 
@@ -2127,22 +2150,61 @@ Three changes, all in place:
   cite the clock bounds. The old line count passed all six; the auditor rejects
   all six and accepts the genuine log.
 - **`scripts/run_lean_queue.sh`** now writes `lean_typecheck.<module>.log` and
-  requires the audit to pass before printing `PROVEN`.
+  requires the audit to pass before printing `PROVEN`. It picks the obligation
+  set **from the artifact**: `_step_correct`/`_step_legacy_correct` for a
+  verified export, `_comb`/`_next`/`_step_refines_fast` for a legacy bridge
+  export — never from how many `#print axioms` lines a file happens to contain.
+  The first version required the verified names unconditionally, which rejected
+  a sound legacy artifact for not being a verified one; the queue serves both,
+  which is why its build step also builds `LegacyCertWF`.
 
-**What this does not retroactively establish.** The queue wrote every module's
-log to one shared path, so each sweep kept only its last module's report. Full
-axiom text survives for 4 modules (`scoreboard_gate`, `PipelinedDualIssueCPU`,
-`minion_dcache_texsend`, `prim_write_commit_rst_en`) and all 4 pass the new
-auditor. For the other 167, what is retained is the `2/2` + no-`sorryAx` gate,
-which is weaker.
+**What was recovered without re-running, and what was not.** The shared-log
+problem is real but narrower than first reported: it affects only artifacts that
+went through `run_lean_queue.sh` into a *shared* output directory, which is CVA6
+and DINO. The CORE-ET full-flow driver wrote its own per-module
+`<Top>.lean.log`, and **all 78 survive**. An earlier draft of this section said
+only four logs survived and the rest needed a re-run; that was wrong, and the
+re-audit was cheap once the files were found.
 
-One property *was* recovered for the whole corpus without re-running, from the
-artifacts rather than the logs: all **170** emitted files audit exactly
-`<Top>_step_correct` and `<Top>_step_legacy_correct`, both of which are declared
-theorems in the same file — no file audits a non-theorem or a name other than
-its two required obligations. That closes the identity hole statically. The
-axiom-content check for those 167 still needs a re-run under the new queue, and
-is listed in R14.9.
+Re-auditing all 78 CORE-ET logs with `axiom_audit.py` — report **and** source,
+against the artifact — gives **78/78 pass**: exact theorem names, `_compiles`
+for `_step_correct`, and both `_compiles` and `_clock_bounds` for
+`_step_legacy_correct`, with no axiom outside the measured set.
+
+The measured set across all 160 surviving reports is exactly:
+
+```
+propext   Classical.choice   Quot.sound
+<Top>_compiles._native.native_decide.ax_N
+<Top>_clock_bounds._native.native_decide.ax_N
+```
+
+and nothing else — no `funext`, no `Quot.lift`, no `Lean.ofReduceBool`, no
+`Lean.trustCompiler`. The allowlist is that measured set. The first version of
+the auditor allowlisted five further axioms on the assumption they might appear;
+they never do, and allowlisting an unobserved axiom is how a trust assumption
+widens without anyone deciding to widen it.
+
+That version also matched native facts by **shape**
+(`<Top>_<anything>._native.native_decide.ax_N`), which would have accepted
+`<Top>_arbitrary_false._native…` — a `native_decide` of an arbitrary
+proposition, proving something about nothing. Native facts are now accepted only
+for the two independently expected witnesses, or, in legacy mode, only when the
+obligation stem names a theorem the artifact itself declares.
+
+Separately, and from the artifacts rather than the logs: all **170** emitted
+files audit exactly `<Top>_step_correct` and `<Top>_step_legacy_correct`, both
+declared as theorems in the same file. No file audits a non-theorem or any other
+name.
+
+**Still outstanding:** full per-module axiom text for the CVA6 and DINO
+artifacts, whose logs the shared path did overwrite. Those need a re-run under
+the new queue, with artifact, library and toolchain hashes recorded (R14.9).
+
+Report counts should keep these tiers apart: **independently audited logs** (78
+CORE-ET), **retained count-only results** (CVA6, DINO), **static-gate
+investigations** (the 18 const-width cases), and **runtime validation**, which
+has not been run at all.
 
 ### R14.7 Timing: measured wall time, not isolated cost
 
@@ -2211,9 +2273,10 @@ is needed on top of it, because non-empty does not mean correct.
    `asyncReset` commit flag; synthetic sync-read flop and ROM domains;
    deterministic root+bit identity; implicit joins; common-domain committing
    memory ports; refusal of unresolved, falling or gated clocks unless already
-   normalized. Emitter stays graph-free; all-fire semantics preserved. 24 of the
-   44 CORE-ET non-emits are this, and `prim_phase_pair_lo_hi` /
-   `prim_write_commit_en` are its minimal fixtures.
+   normalized. Emitter stays graph-free; all-fire semantics preserved.
+   `prim_phase_pair_lo_hi` / `prim_write_commit_en` are refusal fixtures for it,
+   not modules it will convert — they are refused upstream by `pass.single_edge`
+   before the scanner runs.
 3. **Re-run the corpus under the new queue** so every module has a retained
    per-module log and a full axiom audit, with artifact, library and toolchain
    hashes recorded (R14.6).

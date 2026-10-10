@@ -6,11 +6,13 @@
 #include <optional>
 #include <set>
 
+#include "graph/latch_contract.hpp"
 #include "graph_access.hpp"
 
 namespace lean_export {
 namespace {
 using namespace lean_pass;
+namespace lc = livehd::latch_contract;
 
 std::string decimal(const LeanCtx& ctx, const Node_pin& pin) {
   const auto value = pin_const_value(pin);
@@ -329,6 +331,145 @@ void lower_hotmux(const LeanCtx& ctx, const Node& node, DesignScan& design, uint
 
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// Clock-domain resolution (MASTER_INTEGRATION.md R13.3).
+//
+// The scan OWNS the result. It resolves every committing state element to a
+// domain here, stores the ordinal, and the emitter formats what it is given --
+// the emitter never consults HHDS and never reconstructs a domain.
+//
+// Everything below FAILS CLOSED. A domain that cannot be resolved is refused by
+// name, never defaulted to ordinal 0, because a wrong merge is invisible: two
+// elements placed in one domain commit together forever after, and the
+// certificate proves that behaviour faithfully.
+// ---------------------------------------------------------------------------
+
+// A clock root must be identifiable down to the BIT.
+//
+// `Commit_class::net_key()` names a graph input by its NAME, and `control_root`
+// follows every Get_mask to the WHOLE input, so `clks[0]` and `clks[1]` share
+// one key and would land in one ordinal. pass/single_edge tracks the selected
+// bit separately (`clock_bit_on`) and refuses what it cannot decide; that
+// walker is file-local there, so rather than duplicate a parity-sensitive cone
+// walk -- the mistake latch_contract.hpp warns about in as many words -- this
+// REFUSES a multi-bit clock root outright. R13.3 permits exactly that: preserve
+// bit discrimination or refuse, never merge.
+//
+// A one-bit root has no ambiguity to preserve, which covers every design in the
+// current corpus.
+std::optional<std::string> clock_root_bit_refusal(const Node_pin& net) {
+  if (net.is_invalid() || !livehd::graph_util::is_graph_input_pin(net)) {
+    return std::nullopt;
+  }
+  const int w = livehd::graph_util::bits_of(net);
+  if (w <= 1) {
+    return std::nullopt;
+  }
+  return "clock root `" + std::string(livehd::graph_util::pin_name_of(net)) + "` is " + std::to_string(w)
+         + " bits wide; which bit a state element commits on cannot be discriminated here, and merging the bits "
+           "into one domain would place two time bases in one ordinal.";
+}
+
+// Refuse a clock pin that is STILL A GATE.
+//
+// D2's exporter calls `resolve_icg` precisely to diagnose this and fail. It does
+// NOT accept the gate's root while dropping its enables -- doing that silently
+// deletes the gating condition, and the certificate then commits every cycle.
+// `pass.single_edge` is what normalizes a gate into the flop's `enable`; if a
+// cone is still a gate when the Lean scan runs, that normalization did not
+// happen for this element and there is nothing in the certificate carrying the
+// enables.
+std::optional<std::string> gated_clock_refusal(const Node_pin& clock_pin, const lc::Design_clocks& clocks,
+                                               std::string_view what) {
+  if (clock_pin.is_invalid()) {
+    return std::nullopt;
+  }
+  const auto icg = lc::resolve_icg(clock_pin, clocks);
+  if (!icg.has_value()) {
+    return std::nullopt;
+  }
+  std::string why = std::string(what) + " is clocked through an unnormalized clock gate (" + std::to_string(icg->enables.size())
+                    + " enable(s)";
+  if (icg->clock_inverted) {
+    why += ", inverted";
+  }
+  if (icg->div != 1) {
+    why += ", divide-by-" + std::to_string(icg->div);
+  }
+  why += "). pass.single_edge must fold the gate into the element's `enable` first; accepting the gate's root here "
+         "would drop the enables and commit unconditionally.";
+  return why;
+}
+
+// Intern a domain, in INSERTION order. Insertion order follows the scan, which
+// follows graph traversal, so it is not yet deterministic -- `finalize_clocks`
+// below re-sorts by structural key and remaps every ordinal before the scan is
+// returned. Interning here only has to be consistent within one scan.
+uint32_t intern_domain(std::vector<ClockDomain>& table, std::map<std::string, uint32_t>& index, const lc::Commit_class& cc,
+                       const std::string& human) {
+  const auto key = cc.key();
+  if (const auto it = index.find(key); it != index.end()) {
+    return it->second;
+  }
+  const auto ordinal = static_cast<uint32_t>(table.size());
+  table.push_back({key, human, cc.rising, cc.implicit_clock});
+  index.emplace(key, ordinal);
+  return ordinal;
+}
+
+// Human-facing name for a domain. Only ever cosmetic -- `key` is the identity.
+std::string domain_name(const lc::Commit_class& cc) {
+  if (cc.implicit_clock) {
+    return "clock";
+  }
+  if (!cc.net.is_invalid() && livehd::graph_util::is_graph_input_pin(cc.net)) {
+    return std::string(livehd::graph_util::pin_name_of(cc.net));
+  }
+  return "clk_" + cc.net_key();
+}
+
+// Re-sort the clock table by structural key and remap every ordinal.
+//
+// Interning follows traversal, so without this the SAME design scanned twice
+// could number its domains differently and two certificates would differ in a
+// way that means nothing. Sorting by `key` -- which latch_contract derives
+// structurally, never from a nid -- makes the numbering a function of the
+// design. The implicit clock sorts first by construction, since `net_key()`
+// spells it "\x01implicit".
+void finalize_clocks(DesignScan& design, std::vector<ClockDomain> table) {
+  if (table.empty()) {
+    // No committing element resolved a domain: a purely combinational design.
+    // It still gets the single default entry, so `clock_ordinal == 0` is in
+    // range and the emitted `_clock_bounds` obligation is discharged by a table
+    // that is never read.
+    design.clocks = {{"\x01implicit", "clock", true, true}};
+    return;
+  }
+  std::vector<uint32_t> order(table.size());
+  for (uint32_t i = 0; i < order.size(); ++i) {
+    order[i] = i;
+  }
+  std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return table[a].key < table[b].key; });
+  std::vector<uint32_t> remap(table.size());
+  design.clocks.clear();
+  design.clocks.reserve(table.size());
+  for (uint32_t pos = 0; pos < order.size(); ++pos) {
+    remap[order[pos]] = pos;
+    design.clocks.push_back(table[order[pos]]);
+  }
+  for (auto& f : design.flops) {
+    f.clock_ordinal = remap[f.clock_ordinal];
+  }
+  for (auto& [id, m] : design.memories) {
+    m.clock_ordinal = remap[m.clock_ordinal];
+    for (auto& port : m.ports) {
+      if (port.has_domain) {
+        port.clock_ordinal = remap[port.clock_ordinal];
+      }
+    }
+  }
+}
+
 DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   DesignScan design;
   design.name   = std::string(graph.get_name());
@@ -337,6 +478,14 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   ctx.g                 = &graph;
   ctx.strict            = options.strict;
   ctx.max_width         = options.max_width;
+  // ONE O(N) clock scan, handed to every classification below so resolving N
+  // elements stays O(N). Non-hierarchical: pass.lean runs on a flattened body.
+  const lc::Design_clocks  clocks(&graph);
+  std::vector<ClockDomain> clock_table;
+  // key -> ordinal. std::map, so the table is built in a deterministic order
+  // that does not depend on hashing or on node traversal.
+  std::map<std::string, uint32_t> clock_index;
+
   const auto gio        = graph.get_io();
   uint32_t   next_input = 2000000000;
   for (const auto& decl : gio->get_input_pin_decls()) {
@@ -403,7 +552,85 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
       if (!port.clock.is_invalid()) {
         p.clock = capture_pin(ctx, port.clock);
       }
+      // --- domain resolution (R13.3) ---------------------------------------
+      // An ASYNCHRONOUS READ port does not commit, so it carries no domain
+      // obligation and is skipped. Every write port commits, and a synchronous
+      // read port commits its registered read data -- including on a ROM, which
+      // has no mutable MemoryDesc but does have registered reads.
+      const bool commits = !port.rdport || info.sync;
+      if (commits) {
+        const std::string what = "memory n_" + std::to_string(m.id) + " (`" + m.raw_name + "`) port "
+                                 + std::to_string(port.port_id) + (port.rdport ? " (sync read)" : " (write)");
+        if (auto why = gated_clock_refusal(port.clock, clocks, what)) {
+          fatal(ctx, *why);
+        }
+        lc::Commit_class cc;
+        cc.role = lc::Net_role::Clock;
+        if (port.clock.is_invalid()) {
+          cc.implicit_clock = true;
+          cc.rising         = info.posclk != 0;
+        } else {
+          const auto root = lc::control_root(port.clock);
+          if (root.net.is_invalid()) {
+            fatal(ctx,
+                  what
+                      + " has an unresolvable clock cone. A certificate cannot name the domain this port "
+                        "commits on.");
+          }
+          if (!clocks.is_clock(root.net)) {
+            fatal(ctx,
+                  what + " is clocked by a net that is not a clock root (no state element takes an edge from it and "
+                         "its name is not a clock spelling). Reading data as a clock would commit on a value.");
+          }
+          if (auto why = clock_root_bit_refusal(root.net)) {
+            fatal(ctx, what + ": " + *why);
+          }
+          cc.net = root.net;
+          // Global `posclk` and the cone's own inversion compose. A design can
+          // carry both (`posclk=0` on a `~clk` cone is a POSEDGE commit), and
+          // counting the parity in one place only is how a double negation
+          // survives -- the failure latch_contract.hpp records as having made
+          // the same machine come back PROVEN against posedge AND REFUTED
+          // against negedge.
+          cc.rising = (info.posclk != 0) != root.inverted;
+        }
+        if (!cc.rising) {
+          fatal(ctx, what + " commits on a FALLING edge. pass.single_edge must normalize it first.");
+        }
+        p.clock_ordinal = intern_domain(clock_table, clock_index, cc, domain_name(cc));
+        p.has_domain    = true;
+      }
       m.ports.push_back(p);
+    }
+    // ONE MemoryDesc carries ONE clock. That is a CERTIFICATE restriction, not
+    // a hardware guarantee: cells have a per-port `clock_pin` and a single
+    // global `posclk`, and a shared polarity does not imply a shared root. So
+    // the common-domain policy is enforced HERE, across every committing port,
+    // rather than assumed -- distinct roots are refused, never merged onto
+    // whichever port happened to be scanned first.
+    {
+      bool        have = false;
+      uint32_t    chosen = 0;
+      std::string chosen_what;
+      for (const auto& p : m.ports) {
+        if (!p.has_domain) {
+          continue;
+        }
+        const std::string pw = "port " + std::to_string(p.port_id);
+        if (!have) {
+          have        = true;
+          chosen      = p.clock_ordinal;
+          chosen_what = pw;
+        } else if (p.clock_ordinal != chosen) {
+          fatal(ctx,
+                "memory n_" + std::to_string(m.id) + " (`" + m.raw_name + "`) commits on more than one clock domain: "
+                    + chosen_what + " on `" + clock_table[chosen].name + "` and " + pw + " on `"
+                    + clock_table[p.clock_ordinal].name
+                    + "`. A certificate carries ONE MemoryDesc.clock, so these cannot be represented without "
+                      "merging two time bases into one.");
+        }
+      }
+      m.clock_ordinal = have ? chosen : 0;
     }
     design.memories.emplace(m.id, std::move(m));
     ctx.memory_info.emplace(info.nid, info);
@@ -466,6 +693,32 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
         fatal(ctx, "flop n_" + std::to_string(f.id) + " drives unsupported pin `" + name + "`.");
       }
     }
+    // --- domain resolution (R13.3) -----------------------------------------
+    const std::string what = "flop n_" + std::to_string(f.id) + " (`" + f.raw_name + "`)";
+    const auto        clk  = livehd::graph_util::get_driver_of_sink_name(node, "clock_pin");
+    if (auto why = gated_clock_refusal(clk, clocks, what)) {
+      fatal(ctx, *why);
+    }
+    const auto cc = lc::commit_class_of(node, &clocks);
+    if (!cc.has_value()) {
+      fatal(ctx,
+            what
+                + " has an unresolvable clock cone: it reaches neither a clock root nor the implicit clock. "
+                  "A certificate cannot name the domain it commits on.");
+    }
+    if (!cc->rising) {
+      // The `posclk` pin form is refused above. This catches the CONE form --
+      // `wire nclk = ~clk` -- which carries its inversion in the cone and not on
+      // the pin, and which the yosys reader hides but the slang reader does not.
+      fatal(ctx,
+            what
+                + " commits on a FALLING edge (an inversion in the clock cone, not the `posclk` pin). "
+                  "pass.single_edge must normalize it first.");
+    }
+    if (auto why = clock_root_bit_refusal(cc->net)) {
+      fatal(ctx, what + ": " + *why);
+    }
+    f.clock_ordinal = intern_domain(clock_table, clock_index, *cc, domain_name(*cc));
     design.flops.push_back(f);
   }
   for (const auto& [id, pin] : flop_din) {
@@ -609,6 +862,7 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
           "unsupported certificate op(s): " + detail + ". " + std::to_string(unsupported_nodes)
               + " node(s) in this design have no certificate encoding.");
   }
+  finalize_clocks(design, std::move(clock_table));
   return design;
 }
 }  // namespace lean_export

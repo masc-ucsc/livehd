@@ -71,13 +71,25 @@ void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostr
     std::optional<uint32_t> rst = f.reset_pin.has_value() ? std::optional<uint32_t>(d.slot_of.at(*f.reset_pin)) : std::nullopt;
     flop_lines.push_back("{ width := " + std::to_string(f.width) + ", din := " + std::to_string(d.slot_of.at(f.din))
                          + ", enable := " + opt_nat(en) + ", resetPin := " + opt_nat(rst) + ", resetValue := ("
-                         + lean_integer(f.reset_value) + "), resetActiveLow := " + (f.reset_active_low ? "true" : "false") + " }");
+                         + lean_integer(f.reset_value) + "), resetActiveLow := " + (f.reset_active_low ? "true" : "false")
+                         + ", clock := " + std::to_string(f.clock)
+                         + ", asyncReset := " + (f.async_reset ? "true" : "false") + " }");
+  }
+
+  // The clock table. Emitted ALWAYS, even for the single-domain case, so a
+  // certificate states its domains rather than relying on the field default --
+  // a reader can then tell "one clock, resolved" from "clocks never resolved",
+  // which the default alone cannot express.
+  std::vector<std::string> clock_lines;
+  for (const auto& c : d.clocks) {
+    clock_lines.push_back("{ name := " + lean_string(c.name) + " }");
   }
 
   std::vector<std::string> mem_lines;
   for (const auto& m : d.memories) {
     mem_lines.push_back("{ aw := " + std::to_string(m.addr_w) + ", dw := " + std::to_string(m.data_w)
-                        + ", nextImg := " + std::to_string(d.slot_of.at(m.next_img)) + " }");
+                        + ", nextImg := " + std::to_string(d.slot_of.at(m.next_img))
+                        + ", clock := " + std::to_string(m.clock) + " }");
   }
 
   auto emit_array = [&os](const char* field, const std::vector<std::string>& lines, bool) {
@@ -110,6 +122,7 @@ void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostr
   emit_array("outputs ", out_lines, false);
   emit_array("flops   ", flop_lines, false);
   emit_array("memories", mem_lines, true);
+  emit_array("clocks  ", clock_lines, false);
   os << "  }\n\n";
 
   // The residual program is DERIVED, not re-emitted: `compileDesign` is the

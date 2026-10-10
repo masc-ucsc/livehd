@@ -59,10 +59,36 @@ struct Port {
   uint32_t              width = 0;
   std::optional<PinRef> driver;
 };
+// An OWNED clock domain. The scan resolves every committing state element to one
+// of these and stores only the resolved result -- no graph handle, no pin, no
+// reconstruction downstream. The emitter must be able to format a certificate
+// from a DesignScan alone (R13.3: "the emitter must not consult HHDS or
+// reconstruct domains").
+//
+// `key` is `Commit_class::key()`: the structural (root-net, edge) identity from
+// graph/latch_contract.hpp. It is derived structurally rather than from a nid or
+// traversal order, so two scans of the same design agree. It is the grouping
+// identity; `name` is only for humans and for the emitted `ClockDesc.name`.
+//
+// Bit discrimination is part of `key` because `net_key()` distinguishes
+// `clks[0]` from `clks[1]`. R13.3 requires that a bus clock's BIT survive into
+// the ordinal rather than being merged -- two 180-degrees-apart domains that
+// compare equal are exactly the clock-blindness false-PROVEN class the latch
+// contract guards against.
+struct ClockDomain {
+  std::string key;                // Commit_class::key() -- structural identity
+  std::string name;               // human-facing; emitted as ClockDesc.name
+  bool        rising   = true;    // commits on the rise of `key`'s net
+  bool        implicit = false;   // the module's implicit clock (`reg x = 0`)
+};
+
 struct Flop {
   uint32_t                id    = 0;
   uint32_t                width = 0;
   std::optional<PinRef>   din, enable, reset, clock;
+  // Index into DesignScan::clocks. Defaulted to 0 so a scan that has not run
+  // domain resolution still describes the single-domain design it used to.
+  uint32_t                clock_ordinal = 0;
   bool                    asynchronous = false;
   bool                    active_low   = false;
   std::string             initial      = "0";
@@ -80,6 +106,10 @@ struct MemoryPort {
   uint32_t              driver_pid = 0;
   PinRef                addr, din, enable;
   std::optional<PinRef> clock;
+  // Resolved domain of THIS port. A port that does not commit (an asynchronous
+  // read) carries no obligation and keeps `has_domain == false`.
+  uint32_t              clock_ordinal = 0;
+  bool                  has_domain    = false;
 };
 struct Memory {
   uint32_t                 id         = 0;
@@ -88,6 +118,13 @@ struct Memory {
   uint64_t                 size       = 0;
   uint32_t                 wensize    = 1;
   int64_t                  type = 0, fwd = 0, posclk = 1;
+  // The ONE domain this memory commits on. `DesignCert` carries a single
+  // `MemoryDesc.clock`, which is a CERTIFICATE RESTRICTION, not a hardware
+  // guarantee: cells have a per-port `clock_pin` and one global `posclk`, and a
+  // shared polarity does not imply a shared root. The scan therefore enforces
+  // its own common-domain policy across every committing port and refuses
+  // distinct roots rather than silently picking one.
+  uint32_t                 clock_ordinal = 0;
   bool                     sync = false, is_rom = false;
   std::vector<std::string> rom_contents;
   std::vector<MemoryPort>  ports;
@@ -104,6 +141,11 @@ struct DesignScan {
   std::map<uint32_t, Memory> memories;
   std::vector<PinRef>        roots;
   std::vector<DesignNode>    nodes;  // reachable topological order
+  // Owned clock table, in deterministic ordinal order. Always non-empty: a
+  // design with no resolved domain still gets the single default entry, so
+  // `clock_ordinal == 0` is always in range and `clocks.size()` is the bound
+  // every emitted `_clock_bounds` obligation is checked against.
+  std::vector<ClockDomain>   clocks;
 };
 DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options);
 }  // namespace lean_export

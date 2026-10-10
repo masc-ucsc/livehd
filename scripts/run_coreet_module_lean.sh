@@ -197,11 +197,13 @@ if [[ "$LEAN_MODE" == "verified_compiler" ]]; then
   #     emitted complete four-theorem certificates.
   #   * it was MISSING the const-width and ROM-entry gates, so the CORE-ET sweep
   #     ran weaker checks than the CVA6 sweep against the same emitter.  Four
-  #     modules reached a green PROVEN carrying constants too narrow to hold
-  #     their value; `native_decide` proves such a certificate faithfully
-  #     against a model that is itself wrong, so the proof is sound and the
-  #     MODEL is not.  That is the one failure this pipeline cannot detect
-  #     downstream, and it is exactly what the gate exists for.
+  #     modules reached a green PROVEN carrying a constant whose declared width
+  #     cannot hold its value.  That is a flag, NOT a confirmed defect:
+  #     CertificateBuilder::dep deliberately sets a constant source to the
+  #     CONSUMER's width, so a narrow constant can be correct modular
+  #     arithmetic.  The gate still has to run, because if one of them IS a real
+  #     truncation then native_decide proves it faithfully against a model that
+  #     is not the RTL -- the one failure nothing downstream can detect.
   # One implementation, called from both drivers.
   python3 -I "$LIVEHD_ROOT/pass/lean/scripts/vc_gates.py" "$generated" "$TOP" \
     > "$LOG_DIR/static_gates.log" 2>&1 || gate_status=1

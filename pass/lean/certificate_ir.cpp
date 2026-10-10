@@ -240,6 +240,15 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
       b.result.outputs.push_back({b.dep(*o.driver, o.width), o.width});
     }
   }
+  // The emitted clock table is the scan's, in the scan's ordinal order. Only
+  // the human-facing name crosses: a certificate domain IS its ordinal, and the
+  // scan's structural key has no meaning here.
+  if (!design.clocks.empty()) {
+    b.result.clocks.clear();
+    for (const auto& c : design.clocks) {
+      b.result.clocks.push_back({c.name});
+    }
+  }
   std::map<uint32_t, FlopDriver> flops;
   // Allocate sources in graph iteration order, preserve runtime ordinals by nid.
   for (const auto& f : design.flops) {
@@ -260,6 +269,9 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
     // The polarity flag controls both immediate async reads and next-state
     // reset priority; it is independent of the reset signal itself.
     driver.reset_active_low = f.active_low;
+    // Carried from the scan, never recomputed here: the IR has no graph.
+    driver.clock            = f.clock_ordinal;
+    driver.async_reset      = f.asynchronous;
     flops.emplace(f.id, driver);
   }
   for (const auto& [id, f] : flops) {

@@ -67,10 +67,24 @@ struct FlopDriver {
   std::optional<uint32_t> enable, reset_pin;
   std::string             reset_value      = "0";
   bool                    reset_active_low = false;
+  // Resolved by the SCAN (DesignScan::clocks); carried, never recomputed.
+  uint32_t                clock = 0;
+  // An asynchronous reset acts on both the visible Q and the committed state
+  // with no edge, so it is a property of the commit and must reach the
+  // certificate. A synchronous reset instead holds while its clock is quiet,
+  // which the edge-sensitive commit already expresses.
+  bool                    async_reset = false;
 };
 struct MemoryDriver {
   uint32_t addr_w = 0, data_w = 0, next_img = 0;
   uint32_t origin = 0;
+  uint32_t clock  = 0;
+};
+// One emitted clock. Mirrors DesignScan::ClockDomain, minus the structural key:
+// the key is the scan's grouping identity and has no meaning in the certificate,
+// where a domain IS its ordinal.
+struct CertClock {
+  std::string name;
 };
 struct CertificateIR {
   std::vector<Source>          sources;
@@ -79,6 +93,9 @@ struct CertificateIR {
   std::vector<FlopDriver>      flops;
   std::vector<MemoryDriver>    memories;
   std::map<uint32_t, uint32_t> slot_of;
+  // Always non-empty, so every `clock` ordinal above is in range and the
+  // emitted `_clock_bounds` obligation is discharged against a real table.
+  std::vector<CertClock>       clocks{{"clock"}};
 };
 struct CertificateOptions {};
 CertificateIR build_certificate(const DesignScan& design, const CertificateOptions& options);

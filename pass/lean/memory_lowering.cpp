@@ -70,6 +70,13 @@ void lower_memory(CertificateBuilder& b, const Memory& m) {
       f.read_port = p.port_id;
       f.width     = m.bits;
       f.din       = next;
+      // A SYNTHETIC read flop inherits the domain of the port whose registered
+      // read it models -- not the memory's, which may differ only because the
+      // scan's common-domain check allows one shared answer. It has no reset at
+      // all, so it certainly has no ASYNCHRONOUS one; saying so explicitly keeps
+      // it from inheriting a default that would make it commit without an edge.
+      f.clock       = p.has_domain ? p.clock_ordinal : m.clock_ordinal;
+      f.async_reset = false;
       b.read_registers.emplace(reg.id, f);
       b.memory_reads.emplace(key, reg.id);
     } else {
@@ -84,7 +91,7 @@ void lower_memory(CertificateBuilder& b, const Memory& m) {
   }
   const auto next = chain(all);
   if (!m.is_rom) {
-    b.memory_drivers.emplace(m.id, MemoryDriver{m.addr_width, m.bits, next, m.id});
+    b.memory_drivers.emplace(m.id, MemoryDriver{m.addr_width, m.bits, next, m.id, m.clock_ordinal});
   }
 }
 }  // namespace lean_export::detail
