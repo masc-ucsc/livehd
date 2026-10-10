@@ -3749,9 +3749,53 @@ mutations of a real artifact:
 The last is a regression guard with a job to do: without it, deleting the
 entire per-node census would have scored 6/6.
 
+**This was already known on D2, and the port lost it.** After repairing it
+here, `pass/lean/scripts/cert_shape_check.py` on the Direction-2 branch turns
+out to open with:
+
+> REPLACES a `nodes > 0` check that was UNSOUNDLY STRICT. Two real CORE-ET
+> modules -- `null_vpu` and `minion_dcache_texsend` -- are legitimate ZERO-NODE
+> designs [...] the old gate refused them for having no combinational nodes,
+> which is not a defect.
+
+Same two modules, same conclusion, reached independently. So R24 is a **port
+gap**, not a discovery: D2 fixed this and master's `op_census.py` kept the old
+rule. Recorded that way rather than as a find.
+
+That file is now ported (R24.1), and it checks something this repair does not.
+
 **Outstanding.** Both jobs still carry the old `FAILED` label and must be
 re-run under the repaired gate. They are the only two zero-node artifacts in
 the emitted set, so the correction is bounded at two.
+
+### R24.1 `cert_shape_check.py`: every reference must resolve
+
+`op_census.py` reads the **legacy** `graphCert`. The ported checker reads the
+**`DesignCert`**, where slots are dense -- sources occupy `0 .. nSources-1` and
+node `i` occupies `nSources + i` -- so there is a single global invariant worth
+checking cheaply: every output `slot`, flop `din`/`enable`/`resetPin`, node
+`deps` entry and memory `nextImg` must be `< nSources + nNodes`. A malformed
+emission becomes a named failure in milliseconds instead of a Lean error
+minutes later. It is a pre-check, not a substitute for `checkDesign`.
+
+Measured on arrival: **all 81 emitted `verified_compiler` certificates pass**,
+`minion_dcache_texsend` among them, reported as `zero-node design (outputs
+resolve directly to sources); refs valid`.
+
+One thing was added to the D2 version. Its section guard checks only that
+`sources`, `nodes` and `outputs` were **found**. If an entry spelling drifts --
+`origin` renamed, `SourceDesc` respelled -- the section is still found, its
+count silently falls to zero, `total` shrinks, and every reference then looks
+out of range. That reads as a shape failure *in the design* rather than a
+failure to read it; with few enough references it reads as a **pass**. A
+section that is present but counts zero, and is not literally `#[]`, is now a
+named PARSER failure.
+
+Thirteen controls, on mutations of real certificates: four accepted shapes
+(plain, zero-node, with flops, with memories); an out-of-range output slot,
+node dep, flop `din` and memory `nextImg`; a certificate with neither outputs
+nor flops; three parser-drift cases, one of which additionally asserts the
+message does **not** say "out of range"; and an unreadable file.
 
 ## R25. The controls were writing into the live results directory
 
