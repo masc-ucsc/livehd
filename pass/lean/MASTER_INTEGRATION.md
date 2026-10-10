@@ -3172,13 +3172,37 @@ an async reset with no edge while the residual must encode it in its binding
 order — plus a reset/load/hold `diffTrace` with the expected values pinned at
 each step (7, then 5, then 5 held while quiet).
 
-### R18.5 Still open
+### R18.5 Byte enables and forwarding
 
-**Byte-enables** (`wensize > 1`) and **read-during-write forwarding**
-(`fwd ≠ 0`) are not covered: this fixture uses a single enable lane and
-`fwd = 0`. `memory_lowering.cpp` supports both, so the gap is in the gate, not
-the implementation. Selective and disabled lanes, same- versus different-address
-read/write, and write-port collision ordering all remain to be exercised across
-quiet and firing clocks.
+`memory_lowering.cpp` emits **`MemWriteBE`** once `wensize > 1`, resizing the
+enable to one bit per lane. A selective write is therefore a **different
+operator**, not a different argument — and it was untested. A second scanner
+fixture uses four 2-bit lanes over 8-bit cells with `fwd = 1`, and the test
+asserts a `MemWriteBE` node is actually present before any value case runs,
+because with a plain `MemWrite` every lane assertion would quietly be exercising
+the single-lane path again.
 
-The IO/clock sidecar and graph-closed publication remain untouched.
+12 cases, all decided, against a cell holding `0xFF`:
+
+| Enable | Result |
+| --- | --- |
+| `0b1111` | whole cell written → 0 |
+| `0b0000` | **nothing written**, with the clock firing |
+| `0b0011` | low lanes only → **240** (high nibble survives) |
+| `0b1100` | high lanes only → **15** (low nibble survives) |
+| `0b1111`, clock **quiet** | nothing written, whatever the lanes say |
+
+A selective write leaves other addresses alone. And forwarding is contrasted
+directly against the `fwd = 0` fixture: with `fwd = 1`, a same-address read on
+the **writing** step sees the **new** data (0), while a different address is not
+forwarded and reads the committed cell (255) — where the `fwd = 0` fixture reads
+the old cell on that step and only sees the new value on the next.
+
+`diffStep` covers all four lane patterns across every tiny address.
+
+### R18.6 Still open
+
+**Write-port collision ordering** — this fixture has one write port, so the
+`fwd` matrix's per-(read, write) structure is exercised only in its 1×1 case.
+
+The **IO/clock sidecar** and **graph-closed publication** remain untouched.

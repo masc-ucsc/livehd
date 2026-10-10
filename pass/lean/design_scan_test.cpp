@@ -1571,13 +1571,16 @@ TEST(DesignScanClocks, QuietClockResetValueOracle) {
 // The fixture is a 4-entry RAM on `clk_a` with one write port and one
 // synchronous read port, plus a synchronous ROM on `clk_b`, all from the real
 // scanner.
-std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_port_clocked) {
+std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_port_clocked,
+                                              int64_t wensize = 1, int64_t fwd = 0) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string(lgdb));
   auto  io  = lib.create_io("memfix");
   uint32_t pid = 1;
   for (const char* n : {"clk_a", "clk_b", "we", "re"}) {
     io->add_input(n, pid++);
-    io->set_bits(n, 1);
+    // The write enable carries ONE BIT PER LANE: memory_lowering emits
+    // MemWriteBE when wensize > 1 and resizes `enable` to wensize.
+    io->set_bits(n, std::string_view(n) == "we" ? static_cast<uint32_t>(wensize) : 1u);
   }
   io->add_input("waddr", pid++);
   io->set_bits("waddr", 2);
@@ -1608,8 +1611,8 @@ std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_
   rconst("bits", 8);
   rconst("size", 4);
   rconst("type", 1);       // synchronous read
-  rconst("wensize", 1);
-  rconst("fwd", 0);        // NO forwarding: a read sees committed contents
+  rconst("wensize", wensize);
+  rconst("fwd", fwd);      // 0 = no forwarding: a read sees committed contents
   rconst("posclk", 1);
   // port 0 = WRITE, port 1 = synchronous READ.
   rconst("rdport", 0, 0);
@@ -1858,6 +1861,119 @@ TEST(DesignScanClocks, MemoryQuietDomainValueOracle) {
       << "example : diffTrace memfix_designCert memfix_residual [0,1,2,3] " << dst << "\n"
       << "            [⟨" << edges(true, true) << ", #[" << w2 << "]⟩,\n"
       << "             ⟨" << edges(true, true) << ", #[" << rd1 << "]⟩] 0 = none := by native_decide\n";
+  ASSERT_TRUE(out.good());
+}
+
+// BYTE-ENABLE and FORWARDING, which the single-lane fixture above does not
+// reach. `memory_lowering.cpp` emits `MemWriteBE` once `wensize > 1` and resizes
+// the enable to one bit per lane, so a selective write is a different operator,
+// not a different argument -- and an untested one until now.
+TEST(DesignScanClocks, ByteEnableAndForwardingValueOracle) {
+  // 8-bit cells, FOUR 2-bit lanes, and forwarding ON so a same-step read of the
+  // written address sees the new data.
+  auto g = build_mem_fixture("lgdb_clk_mem_be", /*read_port_clocked=*/true,
+                             /*wensize=*/4, /*fwd=*/1);
+  DesignScan design;
+  try {
+    design = scan_design(*g, {});
+  } catch (const std::exception& e) {
+    GTEST_SKIP() << "fixture refused by the scanner: " << e.what();
+  }
+  const auto cert = build_certificate(design, {});
+  // The POINT of this fixture: a different operator must have been selected.
+  bool has_be = false;
+  for (const auto& n : cert.nodes) {
+    has_be |= n.op.kind == Operation::MemWriteBE;
+  }
+  ASSERT_TRUE(has_be) << "wensize=4 did not lower to MemWriteBE; the fixture tests nothing";
+
+  const char* path = std::getenv("LEAN_BE_FIXTURE");
+  if (path == nullptr) {
+    GTEST_SKIP() << "set LEAN_BE_FIXTURE to emit the Lean oracle";
+  }
+  std::ofstream out(path);
+  emit_design_cert(design, cert, out);
+  out << "\n-- scan: " << design.clocks.size() << " clock(s), wensize=4, fwd=1\n";
+
+  auto ordinal_of = [&](std::string_view name) -> size_t {
+    for (size_t i = 0; i < design.inputs.size(); ++i) {
+      if (design.inputs[i].name == name) {
+        return i;
+      }
+    }
+    ADD_FAILURE() << "no input " << name;
+    return 0;
+  };
+  struct In { const char* name; int value; int width; };
+  auto inputs = [&](std::initializer_list<In> set) {
+    std::map<size_t, std::pair<int, int>> by;
+    for (const auto& v : set) {
+      by[ordinal_of(v.name)] = {v.value, v.width};
+    }
+    std::ostringstream o;
+    for (size_t k = 0; k < design.inputs.size(); ++k) {
+      const auto it = by.find(k);
+      const int  w  = it != by.end() ? it->second.second : static_cast<int>(design.inputs[k].width);
+      const int  v  = it != by.end() ? it->second.first : 0;
+      o << (k ? ", " : "") << "mk_bv " << w << " " << v;
+    }
+    return o.str();
+  };
+  const auto ord_a = cert.memories.empty() ? 0u : cert.memories[0].clock;
+  auto       edges = [&](bool a, bool b) {
+    std::ostringstream o;
+    o << "#[";
+    for (size_t c = 0; c < design.clocks.size(); ++c) {
+      o << (c ? ", " : "") << ((c == ord_a ? a : b) ? "true" : "false");
+    }
+    o << "]";
+    return o.str();
+  };
+  // Cell 1 holds 0xFF; a selective write of 0x00 must clear only the enabled
+  // lanes. With four 2-bit lanes, enable 0b0011 touches the LOW four bits.
+  const char* st = "(⟨#[mk_bv 8 99, mk_bv 8 99], #[fun _ => mk_bv 8 255]⟩ : RuntimeState)";
+  auto wr = [&](int en, int data) {
+    return inputs({{"we", en, 4}, {"re", 1, 1}, {"waddr", 1, 2}, {"wdata", data, 8},
+                   {"raddr", 1, 2}, {"romaddr", 0, 2}});
+  };
+  out << "\n-- BYTE ENABLES: four 2-bit lanes over an 8-bit cell holding 0xFF.\n";
+  out << "-- all lanes enabled: the whole cell is written.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << wr(0xF, 0)
+      << "] " << st << ").nextState.mems[0]! (1 : Int)) = mk_bv 8 0 := by native_decide\n";
+  out << "-- NO lane enabled: nothing is written, even with the clock firing.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << wr(0x0, 0)
+      << "] " << st << ").nextState.mems[0]! (1 : Int)) = mk_bv 8 255 := by native_decide\n";
+  out << "-- the LOW two lanes only (0b0011): the high nibble must survive.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << wr(0x3, 0)
+      << "] " << st << ").nextState.mems[0]! (1 : Int)) = mk_bv 8 240 := by native_decide\n";
+  out << "-- the HIGH two lanes only (0b1100): the low nibble must survive.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << wr(0xC, 0)
+      << "] " << st << ").nextState.mems[0]! (1 : Int)) = mk_bv 8 15 := by native_decide\n";
+  out << "-- a selective write leaves OTHER addresses alone.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << wr(0xF, 0)
+      << "] " << st << ").nextState.mems[0]! (2 : Int)) = mk_bv 8 255 := by native_decide\n";
+  out << "\n-- ...and a QUIET clock still writes nothing, whatever the lanes say.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(false, true) << " #[" << wr(0xF, 0)
+      << "] " << st << ").nextState.mems[0]! (1 : Int)) = mk_bv 8 255 := by native_decide\n";
+
+  // FORWARDING: fwd=1 means read port 0 sees write port 0's new data on a
+  // same-address collision. Contrast with the fwd=0 fixture, where the same
+  // step reads the OLD cell.
+  out << "\n-- FORWARDING (fwd=1): a same-address read on the WRITING step sees the\n"
+      << "-- NEW data. The fwd=0 fixture reads the old cell on that step.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << wr(0xF, 0)
+      << "] " << st << ").nextState.flops[0]!) = mk_bv 8 0 := by native_decide\n";
+  const auto other = inputs({{"we", 0xF, 4}, {"re", 1, 1}, {"waddr", 1, 2}, {"wdata", 0, 8},
+                             {"raddr", 2, 2}, {"romaddr", 0, 2}});
+  out << "-- a DIFFERENT address is not forwarded: it reads the committed cell.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << other << "] " << st
+      << ").nextState.flops[0]!) = mk_bv 8 255 := by native_decide\n";
+
+  out << "\n-- direct vs compiled over the byte-enable cases, every tiny address.\n";
+  for (int en : {0x0, 0x3, 0xC, 0xF}) {
+    out << "example : diffStep memfix_designCert memfix_residual " << edges(true, true) << " #[" << wr(en, 0)
+        << "] " << st << " [0,1,2,3] = none := by native_decide\n";
+  }
   ASSERT_TRUE(out.good());
 }
 }  // namespace
