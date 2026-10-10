@@ -126,7 +126,6 @@ cc_test(
     name = "cvc5_link_smoke",
     srcs = ["tests/cvc5_link_smoke.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # ABC's readers require zlib, as in query_test below.
     linkstatic = True,  # Exercise COMDAT coalescing in the final executable.
     deps = [
         "@abc",
