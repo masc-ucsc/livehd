@@ -60,8 +60,8 @@ except Exception: print('-')" "$1" "$2" "$3" "$4"
 # artifact scenario, and must therefore be refused on its own.
 echo "--- control: a preexisting artifact is not a fresh export ---"
 INV="$T/inv_preseed.json"; mk_inventory "$INV" preseed verified_compiler
-mkdir -p "$T/res_preseed"
-out="$(cd "$R" && REPLAY_RESULTS="$T/res_preseed" python3 -I "$ORCH" run "$INV" --family CTL 2>&1)"
+mkdir -p "$T/replay_preseed"
+out="$(cd "$R" && python3 -I "$ORCH" run "$INV" --family CTL --replay-dir "$T/replay_preseed" 2>&1)"
 e=$?
 if [[ "$e" -ne 0 ]]; then
   echo "ok: an unwired family exits nonzero (exit=$e)"
@@ -98,6 +98,59 @@ expect used_false_axiom        "$T/false_axiom.lean" verified_compiler FAILED
 expect verified_for_chunked_wf "$T/good.lean"        legacy_chunked_wf FAILED
 expect verified_for_bridge     "$T/good.lean"        legacy_bridge     FAILED
 expect missing_artifact        "$T/does_not_exist.lean" verified_compiler FAILED
+
+
+# --- controls: --case selects, --redo replaces ------------------------------
+#
+# A bounded rerun is the only way to correct a record that a gate got wrong, so
+# the selection itself has to be trustworthy: a name that matches nothing must
+# be an ERROR, not an empty selection reported as a successful rerun.
+echo "--- controls: --case selects, and a name that matches nothing is an error ---"
+INV2="$T/inv_two.json"
+printf '{"configurations":{"ctl":2},"jobs":[{"family":"CTL","case":"alpha","top":"%s","mode":"verified_compiler"},{"family":"CTL","case":"beta","top":"%s","mode":"verified_compiler"}]}\n' \
+  "$TOP" "$TOP" > "$INV2"
+RES2="$T/replay_two"; mkdir -p "$RES2"
+
+sel_count() {  # args... -> the N from "running N job(s)"
+  (cd "$R" && python3 -I "$ORCH" run "$INV2" --replay-dir "$RES2" --family CTL "$@" 2>&1) \
+    | sed -n 's/^running \([0-9]*\) job(s).*/\1/p' | head -1
+}
+
+n=$(sel_count); [[ "$n" == "2" ]] \
+  && echo "ok: no --case selects both jobs" \
+  || { echo "FAIL: no --case selected '${n:-none}', want 2"; rc=1; }
+
+rm -rf "$RES2"; mkdir -p "$RES2"
+n=$(sel_count --case alpha); [[ "$n" == "1" ]] \
+  && echo "ok: --case alpha selects exactly one job" \
+  || { echo "FAIL: --case alpha selected '${n:-none}', want 1"; rc=1; }
+
+out="$(cd "$R" && python3 -I "$ORCH" run "$INV2" --replay-dir "$RES2" --case gamma 2>&1)"; e=$?
+if [[ "$e" -eq 2 ]] && grep -q 'no such case' <<<"$out"; then
+  echo "ok: an unknown --case exits 2 rather than selecting nothing"
+else
+  echo "FAIL: --case gamma -> exit $e: $(head -1 <<<"$out")"; rc=1
+fi
+
+# A case that EXISTS but is excluded by --mode must still be reported as known:
+# the check is against the inventory, not the post-filter selection.
+out="$(cd "$R" && python3 -I "$ORCH" run "$INV2" --replay-dir "$RES2" --case alpha --mode legacy 2>&1)"
+grep -q 'no such case' <<<"$out" \
+  && { echo "FAIL: a known case excluded by --mode was reported unknown"; rc=1; } \
+  || echo "ok: a known case excluded by --mode is not reported unknown"
+
+# Re-selection: a recorded job is skipped, and --redo brings it back.
+n=$(sel_count --case alpha); [[ "$n" == "0" ]] \
+  && echo "ok: a recorded case is not re-run without --redo" \
+  || { echo "FAIL: recorded case re-selected '${n:-none}', want 0"; rc=1; }
+n=$(sel_count --case alpha --redo); [[ "$n" == "1" ]] \
+  && echo "ok: --redo re-runs the recorded case" \
+  || { echo "FAIL: --redo selected '${n:-none}', want 1"; rc=1; }
+
+out="$(cd "$R" && python3 -I "$ORCH" run "$INV2" --replay-dir "$RES2" --redo 2>&1)"; e=$?
+[[ "$e" -eq 2 ]] \
+  && echo "ok: --redo without --case is refused, not applied to everything" \
+  || { echo "FAIL: --redo without --case exited $e"; rc=1; }
 
 [[ $rc -eq 0 ]] && echo "PASS: scope is requested, freshness is enforced, failures exit nonzero"
 exit $rc

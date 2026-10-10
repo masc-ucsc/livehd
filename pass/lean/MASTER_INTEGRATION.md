@@ -3752,3 +3752,48 @@ entire per-node census would have scored 6/6.
 **Outstanding.** Both jobs still carry the old `FAILED` label and must be
 re-run under the repaired gate. They are the only two zero-node artifacts in
 the emitted set, so the correction is bounded at two.
+
+## R25. The controls were writing into the live results directory
+
+`replay_orchestrator_controls.sh` ran every CLI case with
+`REPLAY_RESULTS="$T/..."` in front of it. **`replay_orchestrator.py` has never
+read that variable.** `RESULTS` and `JOBS` are module constants under
+`generated/master_port/replay/`, so each control run wrote its fixtures into
+the live tree: `results/CTL__preseed__verified_compiler.json` and a
+`jobs/CTL/verified_compiler/` directory were sitting there, left by the suite.
+
+This is R23.1 row 2 again — a knob named in the caller that the callee ignores
+— and it is the second time it has appeared in this harness.
+
+**Blast radius, measured rather than assumed.** Every accounting path is
+inventory-driven: `load_results` walks `inv["jobs"]`, `exit_status` walks the
+selected jobs, and `reaudit_results.py` walks `inv["jobs"]`. Nothing globs the
+results directory. `CTL` is not a family in `inventory.json` (which carries 447
+jobs across CORE-ET, CVA6 and DINO), so the stray record was never counted in
+any total. **No reported number changes.** It was contamination, not
+corruption, and the distinction is worth stating exactly rather than being
+tidied away in silence.
+
+**The repair** is `--replay-dir`, which relocates `REPLAY`, `RESULTS` *and*
+`JOBS` together — a results-only flag would have left the job tree behind. The
+controls pass it; the stray record and directory were removed by explicit path.
+
+### R25.1 `--case` and `--redo`
+
+Correcting R24 needs a bounded rerun of exactly two cases, and `run` skips any
+job that already has a result — which is what makes a rerun cheap and is worth
+keeping. So:
+
+- `--case NAME` (repeatable) narrows the selection.
+- An unknown `--case` **exits 2**. Selecting nothing and printing `running 0
+  job(s)` with exit 0 is a rerun that did not happen, reported as a success —
+  the same shape as everything else in R23.
+- The name is checked against the **whole inventory**, not the post-filter
+  selection, so a case excluded by `--family`/`--mode` is not called unknown.
+- `--redo` replaces an existing record. Without `--case` it is refused, so it
+  cannot be aimed at everything by accident.
+
+Seven controls, through the real CLI: no `--case` selects both jobs; `--case
+alpha` selects one; a recorded case selects zero; `--redo` brings it back to
+one; `--case gamma` exits 2; `--redo` alone exits 2; and a known case excluded
+by `--mode` is not reported unknown.

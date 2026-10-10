@@ -538,6 +538,18 @@ def main() -> int:
     ap.add_argument("--family")
     ap.add_argument("--mode")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--replay-dir", type=Path,
+                    help="relocate the whole replay tree -- results AND job output. "
+                         "A control suite must pass this: the env var the controls used "
+                         "to set, REPLAY_RESULTS, was never read, so every control run "
+                         "wrote its fixtures into the live results directory.")
+    ap.add_argument("--case", action="append", default=[],
+                    help="restrict to these case names (repeatable). A name that is "
+                         "not in the inventory is an error, not an empty selection.")
+    ap.add_argument("--redo", action="store_true",
+                    help="re-run selected cases that already have a result. Without it "
+                         "an existing record is kept, which is what makes a plain rerun "
+                         "cheap; with it the old record is REPLACED.")
     ap.add_argument("--export-only", action="store_true")
     ap.add_argument("--lhd", type=Path, default=ROOT / "bazel-bin" / "lhd" / "lhd")
     ap.add_argument("--root", action="append", default=[],
@@ -557,7 +569,27 @@ def main() -> int:
     if a.command == "status":
         return status(inv)
 
+    if a.replay_dir:
+        global REPLAY, RESULTS, JOBS
+        REPLAY = a.replay_dir.resolve()
+        RESULTS = REPLAY / "results"
+        JOBS = REPLAY / "jobs"
     RESULTS.mkdir(parents=True, exist_ok=True)
+
+    # A --case NAME THAT MATCHES NOTHING IS AN ERROR.
+    #
+    # Silently selecting zero jobs for a misspelled name would print
+    # "running 0 job(s)" and exit 0 -- a rerun that did not happen, reported as
+    # a success. The whole inventory is checked, not the post-filter selection,
+    # so a case that exists but is excluded by --family/--mode says so.
+    if a.case:
+        known = {j["case"] for j in inv["jobs"]}
+        unknown = [c for c in a.case if c not in known]
+        if unknown:
+            print(f"no such case in {a.inventory}: {', '.join(sorted(unknown))}",
+                  file=sys.stderr)
+            return 2
+    case_ok = (lambda j: True) if not a.case else (lambda j: j["case"] in a.case)
     if a.command == "prove":
         # Typecheck jobs that are already EXPORTED. Their exports are not rerun:
         # a valid artifact with recorded provenance does not need regenerating
@@ -567,7 +599,8 @@ def main() -> int:
                if done.get(job_key(j), {}).get("export_state") == "EXPORTED"
                and done[job_key(j)].get("proof_state") == "NOT_RUN"
                and (a.family is None or j["family"] == a.family)
-               and (a.mode is None or j["mode"] == a.mode)]
+               and (a.mode is None or j["mode"] == a.mode)
+               and case_ok(j)]
         if a.limit:
             sel = sel[: a.limit]
         print(f"proving {len(sel)} exported job(s)", flush=True)
@@ -596,10 +629,19 @@ def main() -> int:
         return exit_status(sel)
 
     done = load_results(inv)
+    # --redo REPLACES a recorded result; without it a recorded job is skipped.
+    # Stated plainly because the skip is what keeps a rerun cheap, and because a
+    # record that was wrong (a gate that refused for the wrong reason, say) can
+    # only be corrected by asking for it.
     sel = [j for j in inv["jobs"]
-           if job_key(j) not in done
+           if (a.redo or job_key(j) not in done)
            and (a.family is None or j["family"] == a.family)
-           and (a.mode is None or j["mode"] == a.mode)]
+           and (a.mode is None or j["mode"] == a.mode)
+           and case_ok(j)]
+    if a.redo and not a.case:
+        print("--redo without --case would replace every selected record; "
+              "name the cases to redo", file=sys.stderr)
+        return 2
     if a.limit:
         sel = sel[: a.limit]
     print(f"running {len(sel)} job(s) with {a.lhd} (sha {sha(a.lhd)})", flush=True)
