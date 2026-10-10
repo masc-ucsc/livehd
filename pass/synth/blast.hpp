@@ -188,6 +188,11 @@ public:
   }
 };
 
+// GCC 14 -O2 false positive: the by-value copy of Blast_options below lets the
+// optimizer see a caller's disengaged std::optional<Adder_kind> payload and flag
+// its (engaged-only) read in value_or. The payload is never read unless engaged.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 template <class Ops, class ReadBit, class Slots, class Refuse, class RefuseShift>
 void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops, const ReadBit& abc_bit, const Blast_options& defaults,
                 const livehd::partition::Region_body& rb, const absl::flat_hash_set<hhds::Node_class>& region, const Refuse& refuse,
@@ -1012,4 +1017,5 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
            "wiring, resolved per demanded bit");
   }
 }
+#pragma GCC diagnostic pop
 }  // namespace livehd::synth
