@@ -1,0 +1,26 @@
+[
+  {
+    "top": "SingleCycleCPU",
+    "comparison": "Frozen baseline and refactored plain export from the same saved graph corpus",
+    "before": "generated/legacy_refactor/baseline_corpus/dino/SingleCycleCPU/export/SingleCycleCPU_Lgraph.lean",
+    "after": "generated/legacy_refactor/final_legacy_corpus/dino/SingleCycleCPU/export/SingleCycleCPU_Lgraph.lean",
+    "changes": [],
+    "scope": "Certificate structure and source expressions; not full fast model equality"
+  },
+  {
+    "top": "PipelinedCPU",
+    "comparison": "Frozen baseline and refactored plain export from the same saved graph corpus",
+    "before": "generated/legacy_refactor/baseline_corpus/dino/PipelinedCPU/export/PipelinedCPU_Lgraph.lean",
+    "after": "generated/legacy_refactor/final_legacy_corpus/dino/PipelinedCPU/export/PipelinedCPU_Lgraph.lean",
+    "changes": [],
+    "scope": "Certificate structure and source expressions; not full fast model equality"
+  },
+  {
+    "top": "PipelinedDualIssueCPU",
+    "comparison": "Frozen baseline and refactored plain export from the same saved graph corpus",
+    "before": "generated/legacy_refactor/baseline_corpus/dino/PipelinedDualIssueCPU/export/PipelinedDualIssueCPU_Lgraph.lean",
+    "after": "generated/legacy_refactor/final_legacy_corpus/dino/PipelinedDualIssueCPU/export/PipelinedDualIssueCPU_Lgraph.lean",
+    "changes": [],
+    "scope": "Certificate structure and source expressions; not full fast model equality"
+  }
+]

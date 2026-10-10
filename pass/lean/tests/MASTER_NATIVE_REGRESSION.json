@@ -1,0 +1,81 @@
+{
+  "master_commit": "c54a435156a528d77afab2111bcb337403a0b42a",
+  "configuration": "Bazel 9.2.0 / GCC 14 / dbg",
+  "result": {
+    "exit": 0,
+    "targets": [
+      "//inou/prp:prp-adv_splice_callarg",
+      "//inou/prp:prp-adv_ufcs_05",
+      "//inou/prp:prp-equiv-blocking_ff_state",
+      "//inou/prp:prp-equiv-generic_mod",
+      "//inou/prp:prp-equiv-mem_tuple_rw",
+      "//inou/prp:prp-equiv-mod_template",
+      "//inou/prp:prp-equiv-mod_varargs_add",
+      "//inou/prp:prp-equiv-mod_varargs_csa",
+      "//inou/prp:prp-equiv-pipe_varargs_add",
+      "//inou/prp:prp-fcall6",
+      "//inou/prp:prp-ref_self_type_receiver",
+      "//inou/prp:prp-self_inline_type",
+      "//inou/prp:prp-v2prp2v-comb_array_const_index_read",
+      "//lhd/tests:lhd_abc_math_test",
+      "//lhd/tests:lhd_formal_budget_mine_test",
+      "//lhd/tests:lhd_formal_verify_test",
+      "//lhd/tests:lhd_list_options_test",
+      "//lhd/tests:lhd_sim_incremental_test",
+      "//pass/lean:lean_export_tests",
+      "//pass/lec:lec_stats_test"
+    ],
+    "wall_seconds": 83.513
+  },
+  "expanded_test_targets_passed": 22,
+  "historical_comparison_targets_passed": 17,
+  "native_solver_source_changes": false,
+  "lean_option_checks": {
+    "exit": 0,
+    "wall_seconds": 65.258
+  },
+  "xor_cli_smoke": [
+    {
+      "check": "legacy_export",
+      "exit": 0,
+      "passed": true,
+      "wall_seconds": 0.065
+    },
+    {
+      "check": "legacy_proof",
+      "exit": 0,
+      "passed": true,
+      "wall_seconds": 4.424
+    },
+    {
+      "check": "verified_compiler_export",
+      "exit": 0,
+      "passed": true,
+      "wall_seconds": 0.065
+    },
+    {
+      "check": "verified_compiler_proof",
+      "exit": 0,
+      "passed": true,
+      "wall_seconds": 3.622
+    },
+    {
+      "check": "retired_global_strict",
+      "exit": 2,
+      "passed": true,
+      "wall_seconds": 0.065
+    },
+    {
+      "check": "rtl_equivalence",
+      "exit": 0,
+      "passed": true,
+      "wall_seconds": 0.215,
+      "reader": "master default Slang; source-level LEC no longer accepts --reader yosys-verilog"
+    }
+  ],
+  "wire_ring": {
+    "exit": 0,
+    "target": "//inou/prp:prp-equiv-wire_ring",
+    "wall_seconds": 13.789
+  }
+}

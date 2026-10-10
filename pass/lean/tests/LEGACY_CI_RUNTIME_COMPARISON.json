@@ -1,0 +1,336 @@
+{
+  "snapshot_utc": "2026-09-29T04:56:35.437593+00:00",
+  "base_commit": "1af4e14924db5bb3259e3506ba4d8f62bf109615",
+  "pr_commit": "7c85ef109b490475e5aabd9657dbecd496da4a05",
+  "base_overlays": {
+    "MODULE.bazel": "same upstream source revision; repaired archive coordinates and checksum",
+    "packages/cvc5.BUILD": "retained static linker isolation repair"
+  },
+  "native_source_changes": false,
+  "compiler": "gcc-14 (Debian 14.4.0-1) 14.4.0",
+  "bazel": "9.2.0",
+  "configuration": [
+    "test",
+    "-c",
+    "dbg",
+    "--jobs=16",
+    "--local_test_jobs=4",
+    "--spawn_strategy=local",
+    "--test_strategy=standalone",
+    "--repo_contents_cache=",
+    "--cache_test_results=no",
+    "--test_output=errors",
+    "--keep_going"
+  ],
+  "binary_sha256": {
+    "base": "20370ef99421f83d9bf48ba2b3d928ffc588012833f7e878bae59b97fe43ce77",
+    "pr": "12899d5187a7bc9598f3cd2d5c01979b1b0fb1f67b09907c026465b62552f285"
+  },
+  "summary": {
+    "targets": 17,
+    "matching_results": 17,
+    "failed_in_both": 16,
+    "passed_all_five_steps_in_both": 1
+  },
+  "tests": [
+    {
+      "target": "//inou/prp:prp-equiv-mod_varargs_csa",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.5,
+      "pr_seconds": 0.5,
+      "matching_failure_or_pass_category": "dotted_name_assertion",
+      "evidence": {
+        "base": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed",
+        "pr": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed"
+      },
+      "normalized_log_sha256": {
+        "base": "8fc5b9890e35fcd705901c612629b93fe7e4f8b9f2c88e56fded6fb77e553568",
+        "pr": "8fc5b9890e35fcd705901c612629b93fe7e4f8b9f2c88e56fded6fb77e553568"
+      }
+    },
+    {
+      "target": "//pass/lec:lec_stats_test",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.6,
+      "pr_seconds": 0.6,
+      "matching_failure_or_pass_category": "no_solver_statistics",
+      "evidence": {
+        "base": "lec[stats]: => no cvc5 query ran (every obligation settled by semdiff / cache / abc cones)",
+        "pr": "lec[stats]: => no cvc5 query ran (every obligation settled by semdiff / cache / abc cones)"
+      },
+      "normalized_log_sha256": {
+        "base": "bcf0f567c6b41f63370f600a83f95c5246f7b17bb04d15ddb927a9e6f040e5fb",
+        "pr": "bcf0f567c6b41f63370f600a83f95c5246f7b17bb04d15ddb927a9e6f040e5fb"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-adv_splice_callarg",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.1,
+      "pr_seconds": 0.1,
+      "matching_failure_or_pass_category": "hash_reference_invalidated",
+      "evidence": {
+        "base": "[raw_hash_set.h : 3314] RAW: Use of destroyed hash table.",
+        "pr": "[raw_hash_set.h : 3314] RAW: Use of destroyed hash table."
+      },
+      "normalized_log_sha256": {
+        "base": "0c05758476599d82d2fdb21401cfba367f68e91126fba24ab17c031a57a22b5e",
+        "pr": "0c05758476599d82d2fdb21401cfba367f68e91126fba24ab17c031a57a22b5e"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-equiv-mem_tuple_rw",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 13.6,
+      "pr_seconds": 13.4,
+      "matching_failure_or_pass_category": "dotted_name_assertion",
+      "evidence": {
+        "base": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed",
+        "pr": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed"
+      },
+      "normalized_log_sha256": {
+        "base": "167f98b4c3db20f68e74daf5af0fc6c0b234f963d05b82fd12b59774b961bfec",
+        "pr": "167f98b4c3db20f68e74daf5af0fc6c0b234f963d05b82fd12b59774b961bfec"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-self_inline_type",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.1,
+      "pr_seconds": 0.1,
+      "matching_failure_or_pass_category": "hash_reference_invalidated",
+      "evidence": {
+        "base": "[raw_hash_set.h : 3314] RAW: Use of destroyed hash table.",
+        "pr": "[raw_hash_set.h : 3314] RAW: Use of destroyed hash table."
+      },
+      "normalized_log_sha256": {
+        "base": "88a55f87874c310c98ce84673722822d36fee12133045940d5714f831116d98a",
+        "pr": "88a55f87874c310c98ce84673722822d36fee12133045940d5714f831116d98a"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-v2prp2v-comb_array_const_index_read",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 1.0,
+      "pr_seconds": 0.9,
+      "matching_failure_or_pass_category": "unpaired_memory_state",
+      "evidence": {
+        "base": "{\"schema_version\":1,\"severity\":\"info\",\"code\":\"lec-block-refuted\",\"category\":\"progress\",\"pass\":\"pass.lec\",\"message\":\"lec block 'top' fail\",\"span\":null,\"verdict\":\"fail\",\"engine\":\"bmc\",\"duration_ms\":447,\"attrs\":{\"detail\":\"auto: bmc reached Refuted first in 447ms (raced ind|bmc); solver=cvc5 (bmc, phase=after_reset, 6 checked steps after 2 reset-hold; WARNING no primary reset input found)\",\"witness\":\"first divergence at checked step 1/6: rd_o(ref=7 impl=6) @ inputs rst0.clk_i=0, rst0.en_i=0, rst0.ra_i=0, rst0.wa_i=7, rst0.wd_i=7, rst1.clk_i=0, rst1.en_i=0, rst1.ra_i=0, rst1.wa_i=7, rst1.wd_i=7, s1.clk_i=0, s1.en_i=0, s1.ra_i=7, s1.wa_i=7, s1.wd_i=7\",\"bound\":\"6\"},\"seq\":4}",
+        "pr": "{\"schema_version\":1,\"severity\":\"info\",\"code\":\"lec-block-refuted\",\"category\":\"progress\",\"pass\":\"pass.lec\",\"message\":\"lec block 'top' fail\",\"span\":null,\"verdict\":\"fail\",\"engine\":\"bmc\",\"duration_ms\":399,\"attrs\":{\"detail\":\"auto: bmc reached Refuted first in 399ms (raced ind|bmc); solver=cvc5 (bmc, phase=after_reset, 6 checked steps after 2 reset-hold; WARNING no primary reset input found)\",\"witness\":\"first divergence at checked step 1/6: rd_o(ref=7 impl=6) @ inputs rst0.clk_i=0, rst0.en_i=0, rst0.ra_i=0, rst0.wa_i=7, rst0.wd_i=7, rst1.clk_i=0, rst1.en_i=0, rst1.ra_i=0, rst1.wa_i=7, rst1.wd_i=7, s1.clk_i=0, s1.en_i=0, s1.ra_i=7, s1.wa_i=7, s1.wd_i=7\",\"bound\":\"6\"},\"seq\":4}"
+      },
+      "normalized_log_sha256": {
+        "base": "2c659729268b838ebf57f43b365c1925b626dfaeccb8e4b2b1857f02ebd8f9f3",
+        "pr": "fcdf34112e8f8e57abf35ed77c0d08fda85749d975787198aadf4bd8ca357fd2"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-ref_self_type_receiver",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.4,
+      "pr_seconds": 0.1,
+      "matching_failure_or_pass_category": "hash_reference_invalidated",
+      "evidence": {
+        "base": "[raw_hash_set.h : 3314] RAW: Use of destroyed hash table.",
+        "pr": "[raw_hash_set.h : 3314] RAW: Use of destroyed hash table."
+      },
+      "normalized_log_sha256": {
+        "base": "4a0d4baefa09727878c28120053e11f03c28701b1517b27cef6a57758f9f4e4b",
+        "pr": "4a0d4baefa09727878c28120053e11f03c28701b1517b27cef6a57758f9f4e4b"
+      }
+    },
+    {
+      "target": "//lhd/tests:lhd_abc_math_test",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 1.4,
+      "pr_seconds": 1.5,
+      "matching_failure_or_pass_category": "abc_signed_shift",
+      "evidence": {
+        "base": "counterexample: diff o_d5fa926db6b3ad92(ref=28 impl=12) @ c=8, i_06eabc2f107c3103=1",
+        "pr": "counterexample: diff o_d5fa926db6b3ad92(ref=31 impl=15) @ c=8, i_06eabc2f107c3103=3"
+      },
+      "normalized_log_sha256": {
+        "base": "93dcf07bb27daf9ea3c535989b48afd400b87832f2d96c2dd9a0870334bdc027",
+        "pr": "96a507ac78382e19fef925ef90745ca104fa7634b298b35c7f976fb2ded9ee7d"
+      }
+    },
+    {
+      "target": "//lhd/tests:lhd_sim_incremental_test",
+      "base_result": "PASSED",
+      "pr_result": "PASSED",
+      "base_seconds": 7.2,
+      "pr_seconds": 7.3,
+      "matching_failure_or_pass_category": "all_five_simulator_checks_pass",
+      "evidence": {
+        "base": "PASS (steps 1-5; warm rebuild is a no-op, interface changes reach dependents)",
+        "pr": "PASS (steps 1-5; warm rebuild is a no-op, interface changes reach dependents)"
+      },
+      "normalized_log_sha256": {
+        "base": "f2caa4cf14839c6b8dda6f59ed5d0d0c00adc53974ebd13b2014a3dae92ec329",
+        "pr": "f2caa4cf14839c6b8dda6f59ed5d0d0c00adc53974ebd13b2014a3dae92ec329"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-equiv-mod_varargs_add",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.4,
+      "pr_seconds": 0.4,
+      "matching_failure_or_pass_category": "dotted_name_assertion",
+      "evidence": {
+        "base": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed",
+        "pr": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed"
+      },
+      "normalized_log_sha256": {
+        "base": "57d64f5ac63376e964fe1c333596f7636b1b3bbd76697bff15956a890673a8ce",
+        "pr": "57d64f5ac63376e964fe1c333596f7636b1b3bbd76697bff15956a890673a8ce"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-fcall6",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.1,
+      "pr_seconds": 0.3,
+      "matching_failure_or_pass_category": "hash_reference_invalidated",
+      "evidence": {
+        "base": "[raw_hash_set.h : 3314] RAW: Use of destroyed hash table.",
+        "pr": "[raw_hash_set.h : 3314] RAW: Use of destroyed hash table."
+      },
+      "normalized_log_sha256": {
+        "base": "5850ecc74f0ed2a2c959a69058bc0566ed79c130a3e2b77e285ffdc6973fbf36",
+        "pr": "5850ecc74f0ed2a2c959a69058bc0566ed79c130a3e2b77e285ffdc6973fbf36"
+      }
+    },
+    {
+      "target": "//lhd/tests:lhd_formal_budget_mine_test",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 10.4,
+      "pr_seconds": 10.4,
+      "matching_failure_or_pass_category": "timing_budget",
+      "evidence": {
+        "base": "FAIL: total solver budget not honored: 10s (want < 10s)",
+        "pr": "FAIL: total solver budget not honored: 10s (want < 10s)"
+      },
+      "normalized_log_sha256": {
+        "base": "772c2355708d0849f78511cc4d3a6a9b97bf5bbc71665f9434edb38afdc12f85",
+        "pr": "772c2355708d0849f78511cc4d3a6a9b97bf5bbc71665f9434edb38afdc12f85"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-equiv-generic_mod",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.4,
+      "pr_seconds": 0.4,
+      "matching_failure_or_pass_category": "dotted_name_assertion",
+      "evidence": {
+        "base": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed",
+        "pr": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed"
+      },
+      "normalized_log_sha256": {
+        "base": "97f3f9dde9c0f10aa25aa249f7808f4a6467ceb814c973a3909aefa1ac3b6732",
+        "pr": "97f3f9dde9c0f10aa25aa249f7808f4a6467ceb814c973a3909aefa1ac3b6732"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-adv_ufcs_05",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.4,
+      "pr_seconds": 0.1,
+      "matching_failure_or_pass_category": "hash_reference_invalidated",
+      "evidence": {
+        "base": "[raw_hash_set.h : 3314] RAW: Use of destroyed hash table.",
+        "pr": "[raw_hash_set.h : 3314] RAW: Use of destroyed hash table."
+      },
+      "normalized_log_sha256": {
+        "base": "1f974bb1aaa40cb2552900031bf9c114563559845cd1f4b6343dabefc5e5d256",
+        "pr": "1f974bb1aaa40cb2552900031bf9c114563559845cd1f4b6343dabefc5e5d256"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-equiv-blocking_ff_state",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.3,
+      "pr_seconds": 0.3,
+      "matching_failure_or_pass_category": "unsupported_reader",
+      "evidence": {
+        "base": "{\"schema_version\":1,\"severity\":\"error\",\"code\":\"blocking-ff-state\",\"category\":\"unsupported\",\"pass\":\"inou.slang\",\"message\":\"variable 'sync_0' is blocking-assigned in an edge-sensitive process and read outside it; --reader slang only supports `<=` for state, and would otherwise lower it as stateless combinational logic\",\"span\":{\"file\":\"../../../../../../../../../../pr_ci/runtime_comparison/base_source/inou/prp/tests/equiv/blocking_ff_state.v\",\"start_byte\":621,\"end_byte\":621,\"start_line\":14,\"start_col\":7,\"end_line\":14,\"end_col\":7},\"hint\":\"use a non-blocking assignment (`<=`), or read it with --reader yosys-verilog\",\"seq\":1}",
+        "pr": "{\"schema_version\":1,\"severity\":\"error\",\"code\":\"blocking-ff-state\",\"category\":\"unsupported\",\"pass\":\"inou.slang\",\"message\":\"variable 'sync_0' is blocking-assigned in an edge-sensitive process and read outside it; --reader slang only supports `<=` for state, and would otherwise lower it as stateless combinational logic\",\"span\":{\"file\":\"../../../../../../../../../../../../inou/prp/tests/equiv/blocking_ff_state.v\",\"start_byte\":621,\"end_byte\":621,\"start_line\":14,\"start_col\":7,\"end_line\":14,\"end_col\":7},\"hint\":\"use a non-blocking assignment (`<=`), or read it with --reader yosys-verilog\",\"seq\":1}"
+      },
+      "normalized_log_sha256": {
+        "base": "62a0a61cd15e74636abb778440de0684ef62e221bbb9802160621c85a4dbe8e3",
+        "pr": "bbd4f58931f91f5881b28131711c50e00ebfa4ec15bcef44ea189dd8391d5c44"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-equiv-mod_template",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.7,
+      "pr_seconds": 0.9,
+      "matching_failure_or_pass_category": "dotted_name_assertion",
+      "evidence": {
+        "base": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed",
+        "pr": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed"
+      },
+      "normalized_log_sha256": {
+        "base": "0a0357dc4530b65689031d3070b73371225637b935f65bd9f7cbba605fc31f7c",
+        "pr": "0a0357dc4530b65689031d3070b73371225637b935f65bd9f7cbba605fc31f7c"
+      }
+    },
+    {
+      "target": "//inou/prp:prp-equiv-pipe_varargs_add",
+      "base_result": "FAILED",
+      "pr_result": "FAILED",
+      "base_seconds": 0.4,
+      "pr_seconds": 0.4,
+      "matching_failure_or_pass_category": "dotted_name_assertion",
+      "evidence": {
+        "base": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed",
+        "pr": "upass/core/symbol_table.cpp:525 :assertion bundle_key::find_top_dot(var) == std::string_view::npos failed"
+      },
+      "normalized_log_sha256": {
+        "base": "b4ca71ddb04bbc33d510933015b2927141ce99c0524ba01ecc55aa44226e351a",
+        "pr": "b4ca71ddb04bbc33d510933015b2927141ce99c0524ba01ecc55aa44226e351a"
+      }
+    }
+  ],
+  "limitations": [
+    "This is a targeted local runtime comparison, not a successful full base-branch CI run.",
+    "The base includes exactly the two listed dependency/link build repairs. Native compiler, SMT checker, and test assertions are unchanged.",
+    "The simulator CI failure is not reproduced locally.",
+    "Build wall times are not comparable performance measurements: the base build was colder.",
+    "The wire_ring native solver timeout seen in CI is not reproduced by the local unchanged-harness comparison."
+  ],
+  "wire_ring_comparison": {
+    "target": "//inou/prp:prp-equiv-wire_ring",
+    "results": [
+      {
+        "label": "base",
+        "lhd_sha256": "20370ef99421f83d9bf48ba2b3d928ffc588012833f7e878bae59b97fe43ce77",
+        "exit_code": 0,
+        "elapsed_seconds": 121.26087624003412,
+        "procedure": "Unchanged Pyrope harness, captured matching executable, default solver settings"
+      },
+      {
+        "label": "pr",
+        "lhd_sha256": "12899d5187a7bc9598f3cd2d5c01979b1b0fb1f67b09907c026465b62552f285",
+        "exit_code": 0,
+        "elapsed_seconds": 121.18909410800552,
+        "procedure": "Unchanged Pyrope harness, captured matching executable, default solver settings"
+      }
+    ],
+    "outcome": "Unchanged harness passes on both local versions; latest CI solver timeout not reproduced."
+  }
+}

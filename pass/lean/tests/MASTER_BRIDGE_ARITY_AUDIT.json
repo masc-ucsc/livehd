@@ -1,0 +1,3249 @@
+{
+  "scope": "27 fresh legacy-bridge refusals: current raw upstream operator shapes versus historical certificate shapes. Current shapes are before Lean lowering.",
+  "dispatch_comparison": "B1/B2 and the refactored emitter both support And arities 2/3/4, Xor arity 2, Sum 2+0 and 1+1; neither dispatch supports the refused shapes. Existing generic library lemmas are not wired for mixed-width operands.",
+  "entries": [
+    {
+      "family": "CORE-ET",
+      "case": "debug_breakpoint",
+      "top": "debug_breakpoint",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_And at node 116",
+      "historical_artifact_sha256": "efae73e7cec510f70d73ddf34322a0fc45211ecc5eb07d2dc54e4d0b671903d0",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 10
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 41,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 43,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 47,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 49,
+          "arity": 2,
+          "count": 2
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 5
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 6,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 48,
+          "arity": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_csr_msgs",
+      "top": "intpipe_csr_msgs",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_And at node 308",
+      "historical_artifact_sha256": "5149abe14bec3f7acd4e3ea4192ac78238ac6cff21951cdac0e8610d4052ee59",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 1906
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 40
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 20
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 20
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 112
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 10,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 12,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 15,
+          "arity": 2,
+          "count": 32
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 15,
+          "arity": 3,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 32,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 32,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 4,
+          "arity": 2,
+          "count": 50
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 10,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 5,
+          "arity": 2,
+          "count": 2
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 29
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 10
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 6,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 15,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 5,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 26
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 4,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 5,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 7,
+          "arity": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "intpipe_alu",
+      "top": "intpipe_alu",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Sum 3 at node 17764",
+      "historical_artifact_sha256": "4db01e2929580b1f511d4421a4232b0d2e4f07a23c0c69530535940fa4f95fd8",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 2252
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 16,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 32,
+          "arity": 2,
+          "count": 60
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 64,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 32,
+          "arity": 2,
+          "count": 56
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 64,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 64,
+          "arity": 2,
+          "count": 2
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 9
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 64,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 2,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 3,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 4,
+          "arity": 2,
+          "count": 14
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 7
+        },
+        {
+          "op": "LGraphOp.Op_Sum 3",
+          "width": 65,
+          "arity": 3,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 64,
+          "arity": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_pma_unit",
+      "top": "minion_dcache_pma_unit",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_And at node 436",
+      "historical_artifact_sha256": "38bf2d3c50b0346a2ff7c9dfb6cd5276fb3c49073763e50ea46a538512a23721",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 108
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 22
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 26
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 9,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 10,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 11,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 12,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 13,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 15,
+          "arity": 2,
+          "count": 2
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 19
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 5,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_miss_handler",
+      "top": "minion_dcache_miss_handler",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_And at node 840",
+      "historical_artifact_sha256": "299bc5d0231101fe8466629289b722c10f916b393bf9c9d488fc44db99a9ef04",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 146
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 42
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 9,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 33,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 1,
+          "arity": 2,
+          "count": 2
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 86
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 9
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 5,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 6,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 2,
+          "arity": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "minion_dcache_miss_handler_unit",
+      "top": "minion_dcache_miss_handler_unit",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_And at node 5396",
+      "historical_artifact_sha256": "f254c9586cae4daa17c97be18c16e71556401e0e6e6fd3dc99ccc97a5985fbad",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 328
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 34
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 26
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 48
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 14,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 33,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1024,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 1,
+          "arity": 2,
+          "count": 4
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 173
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 20
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 5,
+          "count": 5
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 6,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 241,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 2,
+          "arity": 2,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_4_2_compressor",
+      "top": "txfma_4_2_compressor",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Xor at node 188",
+      "historical_artifact_sha256": "5b5d8314bc63b3f180f461fd30d9dd369eee768169f2b1f667aebb392cc27cf6",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 8
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 3,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_c0",
+      "top": "txfma_c0",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_And at node 2660",
+      "historical_artifact_sha256": "39306309cd42c2caf60862055874a7cd83b866a00fceaddb7ac5ccea1088420a",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 542
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 24
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 10
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 7,
+          "arity": 2,
+          "count": 24
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 7,
+          "arity": 3,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 45,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 12
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 152
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 33
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 5,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 7,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 45,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 6
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_4_2_compressor_array",
+      "top": "txfma_4_2_compressor_array",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Xor at node 17144",
+      "historical_artifact_sha256": "5e3cfa6f401c0791ae52b55dc680ce9fe5540a518682df37a9159c8fbfc4dfe4",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 638
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 632
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 510
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 379
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 3,
+          "count": 127
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_c3",
+      "top": "txfma_c3",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Sum 0 at node 140",
+      "historical_artifact_sha256": "340afe7e5ec3c12c83a491ad83273b272786de5124de51eff010a85aca64e1db",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 328
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 10,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 2
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 160
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 7
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 0",
+          "width": 11,
+          "arity": 1,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_csa",
+      "top": "txfma_csa",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Xor at node 20",
+      "historical_artifact_sha256": "c83d1a1eb23cbedb9f82e3b5aa895632c82ca3c776fbf05c961f8ee6fa0e2589",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 4,
+          "arity": 2,
+          "count": 4
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 4,
+          "arity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_c4",
+      "top": "txfma_c4",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_And at node 156",
+      "historical_artifact_sha256": "eeff48cc900622c0b09d89283ca6e2840d674a1842a3c1128cea797d45b8ac86",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 26
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 6
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 7
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 5,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_e1",
+      "top": "txfma_e1",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Xor at node 416",
+      "historical_artifact_sha256": "3535622a580b1a6863b9a88c5f2d0028e382905e94197bf379ee89a8ca8a78bd",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 24
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 10
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 7,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 9,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 10,
+          "arity": 2,
+          "count": 30
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 11,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 7,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 11,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 10,
+          "arity": 2,
+          "count": 8
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 10,
+          "arity": 2,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 10,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 3",
+          "width": 11,
+          "arity": 3,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 10,
+          "arity": 3,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_e6",
+      "top": "txfma_e6",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Sum 3 at node 508",
+      "historical_artifact_sha256": "986aac960621ac57223b3607bdc8246cab21b27572b49f6b229e1bef5e564283",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 18
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 9,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 9,
+          "arity": 2,
+          "count": 4
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 7
+        },
+        {
+          "op": "LGraphOp.Op_Sum 3",
+          "width": 9,
+          "arity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_e2",
+      "top": "txfma_e2",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Sum 0 at node 448",
+      "historical_artifact_sha256": "91daacb6d0a206b3c342c9d5f43262f883544f2f2072bb8695e2053d151f3aa4",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 126
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 10
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 7,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 9,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 10,
+          "arity": 2,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 11,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 10,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 11,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 10,
+          "arity": 2,
+          "count": 8
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 122
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 10,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 0",
+          "width": 11,
+          "arity": 1,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 3",
+          "width": 11,
+          "arity": 3,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 8,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 10,
+          "arity": 3,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_f4",
+      "top": "txfma_f4",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Sum 3 at node 15544",
+      "historical_artifact_sha256": "7122a07dfbea5ef6eceed5622664402f6cad3a14078139a95a290f00cc1dad81",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 1020
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 404
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 204
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 3,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 7,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 17,
+          "arity": 3,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 23,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 51,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 52,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 53,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 53,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 102
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 52,
+          "arity": 2,
+          "count": 2
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 511
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 17,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 52,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 3",
+          "width": 54,
+          "arity": 3,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 51
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 51,
+          "arity": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_norm_shf",
+      "top": "txfma_norm_shf",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Sum 0 at node 24",
+      "historical_artifact_sha256": "a879b304153ef7522cb385ebb7effe467aef4d57244023b86f4be69b6c069944",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 33,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 10,
+          "arity": 2,
+          "count": 2
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_Sum 0",
+          "width": 11,
+          "arity": 1,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_rnd_adder",
+      "top": "txfma_rnd_adder",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Sum 3 at node 188",
+      "historical_artifact_sha256": "eabb4c7d49d4c8030b2568c8c36ffab6be14147c7bd8e89acd9d7675dc43add2",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 32,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 34,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 34,
+          "arity": 2,
+          "count": 4
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_Sum 3",
+          "width": 35,
+          "arity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_wallace1",
+      "top": "txfma_wallace1",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Xor at node 104904",
+      "historical_artifact_sha256": "2c16dcae43701ed62ca5bc8be002226e31ab2d7afd28bebdae9bdf408b5eed07",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 2186
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 1328
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 16,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 17,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 1652
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 1133
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 67
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 3,
+          "count": 366
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "txfma_wallace2",
+      "top": "txfma_wallace2",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Xor at node 39252",
+      "historical_artifact_sha256": "2b9d2c6ed960cdbd6119a02a2780e954af0e39251dadd7b2e0097d912d1b8fe3",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 1070
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 996
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 946
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 683
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 35
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 3,
+          "count": 216
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 7,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_mask",
+      "top": "vpu_mask",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Sum 16 at node 8088",
+      "historical_artifact_sha256": "b7a99e9fd4c744dc228735149006e04bb3586c37d07cfc67a0dcf6ee6ee9dbbe",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 4266
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 144
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 58
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 16,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 32,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 128,
+          "arity": 2,
+          "count": 68
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 58
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 32,
+          "arity": 2,
+          "count": 2
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 86
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 16,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 32,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 128,
+          "arity": 2,
+          "count": 34
+        },
+        {
+          "op": "LGraphOp.Op_Sum 16",
+          "width": 5,
+          "arity": 16,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 8",
+          "width": 4,
+          "arity": 8,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 32,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 64,
+          "arity": 2,
+          "count": 17
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_ml",
+      "top": "vpu_ml",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_And at node 2780",
+      "historical_artifact_sha256": "e2b59f3401238d6d3c7dcd88fe32250b43212afdda3593b71afd9b777736675e",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 490
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 48
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 92
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 66
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 3,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 50
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 64
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 7,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 12,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 15,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 16,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 18,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 32,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 36,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 2,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 3,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 4,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 5,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 6,
+          "arity": 2,
+          "count": 26
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 7,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 32,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 33,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 1,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 2,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 3,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 4,
+          "arity": 2,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 12,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 32,
+          "arity": 2,
+          "count": 4
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 177
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 25
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 5,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 6,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 7,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 14,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 0",
+          "width": 34,
+          "arity": 1,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 3,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 4,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 5,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 6,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 7,
+          "arity": 2,
+          "count": 11
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 8,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 2,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 3,
+          "arity": 2,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 7
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 7,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 3",
+          "width": 6,
+          "arity": 3,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 6,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 7,
+          "arity": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_sh_sw",
+      "top": "vpu_sh_sw",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Sum 3 at node 5316",
+      "historical_artifact_sha256": "d54e239cecb29540a1b4e1d5e64d1018a7fba55192c2a22548d0cf06522a802c",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 196
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 14
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 10,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 31,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 32,
+          "arity": 2,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 4,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 32,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 32,
+          "arity": 2,
+          "count": 4
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 96
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 32,
+          "arity": 2,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 3",
+          "width": 33,
+          "arity": 3,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 1,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 32,
+          "arity": 2,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensorfma",
+      "top": "vpu_tensorfma",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_And at node 984",
+      "historical_artifact_sha256": "73479cca3b57661950a50cf881c43ef26cd0fd50aa562851c85a680e8e4d2837",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 340
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 38
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 84
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 50
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 3,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 32
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 42
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 7,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 12,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 16,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 18,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 32,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 3,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 4,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 6,
+          "arity": 2,
+          "count": 14
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 32,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 1,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 2,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 4,
+          "arity": 2,
+          "count": 10
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 12,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 32,
+          "arity": 2,
+          "count": 4
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 74
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 17
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 5,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 6,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 7,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 14,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 3,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 4,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 5,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 7,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 2,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 3,
+          "arity": 2,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 7,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 6,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 7,
+          "arity": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensorquant",
+      "top": "vpu_tensorquant",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_And at node 312",
+      "historical_artifact_sha256": "de0440cfc47cfbe0c8342557401c1f24ff8dec2e2f7f73216c1b6e877618d06b",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 96
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 14
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 32,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 36,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 2,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 3,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 5,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 6,
+          "arity": 2,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 33,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 4,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 2
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 61
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 5
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 4,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 6,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 0",
+          "width": 34,
+          "arity": 1,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 3,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 4,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 6,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 7,
+          "arity": 2,
+          "count": 5
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 7,
+          "arity": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CORE-ET",
+      "case": "vpu_tensorreduce",
+      "top": "vpu_tensorreduce",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Sum 3 at node 1136",
+      "historical_artifact_sha256": "7e165f21ce7c06f438392366f9a5bbd83c2bda55a35c879cd4e73e2eb07761a8",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 48
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 10
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 6
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 7,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 3,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 4,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 7,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 3,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 6
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 41
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 4,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 5,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 8,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 2,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 3",
+          "width": 6,
+          "arity": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "family": "CVA6",
+      "case": "legacy_cva6_alu_export",
+      "top": "cva6_alu_export",
+      "refusal": "legacy fast bridge does not support LGraphOp.Op_Sum 0 at node 12048",
+      "historical_artifact_sha256": "f3ae679da6315090fd2c213962800da62ea5977bac0274dee7348f8a351d699b",
+      "historical_record_found": true,
+      "historical_artifact_matches_inventory": true,
+      "historical_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 1558
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 3,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 2,
+          "arity": 2,
+          "count": 64
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 3,
+          "arity": 2,
+          "count": 32
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 4,
+          "arity": 2,
+          "count": 112
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 5,
+          "arity": 2,
+          "count": 48
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 6,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 7,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 8,
+          "arity": 2,
+          "count": 68
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 16,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 32,
+          "arity": 2,
+          "count": 32
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 64,
+          "arity": 2,
+          "count": 12
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 64,
+          "arity": 3,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 66,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 7,
+          "arity": 2,
+          "count": 32
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 9,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 32,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 2,
+          "arity": 2,
+          "count": 64
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 3,
+          "arity": 2,
+          "count": 32
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 4,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 7,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 64,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 66,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 64,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 65,
+          "arity": 2,
+          "count": 2
+        }
+      ],
+      "current_raw_shapes": [
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 1,
+          "arity": 2,
+          "count": 39
+        },
+        {
+          "op": "LGraphOp.Op_And",
+          "width": 64,
+          "arity": 2,
+          "count": 3
+        },
+        {
+          "op": "LGraphOp.Op_Sum 0",
+          "width": 7,
+          "arity": 1,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_Sum 0",
+          "width": 9,
+          "arity": 1,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 6,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 1",
+          "width": 7,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 2,
+          "arity": 2,
+          "count": 32
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 3,
+          "arity": 2,
+          "count": 16
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 4,
+          "arity": 2,
+          "count": 8
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 5,
+          "arity": 2,
+          "count": 4
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 6,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 7,
+          "arity": 2,
+          "count": 2
+        },
+        {
+          "op": "LGraphOp.Op_Sum 2",
+          "width": 67,
+          "arity": 2,
+          "count": 1
+        },
+        {
+          "op": "LGraphOp.Op_Xor",
+          "width": 64,
+          "arity": 2,
+          "count": 3
+        }
+      ]
+    }
+  ]
+}

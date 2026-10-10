@@ -195,9 +195,6 @@ struct Retired_set_option {
 inline constexpr Retired_set_option kRetiredSetOptions[] = {
     {"inou.cgen.verilog","verbose",                                                                    "This option had no implemented effect; drop the setting."                         },
     {        "pass.lean",                 "normalize",                                                                    "This option had no implemented effect; drop the setting."},
-    {        "pass.lean",           "cert_chunk_size",                                                                    "This option had no implemented effect; drop the setting."},
-    {        "pass.lean",          "cert_chunk_limit",                                                                    "This option had no implemented effect; drop the setting."},
-    {        "pass.lean",          "cert_wf_fallback",                                                                    "This option had no implemented effect; drop the setting."},
     {     "pass.semdiff",                       "alg",                                                                    "This option had no implemented effect; drop the setting."},
     {     "pass.semdiff",                   "verbose",                                                                    "This option had no implemented effect; drop the setting."},
     {       "pass.color",                   "compact",                                                                    "This option had no implemented effect; drop the setting."},

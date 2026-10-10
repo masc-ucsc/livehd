@@ -8,8 +8,33 @@
 #include <cvc5/cvc5.h>
 
 #include "gtest/gtest.h"
+#include "sat/cadical/ccadical.h"
 
 using namespace cvc5;
+
+// Referencing ABC's C API pulls its CaDiCaL objects into the same binary as
+// cvc5. A shared destructor COMDAT signature must not discard either copy.
+TEST(Cvc5Link, IndependentCadicalCopies) {
+  CCaDiCaL *abc = ccadical_init();
+  ASSERT_NE(abc, nullptr);
+  ccadical_add(abc, 1);
+  ccadical_add(abc, 0);
+  EXPECT_EQ(ccadical_solve(abc), 10);
+
+  TermManager tm;
+  Solver      solver(tm);
+  solver.setLogic("QF_BV");
+  Sort bv8 = tm.mkBitVectorSort(8);
+  Term x   = tm.mkConst(bv8, "x");
+  Term y   = tm.mkConst(bv8, "y");
+  solver.assertFormula(tm.mkTerm(Kind::BITVECTOR_ULT, {x, y}));
+  EXPECT_TRUE(solver.checkSat().isSat());
+
+  ccadical_add(abc, -1);
+  ccadical_add(abc, 0);
+  EXPECT_EQ(ccadical_solve(abc), 20);
+  ccadical_release(abc);
+}
 
 // A satisfiable bit-vector query: exists x:bv8 . x == 1.
 TEST(Cvc5Link, BitVectorSat) {

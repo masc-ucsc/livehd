@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIVEHD_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-CVA6_ROOT="${CVA6_ROOT:-/mada/users/czeng14/projects/cva6-clean/cva6}"
+: "${CVA6_ROOT:?set CVA6_ROOT to the CVA6 source checkout}"
 TARGET="${CVA6_TARGET:-cv64a6_imafdc_sv39_hpdcache_wb}"
 TOP="${CVA6_TOP:-tc_sram}"
 BENDER_TOP="${CVA6_BENDER_TOP:-$TOP}"
@@ -17,6 +17,8 @@ LHD="${LHD:-$LIVEHD_ROOT/bazel-bin/lhd/lhd}"
 LAKE="${LAKE:-lake}"
 RUN_LEAN="${RUN_LEAN:-false}"
 EMIT_CERT="${LEAN_EMIT_CERT:-true}"
+# B1+B2 branch: `verified_compiler` makes pass.lean emit ONLY <Top>_designCert.
+LEAN_MODE="${LEAN_MODE:-legacy}"
 # Step-5 fast-view bridge (<Top>_comb/_next/_step = _cert).  Default off, matching
 # the pass default, because a bridge-enabled file is much more expensive to
 # typecheck.  Requires EMIT_CERT=true and a memory-free module.
@@ -29,8 +31,8 @@ BENDER="${BENDER:-}"
 if [[ -z "$BENDER" ]]; then
   if command -v bender >/dev/null 2>&1; then
     BENDER="$(command -v bender)"
-  elif [[ -x /mada/users/czeng14/.local/bin/bender ]]; then
-    BENDER=/mada/users/czeng14/.local/bin/bender
+  elif [[ -x "$HOME/.local/bin/bender" ]]; then
+    BENDER="$HOME/.local/bin/bender"
   fi
 fi
 
@@ -147,10 +149,12 @@ set +e
   --set yosys.filelist_file="$FILELIST" \
   --set yosys.setundef=zero \
   ${YOSYS_MEMORY_MODE:+--set yosys.memory_mode="$YOSYS_MEMORY_MODE"} \
+  --set formal.lean.strict=true \
   --set formal.lean.emit_cert="$EMIT_CERT" \
   --set formal.lean.emit_fast_bridge="$EMIT_FAST_BRIDGE" \
   --set formal.lean.cert_wf="$CERT_WF" \
   --set formal.lean.max_width=1048576 \
+  --set formal.lean.mode="$LEAN_MODE" \
   -- \
   "${SLANG_FLAGS[@]}" \
   > "$RUN_LOG" 2>&1
@@ -170,7 +174,16 @@ generated="$LEAN_DIR/${TOP}_Lgraph.lean"
 # replace hours of discovery.  See pass/lean/README.md "Static gates first".
 # ---------------------------------------------------------------------------
 gate_status=0
-if [[ -r "$generated" ]]; then
+if [[ -r "$generated" && "$LEAN_MODE" == "verified_compiler" ]]; then
+  # Different output shape, different gates: op_census.py / const_parity.py read
+  # the LEGACY per-node fast bodies, which this mode does not emit.
+  {
+    echo "== verified_compiler gates =="
+    python3 "$LIVEHD_ROOT/pass/lean/scripts/vc_gates.py" "$generated" "$TOP" || gate_status=1
+    echo "gate_status=$gate_status"
+  } > "$LOG_DIR/static_gates.log" 2>&1
+  echo "Static gates: $LOG_DIR/static_gates.log (gate_status=$gate_status)"
+elif [[ -r "$generated" ]]; then
   {
     echo "== op census =="
     python3 "$LIVEHD_ROOT/pass/lean/scripts/op_census.py" "$generated" || gate_status=1

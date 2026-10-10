@@ -2,6 +2,7 @@ session "LGraph-Translation-Correctness" = "DINO_Semantic_Primitives_Test" +
   options [document = false, browser_info = false]
   theories
     Translation_LGraph_Model
+    Translation_BT
     Translation_GraphRefine
     Translation_OpBridge
     Translation_Certificate_Evaluator

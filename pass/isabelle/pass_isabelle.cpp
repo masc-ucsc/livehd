@@ -131,6 +131,8 @@ Pass_isabelle::Pass_isabelle(const Eprp_var& var) : Pass("pass.isabelle", var) {
   strict           = (s == "false") ? false : true;
   auto n           = var.get("normalize");
   normalize        = (n == "false") ? false : true;
+  auto efb         = var.get("emit_fast_bridge");
+  emit_fast_bridge = (efb == "true") ? true : false;
   top              = std::string(var.get("top"));
   cert_wf          = parse_cert_wf_mode(var.get("cert_wf"));
   cert_wf_fallback = parse_cert_wf_fallback(var.get("cert_wf_fallback"));
@@ -171,6 +173,9 @@ void Pass_isabelle::setup() {
   m1.add_label_optional("top", "Top module name (informational only)");
   m1.add_label_optional("strict", "true|false. Abort on unsupported ops", "true");
   m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
+  m1.add_label_optional("emit_fast_bridge",
+                        "true|false. Emit per-node fast values for bridge proofs; no equivalence theorem yet. Non-memory designs only.",
+                        "false");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
   m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes.", "fail");
@@ -317,20 +322,6 @@ std::string lit_const_decimal(const Dlop& v, uint32_t w) {
   return "((word_of_int " + isabelle_int_literal(v.to_decimal_string()) + ") :: " + std::to_string(w) + " word)";
 }
 
-std::string cert_op_tag_from_expr(const std::string& expr) {
-  const std::string marker = "op = ";
-  auto              pos    = expr.find(marker);
-  if (pos == std::string::npos) {
-    return "unknown";
-  }
-  pos      += marker.size();
-  auto end  = expr.find_first_of(" ,", pos);
-  if (end == std::string::npos) {
-    return expr.substr(pos);
-  }
-  return expr.substr(pos, end - pos);
-}
-
 std::string chunk_op_summary(const std::vector<std::string>& tags, size_t begin, size_t end) {
   std::map<std::string, size_t> counts;
   for (size_t i = begin; i < end && i < tags.size(); ++i) {
@@ -454,6 +445,15 @@ struct Ctx {
   size_t         cert_chunk_size;
   size_t         cert_chunk_limit;
   std::string    output_dir;
+
+  // Bridge mode: internal nodes are referenced as `<top>_fv<id> i s` (top-level
+  // definitions, one per node) instead of `n_<id>` (a let-binding).  The bridge
+  // needs each node's value to have a NAME so its recurrence lemma can talk
+  // about it; it also removes the two monolithic `definition`s, which are single
+  // declarations and therefore single-threaded (measured 107 s + 83 s at DINO).
+  // Empty means the classic let-chain naming.
+  std::string    fv_args;  // " i s" (sequential) or " i" (combinational)
+  bool           fv_naming = false;
 
   // Field name registries.
   absl::flat_hash_set<std::string> used_fields;
@@ -754,6 +754,9 @@ std::string driver_expr(const Ctx& ctx, const Node_pin& dpin) {
     }
     return lit_const_at(ctx, driver_node, v, w);
   }
+  if (ctx.fv_naming) {
+    return "(" + ctx.top_name + "_fv" + std::to_string(node_id(driver_node)) + ctx.fv_args + ")";
+  }
   return "n_" + std::to_string(node_id(driver_node));
 }
 
@@ -975,8 +978,19 @@ std::string cert_const_pin_expr(const Ctx& ctx, const Node_pin& pin, uint32_t sy
   return oss.str();
 }
 
+// Structured form of one emitted node_cert record.  The fast-view bridge needs
+// (nid, op, width, deps) per node to print its recurrence lemma; recovering that
+// by re-parsing the rendered Isabelle text (as cert_op_tag_from_expr did) is
+// fragile. Keep this metadata alongside the rendered certificate records.
+struct Cert_node_info {
+  uint32_t              nid = 0;
+  std::string           op_expr;  // e.g. "Op_And", "Op_Const (- 1)"
+  uint32_t              width = 0;
+  std::vector<uint32_t> deps;
+};
+
 std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, const std::string& forced_op = "",
-                           const std::vector<uint32_t>& forced_deps = {}) {
+                           const std::vector<uint32_t>& forced_deps = {}, Cert_node_info* info = nullptr) {
   uint32_t w = 0;
   if (node_is_const(node)) {
     w = raw_node_width(node);
@@ -1268,6 +1282,13 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
     }
   }
 
+  if (info != nullptr) {
+    info->nid     = node_id(node);
+    info->op_expr = op_expr;
+    info->width   = w;
+    info->deps    = deps;
+  }
+
   std::ostringstream oss;
   oss << "\\<lparr>nid = " << node_id(node) << ", op = " << op_expr << ", width = " << w << ", deps = " << nat_list(deps)
       << "\\<rparr>";
@@ -1350,17 +1371,22 @@ void emit_cert_theory(const Ctx& ctx, const std::vector<Node>& topo, const std::
   const std::string next_name        = ctx.top_name + "_next_state_from_cert";
   const std::string cert_step_name   = ctx.top_name + "_cert_step";
 
-  Cert_build               build;
-  std::vector<std::string> internal_exprs;
-  std::vector<std::string> internal_op_tags;
-  std::vector<uint32_t>    internal_ids;
+  Cert_build                  build;
+  std::vector<std::string>    internal_exprs;
+  std::vector<std::string>    internal_op_tags;
+  std::vector<uint32_t>       internal_ids;
+  std::vector<Cert_node_info> internal_infos;  // structured form, for the bridge
   internal_exprs.reserve(topo.size());
   internal_op_tags.reserve(topo.size());
   internal_ids.reserve(topo.size());
+  internal_infos.reserve(topo.size());
   for (const auto& node : topo) {
-    internal_exprs.push_back(cert_node_expr(ctx, build, node));
-    internal_op_tags.push_back(cert_op_tag_from_expr(internal_exprs.back()));
+    Cert_node_info info;
+    internal_exprs.push_back(cert_node_expr(ctx, build, node, "", {}, &info));
+    // op tag straight from the structured record, not re-parsed out of the text
+    internal_op_tags.push_back(info.op_expr.substr(0, info.op_expr.find(' ')));
     internal_ids.push_back(node_id(node));
+    internal_infos.push_back(std::move(info));
   }
 
   std::map<std::string, uint32_t> out_driver_ids;
@@ -1441,6 +1467,11 @@ void emit_cert_theory(const Ctx& ctx, const std::vector<Node>& topo, const std::
   ofs << "theory " << cert_theory << "\n";
   ofs << "  imports " << model_theory << " \"LGraph-Translation-Correctness.Translation_Certificate_Evaluator\"\n"
       << "          \"LGraph-Translation-Correctness.Translation_Step\"\n";
+  // Certificate ids reserve billion-sized ranges. Code evaluation must use
+  // integer-backed naturals rather than allocating their unary representation.
+  if (ctx.fv_naming || ctx.cert_wf == CertWFMode::Eval || ctx.cert_wf == CertWFMode::Chunked) {
+    ofs << "          \"HOL-Library.Code_Target_Nat\"\n";
+  }
   ofs << "begin\n\n";
 
   ofs << "definition " << node_count_name << " :: nat where\n";
@@ -1516,6 +1547,39 @@ void emit_cert_theory(const Ctx& ctx, const std::vector<Node>& topo, const std::
   ofs << "      nodes = " << nodes_name << "\\<rparr>\"\n\n";
 
   const bool sequential = !flop_nodes.empty();
+  // ---- bridge: fast values for the synthesized Op_Const nodes ------------
+  // cprop folds constants onto operator PINS, so by certificate time there are
+  // no standalone Nconst nodes left (measured: 204 of 204 Op_Const in DINO, and
+  // 3 of 3 in add2, are synthesized).  The fast model inlines such a constant as
+  // a literal because it is built from terms; the certificate must give it an id
+  // because eval_op takes a dep list of ids.  So each one is a topo node with no
+  // counterpart among the per-node fv definitions, and the per-node recurrence
+  // would not be uniform without these.
+  //
+  // The literal MUST be spelled by lit_const_at -- the same renderer the fast
+  // model uses -- or the two sides would differ textually and the node's proof
+  // could not close.
+  if (ctx.fv_naming) {
+    const bool seq = !ctx.flop_field.empty();
+    ofs << "(* Fast values for constants promoted to certificate nodes.  Spelled by the\n"
+           "   same renderer the fast model inlines with, so the two agree textually. *)\n";
+    for (const auto& kv : build.const_pins) {
+      const auto id_it = build.const_ids.find(kv.first);
+      if (id_it == build.const_ids.end()) {
+        continue;  // already diagnosed above
+      }
+      const uint32_t cid = id_it->second;
+      const uint32_t cw  = kv.first.second;
+      ofs << "definition " << ctx.top_name << "_fv" << cid << " :: \"" << ctx.top_name << "_in \\<Rightarrow> ";
+      if (seq) {
+        ofs << ctx.top_name << "_state \\<Rightarrow> ";
+      }
+      ofs << cw << " word\" where\n";
+      ofs << "  \"" << ctx.top_name << "_fv" << cid << ctx.fv_args << " = ("
+          << lit_const_at(ctx, pin_node(kv.second), pin_const_value(kv.second), cw) << ")\"\n\n";
+    }
+  }
+
   ofs << "definition " << source_env_name << " :: \"" << ctx.top_name << "_in \\<Rightarrow> ";
   if (sequential) {
     ofs << ctx.top_name << "_state \\<Rightarrow> ";
@@ -1762,9 +1826,10 @@ void emit_cert_theory(const Ctx& ctx, const std::vector<Node>& topo, const std::
 
     ofs << "theorem " << ctx.top_name << "_graph_cert_wf:\n";
     ofs << "  \"graph_cert_wf " << graph_name << "\"\n";
-    ofs << "  using " << ctx.top_name << "_graph_cert_wf_bool " << ctx.top_name << "_cert_all_ids_eq_map_nid\n";
-    ofs << "  by (simp add: " << wf_bool_name << "_def " << graph_name << "_def " << topo_name << "_def " << sources_name << "_def "
-        << nodes_name << "_def graph_cert_wf_bool_sound)\n\n";
+    ofs << "  unfolding " << graph_name << "_def " << topo_name << "_def " << nodes_name << "_def "
+        << ctx.top_name << "_cert_all_ids_eq_map_nid\n";
+    ofs << "  by (rule graph_cert_wf_bool_sound[OF " << ctx.top_name << "_graph_cert_wf_bool[unfolded "
+        << wf_bool_name << "_def]])\n\n";
   } else if (ctx.cert_wf == CertWFMode::Sorry) {
     ofs << "lemma " << ctx.top_name << "_graph_cert_wf_bool:\n";
     ofs << "  \"" << wf_bool_name << "\"\n";
@@ -2105,7 +2170,9 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       if (pin_is_const(b)) {
         shift_w = std::max<uint32_t>(shift_w, minimal_unsigned_const_width(pin_const_value(b)));
       }
-      return "((ucast (sem_sra " + ucast_pin_at(ctx, a, value_w) + " " + shift_amount_expr_at(ctx, b, shift_w)
+      // sem_sra returns the operand width. Widen its result with the sign
+      // intact; truncating with scast also preserves the low result bits.
+      return "((scast (sem_sra " + ucast_pin_at(ctx, a, value_w) + " " + shift_amount_expr_at(ctx, b, shift_w)
              + ") :: " + std::to_string(w) + " word))";
     }
 
@@ -2513,6 +2580,18 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
 
   bool sequential = !flop_nodes.empty() || !memory_nodes.empty();
 
+  // Bridge mode.  Refused for memory-bearing designs: the certificate has no
+  // memory operator at all (they get a counts-only stub), so a bridge over one
+  // would be unprovable rather than merely slow.
+  if (emit_fast_bridge) {
+    if (!memory_nodes.empty()) {
+      fatal(ctx, "formal.isabelle.emit_fast_bridge is not supported for designs with memory nodes: "
+                 "the graph certificate has no memory operator.");
+    }
+    ctx.fv_naming = true;
+    ctx.fv_args   = sequential ? " i s" : " i";
+  }
+
   // ---- Compute root set for reachability -------------------------------
   std::vector<Node_pin>           roots;
   // (a) drivers of every graph output
@@ -2637,8 +2716,54 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
     }
 
     // <top>_comb body: shared let-chain over the topo-ordered emit set.
+    // ---- bridge mode: one top-level definition per node ------------------
+    // Emitted in topological order, so each fv definition only mentions fv
+    // definitions already introduced.  Constants are `topo` nodes in the
+    // Isabelle certificate (unlike Lean, where they are sources), so every topo
+    // id gets an fv counterpart and the per-node recurrence stays uniform.
+    const bool bridge = ctx.fv_naming;
+    if (bridge) {
+      ofs << "(* Per-node fast values.  One definition per certificate topo node, so the\n"
+             "   bridge's recurrence lemmas can name each node's value.  Replaces the\n"
+             "   monolithic let-chain, which was a single declaration and therefore\n"
+             "   single-threaded. *)\n";
+      for (const auto& n : topo) {
+        const auto w = node_is_memory(n) ? memory_info_for(ctx, n).bits : node_width(ctx, n);
+        ofs << "definition " << ctx.top_name << "_fv" << node_id(n) << " :: \"" << ctx.top_name << "_in \\<Rightarrow> ";
+        if (sequential) {
+          ofs << ctx.top_name << "_state \\<Rightarrow> ";
+        }
+        ofs << std::to_string(w) << " word\" where\n";
+        ofs << "  \"" << ctx.top_name << "_fv" << node_id(n) << ctx.fv_args << " = (" << emit_node_expr(ctx, n) << " "
+            << ty_word(w) << ")\"\n\n";
+      }
+    }
+
     auto emit_let_chain = [&]() -> std::string {
       std::ostringstream oss;
+      if (bridge) {
+        // bindings live in the fv definitions; emit only the output record
+        oss << "    (\\<lparr>";
+        bool bf = true;
+        for (auto& kv : ctx.output_field) {
+          if (!bf) {
+            oss << ", ";
+          }
+          bf                   = false;
+          const auto& out_name = kv.first;
+          auto        drv      = out_drivers.find(out_name);
+          if (drv == out_drivers.end()) {
+            oss << kv.second << " = " << lit_zero(ctx.output_width[out_name]);
+          } else {
+            oss << kv.second << " = " << ucast_pin_at(ctx, drv->second, ctx.output_width[out_name]);
+          }
+        }
+        if (ctx.output_field.empty()) {
+          oss << "out_dummy = (0 :: 1 word)";
+        }
+        oss << "\\<rparr>)";
+        return oss.str();
+      }
       oss << "    (let\n";
       bool first = true;
       for (const auto& n : topo) {

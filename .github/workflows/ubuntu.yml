@@ -2,7 +2,13 @@ name: macOS 26
 
 on:
   push:
+    branches: [master]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-opt:
@@ -21,7 +27,7 @@ jobs:
         with:
           path: |
             ~/Library/Caches/bazel
-          key: bazel-build-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-${{ github.run_attempt }}
+          key: bazel-build-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             bazel-build-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-
             bazel-build-${{ runner.os }}-${{ runner.arch }}-clang21-
@@ -37,7 +43,8 @@ jobs:
       # A full build is expensive and failures tend to happen late. Keep
       # successfully produced Bazel outputs for the next run either way.
       - name: Save Bazel cache
-        if: always()
+        if: ${{ !cancelled() && steps.bazel-cache.outputs.cache-primary-key != '' && steps.bazel-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
         uses: actions/cache/save@v6.1.0
         with:
           path: |

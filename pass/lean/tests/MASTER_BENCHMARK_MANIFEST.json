@@ -1,0 +1,5267 @@
+{
+  "purpose": "Gate M1 of MASTER_INTEGRATION.md: one authoritative benchmark list for the master rebase.",
+  "generated_from": [
+    "tests/LEGACY_PROOF_COVERAGE.json",
+    "tests/LEGACY_PROOF_INVENTORY.json",
+    "tests/LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+    "SWEEP_b1-b2.tsv",
+    "SWEEP_cva6.tsv",
+    "tests/MASTER_REPLAY_CONFIGURATIONS.json"
+  ],
+  "reconciliation": {
+    "total_entries": 256,
+    "by_family": {
+      "DINO": 3,
+      "CVA6": 36,
+      "CORE-ET": 209,
+      "small": 8
+    },
+    "by_scope": {
+      "bridge": 90,
+      "unspecified": 21,
+      "sweep": 145
+    },
+    "listed_by_exactly_one_inventory": 178,
+    "note": "The 90-result coverage snapshot and the 87-entry inventory are different sets, not a subset relation; the sweep tables are per-module and carry no proof scope. Counts below are the reconciled union."
+  },
+  "pending_decision": [],
+  "entries": [
+    {
+      "family": "DINO",
+      "top": "SingleCycleCPU",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "chunked",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "DINO",
+      "top": "PipelinedCPU",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "chunked",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "DINO",
+      "top": "PipelinedDualIssueCPU",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "chunked",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_alu_export",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_tlb_gate",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "RUNNING",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/cva6_tlb_lean/lgdb"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 3
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_compressed_decoder_gate",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_controller_gate",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/cva6_sweep/controller/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_csr_buffer_gate",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/cva6_sweep/csr_buffer/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_instr_realign_gate",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/cva6_sweep/instr_realign/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_instr_scan_gate",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/cva6_sweep/instr_scan/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_pmp_gate",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_ras_gate",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/cva6_sweep/ras/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_raw_checker_gate",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/cva6_sweep/raw_checker/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_msgs",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "small",
+      "top": "add2",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "saved_artifact",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "saved_artifact",
+          "graph_dir": "generated/memfix/add2/work/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "small",
+      "top": "ram1",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "saved_artifact",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "saved_artifact",
+          "graph_dir": "generated/memfix/ram1/work/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "small",
+      "top": "ram_be",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "saved_artifact",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "saved_artifact",
+          "graph_dir": "generated/memfix/ram_be/work/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "small",
+      "top": "ram_2w",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "saved_artifact",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "saved_artifact",
+          "graph_dir": "generated/memfix/ram_2w/work/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "small",
+      "top": "ram_sync",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "saved_artifact",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "saved_artifact",
+          "graph_dir": "generated/memfix/ram_sync/work/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "small",
+      "top": "ram_sram",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "saved_artifact",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "saved_artifact",
+          "graph_dir": "generated/memfix/ram_sram/work/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "small",
+      "top": "simple_add",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "saved_artifact",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "saved_artifact",
+          "graph_dir": "generated/pass_lean_smoke/simple/work/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "small",
+      "top": "simple_reg",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "saved_artifact",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "saved_artifact",
+          "graph_dir": "generated/pass_lean_smoke/reg/work/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "prim_write_commit_en",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/prim_write_commit_en/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "prim_write_commit_rst_en",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/prim_write_commit_rst_en/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "prim_phase_pair_lo_hi",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/prim_phase_pair_lo_hi/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_imm",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_imm/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_align_shf",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_align_shf/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_e4",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_e4/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "tima_adder",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/tima_adder/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_frac_zero_detect",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_frac_zero_detect/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_booth_ppg_32r4_msb",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_booth_ppg_32r4_msb/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_norm_shf",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_norm_shf/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_csa",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_csa/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_rnd_adder",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_rnd_adder/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_frontend_thread_sched",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_frontend_thread_sched/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_4_2_compressor",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_4_2_compressor/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_file_fl_barrier",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_csr_file_fl_barrier/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_e6",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_e6/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "debug_breakpoint",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/debug_breakpoint/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_scratchpad_ctrl",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_dcache_scratchpad_ctrl/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_trz",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_trz/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_inst_bits_stage",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_inst_bits_stage/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c1",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_c1/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_pmu_read_interface",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_csr_pmu_read_interface/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_lru_array",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_dcache_lru_array/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c4",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_c4/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_writeback_unit",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_dcache_writeback_unit/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_exp_special_detect",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_exp_special_detect/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_file_conv",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_csr_file_conv/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_e1",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_e1/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_pma_unit",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_dcache_pma_unit/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_tensorreduce",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/vpu_tensorreduce/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_bypass",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/vpu_bypass/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_uinst_decoder",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/vpu_uinst_decoder/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c5",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_c5/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_debug_apb_slv",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_debug_apb_slv/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_atomic_alu_unit",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_dcache_atomic_alu_unit/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_mask_scoreboard",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_mask_scoreboard/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_int_scoreboard",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_int_scoreboard/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_replay",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_csr_replay/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_trz2",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_trz2/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c6",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_c6/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_cache_op_unit_l2",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_dcache_cache_op_unit_l2/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_fp_scoreboard",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_fp_scoreboard/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_tensorquant",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/vpu_tensorquant/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_ediff_opdorder_logic",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_ediff_opdorder_logic/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_rf",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_rf/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_miss_handler",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_dcache_miss_handler/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c2",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_c2/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_frontend_rvc_expander",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_frontend_rvc_expander/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c3",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_c3/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_e2",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_e2/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_lxd",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "PROVEN",
+          "exit_code": 0,
+          "sorryAx": false,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": []
+        },
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_lxd/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c0",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_tensorfma",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_store_merge_unit",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_sh_sw",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_miss_handler_unit",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_f4",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_4_2_compressor_array",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_trans",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_cache_op_unit",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_decoder",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_ml",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_alu",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_wallace2",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_decode",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_wallace1",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_tensor_load",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_mask",
+      "scope": "unspecified",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE.json"
+      ],
+      "historical": {
+        "coverage": {
+          "verdict": "QUEUED",
+          "exit_code": null,
+          "sorryAx": null,
+          "cert_wf": "skip",
+          "emit_fast_bridge": true,
+          "replay_mode": "regenerated",
+          "missing_audits": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_alu_export",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/cva6_alu_lean/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_compressed_decoder_gate",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/cva6_sweep/compressed_decoder/lgdb"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_pmp_gate",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/cva6_sweep/pmp/lgdb"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_msgs",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/memval/intpipe_csr_msgs/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c0",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_c0/lgdb_norm"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_tensorfma",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/vpu_tensorfma/lgdb_norm"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_store_merge_unit",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_dcache_store_merge_unit/lgdb_norm"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_sh_sw",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/vpu_sh_sw/lgdb_norm"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_miss_handler_unit",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_dcache_miss_handler_unit/lgdb_norm"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_f4",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_f4/lgdb_norm"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_4_2_compressor_array",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_4_2_compressor_array/lgdb_norm"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_trans",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/vpu_trans/lgdb_norm"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_cache_op_unit",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_dcache_cache_op_unit/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_decoder",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/vpu_decoder/lgdb_norm"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_ml",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/vpu_ml/lgdb_norm"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_alu",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_COVERAGE_ADDITIONS.json",
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_alu/lgdb_norm"
+        },
+        "additions": {
+          "verdict": "PROVEN",
+          "replay_mode": "regenerated"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 2
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_wallace2",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_wallace2/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_decode",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/intpipe_decode/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_wallace1",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/txfma_wallace1/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_tensor_load",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/minion_dcache_tensor_load/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_mask",
+      "scope": "bridge",
+      "listed_in": [
+        "LEGACY_PROOF_INVENTORY.json"
+      ],
+      "historical": {
+        "inventory": {
+          "replay_mode": "regenerated",
+          "graph_dir": "generated/core-et/vpu_mask/lgdb_norm"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_file_fl_barrier",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "65",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_pmu_read_interface",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "185",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "debug_breakpoint",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "165",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_file_conv",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "464",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_fp_scoreboard",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1427",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_replay",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1133",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_imm",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "242",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_inst_bits_stage",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "176",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_128x64_1r1w_lram",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_int_scoreboard",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1095",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_mask_scoreboard",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "953",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_128x72_1r1w_lram",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_buffer_array",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_atomic_alu_unit",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "919",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_msgs",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "7447",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_cache_op_unit_l2",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1426",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_alu",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "5118",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_data_array",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_lru_array",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "286",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_metadata_array",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_cache_op_unit",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "4248",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_pma_unit",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "532",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_decode",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "6659",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_scratchpad_ctrl",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "165",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_miss_handler",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1663",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_texsend",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "0",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_store_merge_unit",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "3152",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_reduce",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "2945",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_tlb_array",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_writeback_unit",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "357",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_miss_handler_unit",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "3556",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_frontend_rvc_expander",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1829",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_debug_apb_slv",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "695",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_frontend_thread_sched",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "36",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_tlb",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_mul_div_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_frontend_thread_buffer",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_replay_queue",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "tima_adder",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "4",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "null_vpu",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "0",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "trans_exp_rom_case_c0",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "11",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "tima_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "706",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "trans_exp_rom_case_c1c2",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "20",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "trans_log_rom_case_c1c2",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "20",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "trans_log_rom_case_c0",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "11",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "trans_rcp_rom_case_c0",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "7",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "trans_rcp_rom_case_c1c2",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "20",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "trans_rsqrt_rom_case_c0",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "6",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "trans_rsqrt_rom_case_c1c2",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "19",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "trans_sin_rom_case_c0",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "23",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "trans_sin_rom_case_c1c2",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "28",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_4_2_compressor",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "42",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_adder",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(filelist)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_align_shf",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "3",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "trans_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "753",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_booth_ppg_32r4_msb",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "11",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_booth_ppg_32r4",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "2092",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_booth_ppg_32r4_norm",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "45",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_tensor_load",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "11424",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c1",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "178",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c0",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "2902",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_4_2_compressor_array",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "4048",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c2",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1785",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c3",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "2030",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_csa",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "21",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c4",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "303",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c5",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "601",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_c6",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1320",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_csr_file",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfmactl_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "10045",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_e4",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "3",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_e1",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "489",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_e6",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "133",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_exp_special_detect",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "360",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_e2",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "2161",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_ediff_opdorder_logic",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1445",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_frontend",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_rf",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1618",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_f4",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "4028",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_f1",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "13840",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_dcache_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "intpipe_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_frac_zero_detect",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "4",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_lxd",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "2659",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_norm_shf",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "19",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_rnd_adder",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "35",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "core_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_top_fake",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(filelist)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_trz",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "167",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_trz2",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1189",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_wallace1",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "11043",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_wallace2",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "6515",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_bypass",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "554",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_ctrl",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_decoder",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "4844",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_lane",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_lane_tima",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_mask",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "14860",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_ml",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "5046",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_rf",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_sh_sw",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "3224",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_tensora_rf",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_tensorb_rf",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_tensorc_rf",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_tensorfma",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "2971",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_tensorquant",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "1436",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_tensorreduce",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "546",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_tensortmp_rf",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "minion_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(timeout)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_trans",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "4152",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfmaexp_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(timeout)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_uinst_decoder",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": "proven",
+          "nodes": "572",
+          "legacy_emit": "EMITTED"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_f3",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(timeout)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfmafrac_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(timeout)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(timeout)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_txfma_trans_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(compile)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "vpu_top",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(timeout)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_e5",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(timeout)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_f5",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(timeout)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_f2",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(timeout)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_f6",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(timeout)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CORE-ET",
+      "top": "txfma_f0",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_b1-b2.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT(timeout)",
+          "bucket": "blocked-upstream",
+          "nodes": "",
+          "legacy_emit": "NO_EMIT"
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "amo_buffer",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "186",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "alu",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "436",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "compressed_decoder",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "2022",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "controller",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "104",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "csr_buffer",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "44",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "aes",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "4",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_shared_tlb",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "136",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "cvxif_compressed_if_driver",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "53",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "cvxif_fu",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "23",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "cvxif_issue_register_commit_if_driver",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "38",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "ariane_regfile",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "1121",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "instr_realign",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "143",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "instr_scan",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "1257",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "lsu_bypass",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "361",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "multiplier",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "2329",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "pmp_entry",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "297",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "ras",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "54",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "raw_checker",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "353",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "btb",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "1782",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "serdiv",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "1180",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "store_buffer",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "1387",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "fpu_wrap",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "PROVEN",
+          "bucket": null,
+          "nodes": "27523",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    },
+    {
+      "family": "CVA6",
+      "top": "cva6_tlb",
+      "scope": "sweep",
+      "listed_in": [
+        "SWEEP_cva6.tsv"
+      ],
+      "historical": {
+        "sweep": {
+          "verdict": "NO_EMIT",
+          "bucket": null,
+          "nodes": "",
+          "legacy_emit": null
+        }
+      },
+      "disposition": "REQUIRED: rerun and record outcome",
+      "inventory_count": 1
+    }
+  ],
+  "configuration_reconciliation": {
+    "file": "MASTER_REPLAY_CONFIGURATIONS.json",
+    "CORE-ET": 125,
+    "CVA6": 61,
+    "note": "The 256 entries above retain their historical scope granularity. CORE-ET has 125 unique tops. CVA6 includes configured *_gate wrappers and separate historical legacy configurations; wrapper names are not additional RTL modules."
+  }
+}

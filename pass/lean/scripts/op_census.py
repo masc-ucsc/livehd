@@ -5,9 +5,9 @@ Answers, in seconds, the three questions that otherwise cost hours of discovery
 before starting a step-5 bridge run on a new design:
 
   1. Which `(op, arity)` pairs does this design use, and does the step-5 bridge
-     dispatch in `pass/lean/pass_lean.cpp` handle every one of them?  An
-     unhandled pair becomes a `sorry -- TODO(step5)` placeholder, so catching it
-     here replaces finding it after a multi-hour typecheck.
+     dispatch in `pass/lean/emit_legacy_fast_bridge.cpp` handle every one of them?  An
+     unhandled pair is refused atomically by the emitter; this gate reports
+     those shapes before a proof queue is started.
   2. How wide are the nodes?  Width is the CVA6 scaling axis (513/576 bits vs
      DINO's 127), and the GetMask `by decide` side condition is O(w^2) per node.
   3. How many GetMask nodes carry a constant ALL-ONES mask?  Those are the ones
@@ -27,18 +27,18 @@ import sys
 
 # ---------------------------------------------------------------------------
 # The supported set.  This MUST mirror the dispatch chain in
-# pass/lean/pass_lean.cpp (the `bridge_call = ..` if/else ladder, ~line 2113).
+# pass/lean/emit_legacy_fast_bridge.cpp (the `bridge_call = ..` dispatch).
 # Keep the two in sync: this gate is only as good as its fidelity to the emitter.
 # ---------------------------------------------------------------------------
 
 # `op` here is the certificate spelling minus the "LGraphOp." prefix, e.g.
 # "Op_GetMask", "Op_Sum 2".  `arity` is len(deps).
-def dispatch_status(op, arity, dep_widths):
+def dispatch_status(op, arity, dep_widths, out_width=None):
     """Return (status, note).
 
     status is one of:
       "ok"        -- the emitter emits a real op bridge
-      "unhandled" -- falls through to `sorry -- TODO(step5)`
+      "unhandled" -- refused by the bridge emitter
       "trap"      -- the emitter CLAIMS support but the bridge lemma cannot
                      unify at this arity, so it emits a proof that fails to
                      typecheck (worse than a sorry: it is silent until the run)
@@ -50,16 +50,55 @@ def dispatch_status(op, arity, dep_widths):
         if arity != 2:
             return ("trap", "getmask_bridge' takes exactly 2 deps")
         return ("ok", "")
+    # Memory operators.  cert_memory_expand is the only thing that emits these, and
+    # it emits them at exactly these arities, so a mismatch means a hand-edited or
+    # stale file rather than an emitter gap -- worth flagging as a trap either way.
+    if op == "Op_MemRead":
+        if arity != 3:
+            return ("trap", "mem_read_bridge takes [mem, addr, enable]")
+        return ("ok", "mem_read_bridge")
+    if op == "Op_MemWrite":
+        if arity != 4:
+            return ("trap", "mem_write_bridge takes [mem, addr, data, enable]")
+        return ("ok", "mem_write_bridge")
+    if op.startswith("Op_MemWriteBE"):
+        if arity != 4:
+            return ("trap", "mem_write_be_bridge takes [mem, addr, data, byte_enable]")
+        return ("ok", "mem_write_be_bridge")
     if op == "Op_Sum 2" and arity == 2:
         return ("ok", "sum2_bridge")
     if op == "Op_Sum 1" and arity == 2:
         return ("ok", "sum1_bridge")
     if op == "Op_And" and arity == 2:
         return ("ok", "and_bridge")
+    if op == "Op_And" and arity == 3:
+        return ("ok", "and3_bridge (fold-free)")
+    if op == "Op_And" and arity == 4:
+        return ("ok", "and4_bridge (fold-free)")
+    if op == "Op_And" and arity > 0:
+        return ("ok", "andn_bv_bridge (mixed widths)")
+    if op.startswith("Op_Sum "):
+        return ("ok", "sumn_bv_bridge (mixed widths, arbitrary add/subtract split)")
+    if op == "Op_Or" and arity == 1:
+        # Arity-1 Or takes the shape-matched or1_bridge with the DEFAULT closer; the
+        # n-ary fold's closer needs two metavariable-headed simp lemmas that dominate
+        # runtime (Bug 9 follow-up).
+        return ("ok", "or1_bridge (fold-free)")
+    if op == "Op_Or" and arity == 2:
+        # Binary Or does NOT take the n-ary bridge: orn_bv_bridge is correct at
+        # arity 2 but its closer unfolds a List.foldl, which sent the kernel into
+        # unbounded recursion on deep operand chains (Bug 9).
+        return ("ok", "or_bridge (binary fast path)")
+    if op == "Op_Or" and arity == 3:
+        return ("ok", "or3_bridge (fold-free)")
+    if op == "Op_Or" and arity == 4:
+        return ("ok", "or4_bridge (fold-free)")
     if op == "Op_Or":
-        return ("ok", "orn_bv_bridge (any arity)")
+        return ("ok", "orn_nonempty_bv_bridge" if arity > 0 else "orn_bv_bridge (empty)")
     if op == "Op_Xor" and arity == 2:
         return ("ok", "xor_bridge")
+    if op == "Op_Xor":
+        return ("ok", "xorn_bv_bridge (mixed widths)")
     if op == "Op_Not" and arity == 1:
         return ("ok", "not_bridge")
     if op == "Op_SHL" and arity == 2:
@@ -71,20 +110,29 @@ def dispatch_status(op, arity, dep_widths):
     if op == "Op_MuxN" and arity == 3:
         return ("ok", "muxn3_bridge")
     if op == "Op_SRA" and arity == 2:
-        return ("ok", "sra_bridge")
+        # A WIDENING SRA (out wider than operand) sign-extends and uses
+        # sra_bridge_sext; sra_bridge itself requires w <= wa and would leave
+        # `decide` proving a FALSE side condition. Report which arm applies so a
+        # width regression here is visible statically.
+        wa = dep_widths[0]
+        if wa is not None and out_width is not None and out_width > wa:
+            return ("ok", "sra_bridge_sext (widening, %d>%d)" % (out_width, wa))
+        return ("ok", "sra_bridge (truncating)")
     if op in ("Op_EQ", "Op_ULT", "Op_UGT") and arity == 2:
         return ("ok", "eq/ult/ugt_bridge")
     if op == "Op_Sext" and arity == 2:
         return ("ok", "sext_bridge | sext_bridge_low")
-    if op == "Op_SLT" and arity == 2:
-        # slt_bridge is stated at a SINGLE width (a b : BitVec cw), so the
-        # emitter only dispatches when both operand widths are equal.
+    if op in ("Op_SLT", "Op_SGT") and arity == 2:
+        # The refactored emitter also has a bridge preserving each operand's
+        # own signed interpretation when the widths differ.
+        name = "slt_bridge" if op == "Op_SLT" else "sgt_bridge"
+        short = op[3:]
         w0, w1 = dep_widths[0], dep_widths[1]
         if w0 is None or w1 is None:
-            return ("unhandled", "SLT with undetermined dep widths (check by hand)")
+            return ("ok", "%s bridge (operand widths selected by emitter)" % short)
         if w0 != w1:
-            return ("unhandled", "SLT at unequal widths %d/%d (needs slt_bridge_max)" % (w0, w1))
-        return ("ok", "slt_bridge")
+            return ("ok", "slt_widths_bridge" if op == "Op_SLT" else "sgt_widths_bridge")
+        return ("ok", name)
     return ("unhandled", "no dispatch arm")
 
 
@@ -221,25 +269,36 @@ def main():
     print("state fields     : %d" % n_flops)
     print("bridge emitted   : %s%s" % (bridge_mode, (" (%d _rec theorems)" % n_rec) if bridge_mode else ""))
     if not nodes:
+        # The counts-only memory stub is gone -- a memory design now gets a real
+        # CertVal certificate -- so an empty certificate has only one meaning left.
+        # If a `_memory_count` def ever reappears here, the emitter regressed to the
+        # stub rather than emitting the decomposition, which is worth saying plainly.
+        mem_stub = re.search(r"^def (\w+)_memory_count : Nat := (\d+)$", text, re.M)
+        if mem_stub:
+            print("\nSTALE MEMORY STUB: this file has a `_memory_count` def and no cert nodes,")
+            print("i.e. it was emitted by a pass.lean predating the memory certificate.")
+            print("Re-emit; memory designs now get a real graphCert over CertVal.")
+            return 1
         print("\nNO certificate nodes found -- was this emitted with formal.lean.emit_cert=true?")
         return 1
 
     # -- (op, arity) histogram + dispatch status -----------------------------
+    # Status is computed PER NODE, not per (op, arity): some conditions depend on
+    # this node's widths (a widening vs truncating SRA, SLT at equal vs unequal
+    # widths). Caching by (op, arity) would report whichever node happened to come
+    # first and could hide a failing one behind a passing twin.
     per_pair = collections.Counter()
     examples = {}
-    status_of = {}
-    for nid, (op, _w, deps) in nodes.items():
-        key = (op, len(deps))
+    for nid, (op, w, deps) in nodes.items():
+        st, note = dispatch_status(op, len(deps), [width_of.get(d) for d in deps], w)
+        key = (op, len(deps), st, note)
         per_pair[key] += 1
         examples.setdefault(key, nid)
-        if key not in status_of:
-            status_of[key] = dispatch_status(op, len(deps), [width_of.get(d) for d in deps])
 
-    print("\n(op, arity) histogram -- %d distinct pairs" % len(per_pair))
-    print("  %-22s %5s %6s  %-8s %s" % ("op", "arity", "count", "status", "note"))
-    for (op, ar), n in per_pair.most_common():
-        st, note = status_of[(op, ar)]
-        print("  %-22s %5d %6d  %-8s %s" % (op, ar, n, st, note))
+    print("\n(op, arity, dispatch) histogram -- %d distinct rows" % len(per_pair))
+    print("  %-22s %5s %6s  %-9s %s" % ("op", "arity", "count", "status", "note"))
+    for (op, ar, st, note), n in per_pair.most_common():
+        print("  %-22s %5d %6d  %-9s %s" % (op, ar, n, st, note))
 
     # -- width census --------------------------------------------------------
     widths = [w for _op, w, _d in nodes.values()]
@@ -303,7 +362,7 @@ def main():
             print("   linter.unreachableTactic on: the generic branch should report unreachable)")
 
     # -- verdict ------------------------------------------------------------
-    bad = [(k, n) for k, n in per_pair.items() if status_of[k][0] != "ok"]
+    bad = [(k, n) for k, n in per_pair.items() if k[2] != "ok"]
     print("")
     if gm_overwide:
         print("FAIL: %d GetMask node(s) have an all-ones mask WIDER than the output width."
@@ -319,14 +378,14 @@ def main():
             print("        ... and %d more" % (len(gm_overwide) - 8))
         return 1
     if not bad:
-        print("PASS: all %d (op, arity) pairs are handled by the step-5 dispatch." % len(per_pair))
+        print("PASS: all %d node(s) across %d (op, arity, dispatch) row(s) are handled."
+              % (sum(per_pair.values()), len(per_pair)))
         return 0
     n_bad_nodes = sum(n for _k, n in bad)
-    print("FAIL: %d node(s) across %d (op, arity) pair(s) are NOT handled:" % (n_bad_nodes, len(bad)))
-    for (op, ar), n in sorted(bad, key=lambda kv: -kv[1]):
-        st, note = status_of[(op, ar)]
+    print("FAIL: %d node(s) across %d dispatch row(s) are NOT handled:" % (n_bad_nodes, len(bad)))
+    for (op, ar, st, note), n in sorted(bad, key=lambda kv: -kv[1]):
         print("  %-22s arity %-3d %6d nodes  [%s] %s (e.g. nid %d)"
-              % (op, ar, n, st, note, examples[(op, ar)]))
+              % (op, ar, n, st, note, examples[(op, ar, st, note)]))
     print("\n'unhandled' -> emitter writes `sorry -- TODO(step5)`.")
     print("'trap'      -> emitter writes a bridge call that CANNOT unify; it fails only")
     print("               once the typecheck reaches it. Fix before any long run.")

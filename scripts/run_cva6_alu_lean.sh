@@ -22,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIVEHD_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WRAPPERS="$SCRIPT_DIR/cva6_module_wrappers"
 
-CVA6_ROOT="${CVA6_ROOT:-/mada/users/czeng14/projects/cva6-clean/cva6}"
+: "${CVA6_ROOT:?set CVA6_ROOT to the CVA6 source checkout}"
 # The ALU export pkg reads cva6_config_pkg::cva6_cfg, so the config package
 # compiled here selects the configuration.  sv39 (not sv32): see the reference doc.
 CONFIG_PKG="${CVA6_CONFIG_PKG:-$CVA6_ROOT/core/include/cv64a6_imafdc_sv39_config_pkg.sv}"
@@ -129,6 +129,7 @@ set +e
   --emit-dir lg:"$LG_DIR" \
   --emit-dir lean:"$LEAN_DIR" \
   --set yosys.setundef=zero \
+  --set formal.lean.strict=true \
   --set formal.lean.emit_cert="$EMIT_CERT" \
   --set formal.lean.emit_fast_bridge="$EMIT_FAST_BRIDGE" \
   --set formal.lean.cert_wf="$CERT_WF" \

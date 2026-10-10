@@ -41,6 +41,16 @@ inductive LGraphOp where
   | Op_Sext
   | Op_GetMask
   | Op_SetMask
+  -- Memory operators.  Deps mirror the fast model's operand order:
+  --   Op_MemRead      [mem, addr, enable]            -> bv   (0 when not enabled)
+  --   Op_MemWrite     [mem, addr, data, enable]      -> mem  (unchanged when not enabled)
+  --   Op_MemWriteBE b [mem, addr, data, byte_enable] -> mem  (b = byte width)
+  -- A multi-write memory becomes a CHAIN of write nodes, each taking the previous
+  -- node's image as its `mem` dep, so the later (higher port_id) write wins a
+  -- same-cycle same-address collision exactly as `memory_write_fold` does.
+  | Op_MemRead
+  | Op_MemWrite
+  | Op_MemWriteBE (byte_w : Nat)
 deriving Repr, Inhabited, DecidableEq
 
 --------------------------------------------------------------------------------
@@ -246,6 +256,111 @@ def eval_op : LGraphOp → Nat → List BV → BV
   | _, w, _                        => mk_bv w 0
 
 --------------------------------------------------------------------------------
+-- Certificate values: bit-vector OR memory image
+--
+-- A memory node is multi-output (N read-data values plus a next-state array), and
+-- `NodeCert` carries exactly one width and one result.  Rather than widen
+-- `NodeCert`, the emitter DECOMPOSES a memory into single-valued cert nodes: the
+-- array is a source (like a flop), each read port is an `Op_MemRead` node, and the
+-- write fold becomes a CHAIN of `Op_MemWrite` nodes, one per write port, in the
+-- same order `memory_write_fold` applies them.  Only the value type has to grow.
+--
+-- `CertVal` deliberately derives NEITHER `DecidableEq` NOR `Repr` -- it carries a
+-- function.  That is safe because values never appear in the data the
+-- `native_decide` well-formedness facts run over: `NodeCert` is nid/op/width/deps
+-- only, and values live solely in the environment `Nat → CertVal`, which is never
+-- `decide`d.  `bridge_nodup` / `bridge_some` / `bridge_depord` / `keys_sub` are
+-- therefore unaffected.
+--------------------------------------------------------------------------------
+
+inductive CertVal where
+  | bv  (b : BV)
+  | mem (f : Int → BV)
+deriving Inhabited
+
+/-- Bit-vector projection.  The `mem` case is a type error the emitter never
+produces (an op is applied to the operand kind its node shape guarantees); it
+returns a zero-width zero rather than needing a partial function. -/
+def CertVal.asBV : CertVal → BV
+  | .bv b  => b
+  | .mem _ => mk_bv 0 0
+
+/-- Memory projection, dual to `asBV`. -/
+def CertVal.asMem : CertVal → (Int → BV)
+  | .mem f => f
+  | .bv _  => fun _ => mk_bv 0 0
+
+--------------------------------------------------------------------------------
+-- Memory operators over the certificate value domain.
+--
+-- These mirror `pass_lean.cpp`'s fast model exactly:
+--   read   -> memory_read_port_expr  (enable-gated; 0 when not read-enabled)
+--   write  -> one step of memory_write_fold (enable-gated, else unchanged)
+-- The array is indexed by the address's UNSIGNED value, matching `mem_read`'s
+-- `m a` on `BitVec addr`.
+--------------------------------------------------------------------------------
+
+def cert_mem_read (w : Nat) (m : Int → BV) (a : BV) (en : BV) : BV :=
+  if bv_nonzero en then bv_resize w (m (bv_uint a)) else mk_bv w 0
+
+def cert_mem_write (m : Int → BV) (a d en : BV) : Int → BV :=
+  if bv_nonzero en then (fun x => if x = bv_uint a then d else m x) else m
+
+/-- Byte-enable masked update, the `BV` twin of `masked_word_update`: bit `i` of the
+result comes from `new` when byte `i / byte_w` is enabled, else from `old`. -/
+def cert_masked_update (w : Nat) (old new bev : BV) (byte_w : Nat) : BV :=
+  mk_bv w (bits_to_int w (fun i => if bv_bit bev (i / byte_w) then bv_bit new i else bv_bit old i))
+
+def cert_mem_write_be (w : Nat) (m : Int → BV) (a d bev : BV) (byte_w : Nat) : Int → BV :=
+  if bv_nonzero bev then
+    (fun x => if x = bv_uint a then cert_masked_update w (m (bv_uint a)) d bev byte_w else m x)
+  else m
+
+--------------------------------------------------------------------------------
+-- The certificate-value evaluator, LAYERED over `eval_op`.
+--
+-- Deliberately NOT a rewrite of `eval_op` into the `CertVal` domain.  `eval_op`
+-- and `denote_op` have 25 operator cases each, `eval_op_correct` proves them
+-- equal, and every `OpBridge` lemma (getmask_bridge', sum2_bridge, and3_bridge,
+-- sra_bridge_sext, ...) is stated about `eval_op`.  Rewriting it would invalidate
+-- all of that.  Instead the memory operators are handled here and EVERY other
+-- operator is delegated unchanged, so the existing bridge lemmas keep applying
+-- verbatim and only the graph-level machinery moves to `CertVal`.
+--
+-- For a concrete non-memory operator the match reduces on the operator
+-- constructor, so `eval_op_cert Op_And w [.bv a, .bv b]` is DEFEQ to
+-- `.bv (eval_op Op_And w [a, b])` -- see `eval_op_cert_bv` below.
+--------------------------------------------------------------------------------
+
+def eval_op_cert : LGraphOp → Nat → List CertVal → CertVal
+  | LGraphOp.Op_MemRead, w, [m, a, en] => .bv (cert_mem_read w m.asMem a.asBV en.asBV)
+  | LGraphOp.Op_MemWrite, _w, [m, a, d, en] => .mem (cert_mem_write m.asMem a.asBV d.asBV en.asBV)
+  | LGraphOp.Op_MemWriteBE byte_w, w, [m, a, d, be] =>
+    .mem (cert_mem_write_be w m.asMem a.asBV d.asBV be.asBV byte_w)
+  -- Wrong arity on a memory op: a defined, obviously-wrong value rather than a
+  -- partial function.  The emitter never produces it; the census gate catches it.
+  | LGraphOp.Op_MemRead, w, _ => .bv (mk_bv w 0)
+  | LGraphOp.Op_MemWrite, _w, _ => .mem (fun _ => mk_bv 0 0)
+  | LGraphOp.Op_MemWriteBE _, _w, _ => .mem (fun _ => mk_bv 0 0)
+  | op, w, vs => .bv (eval_op op w (vs.map CertVal.asBV))
+
+/-- Every non-memory operator delegates to `eval_op` unchanged.  Stated with an
+explicit hypothesis so it applies uniformly; for a concrete operator literal the
+goal also closes by `rfl`, which is what the emitted per-node proofs rely on. -/
+theorem eval_op_cert_bv (op : LGraphOp) (w : Nat) (l : List BV)
+    (h : ∀ b, op ≠ LGraphOp.Op_MemRead ∧ op ≠ LGraphOp.Op_MemWrite ∧ op ≠ LGraphOp.Op_MemWriteBE b) :
+    eval_op_cert op w (l.map CertVal.bv) = .bv (eval_op op w l) := by
+  have hmap : (l.map CertVal.bv).map CertVal.asBV = l := by
+    induction l with
+    | nil => rfl
+    | cons a t ih => simp [CertVal.asBV, ih]
+  cases op <;> first
+    | (exact absurd rfl (h 0).1)
+    | (exact absurd rfl (h 0).2.1)
+    | (exact absurd rfl (h _).2.2)
+    | (simp only [eval_op_cert, hmap])
+
+--------------------------------------------------------------------------------
 -- Node certificate and graph certificate records
 --------------------------------------------------------------------------------
 
@@ -354,6 +469,12 @@ def simpleOpCertWfBool (opc : LGraphOp) (w : Nat) (ds : List Nat) : Bool :=
   | LGraphOp.Op_SHL => ds.length = 2
   | LGraphOp.Op_SRA => ds.length = 2
   | LGraphOp.Op_Sext => ds.length = 2
+  -- Memory ops.  Shape only, exactly like every case above: the arity the
+  -- `eval_op_cert` match requires, so a mis-arity node is rejected by the
+  -- well-formedness gate rather than silently taking the fallback value.
+  | LGraphOp.Op_MemRead => ds.length = 3
+  | LGraphOp.Op_MemWrite => ds.length = 4
+  | LGraphOp.Op_MemWriteBE _ => ds.length = 4
   | _ => false
 
 def simpleNodeCertShapeWfBool (c : NodeCert) : Bool :=
@@ -373,10 +494,34 @@ def denoteNode (G : GraphCert) (sourceEnv : Nat → BV) (n : Nat) : BV :=
   | none => sourceEnv n
   | some c => denote_op c.op c.width (c.deps.map sourceEnv)
 
-def evalNode (G : GraphCert) (rho : Nat → BV) (n : Nat) : BV :=
+/-- Per-node semantics for one value domain.  The graph traversal below is
+written ONCE against this class; `BV` and `CertVal` are instances.  Before this,
+`evalNode`/`evalGraph` and `evalNodeC`/`evalGraphC` were character-identical
+except for the type and one function name -- two copies to keep in sync, and a
+third for every future domain. -/
+class NodeSemantics (V : Type) where
+  interpOp : LGraphOp → Nat → List V → V
+
+instance instNodeSemanticsBV : NodeSemantics BV := ⟨eval_op⟩
+
+/-- The one traversal.  Node lookup, dependency mapping and environment update
+are domain-independent; only `interpOp` varies. -/
+def evalNodeG {V : Type} [NodeSemantics V] (G : GraphCert) (rho : Nat → V) (n : Nat) : V :=
   match G.nodes n with
   | none => rho n
-  | some c => eval_op c.op c.width (c.deps.map rho)
+  | some c => NodeSemantics.interpOp c.op c.width (c.deps.map rho)
+
+def envSetG {V : Type} (rho : Nat → V) (n : Nat) (v : V) : Nat → V :=
+  fun m => if m = n then v else rho m
+
+def evalGraphG {V : Type} [NodeSemantics V] : List Nat → GraphCert → (Nat → V) → Nat → V
+  | [], _G, rho => rho
+  | n :: ns, G, rho => evalGraphG ns G (envSetG rho n (evalNodeG G rho n))
+
+/-- `BV` instance of the generic traversal.  Definitionally the old definition,
+so every existing theorem and all 16 proven designs still elaborate. -/
+def evalNode (G : GraphCert) (rho : Nat → BV) (n : Nat) : BV :=
+  evalNodeG G rho n
 
 def denoteNodeEnv (G : GraphCert) (rho : Nat → BV) (n : Nat) : BV :=
   match G.nodes n with
@@ -384,11 +529,10 @@ def denoteNodeEnv (G : GraphCert) (rho : Nat → BV) (n : Nat) : BV :=
   | some c => denote_op c.op c.width (c.deps.map rho)
 
 def envSet (rho : Nat → BV) (n : Nat) (v : BV) : Nat → BV :=
-  fun m => if m = n then v else rho m
+  envSetG rho n v
 
-def evalGraph : List Nat → GraphCert → (Nat → BV) → Nat → BV
-  | [], _G, rho => rho
-  | n :: ns, G, rho => evalGraph ns G (envSet rho n (evalNode G rho n))
+def evalGraph : List Nat → GraphCert → (Nat → BV) → Nat → BV :=
+  evalGraphG
 
 def denoteGraph : List Nat → GraphCert → (Nat → BV) → Nat → BV
   | [], _G, rho => rho
@@ -406,8 +550,8 @@ theorem eval_op_correct (oper : LGraphOp) (w : Nat) (args : List BV) :
 
 theorem evalNode_eq_denoteNodeEnv (G : GraphCert) (rho : Nat → BV) (n : Nat) :
     evalNode G rho n = denoteNodeEnv G rho n := by
-  unfold evalNode denoteNodeEnv
-  split <;> simp [eval_op_correct]
+  unfold evalNode evalNodeG denoteNodeEnv
+  split <;> simp [NodeSemantics.interpOp, eval_op_correct]
 
 theorem evalGraph_eq_denoteGraph (order : List Nat) (G : GraphCert) (rho : Nat → BV) :
     evalGraph order G rho = denoteGraph order G rho := by
@@ -415,7 +559,12 @@ theorem evalGraph_eq_denoteGraph (order : List Nat) (G : GraphCert) (rho : Nat �
   | nil =>
       rfl
   | cons n ns ih =>
-      simp [evalGraph, denoteGraph, evalNode_eq_denoteNodeEnv, ih]
+      -- `evalGraph` is now an alias of the generic traversal, so its recursive
+      -- equation is stated about `evalGraphG`.  One `show` puts the goal back in
+      -- alias form (the two are definitionally equal) and the original proof runs.
+      show evalGraph ns G (envSet rho n (evalNode G rho n))
+         = denoteGraph ns G (envSet rho n (denoteNodeEnv G rho n))
+      rw [evalNode_eq_denoteNodeEnv, ih]
 
 theorem evalGraphCorrect (order : List Nat) (G : GraphCert) (sourceEnv : Nat → BV) :
     envCorrectOn order
@@ -429,3 +578,27 @@ theorem evalGraphCorrectForCert (G : GraphCert) (sourceEnv : Nat → BV) :
       (evalGraph G.topo G sourceEnv)
       (graphDenotation G.topo G sourceEnv) := by
   exact evalGraphCorrect G.topo G sourceEnv
+
+--------------------------------------------------------------------------------
+-- CertVal graph evaluator: the memory-aware twin of evalNode / envSet / evalGraph.
+--
+-- ADDITIVE BY DESIGN.  The `BV` versions above are what the already-proven
+-- designs elaborate against, so they stay byte-identical; a memory-bearing design
+-- takes this path instead.  Only two things differ: the value type, and
+-- `eval_op_cert` in place of `eval_op`.  The graph plumbing is otherwise the same,
+-- and `DepOrdered` / `DepOrderedB` / `Nodup` / `isSome` are value-FREE (`NodeCert`
+-- is nid/op/width/deps only), so those facts -- and the `native_decide` gates that
+-- discharge them -- are shared verbatim between the two paths.
+--------------------------------------------------------------------------------
+
+instance instNodeSemanticsCertVal : NodeSemantics CertVal := ⟨eval_op_cert⟩
+
+/-- `CertVal` instance of the SAME traversal.  Previously a hand-copied twin. -/
+def evalNodeC (G : GraphCert) (rho : Nat → CertVal) (n : Nat) : CertVal :=
+  evalNodeG G rho n
+
+def envSetC (rho : Nat → CertVal) (n : Nat) (v : CertVal) : Nat → CertVal :=
+  envSetG rho n v
+
+def evalGraphC : List Nat → GraphCert → (Nat → CertVal) → Nat → CertVal :=
+  evalGraphG

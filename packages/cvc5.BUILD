@@ -68,7 +68,8 @@ genrule(
     # localize exactly that set -- robust to any future CaDiCaL namespacing.
     cmd = """
 set -e
-work=$$(mktemp -d)
+work=$$(mktemp -d "$(@D)/cvc5-XXXXXX")
+trap 'rm -rf "$$work"' EXIT
 if [ "$$(uname)" = "Darwin" ]; then
   clang -nostdlib -Wl,-r -Wl,-all_load \
     -Wl,-unexported_symbol,'*CaDiCaL*' \
@@ -104,9 +105,13 @@ else
   # (covers `_ZN7CaDiCaL...`, vtables `_ZTVN7CaDiCaL`, typeinfo `_ZTIN/_ZTSN`,
   # thunks, and cvc5's own cadical glue -- all cvc5-private after `ld -r`),
   # plus the global-namespace Reap class and the ipasir_/ccadical C APIs.
-  nm --defined-only --extern-only "$$work/combined.o" \
-    | awk '$$2 ~ /^[TDBRVW]$$/ {print $$3}' \
-    | grep -E 'CaDiCaL|^ipasir_|^ccadical|^_ZN4Reap' >> "$$work/cad.syms"
+  # Include LOCAL symbols too: destructor COMDAT signatures such as
+  # _ZN7CaDiCaL7WrapperD5Ev are local NOTYPE symbols (nm type 'n'). Renaming
+  # only the exported D0/D1/D2 functions leaves that group signature shared
+  # with abc, so the linker can discard cvc5's renamed destructor sections.
+  nm --defined-only "$$work/combined.o" \
+    | awk '{print $$3}' \
+    | grep -E 'CaDiCaL|4Reap|^ipasir_|^ccadical' >> "$$work/cad.syms"
   sort -u "$$work/cad.syms" -o "$$work/cad.syms"
   # RENAME, don't just localize: CaDiCaL's WEAK template/vtable/typeinfo symbols
   # live in ELF COMDAT groups keyed by the symbol NAME. objcopy --localize-symbols
@@ -126,7 +131,6 @@ else
   rm -f $@
   ar rcs $@ "$$work/local.o"
 fi
-rm -rf "$$work"
 """,
 )
 
