@@ -46,13 +46,29 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# One id per invocation: it names the output directory and is recorded in every
+# result, so a result can be tied to the run that produced it.
+RUN_ID = os.environ.get("REPLAY_RUN_ID") or time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + f"-{os.getpid()}"
 REPLAY = ROOT / "generated" / "master_port" / "replay"
 RESULTS = REPLAY / "results"
 JOBS = REPLAY / "jobs"
 FORMAL = ROOT / "formal" / "lean"
 
 EXPORT_STATES = ["EXPORTED", "REFUSED", "FAILED", "SKIPPED"]
-PROOF_STATES = ["PROVEN", "FAILED", "NOT_RUN"]
+# TYPECHECKED is NOT a proof: a legacy fast model elaborates without carrying a
+# refinement obligation, so calling it PROVEN would overstate it.
+PROOF_STATES = ["PROVEN", "TYPECHECKED", "FAILED", "NOT_RUN"]
+
+# What each REQUESTED mode must demonstrate. Supplied to the auditor explicitly;
+# running it in `auto` mode lets the ARTIFACT choose the obligations, so a
+# verified certificate satisfied a legacy chunked-WF request. Measured.
+MODE_OBLIGATIONS = {
+    "verified_compiler":  (["_step_correct", "_step_legacy_correct"], "PROVEN"),
+    "legacy":             ([], "TYPECHECKED"),
+    "legacy_bridge":      (["_comb_refines_fast"], "PROVEN"),
+    "legacy_full_bridge": (["_comb_refines_fast"], "PROVEN"),
+    "legacy_chunked_wf":  (["_graphCert_wf", "_comb_refines_fast"], "PROVEN"),
+}
 
 
 def sha(p: Path) -> str:
@@ -143,8 +159,14 @@ def mode_env(mode: str) -> dict:
     raise ValueError(f"unregistered mode {mode}")
 
 
-def typecheck(artifact: Path, top: str, out: Path) -> dict:
-    """Serial audited queue + exact-obligation axiom audit. /usr/bin/time -v."""
+def typecheck(artifact: Path, top: str, out: Path, mode: str) -> dict:
+    """Typecheck and audit against the REQUESTED mode's obligations.
+
+    The obligation set comes from `mode`, not from the artifact. Running the
+    auditor in `auto` mode lets the file decide what it has to prove, which is
+    how a verified certificate came back PROVEN for a `legacy_chunked_wf`
+    request -- with no bridge and no graphCert_wf anywhere in it.
+    """
     # ABSOLUTE paths: this runs with cwd=formal/lean, so a relative `-o` lands
     # nowhere and /usr/bin/time exits 125 before Lean is ever invoked.
     out = out.resolve()
@@ -166,13 +188,21 @@ def typecheck(artifact: Path, top: str, out: Path) -> dict:
                  if "Elapsed (wall clock)" in l), None)
     rss = next((l.split(": ")[-1].strip() for l in timing.splitlines()
                 if "Maximum resident set size" in l), None)
-    audit = subprocess.run(
-        ["python3", "-I", str(ROOT / "pass" / "lean" / "scripts" / "axiom_audit.py"),
-         str(log), top, "--artifact", str(artifact)],
-        capture_output=True, text=True)
+    required, success_state = MODE_OBLIGATIONS[mode]
+    cmd_audit = ["python3", "-I", str(ROOT / "pass" / "lean" / "scripts" / "axiom_audit.py"),
+                 str(log), top, "--artifact", str(artifact)]
+    if required:
+        cmd_audit += ["--required", ",".join(required), "--witnesses", "auto"]
+    audit = subprocess.run(cmd_audit, capture_output=True, text=True)
     errs = text.count("error:")
-    ok = rc == 0 and errs == 0 and audit.returncode == 0
-    return {"proof_state": "PROVEN" if ok else "FAILED",
+    # A requested obligation that the ARTIFACT does not even declare is a scope
+    # failure, not an audit the file happens to pass.
+    src = artifact.read_text(errors="replace")
+    absent = [o for o in required if f"theorem {top}{o}" not in src]
+    ok = rc == 0 and errs == 0 and audit.returncode == 0 and not absent
+    return {"proof_state": success_state if ok else "FAILED",
+            "requested_obligations": [top + o for o in required],
+            "obligations_absent_from_artifact": [top + o for o in absent],
             "lean_exit": rc, "lean_errors": errs,
             "axiom_audit": "ok" if audit.returncode == 0 else "FAIL",
             "axiom_detail": (audit.stdout + audit.stderr).strip().splitlines()[:6],
@@ -182,11 +212,31 @@ def typecheck(artifact: Path, top: str, out: Path) -> dict:
 
 def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
     top, mode, fam, case = j["top"], j["mode"], j["family"], j["case"]
-    out = JOBS / fam / mode / case          # CASE, not top: the manifest has
-    out.mkdir(parents=True, exist_ok=True)  # two cases sharing one top.
+    # A FRESH directory per invocation.
+    #
+    # Hashing the artifact after the worker does not establish that the worker
+    # made it. Measured: pre-seed a valid artifact, have the worker exit 0
+    # without writing anything, and the job came back EXPORTED and then PROVEN.
+    # Exporting into a directory that did not exist a moment ago removes the
+    # question -- anything found there was produced by this run.
+    #
+    # CASE, not top: the manifest holds two cases sharing top `cva6_tlb_gate`.
+    base = JOBS / fam / mode / case
+    out = base / RUN_ID
+    if out.exists():
+        raise RuntimeError(f"run directory already exists: {out}")
+    out.mkdir(parents=True)
+    # A stable pointer to the newest run, so paths stay predictable without
+    # letting an older run's output stand in for this one.
+    latest = base / "latest"
+    if latest.is_symlink() or latest.exists():
+        latest.unlink()
+    latest.symlink_to(RUN_ID)
     log = out / "job.log"
     rec = {"family": fam, "case": case, "top": top, "mode": mode,
+           "run_id": RUN_ID, "out_dir": str(out.relative_to(ROOT)),
            "lhd_sha256": sha(lhd), "requested_scope": mode_env(mode),
+           "requested_obligations": [top + o for o in MODE_OBLIGATIONS[mode][0]],
            "export_state": "FAILED", "proof_state": "NOT_RUN"}
 
     env = dict(os.environ)
@@ -199,8 +249,58 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
     if fam == "CORE-ET":
         env["COREET_TOP"] = top
         cmd = ["bash", str(ROOT / "scripts" / "run_coreet_module_lean.sh")]
+    elif fam == "CVA6":
+        # The wrapper is the prerequisite, and a MISSING one stays visibly
+        # unresolved rather than becoming a quiet pass. Regenerated wrappers
+        # first, then the committed hand-written ones for the legacy-only
+        # configurations that have no elaborated instance in the core.
+        wrapper = None
+        for cand in (REPLAY / "cva6_wrappers" / f"{top}.sv",
+                     ROOT / "scripts" / "cva6_module_wrappers" / f"{top}.sv"):
+            if cand.exists():
+                wrapper = cand
+                break
+        if wrapper is None:
+            rec["export_state"] = "SKIPPED"
+            rec["detail"] = f"no wrapper for {top} -- unresolved prerequisite"
+            return rec
+        fl = ROOT / "generated" / "cva6_filelists" / \
+            "cv64a6_imafdc_sv39_hpdcache_wb.top_cva6.flistplus.f"
+        if not fl.exists():
+            rec["export_state"] = "SKIPPED"
+            rec["detail"] = "no CVA6 filelist -- unresolved prerequisite"
+            return rec
+        env["CVA6_ROOT"] = env.get("CVA6_ROOT", "/mada/users/czeng14/projects/cva6-clean/cva6")
+        env["CVA6_TOP"] = top
+        env["CVA6_FILELIST"] = str(fl)
+        env["CVA6_WRAPPER_FILE"] = str(wrapper)
+        rec["wrapper"] = str(wrapper.relative_to(ROOT))
+        rec["wrapper_sha256"] = sha(wrapper)
+        rec["filelist_sha256"] = sha(fl)
+        cmd = ["bash", str(ROOT / "scripts" / "run_cva6_module_lean_stress.sh")]
+    elif fam == "DINO":
+        hb = Path(env.get("HAGENT_BUILD",
+                          "/mada/users/czeng14/projects/hagent/.cache/"
+                          "setup_simplechisel_mcp_2025.11/build"))
+        if not hb.exists():
+            rec["export_state"] = "SKIPPED"
+            rec["detail"] = "no HAGENT_BUILD -- unresolved prerequisite"
+            return rec
+        # The DINO driver exports all three designs in one invocation, selected
+        # by SC_DIR/PIPE_DIR/DUAL_DIR. Pointing the other two at a nonexistent
+        # path would be a silent skip, so instead each job runs the driver with
+        # only ITS design's directory set -- the others are left unset, which
+        # the driver treats as "not requested".
+        env["HAGENT_BUILD"] = str(hb)
+        subdir = {"SingleCycleCPU": ("SC_DIR", "build_singlecyclecpu_d"),
+                  "PipelinedCPU": ("PIPE_DIR", "build_pipelined_d"),
+                  "PipelinedDualIssueCPU": ("DUAL_DIR", "build_dualissue_d")}[top]
+        for var in ("SC_DIR", "PIPE_DIR", "DUAL_DIR"):
+            env.pop(var, None)
+        env[subdir[0]] = str(hb / subdir[1])
+        env["RUN_LEC_GATE"] = "false"
+        cmd = ["bash", str(ROOT / "scripts" / "run_dino_lgraph_lean.sh")]
     else:
-        # A missing adapter is UNRESOLVED, not an acceptance disposition.
         rec["export_state"] = "SKIPPED"
         rec["detail"] = f"{fam} adapter not wired -- unresolved prerequisite"
         return rec
@@ -214,7 +314,33 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
     text = log.read_text(errors="replace")
     artifact = next(iter(out.rglob(f"{top}_Lgraph.lean")), None)
 
+    # DID THE REQUESTED SCOPE ACTUALLY TAKE EFFECT?
+    #
+    # Setting a mode variable is not the same as the runner honouring it.
+    # Measured: a DINO chunked-WF job exported cleanly and produced an artifact
+    # with NO graphCert_wf obligation at all, because
+    # run_dino_lgraph_lean.sh passes only strict/emit_cert/mode/max_width and
+    # has no cert_wf option. Labelling that EXPORTED-as-chunked-WF would assert
+    # a scope the artifact does not carry.
+    def scope_mismatch(art: Path) -> str:
+        want = mode_env(mode)
+        txt = art.read_text(errors="replace")
+        if want.get("LEAN_CERT_WF") == "chunked" and f"theorem {top}_graphCert_wf" not in txt:
+            return "cert_wf=chunked requested but the artifact has no graphCert_wf obligation"
+        if want.get("LEAN_MODE") == "verified_compiler" and f"{top}_designCert" not in txt:
+            return "verified_compiler requested but the artifact has no DesignCert"
+        if want.get("LEAN_EMIT_FAST_BRIDGE") == "true" and want.get("LEAN_MODE") == "legacy" \
+                and f"theorem {top}_comb_refines_fast" not in txt:
+            return "fast bridge requested but the artifact has no _comb_refines_fast"
+        return ""
+
     if rc == 0 and artifact is not None:
+        mismatch = scope_mismatch(artifact)
+        if mismatch:
+            rec["export_state"] = "SKIPPED"
+            rec["detail"] = f"unresolved: {mismatch}"
+            rec["artifact_produced"] = str(artifact.relative_to(ROOT))
+            return rec
         rec["export_state"] = "EXPORTED"
         rec["artifact"] = str(artifact.relative_to(ROOT))
         rec["artifact_sha256"] = sha(artifact)
@@ -231,8 +357,31 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
         rec["detail"] = f"export exit {rc}"
 
     if rec["export_state"] == "EXPORTED" and not export_only:
-        rec.update(typecheck(Path(rec["artifact"]), top, out))
+        rec.update(typecheck(Path(rec["artifact"]), top, out, mode))
     return rec
+
+
+def exit_status(sel: list) -> int:
+    """Nonzero when any selected job failed or is unresolved.
+
+    FAILED and SKIPPED both count: a missing prerequisite is an open question,
+    not a pass, and a caller checking only the exit code should see that.
+    REFUSED does not -- it is a real upstream disposition.
+    """
+    bad = 0
+    for j in sel:
+        p = result_path(j)
+        if not p.exists():
+            bad += 1
+            continue
+        r = json.loads(p.read_text())
+        if r.get("export_state") in ("FAILED", "SKIPPED"):
+            bad += 1
+        elif r.get("proof_state") == "FAILED":
+            bad += 1
+    if bad:
+        print(f"{bad} job(s) failed or are unresolved", file=sys.stderr)
+    return 1 if bad else 0
 
 
 def main() -> int:
@@ -276,7 +425,7 @@ def main() -> int:
                                   f"({rec.get('artifact_sha256')} -> {sha(art)})")
             else:
                 try:
-                    rec.update(typecheck(art, j["top"], out))
+                    rec.update(typecheck(art, j["top"], out, j["mode"]))
                 except subprocess.TimeoutExpired:
                     rec.update(proof_state="FAILED", detail="typecheck timeout")
                 except Exception as e:
@@ -285,7 +434,7 @@ def main() -> int:
             print(f"  [{i}/{len(sel)}] {j['family']}/{j['mode']}/{j['case']}: "
                   f"{rec['proof_state']} wall={rec.get('wall_clock', '-')} "
                   f"rss={rec.get('peak_rss_kib', '-')}", flush=True)
-        return 0
+        return exit_status(sel)
 
     done = load_results(inv)
     sel = [j for j in inv["jobs"]
@@ -311,7 +460,9 @@ def main() -> int:
         print(f"  [{i}/{len(sel)}] {j['family']}/{j['mode']}/{j['case']}: "
               f"export={rec['export_state']} proof={rec.get('proof_state')} "
               f"({rec.get('export_wall_s', '-')}s)", flush=True)
-    return 0
+    # A run with failed or unresolved jobs must not exit 0: a caller that only
+    # checks the status code would otherwise treat it as a clean sweep.
+    return exit_status(sel)
 
 
 if __name__ == "__main__":
