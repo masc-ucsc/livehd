@@ -3579,9 +3579,12 @@ subprocess outcomes:
 | 12 | 12 | 12 | PASS (correct) |
 | 11 | 12 | 12 | FAIL (correct) |
 
-An **extra** row on either side is truncated away silently; only a trace short
-on *both* sides is caught. A simulator that emitted one period too many — or one
-too few on the side that happens to be longer — passes.
+An **extra** row on either side is truncated away silently. What `min` *does*
+catch is a trace short on **either** side, because the minimum then falls below
+`expected` — the `rtl=11 / lean=12` row above fails for exactly that reason. The
+blind spot is the opposite direction: a simulator emitting one period **too
+many** passes, on either side. An earlier wording here said only a trace short
+on *both* sides is caught, which is wrong.
 
 **When that tool is restored**, it must require **exact** trace counts and
 output-column shape, while preserving the behaviour that is correct: `P=1`

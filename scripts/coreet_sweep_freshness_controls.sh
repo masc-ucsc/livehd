@@ -17,15 +17,29 @@ rm -rf "$T"; mkdir -p "$T"
 rc=0
 printf 'mod_one\nmod_two\n' > "$T/list.txt"
 
-# A stand-in for the per-module runner, so the controls do not need CORE-ET.
-mkdir -p "$T/bin"
-cat > "$T/bin/run_coreet_module_lean.sh" <<'STUB'
+# AN ISOLATED FROZEN PROJECT, not a stub on PATH.
+#
+# The first version of these controls wrote a stub at $T/bin/ and set STUB_FAIL,
+# which changed nothing: coreet_full_flow.sh invokes
+# "$R/scripts/run_coreet_module_lean.sh" by ABSOLUTE path, so the stub was never
+# reached and the "aborted worker" case was not being exercised at all.
+#
+# So the controls run against a COPY of the sweep in an isolated tree, whose
+# sibling scripts/ holds the stub. Production admission is untouched: the real
+# script is not modified, and the copy differs only in where it lives.
+PROJ="$T/proj"
+mkdir -p "$PROJ/scripts"
+cp "$SWEEP" "$PROJ/scripts/coreet_full_flow.sh"
+cat > "$PROJ/scripts/run_coreet_module_lean.sh" <<'STUB'
 #!/usr/bin/env bash
-# Writes nothing; the sweep's `one` builds the row from the exit status.
+# Stand-in worker. Exits nonzero when STUB_FAIL=1 so the sweep records a
+# failure row rather than a pass.
 [[ "${STUB_FAIL:-0}" == 1 ]] && exit 3
 exit 0
 STUB
-chmod +x "$T/bin/run_coreet_module_lean.sh"
+chmod +x "$PROJ/scripts/run_coreet_module_lean.sh"
+SWEEP="$PROJ/scripts/coreet_full_flow.sh"
+R="$PROJ"
 
 run() {  # <case> [env...] ; echoes "exit=<n> marker=<COMPLETE|INCOMPLETE|none>"
   local case="$1"; shift
