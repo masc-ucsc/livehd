@@ -44,13 +44,27 @@ if [[ "${RUN_LEAN:-false}" == "true" ]]; then
 fi
 RUN_LEAN=false
 
-mkdir -p "$OUT/rows"
-rm -f "$OUT/COMPLETE"
+# PER-INVOCATION ROW STORAGE.
+#
+# Completion used to be "a non-empty row file exists for every requested
+# module", which says nothing about WHO wrote it. Measured: with a prior run's
+# rows present and the current launcher failing outright, the sweep reported
+# COMPLETE and exited 0 having run ZERO workers. Filtering old rows by requested
+# name does not make them fresh.
+#
+# Rows therefore go in a directory named for THIS run, and the completion check
+# reads only that directory. Previous evidence is left where it is rather than
+# cleaned up -- it is still evidence, just of a different run.
+RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+ROWS="$OUT/rows/$RUN_ID"
+mkdir -p "$ROWS"
+rm -f "$OUT/COMPLETE" "$OUT/INCOMPLETE"
+echo "[sweep] run id $RUN_ID -> $ROWS"
 
 one() {
   local m="$1"
   local mo="$OUT/$m"
-  local row="$OUT/rows/$m.row"
+  local row="$ROWS/$m.row"
   # RUN_LEC_GATE is set EXPLICITLY, not left to a default: these rows are
   # exports, and an export is not an RTL equivalence result.
   COREET_TOP="$m" OUT="$mo" LEAN_MODE=verified_compiler RUN_LEAN="$RUN_LEAN" \
@@ -99,9 +113,17 @@ one() {
   fi
 }
 export -f one
-export R OUT RUN_LEAN COREET_ROOT
+export R OUT RUN_LEAN COREET_ROOT ROWS
 
-grep -vE '^\s*(#|$)' "$LIST" | xargs -P "$JOBS" -I{} bash -c 'one "$@"' _ {}
+# The launcher's exit status is CHECKED. Without this a failed xargs -- a bad
+# -P argument, a missing bash, a killed pipeline -- is indistinguishable from a
+# clean sweep, and the completion check below would then be the only thing
+# standing between that and a COMPLETE marker.
+launch_rc=0
+grep -vE '^\s*(#|$)' "$LIST" | xargs -P "$JOBS" -I{} bash -c 'one "$@"' _ {} || launch_rc=$?
+if [[ "$launch_rc" -ne 0 ]]; then
+  echo "[sweep] WARNING: the worker launcher exited $launch_rc" >&2
+fi
 
 # The sentinel must mean "every requested module produced a row IN THIS RUN",
 # not "the loop exited". Stale rows from an earlier sweep are excluded by name,
@@ -110,21 +132,28 @@ grep -vE '^\s*(#|$)' "$LIST" | xargs -P "$JOBS" -I{} bash -c 'one "$@"' _ {}
 want="$(grep -vE '^\s*(#|$)' "$LIST" | sort -u)"
 missing=""
 while read -r m; do
-  [[ -s "$OUT/rows/$m.row" ]] || missing+=" $m"
+  [[ -s "$ROWS/$m.row" ]] || missing+=" $m"
 done <<< "$want"
 {
   printf 'module\tresult\twall_s\trss_kb\tsorryAx\tdetail\n'
   while read -r m; do
-    [[ -s "$OUT/rows/$m.row" ]] && cat "$OUT/rows/$m.row"
+    [[ -s "$ROWS/$m.row" ]] && cat "$ROWS/$m.row"
   done <<< "$want"
 } > "$OUT/coreet.tsv"
-if [[ -n "$missing" ]]; then
-  echo "INCOMPLETE: no row for:$missing" >&2
-  echo "$missing" > "$OUT/INCOMPLETE"
+# COMPLETE means: the launcher succeeded AND every requested module produced a
+# row IN THIS RUN. Either alone has been observed to be insufficient.
+if [[ -n "$missing" || "$launch_rc" -ne 0 ]]; then
+  {
+    [[ "$launch_rc" -ne 0 ]] && echo "launcher exited $launch_rc"
+    [[ -n "$missing" ]] && echo "no row from run $RUN_ID for:$missing"
+  } | tee "$OUT/INCOMPLETE" >&2
   rm -f "$OUT/COMPLETE"
+  sweep_rc=1
 else
   rm -f "$OUT/INCOMPLETE"
-  touch "$OUT/COMPLETE"
+  printf 'run_id=%s\nrows=%s\n' "$RUN_ID" "$ROWS" > "$OUT/COMPLETE"
+  sweep_rc=0
 fi
 echo "rows: $(($(wc -l < "$OUT/coreet.tsv") - 1)) -> $OUT/coreet.tsv"
 awk -F'\t' 'NR>1{print $2}' "$OUT/coreet.tsv" | sort | uniq -c | sort -rn
+exit "$sweep_rc"
