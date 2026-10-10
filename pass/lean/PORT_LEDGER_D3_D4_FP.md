@@ -538,3 +538,40 @@ would be stating something false of a quiet domain.
 Inserting that helper reproduced the **same** defect as the splitter's: placed
 before `def flopNext`, it landed between that declaration and its doc comment
 and left the comment dangling. Re-inserted above the comment.
+
+### 12.5 Full chain rebuilt with the reifier included
+
+Twelve modules, all exit 0, rebuilt against the guarded `ResidualSemantics`
+with the migrated reifier and harness:
+
+| module | exit | wall | peak RSS |
+| --- | ---: | ---: | ---: |
+| `Translation/LGraphModel` | 0 | 12.47 s | 638,308 kB |
+| `Compiler/ResidualSemantics` | 0 | 1.21 s | 494,364 kB |
+| `Translation/OpBridge` | 0 | 28.88 s | 6,819,368 kB |
+| `Compiler/CompileOpDefs` | 0 | 0.93 s | 489,048 kB |
+| `Compiler/CompileGraphDefs` | 0 | 1.10 s | 482,860 kB |
+| `Compiler/CompileDesignDefs` | 0 | 0.92 s | 485,648 kB |
+| `Compiler/CompileOp` | 0 | 14.20 s | 6,774,064 kB |
+| `Compiler/CompileGraph` | 0 | 15.06 s | 6,726,720 kB |
+| `Compiler/CompileDesign` | 0 | 14.04 s | 6,750,788 kB |
+| `Compiler/Reify` | 0 | 1.03 s | 512,276 kB |
+| `Compiler/ReifyGen` | 0 | 8.80 s | 1,600,816 kB |
+| `Compiler/D3Harness` | 0 | 1.23 s | 497,532 kB |
+
+**Interface audit: IDENTICAL to live** again, with the reifier in the tree.
+**Boundary matrix: `BOUNDARY-MATRIX OK`**, 1.01 s, 469,972 kB.
+
+The reifier path sits where the split intends it: `Reify` 512 MB, `D3Harness`
+498 MB, `ReifyGen` 1.60 GB — against 6.7–6.8 GB for anything that imports
+Mathlib.
+
+**Live library after every isolated build: 25 files checked, 0 changed.**
+
+### 12.6 Still open on D3
+
+- `ReifyProof.lean` (1,327 lines, **4 `sorry`**) is **not** ported. It stays
+  outside every accepted proof path, and nothing above depends on it.
+- The sweep/manifest scripts still carry D3's private absolute paths.
+- `agree` remains **sampled** evidence and `proof` remains **unattempted** —
+  neither is upgraded by anything here.
