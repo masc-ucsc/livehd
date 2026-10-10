@@ -37,7 +37,10 @@ Usage:
 """
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
+import re
 import json
 import os
 import subprocess
@@ -62,8 +65,17 @@ PROOF_STATES = ["PROVEN", "TYPECHECKED", "FAILED", "NOT_RUN"]
 # What each REQUESTED mode must demonstrate. Supplied to the auditor explicitly;
 # running it in `auto` mode lets the ARTIFACT choose the obligations, so a
 # verified certificate satisfied a legacy chunked-WF request. Measured.
+# The value is (minimum obligations, success state). The minimum is ADDED to
+# what the auditor derives from the artifact's structure -- it never replaces
+# it. An earlier version passed `--required _comb_refines_fast` for the bridge
+# modes, which SUBSTITUTED for the derivation, so a stateful model with no
+# next/step obligations came back PROVEN. A mode may strengthen the requirement;
+# it may not weaken it.
 MODE_OBLIGATIONS = {
     "verified_compiler":  (["_step_correct", "_step_legacy_correct"], "PROVEN"),
+    # Legacy fast is TYPECHECKED under its declared scope: it carries no
+    # refinement obligation, and demanding one it was never asked to emit would
+    # fail a correct export.
     "legacy":             ([], "TYPECHECKED"),
     "legacy_bridge":      (["_comb_refines_fast"], "PROVEN"),
     "legacy_full_bridge": (["_comb_refines_fast"], "PROVEN"),
@@ -159,6 +171,29 @@ def mode_env(mode: str) -> dict:
     raise ValueError(f"unregistered mode {mode}")
 
 
+LEAN_LOCK = ROOT / "generated" / "pass_lean_runtime_tmp" / "lean_slot.lock"
+
+
+@contextlib.contextmanager
+def lean_slot():
+    """ONE Lean typecheck at a time, across every launcher on this machine.
+
+    `run_lean_queue.sh` serialises within one invocation; that is not a global
+    guard, and two orchestrator launches happily ran Lean concurrently --
+    observed with the CORE-ET queue and DINO both active. Each job here is
+    multi-GB, and on a shared NFS box concurrent ones starve its clients and can
+    OOM each other, where an OOM-killed run looks exactly like a proof failure.
+    An already-running legitimate job is WAITED FOR, never killed.
+    """
+    LEAN_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with LEAN_LOCK.open("w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
 def typecheck(artifact: Path, top: str, out: Path, mode: str) -> dict:
     """Typecheck and audit against the REQUESTED mode's obligations.
 
@@ -179,9 +214,10 @@ def typecheck(artifact: Path, top: str, out: Path, mode: str) -> dict:
     env["PATH"] = str(Path.home() / ".elan" / "bin") + os.pathsep + env.get("PATH", "")
     env["LEAN_NUM_THREADS"] = env.get("LEAN_NUM_THREADS", "8")
     env["TMPDIR"] = str(ROOT / "generated" / "pass_lean_runtime_tmp")
-    with log.open("w") as fh:
-        rc = subprocess.run(cmd, cwd=str(FORMAL), env=env, stdout=fh,
-                            stderr=subprocess.STDOUT, timeout=7200).returncode
+    with lean_slot():
+        with log.open("w") as fh:
+            rc = subprocess.run(cmd, cwd=str(FORMAL), env=env, stdout=fh,
+                                stderr=subprocess.STDOUT, timeout=7200).returncode
     text = log.read_text(errors="replace")
     timing = tv.read_text(errors="replace") if tv.exists() else ""
     wall = next((l.split(": ")[-1].strip() for l in timing.splitlines()
@@ -191,17 +227,25 @@ def typecheck(artifact: Path, top: str, out: Path, mode: str) -> dict:
     required, success_state = MODE_OBLIGATIONS[mode]
     cmd_audit = ["python3", "-I", str(ROOT / "pass" / "lean" / "scripts" / "axiom_audit.py"),
                  str(log), top, "--artifact", str(artifact)]
-    if required:
-        cmd_audit += ["--required", ",".join(required), "--witnesses", "auto"]
+    if mode == "verified_compiler":
+        cmd_audit += ["--required", ",".join(required)]
+    elif required:
+        # MIN, not required: the structural derivation (next/step when the model
+        # has state, graphCert_wf when it has a graph certificate) still applies.
+        cmd_audit += ["--min-required", ",".join(required), "--witnesses", "auto"]
     audit = subprocess.run(cmd_audit, capture_output=True, text=True)
     errs = text.count("error:")
     # A requested obligation that the ARTIFACT does not even declare is a scope
     # failure, not an audit the file happens to pass.
     src = artifact.read_text(errors="replace")
-    absent = [o for o in required if f"theorem {top}{o}" not in src]
+    effective = list(required)
+    if mode != "verified_compiler" and re.search(rf"^structure {re.escape(top)}_state\b", src, re.M):
+        # Same rule the auditor derives: a model WITH STATE owes next and step.
+        effective += ["_next_refines_fast", "_step_refines_fast"]
+    absent = [o for o in effective if f"theorem {top}{o}" not in src]
     ok = rc == 0 and errs == 0 and audit.returncode == 0 and not absent
     return {"proof_state": success_state if ok else "FAILED",
-            "requested_obligations": [top + o for o in required],
+            "requested_obligations": [top + o for o in effective],
             "obligations_absent_from_artifact": [top + o for o in absent],
             "lean_exit": rc, "lean_errors": errs,
             "axiom_audit": "ok" if audit.returncode == 0 else "FAIL",
@@ -281,12 +325,21 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
         # unresolved rather than becoming a quiet pass. Regenerated wrappers
         # first, then the committed hand-written ones for the legacy-only
         # configurations that have no elaborated instance in the core.
-        wrapper = None
-        for cand in (REPLAY / "cva6_wrappers" / f"{top}.sv",
-                     ROOT / "scripts" / "cva6_module_wrappers" / f"{top}.sv"):
-            if cand.exists():
-                wrapper = cand
-                break
+        # SELECT BY CASE, not by top. The manifest holds two configurations
+        # sharing top `cva6_tlb_gate`: `cva6_tlb` (verified+legacy, from the
+        # core's own elaborated instance) and `legacy_cva6_tlb_gate` (the
+        # historical legacy-only procedure, whose hand-written wrapper is
+        # committed). The two wrapper FILES differ, so preferring the
+        # regenerated one for both would silently run the historical case
+        # against the wrong input -- a unique output directory does not
+        # preserve a procedure.
+        hand = ROOT / "scripts" / "cva6_module_wrappers" / f"{top}.sv"
+        gen = REPLAY / "cva6_wrappers" / f"{top}.sv"
+        historical = case.startswith("legacy_")
+        order = (hand, gen) if historical else (gen, hand)
+        wrapper = next((c for c in order if c.exists()), None)
+        rec["wrapper_selection"] = ("historical hand-written (case is legacy_*)"
+                                    if historical else "regenerated from the retained AST")
         if wrapper is None:
             rec["export_state"] = "SKIPPED"
             rec["detail"] = f"no wrapper for {top} -- unresolved prerequisite"

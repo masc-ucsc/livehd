@@ -66,8 +66,13 @@ would simply be judged combinational.  An EMPTY required set is a hard failure
 for the same reason: an artifact that proves only `Unrecognized : True` must not
 pass by having nothing asked of it.
 
-Usage: axiom_audit.py <typecheck.log> <Top> [--required a,b] [--witnesses a,b]
-                      [--artifact f.lean] [--namespace N] [--mode verified|legacy|auto]
+`--required` REPLACES the derived set and is for callers that know exactly what
+they want. `--min-required` ADDS to it, which is what a replay mode wants: the
+structural derivation still applies, and the mode can only strengthen it.
+
+Usage: axiom_audit.py <typecheck.log> <Top> [--required a,b] [--min-required a,b]
+                      [--witnesses a,b] [--artifact f.lean] [--namespace N]
+                      [--mode verified|legacy|auto]
 Exit 0 iff every check passes.
 """
 
@@ -130,6 +135,7 @@ def main() -> int:
         return 2
     log, top = args[0], args[1]
     required = None
+    min_required = ()
     witnesses = None
     artifact = None
     namespace = None
@@ -168,6 +174,13 @@ def main() -> int:
     if required is None:
         if src is not None:
             detected, required = derive_scope(src, top)
+            # A caller's MINIMUM is added to the derived set, never substituted
+            # for it. Passing `--required _comb_refines_fast` for a bridge mode
+            # REPLACED the derivation, so a stateful model with no next/step
+            # obligations came back PROVEN -- measured on a fixture whose two
+            # next-state functions provably differ. A caller may demand more
+            # than the artifact's structure implies; it may not demand less.
+            required = tuple(required) + tuple(o for o in min_required if o not in required)
             if mode not in ("auto", detected):
                 fails.append(f"artifact looks like a {detected} export but --mode {mode} was requested")
         elif mode == "verified":
