@@ -3362,11 +3362,13 @@ arity from `.input` alone would be too small for it.
 
 ### R19.7 Closing the remaining gates
 
-**Restoration failure is now covered.** It cannot be provoked through
-`publish_pair` — the window between moving an original aside and putting it back
-is entirely inside one call with no hook in it — so rather than add an injection
-seam to production code for one test, the rollback decision is a function,
-`detail::rollback_pair`, driven directly. With a non-empty directory blocking
+**Restoration failure is now covered.** Reaching it from outside `publish_pair`
+needs a fault injected between moving an original aside and putting it back —
+which an external harness *can* do by interposing on `rename`, and an
+independent control has. Rather than add an injection seam to production code so
+an in-process test could do the same, the rollback decision is a function,
+`detail::rollback_pair`, driven directly. That is a choice of test method, not a
+claim that the path is unreachable. With a non-empty directory blocking
 A's restore: the backup is **retained with its original content** and **named in
 the returned list**, while B restores normally and its backup is cleaned. The
 earlier code removed both backups unconditionally at that point, destroying the
@@ -3386,11 +3388,31 @@ emitter; both are wired to `publish_pair`, so both must hold the property.
 **Scope of the in-test JSON reader, stated precisely.** `json_string_field` is a
 field/escape decoder: it finds one `"key": "..."` by substring and decodes that
 string. It proves a byte round trips and would not notice a structural error
-elsewhere. The whole-document gate is separate —
-`scripts/check_io_sidecar.py` parses an emitted sidecar with a real JSON parser
-and checks the contract: the discriminator, dense input ordinals matching list
-position, `runtime_input_arity` in range and past every used ordinal, dense
-output ordinals, and dense clock ordinals from 0.
+elsewhere. The whole-document gate is `scripts/check_io_sidecar.py`.
+
+**That validator's first version was a spell-checker.** Driven through its own
+CLI it accepted a negative `runtime_input_arity`, negative and zero widths, a
+boolean where an ordinal belongs, outputs with no name or width, a clock with no
+name, and a document with a **duplicated `top` key** — and crashed with an
+`AttributeError` on a port that was not an object. Two traps behind that:
+
+- `isinstance(True, int)` is **True** in Python, so a JSON boolean passed every
+  integer check. Integers are now tested with `type(x) is int`.
+- `json.load` keeps the **last** of duplicated keys silently, so a document can
+  say two different things and parse clean. An `object_pairs_hook` now rejects
+  it.
+
+`scripts/check_io_sidecar_controls.sh` pins 15 rejections plus a valid document
+and the real emitted sidecars, all through the actual CLI.
+
+**What `runtime_input_arity` is checked against.** `Direct.checkRuntime` tests
+`i.size < inputArity D`, so the *runtime* rule is a **lower bound** — an input
+array longer than the arity is accepted, and only the edge vector is exact.
+Nothing here rejects a padded input array, and an earlier phrasing implied Lean
+would. The metadata helper emits the **canonical** value, one past the highest
+referenced ordinal, so the validator checks that exact number rather than merely
+a sufficient one: a larger arity would not be refused by Lean, but it is not
+what this emitter produces.
 
 **Top override, pinned in production.** `--set formal.lean.top=renamed_top`
 emits `renamed_top_Lgraph.lean` **and** `renamed_top_io.json`, with the

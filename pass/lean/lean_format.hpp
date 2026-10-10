@@ -34,8 +34,6 @@ void        write_atomic(const std::string& path, const std::function<void(std::
 // the preexisting one, which loses BOTH: the caller ends with no certificate at
 // all where it previously had a working pair.
 //
-// Here, a failure at any point leaves whatever was there before. If both targets
-// existed they are both still the old ones; if neither did, neither is created.
 //
 // WHAT THIS DOES AND DOES NOT GUARANTEE.
 //
@@ -61,11 +59,13 @@ void publish_pair(const std::string& path_a, const std::function<void(std::ostre
 namespace detail {
 // The rollback half of `publish_pair`, exposed so it can be tested directly.
 //
-// The interesting case -- a restore that FAILS -- cannot be provoked from
-// outside `publish_pair`: the window between moving an original aside and
-// putting it back is entirely inside one call, with no hook in it. Rather than
-// add an injection seam to production code for one test, the decision logic is a
-// function, and the test drives it with a blocked target.
+// The interesting case is a restore that FAILS. Reaching it from outside needs
+// a fault injected between moving an original aside and putting it back -- which
+// an external harness CAN do, by interposing on `rename`. Rather than add an
+// injection seam to production code so an in-process test can do the same, the
+// decision logic is a function and the test drives it directly with a blocked
+// target. That is a choice of test method, not a claim that the path is
+// unreachable.
 //
 // `moved_*` / `put_*` say what actually happened, because the loss this guards
 // against came from ASSUMING both originals had been backed up. Returns the
