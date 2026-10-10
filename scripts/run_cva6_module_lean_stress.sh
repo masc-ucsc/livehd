@@ -100,6 +100,24 @@ cat > "$DUMMY_SV" <<'EOF'
 // Empty anchor file. Real CVA6 sources are supplied through yosys.filelist_file.
 EOF
 
+# A wrapper's own prerequisites come FIRST, in the order given.
+#
+# These files are ours, not the core's, so the generated filelist never
+# contains them. `legacy_cva6_alu_export` imports `cva6_alu_export_pkg` and
+# uses its `Cfg`; with only the wrapper appended it failed in both configured
+# modes at "unknown package", before Lean. The dependency list is explicit --
+# see scripts/cva6_module_wrappers/WRAPPER_DEPS.tsv -- and is appended left to
+# right ahead of the wrapper, because elaboration order is the contract.
+if [[ -n "${CVA6_WRAPPER_DEPS:-}" ]]; then
+  # Space- or newline-separated, order preserved.
+  # shellcheck disable=SC2206
+  wrapper_deps=(${CVA6_WRAPPER_DEPS})
+  for dep in "${wrapper_deps[@]}"; do
+    [[ -r "$dep" ]] || { echo "FATAL: missing CVA6_WRAPPER_DEPS entry: $dep" >&2; exit 2; }
+    printf '%s\n' "$dep" >> "$FILELIST"
+  done
+fi
+
 if [[ -n "${CVA6_WRAPPER_FILE:-}" ]]; then
   [[ -r "$CVA6_WRAPPER_FILE" ]] || { echo "FATAL: missing CVA6_WRAPPER_FILE=$CVA6_WRAPPER_FILE" >&2; exit 2; }
   printf '%s\n' "$CVA6_WRAPPER_FILE" >> "$FILELIST"
@@ -125,6 +143,7 @@ fi
   echo "BENDER_TOP=$BENDER_TOP"
   echo "CONFIG_FILE=$CONFIG_FILE"
   echo "FILELIST=$FILELIST"
+  echo "CVA6_WRAPPER_DEPS=${CVA6_WRAPPER_DEPS:-}"
   echo "OUT=$OUT"
   echo "RUN_LEAN=$RUN_LEAN"
   echo "LEAN_EMIT_CERT=$EMIT_CERT"

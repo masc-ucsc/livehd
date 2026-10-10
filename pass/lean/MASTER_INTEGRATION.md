@@ -4954,6 +4954,51 @@ toolchain, recorded as such with full provenance on each case. Not repaired:
 nesting the record, substituting `noncomputable`, upgrading the toolchain or
 any semantic workaround would each be a change the user has excluded.
 
+### R45 `legacy_cva6_alu_export`: a harness defect, not a design one
+
+The case failed in **both** configured modes, and the cause was upstream of
+Lean. `scripts/cva6_module_wrappers/cva6_alu_export.sv` does
+`import cva6_alu_export_pkg::*` and uses that package's `Cfg`; the package is
+ours, sits beside the wrapper, and is **not** in the generated CVA6 filelist,
+which contains the core's files. The runner appended `CVA6_WRAPPER_FILE` and
+nothing else, so elaboration died at *"unknown package
+'cva6_alu_export_pkg'"* and *"use of undeclared identifier 'Cfg'"* — retained
+in the historical job log, before any Lean step.
+
+**Repaired by declaring dependencies, not by inferring them.**
+`scripts/cva6_module_wrappers/WRAPPER_DEPS.tsv` lists, per wrapper, the ordered
+files to compile first; `run_cva6_module_lean_stress.sh` appends
+`CVA6_WRAPPER_DEPS` left to right **ahead of** the wrapper; and
+`replay_orchestrator.py` resolves the row beside the selected wrapper, records
+the dependencies **and their order** in provenance, and treats a declared file
+that is absent as an unresolved prerequisite — `SKIPPED` with the name, never a
+quiet pass. A `_pkg` naming convention would have been wrong for a wrapper
+whose prerequisite is named differently, or whose second dependency must follow
+the first; the order is the contract, so it is written down.
+
+Nothing else moved: no generated wrapper or config substituted, no RTL, native
+or frontend behaviour changed.
+
+**Replayed, both modes, with the intended optimized binary
+`54eb7f2b38b10512`** (203,522,288 bytes — the build the historical rows name), into a separate tree so the historical `FAILED` rows are retained:
+
+| mode | export | proof | obligations | wall | peak RSS |
+|---|---|---|---|---|---:|
+| `legacy` | EXPORTED | **TYPECHECKED** | declared scope: none; axiom audit PASS | 0:30.35 | 1,400,208 KiB |
+| `legacy_bridge` | EXPORTED | **PROVEN** | `cva6_alu_export_comb_refines_fast`; 1 report, 7 axiom citations | 1:59.54 | 8,801,836 KiB |
+
+`LEAN_CERT_WF=skip` in both, as those modes require. `export_wall_s` (0.72 s /
+0.92 s) is export only and is recorded separately from the typecheck wall — the
+two are not interchangeable. The `legacy` artifact digest
+`ca59e4ff4db37af7…` matches the independently produced control artifact.
+
+`scripts/wrapper_deps_controls.sh` keeps it honest, against the actual runner
+and orchestrator: the package lands at line 221 with the wrapper at 222 —
+**immediately** before, not merely present; a missing declared dependency is
+refused by the runner (exit 2, named) and by the orchestrator (named); a row
+declaring nothing is a malformed table; and a wrapper with no declaration is
+unaffected. No `lhd` is invoked, so it makes no proof or timing claim.
+
 CVA6 legacy now stands at **37/61 terminal — 26 accepted typechecks, 8 export
 refusals, 3 typecheck failures**. The queue is running and is not restarted.
 

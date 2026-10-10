@@ -85,6 +85,48 @@ MODE_OBLIGATIONS = {
 }
 
 
+WRAPPER_DEPS_TSV = ROOT / "scripts" / "cva6_module_wrappers" / "WRAPPER_DEPS.tsv"
+
+
+def _wrapper_dep_table():
+    """`{wrapper filename: [ordered dependency filenames]}` from the tracked TSV.
+
+    Absent file means no wrapper declares a dependency -- which is a real
+    answer, not a reason to guess at one.
+    """
+    table = {}
+    if not WRAPPER_DEPS_TSV.exists():
+        return table
+    for line in WRAPPER_DEPS_TSV.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, _, rest = line.partition("\t")
+        if not rest.strip():
+            raise SystemExit(f"{WRAPPER_DEPS_TSV}: row has no dependencies: {line!r}")
+        table[name.strip()] = [d.strip() for d in rest.split(",") if d.strip()]
+    return table
+
+
+def wrapper_deps(wrapper):
+    """The wrapper's declared prerequisites, in order, resolved beside it.
+
+    Returns `(paths, None)`, or `([], first_missing)` when a DECLARED
+    dependency is absent -- which is an unresolved prerequisite, never a quiet
+    pass. Dependencies are matched on the wrapper's FILE NAME, so a regenerated
+    wrapper of the same name inherits the same declaration; if that is ever
+    wrong for a regenerated wrapper, the row is what changes, in the open.
+    """
+    names = _wrapper_dep_table().get(wrapper.name, [])
+    out = []
+    for n in names:
+        d = wrapper.parent / n
+        if not d.exists():
+            return [], n
+        out.append(d)
+    return out, None
+
+
 def sha(p: Path) -> str:
     try:
         return hashlib.sha256(p.read_bytes()).hexdigest()[:16]
@@ -376,9 +418,27 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
             rec["export_state"] = "SKIPPED"
             rec["detail"] = "no CVA6 filelist -- unresolved prerequisite"
             return rec
+        # A wrapper's own compile prerequisites, declared explicitly and
+        # ordered. The generated filelist contains the CORE's files; a package
+        # we wrote beside a wrapper is not in it, and a wrapper that imports
+        # one failed at elaboration before Lean was reached -- measured on
+        # `legacy_cva6_alu_export` in both configured modes. Declared, not
+        # inferred from a `_pkg` suffix: the order is the contract.
+        deps, missing_dep = wrapper_deps(wrapper)
+        if missing_dep is not None:
+            rec["export_state"] = "SKIPPED"
+            rec["detail"] = (f"declared wrapper dependency is absent: {missing_dep} "
+                             f"-- unresolved prerequisite")
+            return rec
         env["CVA6_TOP"] = top
         env["CVA6_FILELIST"] = str(fl)
         env["CVA6_WRAPPER_FILE"] = str(wrapper)
+        if deps:
+            env["CVA6_WRAPPER_DEPS"] = " ".join(str(d) for d in deps)
+        # Provenance records the dependencies AND their order, because a run
+        # that compiled the same files in a different order is a different run.
+        rec["wrapper_deps"] = [str(d.relative_to(ROOT)) for d in deps]
+        rec["wrapper_deps_sha256"] = [sha(d) for d in deps]
         rec["wrapper"] = str(wrapper.relative_to(ROOT))
         rec["wrapper_sha256"] = sha(wrapper)
         rec["filelist_sha256"] = sha(fl)

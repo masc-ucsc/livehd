@@ -1,0 +1,23 @@
+# Ordered compile prerequisites for a hand-written CVA6 wrapper.
+#
+# A wrapper that imports a package needs that package ELABORATED FIRST, and the
+# generated CVA6 filelist does not contain these files -- they are ours, not the
+# core's. The runner appends `CVA6_WRAPPER_FILE` to the filelist and nothing
+# else, so a wrapper with a prerequisite failed before Lean was ever reached.
+#
+# Measured: `legacy_cva6_alu_export` failed in BOTH `legacy` and
+# `legacy_bridge` with "unknown package cva6_alu_export_pkg" and "undeclared
+# identifier Cfg"; inserting only that package immediately before the wrapper
+# exports an artifact through the unchanged static gates.
+#
+# EXPLICIT, not inferred from a `_pkg` naming convention: the order is the
+# contract, and a convention would silently do the wrong thing for a wrapper
+# whose prerequisite is named differently or whose second dependency must
+# follow the first. Paths are relative to this directory. Several dependencies
+# are separated by commas and are appended LEFT TO RIGHT, before the wrapper.
+#
+# A row naming a file that does not exist is an UNRESOLVED PREREQUISITE -- the
+# case is skipped and says so. It never becomes a quiet pass.
+#
+# wrapper	dependencies (ordered)
+cva6_alu_export.sv	cva6_alu_export_pkg.sv
