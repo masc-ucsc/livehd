@@ -20,6 +20,39 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# GNU `time -v` emits exactly these two lines; the labels themselves contain
+# colons ("h:mm:ss"), so neither can be split on the first colon.
+WALL_LINE = re.compile(r"Elapsed \(wall clock\) time \([^)]*\):\s*(.*?)\s*$")
+RSS_LINE = re.compile(r"Maximum resident set size \(kbytes\):\s*(.*?)\s*$")
+WALL_VALUE = re.compile(r"^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$")
+
+
+def parse_wall(v):
+    """`[h:]mm:ss[.ss]` -> seconds, or None if it is not that.
+
+    None means "this is not a wall-clock time", which is a different answer
+    from "it disagrees" and is reported differently.
+    """
+    m = WALL_VALUE.match(v.strip())
+    if not m:
+        return None
+    h, mi, sec = m.group(1), m.group(2), m.group(3)
+    return int(h or 0) * 3600 + int(mi) * 60 + float(sec)
+
+
+def parse_rss(v):
+    """A kbytes count -> int, or None if it is not a bare non-negative integer."""
+    v = v.strip()
+    return int(v) if re.fullmatch(r"\d+", v) else None
+
+
+MEASUREMENTS = (
+    # key, label, line regex, value parser, how to describe a bad value
+    ("wall_clock", "Elapsed (wall clock)", WALL_LINE, parse_wall, "a [h:]mm:ss[.ss] time"),
+    ("peak_rss_kib", "Maximum resident set size", RSS_LINE, parse_rss, "a kbytes integer"),
+)
+
 sys.path.insert(0, str(ROOT / "scripts"))
 
 
@@ -180,20 +213,45 @@ def main() -> int:
             elif art.name not in cmdline and str(art) not in cmdline:
                 blockers.append(f"timing names a different command: {cmdline.strip()[:90]}")
 
-            for key, label in (("wall_clock", "Elapsed (wall clock)"),
-                               ("peak_rss_kib", "Maximum resident set size")):
-                line = next((l for l in tlines if label in l), None)
-                if line is None:
+            # PARSE THE VALUE. DO NOT LOOK FOR IT INSIDE THE LINE.
+            #
+            # This was `str(rec[key]) not in line` -- substring containment, not
+            # comparison. Measured externally, all three of these were ACCEPTED
+            # as TYPECHECKED by the previous version:
+            #
+            #   recorded RSS  96028  against retained 796028   ("96028" ⊂ "796028")
+            #   recorded wall 0:02.5 against retained 0:02.58  ("0:02.5" ⊂ "0:02.58")
+            #   retained line "Maximum resident set size (kbytes): not-a-number (796028)"
+            #
+            # A truncated measurement, an order-of-magnitude error and a
+            # corrupt line all passed. The value is now extracted with its own
+            # label, its syntax is validated on BOTH sides, and the comparison
+            # is on the parsed value.
+            for key, label, line_re, parse, shape in MEASUREMENTS:
+                hit = next((m for m in (line_re.search(l) for l in tlines) if m), None)
+                if hit is None:
                     missing.append(f"the timing file records no {label}")
                     continue
-                measured = line.split(":", 1)[1].strip() if ":" in line else ""
-                if not measured:
+                raw = hit.group(1)
+                if not raw:
                     missing.append(f"the timing file's {label} line carries no value")
+                    continue
+                got = parse(raw)
+                if got is None:
+                    # Unreadable evidence is unresolved, not a contradiction:
+                    # nothing here says the run disagreed, only that the file
+                    # cannot be read as a measurement.
+                    missing.append(f"the timing file's {label} is {raw!r}, not {shape}")
                     continue
                 if rec.get(key) in (None, ""):
                     missing.append(f"no recorded {key} -- the run's {label} was never kept")
-                elif str(rec[key]) not in line:
-                    blockers.append(f"recorded {key}={rec[key]} is not in the retained timing")
+                    continue
+                want = parse(str(rec[key]))
+                if want is None:
+                    missing.append(f"recorded {key}={rec[key]!r} is not {shape}")
+                elif want != got:
+                    blockers.append(f"recorded {key}={rec[key]} but the retained timing "
+                                    f"says {raw}")
         # The log is the evidence; read it rather than trusting the summary.
         log_text = log.read_text(errors="replace")
         n_err = log_text.count("error:")

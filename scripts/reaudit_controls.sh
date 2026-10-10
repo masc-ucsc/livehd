@@ -201,5 +201,34 @@ expect blank_wall_value "$T/blank_wall_value" UNVERIFIABLE
 mutate no_recorded_rss 'rec.pop("peak_rss_kib", None)'
 expect no_recorded_rss "$T/no_recorded_rss" UNVERIFIABLE
 
+# 14..17 THE VALUE IS PARSED, NOT LOOKED FOR INSIDE THE LINE.
+#
+# `str(rec[key]) not in line` is substring containment.  Measured externally,
+# all three of these were accepted as TYPECHECKED: recorded RSS 96028 against a
+# retained 796028, recorded wall 0:02.5 against a retained 0:02.58, and a
+# retained line reading `not-a-number (796028)`.  A truncated measurement, an
+# order-of-magnitude error, and a corrupt line.
+#
+# A DISAGREEMENT is a contradiction -> FAILED.  An UNREADABLE value says only
+# that the file cannot be read as a measurement -> UNVERIFIABLE.
+mutate truncated_rss 'rec["peak_rss_kib"] = str(rec["peak_rss_kib"])[1:]'
+expect truncated_rss "$T/truncated_rss" FAILED
+
+mutate truncated_wall 'rec["wall_clock"] = str(rec["wall_clock"])[:-1]'
+expect truncated_wall "$T/truncated_wall" FAILED
+
+mutate malformed_rss_line "
+tf = d / 'typecheck.time'; import re as _re
+tf.write_text(_re.sub(r'(Maximum resident set size \\(kbytes\\):).*',
+                      r'\\1 not-a-number (796028)', tf.read_text()))"
+expect malformed_rss_line "$T/malformed_rss_line" UNVERIFIABLE
+
+mutate malformed_recorded_wall 'rec["wall_clock"] = "banana"'
+expect malformed_recorded_wall "$T/malformed_recorded_wall" UNVERIFIABLE
+
+# AND THE VALID RECORD STILL PASSES.  Re-run the untouched complete case after
+# every mutation above, so a repair that simply refuses everything is caught.
+expect complete_still_valid "$d2" PROVEN
+
 [[ $rc -eq 0 ]] && echo "PASS: a re-audit cannot promote a run that did not succeed"
 exit $rc

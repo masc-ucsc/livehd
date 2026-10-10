@@ -4022,11 +4022,31 @@ emit a wrong concat. The other two never reach `pass.lean` at all — the
 frontend cannot elaborate the RTL. They are classified, not repaired: both
 areas are outside this work's contract.
 
-### R29.2 The one proof failure
+### R29.2 The one failure is a COMPILATION failure, not a disproved theorem
 
-`CORE-ET/legacy/txfmactl_top`: `lean_exit 1`, three `error:` lines in its
-retained log, recorded `FAILED` and re-audited `FAILED`. A real failure,
-correctly labelled, and still open.
+`CORE-ET/legacy/txfmactl_top`: `lean_exit 1`, three `error:` lines, recorded
+`FAILED` and re-audited `FAILED`. What the errors say matters:
+
+```
+error: failed to compile definition, compiler IR check failed at
+  `txfmactl_top_state.default._closed_0`.
+  Error: constructor `txfmactl_top_state.mk` has too many fields
+error(lean.dependsOnNoncomputable): ... consider marking it as `noncomputable`
+```
+
+This is Lean's **code generator** refusing a constructor arity, at
+`instInhabited...`, `..._next` and `..._nextStateFromCert`. Nothing here is a
+disproved semantic theorem and nothing is `sorry`: the file does not reach the
+point of compiling to executable IR.
+
+The arity is the flat record. `txfmactl_top` declares **289** `st_` fields —
+the largest in the corpus by a wide margin; the next are `vpu_ml` at 170,
+`vpu_tensorfma` at 123 and `trans_top` at 96, and all three compile. So the
+limit sits between 171 and 289 fields.
+
+Flat records are a standing decision and are not changed here. The item is
+recorded as a **Lean compilation/typecheck failure at a code-generator arity
+limit**, open, and distinct from every other failure in this ledger.
 
 ## R30. The ported simulator, run
 
@@ -4121,11 +4141,30 @@ The RSS jump from ~796 MiB (simulator alone) to 6.5 GiB is the point of the
 split: the launcher does **not** need the verified compiler or Mathlib, and the
 bench does.
 
-### R31.2 What this is not
+### R31.2 What this is not — stated properly
 
-This is the **certificate-level** runtime acceptance. It is not an RTL
-differential: see R27 — `iverilog` is not installed, so the P=1/P=2 source-RTL
-fixtures cannot run here, and a registry sweep is not a substitute for them.
+The earlier wording ("D2 runtime acceptance is done except the RTL
+differential") claimed more than was run. Precisely what DirectBench
+establishes:
+
+- it starts from **`zeroState` and `zeroInput`**, not from a reached state or a
+  stimulus;
+- it drives **20 `allEdges` ticks** — every clock firing every tick, so no
+  partial-fire or cross-domain schedule is exercised;
+- `diffTrace` compares **outputs and flops**, and samples memory **only at
+  addresses `[0, 1, 2, 3, 255]`**.
+
+That is **finite certificate-level agreement between two implementations on one
+fixed trace**. It is not an equivalence proof, not an RTL comparison, and not a
+statement about any other input.
+
+And it does not resolve a gate. **`intpipe_csr_msgs` is still `REFUSED` by the
+static mask/raw-provenance gate** — `export_state: REFUSED`, `proof_state:
+NOT_RUN`. The bench ran against the certificate the gate produced and then
+refused. Its agreement says the direct interpreter and the verified compiler
+read that candidate the same way; it says nothing about whether the candidate
+should be admitted. The clock, reset and collision value gates stay exactly as
+they are.
 
 ### R31.3 The live replay's library context, fingerprinted
 
@@ -4240,3 +4279,141 @@ is the D2 design and it is kept; the six generated `[[lean_exe]]` stanzas from
 this session's runs were removed afterwards, leaving the lakefile identical to
 its committed state. Worth naming because the next person to run the generator
 will see the same thing and should not commit it.
+
+## R33. The measurement comparison was substring containment
+
+R26 required the timing lines to be *present*. It left the comparison itself
+as `str(rec[key]) not in line` — **containment, not comparison**. Caught
+externally, and all three of these were accepted as TYPECHECKED:
+
+| recorded | retained | why it passed |
+| --- | --- | --- |
+| RSS `96028` | `796028` | `"96028"` is a substring of `"796028"` |
+| wall `0:02.5` | `0:02.58` | `"0:02.5"` is a substring of `"0:02.58"` |
+| RSS `796028` | `not-a-number (796028)` | the digits are in there somewhere |
+
+An order-of-magnitude error, a truncated measurement and a corrupt line.
+
+**The repair parses.** Each value is extracted with its own label — necessary
+because the wall label itself contains colons (`h:mm:ss`), so no split on the
+first colon is correct — and then validated:
+
+- wall: `[h:]mm:ss[.ss]` → seconds;
+- RSS: a bare non-negative integer → `int`.
+
+Syntax is checked on **both** sides, and the comparison is between parsed
+values. The two outcomes stay distinct: a value that parses on both sides and
+**disagrees** is a contradiction → `FAILED`; a value that **cannot be parsed**
+says only that the file cannot be read as a measurement → `UNVERIFIABLE`. A
+recorded measurement is still never minted from the file as it stands now.
+
+**24 controls pass**, five of them new: `truncated_rss` → FAILED,
+`truncated_wall` → FAILED, `malformed_rss_line` → UNVERIFIABLE,
+`malformed_recorded_wall` → UNVERIFIABLE, and `complete_still_valid` → PROVEN —
+the last re-running the untouched good record *after* every mutation, so a
+repair that simply refuses everything is caught.
+
+**Blast radius, re-measured on a copy of the live records:**
+
+```
+BEFORE: PROVEN 174  TYPECHECKED 79  NOT_RUN 108  FAILED 1
+AFTER : PROVEN 174  TYPECHECKED 79  NOT_RUN 108  FAILED 1
+re-audited 254 retained result(s); 0 verdict(s) changed
+```
+
+Every accepted record's recorded wall and RSS parse and match its retained
+timing exactly. No accepted log needs re-proving.
+
+## R34. Icarus provisioned, and the source-RTL differential finally run
+
+R27 recorded a missing tool. A missing optional tool is an unmet prerequisite,
+not a reason to abandon an authorized validation — and `AGENTS.md` says so
+itself: *"A requested leg whose tool is missing FAILS rather than skipping."*
+
+### R34.1 The provisioned tool
+
+Built from source into a **project-local** tree, no system installation and no
+toolchain change:
+
+```
+tag        v13_0
+commit     dfeee909ed9f20b4870dd93423156c0170c0e1ff
+prefix     generated/validation-tools/iverilog-v13_0
+configure  --prefix=<that>   (no other options)
+built with gcc (Debian 14.2.0-19) 14.2.0
+iverilog   5506c214f778cc5eb79e503c86b68321  version 13.0 (stable) (v13_0-dirty)
+vvp        ab92b3ffd910f0c3682ace1a0befa8f1  runtime version 13.0 (stable)
+```
+
+Source, build tree, prefix and `TMPDIR` are all under the project. The
+`-dirty` suffix is `autoconf.sh` regenerating build files in the checkout; the
+commit is the pinned tag's.
+
+### R34.2 Two differentials ran; one agrees, one does not
+
+With `LHD_EXTERNAL_SIM=1` and the provisioned tools on `PATH`. **These legs had
+never run on this machine** — there was no `iverilog` for them to use, and they
+skip by default.
+
+| test | lec legs | iverilog leg |
+| --- | --- | --- |
+| `single_edge_icg_test` | pass | **"source ICG and normalized flop-with-enable agree over 29 cycles under iverilog"** |
+| `single_edge_four_classes_test` | pass | **`SINGLE_EDGE_DIFF_FAIL errs=78`** |
+
+So a real source-RTL differential now runs, and one of them passes.
+
+### R34.3 The four-classes disagreement, characterized
+
+Every observed mismatch is the **same shape** — the normalized side exactly one
+source period behind:
+
+```
+MISMATCH ql @38000 source=37 normalized=0
+MISMATCH ql @58000 source=48 normalized=37     <- source's 38000 value
+MISMATCH ql @78000 source=85 normalized=48     <- source's 58000 value
+```
+
+`normalized(t) == source(t - 20000)` for every mismatch after the first, and
+the first is the initial condition under the same offset. This is a **uniform
+one-period offset**, not corrupted values — the alignment class that the
+testbench's own comments are about (`HALF=5` gives two posedges per source
+period, reset released at `t=27` so "the phase divider starts period 1 at slot
+0").
+
+**Not repaired, and not explained away.** It is in native `single_edge` and its
+contract test, both outside this work's change scope. Stated as what it is: a
+previously unexercised leg, exercised for the first time, showing a reproducible
+one-period offset under Icarus 13.0 — whether that is master's divider
+convention or the testbench's sampling convention is an open question for
+whoever owns that pass. The lec legs pass and the ICG differential passes, so
+neither the harness nor the tool is the obvious culprit.
+
+### R34.4 Two historical fixtures that cannot run on master
+
+Both named D2 procedures were ported, and both are blocked by a **named**
+upstream difference. Neither was worked around.
+
+| fixture | blocked by |
+| --- | --- |
+| `single_edge_memory_slot_test.sh` | master's `pass.single_edge` refuses: `memory-unsupported: memory \`memory_24:m\` would commit on every sub-step under a phase divider`, with the hint `slot enables are not wired into the Memory cell yet` |
+| `single_edge_multi_clock_test.sh` | master's `pass.single_edge` has **no `multi_clock` option** (9 uses in the fixture) |
+
+The first is exactly the **pre-fix behaviour** the D2 fixture's own header
+describes; the memory-slot gating is a D2 capability master does not carry. The
+second is deliberate upstream: master's comment says a design with two clock
+nets "is already handled honestly downstream — pass/lec's detected-edge branch
+REFUTES two-clock-vs-one-clock today — so declining it here would turn a
+correct verdict into an unsupported exit."
+
+Changing either would mean changing native `single_edge`, which is out of
+scope. The fixtures are retained in `lhd/tests/` so the procedures are not
+lost, and the multi-clock procedure stays **separate** from the single-clock
+one.
+
+**One adaptation was made, to the fixture's own Pyrope source only**: the
+frontend renamed the built-in type spellings (`core/str_tools.hpp`
+`renamed_type_spelling`: `u<N>`→`U<N>`, `s<N>`/`i<N>`→`S<N>`, `bool`→`Bool`,
+`unsigned`→`Unsigned`, `signed`→`Signed`, `string`→`String`). Nine spellings in
+`memslot.prp`. Nothing about the period count, the sampling phase, the
+stimulus, the initialization or the comparison was touched — and the fixture
+still reaches, and is refused by, the pass.
