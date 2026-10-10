@@ -60,7 +60,9 @@ FORMAL = ROOT / "formal" / "lean"
 EXPORT_STATES = ["EXPORTED", "REFUSED", "FAILED", "SKIPPED"]
 # TYPECHECKED is NOT a proof: a legacy fast model elaborates without carrying a
 # refinement obligation, so calling it PROVEN would overstate it.
-PROOF_STATES = ["PROVEN", "TYPECHECKED", "FAILED", "NOT_RUN"]
+# UNVERIFIABLE: the run's evidence is gone, so the verdict cannot be re-checked.
+# It is neither a proof nor a failure, and it counts as NOT ACCEPTED.
+PROOF_STATES = ["PROVEN", "TYPECHECKED", "FAILED", "UNVERIFIABLE", "NOT_RUN"]
 
 # What each REQUESTED mode must demonstrate. Supplied to the auditor explicitly;
 # running it in `auto` mode lets the ARTIFACT choose the obligations, so a
@@ -156,8 +158,16 @@ def mode_env(mode: str) -> dict:
     if mode == "verified_compiler":
         return {"LEAN_MODE": "verified_compiler", "LEAN_EMIT_FAST_BRIDGE": "false",
                 "LEAN_CERT_WF": "skip"}
-    if mode == "legacy":  # legacy fast model
-        return {"LEAN_MODE": "legacy", "LEAN_EMIT_FAST_BRIDGE": "true",
+    if mode == "legacy":
+        # THE STANDALONE FAST MODEL: no bridge, no WF.
+        #
+        # This asked for LEAN_EMIT_FAST_BRIDGE=true, which is the FULL BRIDGE
+        # emission -- so the "fast model" job requested exactly what
+        # legacy_bridge requests, and was then judged against bridge
+        # obligations it had not been asked for as a standalone mode. A full
+        # bridge does include the fast model, but running one is not running
+        # the other.
+        return {"LEAN_MODE": "legacy", "LEAN_EMIT_FAST_BRIDGE": "false",
                 "LEAN_CERT_WF": "skip"}
     if mode == "legacy_bridge":  # full bridge
         return {"LEAN_MODE": "legacy", "LEAN_EMIT_FAST_BRIDGE": "true",
@@ -238,6 +248,12 @@ def typecheck(artifact: Path, top: str, out: Path, mode: str) -> dict:
                  str(log), top, "--artifact", str(artifact)]
     if mode == "verified_compiler":
         cmd_audit += ["--required", ",".join(required)]
+    elif mode == "legacy":
+        # A fast-only export carries NO refinement theorem, so the auditor's
+        # structural derivation (which owes comb, and next/step when the model
+        # has state) would fail a correct one. The declared scope here is "it
+        # elaborates", so the obligation set is explicitly EMPTY.
+        cmd_audit += ["--required", ""]
     elif required:
         # MIN, not required: the structural derivation (next/step when the model
         # has state, graphCert_wf when it has a graph certificate) still applies.
@@ -248,7 +264,8 @@ def typecheck(artifact: Path, top: str, out: Path, mode: str) -> dict:
     # failure, not an audit the file happens to pass.
     src = artifact.read_text(errors="replace")
     effective = list(required)
-    if mode != "verified_compiler" and re.search(rf"^structure {re.escape(top)}_state\b", src, re.M):
+    if mode not in ("verified_compiler", "legacy") \
+            and re.search(rf"^structure {re.escape(top)}_state\b", src, re.M):
         # Same rule the auditor derives: a model WITH STATE owes next and step.
         effective += ["_next_refines_fast", "_step_refines_fast"]
     absent = [o for o in effective if f"theorem {top}{o}" not in src]
@@ -459,11 +476,32 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
     elif "pass.single_edge refused" in text or "combinational loop" in text:
         rec["export_state"] = "REFUSED"
         rec["detail"] = "upstream refusal (single_edge / combinational loop)"
-    elif "static gate" in text.lower() and "FAIL:" in text:
-        rec["export_state"] = "REFUSED"
-        rec["detail"] = "static gate"
     else:
-        rec["detail"] = f"export exit {rc}"
+        # THE GATE WRITES TO ITS OWN LOG, not to stdout. Searching the job's
+        # stdout for "static gate" missed every real refusal: fpu_wrap,
+        # frontend, issue_read_operands and issue_stage were recorded FAILED
+        # when they had in fact been emitted and then REFUSED by the
+        # const-width gate -- a real disposition, and one whose diagnostics are
+        # the open mask investigation (R14.4).
+        gate = next(iter(out.rglob("logs/static_gates.log")), None)
+        gate_fails = []
+        if gate is not None:
+            gate_fails = [l.strip() for l in gate.read_text(errors="replace").splitlines()
+                          if l.startswith("FAIL:")]
+        if gate_fails:
+            rec["export_state"] = "REFUSED"
+            rec["detail"] = f"static gate refused after emission ({len(gate_fails)} flag(s))"
+            rec["gate_failures"] = gate_fails[:8]
+            rec["gate_log_sha256"] = sha(gate)
+            # The artifact EXISTS and is retained with its digest -- a refused
+            # candidate keeps its evidence. It must not enter prove as an
+            # admitted export.
+            emitted = next(iter(out.rglob(f"{top}_Lgraph.lean")), None)
+            if emitted is not None:
+                rec["artifact_produced_then_refused"] = str(emitted.relative_to(ROOT))
+                rec["artifact_produced_sha256"] = sha(emitted)
+        else:
+            rec["detail"] = f"export exit {rc}"
 
     if rec["export_state"] == "EXPORTED" and not export_only:
         rec.update(typecheck(Path(rec["artifact"]), top, out, mode))
@@ -486,7 +524,7 @@ def exit_status(sel: list) -> int:
         r = json.loads(p.read_text())
         if r.get("export_state") in ("FAILED", "SKIPPED"):
             bad += 1
-        elif r.get("proof_state") == "FAILED":
+        elif r.get("proof_state") in ("FAILED", "UNVERIFIABLE"):
             bad += 1
     if bad:
         print(f"{bad} job(s) failed or are unresolved", file=sys.stderr)

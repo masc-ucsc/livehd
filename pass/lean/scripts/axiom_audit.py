@@ -148,6 +148,7 @@ def main() -> int:
         return 2
     log, top = args[0], args[1]
     required = None
+    required_explicitly_empty = False
     min_required = ()
     witnesses = None
     artifact = None
@@ -156,6 +157,7 @@ def main() -> int:
     for i, a in enumerate(args):
         if a == "--required" and i + 1 < len(args):
             required = tuple(x for x in args[i + 1].split(",") if x)
+            required_explicitly_empty = not required
         elif a == "--min-required" and i + 1 < len(args):
             min_required = tuple(x for x in args[i + 1].split(",") if x)
         elif a == "--witnesses" and i + 1 < len(args):
@@ -204,10 +206,22 @@ def main() -> int:
             print("FAIL: no obligation set: pass --required, or --artifact so the "
                   "scope can be derived, or --mode verified")
             return 1
-    if not required:
+    if not required and not required_explicitly_empty:
+        # An ABSENT set is refused: an artifact must not pass an audit that asks
+        # nothing of it because nothing could be derived.
         print("FAIL: the required obligation set is EMPTY. An artifact cannot pass "
               "an audit that asks nothing of it.")
         return 1
+    # An EXPLICITLY empty set (`--required ""`) is a DECLARED scope: a legacy
+    # fast model carries no refinement theorem, and demanding one would fail a
+    # correct export.
+    #
+    # It does NOT short-circuit. An earlier version returned here with a message
+    # claiming the reports had been checked -- before `parse_reports` had even
+    # run, so it crashed with UnboundLocalError, and had it not crashed it would
+    # have skipped the sorryAx and axiom-allowlist checks entirely. "No required
+    # obligations" means exactly that; every other policy still applies to
+    # whatever the file did report.
 
     if witnesses is None:
         witnesses = VERIFIED_WITNESSES if tuple(required) == VERIFIED_REQUIRED else ("auto",)
@@ -280,8 +294,9 @@ def main() -> int:
         print(f"FAIL: {f}")
     if not fails:
         scope = "report+source" if artifact else "report only"
-        print(f"PASS: axiom audit ({scope}; {len(required)} obligation(s); "
-              f"{len(reports)} report(s), "
+        kind = ("typecheck only, declared scope: no required obligations"
+                if required_explicitly_empty else f"{len(required)} obligation(s)")
+        print(f"PASS: axiom audit ({scope}; {kind}; {len(reports)} report(s), "
               f"{sum(len(v) for v in reports.values())} axiom citation(s))")
     return 1 if fails else 0
 

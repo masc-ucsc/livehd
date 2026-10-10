@@ -3613,3 +3613,79 @@ check must be keyed to the thing it claims. The axiom audit counted lines
 instead of comparing names; `--resume` compared inputs instead of the question
 asked; the LEC gate read one field instead of validating the record; this read a
 filename instead of a run. Each passed for a long time.
+
+## R23. The replay harness, and six ways it accepted work it had not checked
+
+The configured replay is a harness, and every defect in it so far has been one
+shape: **a check keyed to something other than the thing it claims**. They are
+recorded together because the pattern is the finding.
+
+### R23.1 The defects, in the order they were caught
+
+| # | The check | What it actually verified | Measured consequence |
+| ---: | --- | --- | --- |
+| 1 | job `passed` | export exit 0 **and a file exists** | a worker writing `THIS IS NOT VALID LEAN` passed in every mode |
+| 2 | mode flags | `EMIT_FAST_BRIDGE`, a name the runner ignores | the runner's default happened to be right; the request did nothing |
+| 3 | job identity | `(family, top, mode)` | `cva6_tlb` and `legacy_cva6_tlb_gate` share a top and collided |
+| 4 | proof scope | the **artifact's** own structure (`auto`) | a verified certificate satisfied a `legacy_chunked_wf` request |
+| 5 | re-audit promotion | `axiom_audit.py`'s exit code alone | `example : False := by rfl` — Lean exit 1 — promoted to PROVEN |
+| 6 | evidence guards | fields being **non-`None`** | a null exit, an empty digest, a blank timing file, and a timing file from a *different run* all passed |
+
+Each was found by an adversarial control, never by a job failing — which is the
+point: a harness that only reports success is indistinguishable from one that
+works.
+
+### R23.2 What replaced them
+
+**Export and proof are separate states.** `export_state` is
+EXPORTED/REFUSED/FAILED/SKIPPED; `proof_state` is
+PROVEN/TYPECHECKED/FAILED/NOT_RUN/UNVERIFIABLE. A refusal is a real upstream
+disposition and is not a failure; a missing adapter is SKIPPED and **never** an
+acceptance.
+
+**Scope is requested, not inferred.** `MODE_OBLIGATIONS` gives each mode a
+*minimum*, supplied as `--min-required`, which is **added** to the auditor's
+structural derivation rather than replacing it. A mode may strengthen the
+requirement; it may not weaken it. The distinction that makes this work:
+
+- **state is a property of the design** — a model with `structure <Top>_state`
+  owes `next` and `step` in any mode that asks for a refinement at all. The
+  exception is the standalone **fast** typecheck, whose declared scope is "it
+  elaborates": it carries no refinement theorem, so demanding one would fail a
+  correct export;
+- **well-formedness is a property of the requested emission** — a `cert_wf=skip`
+  export defines a graph certificate and deliberately does not prove its
+  well-formedness.
+
+Deriving WF from `def <Top>_graphCert` failed a genuine full-bridge proof, and
+the re-audit caught it.
+
+**Legacy fast has its own scope.** It requested `LEAN_EMIT_FAST_BRIDGE=true` —
+identical to a full bridge — and was then judged against bridge obligations it
+had not asked for. It is now `false`/`skip` with an **explicitly empty**
+obligation set, which the auditor distinguishes from an *absent* one: the first
+is a declared scope and passes as TYPECHECKED, the second is refused. An empty
+scope never becomes PROVEN, and it does not short-circuit the `sorryAx` and
+axiom-allowlist checks — an earlier version returned before `parse_reports` had
+run, which both crashed and would have skipped them.
+
+**Freshness is structural.** Jobs export into a per-invocation directory that
+must not already exist, so a pre-seeded artifact cannot be adopted by a worker
+that exits 0 without writing anything.
+
+**A re-audit cannot promote a run that did not succeed.** It requires
+`lean_exit == 0`, no `error:` or `sorryAx` in the retained log, a retained
+timing file with a **present and successful** exit status naming **this**
+artifact, and digests that are present, well-formed and still matching. Absent
+evidence yields **UNVERIFIABLE** — neither a proof nor a failure — and counts as
+not-accepted. A post-edit digest is never minted as evidence of what a previous
+run checked.
+
+### R23.3 The rule
+
+> A check must be keyed to the thing it claims, and **absent evidence is not
+> clean evidence**.
+
+Six instances in this harness, plus the axiom audit counting lines, `--resume`
+comparing inputs instead of the question asked, the LEC gate reading one field,
+and the sweep reading a filename instead of a run. Every one passed for a while.

@@ -29,7 +29,12 @@ mk_case() {  # <name> <artifact> <lean_exit> <lean_errors> [extra-json]
   local d="$T/$n"
   mkdir -p "$d"
   cp "$art" "$d/art.lean"
-  ( cd "$R/formal/lean" && nice -n19 lake env lean "$d/art.lean" ) > "$d/typecheck.log" 2>&1
+  # Produce the SAME evidence a real job does, including the timing file: the
+  # guard requires it, and a fixture that omits it tests the fixture rather than
+  # the policy. (It did: the complete positive failed on "no retained timing
+  # file" until this was added.)
+  ( cd "$R/formal/lean" && /usr/bin/time -v -o "$d/typecheck.time" \
+      nice -n19 lake env lean "$d/art.lean" ) > "$d/typecheck.log" 2>&1
   local real_exit=$?
   python3 -I - "$d" "$TOP" "$real_exit" "$n" <<'PY'
 import hashlib, json, sys
@@ -37,10 +42,18 @@ from pathlib import Path
 d, top, ex, name = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4]
 sha = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()[:16]
 log = (d/"typecheck.log").read_text(errors="replace")
+tt = (d/"typecheck.time").read_text(errors="replace") if (d/"typecheck.time").exists() else ""
+def field(label):
+    for l in tt.splitlines():
+        if label in l:
+            return l.split(": ")[-1].strip()
+    return None
 json.dump({"family":"CTL","case":name,"top":top,"mode":"legacy_bridge",
            "export_state":"EXPORTED","proof_state":"FAILED",
            "artifact":str(d/"art.lean"),"artifact_sha256":sha(d/"art.lean"),
            "out_dir":str(d),"typecheck_log_sha256":sha(d/"typecheck.log"),
+           "wall_clock":field("Elapsed (wall clock)"),
+           "peak_rss_kib":field("Maximum resident set size"),
            "lean_exit":ex,"lean_errors":log.count("error:")},
           open(d/"result.json","w"), indent=1)
 PY
@@ -93,6 +106,72 @@ import json,sys
 p=sys.argv[1]; d=json.load(open(p)); d.pop('lean_exit',None)
 json.dump(d, open(p,'w'), indent=1)" "$d4/result.json"
 expect no_exit "$d4" FAILED
+
+# 5..9 EVIDENCE-MUTATION controls. These reuse ONE successful retained run and
+# mutate its record, rather than recompiling a full artifact per negative: the
+# admission logic is what is under test, not Lean.
+mutate() {  # <name> <python-statement operating on `rec` and `d`>
+  local n="$1" stmt="$2" d="$T/$1"
+  rm -rf "$d"; cp -r "$T/complete" "$d" 2>/dev/null || { echo "FAIL: no complete case"; rc=1; return; }
+  # `_rp` and `_d`, not `p`/`d`: a mutation statement that binds `p` would
+  # otherwise redirect the json.dump below into whatever file it named. One did
+  # -- `p = d / "typecheck.time"` wrote the RESULT JSON into the timing file and
+  # left the record unmutated, so the control silently tested the unmodified
+  # case and reported a pass.
+  STMT="$stmt" DIR="$d" python3 -I -c '
+import json, os
+from pathlib import Path
+_d = Path(os.environ["DIR"])
+_rp = _d / "result.json"
+rec = json.load(open(_rp))
+rec["artifact"] = str(_d / "art.lean")
+rec["out_dir"] = str(_d)
+d = _d
+exec(os.environ["STMT"])
+json.dump(rec, open(_rp, "w"), indent=1)
+'
+}
+
+# A null exit: `not in (0, None)` treated this as acceptable.
+mutate null_exit 'rec["lean_exit"] = None'
+expect null_exit "$T/null_exit" FAILED
+
+# A deleted hash removed its own check, so the evidence went unverified.
+mutate no_art_hash 'rec.pop("artifact_sha256", None)'
+expect no_art_hash "$T/no_art_hash" FAILED
+
+mutate no_log_hash 'rec.pop("typecheck_log_sha256", None)'
+expect no_log_hash "$T/no_log_hash" FAILED
+
+# A vanished artifact left the old PROVEN standing and exited 0.
+mutate gone_artifact 'rec["artifact"] = str(d / "does_not_exist.lean")'
+expect gone_artifact "$T/gone_artifact" UNVERIFIABLE
+
+# A killed run: /usr/bin/time records the signal while the log can look clean.
+mutate killed 'open(d / "typecheck.time", "a").write("\n\tCommand terminated by signal 9\n")'
+expect killed "$T/killed" FAILED
+
+# 10..14 MISSING-CONTENT boundaries. Each is a field that is PRESENT but says
+# nothing -- the class the first guards missed, because they rejected only None
+# and only lines that happened to exist.
+
+mutate empty_art_hash 'rec["artifact_sha256"] = ""'
+expect empty_art_hash "$T/empty_art_hash" FAILED
+
+mutate empty_timing 'open(d / "typecheck.time", "w").write("")'
+expect empty_timing "$T/empty_timing" FAILED
+
+# The exit line REMOVED, not made nonzero: absence read as success.
+mutate no_exit_line 'tf = d / "typecheck.time"; tf.write_text("\n".join(l for l in tf.read_text().splitlines() if "Exit status" not in l))'
+expect no_exit_line "$T/no_exit_line" FAILED
+
+# A timing file from a DIFFERENT run: plausible, successful, and not this one.
+mutate timing_substituted 'open(d / "typecheck.time", "w").write("\tCommand being timed: \"lake env lean /somewhere/else/Other_Lgraph.lean\"\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:01.00\n\tMaximum resident set size (kbytes): 1234\n\tExit status: 0\n")'
+expect timing_substituted "$T/timing_substituted" FAILED
+
+# Recorded wall/RSS that the retained timing does not support.
+mutate timing_mismatch 'rec["peak_rss_kib"] = "999999999"'
+expect timing_mismatch "$T/timing_mismatch" FAILED
 
 [[ $rc -eq 0 ]] && echo "PASS: a re-audit cannot promote a run that did not succeed"
 exit $rc
