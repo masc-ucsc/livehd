@@ -233,6 +233,20 @@ def main():
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
+    # REFUSE FOR A MISSING REFERENCE BEFORE PAYING FOR THE SUBJECT.
+    #
+    # The check sat after the Lean side, so a run with no iverilog elaborated
+    # the certificate first -- minutes and gigabytes on the largest designs --
+    # and then printed the same SKIPPED it could have printed immediately. The
+    # verdict is unchanged, and so is its exit status; only the order is.
+    #
+    # ONLY A MISSING TOOL MAY SKIP. An installed iverilog that cannot
+    # elaborate the design is a BEHAVIORAL_DIFF_FAIL further down, never a
+    # skip, and that stays exactly where it is.
+    if shutil.which("iverilog") is None:
+        print("BEHAVIORAL_DIFF_SKIPPED no-iverilog")
+        return 3
+
     io = json.load(open(a.sidecar))
     arity = io["runtime_input_arity"]
     by_name = {i["name"]: i for i in io["inputs"]}
@@ -288,9 +302,7 @@ def main():
         return 2
 
     # --- iverilog side ------------------------------------------------------
-    if shutil.which("iverilog") is None:
-        print("BEHAVIORAL_DIFF_SKIPPED no-iverilog")
-        return 3
+    # (its presence was established before the Lean run)
     tb = os.path.join(a.out, "tb.v")
     init = open(a.rtl_init).read() if a.rtl_init else ""
     open(tb, "w").write(build_tb(a.top, ins, outs, len(periods), os.path.abspath(rtl_stim), a.p, init,

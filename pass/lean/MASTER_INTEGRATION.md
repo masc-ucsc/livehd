@@ -4188,3 +4188,55 @@ run concurrently.
 Native LEC, `single_edge` and frontend contracts; checker/evaluator policy;
 the flat record layout; the pinned toolchain. No guard was weakened, no record
 nested, no value widened, and no semantic policy changed.
+
+### R31.4 DirectBench on real stateful designs
+
+`txfma_e4` has one node, so its agreement is weak evidence. Two real CORE-ET
+designs, both 20 cycles, both `exit 0`:
+
+| design | sources | nodes | outputs | flops | mems | `direct_run_outsum` | `residual_run_outsum` | diff | wall | peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: |
+| `intpipe_csr_file_conv` | 136 | 154 | 4 | 7 | 0 | 40 | 40 | **OK** | 13.84 s | 6,659,484 KiB |
+| `intpipe_csr_msgs` | 2,045 | 2,560 | 11 | **53** | **1** | 368934881474191687660 | 368934881474191687660 | **OK** | 26.63 s | 6,680,320 KiB |
+
+`intpipe_csr_msgs` is the one that carries weight: 2,560 nodes, 53 flops, a
+memory and **two clock domains**, and the direct interpreter and the verified
+compiler's residual produce the *same 21-digit output sum* over 20 cycles, with
+`diffTrace` agreeing cycle by cycle rather than only on the total.
+`compile_bindings` equals the node count in both (154 and 2,560), so the
+compiler bound every node rather than folding the design away.
+
+### R31.5 The RTL differential, attempted and refused on the record
+
+Not skipped quietly, and not replaced by a control. The tool was run on real
+inputs — the emitted `intpipe_csr_msgs` certificate, its sidecar (20 named
+input ordinals, 11 outputs, two named clocks `clk_i`/`clk_wr_i`), its RTL at
+`core-et/hw/ip/minion/intpipe/csr/rtl/intpipe_csr_msgs.sv`, and a 12-period
+scenario written **by signal name**, across both sampling phases:
+
+| P | sample | result | exit |
+| ---: | --- | --- | ---: |
+| 1 | before-first-edge | `BEHAVIORAL_DIFF_SKIPPED no-iverilog` | 3 |
+| 1 | after-first-edge | `BEHAVIORAL_DIFF_SKIPPED no-iverilog` | 3 |
+| 2 | before-first-edge | `BEHAVIORAL_DIFF_SKIPPED no-iverilog` | 3 |
+| 2 | after-first-edge | `BEHAVIORAL_DIFF_SKIPPED no-iverilog` | 3 |
+
+**No differential ran.** That is the honest outcome with no `iverilog` on this
+machine, and it is recorded as a refusal with a named cause, not as a pass.
+
+One ordering repair: the `iverilog` check sat *after* the Lean side, so a run
+with no reference simulator elaborated the certificate first — minutes and
+gigabytes on the largest designs — and then printed the same `SKIPPED` it could
+have printed immediately. The verdict and its exit status are unchanged; only
+the order is. **Only a missing tool may skip**: an installed `iverilog` that
+cannot elaborate the design is still a `BEHAVIORAL_DIFF_FAIL`, and that check
+stays exactly where it was.
+
+### R31.6 A wrinkle worth naming
+
+`make_sim_launcher.py` **appends to a tracked `lakefile.toml`** while its
+outputs are gitignored, so generating a launcher dirties the repository. That
+is the D2 design and it is kept; the six generated `[[lean_exe]]` stanzas from
+this session's runs were removed afterwards, leaving the lakefile identical to
+its committed state. Worth naming because the next person to run the generator
+will see the same thing and should not commit it.
