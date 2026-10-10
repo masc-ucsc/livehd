@@ -76,12 +76,17 @@ def reqV (w : Nat) : List BV → BV
   | []        => mk_bv w 1
   | a :: rest => mk_bv w (if reqTail a rest then 1 else 0)
 
-/-- `Op_SHL`: XOR-fold of `a * 2^b` over the shift operands. -/
+/-- `Op_SHL`: XOR-fold of `a * 2^b` over the shift operands.
+
+Mirrors `eval_op Op_SHL` exactly, INCLUDING its saturation at the result width:
+an amount `≥ w` contributes zero.  Stated here rather than delegating to
+`eval_op`, so `rshl_eval` stays an independent local proof. -/
 def rshlV (w : Nat) : List BV → BV
   | []       => mk_bv w 0
   | a :: bs  => bs.foldl (fun acc b =>
       bv_bitwise w (fun x y => xor x y) acc
-        (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0)
+        (mk_bv w (if (bv_uint b).toNat ≥ w then 0
+                  else bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0)
 
 def rnotV (w : Nat) (a : BV) : BV := mk_bv w (bits_to_int w fun i => ! bv_bit a i)
 
@@ -110,6 +115,11 @@ rather than a bit-blast.  (The strictly stronger bit-level characterisation
 def rsextV (w : Nat) (a amt : BV) : BV :=
   let n := (bv_uint amt).toNat
   if n = 0 then mk_bv w 0
+  -- n STRICTLY greater than a.width: the sign bit at n-1 cannot be set, so this
+  -- is zero extension.  Equivalent to the general formula, but it avoids
+  -- `mk_bv n`, whose modulus is `2 ^ n` for an `n` that is a VALUE.  Equality
+  -- keeps sign extension: a = mk_bv 4 (-1), n = 4, w = 8 is 255, not 15.
+  else if n > a.width then mk_bv w (bv_uint a)
   else mk_bv w (bv_sint (mk_bv n (bv_uint a)))
 
 def rgetMaskV (w : Nat) (a m : BV) : BV := bv_get_mask w a m
@@ -201,6 +211,35 @@ def runBindings (bs : List ResidualBinding) (env : SlotEnv) : SlotEnv :=
   match bs with
   | []      => env
   | b :: bs => runBindings bs (env.push (denoteExpr env b.rhs))
+
+/-- `flopNext` at the VALUE level: the same decision, with its operands already
+read out of the environment.
+
+D3 defines this so the reifier can state a flop's next value in terms of named
+per-binding values, exactly as it does a combinational output, instead of
+re-deriving reset priority and polarity on the fast side where the two could
+disagree.
+
+D3's version is CLOCKLESS -- it takes neither the edge nor `asyncReset`, and
+its reset arm is `if inReset then …`. Carried onto this schema it takes both,
+and reproduces `flopNext`'s rule exactly: a quiet domain holds, except for an
+ASYNCHRONOUS reset, which does not wait for an edge. -/
+def flopNextV (w : Nat) (din : BV) (en : Option BV) (rst : Option BV)
+    (resetValue : Int) (resetActiveLow : Bool) (old : Option BV)
+    (edge : Bool) (asyncReset : Bool) : BV :=
+  let inReset : Bool :=
+    match rst with
+    | none   => false
+    | some r => let rv := bv_nonzero r
+                if resetActiveLow then !rv else rv
+  if inReset && (edge || asyncReset) then mk_bv w resetValue
+  else
+    let enb : Bool :=
+      match en with
+      | none    => true
+      | some x  => bv_nonzero x
+    if edge && enb then bv_resize w din
+    else old.getD (mk_bv w 0)
 
 /-- Flop next value.  RESET HAS PRIORITY over enable; polarity is explicit;
 `resetValue` is loaded rather than assumed zero. All three are exactly what the

@@ -890,3 +890,74 @@ their first use, and my new regression asserted the *other* flop's initial
 value (`3` where the stored value is `9`). Neither was a semantic failure, and
 neither implementation nor any original assertion was changed to accommodate
 them.
+
+## 16. Installed into the tracked tree
+
+The D3 contribution is no longer staged-only. 27 files are installed in
+the owned master paths, with the post-D2 schema and master's architecture
+retained throughout.
+
+| destination | status | sha256 | provenance |
+| --- | --- | --- | --- |
+| `formal/lean/LeanSemanticPrimitives/Compiler/CompileOpDefs.lean` | new | `7d0a93539e3ea51c` | adapted (see §12–§15) |
+| `formal/lean/LeanSemanticPrimitives/Compiler/CompileGraphDefs.lean` | new | `1419933c3b1bc9b5` | adapted (see §12–§15) |
+| `formal/lean/LeanSemanticPrimitives/Compiler/CompileDesignDefs.lean` | new | `60043dac56f5c3bf` | adapted (see §12–§15) |
+| `formal/lean/LeanSemanticPrimitives/Compiler/CompileOp.lean` | replaced | `3e82e14d2dc7cbf6` | re-derived / new |
+| `formal/lean/LeanSemanticPrimitives/Compiler/CompileGraph.lean` | replaced | `cf582b4d77beb451` | re-derived / new |
+| `formal/lean/LeanSemanticPrimitives/Compiler/CompileDesign.lean` | replaced | `73d0ba3551c86c7f` | re-derived / new |
+| `formal/lean/LeanSemanticPrimitives/Compiler/ResidualSemantics.lean` | replaced | `7486cf3f076668a2` | re-derived / new |
+| `formal/lean/LeanSemanticPrimitives/Compiler/Reify.lean` | new | `32a29df183079160` | re-derived / new |
+| `formal/lean/LeanSemanticPrimitives/Compiler/ReifyGen.lean` | new | `f248fd8c4cf8b703` | adapted (see §12–§15) |
+| `formal/lean/LeanSemanticPrimitives/Compiler/ReifyProof.lean` | new | `fdb598f754483904` | adapted (see §12–§15) |
+| `formal/lean/LeanSemanticPrimitives/Compiler/D3Harness.lean` | new | `81418798bc7cbb78` | adapted (see §12–§15) |
+| `formal/lean/LeanSemanticPrimitives/Translation/LGraphModel.lean` | replaced | `f18d2c8888668171` | re-derived / new |
+| `formal/lean/LeanSemanticPrimitives/Translation/OpBridge.lean` | replaced | `fc9366004cb12f1d` | re-derived / new |
+| `formal/lean/probes/d3_flop_gen_test.lean` | new | `5ad35e10dc8f5bbb` | re-derived / new |
+| `formal/lean/probes/d3_flopnext_test.lean` | new | `11af408ef81c0b8b` | re-derived / new |
+| `formal/lean/probes/d3_generated_clock_test.lean` | new | `eb199e97bc58a51a` | re-derived / new |
+| `formal/lean/probes/d3_harness_test.lean` | new | `c384ea0374b9d496` | re-derived / new |
+| `formal/lean/probes/d3_memory_gen_test.lean` | new | `fae4ea6b665832f3` | re-derived / new |
+| `formal/lean/probes/d3_memory_semantics_test.lean` | new | `eb9d6a3ac1d829b2` | re-derived / new |
+| `formal/lean/probes/d3_nondefault_metadata_test.lean` | new | `6462af8bf8ca4743` | re-derived / new |
+| `formal/lean/probes/d3_reify_test.lean` | new | `778d5e149a7334b7` | re-derived / new |
+| `formal/lean/probes/d3_shared_test.lean` | new | `b27a7b8ed6b14123` | re-derived / new |
+| `formal/lean/probes/d3_shift_boundary_test.lean` | new | `66ea49164ef0ff99` | **byte-identical to the D3 pin** |
+| `formal/lean/probes/d3_stimulus_test.lean` | new | `609026eafbd04595` | re-derived / new |
+| `pass/lean/scripts/d3_sweep.py` | new | `e5cc27ae4383d955` | pinned 979fecc89a1c8dbe, private paths made configurable |
+| `pass/lean/scripts/d3_manifest.py` | new | `15b7cb5bc9a4a0f7` | pinned 22327f964c0ebb27, private paths made configurable |
+| `pass/lean/manifests/cva6_30_frozen.tsv` | new | `a30f0be7206fb35b` | pinned 70efe8d6c801f798, private paths made configurable |
+
+### 16.1 What is NOT installed
+
+`Compiler/CertIO.lean` stays staged. Its DCERT2 codec, checked admission and
+runtime validation all pass their probe, but the **universal round-trip
+theorem is not proved yet** and the C++ parity is not measured. Installing a
+codec whose central promise is unproved would put it in the tree on the
+strength of tests alone.
+
+### 16.2 The live artifacts are the BASELINE environment, not acceptance
+
+The replay queue is still running against `formal/lean/.lake/build`. Those
+oleans were built from the **previous** sources and are unchanged — verified
+again after the install: **25 recorded files, 0 changed**. `lake env` only sets
+environment variables; it does not build, so installing sources cannot disturb
+a job in flight.
+
+So the sources in the tree and the artifacts the queue is using are now
+deliberately **out of step**, and that is recorded rather than glossed:
+
+- the queue's results are the **baseline compiled environment**, and are not
+  evidence about the newly tracked sources;
+- the 185 baseline refinement proofs certify the old build, not this one;
+- rebuild and activation happen only once the queue is quiescent, under their
+  **own** fingerprints, and final integrated benchmarks are taken there.
+
+### 16.3 Evidence corrections carried into this record
+
+- The unmodified pinned `ReifyProof` build was **1:39.65 / 7,135,380 kB**;
+  the 1:08.69 / 7,127,316 kB figure I quoted belongs to the **later**
+  edge-arity port. Timings are tied to the source they built.
+- `csr_regfile`'s full log carries **seven** diagnostics — three constructor
+  errors and four `dependsOnNoncomputable` — where the record's
+  `lean_errors: 3` is the driver's restricted parser count. Verdict, cause,
+  wall and RSS were right; the count was partial.
