@@ -117,6 +117,31 @@ proof, _ = run("lec", "--impl", "lg:" + str(work / "cycle-net"), "--ref", cycle,
                "--workdir", work / "cycle-proof", "--set", "formal.timeout=10")
 assert proof["lec"]["verdict"] == "proven", proof
 
+# A module-level color covers compact-loop bodies. Call-site specialization must
+# keep the loop descriptor: otherwise the loop index port is left undriven and
+# the flattened comparisons have no operands ("LT/GT requires an operand in each bank").
+looped = work / "looped.prp"
+looped.write_text('''pub comb looped::[timecheck=false,synth.color="all"](request:U16)->(grant:U16) {
+ mut can_grant:U16 = 0
+ for i in 0..<16 {
+  mut wins = true
+  for j in 0..<16 {
+   if i < j {
+    wins = wins and (request#[j] == 0)
+   } elif i > j {
+    wins = wins and (request#[j] == 0)
+   }
+  }
+  can_grant#[i] = U1(wins)
+ }
+ grant = request & can_grant
+}''')
+synth("looped", looped)
+proof, _ = run("lec", "--impl", "lg:" + str(work / "looped-net"), "--ref", looped,
+               "--lib", "lg:" + str(work / "models"), "--top", "looped.looped",
+               "--workdir", work / "looped-proof", "--set", "formal.timeout=10")
+assert proof["lec"]["verdict"] == "proven", proof
+
 inline = work / "inline.prp"
 inline.write_text('''comb lane::[synth.color="inside"](a:U8,b:U8)->(y:U8) { y=(a+b)#[0..=7] }
 pub comb inline::[timecheck=false](a:U8,b:U8,c:U8)->(x:U8,y:U8) {

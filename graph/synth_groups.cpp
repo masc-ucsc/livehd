@@ -91,7 +91,14 @@ void specialize_calls(std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
         found = copies.emplace(key, body).first;
         graphs.push_back(body);
       }
-      inst.set_subnode(found->second->get_io());
+      // A compact-loop instance must keep its descriptor (index/carry ports are
+      // implicit, not edges): re-pointing it as a plain Sub leaves the index
+      // input undriven and flattening then yields operand-less cells.
+      if (auto loop = inst.subnode_loop()) {
+        inst.set_subnode(found->second->get_io(), *loop);
+      } else {
+        inst.set_subnode(found->second->get_io());
+      }
       call["_specialized"] = {"true", 3};
       a.set(write(call));
     }
