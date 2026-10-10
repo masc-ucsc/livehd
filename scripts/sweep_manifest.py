@@ -136,12 +136,46 @@ def main():
                 e["artifact_provenance"] = prov[0]
                 if prov[1]:
                     e["provenance_detail"] = f"artifact: {prov[1]}"
+                # THE IO SIDECAR IS PART OF AN ACCEPTED EXPORT'S EVIDENCE.
+                #
+                # Measured: an EXPORTED/PROVEN record stayed `sweepable` when
+                # its recorded sidecar file had been DELETED, and when the
+                # sidecar was present but no digest had ever been recorded for
+                # it. Either way the IO mapping that the proof used cannot be
+                # confirmed -- and the ordinals in the file as it stands now
+                # are not evidence of the ordinals it used.
+                #
+                # A REFUSED candidate is different: the orchestrator writes a
+                # sidecar digest only on the EXPORTED path, so no recorded
+                # sidecar is the expected state there and it stays in the
+                # investigation set as long as its ARTIFACT digest matches.
+                accepted = e["export_state"] == "EXPORTED"
+                rec_side = rec.get("sidecar_sha256")
                 if "sidecar" in e:
-                    sp = verify_digest(rec.get("sidecar_sha256"), e["sidecar_sha256"])
+                    sp = verify_digest(rec_side, e["sidecar_sha256"])
                     e["sidecar_provenance"] = sp[0]
+                    if sp[0] == "unrecorded" and accepted:
+                        sp = (sp[0], "the IO mapping has no recorded digest, so the "
+                                     "ordinals in it now are not evidence of the ones "
+                                     "the proof used")
                     if sp[1]:
                         e["provenance_detail"] = ((e.get("provenance_detail", "") + "; ")
                                                   + f"sidecar: {sp[1]}").lstrip("; ")
+                elif rec_side:
+                    # Recorded, and gone.
+                    e["sidecar_provenance"] = "missing"
+                    e["provenance_detail"] = (
+                        (e.get("provenance_detail", "") + "; ")
+                        + f"sidecar: recorded as {rec_side} but the file is absent"
+                    ).lstrip("; ")
+                elif accepted:
+                    e["sidecar_provenance"] = "unrecorded"
+                    e["provenance_detail"] = (
+                        (e.get("provenance_detail", "") + "; ")
+                        + "sidecar: an accepted export with no IO mapping recorded or present"
+                    ).lstrip("; ")
+                else:
+                    e["sidecar_provenance"] = "not-applicable"
                 # CLASSIFY ON THE STATE, NOT ON WHICH FIELD HELD THE PATH.
                 #
                 # The first version read `artifact` as "accepted" and
@@ -164,8 +198,15 @@ def main():
                 # A sidecar that IS recorded and disagrees is still a mismatch:
                 # that is contradicted evidence, not absent evidence.
                 prov_state = e.get("artifact_provenance", "match")
-                if e.get("sidecar_provenance") == "mismatch":
+                sp_state = e.get("sidecar_provenance", "not-applicable")
+                if sp_state == "mismatch":
                     prov_state = "mismatch"
+                elif accepted and sp_state in ("unrecorded", "missing") and prov_state == "match":
+                    # The artifact is the one the record describes, but the IO
+                    # evidence for an ACCEPTED export is not. Unresolved, not
+                    # accepted -- and distinct from a refused candidate, which
+                    # never had a recorded sidecar to begin with.
+                    prov_state = "unrecorded"
                 if prov_state == "mismatch":
                     # A NAMED NON-SUCCESS. Not swept, not investigated, not
                     # silently dropped: the bytes on disk are not the bytes the

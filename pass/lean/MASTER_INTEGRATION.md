@@ -4699,3 +4699,81 @@ launched from a command whose text does not contain the script body.
 Both stale drivers' logs confirmed they had done **no work** — only waiting
 lines — so all three waiters were stopped and nothing was restarted. No proof
 job was touched and no result was discarded.
+
+## R38. Three ways the new guards could still be bypassed
+
+All three were in code added by R36, and all three were found by driving the
+real CLI rather than by reading it.
+
+### R38.1 A missing identity entry skipped the check it should have triggered
+
+`run_one` took `entry=None`, wrote `entry = entry or {}`, and then guarded the
+provenance check with `if entry:`. So "the manifest has no entry for this
+payload" became "there is no provenance to check". Measured: a manifest with a
+valid `to_run` path and `entries: []` returned **ACCEPTED, exit 0, four
+cycles** — with blank `family`, `case`, `mode` and `artifact_sha256`. The row
+could not say what it had run.
+
+Now a payload must have **exactly one eligible identity entry**:
+
+- none → exit 2 before anything executes, naming the payload;
+- two entries that **disagree** about family/case/mode/digest → exit 2,
+  ambiguity rather than first-match;
+- explicit `aliases` are **not** ambiguity — that is one entry recording the
+  other configurations that share its payload, and it still runs;
+- in manifest mode a payload that reaches `run_one` without an entry is the
+  named `PROVENANCE_MISMATCH` verdict, not a silent pass.
+
+Non-manifest directory mode is unaffected: there, no entry is the normal state.
+
+The on-disk check now runs **before** the identity check, because "this file is
+not there" is the more actionable diagnosis than "this file cannot be
+identified".
+
+### R38.2 An accepted export's IO sidecar was not evidence
+
+An `EXPORTED`/`PROVEN` record stayed `sweepable` when its recorded sidecar file
+had been **deleted**, and when the sidecar was present but **no digest had ever
+been recorded** for it. Either way the IO mapping the proof used cannot be
+confirmed — and the ordinals in the file as it stands now are not evidence of
+the ordinals it used.
+
+| situation | disposition |
+| --- | --- |
+| accepted export, sidecar recorded and matching | unchanged |
+| accepted export, sidecar recorded but **absent** | `provenance_unresolved` |
+| accepted export, sidecar present with **no recorded digest** | `provenance_unresolved` |
+| sidecar recorded and **disagreeing** | `provenance_mismatch` |
+| **refused** candidate, artifact digest matches, no sidecar ever recorded | stays `gate_refused` |
+
+The last row is the distinction that matters: the orchestrator writes a sidecar
+digest only on the EXPORTED path, so for a refused candidate its absence is the
+expected state, not missing evidence. Measured on the live tree, the new rule
+reclassifies **nothing** — every accepted export there has a recorded sidecar
+digest that matches — it closes the bypass.
+
+### R38.3 The context file pointed at a directory that does not exist
+
+`os.path.dirname(LEAN_DIR)` is `<root>/formal`, not `<root>`, so the writer
+looked for `formal/generated/master_port/d2_runtime/library_fingerprint.txt`,
+found nothing, and every context file omitted the fingerprint while the real
+one sat beside it. Fixed, and the context now records the fingerprint's **path
+and mtime** alongside its contents — an old fingerprint must not read as a
+freshly measured one — or an explicit note saying where it looked and failed.
+
+**And the "retained log" was not retained.** `log_sha256` hashed `out + err`
+and discarded the string, while the comment beside it called it a retained log:
+a digest of something nobody can read. Each payload's probe log is now written
+to a project-local evidence directory (`<out>.evidence/` by default) under a
+name built from the **configured identity and the digest of the bytes that
+ran**, so two configurations sharing a payload cannot overwrite each other,
+beside a JSON carrying the command, exit status, timeout flag, wall time and
+every digest. A **TIMEOUT keeps its evidence too** — the first version returned
+early, so the slowest and most interesting runs left nothing behind.
+
+**Controls:** 27 in `direct_sweep_controls.sh` and 8 in
+`sweep_manifest_controls.sh`. Two of the new ones first failed against my own
+fixtures rather than the tool: the `investigate_only` manifest described only
+the `to_run` payload, so the identity check correctly rejected it; and the
+`not on disk` case began reporting the identity diagnosis once that check moved
+first. Both fixtures were wrong, and the tool was right.

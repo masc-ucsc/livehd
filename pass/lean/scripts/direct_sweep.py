@@ -232,7 +232,24 @@ def provenance_error(path, entry):
     return ""
 
 
-def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0, entry=None):
+def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0, entry=None,
+            manifest_mode=False, evidence_dir=None):
+    # A MISSING IDENTITY IS A REFUSAL, NOT AN EMPTY DICT.
+    #
+    # `entry or {}` turned "no manifest entry for this payload" into "no
+    # provenance to check", and the guard below then skipped itself. Measured
+    # on the real CLI: a manifest with a valid `to_run` path and `entries: []`
+    # returned ACCEPTED, exit 0, four cycles -- with blank family, case, mode
+    # and artifact_sha256. The row could not say what it had run.
+    if manifest_mode and not entry:
+        return {"module": os.path.basename(path).replace("_Lgraph.lean", ""), "path": path,
+                "verdict": "PROVENANCE_MISMATCH", "family": "", "case": "", "mode": "",
+                "reason": "the manifest selected this payload but carries no identity entry "
+                          "for it", "artifact_sha256": "", "aliases": "", "ran_sha256": "",
+                "probe_sha256": "", "log_sha256": "", "evidence": "",
+                "sources": "", "nodes": "", "outputs": "", "flops": "", "mems": "",
+                "inputs": "", "check_ms": "", "step1_ms": "", "run_ms": "", "cycles": "",
+                "wall_s": "", "rss_kb": ""}
     entry = entry or {}
     name = os.path.basename(path).replace("_Lgraph.lean", "")
     row = {"module": name, "path": path, "verdict": "NO_CERT", "reason": "",
@@ -240,7 +257,7 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0, entry=Non
            "mode": entry.get("mode", ""),
            "artifact_sha256": entry.get("artifact_sha256", ""),
            "aliases": ",".join(entry.get("aliases", [])),
-           "ran_sha256": "", "probe_sha256": "", "log_sha256": "",
+           "ran_sha256": "", "probe_sha256": "", "log_sha256": "", "evidence": "",
            "sources": "", "nodes": "", "outputs": "", "flops": "", "mems": "",
            "inputs": "", "check_ms": "", "step1_ms": "", "run_ms": "",
            # NOT prefilled from the request: `cycles` must be what the run
@@ -278,13 +295,46 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0, entry=Non
     t0 = time.time()
     out, err, timed_out, exit_code = run_timed(cmd, timeout, cwd=LEAN_DIR, env=lean_env)
     if timed_out:
+        # A TIMEOUT KEEPS ITS EVIDENCE: fall through to the retention block
+        # below rather than returning here, which is what the first version
+        # did -- the slowest and most interesting runs left nothing behind.
         row["verdict"] = "TIMEOUT"
         row["reason"] = f"no result within {timeout}s (harness limit, not a model refusal)"
-        row["wall_s"] = f"{time.time() - t0:.1f}"
-        return row
     row["wall_s"] = f"{time.time() - t0:.1f}"
-    # The RETAINED RUN LOG is evidence too: hash what the probe actually printed.
+    # THE RETAINED LOG IS RETAINED. The previous version hashed `out + err` and
+    # threw the string away, while its own comment called it a retained log --
+    # a digest of nothing anyone can read. The log, the command and the exit
+    # status are written to project-local evidence under a name built from the
+    # CONFIGURED IDENTITY and the digest of the bytes that ran, so two
+    # configurations sharing a payload do not overwrite each other.
     row["log_sha256"] = hashlib.sha256((out + err).encode(errors="replace")).hexdigest()
+    if evidence_dir:
+        tag = "__".join(x for x in (row.get("family") or "nofam", row.get("case") or name,
+                                    row.get("mode") or "nomode",
+                                    (row.get("ran_sha256") or "nohash")[:12]) if x)
+        tag = re.sub(r"[^A-Za-z0-9_.-]", "_", tag)
+        try:
+            os.makedirs(evidence_dir, exist_ok=True)
+            lp = os.path.join(evidence_dir, tag + ".log")
+            with open(lp, "w", encoding="utf-8", errors="replace") as fh:
+                fh.write(out)
+                if err:
+                    fh.write("\n--- stderr ---\n" + err)
+            with open(os.path.join(evidence_dir, tag + ".json"), "w") as fh:
+                json.dump({"path": path, "family": row.get("family"), "case": row.get("case"),
+                           "mode": row.get("mode"), "command": cmd,
+                           "exit_code": exit_code, "timed_out": timed_out,
+                           "wall_s": row["wall_s"],
+                           "artifact_sha256": row.get("artifact_sha256"),
+                           "ran_sha256": row.get("ran_sha256"),
+                           "probe_sha256": row.get("probe_sha256"),
+                           "log_sha256": row["log_sha256"],
+                           "log_file": os.path.basename(lp),
+                           "cycles_requested": cycles, "timeout_s": timeout}, fh, indent=1)
+                fh.write("\n")
+            row["evidence"] = os.path.basename(lp)
+        except OSError as e:
+            row["evidence"] = f"(unwritable: {e})"
     saw_rundirect_ok = False
     tail = err.strip().splitlines()
     if tail:
@@ -372,6 +422,9 @@ def main():
     ap.add_argument("--timeout", type=int, default=1800)
     ap.add_argument("--max-rec-depth", type=int, default=0,
                     help="override the emitted `set_option maxRecDepth`; the emitted\n1000000 is not enough for the largest CVA6 certificates (try 20000000)")
+    ap.add_argument("--evidence", default="",
+                    help="where to retain each payload's probe log, command and exit status "
+                         "(default: <out>.evidence)")
     ap.add_argument("--keep", action="store_true", help="keep the generated probes")
     args = ap.parse_args()
 
@@ -383,15 +436,37 @@ def main():
         import json as _json
         man = _json.loads(open(args.manifest).read())
         want = set(man.get(args.manifest_set, []))
+        missing_files = [a for a in sorted(want) if not os.path.exists(a)]
+        if missing_files:
+            print(f"direct_sweep: {len(missing_files)} manifest payload(s) are not on disk, "
+                  f"e.g. {missing_files[0]}", file=sys.stderr)
+            return 2
+        # EXACTLY ONE ELIGIBLE ENTRY PER SELECTED PAYLOAD.
+        #
+        # Taking the first match quietly accepted both "no entry at all" and
+        # "two entries disagreeing about what this payload is". A payload the
+        # manifest cannot identify may not run, and one it identifies twice,
+        # differently, is ambiguous rather than resolved by arrival order.
+        # Explicit `aliases` are not ambiguity: that is ONE entry recording the
+        # other configurations that share its payload.
+        by_path = {}
         for e in man.get("entries", []):
             a = e.get("artifact")
-            if a in want and a not in ident:
-                ident[a] = e
-        missing = [a for a in sorted(want) if not os.path.exists(a)]
-        if missing:
-            print(f"direct_sweep: {len(missing)} manifest payload(s) are not on disk, "
-                  f"e.g. {missing[0]}", file=sys.stderr)
+            if a in want:
+                by_path.setdefault(a, []).append(e)
+        missing = sorted(a for a in want if not by_path.get(a))
+        ambiguous = sorted(a for a, es in by_path.items()
+                           if len({(x.get("family"), x.get("case"), x.get("mode"),
+                                    x.get("artifact_sha256")) for x in es}) > 1)
+        if missing or ambiguous:
+            for a in missing:
+                print(f"direct_sweep: manifest selects {a} but carries no identity entry "
+                      f"for it", file=sys.stderr)
+            for a in ambiguous:
+                print(f"direct_sweep: manifest carries {len(by_path[a])} disagreeing "
+                      f"identity entries for {a}", file=sys.stderr)
             return 2
+        ident = {a: es[0] for a, es in by_path.items()}
         files = sorted(want, key=lambda q: os.path.getsize(q))
         if args.roots:
             print("direct_sweep: --manifest given, so the positional roots are ignored",
@@ -454,7 +529,7 @@ def main():
     cols = ["family", "case", "mode", "module", "verdict", "reason", "sources", "nodes",
             "outputs", "flops", "mems", "inputs", "check_ms", "step1_ms", "run_ms",
             "cycles", "wall_s", "rss_kb", "artifact_sha256", "ran_sha256",
-            "probe_sha256", "log_sha256", "aliases", "path"]
+            "probe_sha256", "log_sha256", "evidence", "aliases", "path"]
     rows = []
     # EVERY FINISHED ROW IS WRITTEN AS IT FINISHES, to `<out>.partial`.
     #
@@ -468,6 +543,9 @@ def main():
     # A SEPARATE FILE, not `<out>` itself: a half-written `<out>` would be read
     # by every consumer as a complete sweep. `.partial` is evidence, and its
     # absence next to a present `<out>` is what says the run finished.
+    # Project-local evidence, beside the table.
+    evidence_dir = args.evidence or (args.out + ".evidence")
+    os.makedirs(evidence_dir, exist_ok=True)
     partial = args.out + ".partial"
     try:
         with open(partial, "w", encoding="utf-8") as pf:
@@ -475,7 +553,8 @@ def main():
             pf.flush()
             with ThreadPoolExecutor(max_workers=args.jobs) as ex:
                 futs = [ex.submit(run_one, p, workdir, args.cycles, args.timeout, lean_env,
-                                  args.max_rec_depth, ident.get(p))
+                                  args.max_rec_depth, ident.get(p), bool(args.manifest),
+                                  evidence_dir)
                         for p in files]
                 # AS THEY COMPLETE, not in submission order.  Iterating
                 # `futs` and calling `f.result()` blocks on the FIRST module,
@@ -534,10 +613,20 @@ def main():
         "verdicts": {k: sum(1 for r in rows if r["verdict"] == k)
                      for k in sorted({r["verdict"] for r in rows})},
     }
-    lib = os.path.join(os.path.dirname(LEAN_DIR), "generated", "master_port",
-                       "d2_runtime", "library_fingerprint.txt")
+    # `dirname(LEAN_DIR)` is `<root>/formal`, not `<root>`: the writer looked for
+    # formal/generated/... and silently found nothing, so every context file
+    # omitted the fingerprint while the real one sat beside it.
+    lib = os.path.join(os.path.dirname(os.path.dirname(LEAN_DIR)), "generated",
+                       "master_port", "d2_runtime", "library_fingerprint.txt")
     if os.path.exists(lib):
+        ctx["library_fingerprint_file"] = lib
+        ctx["library_fingerprint_mtime"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(os.path.getmtime(lib)))
         ctx["library_fingerprint"] = open(lib).read().splitlines()
+    else:
+        ctx["library_fingerprint"] = None
+        ctx["library_fingerprint_note"] = f"not found at {lib}"
+    ctx["evidence_dir"] = evidence_dir
     with open(args.out + ".context.json", "w") as f:
         json.dump(ctx, f, indent=1)
         f.write("\n")

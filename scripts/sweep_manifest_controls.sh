@@ -69,6 +69,35 @@ mk_record "$REC_A" "0000000000000000"; build
 case "$(cls)" in provenance_mismatch*) echo "ok: changed sidecar -> provenance_mismatch" ;;
   *) echo "MISS: changed sidecar -> $(cls)"; rc=1 ;; esac
 
+# AN ACCEPTED EXPORT'S IO SIDECAR IS PART OF ITS EVIDENCE.
+#
+# Measured: an EXPORTED/PROVEN record stayed `sweepable` when its recorded
+# sidecar had been DELETED, and when the sidecar was present with no digest
+# ever recorded. Either way the IO mapping the proof used cannot be confirmed,
+# and the ordinals in the file now are not evidence of the ones it used.
+mk_record "$REC_A" "$REC_S"
+mv "$W/art/Ctl_io.json" "$W/art/.io_hidden"; build
+case "$(cls)" in provenance_unresolved*) echo "ok: deleted sidecar on an accepted export -> unresolved" ;;
+  *) echo "MISS: deleted sidecar -> $(cls)"; rc=1 ;; esac
+mv "$W/art/.io_hidden" "$W/art/Ctl_io.json"
+
+mk_record "$REC_A" ""; build
+case "$(cls)" in provenance_unresolved*) echo "ok: sidecar with no recorded digest -> unresolved" ;;
+  *) echo "MISS: unrecorded sidecar digest -> $(cls)"; rc=1 ;; esac
+
+# A REFUSED candidate never had a recorded sidecar: that is the expected state
+# and must NOT be confused with an accepted export missing its IO evidence.
+python3 -I -c "
+import json, os, sys
+rec = {'family':'CTL','case':'Ctl','top':'Ctl','mode':'verified_compiler',
+       'export_state':'REFUSED','proof_state':'NOT_RUN','detail':'static gate',
+       'artifact_produced_then_refused': os.path.relpath(sys.argv[1], sys.argv[2]),
+       'artifact_produced_sha256': sys.argv[3]}
+json.dump(rec, open(sys.argv[4],'w'), indent=1)"   "$ART" "$ROOT" "$REC_A" "$W/results/CTL__Ctl__verified_compiler.json"
+build
+case "$(cls)" in gate_refused*) echo "ok: refused candidate, no recorded sidecar -> stays gate_refused" ;;
+  *) echo "MISS: refused candidate -> $(cls)"; rc=1 ;; esac
+
 [ "$rc" -eq 0 ] && echo "PASS: a disposition is linked only to the bytes the record describes" \
                 || echo "FAIL: sweep_manifest controls missed"
 exit $rc

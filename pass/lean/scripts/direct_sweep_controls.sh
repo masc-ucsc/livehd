@@ -101,11 +101,17 @@ fi
 # jobs emit a legacy GraphCert.  A walk cannot tell an accepted export from a
 # refused candidate, and silently omits every configured case with nothing to
 # sweep.
+INVCERT="$ROOT/generated/master_port/replay/jobs/CORE-ET/verified_compiler/tima_adder/lean/tima_adder_Lgraph.lean"
+# Every selected payload needs its own identity entry -- in BOTH sets. The
+# first version described only the to_run payload, and the investigate_only
+# case then failed the identity check, which is the tool being right.
 cat > "$WORK/man.json" <<EOF
 {"to_run": ["$CERT"],
- "investigate_only": ["$ROOT/generated/master_port/replay/jobs/CORE-ET/verified_compiler/tima_adder/lean/tima_adder_Lgraph.lean"],
+ "investigate_only": ["$INVCERT"],
  "entries": [{"family":"CORE-ET","case":"txfma_e4","mode":"verified_compiler",
-              "artifact":"$CERT","artifact_sha256":"deadbeef","aliases":["CORE-ET/legacy/txfma_e4"]}]}
+              "artifact":"$CERT","artifact_sha256":"deadbeef","aliases":["CORE-ET/legacy/txfma_e4"]},
+             {"family":"CORE-ET","case":"tima_adder","mode":"verified_compiler",
+              "artifact":"$INVCERT","artifact_sha256":"deadbeef"}]}
 EOF
 sel() { (cd "$ROOT" && python3 -I pass/lean/scripts/direct_sweep.py --manifest "$1" \
           ${2:+--manifest-set "$2"} --out "$WORK/sel.tsv" --limit 1 --jobs 1 --timeout 1 2>&1) \
@@ -227,6 +233,68 @@ else
   echo "MISS: cli_changed_artifact -> $(tail -1 "$WORK/prov.tsv" 2>/dev/null | cut -c1-80)"; rc=1
 fi
 grep -q 'ACCEPTED' "$WORK/prov.tsv" 2>/dev/null && { echo "MISS: a mutated payload was ACCEPTED"; rc=1; }
+
+# 18..21 A MANIFEST THAT CANNOT IDENTIFY A PAYLOAD MAY NOT RUN IT.
+#
+# Measured on the real CLI: a manifest with a valid `to_run` path and
+# `entries: []` returned ACCEPTED, exit 0, four cycles -- with blank family,
+# case, mode and artifact_sha256. The row could not say what it had run.
+python3 -I -c "
+import json
+json.dump({'to_run': ['$CERT'], 'entries': []}, open('$WORK/man_noident.json','w'))"
+out="$(cd "$ROOT" && python3 -I pass/lean/scripts/direct_sweep.py --manifest "$WORK/man_noident.json" \
+        --out "$WORK/noident.tsv" --jobs 1 --cycles 1 --timeout 60 2>&1)"; e=$?
+if [ "$e" -eq 2 ] && grep -q 'no identity entry' <<<"$out"; then
+  echo "ok: manifest_missing_identity -> exit 2 before execution"
+else
+  echo "MISS: manifest_missing_identity -> exit $e: $(head -1 <<<"$out")"; rc=1
+fi
+grep -q 'ACCEPTED' "$WORK/noident.tsv" 2>/dev/null && { echo "MISS: an unidentified payload was ACCEPTED"; rc=1; }
+
+# Two entries DISAGREEING about the same payload is ambiguity, not something
+# to resolve by arrival order.
+python3 -I -c "
+import json
+e1 = {'family':'CORE-ET','case':'a','mode':'verified_compiler','artifact':'$CERT','artifact_sha256':'x'}
+e2 = dict(e1, case='b')
+json.dump({'to_run': ['$CERT'], 'entries': [e1, e2]}, open('$WORK/man_ambig.json','w'))"
+out="$(cd "$ROOT" && python3 -I pass/lean/scripts/direct_sweep.py --manifest "$WORK/man_ambig.json" \
+        --out "$WORK/ambig.tsv" --jobs 1 --cycles 1 --timeout 60 2>&1)"; e=$?
+[ "$e" -eq 2 ] && grep -q 'disagreeing identity entries' <<<"$out" \
+  && echo "ok: manifest_ambiguous_identity -> exit 2" \
+  || { echo "MISS: manifest_ambiguous_identity -> exit $e"; rc=1; }
+
+# ALIASES ARE NOT AMBIGUITY: one entry recording the configurations that share
+# its payload must still run.
+python3 -I -c "
+import json, hashlib
+h = hashlib.sha256(open('$CERT','rb').read()).hexdigest()
+e = {'family':'CORE-ET','case':'a','mode':'verified_compiler','artifact':'$CERT',
+     'artifact_sha256': h, 'aliases':['CORE-ET/legacy/a','CVA6/verified_compiler/a']}
+json.dump({'to_run': ['$CERT'], 'entries': [e]}, open('$WORK/man_alias.json','w'))"
+n=$( (cd "$ROOT" && python3 -I pass/lean/scripts/direct_sweep.py --manifest "$WORK/man_alias.json" \
+        --out "$WORK/alias.tsv" --limit 1 --jobs 1 --timeout 1 2>&1) \
+      | sed -n 's/^# \([0-9]*\) unique certificates/\1/p' | head -1)
+[ "$n" = "1" ] && echo "ok: manifest_aliases_are_not_ambiguity -> selected 1" \
+  || { echo "MISS: aliased entry selected '${n:-none}'"; rc=1; }
+
+# THE CONTEXT FILE MUST CARRY THE REAL FINGERPRINT, not look for it in
+# formal/generated/... and silently record nothing.
+if [ -f "$WORK/alias.tsv.context.json" ]; then
+  python3 -I -c "
+import json, sys
+c = json.load(open('$WORK/alias.tsv.context.json'))
+fp = c.get('library_fingerprint')
+real = __import__('os').path.exists('$ROOT/generated/master_port/d2_runtime/library_fingerprint.txt')
+if real and not fp:
+    print('MISS: the real fingerprint exists but the context omitted it:',
+          c.get('library_fingerprint_note','')); sys.exit(1)
+print('ok: context_records_library_fingerprint ->',
+      (str(len(fp)) + ' line(s)') if fp else 'absent, and the real one is absent too')
+" || rc=1
+else
+  echo "MISS: no context file beside the table"; rc=1
+fi
 
 # 8. scratch is project-local, never /tmp -- by CALLING the resolver, not by
 #    grepping the source for a path.
