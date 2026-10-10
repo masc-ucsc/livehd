@@ -255,6 +255,50 @@ TEST(abc_arith, carry_save_multiplier_depth) {
   }
 }
 
+TEST(abc_arith, sn_squarer_matches_multiplier_and_is_smaller) {
+  ByteOps ops;
+  for (auto adder : kKinds) {
+    for (int w = 1; w <= 7; ++w) {
+      const uint64_t limit = uint64_t{1} << w;
+      for (uint64_t a = 0; a < limit; ++a) {
+        for (bool sgn : {false, true}) {
+          // Native-width operands, product kept at full width (the blast path).
+          const int      out_w = 2 * w;
+          const uint64_t av    = sgn && (a & (limit >> 1)) ? a | ~(limit - 1) : a;
+          const auto     want  = (av * av) & ((uint64_t{1} << out_w) - 1);
+          EXPECT_EQ(from_bits(build_mul(Mult_kind::sn, adder, 3, ops, to_bits(a, w), to_bits(a, w), out_w, sgn, sgn, true)), want)
+              << "w=" << w << " a=" << a << " signed=" << sgn;
+        }
+      }
+    }
+  }
+  // Truncated result (out_w < 2w) must also agree.
+  for (int w : {5, 8}) {
+    for (int out_w : {3, w, w + 2}) {
+      for (uint64_t a = 0; a < (uint64_t{1} << w); ++a) {
+        const uint64_t mask = (uint64_t{1} << out_w) - 1;
+        EXPECT_EQ(from_bits(build_mul(Mult_kind::sn, Adder_kind::prefix, 0, ops, to_bits(a, w), to_bits(a, w), out_w, false, false, true)),
+                  (a * a) & mask);
+      }
+    }
+  }
+  // It is a structural saving: count AND gates of the matrix.
+  struct CountOps {
+    size_t ands = 0;
+    int    zero() { return 0; }
+    int    one() { return 1; }
+    int    inv(int a) { return a; }
+    int    and_(int a, int b) { ++ands; return a ^ b; }
+    int    or_(int a, int b) { ++ands; return a | b; }
+    int    xor_(int a, int b) { ++ands; return a ^ b; }
+  };
+  CountOps full, sq;
+  std::vector<int> in(12, 7);
+  (void)build_mul(Mult_kind::sn, Adder_kind::rca, 0, full, in, in, 24, false, false, false);
+  (void)build_mul(Mult_kind::sn, Adder_kind::rca, 0, sq, in, in, 24, false, false, true);
+  EXPECT_LT(sq.ands, full.ands * 7 / 10);
+}
+
 TEST(abc_arith, subtract_via_twos_complement) {
   ByteOps ops;
   for (int w : {4, 8, 16}) {

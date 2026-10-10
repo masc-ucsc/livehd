@@ -594,7 +594,7 @@ inline std::vector<Bit> build_affine_shr_prefix(Ops& ops, const std::vector<Bit>
 // Mixed signedness is handled by adding a zero sign bit to the unsigned input.
 template <class Bit, class Ops>
 inline std::vector<Bit> sn_mul(Adder_kind adder, int block_size, Ops& ops, std::vector<Bit> a, std::vector<Bit> b, int out_w,
-                               bool a_signed, bool b_signed) {
+                               bool a_signed, bool b_signed, bool squared = false) {
   if (out_w <= 0) {
     return {};
   }
@@ -621,13 +621,17 @@ inline std::vector<Bit> sn_mul(Adder_kind adder, int block_size, Ops& ops, std::
     auto at = std::find_if(column.begin(), column.end(), [level](const Term& t) { return t.level < level; });
     column.insert(at, {bit, level});
   };
+  // `squared`: a and b are the same value, so pp(i,j) == pp(j,i). The pair is
+  // 2*pp(i,j) = pp(i,j) one column higher: place each off-diagonal term once.
+  // Baugh-Wooley inverts both copies identically, so the matrix constants below
+  // are unchanged and the matrix shrinks from aw*aw to aw*(aw+1)/2 terms.
   for (size_t i = 0; i < aw; ++i) {
-    for (size_t j = 0; j < bw; ++j) {
+    for (size_t j = squared ? i : 0; j < bw; ++j) {
       auto pp = ops.and_(a[i], b[j]);
       if (signed_matrix && ((i + 1 == aw) != (j + 1 == bw))) {
         pp = ops.inv(pp);
       }
-      push(columns[i + j], pp, 0);
+      push(columns[squared && j > i ? i + j + 1 : i + j], pp, 0);
     }
   }
   if (signed_matrix) {
@@ -695,9 +699,10 @@ inline std::vector<Bit> sn_mul(Adder_kind adder, int block_size, Ops& ops, std::
 // pick the architecture of the internal partial-product additions.
 template <class Bit, class Ops>
 inline std::vector<Bit> build_mul(Mult_kind kind, Adder_kind adder, int block_size, Ops& ops, const std::vector<Bit>& a,
-                                  const std::vector<Bit>& b, int out_w, bool a_signed = false, bool b_signed = false) {
+                                  const std::vector<Bit>& b, int out_w, bool a_signed = false, bool b_signed = false,
+                                  bool squared = false) {
   if (kind == Mult_kind::sn) {
-    return sn_mul(adder, block_size, ops, a, b, out_w, a_signed, b_signed);
+    return sn_mul(adder, block_size, ops, a, b, out_w, a_signed, b_signed, squared && a.size() == b.size());
   }
   std::vector<std::vector<Bit>> rows;
   int                           aw = static_cast<int>(a.size());

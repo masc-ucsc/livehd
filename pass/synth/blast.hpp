@@ -1047,6 +1047,8 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         };
         acc             = native_bits(ds[0]);
         bool acc_signed = signed_operand(ds[0]);
+        // x * x: the squarer places each symmetric partial product once.
+        const bool squared = ds.size() == 2 && ds[0] == ds[1];
         for (size_t k = 1; k < ds.size(); ++k) {
           const bool rhs_signed = signed_operand(ds[k]);
           const auto rhs        = native_bits(ds[k]);
@@ -1060,7 +1062,8 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
                                  rhs,
                                  out_w,
                                  acc_signed,
-                                 rhs_signed);
+                                 rhs_signed,
+                                 squared);
           acc_signed            = acc_signed || rhs_signed;
         }
       } else {
