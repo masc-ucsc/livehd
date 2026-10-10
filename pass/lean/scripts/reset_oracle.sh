@@ -40,10 +40,11 @@ python3 -I - "$FIXTURE" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-if 'Compiler.DirectCheck' not in s:
+if 'Compiler.DirectVsCompiled' not in s:
     s = s.replace('import LeanSemanticPrimitives.Compiler.CompileDesign',
                   'import LeanSemanticPrimitives.Compiler.CompileDesign\n'
-                  'import LeanSemanticPrimitives.Compiler.DirectCheck', 1)
+                  'import LeanSemanticPrimitives.Compiler.DirectCheck\n'
+                  'import LeanSemanticPrimitives.Compiler.DirectVsCompiled', 1)
     s = s.replace('open Compiler\n', 'open Compiler\nopen Compiler.Direct\n', 1)
     open(p, 'w').write(s)
 PY
@@ -59,7 +60,7 @@ grep -q 'asyncReset := true'  "$FIXTURE" && grep -q 'asyncReset := false' "$FIXT
 echo "[reset-oracle] $cases case(s) to decide"
 
 cd "$ROOT/formal/lean"
-NEEDED=LeanSemanticPrimitives.Compiler.DirectCheck
+NEEDED=LeanSemanticPrimitives.Compiler.DirectVsCompiled
 echo "[reset-oracle] building $NEEDED"
 LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-8}" "$LAKE" build "$NEEDED" > "$OUT/lake_build.log" 2>&1 || {
   echo "[reset-oracle] FAIL: lake build; see $OUT/lake_build.log" >&2; exit 1; }

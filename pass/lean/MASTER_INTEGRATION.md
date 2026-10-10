@@ -3079,9 +3079,14 @@ about what `checkDesign` admits.
 ## R18. Memory value gates across quiet and firing domains
 
 A memory commits on its own clock, and a synchronous read is a **register** that
-commits on its port's clock. Neither is observable while every clock fires: a
-write that commits and a write that is held look identical on the next read. So
-these are cases that only exist once domains are resolved.
+commits on its port's clock.
+
+Be precise about what is new here. Ordinary write-then-read behaviour was
+perfectly observable in the `allEdges` model and is not a product of clock
+resolution. What requires a **quiet** edge is the clock-conditioned **hold**:
+that a write does *not* commit, and that a read register does *not* load, when
+their domain does not fire. An earlier version of this section said neither was
+observable while every clock fires, which overstates it.
 
 The fixture is built by the **real scanner**: a 4-entry RAM with a write port
 and a synchronous read port on `clk_a`, plus a synchronous ROM on `clk_b`.
@@ -3138,11 +3143,42 @@ implicit element into a **unique** explicit domain — but this design has two,
 `DesignScanClocks.MixedDomainMemoryIsRefused` pins both the refusal and its
 reason.
 
-### R18.4 Still open
+### R18.4 Direct versus compiled — the `Direct*` modules, finally exercised
 
-Not covered by this fixture: **byte-enables** (`wensize > 1`), **read-during-write
-forwarding** (`fwd` is 0 here, so reads see committed contents only), and
-**`directStep` versus `compileAndRun`** on the same artifacts. `allEdges`
-versus the preserved interpreter is covered; direct-versus-compiled is not, and
-needs the `Direct*` modules exercised on a real design for the first time
-(R14.2). The IO/clock sidecar and graph-closed publication remain untouched.
+Until now the `Direct*` modules had never been run on a scanner-produced design
+at all (R14.2): they were ported, built and type-correct, with no real design
+behind them. Both fixtures now compare the **checked direct interpreter**
+against the **compiled residual** via `diffStep`/`diffTrace`.
+
+**Memory fixture**, 29 cases:
+
+- `diffStep` across **all four edge vectors**, sampling **every** tiny address,
+  and again with the write disabled so a spurious commit on either side shows;
+- the RAM starts at **[11, 22, 33, 44]**, not a uniform fill — a read wired to
+  the wrong address is then observable, where a uniform image would let both
+  sides agree while reading from the wrong place;
+- **expected loaded values**, not merely agreement: `raddr=3` loads 44 and
+  `romaddr=2` loads 3; `raddr=1` loads 22 and `romaddr=0` loads 1. Two
+  implementations can agree and both be wrong;
+- a **two-step trace** for no-forwarding (`fwd = 0`): the committing step reads
+  the **old** cell (22) and the new value (77) appears only on the following
+  read. One step cannot distinguish that from a broken write;
+- `diffTrace` agrees across that whole trace.
+
+**Reset fixture**, 44 cases: `diffStep` across every edge vector with the reset
+both asserted and deasserted — reset flavour being where the two
+implementations are most likely to drift, since the direct interpreter applies
+an async reset with no edge while the residual must encode it in its binding
+order — plus a reset/load/hold `diffTrace` with the expected values pinned at
+each step (7, then 5, then 5 held while quiet).
+
+### R18.5 Still open
+
+**Byte-enables** (`wensize > 1`) and **read-during-write forwarding**
+(`fwd ≠ 0`) are not covered: this fixture uses a single enable lane and
+`fwd = 0`. `memory_lowering.cpp` supports both, so the gap is in the gate, not
+the implementation. Selective and disabled lanes, same- versus different-address
+read/write, and write-port collision ordering all remain to be exercised across
+quiet and firing clocks.
+
+The IO/clock sidecar and graph-closed publication remain untouched.

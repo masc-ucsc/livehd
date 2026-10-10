@@ -1516,6 +1516,42 @@ TEST(DesignScanClocks, QuietClockResetValueOracle) {
       << "example : resetfix_step #[" << good_in << "] " << st
       << " = interpretDesignLegacy resetfix_designCert #[" << good_in << "] " << st
       << " := resetfix_step_legacy_correct _ _\n";
+  // -- DIRECT versus COMPILED, on the reset artifact ------------------------
+  //
+  // Reset flavour is exactly where two implementations are most likely to
+  // drift: the direct interpreter applies an async reset without an edge, the
+  // compiled residual has to encode that in its binding order. Compared across
+  // every edge vector, with the reset both asserted and deasserted.
+  out << "\n-- direct vs compiled, every edge vector, reset asserted and not.\n";
+  for (int ea = 0; ea < 2; ++ea) {
+    for (int eb = 0; eb < 2; ++eb) {
+      for (int r = 0; r < 2; ++r) {
+        out << "example : diffStep resetfix_designCert resetfix_residual " << edges(ea != 0, eb != 0) << " #["
+            << inputs(r, 1, 5) << "] " << st << " [] = none := by native_decide\n";
+      }
+    }
+  }
+  // A MULTI-STEP trace: reset, then release and load, then hold.
+  out << "\n-- ...and across a reset / load / hold trace.\n"
+      << "example : diffTrace resetfix_designCert resetfix_residual [] " << st << "\n"
+      << "            [⟨" << edges(true, true) << ", #[" << inputs(1, 1, 5) << "]⟩,\n"
+      << "             ⟨" << edges(true, true) << ", #[" << inputs(0, 1, 5) << "]⟩,\n"
+      << "             ⟨" << edges(false, false) << ", #[" << inputs(0, 1, 5) << "]⟩] 0 = none"
+      << " := by native_decide\n";
+  // EXPECTED values along that trace, so agreement is not the only claim.
+  out << "\n-- and the trace's expected values: reset to 7, then load 5, then HOLD 5\n"
+      << "-- while the clock is quiet.\n"
+      << "def resetfix_afterReset : RuntimeState :=\n"
+      << "  (compileAndRun resetfix_designCert " << edges(true, true) << " #[" << inputs(1, 1, 5) << "] " << st
+      << ").nextState\n"
+      << "example : (resetfix_afterReset.flops[0]!) = mk_bv 8 7 := by native_decide\n"
+      << "def resetfix_afterLoad : RuntimeState :=\n"
+      << "  (compileAndRun resetfix_designCert " << edges(true, true) << " #[" << inputs(0, 1, 5)
+      << "] resetfix_afterReset).nextState\n"
+      << "example : (resetfix_afterLoad.flops[0]!) = mk_bv 8 5 := by native_decide\n"
+      << "example : ((compileAndRun resetfix_designCert " << edges(false, false) << " #[" << inputs(0, 1, 5)
+      << "] resetfix_afterLoad).nextState.flops[0]!) = mk_bv 8 5 := by native_decide\n";
+
   out << "\n-- A QUIET domain is NOT the legacy schedule -- the two differ, which is\n"
       << "-- the whole content of resolving domains.\n"
       << "example : (compileAndRun resetfix_designCert " << edges(true, false) << " #[" << inputs(1, 1, 5) << "] " << st
@@ -1760,6 +1796,68 @@ TEST(DesignScanClocks, MemoryQuietDomainValueOracle) {
       << "example : memfix_step #[" << wr << "] " << st
       << " = interpretDesignLegacy memfix_designCert #[" << wr << "] " << st
       << " := memfix_step_legacy_correct _ _\n";
+
+  // -- DIRECT versus COMPILED ----------------------------------------------
+  //
+  // `diffStep` runs the CHECKED direct interpreter against the compiled
+  // residual and reports the first disagreement. Until now the `Direct*`
+  // modules had never been exercised on a scanner-produced design at all
+  // (R14.2), so this is the first time the two implementations are compared on
+  // one.
+  //
+  // DISTINGUISHABLE CELLS. The RAM starts at [11,22,33,44] rather than a
+  // uniform fill, so a read wired to the wrong address is observable; a uniform
+  // image would agree on both sides while being read from the wrong place.
+  const char* dst = "(⟨#[mk_bv 8 99, mk_bv 8 99], "
+                    "#[fun a => if a = 0 then mk_bv 8 11 else if a = 1 then mk_bv 8 22 "
+                    "else if a = 2 then mk_bv 8 33 else mk_bv 8 44]⟩ : RuntimeState)";
+  out << "\n-- direct vs compiled, every edge vector, sampling EVERY tiny address.\n";
+  for (int ea = 0; ea < 2; ++ea) {
+    for (int eb = 0; eb < 2; ++eb) {
+      out << "example : diffStep memfix_designCert memfix_residual " << edges(ea != 0, eb != 0) << " #[" << wr
+          << "] " << dst << " [0,1,2,3] = none := by native_decide\n";
+    }
+  }
+  // ...and with the write disabled, so a spurious commit on either side shows.
+  out << "example : diffStep memfix_designCert memfix_residual " << edges(true, true) << " #[" << nowr << "] "
+      << dst << " [0,1,2,3] = none := by native_decide\n";
+
+  // EXPECTED LOADED VALUES, not just agreement. Two implementations can agree
+  // and both be wrong; these pin what the registers must actually hold.
+  const auto rd3 = inputs({{"we", 0, 1}, {"re", 1, 1}, {"waddr", 0, 2}, {"wdata", 0, 8},
+                           {"raddr", 3, 2}, {"romaddr", 2, 2}});
+  out << "\n-- The RAM read register LOADS the addressed cell (raddr=3 -> 44),\n"
+      << "-- and the ROM register loads its entry (romaddr=2 -> 3).\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << rd3 << "] " << dst
+      << ").nextState.flops[0]!) = mk_bv 8 44 := by native_decide\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << rd3 << "] " << dst
+      << ").nextState.flops[1]!) = mk_bv 8 3 := by native_decide\n";
+  const auto rd1 = inputs({{"we", 0, 1}, {"re", 1, 1}, {"waddr", 0, 2}, {"wdata", 0, 8},
+                           {"raddr", 1, 2}, {"romaddr", 0, 2}});
+  out << "-- a DIFFERENT address loads a different cell -- the read is really wired.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << rd1 << "] " << dst
+      << ").nextState.flops[0]!) = mk_bv 8 22 := by native_decide\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << rd1 << "] " << dst
+      << ").nextState.flops[1]!) = mk_bv 8 1 := by native_decide\n";
+
+  // MULTI-STEP TRACE. `fwd` is 0, so a read on the SAME step as a write to the
+  // same address sees the OLD contents, and the new value only appears on the
+  // following step. One step cannot distinguish that from a broken write.
+  const auto w2 = inputs({{"we", 1, 1}, {"re", 1, 1}, {"waddr", 1, 2}, {"wdata", 77, 8},
+                          {"raddr", 1, 2}, {"romaddr", 0, 2}});
+  out << "\n-- No forwarding: the committing step reads the OLD cell (22), and the\n"
+      << "-- new value (77) appears only on the NEXT read.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << w2 << "] " << dst
+      << ").nextState.flops[0]!) = mk_bv 8 22 := by native_decide\n"
+      << "def memfix_afterWrite : RuntimeState :=\n"
+      << "  (compileAndRun memfix_designCert " << edges(true, true) << " #[" << w2 << "] " << dst
+      << ").nextState\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << rd1
+      << "] memfix_afterWrite).nextState.flops[0]!) = mk_bv 8 77 := by native_decide\n";
+  out << "\n-- ...and direct and compiled agree across that whole two-step trace.\n"
+      << "example : diffTrace memfix_designCert memfix_residual [0,1,2,3] " << dst << "\n"
+      << "            [⟨" << edges(true, true) << ", #[" << w2 << "]⟩,\n"
+      << "             ⟨" << edges(true, true) << ", #[" << rd1 << "]⟩] 0 = none := by native_decide\n";
   ASSERT_TRUE(out.good());
 }
 }  // namespace
