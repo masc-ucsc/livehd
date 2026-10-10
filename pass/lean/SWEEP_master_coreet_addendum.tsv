@@ -1,0 +1,6 @@
+module	source	result	wall_s	rss_kb	axioms	detail
+null_vpu	regate	PROVEN	20.09	6664612	2/2	constant-driven (sources=10 nodes=0); was blocked by the stale nodes>0 gate
+minion_dcache_texsend	regate	PROVEN	12.70	6668296	2/2	constant-driven (sources=7 nodes=0); was blocked by the stale nodes>0 gate
+prim_write_commit_rst_en	manifest-gap	PROVEN	37.17	6670316	2/2	sources=18 nodes=12; not in the 122-module discovery list
+prim_phase_pair_lo_hi	manifest-gap	EXPORT_FAIL	-	-	-	pass.single_edge: latch_48:q_hi_reg gated by enable latch latch_32:hi_en_1p not transparent on the opposite phase
+prim_write_commit_en	manifest-gap	EXPORT_FAIL	-	-	-	pass.single_edge: latch_20:q_o gated by enable latch latch_24:en_1p not transparent on the opposite phase

@@ -1,0 +1,123 @@
+module	result	wall_s	rss_kb	sorryAx	detail
+core_top	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'core_top': sra -> sext -> get_ma
+debug_breakpoint	PASS	77.84	6580236	0	depends on axioms: [propext,
+intpipe_alu	PASS	25.58	6976536	0	depends on axioms: [propext,
+intpipe_csr_file_conv	PASS	78.01	6450920	0	depends on axioms: [propext,
+intpipe_csr_file_fl_barrier	PASS	77.47	6427204	0	depends on axioms: [propext,
+intpipe_csr_file	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'intpipe_csr_file': sra -> sext -
+intpipe_csr_msgs	PASS	34.10	7049568	0	depends on axioms: [propext,
+intpipe_csr_pmu_read_interface	PASS	77.75	6429820	0	depends on axioms: [propext,
+intpipe_csr_replay	PASS	40.25	6522024	0	depends on axioms: [propext,
+intpipe_decode	PASS	26.02	6955436	0	depends on axioms: [propext,
+intpipe_fp_scoreboard	PASS	38.94	6462892	0	depends on axioms: [propext,
+intpipe_imm	PASS	38.61	6449236	0	depends on axioms: [propext,
+intpipe_inst_bits_stage	PASS	38.97	6470924	0	depends on axioms: [propext,
+intpipe_int_scoreboard	PASS	23.92	6638136	0	depends on axioms: [propext,
+intpipe_mask_scoreboard	PASS	24.81	6670356	0	depends on axioms: [propext,
+intpipe_mul_div_top	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'intpipe_mul_div_top': state e
+intpipe_rf	PASS	18.88	6758504	0	depends on axioms: [propext,
+intpipe_top	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'intpipe_top': sra -> sext -> get
+minion_dcache_128x64_1r1w_lram	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_dcache_128x64_1r1w_lra
+minion_dcache_128x72_1r1w_lram	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_dcache_128x72_1r1w_lra
+minion_dcache_atomic_alu_unit	PASS	23.16	6704920	0	depends on axioms: [propext,
+minion_dcache_buffer_array	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_dcache_buffer_array': 
+minion_dcache_cache_op_unit_l2	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_dcache_cache_op_unit_l
+minion_dcache_cache_op_unit	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_dcache_cache_op_unit':
+minion_dcache_data_array	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_dcache_data_array': me
+minion_dcache_lru_array	PASS	17.09	6682284	0	depends on axioms: [propext,
+minion_dcache_metadata_array	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_dcache_metadata_array'
+minion_dcache_miss_handler	PASS	20.60	6583228	0	depends on axioms: [propext,
+minion_dcache_miss_handler_unit	PASS	22.99	6907680	0	depends on axioms: [propext,
+minion_dcache_pma_unit	PASS	16.11	6471812	0	depends on axioms: [propext,
+minion_dcache_reduce	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_dcache_reduce': state 
+minion_dcache_replay_queue	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_dcache_replay_queue': 
+minion_dcache_scratchpad_ctrl	PASS	15.74	6455084	0	depends on axioms: [propext,
+minion_dcache_store_merge_unit	PASS	21.80	6600840	0	depends on axioms: [propext,
+minion_dcache_tensor_load	EXPORT_FAIL	-	-	-	"message":"offending driver's operands: mux_19104 <= {pid=0 drv=or
+minion_dcache_texsend	EXPORT_FAIL	-	-	-	"message":"pass.single_edge on `minion_dcache_texsend`: skipped: n
+minion_dcache_tlb_array	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_dcache_tlb_array': mem
+minion_dcache_top	EXPORT_FAIL	-	-	-	"message":"offending driver's operands: mux_94508 <= {pid=0 drv=s0
+minion_dcache_writeback_unit	PASS	15.92	6683068	0	depends on axioms: [propext,
+minion_debug_apb_slv	PASS	16.53	6701092	0	depends on axioms: [propext,
+minion_frontend_rvc_expander	PASS	18.37	6781492	0	depends on axioms: [propext,
+minion_frontend_thread_buffer	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_frontend_thread_buffer
+minion_frontend_thread_sched	PASS	14.62	6671900	0	depends on axioms: [propext,
+minion_frontend	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_frontend': state eleme
+minion_tlb	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'minion_tlb': memory `memory_1
+minion_top	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'minion_top': mux -> mux -> sext 
+null_vpu	EXPORT_FAIL	-	-	-	"message":"pass.single_edge on `null_vpu`: skipped: no latch, no n
+tima_adder	PASS	13.22	6668108	0	depends on axioms: [propext,
+tima_top	PASS	16.61	6556256	0	depends on axioms: [propext,
+trans_exp_rom_case_c0	PASS	15.74	6457268	0	depends on axioms: [propext,
+trans_exp_rom_case_c1c2	PASS	15.47	6669092	0	depends on axioms: [propext,
+trans_log_rom_case_c0	PASS	15.96	6583428	0	depends on axioms: [propext,
+trans_log_rom_case_c1c2	PASS	15.68	6472392	0	depends on axioms: [propext,
+trans_rcp_rom_case_c0	PASS	16.00	6500120	0	depends on axioms: [propext,
+trans_rcp_rom_case_c1c2	PASS	15.78	6666104	0	depends on axioms: [propext,
+trans_rsqrt_rom_case_c0	PASS	16.10	6462180	0	depends on axioms: [propext,
+trans_rsqrt_rom_case_c1c2	PASS	16.29	6620756	0	depends on axioms: [propext,
+trans_sin_rom_case_c0	PASS	16.17	6462876	0	depends on axioms: [propext,
+trans_sin_rom_case_c1c2	PASS	16.08	6669608	0	depends on axioms: [propext,
+trans_top	PASS	18.62	6786340	0	depends on axioms: [propext,
+txfma_4_2_compressor_array	PASS	19.22	6801560	0	depends on axioms: [propext,
+txfma_4_2_compressor	PASS	16.21	6456676	0	depends on axioms: [propext,
+txfma_adder	EXPORT_FAIL	-	-	-	"message":"cmd:read_slang --top txfma_adder --ignore-timing --no-p
+txfma_align_shf	PASS	16.54	6663648	0	depends on axioms: [propext,
+txfma_booth_ppg_32r4_msb	PASS	15.46	6661612	0	depends on axioms: [propext,
+txfma_booth_ppg_32r4_norm	PASS	14.71	6558648	0	depends on axioms: [propext,
+txfma_booth_ppg_32r4	PASS	17.37	6654684	0	depends on axioms: [propext,
+txfma_c0	PASS	21.19	6703920	0	depends on axioms: [propext,
+txfma_c1	PASS	14.67	6668948	0	depends on axioms: [propext,
+txfma_c2	PASS	17.24	6711364	0	depends on axioms: [propext,
+txfma_c3	PASS	18.81	6624364	0	depends on axioms: [propext,
+txfma_c4	PASS	16.74	6551520	0	depends on axioms: [propext,
+txfma_c5	PASS	16.38	6686044	0	depends on axioms: [propext,
+txfma_c6	PASS	17.93	6597000	0	depends on axioms: [propext,
+txfma_csa	PASS	17.32	6663580	0	depends on axioms: [propext,
+txfmactl_top	PASS	36.37	7216200	0	depends on axioms: [propext,
+txfma_e1	PASS	17.14	6687040	0	depends on axioms: [propext,
+txfma_e2	PASS	18.96	6775508	0	depends on axioms: [propext,
+txfma_e4	PASS	15.15	6668336	0	depends on axioms: [propext,
+txfma_e5	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'txfma_e5': mux -> mux -> sext
+txfma_e6	PASS	16.53	6517124	0	depends on axioms: [propext,
+txfma_ediff_opdorder_logic	PASS	17.75	6510776	0	depends on axioms: [propext,
+txfma_exp_special_detect	PASS	16.99	6504560	0	depends on axioms: [propext,
+txfmaexp_top	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'txfmaexp_top': mux -> mux -> sex
+txfma_f0	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'txfma_f0': mux -> mux -> sext
+txfma_f1	PASS	33.48	7126724	0	depends on axioms: [propext,
+txfma_f2	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'txfma_f2': mux -> sext -> mux ->
+txfma_f3	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'txfma_f3': mux -> mux -> mux
+txfma_f4	PASS	22.82	6893120	0	depends on axioms: [propext,
+txfma_f5	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'txfma_f5': mux -> mux
+txfma_f6	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'txfma_f6': get_mask -> mux -> mu
+txfmafrac_top	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'txfmafrac_top': mux -> get_mask 
+txfma_frac_zero_detect	PASS	14.21	6663044	0	depends on axioms: [propext,
+txfma_lxd	PASS	19.69	6821748	0	depends on axioms: [propext,
+txfma_norm_shf	PASS	13.66	6664128	0	depends on axioms: [propext,
+txfma_rnd_adder	PASS	14.25	6666932	0	depends on axioms: [propext,
+txfma_top_fake	EXPORT_FAIL	-	-	-	"message":"cmd:read_slang --top txfma_top_fake --ignore-timing --n
+txfma_top	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'txfma_top': mux -> mux -> sext -
+txfma_trz2	PASS	85.80	6522956	0	depends on axioms: [propext,
+txfma_trz	PASS	84.17	6510292	0	depends on axioms: [propext,
+txfma_wallace1	PASS	93.68	6805180	0	depends on axioms: [propext,
+txfma_wallace2	PASS	89.80	6706204	0	depends on axioms: [propext,
+vpu_bypass	PASS	30.63	6682784	0	depends on axioms: [propext,
+vpu_ctrl	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'vpu_ctrl': state element `flo
+vpu_decoder	PASS	32.87	6858244	0	depends on axioms: [propext,
+vpu_lane_tima	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'vpu_lane_tima': state element
+vpu_lane	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'vpu_lane': mux -> mux -> sext ->
+vpu_mask	PASS	41.57	7217960	0	depends on axioms: [propext,
+vpu_ml	PASS	33.22	7019884	0	depends on axioms: [propext,
+vpu_rf	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'vpu_rf': memory `memory_348:g
+vpu_sh_sw	PASS	24.79	6772964	0	depends on axioms: [propext,
+vpu_tensora_rf	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'vpu_tensora_rf': memory `memo
+vpu_tensorb_rf	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'vpu_tensorb_rf': memory `memo
+vpu_tensorc_rf	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'vpu_tensorc_rf': memory `memo
+vpu_tensorfma	PASS	26.18	6773260	0	depends on axioms: [propext,
+vpu_tensorquant	PASS	22.43	6653064	0	depends on axioms: [propext,
+vpu_tensorreduce	PASS	20.97	6698196	0	depends on axioms: [propext,
+vpu_tensortmp_rf	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'vpu_tensortmp_rf': memory `me
+vpu_top	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'vpu_top': mux -> mux -> sext -> 
+vpu_trans	EXPORT_FAIL	-	-	-	"message":"pass.single_edge refused 'vpu_trans': state element `fl
+vpu_txfma_trans_top	EXPORT_FAIL	-	-	-	"message":"combinational loop in 'vpu_txfma_trans_top': mux -> mux
+vpu_uinst_decoder	PASS	14.43	6683904	0	depends on axioms: [propext,

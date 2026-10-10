@@ -1,0 +1,4 @@
+module	nodes	flops	max_w	wall_s	peak_rss_kb	exit	axioms	verdict
+SingleCycleCPU				46.26	6838540	0	2/2	PROVEN
+PipelinedCPU				30.43	6891272	0	2/2	PROVEN
+PipelinedDualIssueCPU				41.83	7168348	0	2/2	PROVEN

@@ -1,0 +1,15 @@
+module	verdict	reason	sources	nodes	outputs	flops	mems	inputs	check_ms	step1_ms	run_ms	cycles	wall_s	rss_kb	path
+intpipe_mul_div_top	ACCEPTED		8982	9343	5	536	0	14	143	913	3198	4	95.0	2009272	generated/core-et/phaseB/lean/intpipe_mul_div_top_Lgraph.lean
+minion_dcache_128x64_1r1w_lram	ACCEPTED		86	92	1	9	2	12	4	7	22	4	0.9	507088	generated/core-et/phaseB/lean/minion_dcache_128x64_1r1w_lram_Lgraph.lean
+minion_dcache_128x72_1r1w_lram	ACCEPTED		86	92	1	9	2	12	2	5	15	4	0.8	506504	generated/core-et/phaseB/lean/minion_dcache_128x72_1r1w_lram_Lgraph.lean
+minion_dcache_buffer_array	ACCEPTED		561	616	5	16	1	23	19	21	40	4	2.8	581844	generated/core-et/phaseB/lean/minion_dcache_buffer_array_Lgraph.lean
+minion_dcache_data_array	ACCEPTED		464	517	1	26	8	7	14	56	166	4	2.6	572192	generated/core-et/phaseB/lean/minion_dcache_data_array_Lgraph.lean
+minion_dcache_metadata_array	ACCEPTED		1732	1779	2	22	4	8	24	163	560	4	8.8	757332	generated/core-et/phaseB/lean/minion_dcache_metadata_array_Lgraph.lean
+minion_dcache_replay_queue	ACCEPTED		6895	7868	15	129	2	28	145	630	2133	4	76.6	1706476	generated/core-et/phaseB/lean/minion_dcache_replay_queue_Lgraph.lean
+minion_dcache_tlb_array	ACCEPTED		749	884	4	36	1	14	21	35	96	4	3.5	622780	generated/core-et/phaseB/lean/minion_dcache_tlb_array_Lgraph.lean
+minion_tlb	ACCEPTED		724	867	5	30	1	14	21	37	94	4	3.3	622940	generated/core-et/phaseB/lean/minion_tlb_Lgraph.lean
+vpu_lane_tima	ACCEPTED		791	818	2	13	2	19	26	40	119	4	3.9	619208	generated/core-et/phaseB/lean/vpu_lane_tima_Lgraph.lean
+vpu_tensora_rf	ACCEPTED		34	34	1	3	1	6	1	1	3	4	0.8	498500	generated/core-et/phaseB/lean/vpu_tensora_rf_Lgraph.lean
+vpu_tensorb_rf	ACCEPTED		34	34	1	3	1	6	1	1	3	4	0.6	497832	generated/core-et/phaseB/lean/vpu_tensorb_rf_Lgraph.lean
+vpu_tensorc_rf	ACCEPTED		34	34	1	3	1	6	0	2	3	4	0.6	499396	generated/core-et/phaseB/lean/vpu_tensorc_rf_Lgraph.lean
+vpu_tensortmp_rf	ACCEPTED		34	34	1	3	1	6	1	1	3	4	0.5	498084	generated/core-et/phaseB/lean/vpu_tensortmp_rf_Lgraph.lean

@@ -1,0 +1,125 @@
+module	elab	detail
+aes	OK	
+alu	OK	
+alu_wrapper	OK	
+amo_buffer	OK	
+ariane_regfile	OK	
+bht	OK	
+branch_unit	OK	
+btb	OK	
+commit_stage	OK	
+compressed_decoder	OK	
+controller	OK	
+csr_buffer	OK	
+csr_regfile	OK	
+ct_vfdsu_ctrl	OK	
+ct_vfdsu_double	OK	
+ct_vfdsu_ff1	OK	
+ct_vfdsu_pack	OK	
+ct_vfdsu_prepare	OK	
+ct_vfdsu_round	OK	
+ct_vfdsu_scalar_dp	OK	
+ct_vfdsu_srt	OK	
+ct_vfdsu_srt_radix16_bound_table	OK	
+ct_vfdsu_srt_radix16_with_sqrt	OK	
+ct_vfdsu_top	OK	
+cva6_fifo_v3	OK	
+cva6_hpdcache_if_adapter	OK	
+cva6_hpdcache_subsystem_axi_arbiter	FAIL	use of undeclared identifier 'axi_b_chan_t'; did you mean 'axi_w_chan_t__r'?
+cva6_hpdcache_subsystem	OK	
+cva6_hpdcache_wrapper	OK	
+cva6_icache	OK	
+cva6_mmu	OK	
+cva6	OK	
+cva6_ptw	OK	
+cva6_rvfi_probes	OK	
+cva6_shared_tlb	OK	
+cva6_tlb	OK	
+cvxif_compressed_if_driver	OK	
+cvxif_fu	OK	
+cvxif_issue_register_commit_if_driver	OK	
+decoder	OK	
+ex_stage	OK	
+fpnew_cast_multi	FAIL	no implicit conversion from 'bit[1:0]' to 'pipe_config_t'; explicit conversion exists, are
+fpnew_classifier	FAIL	no implicit conversion from 'bit[2:0]' to 'fp_format_e'; explicit conversion exists, are y
+fpnew_divsqrt_th_64_multi	FAIL	no implicit conversion from 'bit[1:0]' to 'pipe_config_t'; explicit conversion exists, are
+fpnew_fma	FAIL	no implicit conversion from 'bit[2:0]' to 'fp_format_e'; explicit conversion exists, are y
+fpnew_noncomp	FAIL	no implicit conversion from 'bit[2:0]' to 'fp_format_e'; explicit conversion exists, are y
+fpnew_opgroup_block	FAIL	no implicit conversion from 'bit[1:0]' to 'opgroup_e'; explicit conversion exists, are you
+fpnew_opgroup_fmt_slice	FAIL	no implicit conversion from 'bit[1:0]' to 'opgroup_e'; explicit conversion exists, are you
+fpnew_opgroup_multifmt_slice	FAIL	no implicit conversion from 'bit[1:0]' to 'opgroup_e'; explicit conversion exists, are you
+fpnew_rounding	OK	
+fpnew_top	FAIL	no implicit conversion from 'bit[1:0]' to 'divsqrt_unit_t'; explicit conversion exists, ar
+fpu_wrap	OK	
+frontend	OK	
+gated_clk_cell	OK	
+hpdcache_1hot_to_binary	OK	
+hpdcache_amo	OK	
+hpdcache_cbuf	OK	
+hpdcache_cmo	OK	
+hpdcache_ctrl	FAIL	use of undeclared identifier 'wbuf_addr_t'
+hpdcache_ctrl_pe	OK	
+hpdcache_data_resize	OK	
+hpdcache_data_upsize	OK	
+hpdcache_decoder	OK	
+hpdcache_demux	OK	
+hpdcache_fifo_reg	OK	
+hpdcache_flush	OK	
+hpdcache_fxarb	OK	
+hpdcache_lfsr	OK	
+hpdcache_memctrl	OK	
+hpdcache_mem_req_read_arbiter	OK	
+hpdcache_mem_req_write_arbiter	OK	
+hpdcache_mem_to_axi_read	FAIL	use of undeclared identifier 'axi_r_chan_t'
+hpdcache_mem_to_axi_write	FAIL	use of undeclared identifier 'axi_b_chan_t'
+hpdcache_miss_handler	OK	
+hpdcache_mshr	OK	
+hpdcache_mux	OK	
+hpdcache_prio_1hot_encoder	OK	
+hpdcache_prio_bin_encoder	OK	
+hpdcache_regbank_wbyteenable_1rw	OK	
+hpdcache_rrarb	OK	
+hpdcache_rtab	OK	
+hpdcache_sram_1rw	OK	
+hpdcache_sram	OK	
+hpdcache_sram_wbyteenable_1rw	OK	
+hpdcache_sram_wbyteenable	OK	
+hpdcache_sync_buffer	FAIL	use of undeclared identifier 'fifo_data_t'
+hpdcache_uncached	OK	
+hpdcache_victim_random	OK	
+hpdcache_victim_sel	OK	
+hwpf_stride_arb	OK	
+hwpf_stride	OK	
+hwpf_stride_wrapper	OK	
+id_stage	OK	
+instr_queue	OK	
+instr_realign	OK	
+instr_scan	OK	
+issue_read_operands	OK	
+issue_stage	OK	
+lfsr	OK	
+load_store_unit	OK	
+load_unit	OK	
+lsu_bypass	OK	
+lzc	OK	
+multiplier	OK	
+mult	OK	
+perf_counters	OK	
+pmp_data_if	OK	
+pmp_entry	OK	
+pmp	OK	
+popcount	OK	
+ras	OK	
+raw_checker	OK	
+rr_arb_tree	OK	
+scoreboard	OK	
+serdiv	OK	
+shift_reg_gated	OK	
+shift_reg	OK	
+sram_cache	OK	
+sram	OK	
+store_buffer	OK	
+store_unit	OK	
+tc_sram	OK	
+tc_sram_wrapper	OK	
+unread	OK	

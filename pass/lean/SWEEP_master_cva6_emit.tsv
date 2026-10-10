@@ -1,0 +1,111 @@
+module	emit	sources	nodes	flops	mems
+amo_buffer	EMITTED	89	104	7	0
+alu	EMITTED	1589	1982	0	0
+alu_wrapper	EMITTED	1585	1979	0	0
+ariane_regfile	EMITTED	400	487	32	0
+branch_unit	EMITTED	75	83	0	0
+aes	EMITTED	1317	3569	0	0
+bht	EMITTED	5102	4832	256	0
+btb	EMITTED	1059	1037	64	0
+commit_stage	EMITTED	315	428	0	0
+compressed_decoder	EMITTED	686	970	0	0
+controller	EMITTED	52	34	3	0
+csr_buffer	EMITTED	29	28	2	0
+ct_vfdsu_ctrl	EMITTED	88	125	7	0
+ct_vfdsu_ff1	EMITTED	411	530	0	0
+ct_vfdsu_pack	EMITTED	366	543	0	0
+ct_vfdsu_prepare	EMITTED	1294	1913	21	0
+ct_vfdsu_round	EMITTED	1129	1883	25	0
+ct_vfdsu_scalar_dp	EMITTED	56	40	16	0
+ct_vfdsu_double	NO_EMIT	unknown			
+ct_vfdsu_srt_radix16_bound_table	EMITTED	247	597	0	0
+ct_vfdsu_srt	NO_EMIT	unknown			
+ct_vfdsu_srt_radix16_with_sqrt	NO_EMIT	unknown			
+cva6_fifo_v3	EMITTED	218	200	31	0
+cva6_hpdcache_if_adapter	EMITTED	37	30	0	0
+ct_vfdsu_top	NO_EMIT	unknown			
+cva6_icache	EMITTED	213	328	10	0
+csr_regfile	EMITTED	10796	11532	534	0
+cva6_mmu	NO_EMIT	combinational loop in 'cva6_mmu_gate': sext -> get_mask -> sra -> sext -> get_mask -> shl 			
+cva6_ptw	EMITTED	1784	2345	11	0
+cva6_rvfi_probes	EMITTED	187	163	0	0
+cva6_shared_tlb	EMITTED	70	58	5	0
+cva6_tlb	NO_EMIT	combinational loop in 'cva6_tlb_gate': sext -> get_mask -> sra -> sext -> get_mask -> shl 			
+cvxif_compressed_if_driver	EMITTED	27	31	0	0
+cvxif_fu	EMITTED	24	17	0	0
+cvxif_issue_register_commit_if_driver	EMITTED	17	14	0	0
+decoder	EMITTED	2034	3717	0	0
+ex_stage	NO_EMIT	combinational loop in 'ex_stage_gate': sext -> get_mask -> sra -> sext -> get_mask -> shl 			
+fpnew_rounding	EMITTED	44	73	0	0
+cva6_hpdcache_wrapper	NO_EMIT	combinational loop in 'cva6_hpdcache_wrapper_gate': concat -> get_mask -> concat -> lt -> 			
+cva6_hpdcache_subsystem	NO_EMIT	combinational loop in 'cva6_hpdcache_subsystem_gate': concat -> get_mask -> concat -> lt -			
+gated_clk_cell	EMITTED	1	0	0	0
+hpdcache_1hot_to_binary	EMITTED	14	13	0	0
+hpdcache_amo	EMITTED	39	84	0	0
+frontend	NO_EMIT	unknown			
+fpu_wrap	NO_EMIT	unknown			
+hpdcache_cbuf	EMITTED	261	253	15	0
+hpdcache_data_resize	EMITTED	77	87	7	0
+hpdcache_cmo	EMITTED	510	914	31	0
+hpdcache_decoder	EMITTED	14	14	0	0
+hpdcache_data_upsize	EMITTED	85	102	6	0
+hpdcache_demux	EMITTED	9	8	0	0
+hpdcache_fifo_reg	EMITTED	34	36	6	0
+hpdcache_fxarb	EMITTED	37	57	2	0
+hpdcache_flush	EMITTED	486	576	42	0
+hpdcache_lfsr	EMITTED	10	9	1	0
+hpdcache_mem_req_read_arbiter	EMITTED	31	42	2	0
+hpdcache_mem_req_write_arbiter	EMITTED	143	190	15	0
+hpdcache_ctrl_pe	EMITTED	1764	4022	0	0
+hpdcache_memctrl	NO_EMIT	unknown			
+hpdcache_mshr	NO_EMIT	unknown			
+hpdcache_mux	EMITTED	10	9	0	0
+hpdcache_miss_handler	NO_EMIT	unknown			
+hpdcache_prio_1hot_encoder	EMITTED	14	22	0	0
+hpdcache_prio_bin_encoder	EMITTED	22	38	0	0
+hpdcache_rrarb	EMITTED	58	92	2	0
+hpdcache_sram_1rw	EMITTED	16	16	1	1
+hpdcache_rtab	EMITTED	1406	1879	134	0
+hpdcache_sram	EMITTED	18	16	1	1
+hpdcache_regbank_wbyteenable_1rw	EMITTED	650	908	2	0
+hpdcache_sram_wbyteenable_1rw	NO_EMIT	unknown			
+hpdcache_sram_wbyteenable	NO_EMIT	unknown			
+hpdcache_victim_random	EMITTED	162	236	1	0
+hpdcache_uncached	EMITTED	612	897	30	0
+hpdcache_victim_sel	EMITTED	162	236	1	0
+hwpf_stride_arb	EMITTED	95	140	2	0
+hwpf_stride	EMITTED	275	437	26	0
+instr_queue	EMITTED	643	673	71	0
+hwpf_stride_wrapper	EMITTED	1278	2047	112	0
+instr_realign	EMITTED	51	67	3	0
+instr_scan	EMITTED	279	298	0	0
+issue_read_operands	NO_EMIT	unknown			
+lfsr	EMITTED	16	14	1	0
+load_store_unit	NO_EMIT	combinational loop in 'load_store_unit_gate': sext -> get_mask -> sra -> sext -> get_mask 			
+load_unit	EMITTED	768	956	28	0
+lsu_bypass	EMITTED	226	215	31	0
+lzc	EMITTED	6	6	0	0
+multiplier	EMITTED	1054	1259	6	0
+mult	EMITTED	1666	2052	19	0
+perf_counters	EMITTED	590	886	12	0
+id_stage	EMITTED	2911	4867	29	0
+pmp_entry	EMITTED	171	206	0	0
+pmp_data_if	NO_EMIT	combinational loop in 'pmp_data_if_gate': sra -> sext -> get_mask -> shl -> sext -> get_ma			
+issue_stage	NO_EMIT	unknown			
+popcount	EMITTED	3	3	0	0
+ras	EMITTED	40	38	4	0
+raw_checker	EMITTED	72	112	0	0
+rr_arb_tree	EMITTED	94	132	1	0
+serdiv	EMITTED	473	621	12	0
+shift_reg_gated	EMITTED	8	4	2	0
+pmp	EMITTED	1478	1942	0	0
+shift_reg	EMITTED	5	2	1	0
+sram	EMITTED	2	0	0	0
+sram_cache	EMITTED	2	0	0	0
+store_buffer	EMITTED	785	791	62	0
+store_unit	EMITTED	1115	1301	76	0
+tc_sram	NO_EMIT	unknown			
+tc_sram_wrapper	EMITTED	1	0	0	0
+unread	NO_EMIT	unknown			
+scoreboard	EMITTED	5662	5111	235	0
+cva6	NO_EMIT	combinational loop in 'cva6_gate': concat -> get_mask -> concat -> lt -> get_mask -> conca			

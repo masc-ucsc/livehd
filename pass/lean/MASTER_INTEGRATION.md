@@ -1886,3 +1886,352 @@ allEdges wrapper preserves every-step behavior; it does not recover RTL clock
 provenance. Full 186-configuration CORE-ET/CVA6 and three-DINO replay, flat-record
 upgrade acceptance and D3/D4/FP migration remain open. Lean/Mathlib pins, flat
 record layout and native LEC/frontend/graph code were not changed.
+
+## R14. Full-flow replay on master: CORE-ET, CVA6 and DINO
+
+Rebase standard, as set by the user: *every benchmark we support must pass —
+the old branch corpus and the blocks master has gained since.* This section
+records the first replay that meets it, and the defects that replay exposed.
+
+It is a **full** flow — frontend, `pass.lean` export, Lean typecheck, axiom
+audit — not an export census. The earlier CORE-ET census ran
+`STOP_AFTER=lean RUN_LEAN=false` and typechecked nothing; its numbers are not
+evidence of proof and are superseded here.
+
+Scope of what was run: `formal.lean.mode=verified_compiler` typechecks of the
+`allEdges` compatibility export. **LEC was disabled.** Trace comparison,
+`checkDesign`/`checkRuntime`, and legacy-fast / full-bridge / full-chunked-WF
+acceptance are separate gates and were not run. Nothing below is a claim about
+those.
+
+Evidence, committed beside this document:
+
+| File | Rows | Produced by |
+| --- | ---: | --- |
+| [SWEEP_master_coreet122.tsv](SWEEP_master_coreet122.tsv) | 122 | full-flow CORE-ET driver — **historical baseline, left as run** |
+| [SWEEP_master_coreet_addendum.tsv](SWEEP_master_coreet_addendum.tsv) | 5 | post-baseline: 2 regate + 3 manifest-gap modules |
+| [SWEEP_master_cva6_elab.tsv](SWEEP_master_cva6_elab.tsv) | 124 | `scripts/elab_cva6_wrappers.sh` |
+| [SWEEP_master_cva6_emit.tsv](SWEEP_master_cva6_emit.tsv) | 110 | `scripts/run_cva6_vc_sweep.sh` |
+| [SWEEP_master_cva6_prove.tsv](SWEEP_master_cva6_prove.tsv) | 87 | `scripts/run_lean_queue.sh` |
+| [SWEEP_master_dino3.tsv](SWEEP_master_dino3.tsv) | 3 | `scripts/run_lean_queue.sh` |
+| [CONST_WIDTH_CASES.tsv](CONST_WIDTH_CASES.tsv) | 18 | `pass/lean/scripts/vc_gates.py` over every emitted certificate |
+
+The baseline table is kept exactly as the sweep produced it; the five
+post-baseline modules are recorded separately rather than folded in, so the
+historical 78/44 figures stay readable. A header row was prepended to the CVA6
+elaboration table; it is otherwise verbatim. In the emit table, column 3 holds
+`sources` for an `EMITTED` row and the **refusal reason** for a `NO_EMIT` row —
+the driver reuses the slot.
+
+### R14.1 Result
+
+| Family | Covered | Emitted | Proven | Typecheck failures | `sorryAx` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| DINO | 3 | 3 | **3** | 0 | 0 |
+| CORE-ET | 125 | 81 | **81** | 0 | 0 |
+| CVA6 | 110 elaborated (of 124 generated) | 87 | **87** | 0 | 0 |
+| **Total** | — | **171** | **171** | **0** | **0** |
+
+Every module that emits a certificate proves it; there is no partially-verified
+tier. But see R14.4 — **four of these 171 carry a model defect that a proof
+cannot detect**, so "proven" and "trustworthy" are not the same count here.
+
+CORE-ET coverage is now the full authoritative manifest. The sweep as first run
+covered 122 of the 125 tops in
+[MASTER_BENCHMARK_MANIFEST.json](tests/MASTER_BENCHMARK_MANIFEST.json); the
+three missing tops were found by reconciling against it and have been run
+(R14.3). The 122-module discovery list and the expanded CVA6 wrapper list are
+**additional** coverage over the authoritative 125 CORE-ET + 61 CVA6
+configuration manifest, not replacements for it. The CVA6 61 counts historical
+configurations including legacy ones, and is a different axis from the 124
+generated `_gate` wrappers; that reconciliation is still open.
+
+### R14.2 What these artifacts are, and are not
+
+The exports are **verified-compiler** artifacts. Each contains:
+
+```
+def     <Top>_designCert : DesignCert
+def     <Top>_step       := compileAndRun <Top>_designCert (allEdges <Top>_designCert)
+theorem <Top>_compiles
+theorem <Top>_clock_bounds
+theorem <Top>_step_correct
+theorem <Top>_step_legacy_correct
+def     <Top>_residual
+```
+
+They exercise the **D2-ported library** — clock-aware `DesignCert`,
+`ClockEdges`, arbitrary-edge `compileAndRun_correct`. They are **not** D2's
+direct interpreter: across all 171 exports, zero files reference `DirectSim`,
+`directStep` or `runDirect`. The eight `Direct*` modules are ported and build,
+but no real design has been run through them.
+
+The array state model carrying 534 flops says nothing about the legacy
+flat-constructor path, which keeps its own separate upgrade gate. It is not
+authority to change nesting or toolchain pins.
+
+### R14.3 Two gate defects found by the replay
+
+The replay's value was not the green count. It was two defects in the gates
+themselves, both found by reconciling results against an independent source.
+
+**(a) A stale duplicate gate refused valid certificates.**
+`scripts/run_coreet_module_lean.sh` carried a hand-rolled copy of
+`pass/lean/scripts/vc_gates.py`, and the copy had drifted in both directions.
+It refused any certificate with zero *nodes*. That is wrong: a design whose
+outputs are all constant-driven is valid and provable. `null_vpu` (10 constant
+sources, 10 outputs) and `minion_dcache_texsend` had each emitted a complete
+four-theorem certificate and were discarded by that check alone. Both are now
+**PROVEN** — 20.1 s and 12.7 s.
+
+The baseline's 44 `EXPORT_FAIL` rows therefore contain 2 that were never
+failures. They are *not* `single_edge` refusals, although their recorded detail
+text mentions `pass.single_edge`; that is a skip notice, not the refusal.
+
+**(b) The same stale copy was missing the const-width and ROM-entry gates.**
+The CORE-ET sweep ran **weaker checks than the CVA6 sweep against the same
+emitter**. Running `vc_gates.py` over the 80 emitted CORE-ET certificates finds
+4 that violate the const-width gate (R14.4).
+
+Both drivers now call the one implementation. The fix is deliberately *not* to
+drop the degeneracy check: `vc_gates.py` refuses a certificate with **no sources
+and no nodes**, which still catches the empty-filelist trap of R14.8.
+
+That is not sufficient, and should not be recorded as if it were. A wrong but
+non-empty elaboration — right module name, wrong or partial RTL — still passes
+every static gate. Detecting that needs an input/provenance check (hashes of the
+resolved source set against the manifest), which does not exist yet and is
+listed in R14.9. Removing `nodes>0` must not be read as making accidental
+elaboration acceptable.
+
+### R14.4 Four proven CORE-ET modules carry a model defect
+
+| Module | Violations | First |
+| --- | ---: | --- |
+| `trans_top` | 31 | `const width 1 cannot hold value 8192 (needs 14 bits)` |
+| `intpipe_csr_msgs` | 8 | `const width 46 cannot hold value 1152886320234758144 (needs 60 bits)` |
+| `vpu_ml` | 1 | `const width 29 cannot hold value 4160749568 (needs 32 bits)` |
+| `vpu_tensorfma` | 1 | `const width 29 cannot hold value 4160749568 (needs 32 bits)` |
+
+These four typechecked, passed the axiom audit and are counted among the 81.
+**Their proofs are sound and their models may not be.** `native_decide`
+evaluates the certificate as written, so a constant whose declared width cannot
+hold its value is proven faithfully — against a design that is not the RTL.
+`graph/node_util.hpp:323` calls such a width "a lie". This is the one failure
+class the proof pipeline cannot catch downstream, which is precisely why the
+gate exists and why its absence on the CORE-ET path mattered.
+
+Counting these four, **trustworthy CORE-ET is 77, not 81**, and the corpus total
+is 167 of 171. They are recorded in `CONST_WIDTH_CASES.tsv` alongside the 14
+CVA6 modules the gate refused *before* typecheck. It is **one defect class, 18
+modules, both families** — the single largest open item in the corpus.
+
+A pattern worth checking first: many violations are near a power of two
+(`width 1` / value 2 at 56 occurrences in two hpdcache modules; `width 61` /
+value 9223372036854775804; `width 29` / value 4160749568 = `0xF8000000`). That
+shape suggests a signed/unsigned or sign-extension width computation rather than
+genuine RTL truncation — but that is a hypothesis from the numbers, not a
+diagnosis.
+
+**No constant will be widened and no truncation semantics changed on this
+hypothesis.** The next step is to audit raw graph widths and values against
+upstream semantics per module, and any semantic change goes to the user for a
+decision before adoption. These are investigation cases; they do not displace
+the approved R13 clock-provenance work.
+
+### R14.5 Why a module does not emit, by verified cause
+
+**CORE-ET, 44 of 125.** None is a Lean-side failure.
+
+| Cause | Count |
+| --- | ---: |
+| `pass.single_edge` refused — memory would commit every sub-step under a phase divider | 13 |
+| `pass.single_edge` refused — enable latch not transparent on the phase opposite the gated edge | 11 |
+| combinational loop reported by `pass.formal` | 16 |
+| Concat lane-width inconsistency | 2 |
+| `read_slang` elaboration error | 2 |
+
+The two Concat cases (`minion_dcache_top`, `minion_dcache_tensor_load`) are
+**not** combinational loops. Their diagnostic leads with a lane table showing a
+driver wider than its declared window —
+`[0] drv=mux_94508 bits=2 window=1`. An earlier draft of this section classified
+them as loops by keyword; reading the full message corrects that.
+
+**24 of the 44 are clock-domain questions**, which is the strongest argument for
+R13.3 step 2 in the corpus: phase dividers and enable-latch gating are exactly
+what `resolve_icg()` and `commit_class_of()` exist to resolve. Two of them are
+the `prim_*` primitives recovered in R14.3 — `prim_phase_pair_lo_hi` and
+`prim_write_commit_en` — which are the minimal reproducers of the enable-latch
+case and the right fixtures to develop step 2 against. The third recovered
+primitive, `prim_write_commit_rst_en`, emits and proves (37.2 s).
+
+**CVA6, 23 of 110 elaborated.**
+
+| Cause | Count |
+| --- | ---: |
+| const-width static gate (R14.4) | 14 |
+| combinational loop reported by `pass.formal` | 8 |
+| empty certificate (`unread`, a stub) | 1 |
+
+**CVA6 wrapper elaboration, 14 of 124 generated.** These fail in `slang`, before
+any LiveHD pass runs, on types the generated wrapper uses but does not declare:
+
+```
+cva6_hpdcache_subsystem_axi_arbiter  use of undeclared identifier 'axi_b_chan_t'
+fpnew_cast_multi                     no implicit conversion from 'bit[1:0]' to 'pipe_config_t'
+```
+
+Twelve of the fourteen are `fpnew_*` or `hpdcache_*`, both heavily
+package-parameterised. This is a `scripts/gen_cva6_wrappers.py` limitation, not
+a statement about those modules' verifiability.
+
+### R14.6 The axiom audit was a line count; it is now an audit
+
+R13.1's guard is that clock well-formedness must not be inferred from compile
+acceptance. The emitted proofs keep the obligations separate, and the audit
+confirms the dependency — note that independence is a property of the
+**obligations**, not of disjoint final axiom sets:
+
+```
+'scoreboard_gate_step_correct'        depends on axioms:
+  [propext, Classical.choice, Quot.sound,
+   scoreboard_gate_compiles._native.native_decide.ax_1_1]
+'scoreboard_gate_step_legacy_correct' depends on axioms:
+  [propext, Classical.choice, Quot.sound,
+   scoreboard_gate_clock_bounds._native.native_decide.ax_1_1,
+   scoreboard_gate_compiles._native.native_decide.ax_1_1]
+```
+
+`_step_correct` cites compile acceptance. `_step_legacy_correct` cites compile
+acceptance **and** the separately proved clock bounds, because it must discharge
+`hf`/`hm` for `interpretDesign_allEdges`. Both share `_compiles`; what matters is
+that the bounds are proved independently and actually used.
+
+**The queue's `2/2` did not establish this.** It compared a count of
+`depends on axioms` lines against a count of `^#print axioms ` lines and grepped
+for the literal `sorryAx`. That accepts a file auditing theorems that are not the
+required obligations (no name is ever compared), any custom axiom not spelled
+`sorryAx`, and — because Lean **wraps** long axiom lists — any axiom smuggled
+onto a continuation line. Reporting `2/2` as structural safety overstated it.
+
+Three changes, all in place:
+
+- **`pass/lean/scripts/axiom_audit.py`** checks exact namespace-qualified
+  obligation identity, parses wrapped lists, allowlists axioms (the Lean
+  standard set plus the per-design `native_decide` facts), and **requires
+  `_step_legacy_correct` to cite the `_clock_bounds` native fact** — the R13.1
+  guard, enforced rather than described.
+- **`pass/lean/scripts/axiom_audit_controls.sh`** is the adversarial suite: a
+  missing obligation, a wrong theorem name, a custom axiom, an imported `sorry`,
+  an axiom on a wrapped continuation line, and a legacy obligation that does not
+  cite the clock bounds. The old line count passed all six; the auditor rejects
+  all six and accepts the genuine log.
+- **`scripts/run_lean_queue.sh`** now writes `lean_typecheck.<module>.log` and
+  requires the audit to pass before printing `PROVEN`.
+
+**What this does not retroactively establish.** The queue wrote every module's
+log to one shared path, so each sweep kept only its last module's report. Full
+axiom text survives for 4 modules (`scoreboard_gate`, `PipelinedDualIssueCPU`,
+`minion_dcache_texsend`, `prim_write_commit_rst_en`) and all 4 pass the new
+auditor. For the other 167, what is retained is the `2/2` + no-`sorryAx` gate,
+which is weaker.
+
+One property *was* recovered for the whole corpus without re-running, from the
+artifacts rather than the logs: all **170** emitted files audit exactly
+`<Top>_step_correct` and `<Top>_step_legacy_correct`, both of which are declared
+theorems in the same file — no file audits a non-theorem or a name other than
+its two required obligations. That closes the identity hole statically. The
+axiom-content check for those 167 still needs a re-run under the new queue, and
+is listed in R14.9.
+
+### R14.7 Timing: measured wall time, not isolated cost
+
+| Family | n | Median | Mean | Max | Concurrency |
+| --- | ---: | ---: | ---: | ---: | --- |
+| CVA6 | 87 | 15.9 s | 25.7 s | 161.0 s (`multiplier_gate`) | serial queue |
+| CORE-ET | 78 | 18.6 s | 27.3 s | 93.7 s (`txfma_wallace1`) | 4-way parallel |
+| DINO | 3 | 41.8 s | 39.5 s | 46.3 s (`SingleCycleCPU`) | serial queue |
+
+These are wall times under the recorded concurrency on a shared NFS box, not
+isolated per-module cost and not a proven bound on it. The CORE-ET figures
+additionally carry 4-way contention. `scripts/run_lean_queue.sh` serializes for
+exactly this reason, and the CVA6 and DINO rows went through it.
+
+Total CVA6 proof time was 2,236 s across 87 modules.
+
+**Size predicts cost poorly.** Univariate Pearson correlation of wall time is
+**+0.50** against node count and **+0.39** against flop count; with no fitted
+model these do not combine into a stated explained variance. The four slowest
+modules span three orders of magnitude in size:
+
+| Module | Nodes | Flops | Max width | Wall |
+| --- | ---: | ---: | ---: | ---: |
+| `multiplier_gate` | 1,259 | 6 | 256 | 161.0 s |
+| `csr_regfile_gate` | 11,532 | 534 | 5,770 | 122.4 s |
+| `cva6_shared_tlb_gate` | 58 | 5 | 190 | 113.8 s |
+| `hpdcache_prio_1hot_encoder_gate` | 22 | 0 | 5 | 96.4 s |
+
+A 22-node, flopless, 5-bit module at 96 s is not explained by node count, flop
+count or width, and neither is a 58-node module at 114 s — while 125-node
+`ct_vfdsu_ctrl_gate` finishes in 13.3 s. The fastest observed run is 12.5 s;
+whether that reflects a fixed `native_decide` compile-and-link cost is a
+**hypothesis**, not a measurement, and no profiling has been done. Flop and node
+counts for CVA6 are grep proxies over the certificate (`resetActiveLow`,
+`origin :=`), good for ranking, not exact structural counts.
+
+### R14.8 Recovering the CVA6 flow
+
+The CVA6 result was unobtainable at the start of this session: the sweep ran
+through `bender`, which cannot resolve `--top <module>_gate` and silently emits
+an **empty** filelist. That elaborates to nothing, exits 0, and yields a
+certificate with `nodes := #[]` — `fpu_wrap` came out as a 2,141-byte stub. The
+sweep reported 8 of 23, three of them stubs.
+
+The fix was to drop bender here and restore the static 219-source filelist from
+`livehd-new`
+(`generated/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.top_cva6.flistplus.f`),
+injecting the wrapper via `CVA6_WRAPPER_FILE` and letting yosys pick the top.
+That moved CVA6 from 8-of-23-with-stubs to 87-of-110 real.
+`run_cva6_vc_sweep.sh` carries this as a comment at the filelist assignment so
+the bender route is not re-attempted.
+
+The lesson has now cost two sessions: **a tool that reports success on an empty
+input is worse than one that fails.** The only reliable defence is a
+non-degeneracy check on the artifact — and, as R14.3 notes, a provenance check
+is needed on top of it, because non-empty does not mean correct.
+
+### R14.9 Open items in priority order
+
+1. **Const-width, 18 modules across both families** (R14.4). Audit raw graph
+   widths and values against upstream semantics per module. Do **not** widen
+   constants or alter truncation semantics; bring any semantic change to the
+   user first.
+2. **R13.4 step 2 — clock-domain resolution**, per R13.3: owned clock provenance
+   in `DesignScan` → `CertificateIR` / builder / memory lowering → emitter;
+   `asyncReset` commit flag; synthetic sync-read flop and ROM domains;
+   deterministic root+bit identity; implicit joins; common-domain committing
+   memory ports; refusal of unresolved, falling or gated clocks unless already
+   normalized. Emitter stays graph-free; all-fire semantics preserved. 24 of the
+   44 CORE-ET non-emits are this, and `prim_phase_pair_lo_hi` /
+   `prim_write_commit_en` are its minimal fixtures.
+3. **Re-run the corpus under the new queue** so every module has a retained
+   per-module log and a full axiom audit, with artifact, library and toolchain
+   hashes recorded (R14.6).
+4. **Provenance gate**: hash the resolved source set per module against the
+   manifest, so a wrong-but-non-empty elaboration cannot pass (R14.3).
+5. **CVA6 configuration reconciliation** — the authoritative 61 against the 124
+   generated wrappers.
+6. **Hotmux one-hot status** (native-proved / deferred / refuted) into export
+   diagnostics. Every DINO export currently carries a bare `onehot-deferred`
+   warning with no indication of which.
+7. **`gen_cva6_wrappers.py` package-type propagation**, worth up to 14 more CVA6
+   modules.
+8. **Run a real design through the `Direct*` interpreter** (R14.2).
+9. Acceptance for step 2 is broader than `SWEEP_multiclock6`: independent, quiet
+   and simultaneous clocks; sync vs async reset and Q reads; memory/ROM hold and
+   commit; invalid ordinals and vectors; mixed roots; bus bits; gates, polarity
+   and constants; plus direct-vs-compiled and allEdges-vs-preserved comparison.
+10. Then D3/D4 bounded runtime repairs and proof splits, metadata-complete D4
+    transport, and FP's pinned implementation — each recorded in a destination
+    ledger, with no graph-coupled exporter copied and no omitted clock/reset
+    transport metadata silently defaulted.
