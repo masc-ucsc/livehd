@@ -22,7 +22,19 @@ degenerate model that still compiles, so every step hard-fails instead.
 import os, re, sys, hashlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUTDIR = os.path.join(ROOT, "generated", "core-et", "patched_src")
+# The output directory is overridable so a caller can derive into FRESH staging
+# and compare, rather than writing straight over the directory a sweep consumes.
+# Checking an embedded source-hash header is not enough on its own: a derived
+# body can be edited with that header left intact.  Regenerating and comparing
+# byte for byte is what actually shows the consumed files are this generator's
+# output -- which is exactly what `scripts/coreet_preflight.sh` does, and it
+# cannot do it without this seam.  Taken from pinned D4
+# f6ad1fe29f8f15aeda045115864fd81a34c33aef; master's requirement that
+# COREET_ROOT be set EXPLICITLY is kept, because the pinned copy defaulted it
+# to a private checkout path.
+OUTDIR = os.environ.get(
+    "COREET_PATCHED_OUTDIR",
+    os.path.join(ROOT, "generated", "core-et", "patched_src"))
 
 # relative path -> list of identifiers whose declaration must move up
 PATCHES = {

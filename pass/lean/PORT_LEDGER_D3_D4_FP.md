@@ -1705,6 +1705,135 @@ demonstrated runnable and fail-closed, and **a passing reconciliation still
 requires a real corpus run**. Full original-corpus coverage remains open; no
 row here is evidence about any design.
 
+## 25. Preflight admission, the corpus prerequisites, and the rebuilt library
+
+### 25.1 Two preflight gaps the exit guard did not reach
+
+- **The sweep's preflight discarded its child's status entirely** — it checked
+  the substitution's value and nothing else — so a correctly shaped row
+  followed by exit 17 blessed a toolchain that cannot run.
+- **Both drivers searched the whole row for `READ_ERROR`.** A perfectly
+  successful `PARSED / true / RAN` row satisfies that as soon as the words
+  appear in its diagnostic PROSE, so the preflight passed without ever
+  exercising the failure path it exists to test.
+
+Both now require a clean exit and the parsed FIELDS — `parse_status`
+`READ_ERROR`, `runtime_status` `NOT_RUN`, no compile verdict, no digest — in
+one shared `preflight_fields_ok`. The sweep keeps its preflight logs instead of
+sending them to `/dev/null`.
+
+`exit_status_controls.sh` has **11 legs**; **the pinned drivers fail 9 of 11**,
+the guarded ones pass 11 of 11.
+
+**A correction to my own account**, carried into both drivers, the control
+header and §24: I wrote that `$?` after a substitution ending in `| tail -1` is
+`tail`'s status and therefore always zero. That is **false** where
+`-o pipefail` is set, and both scripts set it on their second line — the status
+was available and correct. The defect was entirely in the acceptance test,
+which never consulted it. Dropping the pipe is still worth doing, because it
+stops the guard depending on `pipefail` remaining set, but it was not the
+repair.
+
+### 25.2 The corpus prerequisites
+
+Restored from the pin, both absent and both required by the sweep:
+
+- **`scripts/coreet_preflight.sh`** — binds a CORE-ET run to the corpus it
+  measures: cleanliness over `hw dv mk` (the paths the filelist flow actually
+  reads), the four derived sources regenerated and compared **byte for byte**
+  against a second fresh derivation, and `COREET_TECH` recorded explicitly.
+- **`scripts/build_cva6_foundation.sh`** — the one manifest the sweep checks
+  revision, config, filelist and wrapper set against.
+
+**A third gap only running it found.** The preflight derives into fresh staging
+and compares; master's `coreet_patch_srcs.py` **ignores
+`COREET_PATCHED_OUTDIR`** and writes to a hardcoded directory. So the staging
+derivation produced nothing and the comparison refused — correctly, and for the
+wrong reason. The seam is taken from the pin; master's requirement that
+`COREET_ROOT` be set EXPLICITLY is kept, because the pinned copy defaulted it
+to a private checkout path. One hunk, each half from whichever side was right.
+
+With that, the preflight **passes**:
+
+```
+coreet_rev=c72b6a2fe4aaad5a9eef437776864ff71f4b55d7      coreet_tech=generic
+coreet_relevant_inputs_clean=yes
+coreet_outside_scope_tracked=0   coreet_outside_scope_untracked=1
+coreet_derived_mode=regenerated in place; four outputs AND map then
+                    authenticated against a second fresh derivation
+coreet_derived_aggregate_sha256=ee945429d58898f9e9555dd487f4f83c7d630ef8b7b25073c1d45a07d82cb4f4
+```
+
+The one out-of-scope untracked file is `core_et_blocks.txt`, which the
+preflight's own documentation names as retained evidence it must neither delete
+nor misreport.
+
+### 25.3 The tracked library, built from source
+
+`lake build` over `CertIOFacade`, `DirectCheck` and the default target: **exit
+0, zero errors, 8581 jobs, 1:28.28 wall, 6,922,424 KiB peak, 33 objects.** The
+`DirectCheck` repair of R46 holds in the full build.
+
+Fingerprint recorded in
+`generated/master_port/d2_runtime/library_fingerprint_rebuilt.txt` — toolchain,
+`lhd`, head, and a digest and size for each of the 33 objects. It **supersedes**
+`library_fingerprint.txt` rather than replacing it: results accepted against
+the previous cached objects stay tied to that file.
+
+### 25.4 The binary binding, made explicit
+
+`LHD` is now honoured exactly when set, under the policy this script already
+applied to `LAKE` — a named executable is never replaced by a fallback — and
+the provenance records `lhd_bytes` and `lhd_build_mode` (`k8-opt` vs
+`k8-fastbuild`, read from the resolved path) alongside the digest.
+`bazel-bin/lhd/lhd` is whatever the last build left there, and on this tree
+that is a fastbuild, while the accepted corpus rows came from the optimized
+build.
+
+### 25.5 The first CORE-ET pilot, and what it showed
+
+Three modules, the optimized binary `54eb7f2b38b10512`, ordinary 8192 KiB
+stack, 18-column rows:
+
+| module | emit | runtime | cause |
+|---|---|---|---|
+| `intpipe_alu` | NO_CERT | NOT_RUN | emitter OK, no `.dcert` found |
+| `intpipe_inst_bits_stage` | NO_CERT | NOT_RUN | emitter OK, no `.dcert` found |
+| `intpipe_csr_msgs` | EMIT_FAILED (rc=3) | NOT_RUN | static gates: `const width 46 cannot hold value 1152886320234758144 (needs 60 bits)` and four more |
+
+The third is a **genuine static-gate refusal** and is recorded as one; it is
+not worked around.
+
+The first two are a **provenance result, not a runtime one**: that optimized
+binary was built at 03:23, before `emit_dcert.cpp` existed, so it emits the
+Lean literal and the sidecar and no DCERT2 at all. The sweep reported exactly
+that — emitter OK, no certificate, nothing run — which is the correct
+disposition and not a pass. The optimized binary is being rebuilt with the
+serializer; **no runtime coverage is claimed from this pilot.**
+
+### 25.6 CVA6 foundation: an unresolved prerequisite, not a workaround
+
+`build_cva6_foundation.sh` requires `CVA6_ROOT` to be a git checkout with **no
+tracked modifications**, and records the revision so a sweep can verify it is
+looking at the same source STATE and not merely the same path. All three CVA6
+checkouts on this machine are at `aa4f5a54` with the **same three tracked
+modifications**:
+
+```
+core/Flist.cva6      | 8 +-------
+core/cva6.sv         | 6 +++++-
+core/frontend/bht.sv | 3 ++-
+```
+
+`bht.sv` comments out a prediction assignment and replaces it with one gated on
+`bht_update_i.pc[0]` — a deliberate RTL experiment belonging to someone else's
+work. Reverting it would change that experiment; passing a flag to skip the
+check would weaken exactly the binding this step exists to preserve. So the
+CVA6 foundation is recorded as an **unresolved prerequisite** and the frozen-30
+procedure is not started against a dirty checkout. The CVA6 *replay* path
+(`run_cva6_module_lean_stress.sh` with the static filelist) is unaffected and
+is what the accepted ALU replay used.
+
 ## 20. D3 replay backlog (recorded, not yet repaired)
 
 Two gaps in restored D3 procedures, kept visible so they are not mistaken for

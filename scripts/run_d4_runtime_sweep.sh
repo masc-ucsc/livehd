@@ -86,8 +86,18 @@ row() {
 # ---------------------------------------------------------------------------
 # Fail closed on every input AND every tool, before a single block runs.
 # ---------------------------------------------------------------------------
-LHD="$ROOT/bazel-bin/lhd/lhd"
-[[ -x "$LHD" ]] || die "no lhd binary at $LHD (build //lhd:lhd in THIS worktree)"
+# AN EXPLICIT `LHD` IS HONOURED EXACTLY, under the same policy this script
+# already applies to `LAKE`: a named executable is never replaced by a
+# fallback. `bazel-bin/lhd/lhd` is whatever the last `bazel build` left there
+# -- on this tree a fastbuild -- and the accepted corpus rows were produced by
+# the OPTIMIZED build, so a run that silently used the other one would not be
+# comparable to them. The binary and its mode are recorded either way.
+if [[ -n "${LHD:-}" ]]; then
+  [[ -x "$LHD" ]] || die "LHD=$LHD is not an executable; an explicit setting is never replaced by a fallback"
+else
+  LHD="$ROOT/bazel-bin/lhd/lhd"
+  [[ -x "$LHD" ]] || die "no lhd binary at $LHD (build //lhd:lhd in THIS worktree), or set LHD=<path>"
+fi
 
 # `lake` is not reliably on PATH -- a bare call exits 127, which would become one
 # NO_ROW per block AFTER paying for emission.  Resolve it once, up front.
@@ -394,6 +404,10 @@ PROV="$OUTDIR/provenance.txt"
   echo "worktree=$ROOT"
   echo "lhd=$LHD"
   echo "lhd_sha256=$(sha256sum "$LHD" | cut -d' ' -f1)"
+  echo "lhd_bytes=$(stat -c%s "$LHD")"
+  # The build MODE, as the path records it -- `k8-opt` vs `k8-fastbuild` -- so a
+  # row says which binary produced it without needing the digest resolved.
+  echo "lhd_build_mode=$(sed -n 's|.*/bazel-out/\([^/]*\)/bin/.*|\1|p' <<<"$(readlink -f "$LHD")" | head -1)"
   echo "lake=$LAKE"
   echo "lake_version=$LAKE_VERSION"
   echo "lake_version_cwd=$ROOT/formal/lean"
