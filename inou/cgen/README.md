@@ -114,8 +114,7 @@ not replicated combinational temporaries for every ordinal.
 Slop pure body and reduction helpers require inlining, so the arithmetic is
 inside the rolled loop even when the body exceeds the compiler's usual inline
 cost threshold. Generated loop traversals carry Clang `unroll(disable)` (or GCC `unroll 1`)
-hints. LLVM pipeline tuning also disables loop unrolling; LiveHD's bounded
-LLVM pass pipeline contains no unroll pass. `compile.unroll=false` remains the
+hints. LLVM pipeline tuning also disables loop unrolling. `compile.unroll=false` remains the
 front-end default, independently preserving the compact graph representation.
 
 `sim.tune.backend=llvm` emits each circuit color directly as a native,
@@ -124,9 +123,11 @@ no external calls or undefined symbols: object emission validates the native sym
 table, including dependencies introduced by instruction selection. Wide division
 uses an internal restoring loop and memory intrinsics expand locally. The C++
 support compiles normally, without host bitcode or cross-language inlining.
-Stateless leaf loops whose entire output computation fits one native color
-also get a native rolled-loop entry. The color body is explicitly inlined into
-that loop once; there is no per-iteration call or C++ arithmetic. The adapter
+Stateless leaf loops get a native rolled-loop entry when their output
+computation fits one native color or a resource-free pure data DAG of colors.
+For multi-color bodies, the emitter composes the required pre-rise colors,
+including conditional regions, by explicitly inlining their existing LLVM IR.
+The composed body is then explicitly inlined into that loop once; there is no per-iteration call or C++ arithmetic. The adapter
 packs ports once, invokes the loop, and publishes its outputs. Carry and
 activation values stay in native SSA, including zero-trip carry seeds. The
 entry accepts count/first/step dynamically. A proven nonnegative index range
@@ -135,7 +136,42 @@ domains retain the general representation. Shared definitions merge their range
 requirements conservatively. The emitter shares objects across identical
 phase computations. Binding layouts salt generation reuse; the existing bounded
 workers emit these objects. Unroll-disable metadata and IR regression tests
-preserve the loop regardless of trip count.
+preserve the loop regardless of trip count. Multi-color bodies add a derived
+`.native-loop.llvm.o` object with its own content cache and artifact tracking;
+the original color identities and objects remain unchanged. Backend switches
+and eligibility changes remove obsolete derived objects. Stateful, nested and
+observation-enabled loops still use their existing scheduling path.
+
+Generated simulators default to size optimization: host C++ uses `-Os` for
+both backends, including Ninja, the built-in compiler, and standalone Bazel
+exports. Native LLVM objects use the `Os` module pipeline, `optsize` function
+attributes, and the default (O2-equivalent) machine optimization level. Loop
+unrolling and interleaving remain disabled; native bodies are explicitly inlined
+before optimization. The optimization attributes and emitter salt participate
+in object reuse, while host command changes invalidate compiled support objects.
+
+Arithmetic temporaries remain LLVM SSA values, so register allocation can keep
+them out of memory. Extraction, wide-shift and native-loop scratch buffers use
+fixed array types allocated at function entry. This makes them promotable and
+prevents inlining a non-entry allocation from introducing stack save/restore
+inside a rolled loop. Persistent registers and memories keep their instance
+storage. The [stack-local regression](../../repros/sim_llvm_slop_20261007/stack-locals/index.html)
+records the reproduced IR overhead and correctness checks.
+
+Dynamic one-bit extraction loads only the selected packed word: an adjacent-word
+load and funnel shift cannot contribute to a one-bit result. Wider slices retain
+the two-word path.
+The [LLVM/Slop audit](../../repros/sim_llvm_slop_20261007/index.html) records all
+355 ledger slowdowns, paired screening, loop-path differences, retained fixes,
+and the rejected slice-transport experiment.
+Expensive one-use operands of absorbing one-bit loop carries (`carry && value`
+or `carry || value`) execute in a conditional region. Once the carry reaches
+its absorbing value, subsequent iterations skip those calculations and indexed
+reads while retaining all other outputs and iterations. Loads are moved only
+within the same block, with no intervening writes; small expressions stay
+branchless. This recovers C++ short-circuit behavior without unrolling.
+See the [pipeline experiments](../../repros/sim_llvm_slop_20261007/pipeline-options/index.html)
+for standard O2/O3 comparisons and the remaining Slop gap.
 
 The driver, scheduling, state commits and observation remain C++. Stateful,
 nested, resource-backed and multi-color loops still use the existing compact
@@ -153,6 +189,25 @@ guards are sampled by the evaluator adapter. Unknown constants remain seeded
 runtime inputs, never setup-time random draws. Undefined memory collisions use
 a deterministic seeded packed-memory stream implemented in both the shared
 support and native IR; particular undefined values need not match Slop's stream.
+
+LLVM concatenation coalesces adjacent slices of the same SSA source before
+assembling the result. It follows constant shift guards and preserves extension
+bits and lane order, avoiding bit-by-bit reconstruction of an existing bus.
+This reduces the USYN one-hot demux's native kernel text from 4,597 to 532 bytes
+and its simulation time from 7.96 to 1.78 seconds. The
+[Verilator gap investigation](../../repros/sim_llvm_verilator_20261007/index.html)
+separates this code-generation issue from the remaining state/ABI transport
+costs in source FIFO and sequential netlist simulations.
+
+One-bit data-state commits use a conditional value selection and branchless
+dirty notification. Bits feeding mux selectors or flop/latch controls keep
+conditional stores: control state often remains unchanged for long stretches. LLVM one-bit boundary stores similarly compare, store, and mask
+the notification instead of branching through `slop_update`. This avoids a
+branch per changing bit in mapped register banks. Wider values keep conditional
+stores; commits still honor their sampled flag and the existing phase barrier.
+Notification destinations are deduplicated without changing color membership.
+See the [2.5× follow-up](../../repros/sim_llvm_verilator_20261007/followup-2.5.html)
+for measurements and the unsuccessful broader experiments.
 
 Packed kernels load inputs and materialize casts at first use. Input, output,
 changed-bit and resource-table pointers carry `noalias`: the caller supplies
@@ -220,7 +275,8 @@ emitter now:
   `set_mask_op_opt`, instead of shifting and masking the whole word; cprop
   folds the `(lo + W - 1) + 1 - lo` width to the literal first. A materialized
   shift whose every reader keeps a low lane computes only that lane (LLVM:
-  `Cgen_llvm::dynamic_extract`, two guarded word loads and a funnel shift).
+  `Cgen_llvm::dynamic_extract`, one guarded word load for a single bit, or
+  two guarded word loads and a funnel shift for a wider lane).
 - Versions every `In` field wider than one word (`__ver_<field>`, bumped by
   every generated writer). A non-DUT module forwards such an input into a
   child only when the version moved, a wrapper broadcasts an invariant only
@@ -307,3 +363,13 @@ the adapter no longer packs those slices separately. Constant specialization
 still scans the full hierarchy to propagate newly constant outputs, but runs
 constant folding and width inference again only for locally rewritten bodies.
 The parent-before-child regression checks propagation through six definitions.
+
+The LLVM scalar ABI packs multiple outputs into one 64-bit return register when
+their combined width fits, with the first output in the low bits. This avoids
+temporary input/output/change arrays for small multi-output colors. The adapter
+snapshots every old result before publishing any output; native rolled loops
+unpack all result lanes without introducing body calls or unrolling. Resource-free
+scalar declarations carry a `const` function attribute so the host compiler knows
+the call cannot access simulator state. Resource-bearing calls retain their normal
+memory effects. The [ABI transport investigation](../../repros/sim_llvm_slop_20261007/abi/index.html)
+records paired speedups, aliasing/alignment experiments, and remaining gaps.

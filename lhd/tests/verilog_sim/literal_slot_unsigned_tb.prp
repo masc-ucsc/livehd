@@ -1,0 +1,14 @@
+const dut_m = import("lg:literal_slot_unsigned")
+
+test literal_slot_unsigned.icarus {
+  mut dut = dut_m
+  tick 5 {
+    dut.reset = clock < 2
+    dut.i0 = 15 + clock * 40
+    dut.i1 = 8499 + clock * 7
+    dut.i2 = 31932041496588 - clock * 1000003
+    step
+    const want = if clock == 1 { 3 } elif clock == 2 { 2 } elif clock == 3 { 1 } else { 0 }
+    assert(dut.o0 == want, "(i1 / 1 + 1) mod 4")
+  }
+}

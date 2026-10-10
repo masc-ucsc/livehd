@@ -478,7 +478,10 @@ TEST(BitwidthInfer, SextReinterpretsUnsignedMask) {
   unused_shift.del_node();
   auto mask = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   g->get_input_pin("data").connect_sink(livehd::graph_util::setup_sink_by_name(mask, "a"));
-  livehd::graph_util::connect_bit_range(mask, 0, 8);
+  // Bits [1,9): a LOW window [0,w) under a Sext keeping b <= w bits is
+  // redundant and cprop's Sext fold (which bitwidth's rewrite applies) would
+  // bypass it, leaving no mask pin to check.
+  livehd::graph_util::connect_bit_range(mask, 1, 9);
   auto pattern = mask.create_driver_pin(0);
   livehd::graph_util::set_ubits(pattern, 8);
   auto sext = livehd::graph_util::create_typed_node(*g, Ntype_op::Sext);

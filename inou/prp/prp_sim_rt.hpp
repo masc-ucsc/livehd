@@ -1088,6 +1088,8 @@ inline constexpr std::string_view kSetParser = R"cpp(
       _seed = _to_u64("set lhd.seed", _v);
     } else if (_k == "sim.init_zero") {
       _init_zero = _set_bool(_k, _v);
+    } else if (_k == "sim.warn_undefined") {
+      __lhd_warn_undefined = _set_bool(_k, _v);  // report the first undefined result per site
     } else if (_k == "sim.unknown_zero") {
       // true: zero-fill every `?` at run time -- byte-identical to a build generated
       // with sim.unknown_zero=true. A binary generated WITH it has no `?` text left

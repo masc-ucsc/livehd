@@ -586,6 +586,36 @@ TEST(CpropCleanup, EnabledFlopDoesNotNeedItsDataHoldMux) {
   }
 }
 
+// Fuzz: a write guard that folds to 0 (`if (x#[8] == 1)` on a U8) leaves a
+// constant-false enable. The emitters read a constant enable as "no enable",
+// so cprop must turn it into the hold it means (din = q) and drop a
+// constant-true one (the unconditional write).
+TEST(CpropCleanup, ConstantFlopEnableBecomesHoldOrUnconditionalWrite) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_const_enable_test");
+  for (int en : {0, 1}) {
+    auto io = lib.create_io(en ? "const_enable_true" : "const_enable_false");
+    io->add_input("d", 1);
+    io->set_bits("d", 8);
+    io->add_input("clock", 2);
+    io->set_bits("clock", 1);
+    io->add_output("q", 3);
+    io->set_bits("q", 8);
+    auto g    = io->create_graph();
+    auto flop = gu::create_typed_node(*g, Ntype_op::Flop, 8);
+    auto q    = flop.create_driver_pin(0);
+    gu::set_ubits(q, 8);
+    q.connect_sink(g->get_output_pin("q"));
+    g->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+    g->get_input_pin("d").connect_sink(gu::setup_sink_by_name(flop, "din"));
+    gu::create_const(*g, *Dlop::create_integer(en)).connect_sink(gu::setup_sink_by_name(flop, "enable"));
+    Cprop cp;
+    cp.do_trans(g);
+    EXPECT_TRUE(gu::get_driver_of_sink_name(flop, "enable").is_invalid());
+    EXPECT_EQ(gu::get_driver_of_sink_name(flop, "din"), en ? g->get_input_pin("d") : q);
+  }
+}
+
 TEST(CpropHotmux, ConstantControlsSelectValuesAndDefault) {
   namespace gu = livehd::graph_util;
   auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_hotmux");
@@ -1301,6 +1331,45 @@ TEST(CpropMasks, LowWindowNarrowsPrivateFold) {
   for (int64_t av : {0, 1, 0x7FFF, 0x8000, 0xFFFF, 0x1234}) {
     auto values = f.inputs(0, av, 0);
     EXPECT_EQ(mux_eval(f.output(), values), ((av << 1) ^ 0x1A5A5) & 0xFFFF) << av;
+  }
+}
+
+// Width-free Sext/Get_mask folds on the shape a Verilog reader emits for a
+// signed 1-bit write (`sext(x, 12)[0,1)` re-signed by `sext(.., 1)`): a Sext
+// keeping b bits reads no bit of a low [0,w) window above b <= w, and a [lo,hi)
+// window with hi <= b reads no bit of the Sext above its kept bits.
+TEST(CpropMasks, SextAndLowWindowChainsCollapse) {
+  Mux_graph f("sext_window_chain", 1, 12, true);
+  auto      s1 = f.node(Ntype_op::Sext);
+  gu::setup_sink_by_name(s1, "a").connect_driver(f.a);
+  gu::setup_sink_by_name(s1, "b").connect_driver(f.constant(12));
+  auto m1 = gu::create_get_mask(*f.graph, s1.create_driver_pin(0), 0, 1);
+  gu::set_ubits(m1.create_driver_pin(0), 1);
+  auto s2 = f.node(Ntype_op::Sext, 1);
+  gu::set_sbits(s2.create_driver_pin(0), 1);
+  gu::setup_sink_by_name(s2, "a").connect_driver(m1.create_driver_pin(0));
+  gu::setup_sink_by_name(s2, "b").connect_driver(f.constant(1));
+  auto wide = gu::create_get_mask(*f.graph, s2.create_driver_pin(0), 0, 8);
+  gu::set_ubits(wide.create_driver_pin(0), 8);
+  wide.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
+  auto bit = gu::create_get_mask(*f.graph, s2.create_driver_pin(0), 0, 1);
+  gu::set_ubits(bit.create_driver_pin(0), 1);
+  bit.create_driver_pin(0).connect_sink(f.graph->get_output_pin("observe"));
+  Cprop{}.do_trans(f.graph);
+  int sexts = 0;
+  for (auto n : f.graph->body().nodes()) {
+    if (gu::type_op_of(n) == Ntype_op::Sext) {
+      ++sexts;
+      EXPECT_TRUE(gu::is_graph_input_pin(gu::get_driver_of_sink_name(n, "a"))) << "the Sext reads the input directly";
+    }
+  }
+  EXPECT_EQ(sexts, 1);
+  EXPECT_TRUE(gu::is_graph_input_pin(gu::get_driver_of_sink_name(f.observed().get_master_node(), "a")))
+      << "bit 0 of a 1-bit Sext is bit 0 of its input";
+  for (int64_t av : {0, 1, 2, 3, -1, -2, 0x7FF, -0x800}) {
+    auto values = f.inputs(0, av, 0);
+    EXPECT_EQ(mux_eval(f.output(), values), (av & 1) ? 0xFF : 0) << av;
+    EXPECT_EQ(mux_eval(f.observed(), values), av & 1) << av;
   }
 }
 

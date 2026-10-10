@@ -60,6 +60,7 @@ genrule(
         "//pass/liberty:liberty_dff_srcs",
         "//pass/formal",  # memory and selector proof semantics
         "//pass/partition:partition_srcs",
+        "//pass/specialize:specialize_srcs",  # constants specialized into the private copy
     ],
     outs = ["synth_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +
@@ -89,6 +90,15 @@ cc_library(
         "@abseil-cpp//absl/container:flat_hash_map",
         "@iassert",
     ],
+)
+
+# Header-only structural analysis shared with coloring, without a mapper dependency.
+cc_library(
+    name = "affine_amount",
+    hdrs = ["affine_amount.hpp"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = ["//graph"],
 )
 
 cc_library(
@@ -121,6 +131,7 @@ cc_library(
         "//pass/formal",
         "//pass/liberty:liberty_dff",
         "//pass/partition:pass_partition",
+        "//pass/specialize",
         "//pass/semdiff",  # region cache: structural_identical
         "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/container:flat_hash_map",

@@ -202,7 +202,12 @@ public:
     }
   }
 
-  void add_sra(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop amount) {
+  // `out_cap` (> 0) is the SRA driver pin's declared width. Bits at and above
+  // it are not part of the value, so they are never tracked: a word select
+  // `bus >> (k*W)` out of an N-bit bus used to track N - k*W bits per select,
+  // which is quadratic over the selects of one wide bus (xs Rob: hundreds of
+  // GiB in pass.opentimer before a single gate was timed). 0 = no cap.
+  void add_sra(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop amount, int32_t out_cap = 0) {
     I(a_sbits > 0);
     I(amount.is_just_i64());  // a >62-bit shift amount is structurally bogus
     const auto amount_i = amount.to_just_i64();
@@ -216,25 +221,27 @@ public:
       add_input(a_pin, a_sbits);
       it = full_map.find(a_pin);
     }
-    const Pin_vector source = it->second;
-
-    auto&      pv       = full_map[dst_pin];
-    const auto out_bits = amount_u < a_sbits_u ? a_sbits_u - amount_u : size_t{1};
-    pv.resize(out_bits, {zero_, -1});
-    if (source.empty()) {
-      pv.assign(out_bits, {zero_, 0});
-      return;
+    auto out_bits = amount_u < a_sbits_u ? a_sbits_u - amount_u : size_t{1};
+    if (out_cap > 0) {
+      out_bits = std::min(out_bits, static_cast<size_t>(out_cap));
     }
 
-    for (size_t i = 0; i < out_bits; ++i) {
-      // Arithmetic right shift is wiring: output bit i comes from input bit
-      // i+amount.  An overshift repeats the sign bit.  Keeping one bit in that
-      // case is important for the one-bit SRA nodes emitted by ABC read-back;
-      // unsigned/logical overshifts are represented by zero-fill wiring, not
-      // by an SRA node.
-      const auto src = std::min(amount_u + i, source.size() - 1);
-      pv[i]          = source[src];
+    // Build locally: full_map[dst_pin] below may insert, and only the selected
+    // window of the source is read (never a copy of the whole bus).
+    const Pin_vector& source = it->second;
+    Pin_vector        pv(out_bits, {zero_, 0});
+    if (!source.empty()) {
+      for (size_t i = 0; i < out_bits; ++i) {
+        // Arithmetic right shift is wiring: output bit i comes from input bit
+        // i+amount.  An overshift repeats the sign bit.  Keeping one bit in that
+        // case is important for the one-bit SRA nodes emitted by ABC read-back;
+        // unsigned/logical overshifts are represented by zero-fill wiring, not
+        // by an SRA node.
+        const auto src = std::min(amount_u + i, source.size() - 1);
+        pv[i]          = source[src];
+      }
     }
+    full_map[dst_pin] = std::move(pv);
   }
 
   void add_sext(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop amount) {

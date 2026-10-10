@@ -1,0 +1,6 @@
+// Fuzz: the inlined `3 >> i1` is unsigned but its text shifts the signed
+// `3'sh3`; sized to 2 bits it kept that sign (-1), so the outer `>>>` filled
+// ones and o0 read 65535 for 3.
+pub comb sra_unsigned_sized_operand(i1:S3) -> (o0:U16) {
+  o0 = ((3 >> i1) >> i1)
+}

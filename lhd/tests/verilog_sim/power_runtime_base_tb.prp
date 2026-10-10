@@ -1,0 +1,21 @@
+const dut_m = import("lg:power_runtime_base")
+
+test power_runtime_base.icarus {
+  mut dut = dut_m
+  tick 2 {
+    dut.reset = false
+    if clock == 0 {
+      dut.a = -7
+      dut.b = 100
+    } else {
+      dut.a = 5
+      dut.b = 127
+    }
+    step
+    if clock == 0 {
+      assert(dut.p3 == -87 and dut.q2 == 784 and dut.z0 == 1 and dut.n1 == -7, "-7**3 wraps to -87, 100**2 to 784")
+    } else {
+      assert(dut.p3 == 125 and dut.q2 == 769 and dut.z0 == 1 and dut.n1 == 5, "127**2 wraps to 769")
+    }
+  }
+}

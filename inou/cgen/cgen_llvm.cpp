@@ -32,6 +32,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
@@ -56,10 +57,6 @@
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/IPO/GlobalDCE.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
-#include "llvm/Transforms/Scalar/ADCE.h"
-#include "llvm/Transforms/Scalar/EarlyCSE.h"
-#include "llvm/Transforms/Scalar/SROA.h"
-#include "llvm/Transforms/Scalar/SimplifyCFG.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/LowerMemIntrinsics.h"
 #include "sim_llvm_target.hpp"
@@ -88,8 +85,8 @@ public:
       llvm::TimePassesIsEnabled = true;
       llvm::EnableStatistics();
       if (const char* directory = std::getenv("LHD_LLVM_TIME_PASSES_DIR")) {
-        const auto      filename = std::filesystem::path(directory)
-                                   / (std::filesystem::path(path).filename().string() + "." + std::string(stage) + ".log");
+        const auto filename = std::filesystem::path(directory)
+                              / (std::filesystem::path(path).filename().string() + "." + std::string(stage) + ".log");
         std::error_code ec;
         report_ = std::make_unique<llvm::raw_fd_ostream>(filename.string(), ec);
         if (ec) {
@@ -140,6 +137,87 @@ llvm::Value* cast_integer(llvm::IRBuilder<>& builder, llvm::Value* value, unsign
   return source_unsigned ? builder.CreateZExt(value, type) : builder.CreateSExt(value, type);
 }
 
+// Preserve short-circuit evaluation for absorbing Boolean loop carries. After
+// AND reaches false (or OR reaches true), the expensive operand cannot change
+// that carry again. Slop exposes this control flow through C++ &&/||, while
+// eagerly computed LLVM bitwise operands otherwise keep doing indexed reads.
+// This only guards the operand: other outputs and every loop iteration remain.
+void short_circuit_loop_carries(llvm::Function& function) {
+  std::vector<llvm::BinaryOperator*> candidates;
+  for (auto& block : function) {
+    for (auto& instruction : block) {
+      auto* binary = llvm::dyn_cast<llvm::BinaryOperator>(&instruction);
+      if (binary && binary->getType()->isIntegerTy(1)
+          && (binary->getOpcode() == llvm::Instruction::And || binary->getOpcode() == llvm::Instruction::Or)) {
+        candidates.push_back(binary);
+      }
+    }
+  }
+  for (auto* binary : candidates) {
+    llvm::PHINode* carry   = nullptr;
+    llvm::Value*   operand = nullptr;
+    for (unsigned side = 0; side < 2; ++side) {
+      auto* phi = llvm::dyn_cast<llvm::PHINode>(binary->getOperand(side));
+      if (phi && phi->getNumIncomingValues() == 2 && (phi->getIncomingValue(0) == binary || phi->getIncomingValue(1) == binary)) {
+        carry   = phi;
+        operand = binary->getOperand(1 - side);
+        break;
+      }
+    }
+    if (!carry) {
+      continue;
+    }
+    // Sink only an exclusive, same-block dependence slice. A skipped load must
+    // not cross a write; rejecting all intervening writes avoids an alias query.
+    std::vector<llvm::Instruction*>     slice;
+    llvm::SmallVector<llvm::Value*, 64> work{operand};
+    while (!work.empty() && slice.size() < 256) {
+      auto* inst = llvm::dyn_cast<llvm::Instruction>(work.pop_back_val());
+      if (!inst || !inst->hasOneUse() || inst->getParent() != binary->getParent() || inst->isTerminator()
+          || inst->mayHaveSideEffects() || llvm::isa<llvm::PHINode>(inst) || llvm::isa<llvm::AllocaInst>(inst)) {
+        continue;
+      }
+      if (inst->mayReadFromMemory()) {
+        auto* load = llvm::dyn_cast<llvm::LoadInst>(inst);
+        if (!load || !load->isSimple()) {
+          continue;
+        }
+        bool intervening_write = false;
+        for (auto it = std::next(inst->getIterator()); &*it != binary; ++it) {
+          intervening_write |= it->mayWriteToMemory();
+        }
+        if (intervening_write) {
+          continue;
+        }
+      }
+      slice.push_back(inst);
+      for (auto& input : inst->operands()) {
+        work.push_back(input);
+      }
+    }
+    // Keep small operations branchless and bound analysis of very large DAGs.
+    if (slice.size() < 8 || !work.empty()) {
+      continue;
+    }
+    std::sort(slice.begin(), slice.end(), [](const auto* a, const auto* b) { return a->comesBefore(b); });
+    auto* predecessor = binary->getParent();
+    auto* merge       = predecessor->splitBasicBlock(binary->getIterator(), "carry.join");
+    auto* evaluate    = llvm::BasicBlock::Create(function.getContext(), "carry.eval", &function, merge);
+    auto* branch      = llvm::BranchInst::Create(merge, evaluate);
+    for (auto* inst : slice) {
+      inst->moveBefore(branch->getIterator());
+    }
+    const bool conjunction = binary->getOpcode() == llvm::Instruction::And;
+    predecessor->getTerminator()->eraseFromParent();
+    llvm::BranchInst::Create(conjunction ? evaluate : merge, conjunction ? merge : evaluate, carry, predecessor);
+    auto* result = llvm::PHINode::Create(binary->getType(), 2, "carry.result", binary->getIterator());
+    result->addIncoming(llvm::ConstantInt::get(binary->getType(), !conjunction), predecessor);
+    result->addIncoming(operand, evaluate);
+    binary->replaceAllUsesWith(result);
+    binary->eraseFromParent();
+  }
+}
+
 }  // namespace
 
 class Cgen_llvm::Impl {
@@ -158,12 +236,12 @@ public:
   llvm::LLVMContext                       context;
   std::unique_ptr<llvm::Module>           module;
   llvm::IRBuilder<>                       builder;
-  llvm::Function*                         function = nullptr;
+  llvm::Function*                         function      = nullptr;
   llvm::Function*                         loop_function = nullptr;
-  llvm::Value*                            inputs   = nullptr;
-  llvm::Value*                            outputs  = nullptr;
-  llvm::Value*                            changed  = nullptr;
-  llvm::Value*                            owner    = nullptr;
+  llvm::Value*                            inputs        = nullptr;
+  llvm::Value*                            outputs       = nullptr;
+  llvm::Value*                            changed       = nullptr;
+  llvm::Value*                            owner         = nullptr;
   std::vector<llvm::Value*>               values;
   std::vector<size_t>                     input_word_offsets;
   std::vector<uint32_t>                   input_bits;
@@ -261,8 +339,17 @@ public:
     // optimizer's word-by-word shift/OR reconstruction.
     if constexpr (std::endian::native == std::endian::little) {
       if (width > 64) {
-        auto* ptr = builder.CreateConstInBoundsGEP1_64(builder.getInt64Ty(), base, offset);
-        return builder.CreateAlignedLoad(builder.getIntNTy(width), ptr, llvm::Align(alignof(uint64_t)), name + ".bits");
+        // Load the WHOLE words, then truncate. A `load i70` is undefined LLVM
+        // when the bits past bit 69 of its last byte were not written by an
+        // i70 store, and packed words of a signed Slop are sign-extended: the
+        // garbage reached a later zext (`zext i70 -> i72` set bits 70-71) and a
+        // wide `x % d` divided by the wrong divisor (random Verilog sim fuzz vs
+        // Icarus/Verilator/slop, 2026-10-09).
+        // (A whole-byte width has no padding bits, so it keeps its exact load.)
+        auto*      ptr   = builder.CreateConstInBoundsGEP1_64(builder.getInt64Ty(), base, offset);
+        const auto words = width % 8 == 0 ? width : static_cast<unsigned>(word_count(width) * 64);
+        auto*      whole = builder.CreateAlignedLoad(builder.getIntNTy(words), ptr, llvm::Align(alignof(uint64_t)), name + ".words");
+        return words == width ? whole : builder.CreateTrunc(whole, builder.getIntNTy(width), name + ".bits");
       }
     }
     auto*        type   = builder.getIntNTy(width);
@@ -319,6 +406,18 @@ public:
     a                = cast_integer(builder, a, width, address.unsign);
     return builder.CreateICmpULT(a, llvm::ConstantInt::get(builder.getIntNTy(width), size));
   }
+  // A native color has no external symbols, so it cannot call the reporter:
+  // it sets the site's `hit` byte (after its two string pointers) and the
+  // caller polls it (kUndefinedWarnHelper's __lhd_undef_poll).
+  void undefined_if(llvm::Value* hit, size_t site) {
+    auto* yes  = llvm::BasicBlock::Create(context, "undefined.hit", function);
+    auto* done = llvm::BasicBlock::Create(context, "undefined.done", function);
+    builder.CreateCondBr(hit, yes, done, llvm::MDBuilder(context).createUnlikelyBranchWeights());
+    builder.SetInsertPoint(yes);
+    builder.CreateStore(builder.getInt8(1), builder.CreateConstInBoundsGEP1_64(builder.getInt8Ty(), resource(site), 2 * sizeof(void*)));
+    builder.CreateBr(done);
+    builder.SetInsertPoint(done);
+  }
   template <class Fn>
   void when(llvm::Value* condition, Fn emit) {
     auto* yes  = llvm::BasicBlock::Create(context, "memory.active", function);
@@ -354,8 +453,8 @@ public:
       when(active, [&] {
         auto* address = builder.CreateLoad(builder.getInt64Ty(), word_ptr(pending, 3 * word_count(m.bits)));
         auto* ptr     = builder.CreateInBoundsGEP(builder.getInt64Ty(),
-                                                  resource(m.data),
-                                                  builder.CreateMul(address, builder.getInt64(word_count(m.bits))));
+                                              resource(m.data),
+                                              builder.CreateMul(address, builder.getInt64(word_count(m.bits))));
         auto* old     = load_packed(ptr, 0, m.bits, "memory.old");
         auto* data    = load_packed(pending, 0, m.bits, "memory.new");
         auto* mask    = load_packed(pending, word_count(m.bits), m.bits, "memory.mask");
@@ -368,8 +467,19 @@ public:
     }
   }
 
+  llvm::AllocaInst* local_words(size_t words, llvm::StringRef name) {
+    // One fixed allocation per invocation, even when the use follows a branch
+    // or packed-word loop. Inlining must not introduce per-iteration stack
+    // save/restore, and the array extent must be visible to SROA.
+    auto&             entry = builder.GetInsertBlock()->getParent()->getEntryBlock();
+    llvm::IRBuilder<> allocations(&entry, entry.getFirstInsertionPt());
+    auto* buffer = allocations.CreateAlloca(llvm::ArrayType::get(builder.getInt64Ty(), std::max<size_t>(1, words)), nullptr, name);
+    buffer->setAlignment(llvm::Align(alignof(uint64_t)));
+    return buffer;
+  }
+
   llvm::Value* packed_alloca(llvm::Value* value, uint32_t width, llvm::StringRef name) {
-    auto* words = builder.CreateAlloca(builder.getInt64Ty(), builder.getInt64(word_count(width)), name);
+    auto* words = local_words(word_count(width), name);
     store_packed(value, words, 0, width);
     return words;
   }
@@ -461,6 +571,86 @@ Cgen_llvm::Value Cgen_llvm::resize(Value value, uint32_t result_width, bool resu
   const auto result                = impl_->remember(nullptr, result_width, result_unsign);
   impl_->deferred_casts[result.id] = value;
   return result;
+}
+
+Cgen_llvm::Value Cgen_llvm::concat(const std::vector<Value>& lanes) {
+  struct Slice {
+    llvm::Value* source;
+    uint32_t     lo;
+    uint32_t     width;
+  };
+  std::vector<Slice> slices;
+  uint64_t           total = 0;
+  for (const auto lane : lanes) {
+    auto* source = impl_->get(lane);
+    if (source == nullptr || lane.width == 0) {
+      return {};
+    }
+    total += lane.width;
+    if (total > llvm::IntegerType::MAX_INT_BITS) {
+      return {};
+    }
+    uint32_t lo = 0;
+    // Only peel operations that preserve the requested bits. In particular,
+    // do not turn an extension's high zero/sign bits into bits of its source.
+    while (true) {
+      // Shift lowering retains an explicit oversized-count select until the
+      // optimization pipeline, even when its predicate is already constant.
+      if (auto* select = llvm::dyn_cast<llvm::SelectInst>(source)) {
+        if (auto* condition = llvm::dyn_cast<llvm::ConstantInt>(select->getCondition())) {
+          source = condition->isZero() ? select->getFalseValue() : select->getTrueValue();
+          continue;
+        }
+      }
+      if (auto* cast = llvm::dyn_cast<llvm::CastInst>(source)) {
+        if ((cast->getOpcode() == llvm::Instruction::Trunc || cast->getOpcode() == llvm::Instruction::ZExt
+             || cast->getOpcode() == llvm::Instruction::SExt)
+            && uint64_t{lo} + lane.width <= cast->getOperand(0)->getType()->getIntegerBitWidth()) {
+          source = cast->getOperand(0);
+          continue;
+        }
+      }
+      if (auto* shift = llvm::dyn_cast<llvm::BinaryOperator>(source); shift && shift->getOpcode() == llvm::Instruction::LShr) {
+        if (auto* amount = llvm::dyn_cast<llvm::ConstantInt>(shift->getOperand(1))) {
+          const auto bits = amount->getValue().getLimitedValue();
+          if (bits < source->getType()->getIntegerBitWidth()
+              && uint64_t{lo} + lane.width + bits <= source->getType()->getIntegerBitWidth()) {
+            lo     += static_cast<uint32_t>(bits);
+            source  = shift->getOperand(0);
+            continue;
+          }
+        }
+      }
+      break;
+    }
+    if (!slices.empty() && slices.back().source == source && slices.back().lo == lo + lane.width) {
+      slices.back().lo     = lo;
+      slices.back().width += lane.width;
+    } else {
+      slices.push_back({source, lo, lane.width});
+    }
+  }
+  if (total == 0) {
+    return {};
+  }
+  auto&        b         = impl_->builder;
+  auto*        type      = b.getIntNTy(static_cast<uint32_t>(total));
+  llvm::Value* result    = llvm::ConstantInt::get(type, 0);
+  auto         remaining = static_cast<uint32_t>(total);
+  for (const auto& slice : slices) {
+    auto* value = slice.source;
+    if (slice.lo) {
+      value = b.CreateLShr(value, llvm::ConstantInt::get(value->getType(), slice.lo));
+    }
+    value      = cast_integer(b, value, slice.width, true);
+    value      = cast_integer(b, value, static_cast<uint32_t>(total), true);
+    remaining -= slice.width;
+    if (remaining) {
+      value = b.CreateShl(value, llvm::ConstantInt::get(type, remaining));
+    }
+    result = b.CreateOr(result, value);
+  }
+  return impl_->remember(result, static_cast<uint32_t>(total), true);
 }
 
 Cgen_llvm::Value Cgen_llvm::unary_not(Value value, uint32_t result_width, bool result_unsign) {
@@ -563,10 +753,17 @@ Cgen_llvm::Value Cgen_llvm::dynamic_extract(Value source, Value count, uint32_t 
     auto* loaded   = builder.CreateLoad(i64, ptr, "extract.load");
     return builder.CreateSelect(in_range, loaded, llvm::ConstantInt::get(i64, 0));
   };
-  auto* low  = load_word(word);
-  auto* high = load_word(builder.CreateAdd(word, llvm::ConstantInt::get(i64, 1)));
-  auto* fshr = llvm::Intrinsic::getOrInsertDeclaration(impl_->module.get(), llvm::Intrinsic::fshr, {i64});
-  auto* lane = builder.CreateCall(fshr, {high, low, shift}, "extract.lane");
+  auto*        low = load_word(word);
+  llvm::Value* lane;
+  if (len == 1) {
+    // A single bit never crosses a packed-word boundary. Loading the next
+    // word adds a bounds check and a funnel shift to every loop iteration.
+    lane = builder.CreateLShr(low, shift, "extract.bit");
+  } else {
+    auto* high = load_word(builder.CreateAdd(word, llvm::ConstantInt::get(i64, 1)));
+    auto* fshr = llvm::Intrinsic::getOrInsertDeclaration(impl_->module.get(), llvm::Intrinsic::fshr, {i64});
+    lane       = builder.CreateCall(fshr, {high, low, shift}, "extract.lane");
+  }
   auto* bits = cast_integer(builder, lane, len, true);
   return impl_->remember(cast_integer(builder, bits, result_width, true), result_width, result_unsign);
 }
@@ -592,18 +789,15 @@ Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t 
     // in an LLVM loop instead; constant shifts retain their direct path.
     constexpr unsigned max_variable_shift_width = 4096;
     if (work_width > max_variable_shift_width && !llvm::isa<llvm::ConstantInt>(right)) {
-      auto&      b               = impl_->builder;
-      auto*      i64             = b.getInt64Ty();
-      const auto source_words    = word_count(work_width);
-      const auto output_words    = word_count(result_width);
-      left                       = cast_integer(b, left, work_width, lhs.unsign);
-      auto*             padded   = cast_integer(b, left, static_cast<unsigned>(source_words * 64), op != Binary_op::ashr);
-      auto*             function = b.GetInsertBlock()->getParent();
-      llvm::IRBuilder<> allocations(&function->getEntryBlock(), function->getEntryBlock().getFirstInsertionPt());
-      auto*             source = allocations.CreateAlloca(i64, llvm::ConstantInt::get(i64, source_words), "shift.source");
-      auto*             output = allocations.CreateAlloca(i64, llvm::ConstantInt::get(i64, output_words), "shift.output");
-      source->setAlignment(llvm::Align(alignof(uint64_t)));
-      output->setAlignment(llvm::Align(alignof(uint64_t)));
+      auto&      b            = impl_->builder;
+      auto*      i64          = b.getInt64Ty();
+      const auto source_words = word_count(work_width);
+      const auto output_words = word_count(result_width);
+      left                    = cast_integer(b, left, work_width, lhs.unsign);
+      auto* padded            = cast_integer(b, left, static_cast<unsigned>(source_words * 64), op != Binary_op::ashr);
+      auto* function          = b.GetInsertBlock()->getParent();
+      auto* source            = impl_->local_words(source_words, "shift.source");
+      auto* output            = impl_->local_words(output_words, "shift.output");
       impl_->store_packed(padded, source, 0, static_cast<uint32_t>(source_words * 64));
       const auto   compare_width = std::max<unsigned>(rhs.width, 32);
       auto*        count         = cast_integer(b, right, compare_width, true);
@@ -672,16 +866,19 @@ Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t 
     return impl_->remember(cast_integer(impl_->builder, selected, result_width, true), result_width, result_unsign);
   }
 
-  const bool comparison      = op == Binary_op::eq || op == Binary_op::ne || op == Binary_op::lt || op == Binary_op::le
-                               || op == Binary_op::gt || op == Binary_op::ge;
+  const bool comparison = op == Binary_op::eq || op == Binary_op::ne || op == Binary_op::lt || op == Binary_op::le
+                          || op == Binary_op::gt || op == Binary_op::ge;
   const bool ordered         = op == Binary_op::lt || op == Binary_op::le || op == Binary_op::gt || op == Binary_op::ge;
   // An ORDERED compare is sign-aware and a mixed-sign pair has no common
   // interpretation at max(width): the unsigned side's top bit would be read as
   // a sign. One extra bit gives each side room to extend by its OWN rule, which
-  // is exactly the `cw += 1` the reference Slop lowering applies. EQ is a
-  // bit-pattern compare and must NOT get the headroom.
+  // is exactly the `cw += 1` the reference Slop lowering applies. EQ/NE compare
+  // VALUES too: a same-sign pair needs no headroom, but a mixed-sign one does,
+  // or `t0 == i1` with t0:S16 = wrap i1 compared the shared bit pattern and was
+  // true for i1 >= 32768 (slop and Icarus: false; random Pyrope sim fuzz,
+  // 2026-10-09).
   unsigned   operation_width = comparison ? std::max(lhs.width, rhs.width) : result_width;
-  if (ordered && (!lhs.unsign || !rhs.unsign)) {
+  if ((ordered && (!lhs.unsign || !rhs.unsign)) || ((op == Binary_op::eq || op == Binary_op::ne) && lhs.unsign != rhs.unsign)) {
     ++operation_width;
   }
   left  = cast_integer(impl_->builder, left, operation_width, lhs.unsign);
@@ -892,6 +1089,9 @@ Cgen_llvm::Value Cgen_llvm::memory_read(std::string_view symbol, Value address, 
   const auto& m     = it->second;
   auto&       b     = impl_->builder;
   auto*       valid = impl_->valid_address(address, m.size);
+  if (m.warn_site != no_site) {
+    impl_->undefined_if(b.CreateNot(valid), m.warn_site);
+  }
   auto*       index = cast_integer(b, impl_->get(address), 64, address.unsign);
   auto*       safe  = b.CreateSelect(valid, index, b.getInt64(0));
   auto*       ptr = b.CreateInBoundsGEP(b.getInt64Ty(), impl_->resource(m.data), b.CreateMul(safe, b.getInt64(word_count(m.bits))));
@@ -1043,18 +1243,32 @@ bool Cgen_llvm::memory_stage_write(std::string_view symbol, Value enable, Value 
       active = b.CreateTrunc(b.CreateLShr(wen, llvm::ConstantInt::get(wen->getType(), lane)), b.getInt1Ty());
     }
     auto lane_mask = llvm::APInt::getBitsSet(m.bits, lane * (m.bits / m.lanes), (lane + 1) * (m.bits / m.lanes));
-    mask = b.CreateOr(mask,
+    mask           = b.CreateOr(mask,
                       b.CreateSelect(active, llvm::ConstantInt::get(mask_type, lane_mask), llvm::ConstantInt::get(mask_type, 0)));
   }
-  auto* valid = b.CreateAnd(impl_->valid_address(address, m.size), b.CreateICmpNE(mask, llvm::ConstantInt::get(mask_type, 0)));
+  auto* in_range = impl_->valid_address(address, m.size);
+  auto* enabled  = b.CreateICmpNE(mask, llvm::ConstantInt::get(mask_type, 0));
   if (m.gated) {
-    valid = b.CreateAnd(valid, b.CreateICmpNE(b.CreateLoad(b.getInt64Ty(), impl_->resource(m.gate)), b.getInt64(0)));
+    enabled = b.CreateAnd(enabled, b.CreateICmpNE(b.CreateLoad(b.getInt64Ty(), impl_->resource(m.gate)), b.getInt64(0)));
   }
+  if (m.warn_site != no_site) {
+    impl_->undefined_if(b.CreateAnd(enabled, b.CreateNot(in_range)), m.warn_site);
+  }
+  auto* valid = b.CreateAnd(in_range, enabled);
   impl_->store_packed(impl_->get(data), pending, 0, m.bits);
   impl_->store_packed(mask, pending, word_count(m.bits), m.bits);
   impl_->store_packed(llvm::ConstantInt::get(mask_type, 0), pending, 2 * word_count(m.bits), m.bits);
   b.CreateStore(cast_integer(b, impl_->get(address), 64, address.unsign), impl_->word_ptr(pending, 3 * word_count(m.bits)));
   b.CreateStore(b.CreateZExt(valid, b.getInt8Ty()), impl_->fired_ptr(m, pending));
+  return true;
+}
+
+bool Cgen_llvm::undefined_if(Value condition, size_t site) {
+  auto* hit = impl_->get(condition);
+  if (hit == nullptr) {
+    return false;
+  }
+  impl_->undefined_if(impl_->builder.CreateICmpNE(hit, llvm::ConstantInt::get(hit->getType(), 0)), site);
   return true;
 }
 
@@ -1149,11 +1363,11 @@ bool Cgen_llvm::write_state_object(std::string_view path, std::string_view descr
   if (!words.empty()) {
     auto* values = llvm::ConstantArray::get(llvm::ArrayType::get(word_type, words.size()), words);
     auto* table  = new llvm::GlobalVariable(*impl_->module,
-                                            values->getType(),
-                                            true,
-                                            llvm::GlobalValue::PrivateLinkage,
-                                            values,
-                                            "state.defaults");
+                                           values->getType(),
+                                           true,
+                                           llvm::GlobalValue::PrivateLinkage,
+                                           values,
+                                           "state.defaults");
     table->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     defaults = table;
   }
@@ -1232,11 +1446,22 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
     }
     impl_->builder.CreateRetVoid();
   } else if (impl_->scalar_abi) {
-    if (impl_->output_values.size() != 1 || impl_->output_values.front().value.width > 64) {
-      error = "scalar LLVM ABI requires exactly one output no wider than 64 bits";
+    uint32_t     total_bits = 0;
+    llvm::Value* result     = impl_->builder.getInt64(0);
+    for (const auto& output : impl_->output_values) {
+      if (output.value.width > 64 - total_bits) {
+        error = "scalar LLVM ABI outputs exceed 64 packed bits";
+        return false;
+      }
+      auto* value  = cast_integer(impl_->builder, impl_->get(output.value), 64, true);
+      result       = impl_->builder.CreateOr(result, impl_->builder.CreateShl(value, total_bits));
+      total_bits  += output.value.width;
+    }
+    if (total_bits == 0) {
+      error = "scalar LLVM ABI requires an output";
       return false;
     }
-    impl_->builder.CreateRet(cast_integer(impl_->builder, impl_->get(impl_->output_values.front().value), 64, true));
+    impl_->builder.CreateRet(result);
   } else {
     auto*        i64           = impl_->builder.getInt64Ty();
     const size_t changed_words = std::max<size_t>(1, word_count(static_cast<uint32_t>(impl_->output_values.size())));
@@ -1269,6 +1494,101 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
     return false;
   }
   impl_->sealed_changed = track_changed;
+  return true;
+}
+
+bool Cgen_llvm::inline_body(const Inline_body& body, const std::vector<Value>& inputs, std::vector<Value>& outputs,
+                            std::string& error) {
+  if (inputs.size() != body.inputs.size()) {
+    error = "inline color input count mismatch";
+    return false;
+  }
+  auto parsed = llvm::parseBitcodeFile(llvm::MemoryBufferRef(body.bitcode, "inline.color"), impl_->context);
+  if (!parsed) {
+    error = llvm::toString(parsed.takeError());
+    return false;
+  }
+  auto* source = (*parsed)->getFunction("__lhd_shared_color");
+  if (!source) {
+    error = "inline color has no body";
+    return false;
+  }
+  // Privatize before linking, so repeated instances cannot resolve to another
+  // occurrence's definition. Only the inlined instructions survive.
+  source->setName("__lhd_inline_color");
+  for (auto& fn : **parsed) {
+    if (!fn.isDeclaration() && &fn != source) {
+      fn.setLinkage(llvm::GlobalValue::InternalLinkage);
+    }
+  }
+  if (llvm::Linker::linkModules(*impl_->module, std::move(*parsed))) {
+    error = "could not import inline color";
+    return false;
+  }
+  // The linker may move or replace definitions; locate the unique imported
+  // name (the previous import is erased below).
+  auto* callee = impl_->module->getFunction("__lhd_inline_color");
+  if (!callee) {
+    error = "imported inline color is missing";
+    return false;
+  }
+  auto&                           b   = impl_->builder;
+  auto*                           ptr = llvm::PointerType::getUnqual(impl_->context);
+  llvm::SmallVector<llvm::Value*> args;
+  size_t                          input_words = 0, output_words = 0;
+  for (const auto& [width, unsign] : body.inputs) {
+    (void)unsign;
+    input_words += word_count(width);
+  }
+  for (const auto& [width, unsign] : body.outputs) {
+    (void)unsign;
+    output_words += word_count(width);
+  }
+  auto*  packed_in  = impl_->local_words(input_words, "inline.inputs");
+  auto*  packed_out = impl_->local_words(output_words, "inline.outputs");
+  auto*  changed    = impl_->local_words(word_count(static_cast<uint32_t>(body.outputs.size())), "inline.changed");
+  size_t offset     = 0;
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    auto* value = impl_->get(resize(inputs[i], body.inputs[i].first, body.inputs[i].second));
+    if (body.scalar) {
+      args.push_back(cast_integer(b, value, 64, true));
+    } else {
+      impl_->store_packed(value, packed_in, offset, body.inputs[i].first);
+    }
+    offset += word_count(body.inputs[i].first);
+  }
+  // Changed tracking is dead after inlining, but its old-output reads must
+  // still have defined values before dead-code elimination.
+  for (size_t i = 0; i < output_words; ++i) {
+    b.CreateStore(b.getInt64(0), b.CreateConstInBoundsGEP1_64(b.getInt64Ty(), packed_out, i));
+  }
+  if (!body.scalar) {
+    args = {packed_in, packed_out, changed};
+  }
+  args.push_back(llvm::ConstantPointerNull::get(ptr));
+  auto* call   = b.CreateCall(callee, args);
+  offset       = 0;
+  uint32_t bit = 0;
+  outputs.clear();
+  for (const auto& [width, unsign] : body.outputs) {
+    auto* value = body.scalar ? cast_integer(b, b.CreateLShr(call, bit), width, true)
+                              : impl_->load_packed(packed_out, offset, width, "inline.result");
+    // Inlining replaces and deletes a scalar call. Keep an instruction user
+    // whose operand is rewritten, rather than remembering the deleted call.
+    outputs.push_back(impl_->remember(b.CreateFreeze(value), width, unsign));
+    offset += word_count(width);
+    bit    += width;
+  }
+  auto*                    continuation = b.CreateUnreachable();
+  llvm::InlineFunctionInfo info;
+  if (!llvm::InlineFunction(*call, info).isSuccess()) {
+    error = "could not inline color body";
+    return false;
+  }
+  callee->eraseFromParent();
+  auto* block = continuation->getParent();
+  continuation->eraseFromParent();
+  b.SetInsertPoint(block);
   return true;
 }
 
@@ -1349,15 +1669,9 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     output_offsets.push_back(output_words);
     output_words += word_count(out.value.width);
   }
-  // SROA skips array-count allocas even when the count is constant. Encode the
-  // fixed extent in the allocated type so inlined packed loads/stores can be
-  // promoted to SSA instead of copying wide carry buffers on every iteration.
-  const auto buffer = [&](size_t words, llvm::StringRef name) {
-    return b.CreateAlloca(llvm::ArrayType::get(i64, std::max<size_t>(1, words)), nullptr, name);
-  };
-  auto* packed_in  = buffer(input_words, "body.inputs");
-  auto* packed_out = buffer(output_words, "body.outputs");
-  auto* changed    = buffer(word_count(static_cast<uint32_t>(impl_->output_values.size())), "body.changed");
+  auto* packed_in  = impl_->local_words(input_words, "body.inputs");
+  auto* packed_out = impl_->local_words(output_words, "body.outputs");
+  auto* changed    = impl_->local_words(word_count(static_cast<uint32_t>(impl_->output_values.size())), "body.changed");
   for (size_t i = 0; i < output_words; ++i) {
     b.CreateStore(b.getInt64(0), b.CreateConstInBoundsGEP1_64(i64, packed_out, i));
   }
@@ -1430,7 +1744,13 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
   }
   auto* call = b.CreateCall(impl_->function, args);
   if (impl_->scalar_abi) {
-    impl_->store_packed(call, packed_out, 0, impl_->output_values.front().value.width);
+    uint32_t bit = 0;
+    for (size_t i = 0; i < impl_->output_values.size(); ++i) {
+      const auto width = impl_->output_values[i].value.width;
+      auto*      value = cast_integer(b, b.CreateLShr(call, bit), width, true);
+      impl_->store_packed(value, packed_out, output_offsets[i], width);
+      bit += width;
+    }
   }
   auto*                     is_active = active ? b.CreateICmpNE(active, llvm::ConstantInt::get(active->getType(), 0)) : b.getTrue();
   std::vector<llvm::Value*> next_carries;
@@ -1438,9 +1758,9 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     const auto [input, output] = layout.carries[i];
     const auto& out            = impl_->output_values[output].value;
     auto*       next           = cast_integer(b,
-                                              impl_->load_packed(packed_out, output_offsets[output], out.width, "next.carry"),
-                                              layout.inputs[input].first,
-                                              out.unsign);
+                              impl_->load_packed(packed_out, output_offsets[output], out.width, "next.carry"),
+                              layout.inputs[input].first,
+                              out.unsign);
     next                       = b.CreateSelect(is_active, next, carries[i]);
     next_carries.push_back(next);
   }
@@ -1449,9 +1769,9 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     const auto  output = *layout.next_active;
     const auto& out    = impl_->output_values[output].value;
     next_active        = cast_integer(b,
-                                      impl_->load_packed(packed_out, output_offsets[output], out.width, "next.active"),
-                                      layout.inputs[*layout.activation].first,
-                                      out.unsign);
+                               impl_->load_packed(packed_out, output_offsets[output], out.width, "next.active"),
+                               layout.inputs[*layout.activation].first,
+                               out.unsign);
     next_active        = b.CreateSelect(is_active, next_active, llvm::ConstantInt::get(active->getType(), 0));
   }
   // Carry outputs publish the retained carry, including inactive/zero trips.
@@ -1540,19 +1860,19 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   // builds, and every mainstream Linux toolchain defaults that link to PIE:
   // the Static model LLVM picks for a null reloc model emits absolute
   // relocations the PIE link then refuses.
-  std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(triple,
-                                                                           "generic",
-                                                                           "",
-                                                                           options,
-                                                                           llvm::Reloc::PIC_,
-                                                                           std::nullopt,
-                                                                           llvm::CodeGenOptLevel::Aggressive));
+  std::unique_ptr<llvm::TargetMachine> machine(
+      target->createTargetMachine(triple, "generic", "", options, llvm::Reloc::PIC_, std::nullopt, llvm::CodeGenOptLevel::Default));
   if (!machine) {
     error = "LLVM could not create a native target machine";
     return false;
   }
   impl_->module->setTargetTriple(triple);
   impl_->module->setDataLayout(machine->createDataLayout());
+  for (auto& function : *impl_->module) {
+    if (!function.isDeclaration()) {
+      function.addFnAttr(llvm::Attribute::OptimizeForSize);
+    }
+  }
   profile.mark("target-setup");
 
   const auto digest = [](llvm::StringRef bytes) {
@@ -1583,34 +1903,33 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
     }
   }
 
-  // Keep exact-width bit operations visible to a deliberately bounded scalar
-  // pipeline before instruction selection. The generic O2 module pipeline is
-  // a poor fit for generated color kernels: Minion's largest straight-line
-  // color spent more than 14 minutes in GVN alone. These kernels contain only bounded packed-word loops
-  // and no internal calls, so one pass each of stack promotion, local CSE,
-  // bit folding, CFG cleanup, and dead-code removal captures the useful
-  // simplifications without the inliner/GVN compile-time cliff.
+  // Use the size-oriented pipeline for native colors as well as host C++.
+  // The explicit native-loop inlining has already run. Keep its body rolled
+  // even for constant trip counts; size optimization must not duplicate it.
   llvm::LoopAnalysisManager     loop_analyses;
   llvm::FunctionAnalysisManager function_analyses;
   llvm::CGSCCAnalysisManager    cgscc_analyses;
   llvm::ModuleAnalysisManager   module_analyses;
   llvm::PipelineTuningOptions   tuning;
-  tuning.LoopUnrolling = false;
+  tuning.LoopUnrolling    = false;
+  tuning.LoopInterleaving = false;
   llvm::PassBuilder pass_builder(machine.get(), tuning, std::nullopt, profile.callbacks());
   pass_builder.registerModuleAnalyses(module_analyses);
   pass_builder.registerCGSCCAnalyses(cgscc_analyses);
   pass_builder.registerFunctionAnalyses(function_analyses);
   pass_builder.registerLoopAnalyses(loop_analyses);
   pass_builder.crossRegisterProxies(loop_analyses, function_analyses, cgscc_analyses, module_analyses);
-  llvm::FunctionPassManager functions;
-  functions.addPass(llvm::SROAPass(llvm::SROAOptions::ModifyCFG));
-  functions.addPass(llvm::EarlyCSEPass());
-  functions.addPass(llvm::InstCombinePass());
-  functions.addPass(llvm::SimplifyCFGPass());
-  functions.addPass(llvm::ADCEPass());
-  llvm::ModulePassManager pipeline;
-  pipeline.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(functions)));
+  auto pipeline = pass_builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::Os);
   pipeline.run(*impl_->module, module_analyses);
+  if (impl_->loop_function != nullptr) {
+    // Clean up hoisted loop expressions without perturbing straight-line
+    // colors with a second global instruction-combining sweep.
+    llvm::FunctionPassManager loop_cleanup;
+    loop_cleanup.addPass(llvm::InstCombinePass());
+    loop_cleanup.run(*impl_->loop_function, function_analyses);
+    short_circuit_loop_carries(*impl_->loop_function);
+    function_analyses.invalidate(*impl_->loop_function, llvm::PreservedAnalyses::none());
+  }
   profile.mark("ir-optimization");
 
   // Legalizing an oversized integer produces thousands of native operations.
@@ -1807,18 +2126,20 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
     return false;
   }
   llvm::TargetOptions                  options;
-  std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(triple,
-                                                                           "generic",
-                                                                           "",
-                                                                           options,
-                                                                           llvm::Reloc::PIC_,
-                                                                           std::nullopt,
-                                                                           llvm::CodeGenOptLevel::Aggressive));
+  std::unique_ptr<llvm::TargetMachine> machine(
+      target->createTargetMachine(triple, "generic", "", options, llvm::Reloc::PIC_, std::nullopt, llvm::CodeGenOptLevel::Default));
   if (!machine) {
     error = "LLVM could not create a native target machine for linked simulator bitcode";
     return false;
   }
   module->setDataLayout(machine->createDataLayout());
+  for (auto& function : *module) {
+    // Cold support may explicitly use optnone; LLVM forbids combining it
+    // with optsize. Preserve that function-level override.
+    if (!function.isDeclaration() && !function.hasFnAttribute(llvm::Attribute::OptimizeNone)) {
+      function.addFnAttr(llvm::Attribute::OptimizeForSize);
+    }
+  }
   profile.mark("target-setup");
 
   // Which kernels does THIS module actually call? Recorded BEFORE the inliner
@@ -1846,22 +2167,17 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
   llvm::CGSCCAnalysisManager    cgscc_analyses;
   llvm::ModuleAnalysisManager   module_analyses;
   llvm::PipelineTuningOptions   tuning;
-  tuning.LoopUnrolling = false;
+  tuning.LoopUnrolling    = false;
+  tuning.LoopInterleaving = false;
   llvm::PassBuilder pass_builder(machine.get(), tuning, std::nullopt, profile.callbacks());
   pass_builder.registerModuleAnalyses(module_analyses);
   pass_builder.registerCGSCCAnalyses(cgscc_analyses);
   pass_builder.registerFunctionAnalyses(function_analyses);
   pass_builder.registerLoopAnalyses(loop_analyses);
   pass_builder.crossRegisterProxies(loop_analyses, function_analyses, cgscc_analyses, module_analyses);
-  llvm::FunctionPassManager functions;
-  functions.addPass(llvm::SROAPass(llvm::SROAOptions::ModifyCFG));
-  functions.addPass(llvm::EarlyCSEPass());
-  functions.addPass(llvm::InstCombinePass());
-  functions.addPass(llvm::SimplifyCFGPass());
-  functions.addPass(llvm::ADCEPass());
   llvm::ModulePassManager pipeline;
   pipeline.addPass(llvm::AlwaysInlinerPass());
-  pipeline.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(functions)));
+  pipeline.addPass(pass_builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::Os));
   pipeline.run(*module, module_analyses);
 
   for (auto& function : module->functions()) {

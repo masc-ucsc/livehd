@@ -1,0 +1,33 @@
+/*
+:name: icarus_backend_parity
+:type: simulation
+:sim_sweep: sim.tune.backend=slop,llvm
+*/
+// Three backend disagreements the Icarus-vs-slop-vs-llvm differential fuzz
+// found (2026-10-09); Icarus on the emitted Verilog is the reference:
+//   q -- slop read the unsigned 5-bit sum 20 of `(i1 - (-19)) / 2` back from a
+//        signed Slop<5> (as -12): the divide carrier lacked the unsigned bit.
+//   s -- `1 << n` with n:S2 == -1 shifts by 3 (the count's bit pattern), so the
+//        shift needs 4 bits; bitwidth sized it from the signed max (2 bits).
+//   e -- `t == b` with t:S16 = wrap b is false once b >= 32768; llvm compared
+//        the shared bit pattern.
+pub mod icarus_backend_parity(i1:U1, n:S2, b:U16) -> (q:U16@[0], s:U8@[0], e:Bool@[0]) {
+  q = (i1 - (-19)) / 2
+  sat s = U1(b == b) << n
+  mut t:S16 = 0
+  wrap t = b
+  e = t == b
+}
+
+test icarus_backend_parity.icarus {
+  mut dut = icarus_backend_parity
+  tick 4 {
+    dut.i1 = clock & 1
+    dut.n  = if clock == 0 { -1 } elif clock == 1 { -2 } elif clock == 2 { 1 } else { 0 }
+    dut.b  = if clock < 2 { 40000 } else { 1234 }
+    step
+    assert(dut.q == (if clock & 1 == 1 { 10 } else { 9 }), "q")
+    assert(dut.s == (if clock == 0 { 8 } elif clock == 1 { 4 } elif clock == 2 { 2 } else { 1 }), "s")
+    assert(dut.e == (clock >= 2), "e")
+  }
+}

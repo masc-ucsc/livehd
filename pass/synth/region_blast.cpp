@@ -433,6 +433,10 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   // equally large selector forest. `pi_order` records the exact lazy creation
   // order, so the mapped PI readback remains positional and deterministic.
   absl::flat_hash_map<hhds::Pin_class, size_t> region_input_index;
+  absl::flat_hash_set<hhds::Pin_class> region_output_pins;
+  for (const auto& port : rb.outputs) {
+    region_output_pins.insert(port.src_driver);
+  }
   // Native boundary outputs follow the same demand-driven rule as region
   // inputs.  Wide packed-wiring boundaries can expose tens of thousands of
   // bits while the mapped cone reads only a handful; eagerly creating every PI
@@ -1857,7 +1861,10 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
         out_bits = std::max(out_bits, gu::bits_of(op_pin));
       }
     }
-    if (op == Ntype_op::SHL || op == Ntype_op::Not) {
+    // A copied slice can be local while its producer is still exported for
+    // the slice's original owner. The declared region output needs every bit;
+    // local consumers alone cannot prove that the exported prefix is enough.
+    if ((op == Ntype_op::SHL || op == Ntype_op::Not) && !region_output_pins.contains(out_pin)) {
       const auto demand = gu::masked_output_width(n, [&](const auto& consumer) { return region.contains(consumer); });
       if (demand > 0) {
         out_bits = std::min(out_bits, static_cast<int>(demand));

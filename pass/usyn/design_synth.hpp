@@ -29,6 +29,7 @@ struct Design_options {
   uint64_t                                 cost_model_work  = 0;
   bool                                     eq_balance       = false;
   uint64_t                                 max_source_nodes = 2000000;
+  bool                                     specialize       = true;  // pass.specialize on the private copy
   partition::Flatten_mode                  flatten          = partition::Flatten_mode::automatic;
   Logical_cache_options                    cache{};
 };

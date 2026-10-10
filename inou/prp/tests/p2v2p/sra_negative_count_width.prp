@@ -1,0 +1,6 @@
+// Fuzz: a right shift whose count may be negative kept its output pin's stale
+// width (11 bits) although `t0 ^ 1027` needs 12, so the ref read 1027 as -1021.
+// Whatever the count, `a >> n` lies in a's range plus 0 / -1.
+pub comb sra_negative_count_width(i1:S3, t0:S4, i3:S16) -> (o1:S16) {
+  wrap o1 = (((t0 ^ 1027) >> i1) + i3)  // the `+ i3` may overflow S16
+}

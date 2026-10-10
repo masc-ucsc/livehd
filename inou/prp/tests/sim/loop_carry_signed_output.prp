@@ -1,0 +1,24 @@
+/*
+:name: loop_carry_signed_output
+:type: simulation
+:sim_sweep: sim.tune.backend=slop,llvm
+*/
+// A compact loop's unsigned carry (`t0:U8`, Slop_u<8>) aliased straight into a
+// signed output (`sat o0:S8 = t0` is a proven no-op) was assigned without a
+// conversion, and the generated simulator did not compile.
+pub mod loop_carry_signed_output(i0:U8) -> (o0:S8@[0]) {
+  mut t0:U8 = 1
+  for j in 0..<5 {
+    wrap t0 = t0 | i0#[j]
+  }
+  sat o0 = t0
+}
+
+test loop_carry_signed_output.carry {
+  mut dut = loop_carry_signed_output
+  tick 3 {
+    dut.i0 = if clock == 0 { 0 } elif clock == 1 { 0x1f } else { 0x0a }
+    step
+    assert(dut.o0 == (if clock == 1 { 1 } else { 1 }), "or-reduction of the low bits into bit 0")
+  }
+}

@@ -525,7 +525,20 @@ void Bitwidth::process_shl(hhds::Node_class& node, Inp_pins& inp_edges) {
   const auto n_max           = n_it->second.get_max();
   const bool may_be_negative = n_min.is_negative();
   const auto n_lo            = may_be_negative ? zero : n_min;
-  const auto n_hi            = n_max.is_negative() ? zero : n_max;
+  auto       n_hi            = n_max.is_negative() ? zero : n_max;
+  // A negative count is its bit pattern read unsigned at the count's width,
+  // as the emitted Verilog shifts (user ruling 2026-10-09: Icarus semantics;
+  // `1 << i1` with i1:S2 == -1 shifts by 3). Bounding it by the signed max
+  // sized `1 << i1` to 2 bits, and every backend dropped the 8.
+  if (may_be_negative) {
+    const auto nb = bits_of(n_dpin);
+    if (nb > 0 && nb < 4096) {
+      const auto pattern_max = *Dlop::get_mask_value(nb);
+      if (pattern_max.gt_op(n_hi)->is_known_true()) {
+        n_hi = pattern_max;
+      }
+    }
+  }
 
   auto       max        = a_bw.get_max();
   auto       min        = a_bw.get_min();
@@ -612,6 +625,13 @@ void Bitwidth::process_sra(hhds::Node_class& node, Inp_pins& inp_edges) {
     } else {
       fallback.set_sbits_range(bits);
     }
+    // Whatever the count (a negative one shifts by its unsigned bit pattern,
+    // user ruling 2026-10-09), `a >> n` lies in a's range plus 0 / -1. A
+    // stale narrower carrier must not win: `(t0 ^ 1027) >> i1` kept an 11-bit
+    // output for a 12-bit value and the ref read 1027 as -1021 (random Pyrope
+    // fuzz, 2026-10-09).
+    fallback.set_wider_range(a_bw);
+    fallback.set_wider_range(*Dlop::create_integer(a_bw.get_min().is_negative() ? -1 : 0), *Dlop::create_integer(0));
     adjust_bw(output, fallback);
     return;
   }
@@ -826,6 +846,15 @@ void Bitwidth::process_memory(hhds::Node_class& node) {
     Bitwidth_range addr_bw(0, mem_size - 1);
     for (auto& dpin : addr_drivers) {
       auto it = bwmap.find(dpin.get_class_index());
+      // As for the din seed below: an expression whose range this pass derives
+      // from its operands must not be seeded with the memory's index range.
+      // The map only widens, so a 1-bit Get_mask address (`mem[{1'b0, t2}]`
+      // after cprop drops the zero lane) kept [0, 3], and the same pin feeding
+      // a 1-bit Concat lane failed concat-lane-width (random Verilog fuzz,
+      // 2026-10-09).
+      if (it == bwmap.end() && !dpin.is_const() && infer_internal_range(type_op_of(dpin.get_master_node()))) {
+        continue;
+      }
       if (it == bwmap.end()) {
         bwmap.insert_or_assign(dpin.get_class_index(), addr_bw);
         discovered_some_backward_nodes_try_again = true;
@@ -1321,7 +1350,12 @@ void Bitwidth::process_assignment_or(hhds::Node_class& node, Inp_pins& inp_edges
 
 void Bitwidth::process_bit_or(hhds::Node_class& node, Inp_pins& inp_edges) {
   I(inp_edges.size() > 1);
-  int32_t max_bits     = 0;
+  // TWO maxima, as process_bit_xor: a non-negative uW operand needs W+1 bits
+  // once the RESULT has to be signed. Taking its unsigned width into the signed
+  // range made `u16 | s4` stamp s16, so 0x800F read back negative (random
+  // Pyrope round-trip fuzz, 2026-10-08).
+  int32_t max_bits     = 0;  // unsigned answer
+  int32_t max_sbits    = 0;  // signed answer
   bool    any_negative = false;
   for (auto e : inp_edges) {
     auto it = bwmap.find(e.get_driver_pin().get_class_index());
@@ -1330,10 +1364,14 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, Inp_pins& inp_edges) {
       not_finished = true;
       return;
     }
-    any_negative = any_negative || !it->second.is_always_positive();
-    auto bits    = it->second.is_always_positive() ? it->second.get_ubits() : it->second.get_sbits();
-    if (bits > max_bits) {
-      max_bits = bits;
+    if (it->second.is_always_positive()) {
+      const int32_t ubits = it->second.get_ubits();
+      max_bits            = std::max(max_bits, ubits);
+      max_sbits           = std::max(max_sbits, ubits == 0 ? 0 : ubits + 1);
+    } else {
+      any_negative = true;
+      max_sbits    = std::max(max_sbits, it->second.get_sbits());
+      max_bits     = std::max(max_bits, it->second.get_sbits());
     }
   }
 
@@ -1357,7 +1395,7 @@ void Bitwidth::process_bit_or(hhds::Node_class& node, Inp_pins& inp_edges) {
     // The old bound was UNSOUND: an operand that *can* be negative only sets
     // the result's sign bit when it actually is, so `a | b` is perfectly
     // capable of being positive and pinning max at 0 said otherwise.
-    bw.set_sbits_range(max_bits);
+    bw.set_sbits_range(max_sbits);
   } else {
     bw.set_range(*Dlop::create_integer(0), *Dlop::get_mask_value(max_bits));
   }

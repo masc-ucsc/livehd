@@ -1474,11 +1474,17 @@ std::set<std::string> sim_unused_artifacts(const std::string& directory, const s
     }
     std::string line;
     while (std::getline(source, line)) {
-      const auto first = line.find_first_not_of(" \t");
-      if (first == std::string::npos || !std::string_view(line).substr(first).starts_with("#include")) {
+      auto first = line.find_first_not_of(" \t");
+      if (first == std::string::npos || line[first] != '#') {
         continue;
       }
-      const auto begin = line.find('"', first + 8);
+      // `#  include "x"`: blanks are allowed between '#' and the directive
+      const auto directive = line.find_first_not_of(" \t", first + 1);
+      if (directive == std::string::npos || !std::string_view(line).substr(directive).starts_with("include")) {
+        continue;
+      }
+      first            = directive;
+      const auto begin = line.find('"', first + 7);
       if (begin == std::string::npos) {
         continue;
       }
@@ -1708,6 +1714,7 @@ void sim_command(Options& opts, Result& res) {
   bool        ckpt_on          = true;
   bool        ckpt_explicit    = false;  // the user configured checkpoints (sim.tune: auto does not profile then)
   bool        init_zero        = false;
+  std::string warn_undefined;  // empty: the driver's default (on)
   bool        unknown_zero     = false;
   bool        unknown_zero_set = false;  // an explicit sim.unknown_zero is always followed (sim.tune ruling 3)
   std::string ckpt_min_secs, ckpt_max, ckpt_max_overhead, ckpt_every;
@@ -1729,6 +1736,8 @@ void sim_command(Options& opts, Result& res) {
       ckpt_explicit = true;
     } else if (k == "sim.init_zero") {
       init_zero = (v == "true" || v == "1" || v == "on");
+    } else if (k == "sim.warn_undefined") {
+      warn_undefined = (v == "true" || v == "1" || v == "on") ? "true" : "false";
     } else if (k == "sim.unknown_zero") {
       // Read here for the TESTBENCH literals (prp_sim); the DUT side gets the
       // same flag as an inou.cgen.sim label (lhd_kernel_common's sim.* mapping).
@@ -1889,7 +1898,7 @@ void sim_command(Options& opts, Result& res) {
     std::ofstream bf(std::format("{}/BUILD", simdir), std::ios::app);
     bf << "\nload(\"@rules_cc//cc:defs.bzl\", \"cc_binary\")\n";
     bf << std::format(
-        "cc_binary(\n    name = \"{0}\",\n    srcs = [\"{0}.cpp\"],\n    copts = [\"-std=c++23\", \"-pthread\"],\n"
+        "cc_binary(\n    name = \"{0}\",\n    srcs = [\"{0}.cpp\"],\n    copts = [\"-std=c++23\", \"-Os\", \"-pthread\"],\n"
         "    linkopts = [\"-pthread\"],\n"
         "    deps = [\":sim\", \"@hlop//hlop\"],\n)\n",
         prp_sim::kDriverBasename);
@@ -2110,25 +2119,13 @@ void sim_command(Options& opts, Result& res) {
     tus.push_back(hlop_inc + "/vcd_writer.cpp");
   }
 
-  // -O2, not -O1 (todo/livehd/2f-latch M7 efficiency item b). The optimization
-  // level is NOT the lever here; the job count is. Measured on
-  // dino's whole-CPU driver (18 TUs, 5372 generated lines, 18-core arm64):
-  //
-  //   one serial clang++ over all TUs   -O2 36.5s  -O1 31.6s  -Os 30.9s  -O0 17.3s
-  //   per-TU -c in parallel, then link  -O2  6.9s
-  //   the simulation itself (20k cycles)  -O2 3.8s   -Os 6.5s  -Oz 11.0s
-  //
-  // So parallelism buys 5.3x where the level buys ~15%, and -Os pays for its
-  // 16% of build with 68% of the RUN. The note that used to sit here — "compile
-  // time is IDENTICAL at -O1/-O2/-O3" — was measured on a 1-2 TU driver and
-  // does not survive at 18; it reached the right conclusion (keep -O2) for a
-  // reason that no longer holds. -O3 still measures no better and inflates code
-  // size on generated straight-line arithmetic.
+  // Size optimization is the simulator default for both Slop and LLVM's
+  // generated C++ support. Keep compilation parallel and cache its full command.
   // ABSOLUTE -I: `--workdir` is routinely relative, and the ninja build runs
   // with its cwd set to the sim dir (so its .ninja_deps/.ninja_log land there),
   // where a relative `-Iw/sim` would resolve to nothing.
   const std::string simdir_abs = fs::absolute(simdir).string();
-  std::string       cflags     = std::format("-std=c++23 -DNDEBUG -O2 -pthread -I{} -I{} -I{}",
+  std::string       cflags     = std::format("-std=c++23 -DNDEBUG -Os -pthread -I{} -I{} -I{}",
                                              shell_quote(simdir_abs),
                                              shell_quote(hlop_inc),
                                              shell_quote(iassert_inc));
@@ -2144,10 +2141,16 @@ void sim_command(Options& opts, Result& res) {
       jobs = std::atoi(v.c_str());
     }
   }
+  // The load-independent job count: what the PCH decision below compares
+  // against. `jobs` follows the machine's CURRENT load, and the PCH choice lands
+  // in every TU's stamped command line, so deciding on the load would rebuild
+  // every object whenever the host was busier than the last run.
+  int stable_jobs = jobs > 0 ? jobs : static_cast<int>(livehd::sim::available_cpus());
   if (jobs <= 0) {
     jobs = static_cast<int>(livehd::sim::available_compile_jobs());
   }
-  jobs = std::clamp(jobs, 1, static_cast<int>(tus.size()));
+  jobs        = std::clamp(jobs, 1, static_cast<int>(tus.size()));
+  stable_jobs = std::clamp(stable_jobs, 1, static_cast<int>(tus.size()));
 
   // One object per TU. The objects are NOT wiped between runs and their names
   // are STABLE (derived from the source basename, never from a position in the
@@ -2429,7 +2432,7 @@ void sim_command(Options& opts, Result& res) {
     // jobs, 6.4 -> 7.0 s. `true` forces it, `false` disables it.
     const bool pch_forced = pch_set == "true" || pch_set == "1" || pch_set == "on";
     bool       pch_on     = pch_set != "false" && pch_set != "0" && pch_set != "off"
-                  && (pch_forced || tus.size() >= 2 * static_cast<size_t>(std::max(jobs, 1)));
+                  && (pch_forced || tus.size() >= 2 * static_cast<size_t>(std::max(stable_jobs, 1)));
     if (pch_on) {
       int        vrc     = 0;
       const auto version = capture(std::format("{} --version 2>&1", shell_quote(cxx)), vrc);
@@ -2904,6 +2907,9 @@ void sim_command(Options& opts, Result& res) {
   }
   if (init_zero) {
     run_args += " --init-zero";
+  }
+  if (!warn_undefined.empty()) {
+    run_args += " --set sim.warn_undefined=" + warn_undefined;
   }
   // Always ask the driver for its per-test result array (a sidecar JSON file);
   // it is read back below and embedded verbatim as the envelope's "tests" member

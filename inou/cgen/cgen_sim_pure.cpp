@@ -37,8 +37,14 @@ bool Cgen_sim::pure_graph(hhds::Graph* graph) {
       // Match the ordinary simulator emitter: proof-only subnodes and
       // detached placeholders have no runtime instance or side effects.
       // They must not turn a stateless arithmetic loop into lane scheduling.
-      if (!io || io->get_name().empty() || io->get_name() == gu::lgassert_module_name
-          || io->get_name() == gu::fproperty_module_name) {
+      if (!io || io->get_name().empty() || gu::is_marker_module_name(io->get_name())) {
+        // ...but only while nothing reads them: emit_pure_eval binds a Sub's
+        // outputs from its callee's __pure_eval, which a placeholder has none of.
+        for (auto output : node.out_sorted_pins()) {
+          if (output.out_edges().begin() != output.out_edges().end()) {
+            return false;
+          }
+        }
         continue;
       }
       if (!pure_graph(node.get_subnode_graph().get())) {

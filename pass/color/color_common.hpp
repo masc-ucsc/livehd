@@ -179,6 +179,10 @@ struct Color_opts {
   // and no merge at all. The shipped policy (30000) lives on the pass.color
   // label so a direct caller or unit test still gets what it asked for.
   uint64_t max_gate      = 0;
+  // Soft lower bound in the same predicted-AIG unit. Unlike a node-count
+  // floor, this also catches a few wide operators. Zero preserves the old policy.
+  uint64_t min_gate      = 0;
+  bool     boundary_wiring = false;  // copy constant bit wiring into consuming regions
   // cones mode: every cone walks to the register boundary and every pair of
   // overlapping cones merges, whatever max_gate says, so each combinational
   // path lies inside one color (flop-to-flop colors, the synth/domino mapper's

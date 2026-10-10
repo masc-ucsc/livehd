@@ -1271,7 +1271,8 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             return;
           }
           seed_operand(a_dpin, a_bits);
-          pin_tracker.add_sra(wname, trk_id(a_dpin), a_bits, b_const);
+          // The SRA's own driver width bounds what any consumer can read.
+          pin_tracker.add_sra(wname, trk_id(a_dpin), a_bits, b_const, std::max(bits_of(node.get_driver_pin(0)), 0));
         } else if (op == Ntype_op::Sext) {
           auto a_dpin = hier_driver_of(node, "a");
           auto b_dpin = hier_driver_of(node, "b");
@@ -1929,6 +1930,15 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
 
   // OT gate/instance name -> node, to source-attribute the path points below.
   absl::flat_hash_map<std::string, hhds::Occurrence_node> inst2node;
+  // region_id -> its color_qor_ row. A linear find per cell was O(cells x
+  // regions): 10.6M cells x 6.4k regions on xs Rob.
+  absl::flat_hash_map<uint32_t, Color_qor*> qor_row;
+  if (stats_) {
+    qor_row.reserve(color_qor_.size());
+    for (auto& row : color_qor_) {
+      qor_row.try_emplace(row.region_id, &row);  // first row wins, as the find did
+    }
+  }
 
   for (auto& node : leaf_nodes(g)) {
     auto op = type_op_of(node);
@@ -1956,10 +1966,8 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         }
       }
       if (region_id != 0) {
-        auto it
-            = std::find_if(color_qor_.begin(), color_qor_.end(), [&](const Color_qor& row) { return row.region_id == region_id; });
-        if (it != color_qor_.end()) {
-          color_row = &*it;
+        if (auto it = qor_row.find(region_id); it != qor_row.end()) {
+          color_row = it->second;
           ++color_row->cells;
         }
       }

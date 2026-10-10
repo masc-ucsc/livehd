@@ -1192,10 +1192,14 @@ private:
         error_at(nid, "upass.tolg: malformed constant literal '{}'", lnast_->get_name(nid));
       }
       if (c->is_nil()) {
-        // A bare `nil` literal that reaches a graph leaf has always lowered to
-        // the integer 0 (the structural nil paths are handled by their own
-        // rules); say so here -- the constant pool refuses Nil as a value.
-        c = Dlop::create_integer(0);
+        // A bare `nil` literal that reaches a graph leaf is X (every bit
+        // unknown): a nil the compiler cannot prove unread is a random
+        // initial value in simulation (user ruling 2026-10-09), the same X an
+        // output left unassigned on a runtime path already gets. It used to
+        // lower to 0, so `mut x:U8 = nil; if c { x = a }` and `o = nil` read
+        // 0 while the unassigned-output path read X. The constant pool refuses
+        // Nil as a value either way.
+        c = Dlop::unknown();
       }
       int32_t mw
           = c->is_just_i64() ? mw_of_val(c->to_just_i64()) : std::max<int32_t>(1, static_cast<int32_t>(c->get_signed_bits()));
@@ -9107,8 +9111,11 @@ private:
     sub.create_sink_pin("cond").connect_driver(cond);
     // Carry the "line of code info" (file:line of the `a#[lo..=hi]`) on the
     // instance-name attr so cgen can fold it into the assertion message.
+    // The attr is the WHOLE message: the array-index guard below shares the
+    // primitive, and cgen used to prefix every lgassert with this one's text.
     const auto  sp  = lnast_->span_of(loc_nid);
-    std::string loc = sp.file.empty() ? std::string{"?"} : sp.file;
+    std::string loc = "descending bit-range select (hi < lo) at ";
+    loc += sp.file.empty() ? std::string{"?"} : sp.file;
     if (sp.start_line) {
       loc += ":" + std::to_string(*sp.start_line);
     }
@@ -9169,6 +9176,37 @@ private:
   // an `fproperty` Sub: a recognized primitive carrying the 1-bit cond, with
   // "<kind>\x1f<loc>\x1f<msg>" packed in the instance-name attr. pass.formal
   // proves/defers it; cgen emits a runtime check for what it could not prove.
+  // sim.warn_undefined (`__fkind__undefined`, the slang reader's out-of-range
+  // memory access): an `lgundef` marker Sub whose `cond` is true while the
+  // access is defined -- `!path || in_range`, the same implication an assert
+  // takes -- named "<what>\x1f<file:line>". Only the simulator reads it.
+  void lower_undefined_marker(const Lnast_nid& nid, const Val& cond, std::string msg) {
+    if (cond.pin.is_const() && livehd::graph_util::const_of(cond.pin).is_known_true()) {
+      return;
+    }
+    auto gio = lib_->find_io(livehd::graph_util::lgundef_module_name);
+    if (!gio) {
+      gio = lib_->create_io(livehd::graph_util::lgundef_module_name);
+      gio->add_input("cond", 1);
+      gio->set_bits("cond", 1);
+      gio->set_unsign("cond", true);
+    }
+    const auto guard    = effect_path_cond();
+    const auto eff_cond = guard.is_invalid() ? nonzero1(cond.pin) : or2(not1(nonzero1(guard)), nonzero1(cond.pin));
+    auto       sub      = make_node(Ntype_op::Sub);
+    sub.set_subnode(gio);
+    sub.create_sink_pin("cond").connect_driver(eff_cond);
+    if (msg.size() >= 2 && (msg.front() == '\'' || msg.front() == '"') && msg.back() == msg.front()) {
+      msg = msg.substr(1, msg.size() - 2);
+    }
+    const auto  sp  = lnast_->span_of(nid);
+    std::string loc = sp.file.empty() ? std::string{"?"} : sp.file;
+    if (sp.start_line) {
+      loc += ":" + std::to_string(*sp.start_line);
+    }
+    sub.attr(hhds::attrs::name).set(std::string(livehd::graph_util::lgundef_name_prefix) + msg + "\x1f" + loc);
+  }
+
   void lower_cassert(const Lnast_nid& nid) {
     if (lib_ == nullptr) {
       return;
@@ -9207,6 +9245,9 @@ private:
       } else if (s == "__fkind__cassert") {
         kind = "cassert";
         nxt  = lnast_->get_sibling_next(nxt);
+      } else if (s == "__fkind__undefined") {
+        kind = "undefined";
+        nxt  = lnast_->get_sibling_next(nxt);
       }
     }
     // `cassert` is an ELABORATION check: the upass must fold it here, or it
@@ -9233,6 +9274,10 @@ private:
     }
     if (!nxt.is_invalid() && Lnast_ntype::is_const(lnast_->get_type(nxt))) {
       msg = std::string{lnast_->get_name(nxt)};
+    }
+    if (kind == "undefined") {
+      lower_undefined_marker(nid, cond, msg);
+      return;
     }
     auto gio = lib_->find_io(livehd::graph_util::fproperty_module_name);
     if (!gio) {
@@ -9556,6 +9601,19 @@ private:
     const int32_t own_mw = base.mw;
     const auto    decl   = bit_write_decl(set_mask_nid, dst, val);
     is_signed            = decl && decl->is_signed;
+    if (decl && own_mw > decl->mw && decl->mw > 0) {
+      // The variable holds its declared bits only. A wider base (an X seed:
+      // `mut m:S8 = nil` is the 65-bit unknown) re-signed the result at the
+      // seed's width, a no-op, so bits above the declared ones stayed X and
+      // `m < -64` read them after all 8 bits were written (random Pyrope
+      // fuzz, 2026-10-09). Enter at the declared width.
+      auto gm = make_node(Ntype_op::Get_mask);
+      livehd::graph_util::connect_mask_operands(gm, base.pin, 0, decl->mw);
+      base.pin = gm.create_driver_pin(0);
+      set_ubits(base.pin, decl->mw);
+      base.mw = decl->mw;
+      return base;
+    }
     if (decl) {
       base.mw = std::max(base.mw, decl->mw);
     } else if (reach > 0) {
@@ -10472,8 +10530,11 @@ private:
       return;
     }
     const int64_t bval = const_val(b);
-    if (bval == 0) {  // constprop already errors comptime mod-by-zero; guard anyway.
-      error_at(b, {"mod-by-zero", "type"}, "upass.tolg: modulo by zero is an illegal operation");
+    if (bval == 0) {
+      // Pyrope rejects a comptime zero divisor in constprop; one that reaches
+      // here is Verilog's `x % 0`, which is X (Icarus: all-x), not an error
+      // (random Pyrope round-trip fuzz, 2026-10-09).
+      record(dst_name, create_const(*g_, *Dlop::unknown()), 1);
       return;
     }
     const int64_t babs = iabs64(bval);

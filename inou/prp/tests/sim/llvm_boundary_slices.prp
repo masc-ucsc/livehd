@@ -29,3 +29,26 @@ test llvm_boundary_slices.shared_transport {
     assert(clock > 0 implies (dut.low == 0 and dut.cross == 0 and dut.high == 0))
   }
 }
+
+// Signed integers extend above their inferred storage width. Cover a window
+// wholly above the input and another that crosses the 64-bit limb boundary.
+pub mod llvm_signed_boundary_slices(d:S4) -> (full:U12@[0], high:U8@[0], cross:U70@[0], negative:S12@[0]) {
+  full = d#[0..=11]
+  high = d#[4..=11]
+  cross = d#[1..=70]
+  negative = d#sext[0..=11]
+}
+
+test llvm_signed_boundary_slices.sign_extension {
+  mut dut = llvm_signed_boundary_slices
+  tick 16 {
+    dut.d = clock - 8
+    step
+    const value = clock - 8
+    const shifted = value >> 1
+    assert(dut.full == if value < 0 { value + 4096 } else { value })
+    assert(dut.high == if value < 0 { 255 } else { 0 })
+    assert(dut.cross == if value < 0 { shifted + (1 << 70) } else { shifted })
+    assert(dut.negative == value)
+  }
+}

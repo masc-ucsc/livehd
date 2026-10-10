@@ -23,6 +23,7 @@ const char* adder_name(synth::arith::Adder_kind kind) {
     case synth::arith::Adder_kind::cska  : return "cska";
     case synth::arith::Adder_kind::cla   : return "cla";
     case synth::arith::Adder_kind::prefix: return "prefix";
+    case synth::arith::Adder_kind::brent : return "brent";
     case synth::arith::Adder_kind::rca   : break;
   }
   return "rca";
@@ -31,6 +32,7 @@ const char* multiplier_name(synth::arith::Mult_kind kind) {
   switch (kind) {
     case synth::arith::Mult_kind::array: return "array";
     case synth::arith::Mult_kind::tree : return "tree";
+    case synth::arith::Mult_kind::sn   : return "sn";
     case synth::arith::Mult_kind::csa  : break;
   }
   return "csa";

@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <print>
+#include <set>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -51,6 +52,10 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "true|false: expand carry-dependent loops before ABC mapping (default true). False maps their "
                        "bodies separately and stitches the carry connections afterwards, for benchmarking. Independent "
                        "loops always map separately; compile.unroll=true requests general front-end expansion.",
+                       "true");
+  m.add_label_optional("specialize",
+                       "true|false: run pass.specialize (constant instance inputs folded into state-free callees) on "
+                       "the private copy after pass.color (default true; the synth.specialize spelling)",
                        "true");
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library",
@@ -199,9 +204,10 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "-1");
   m.add_label_optional("verbose", "per-module ABC stats", "false");
   m.add_label_optional("stats", "report one mapped QoR row per (definition, color); incremental rows include resynth=1|0", "false");
-  m.add_label_optional("adder",
-                       "auto|rca|cska|cla: auto compares mapped area or critical-path timing, including inlined arithmetic",
-                       "auto");
+  m.add_label_optional(
+      "adder",
+      "auto|rca|cska|cla|prefix|brent: auto compares mapped area or critical-path timing, including inlined arithmetic",
+      "auto");
   m.add_label_optional("barrel", "auto|log|reverse: barrel mux stage order; explicit selection disables trials", "auto");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   m.add_label_optional("threads",
@@ -219,10 +225,11 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "true|false skip memory admission and map the region regardless. It may exhaust "
                        "physical memory and be killed by the OS",
                        "false");
-  m.add_label_optional("multiplier",
-                       "auto|array|tree: partial-product summation; auto trials a balanced tree on critical paths. An explicit "
-                       "multiplier locks its internal adder too",
-                       "auto");
+  m.add_label_optional(
+      "multiplier",
+      "auto|array|tree|csa|sn: partial-product summation; auto trials a balanced tree on critical paths. An explicit "
+      "multiplier locks its internal adder too",
+      "auto");
   m.add_label_optional("qor",
                        "write per-region + total QoR JSON (mapped gates/area/critical delay, source-attributed) to this file "
                        "(`lhd pass abc` defaults it to <workdir>/qor.json when --workdir is set)",
@@ -417,8 +424,8 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j             += std::format("\"top\":\"{}\",", jesc(top));
   j             += std::format("\"library\":\"{}\",", jesc(opts.library));
   j             += std::format("\"register\":{},\"memory\":\"{}\",",
-                               opts.map_register ? "true" : "false",
-                               livehd::synth::memory_fold_name(opts.memory_fold));
+                   opts.map_register ? "true" : "false",
+                   livehd::synth::memory_fold_name(opts.memory_fold));
   // The per-region register guard (0 = every flop maps), so a QoR reader can
   // tell "kept native by limit" from "kept native by contract" (an
   // asynchronous reset) without the diagnostics stream.
@@ -458,17 +465,17 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     }
     // The asynchronous clear/preset picks (empty: that reset value stays native).
     j          += std::format("],\"clear\":\"{}\",\"preset\":\"{}\"",
-                              dff_sel.areset_ladder[0].empty() ? "" : jesc(dff_sel.areset_ladder[0].front().name),
-                              dff_sel.areset_ladder[1].empty() ? "" : jesc(dff_sel.areset_ladder[1].front().name));
+                     dff_sel.areset_ladder[0].empty() ? "" : jesc(dff_sel.areset_ladder[0].front().name),
+                     dff_sel.areset_ladder[1].empty() ? "" : jesc(dff_sel.areset_ladder[1].front().name));
     // The integrated clock-gate pick (empty: gated-clock registers stay native).
     j          += std::format(",\"icg\":\"{}\"", dff_sel.icg_ladder.empty() ? "" : jesc(dff_sel.icg_ladder.front().name));
     // The transparent data-latch picks, active-high / active-low enable
     // (empty: that latch polarity maps through the other one plus an inverter,
     // or stays native without either).
     j          += std::format(",\"latch\":\"{}\",\"latch_n\":\"{}\"",
-                              dff_sel.latch_ladder[0][0].empty() ? "" : jesc(dff_sel.latch_ladder[0][0].front().name),
-                              dff_sel.latch_ladder[1][0].empty() ? "" : jesc(dff_sel.latch_ladder[1][0].front().name));
-    j          += ",\"cells\":{";
+                     dff_sel.latch_ladder[0][0].empty() ? "" : jesc(dff_sel.latch_ladder[0][0].front().name),
+                     dff_sel.latch_ladder[1][0].empty() ? "" : jesc(dff_sel.latch_ladder[1][0].front().name));
+    j += ",\"cells\":{";
     bool first  = true;
     for (const auto& [name, n] : dff_count) {
       j     += std::format("{}\"{}\":{}", first ? "" : ",", jesc(name), n);
@@ -655,7 +662,9 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   auto prepared
       = livehd::synth::prepare_design(var.graphs,
                                       unroll_carry_text == "true" || unroll_carry_text == "1" || unroll_carry_text == "on",
-                                      "pass.abc");
+                                      "pass.abc",
+                                      nullptr,
+                                      var.get("specialize", "true") != "false");
   if (!prepared) {
     return;
   }
@@ -712,13 +721,15 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
 
   auto adder = livehd::synth::arith::parse_adder_kind(adder_s == "auto" ? "rca" : adder_s);
   if (!adder.has_value()) {
-    livehd::diag::err("pass.abc", "bad-adder", "io").msg("pass.abc: unknown adder '{}' (use rca|cska|cla)", adder_s).fatal();
+    livehd::diag::err("pass.abc", "bad-adder", "io")
+        .msg("pass.abc: unknown adder '{}' (use rca|cska|cla|prefix|brent)", adder_s)
+        .fatal();
     return;
   }
   auto multiplier = livehd::synth::arith::parse_mult_kind(mult_s == "auto" ? "array" : mult_s);
   if (!multiplier.has_value()) {
     livehd::diag::err("pass.abc", "bad-multiplier", "io")
-        .msg("pass.abc: unknown multiplier '{}' (use auto|array|tree)", mult_s)
+        .msg("pass.abc: unknown multiplier '{}' (use auto|array|tree|csa|sn)", mult_s)
         .fatal();
     return;
   }
@@ -1044,10 +1055,14 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
       break;
     }
   }
-  opts.ware_arith   = ware_policy.arith;
-  opts.ware_cmp     = ware_policy.cmp;
-  opts.ware_shift   = ware_policy.shift;
-  auto ware_modules = livehd::synth::build_ware_modules(scratch_graphs, ware_policy);
+  opts.ware_arith = ware_policy.arith;
+  opts.ware_cmp   = ware_policy.cmp;
+  opts.ware_shift = ware_policy.shift;
+  std::set<int> option_colors;
+  for (const auto& [color, ro] : region_opts) {
+    option_colors.insert(color);
+  }
+  auto ware_modules = livehd::synth::build_ware_modules(scratch_graphs, ware_policy, option_colors);
   resolve_graphs.insert(resolve_graphs.end(), ware_modules.begin(), ware_modules.end());
   auto memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits);
   resolve_graphs.insert(resolve_graphs.end(), memory_modules.begin(), memory_modules.end());
@@ -1103,7 +1118,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     // an unknown `dff_cell` name) falls back to the raw option so the two
     // failure shapes stay distinct keys too.
     const std::string dff_desc = livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell);
-    incr = std::make_shared<livehd::synth::Region_cache>(cache_dir,
+    incr                       = std::make_shared<livehd::synth::Region_cache>(cache_dir,
                                                          livehd::synth::Region_cache::make_salt(livehd::abc::kAbcSrcSalt,
                                                                                                 opts.library,
                                                                                                 opts.map_register,

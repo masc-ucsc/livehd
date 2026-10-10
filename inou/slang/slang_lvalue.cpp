@@ -1371,6 +1371,9 @@ const slang::ast::Expression* Slang_context::peel_unpacked_chain(const slang::as
 Slang_context::Unpacked_address Slang_context::build_unpacked_address(const Mem_info&                                   mi,
                                                                       const std::vector<const slang::ast::Expression*>& sels) {
   Unpacked_address addr;
+  if (!sels.empty() && sels.front() != nullptr) {
+    addr.range = sels.front()->sourceRange;
+  }
   bool             never = false;  // a constant selector outside its dim
   auto             check = [&](const std::string& condition) {
     addr.in_range = addr.in_range.empty() ? condition : builder_.create_log_and_stmts(addr.in_range, condition);
@@ -1444,9 +1447,28 @@ Slang_context::Unpacked_address Slang_context::build_unpacked_address(const Mem_
   return addr;
 }
 
+// sim.warn_undefined: an access that CAN leave the array gets a marker the
+// simulator reports the first time it does (user ruling 2026-10-09: the
+// reader emits it, the translation itself stays SystemVerilog's X read /
+// dropped write). A `cassert` with the `__fkind__undefined` kind: upass keeps
+// it unless the condition folds true, tolg lowers it to an `lgundef` marker
+// under the current path condition, and only the simulator reads it.
+void Slang_context::note_out_of_range(const Unpacked_address& addr, std::string_view what) {
+  if (addr.in_range.empty()) {
+    return;  // no selector can leave its dimension
+  }
+  set_pending_loc(addr.range);
+  auto idx = builder_.add_child(Lnast_ntype::create_cassert());
+  builder_.add_value_child_pub(idx, addr.in_range);  // already a Bool (the range compares), or `false`
+  builder_.add_child(idx, Lnast_node::create_const("__fkind__undefined"));
+  builder_.add_child(idx, Lnast_node::create_const(absl::StrCat("'", what, "'")));
+  clear_pending_loc();
+}
+
 // Emit `emit` (the stores of a write) under the address check: nothing for a
 // constant out-of-range address, `if in_range { ... }` for a runtime one.
 void Slang_context::emit_if_in_range(const Unpacked_address& addr, const std::function<void()>& emit) {
+  note_out_of_range(addr, "memory write outside the array");
   if (addr.in_range == "false") {
     return;  // Verilog drops an out-of-range write
   }
@@ -1460,6 +1482,7 @@ void Slang_context::emit_if_in_range(const Unpacked_address& addr, const std::fu
 // and 0 when those bits land past a span that is not a power of two.
 std::string Slang_context::emit_guarded_read(const Unpacked_address& addr, int bits,
                                              const std::function<std::string(const std::string&)>& read) {
+  note_out_of_range(addr, "memory read outside the array");
   if (!addr.past_span) {
     return read(addr.index);
   }
@@ -2395,6 +2418,18 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
       lo_bit = 0;
     }
     note_write(*lv.base, current_assign_nonblocking_, sr.start());
+    const auto bi = tinfo(lv.base->getType());
+    if (!current_assign_nonblocking_ && bi.is_signed && !flat_port_syms_.contains(lv.base)) {
+      // As the runtime-position write below: a signed local declares no range,
+      // so a set_mask on its unbounded value cannot reach its sign bit --
+      // `t[1] = 1` on `reg signed [1:0] t = 1` must read -1, not 3 (random
+      // Verilog fuzz). Splice the bit pattern and store it sign-extended.
+      auto cur_p = to_pattern(read_symbol(*lv.base, sr), bi.bits, true);
+      builder_.create_assign_stmts(
+          base_name,
+          fit_wrap(splice_range(cur_p, std::to_string(lo_bit), std::to_string(lo_bit + lv.width - 1), val), bi.bits, true));
+      return;
+    }
     builder_.create_set_mask_stmts(base_name, val, std::to_string(lo_bit), std::to_string(lo_bit + lv.width));
     return;
   }

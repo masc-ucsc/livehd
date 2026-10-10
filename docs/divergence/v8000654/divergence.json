@@ -1,0 +1,170 @@
+{
+ "icarus_vs_verilator": [
+  {
+   "cycle": 0,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "225",
+   "lhd_llvm": "225"
+  },
+  {
+   "cycle": 1,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "225",
+   "lhd_llvm": "225"
+  },
+  {
+   "cycle": 2,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "225",
+   "lhd_llvm": "225"
+  },
+  {
+   "cycle": 3,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "225",
+   "lhd_llvm": "225"
+  },
+  {
+   "cycle": 3,
+   "output": "o1",
+   "icarus": "X",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 4,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "225",
+   "lhd_llvm": "225"
+  },
+  {
+   "cycle": 5,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "225",
+   "lhd_llvm": "225"
+  },
+  {
+   "cycle": 5,
+   "output": "o1",
+   "icarus": "X",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 6,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "225",
+   "lhd_llvm": "225"
+  },
+  {
+   "cycle": 7,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "225",
+   "lhd_llvm": "225"
+  },
+  {
+   "cycle": 8,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "225",
+   "lhd_llvm": "225"
+  },
+  {
+   "cycle": 9,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "225",
+   "lhd_llvm": "225"
+  },
+  {
+   "cycle": 9,
+   "output": "o1",
+   "icarus": "X",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  }
+ ],
+ "inputs": [
+  {
+   "i0": 2260,
+   "i1": 4013,
+   "i2": 1674,
+   "i3": 131
+  },
+  {
+   "i0": 1722,
+   "i1": 2488,
+   "i2": -32695,
+   "i3": 236
+  },
+  {
+   "i0": 2358,
+   "i1": 3955,
+   "i2": 18215,
+   "i3": 464
+  },
+  {
+   "i0": 891,
+   "i1": 3044,
+   "i2": -20384,
+   "i3": 313
+  },
+  {
+   "i0": 2944,
+   "i1": 1914,
+   "i2": 18369,
+   "i3": 50
+  },
+  {
+   "i0": 1831,
+   "i1": 204,
+   "i2": -7707,
+   "i3": 233
+  },
+  {
+   "i0": 1173,
+   "i1": 1052,
+   "i2": -32478,
+   "i3": 16
+  },
+  {
+   "i0": 3147,
+   "i1": 892,
+   "i2": -12154,
+   "i3": 430
+  },
+  {
+   "i0": 1167,
+   "i1": 1090,
+   "i2": -32538,
+   "i3": 310
+  },
+  {
+   "i0": 3515,
+   "i1": 2665,
+   "i2": 8332,
+   "i3": 325
+  }
+ ]
+}

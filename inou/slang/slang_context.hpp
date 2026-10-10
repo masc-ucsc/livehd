@@ -943,8 +943,10 @@ private:
     int64_t     span      = 1;
     bool        past_span = false;
     bool        constant  = false;  // `index` is a literal
+    slang::SourceRange range;       // the selectors, for the sim.warn_undefined marker
   };
   Unpacked_address build_unpacked_address(const Mem_info& mi, const std::vector<const slang::ast::Expression*>& sels);
+  void             note_out_of_range(const Unpacked_address& addr, std::string_view what);
   void             emit_if_in_range(const Unpacked_address& addr, const std::function<void()>& emit);
   std::string emit_guarded_read(const Unpacked_address& addr, int bits, const std::function<std::string(const std::string&)>& read);
   bool        current_assign_nonblocking_ = false;

@@ -2081,10 +2081,21 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // now carry their declared sign (they used to be a blanket `input signed`
     // compensated by a to_positive Get_mask), so read the unsigned ones as the
     // non-negative signed values they are.
-    const bool  mixed_signs       = mixes_operand_signs(node);
+    // A NEGATIVE constant operand is a signed operand too (mixes_operand_signs
+    // skips constants): beside an unsigned operand the expression was unsigned
+    // and `rem - (-1)` zero-extended the -1 into +1023 (random Pyrope
+    // round-trip fuzz, 2026-10-08).
+    bool negative_constant = false;
+    bool unsigned_operand  = false;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      const auto drv     = sink.get_driver_pin();
+      negative_constant |= drv.is_const() && const_of(drv).is_negative();
+      unsigned_operand  |= !drv.is_const() && !operand_reads_signed(drv);
+    }
+    const bool  mixed_signs       = mixes_operand_signs(node) || (negative_constant && unsigned_operand);
     const int   result_bits       = bits_of(dpin);
     const bool  result_uns        = is_unsign(dpin);
-    bool        signed_arithmetic = false;
+    bool        signed_arithmetic = negative_constant;
     for (const auto& sink : node.inp_sorted_pins()) {
       const auto drv     = sink.get_driver_pin();
       signed_arithmetic |= operand_reads_signed(drv);
@@ -2107,8 +2118,18 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       // zero-extend that operand before adding. Keep the arithmetic signed
       // and give a positive constant its leading zero bit; cast the result
       // unsigned only after evaluating the sum.
-      const int   constant_bits = signed_arithmetic ? std::max(result_bits, static_cast<int>(c.get_signed_bits())) : result_bits;
-      return absl::StrCat("(", const_to_verilog(c, constant_bits, result_uns && !signed_arithmetic && !c.is_negative()), ")");
+      //
+      // A constant spelled SIGNED must also hold its own value: the Sum's text
+      // can be re-read in a WIDER context (a division or compare around it),
+      // where Verilog sign-extends every operand, and `t0 - 8` with an S4
+      // result spelled the 8 as `4'sh8` == -8, so `(t0 - 8) / 8` computed
+      // +1 instead of -1 (random Pyrope round-trip fuzz, 2026-10-08).
+      const bool  spell_unsigned = result_uns && !signed_arithmetic && !c.is_negative();
+      int         constant_bits  = signed_arithmetic ? std::max(result_bits, static_cast<int>(c.get_signed_bits())) : result_bits;
+      if (!spell_unsigned) {
+        constant_bits = std::max(constant_bits, static_cast<int>(c.get_signed_bits()));
+      }
+      return absl::StrCat("(", const_to_verilog(c, constant_bits, spell_unsigned), ")");
     };
     for (const auto& sink : node.inp_sorted_pins()) {
       const auto drv     = sink.get_driver_pin();
@@ -2134,7 +2155,14 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     } else {
       final_expr = absl::StrCat(add_seq, " - (", sub_seq, ")");
     }
-    if (result_uns && saw_context_constant) {
+    if (result_uns && signed_arithmetic && result_bits > 0) {
+      // Range inference proved the result non-negative, but the text still
+      // computes in signed arithmetic. Inlined beside an unsigned operand the
+      // whole Verilog expression goes unsigned and the inner $signed operands
+      // zero-extend: `-(... $signed(1'(i2 >>> 5)) << 3) ^ bit` gave 4089 for 9
+      // (random Pyrope round-trip fuzz, 2026-10-08). Seal it at its width.
+      final_expr = absl::StrCat("$unsigned(", result_bits, "'(", final_expr, "))");
+    } else if (result_uns && saw_context_constant) {
       // The constant above gives the inner expression result_bits of context,
       // so this cast cannot narrow the arithmetic. It does make the proven
       // unsigned landing explicit to a Verilog reader: without it, the direct
@@ -2189,13 +2217,45 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     const auto b   = get_driver(find_sink_pin(node, "b"));
     auto       lhs = get_expression(a);
     auto       rhs = get_expression(b);
+    // Like a comparison, a quotient gives its inlined arithmetic operands no
+    // width context of their own: `(a7 + b16) / 6` was evaluated at the 16-bit
+    // LHS width and lost the sum's carry (random Pyrope round-trip fuzz,
+    // 2026-10-08). Size each inlined operand at its graph width first.
+    // A size cast keeps the inner expression's sign: the unsigned 183 of
+    // `(9'shb7 >>> t1)` sized to 8 bits read as -73 and divided signed (random
+    // Pyrope round-trip fuzz, 2026-10-09). An unsigned pin lands unsigned.
+    const auto sized = [&](const hhds::Pin_class& p, std::string expr) {
+      if (!p.is_const() && !pin2var.contains(p.get_class_index()) && bits_of(p) > 0) {
+        const auto cast = absl::StrCat(bits_of(p), "'(", expr, ")");
+        return is_unsign(p) ? absl::StrCat("$unsigned(", cast, ")") : cast;
+      }
+      return expr;
+    };
+    lhs = sized(a, std::move(lhs));
+    rhs = sized(b, std::move(rhs));
     // Verilog makes both operands unsigned when either is unsigned. Preserve
     // the LGraph's numeric operand values with a zero-extended signed carrier.
-    if (mixes_operand_signs(node)) {
+    const bool mixed = mixes_operand_signs(node);
+    if (mixed) {
       lhs = signed_operand(a, lhs);
       rhs = signed_operand(b, rhs);
     }
     final_expr = absl::StrCat(lhs, op == Ntype_op::Div ? "/" : "%", rhs);
+    // A SIGNED result whose operands both read unsigned is evaluated unsigned
+    // by Verilog; its consumers trust the pin's sign, so `rem - (-1)` beside it
+    // went unsigned and the -1 became +1023 (random Pyrope round-trip fuzz,
+    // 2026-10-08). The value is non-negative and fits the signed width: land it
+    // there and read it signed.
+    if (!mixed && !is_unsign(dpin) && bits_of(dpin) > 0 && !operand_reads_signed(a)) {
+      final_expr = absl::StrCat("$signed(", bits_of(dpin), "'(", final_expr, "))");
+    } else if (is_unsign(dpin) && (mixed || operand_reads_signed(a) || operand_reads_signed(b))) {
+      // The converse: a SIGNED division landing in a (proven non-negative)
+      // unsigned pin. Spliced into an unsigned consumer (the SHL zero pad),
+      // Verilog re-evaluated the operands unsigned and -1/2 became 7/2
+      // (random Pyrope round-trip fuzz, 2026-10-08). `$unsigned()` takes a
+      // self-determined argument, so the division stays signed inside it.
+      final_expr = absl::StrCat("$unsigned(", final_expr, ")");
+    }
   } else if (op == Ntype_op::Not) {
     auto lhs_dpin = get_driver(find_sink_pin(node, "a"));
     auto lhs      = get_expression(lhs_dpin);
@@ -2206,8 +2266,20 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       // becomes 5'b0_addr before ~ is applied.
       fout->append("  ", var_pre->second, " = ", lhs, ";\n");
       lhs = var_pre->second;
+    } else if (var_pre == pin2var.end() && bits_of(dpin) > 0
+               && (bits_of(dpin) != bits_of(lhs_dpin) || is_unsign(dpin) != is_unsign(lhs_dpin))) {
+      // INLINED: the same evaluation at the output width and sign, by a size
+      // cast instead of a temporary. `~u1` is -1/-2 in LiveHD's unbounded
+      // integers; a bare `~g` on a 1-bit unsigned g was 0/1 and made the whole
+      // enclosing expression unsigned (random Pyrope round-trip fuzz,
+      // 2026-10-08).
+      // Parenthesized: yosys parses `~1'(x)` as a cast of size `~1` (-2).
+      const auto sized = absl::StrCat("~(", bits_of(dpin), "'(", lhs, "))");
+      final_expr       = is_unsign(dpin) ? sized : absl::StrCat("$signed(", sized, ")");
     }
-    final_expr = absl::StrCat("~", lhs);
+    if (final_expr.empty()) {
+      final_expr = absl::StrCat("~", lhs);
+    }
   } else if (op == Ntype_op::Set_mask) {
     auto a_dpin = get_driver(find_sink_pin(node, "a"));
     auto a      = get_expression(a_dpin);
@@ -2493,6 +2565,14 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     std::string wide_val;
     if (operand_is_self_contained && operand_reads_signed(val_dpin)) {
       wide_val = absl::StrCat("($signed(", std::to_string(obits), "'sb0) | $signed(", val_expr, "))");
+    } else if (operand_reads_signed(val_dpin) && bits_of(val_dpin) > 0) {
+      // An inlined signed operand with no signed destination to land in (the
+      // shift is itself inlined): size it at its graph width first -- the size
+      // cast gives the expression that width as its context, like a compare
+      // operand -- then sign-extend. The unsigned pad zero-filled it:
+      // `(-4) ^ (i0 << 6)`, folded to `((~i0) << 6) | 0x3c`, came out positive
+      // (random Pyrope round-trip fuzz, 2026-10-08).
+      wide_val = absl::StrCat("($signed(", std::to_string(obits), "'sb0) | $signed(", bits_of(val_dpin), "'(", val_expr, ")))");
     } else {
       wide_val = absl::StrCat("({", std::to_string(obits), "{1'b0}} | ", val_expr, ")");
     }
@@ -2528,6 +2608,13 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       const auto amount = const_of(amt_dpin).to_just_i64();
       if (amount >= 0 && amount < bits_of(a_dpin)) {
         final_expr = bits_of(a_dpin) == 1 ? val_expr : absl::StrCat(val_expr, "[", amount, "]");
+        // The PATTERN is the bit either way, but a SIGNED one-bit result is
+        // the value 0/-1, and its text is spliced into arithmetic: a bare
+        // select reads unsigned (+1), so `(s >>> 2) + y` added 1 instead of -1
+        // (random Pyrope round-trip fuzz, 2026-10-08).
+        if (!is_unsign(dpin) && bits_of(a_dpin) != 1) {
+          final_expr = absl::StrCat("$signed(", final_expr, ")");
+        }
       }
     }
     if (final_expr.empty()) {
@@ -2546,12 +2633,38 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       // forces the left operand signed even when `val`'s text would otherwise read
       // unsigned. Only do this for a genuinely signed operand: `$signed`-wrapping
       // an unsigned value would sign-extend a value that should zero-fill.
+      const bool inlined_operand = !a_dpin.is_const() && !pin2var.contains(a_dpin.get_class_index()) && bits_of(a_dpin) > 0;
       if (!operand_reads_signed(a_dpin)) {
+        // The shifted operand takes the assignment's width as context: a 10-bit
+        // `i0 + ~i2` shifted into an 8-bit net was summed at 9 bits and lost
+        // its carry before the shift (random Pyrope round-trip fuzz,
+        // 2026-10-08). Size an inlined operand at its graph width.
+        // $unsigned: a size cast keeps the inner sign, so `2'((3'sh3) >>> i1)`
+        // was the signed -1 and the outer `>>>` sign-filled it to all ones.
+        if (inlined_operand) {
+          val_expr = absl::StrCat("$unsigned(", bits_of(a_dpin), "'(", val_expr, "))");
+        }
         final_expr = absl::StrCat(val_expr, " >>> ", amt_expr);
+        // The text is an unsigned (logical) shift; a SIGNED result pin is read
+        // signed by every consumer (operand_reads_signed trusts the pin), so
+        // spell the non-negative value signed: beside a signed sibling the
+        // unsigned text made the enclosing `|` unsigned and zero-extended it
+        // (`(-i3 >> i3) | ((49 - i3) >> i3)` read 15 for -1; random Pyrope
+        // round-trip fuzz, 2026-10-09).
+        if (!is_unsign(dpin)) {
+          final_expr = absl::StrCat("$signed({1'b0, (", final_expr, ")})");
+        }
       } else {
         // A nested SRA's operand also takes this branch (its inner shift already
         // emitted self-contained signed text), so the outer `>>>` is isolated too
         // and the enclosing unsigned context cannot demote it to a logical shift.
+        // `$signed(x)` self-determines x: an INLINED operand (`r0 - i0`, a
+        // 9-bit result of two S8s) would be re-read at its 8-bit natural width
+        // and wrap before the shift (random Pyrope round-trip fuzz,
+        // 2026-10-08). Size it at its graph width first.
+        if (inlined_operand) {
+          val_expr = absl::StrCat(bits_of(a_dpin), "'(", val_expr, ")");
+        }
         final_expr = absl::StrCat("$signed($signed(", val_expr, ") >>> ", amt_expr, ")");
       }
     }
@@ -2733,8 +2846,20 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // (`1'sh1`, the -1) is ZERO-extended: `b ^ -1` flipped only bit 0. The
     // argument of `$unsigned(...)` is self-determined, so the signed evaluation
     // stays in its own context and the non-negative value zero-extends right.
-    if (mixed_signs && !operand_reads_signed(node.get_driver_pin(0))) {
-      final_expr = absl::StrCat("$unsigned(", final_expr, ")");
+    //
+    // Not only a MIXED-sign node: any signed operand (a constant does not count
+    // in mixes_operand_signs) evaluates the text signed, `s2 & 4'sh6` with s2 =
+    // -2 is 6 only when s2 sign-extends; inside an enclosing unsigned Sum it
+    // zero-extended to 2 (random Pyrope round-trip fuzz, 2026-10-08). The
+    // size cast keeps a Mult's full product inside the self-determined
+    // argument.
+    bool any_signed_operand = mixed_signs;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      any_signed_operand |= operand_reads_signed(sink.get_driver_pin());
+    }
+    if (any_signed_operand && !operand_reads_signed(node.get_driver_pin(0))) {
+      const auto w = bits_of(node.get_driver_pin(0));
+      final_expr   = w > 0 ? absl::StrCat("$unsigned(", w, "'(", final_expr, "))") : absl::StrCat("$unsigned(", final_expr, ")");
     }
   }
 
@@ -2963,6 +3088,12 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
       continue;
     }
 
+    // A sim.warn_undefined marker: the emitted Verilog already has the X read /
+    // dropped write it reports on, so there is nothing to write.
+    if (sub_io->get_name() == livehd::graph_util::lgundef_module_name) {
+      continue;
+    }
+
     // Runtime range-select guard (`a#[lo..=hi]`): an `lgassert` Sub is a
     // recognized primitive, NOT a real sub-graph. Lower it to an inline
     // SystemVerilog immediate assertion on its `cond` input. It drives no data
@@ -2976,6 +3107,8 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
       if (cond.is_invalid()) {
         continue;
       }
+      // The instance-name attr is the whole message (tolg names the check:
+      // a descending range select, an out-of-range array index).
       std::string loc;
       if (auto nm = node.attr(hhds::attrs::name); nm.has()) {
         loc = std::string{nm.get()};
@@ -2985,8 +3118,8 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
       fout->append("always_comb begin\n");
       fout->append("  assert (",
                    get_wire_or_const(cond),
-                   ") else $error(\"lgassert: descending bit-range select (hi < lo)",
-                   loc.empty() ? std::string{} : absl::StrCat(" at ", loc),
+                   ") else $error(\"lgassert: ",
+                   loc.empty() ? std::string{"runtime check failed"} : loc,
                    "\");\n");
       fout->append("end\n");
       fout->append("// synthesis translate_on\n");
@@ -3634,6 +3767,10 @@ void Cgen_verilog::create_registers(std::shared_ptr<File_output> fout, hhds::Gra
         // because every emitter gave a flop enable fanout >= 2; pass.single_edge
         // synthesizes `enable & (phase == slot)` with exactly one consumer.
         enable = get_expression(enable_dpin);
+      } else if (!enable_dpin.is_invalid() && enable_dpin.is_known_false()) {
+        // A constant-false enable never loads; dropping it as "no enable"
+        // wrote din on every edge (cprop folds the depth-1 case to din = q).
+        enable = "1'b0";
       }
     }
 

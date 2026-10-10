@@ -1,0 +1,16 @@
+// Fuzz: the packed [4]U3 table lowers to a 6-bit set_mask chain. The Pyrope
+// writer demoted its SSA copy to `mut w2 = <3-bit seed>` and then wrote
+// `w2#[3..<6]`, which the regenerated source rejected (bit-range-overflow).
+pub mod set_mask_ssa_copy_width(i0:U8) -> (o0:U4@[0]) {
+  reg r0:S8 = 0
+  mut a_t0:[4]U3 = 0
+  mut e0_t0:U3 = 0
+  wrap e0_t0 = i0#[4..=6]
+  a_t0[0] = e0_t0
+  mut e1_t0:U3 = 0
+  wrap e1_t0 = r0
+  a_t0[1] = e1_t0
+  mut t0 = a_t0[i0#[3..<5]]
+  if (i0 < t0) { wrap r0 = i0 }
+  wrap o0 = r0
+}

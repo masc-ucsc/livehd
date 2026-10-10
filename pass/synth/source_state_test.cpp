@@ -606,5 +606,23 @@ TEST_F(SourceState, HierarchicalValidationVisitsSharedDefinitionsBeforePartition
   EXPECT_EQ(diag::sink().records()[0].span.file, "rtl/child.v");
   EXPECT_EQ(diag::sink().records()[0].span.start_line, 19U);
 }
+TEST_F(SourceState, PrivateSliceCannotNarrowAnExportedProducer) {
+  auto wide = node(Ntype_op::Not, "wide", 3);
+  connect(wide, "a", in("a"));
+  auto slice = node(Ntype_op::Get_mask, "private_slice", 2);
+  connect(slice, "a", wide.create_driver_pin(0));
+  gu::connect_bit_range(slice, 0, 2);
+  ready();
+  // The original slice belongs to another region, which exports its producer.
+  // This region also holds a private copy: both handles remain in rb.nodes.
+  rb.outputs.push_back({"wide", wide.create_driver_pin(0), 3, false});
+  const auto result = blast();
+  ASSERT_EQ(result.status, Region_blast::Status::blasted);
+  ASSERT_EQ(result.lnet.outputs().size(), 3U);
+  const auto high = result.lnet.outputs()[2].node;
+  EXPECT_EQ(result.lnet.kind(high), Lnet::Kind::constant);
+  EXPECT_TRUE(result.lnet.eval(high, 0));  // ~zero-extension of the two-bit input
+}
+
 }  // namespace
 }  // namespace livehd::synth

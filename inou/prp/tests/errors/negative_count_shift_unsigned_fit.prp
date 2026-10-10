@@ -1,0 +1,13 @@
+/*
+:name: negative_count_shift_unsigned_fit
+:type: error
+:error: may not fit
+*/
+
+// A count that may be negative shifts by its bit pattern (s:S3 == -1 by 7), so
+// `(-i3) >> i3` is bounded and can be negative: it does not fit a U5 without
+// `wrap`/`sat`. The count used to make the range unbounded, and an unbounded
+// value skipped the declared-fit check (random Pyrope fuzz, 2026-10-09).
+pub comb negative_count_shift_unsigned_fit(i3:S3) -> (o0:U5) {
+  o0 = ((-i3) >> i3) // locate_error_here
+}

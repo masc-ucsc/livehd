@@ -1,0 +1,152 @@
+{
+ "icarus_vs_verilator": [
+  {
+   "cycle": 4,
+   "output": "o0",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 4,
+   "output": "o1",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 5,
+   "output": "o0",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 5,
+   "output": "o1",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 6,
+   "output": "o0",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 6,
+   "output": "o1",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 7,
+   "output": "o0",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 7,
+   "output": "o1",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 8,
+   "output": "o0",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 8,
+   "output": "o1",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 9,
+   "output": "o0",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 9,
+   "output": "o1",
+   "icarus": "0",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  }
+ ],
+ "inputs": [
+  {
+   "i0": 27086,
+   "i1": 17607,
+   "i2": 57153
+  },
+  {
+   "i0": 48967,
+   "i1": 35873,
+   "i2": 54123
+  },
+  {
+   "i0": 31166,
+   "i1": 1875,
+   "i2": 20367
+  },
+  {
+   "i0": 10065,
+   "i1": 42587,
+   "i2": 15993
+  },
+  {
+   "i0": 30548,
+   "i1": 228,
+   "i2": 22380
+  },
+  {
+   "i0": 33111,
+   "i1": 5125,
+   "i2": 28928
+  },
+  {
+   "i0": 35632,
+   "i1": 54701,
+   "i2": 61963
+  },
+  {
+   "i0": 2652,
+   "i1": 3726,
+   "i2": 53128
+  },
+  {
+   "i0": 63510,
+   "i1": 40329,
+   "i2": 43731
+  },
+  {
+   "i0": 42038,
+   "i1": 41760,
+   "i2": 46121
+  }
+ ]
+}

@@ -11917,7 +11917,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     }
     auto sio = node.get_subnode_io();
     if (sio != nullptr
-        && (sio->get_name() == graph_util::fproperty_module_name || sio->get_name() == graph_util::lgassert_module_name)) {
+        && graph_util::is_marker_module_name(sio->get_name())) {
       continue;  // property primitives, not real boxes
     }
     bool flattenable = false;

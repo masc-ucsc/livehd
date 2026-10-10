@@ -1,0 +1,146 @@
+{
+ "icarus_vs_verilator": [
+  {
+   "cycle": 0,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 1,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 2,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 3,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 4,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 5,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 6,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 7,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 8,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 9,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  }
+ ],
+ "inputs": [
+  {
+   "i0": 230,
+   "i1": -15,
+   "i2": 2,
+   "i3": 8092941674705459038
+  },
+  {
+   "i0": 17,
+   "i1": -5,
+   "i2": 3,
+   "i3": 8754508376859407319
+  },
+  {
+   "i0": 184,
+   "i1": 22,
+   "i2": 1,
+   "i3": -7084718490429206212
+  },
+  {
+   "i0": 152,
+   "i1": -44,
+   "i2": 0,
+   "i3": 7793064043066412598
+  },
+  {
+   "i0": 185,
+   "i1": 23,
+   "i2": 2,
+   "i3": -8424118082448405320
+  },
+  {
+   "i0": 47,
+   "i1": -38,
+   "i2": 3,
+   "i3": 2449989688786046736
+  },
+  {
+   "i0": 141,
+   "i1": -28,
+   "i2": 2,
+   "i3": 3137142611372486341
+  },
+  {
+   "i0": 142,
+   "i1": -64,
+   "i2": 0,
+   "i3": -5069879875800676705
+  },
+  {
+   "i0": 94,
+   "i1": 44,
+   "i2": 3,
+   "i3": 7362453199350672811
+  },
+  {
+   "i0": 234,
+   "i1": 62,
+   "i2": 1,
+   "i3": -5422757697061686559
+  }
+ ]
+}

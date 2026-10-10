@@ -2560,7 +2560,7 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
     }
     ofs << "    ],\n";
     ofs << "    hdrs = glob([\"*.hpp\"]),\n";
-    ofs << "    copts = [\"-std=c++23\", \"-pthread\"],\n"
+    ofs << "    copts = [\"-std=c++23\", \"-Os\", \"-pthread\"],\n"
            "    linkopts = [\"-pthread\"],\n";
     // alwayslink: nothing references a `<stem>.tune-id.cpp` object by name --
     // the driver DEFINES weak fallbacks of its identity functions -- so a

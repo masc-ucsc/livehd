@@ -10,6 +10,7 @@
 #include <format>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <tuple>
 
@@ -153,7 +154,7 @@ std::string section_info(hhds::Graph& graph, int color, Ware_policy policy) {
 }
 
 std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class& node, const std::string& kind,
-                                     Ware_policy policy) {
+                                     Ware_policy policy, const std::set<int>& option_colors) {
   // Sink-port ascending by contract (the pin chain is kept sorted), which is the
   // whole of the order now. The sort_drivers_within_pin call that used to follow
   // is GONE: it imposed a deterministic order on the SEVERAL DRIVERS OF ONE SINK
@@ -196,10 +197,17 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   for (auto [pid, pin] : outputs) {
     descriptor += std::format("/o{}:{}:{}", pid, output_width(pin), gu::is_unsign(pin));
   }
+  // The color names the section only when that section carries its own
+  // options; then the body keeps it so pass.abc's per-color lookup still
+  // finds them. Otherwise equal shapes share one module whatever their color
+  // NUMBER (unstable across edits); the body keeps the first color, which by
+  // construction has no override either.
   const auto color  = gu::node_color_of(node);
   const auto info   = section_info(parent, color, policy);
-  descriptor       += std::format("/color:{}", color);
-  descriptor       += info;
+  if (info.find("\"region_opts\"") != std::string::npos || option_colors.contains(color)) {
+    descriptor += std::format("/color:{}", color);
+  }
+  descriptor += info;
   uint64_t hash     = 14695981039346656037ULL;
   for (unsigned char ch : descriptor) {
     hash = (hash ^ ch) * 1099511628211ULL;
@@ -342,7 +350,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
 }  // namespace
 
 std::vector<std::shared_ptr<hhds::Graph>> build_ware_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
-                                                             Ware_policy                                      fallback) {
+                                                             Ware_policy fallback, const std::set<int>& option_colors) {
   std::vector<std::shared_ptr<hhds::Graph>> modules;
   for (const auto& graph : graphs) {
     if (!graph || graph->get_input_node().attr(attrs::ware_module).has()) {
@@ -365,7 +373,7 @@ std::vector<std::shared_ptr<hhds::Graph>> build_ware_modules(const std::vector<s
         }
       }
       for (const auto& [node, kind] : nodes) {
-        auto child = enclose(*graph, node, kind, policy);
+        auto child = enclose(*graph, node, kind, policy, option_colors);
         if (std::find(modules.begin(), modules.end(), child) == modules.end()) {
           modules.push_back(child);
         }

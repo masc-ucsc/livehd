@@ -19,8 +19,8 @@
 #include "perf_tracing.hpp"
 #include "sim_color_plan.hpp"
 #include "sim_loop_fusion.hpp"
-#include "sim_specialize.hpp"
 #include "sim_tune_vector.hpp"  // the shared sim.tune.* knob grammar and defaults
+#include "specialize.hpp"
 #include "split_selfref.hpp"
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
@@ -321,7 +321,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   }
 
   if (!observe_on && vcd_out.empty()) {
-    livehd::sim::specialize_constants(sim_graphs);
+    livehd::specialize::specialize_constants(sim_graphs, {.refold_all = true});
   }
 
   // Run every STRUCTURAL rewrite the emitter makes, over the WHOLE library,

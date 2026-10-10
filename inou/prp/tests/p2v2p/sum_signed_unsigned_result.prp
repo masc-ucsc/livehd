@@ -1,0 +1,9 @@
+// Fuzz: range inference proves -((i2 >> 5) << 3) non-negative (0 or 8), so the
+// negate lands on an unsigned pin while its text still computes signed. Beside
+// the unsigned bit select the whole Verilog expression went unsigned, the inner
+// $signed(1'(...)) zero-extended, and o0 read 4089 instead of 9 for i2 = -2.
+pub comb sum_signed_unsigned_result(i2:S2) -> (o0:U12) {
+  mut t1:S9 = 0
+  sat t1 = (-((i2 >> 5) << 3))
+  o0 = (t1 ^ i2#[1..=1])
+}

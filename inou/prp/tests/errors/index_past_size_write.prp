@@ -1,0 +1,13 @@
+/*
+:name: index_past_size_write
+:type: error
+:error: has 3 entries but its index may reach 3
+:help: stays below 3
+*/
+
+// The write side of index_past_size_read: `a[wa] = x` with wa:U2.
+pub mod top(x:U8, wa:U2, ra:U1) -> (y:U8@[0]) {
+  reg a:[3]U8 = 0
+  a[wa] = x   // locate_error_here
+  y = a[ra]
+}

@@ -1,0 +1,12 @@
+// Fuzz: the same unsigned-landing signed Sum, read through a
+// folded mux by a shift sum and a mult.
+pub comb sum_signed_unsigned_mult(i0:U4, i1:U3) -> (o0:S15) {
+  mut a_t0:[4]U1 = 0
+  mut e0_t0:U1 = 0
+  wrap e0_t0 = i0
+  a_t0[1] = e0_t0
+  mut t0 = a_t0[i1#[2..<4]]
+  mut t1 = (i1 - Unsigned(i0))
+  mut t2 = (if (i0 == i0) { t1 } else { (~i1) })
+  wrap o0 = (((238063 >> t0) + t2) * i1#[2..=2])
+}

@@ -1,0 +1,20 @@
+/*
+:name: for_index_write
+:type: error
+:error: for. index
+*/
+
+// A `for (index, value)` index is the const position of the element
+// (05b-statements.md); writing it used to be accepted and changed every later
+// use of `i` in that iteration (random Pyrope fuzz, 2026-10-08). The loop VALUE
+// is a copy and stays writable.
+
+pub comb for_index_write(a:U8) -> (o:U8) {
+  const t = (1, 2, 3)
+  mut x:U8 = 0
+  for (i, v) in t {
+    i = 5 // locate_error_here
+    wrap x = x + i + v
+  }
+  o = x
+}

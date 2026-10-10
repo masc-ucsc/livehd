@@ -1,0 +1,126 @@
+{
+ "icarus_vs_verilator": [
+  {
+   "cycle": 0,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "4",
+   "lhd_slop": "4",
+   "lhd_llvm": "4"
+  },
+  {
+   "cycle": 1,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "4",
+   "lhd_slop": "4",
+   "lhd_llvm": "4"
+  },
+  {
+   "cycle": 2,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "4",
+   "lhd_slop": "4",
+   "lhd_llvm": "4"
+  },
+  {
+   "cycle": 3,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "4",
+   "lhd_slop": "4",
+   "lhd_llvm": "4"
+  },
+  {
+   "cycle": 4,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "4",
+   "lhd_slop": "4",
+   "lhd_llvm": "4"
+  },
+  {
+   "cycle": 5,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "4",
+   "lhd_slop": "4",
+   "lhd_llvm": "4"
+  },
+  {
+   "cycle": 6,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "4",
+   "lhd_slop": "4",
+   "lhd_llvm": "4"
+  },
+  {
+   "cycle": 7,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "4",
+   "lhd_slop": "4",
+   "lhd_llvm": "4"
+  },
+  {
+   "cycle": 8,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "4",
+   "lhd_slop": "4",
+   "lhd_llvm": "4"
+  },
+  {
+   "cycle": 9,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "4",
+   "lhd_slop": "4",
+   "lhd_llvm": "4"
+  }
+ ],
+ "inputs": [
+  {
+   "i0": -32051,
+   "i1": -3
+  },
+  {
+   "i0": 24821,
+   "i1": 55
+  },
+  {
+   "i0": -10541,
+   "i1": 187
+  },
+  {
+   "i0": -28520,
+   "i1": -200
+  },
+  {
+   "i0": -4765,
+   "i1": -5
+  },
+  {
+   "i0": 30420,
+   "i1": -197
+  },
+  {
+   "i0": 7236,
+   "i1": 54
+  },
+  {
+   "i0": -16373,
+   "i1": -29
+  },
+  {
+   "i0": 28268,
+   "i1": 173
+  },
+  {
+   "i0": -9347,
+   "i1": -116
+  }
+ ]
+}

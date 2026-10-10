@@ -1,0 +1,136 @@
+{
+ "icarus_vs_verilator": [
+  {
+   "cycle": 0,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "2147483646",
+   "lhd_slop": "2147483646",
+   "lhd_llvm": "2147483646"
+  },
+  {
+   "cycle": 1,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "2147483647",
+   "lhd_slop": "2147483647",
+   "lhd_llvm": "2147483647"
+  },
+  {
+   "cycle": 2,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "2147483647",
+   "lhd_slop": "2147483647",
+   "lhd_llvm": "2147483647"
+  },
+  {
+   "cycle": 3,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "2147483646",
+   "lhd_slop": "2147483646",
+   "lhd_llvm": "2147483646"
+  },
+  {
+   "cycle": 4,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "2147483646",
+   "lhd_slop": "2147483646",
+   "lhd_llvm": "2147483646"
+  },
+  {
+   "cycle": 5,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "2147483647",
+   "lhd_slop": "2147483647",
+   "lhd_llvm": "2147483647"
+  },
+  {
+   "cycle": 6,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "2147483647",
+   "lhd_slop": "2147483647",
+   "lhd_llvm": "2147483647"
+  },
+  {
+   "cycle": 7,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "2147418113",
+   "lhd_slop": "2147418113",
+   "lhd_llvm": "2147418113"
+  },
+  {
+   "cycle": 8,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "2147483646",
+   "lhd_slop": "2147483646",
+   "lhd_llvm": "2147483646"
+  },
+  {
+   "cycle": 9,
+   "output": "o0",
+   "icarus": "X",
+   "verilator": "2147483647",
+   "lhd_slop": "2147483647",
+   "lhd_llvm": "2147483647"
+  }
+ ],
+ "inputs": [
+  {
+   "i0": 13,
+   "i1": 0,
+   "i2": 1
+  },
+  {
+   "i0": -20,
+   "i1": 0,
+   "i2": 0
+  },
+  {
+   "i0": -156,
+   "i1": 0,
+   "i2": -2
+  },
+  {
+   "i0": 37,
+   "i1": 0,
+   "i2": 1
+  },
+  {
+   "i0": 42,
+   "i1": 1,
+   "i2": -1
+  },
+  {
+   "i0": -159,
+   "i1": 0,
+   "i2": 0
+  },
+  {
+   "i0": 201,
+   "i1": 1,
+   "i2": -2
+  },
+  {
+   "i0": -254,
+   "i1": 1,
+   "i2": 1
+  },
+  {
+   "i0": 34,
+   "i1": 0,
+   "i2": 1
+  },
+  {
+   "i0": 54,
+   "i1": 0,
+   "i2": 0
+  }
+ ]
+}

@@ -1730,3 +1730,59 @@ TEST(ColorSynthCones, SmallColorJoinsItsMostOverlappingNeighbourPastMaxGate) {
     }
   }
 }
+
+
+TEST(ColorSynthCones, PredictedFloorAbsorbsHeavyFewNodeTailPastSoftMaximum) {
+  for (const uint64_t floor : {0ULL, 256ULL}) {
+    auto f = absorb_fixture(std::format("lg_cones_pred_floor_{}", floor).c_str(), 64);
+    auto opts = capped_opts(f.chain_pred + 4);
+    opts.min_nodes = 0;
+    opts.min_gate = floor;
+    ASSERT_GT(f.tail_pred, opts.max_gate / 64);
+    ASSERT_GT(opts.max_gate, floor);
+    Color_synth(opts, "cones").label(f.g.get());
+    EXPECT_EQ(node_color_of(f.ra) == node_color_of(f.rb), floor != 0);
+    EXPECT_EQ(uncolored_count(f.g.get()), 0u);
+  }
+}
+
+TEST(ColorSynthCones, BudgetCutCannotHideWordLookupStrideOrObservedSlice) {
+  auto& lib = livehd::Hhds_graph_library::instance("lg_cones_affine_lookup");
+  auto io = lib.create_io("affine_lookup");
+  io->add_input("data", 1024);
+  io->add_input("index", 4);
+  auto g = io->create_graph();
+  set_bits(g->get_input_pin("data"), 1024);
+  set_bits(g->get_input_pin("index"), 4);
+  livehd::graph_util::set_unsign(g->get_input_pin("index"));
+  auto amount = create_typed_node(*g, Ntype_op::SHL, 10);
+  g->get_input_pin("index").connect_sink(livehd::graph_util::setup_sink_pid(amount, 0));
+  create_const(*g, *Dlop::create_integer(6)).connect_sink(livehd::graph_util::setup_sink_pid(amount, 1));
+  auto amount_out = amount.create_driver_pin(0);
+  set_bits(amount_out, 10);
+  livehd::graph_util::set_unsign(amount_out);
+  auto packed = create_typed_node(*g, Ntype_op::Get_mask, 1024);
+  g->get_input_pin("data").connect_sink(livehd::graph_util::setup_sink_pid(packed, 0));
+  livehd::graph_util::connect_bit_range(packed, 0, 1024);
+  auto packed_out = packed.create_driver_pin(0);
+  set_bits(packed_out, 1024);
+  auto shift = create_typed_node(*g, Ntype_op::SRA, 1024);
+  packed_out.connect_sink(livehd::graph_util::setup_sink_pid(shift, 0));
+  amount_out.connect_sink(livehd::graph_util::setup_sink_pid(shift, 1));
+  auto shift_out = shift.create_driver_pin(0);
+  set_bits(shift_out, 1024);
+  auto slice = create_typed_node(*g, Ntype_op::Get_mask, 64);
+  shift_out.connect_sink(livehd::graph_util::setup_sink_pid(slice, 0));
+  livehd::graph_util::connect_bit_range(slice, 0, 64);
+  auto slice_out = slice.create_driver_pin(0);
+  set_bits(slice_out, 64);
+  make_flop(*g, slice_out, 64);
+  auto opts = capped_opts(1024);
+  opts.stop_arith = false;
+  opts.stop_cmp = false;
+  opts.stop_shift = false;
+  Color_synth(opts, "cones").label(g.get());
+  EXPECT_EQ(node_color_of(shift), node_color_of(amount));
+  EXPECT_EQ(node_color_of(shift), node_color_of(slice));
+  EXPECT_EQ(uncolored_count(g.get()), 0u);
+}

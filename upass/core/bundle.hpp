@@ -266,6 +266,9 @@ public:
   bool concat(const std::shared_ptr<Bundle const>& tup, std::string* conflict = nullptr);
 
   bool is_empty() const { return !has_scalar_ && fields_.empty() && attr_map.empty(); }
+  // No value of its own -- at most residual attrs (an opaque Sub output's
+  // binding is attr-only).
+  bool has_no_data() const { return !has_scalar_ && fields_.empty(); }
   bool is_scalar() const { return has_scalar_ || fields_.size() <= 1; }
   bool is_trivial_scalar() const;
 

@@ -10,6 +10,7 @@
 // alike. It is the same gate pass/lec trusts for its no-solver skip.
 
 #include "legalize.hpp"
+#include "acyclic.hpp"
 
 #include <string>
 #include <vector>
@@ -614,4 +615,120 @@ TEST(LoopSplit, SplitLoopIsEquivalentToTheOriginal) {
   auto r    = livehd::lec::prove_equal(ref_host.get(), imp_host.get(), o, &sub_lib);
   EXPECT_EQ(r.verdict, livehd::lec::Verdict::Proven)
       << "splitting a loop into a parallel half and a recurrence half must preserve behavior; got " << r.detail;
+}
+
+namespace {
+// child `lane`: y = a[0] (a 2-bit packed input). top: lane.a = {msb, lsb}, q = lane.y.
+// `feedback_in_msb` puts lane.y into the bit lane.y does NOT read (a false,
+// port-level loop); otherwise into bit 0, the one it reads (a real loop).
+std::shared_ptr<hhds::Graph> build_packed_feedback(hhds::GraphLibrary& lib, bool feedback_in_msb) {
+  auto cio = lib.create_io("lane");
+  cio->add_input("a", 1);
+  cio->set_bits("a", 2);
+  cio->set_unsign("a", true);
+  cio->add_output("y", 2);
+  cio->set_bits("y", 1);
+  cio->set_unsign("y", true);
+  auto cg  = cio->create_graph();
+  auto sel = gu::create_typed_node(*cg, Ntype_op::Get_mask, 1);
+  auto ca  = cg->get_input_pin("a");
+  gu::set_ubits(ca, 2);
+  gu::connect_mask_operands(sel, ca, 0, 1);
+  sel.create_driver_pin(0).connect_sink(cg->get_output_pin("y"));
+  // State, so the state-free-inline rule does not apply: z = register(a).
+  cio->add_input("clk", 3);
+  cio->set_bits("clk", 1);
+  cio->add_output("z", 4);
+  cio->set_bits("z", 2);
+  auto reg = gu::create_typed_node(*cg, Ntype_op::Flop, 2);
+  reg.attr(hhds::attrs::name).set(std::string{"r"});
+  ca.connect_sink(gu::setup_sink_by_name(reg, "din"));
+  cg->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(reg, "clock_pin"));
+  reg.create_driver_pin(0).connect_sink(cg->get_output_pin("z"));
+
+  auto pio = lib.create_io("top");
+  pio->add_input("d", 1);
+  pio->set_bits("d", 1);
+  pio->set_unsign("d", true);
+  pio->add_output("q", 2);
+  pio->set_bits("q", 1);
+  auto pg  = pio->create_graph();
+  auto d   = pg->get_input_pin("d");
+  gu::set_ubits(d, 1);
+  auto sub = gu::create_typed_node(*pg, Ntype_op::Sub);
+  sub.set_subnode(cio);
+  auto y = sub.create_driver_pin(2);
+  gu::set_ubits(y, 1);
+  auto cat = gu::create_typed_node(*pg, Ntype_op::Concat);  // MSB first: {lane1, lane0}
+  (feedback_in_msb ? y : d).connect_sink(cat.create_sink_pin(0));
+  gu::create_const(*pg, *Dlop::create_integer(1)).connect_sink(cat.create_sink_pin(1));
+  (feedback_in_msb ? d : y).connect_sink(cat.create_sink_pin(2));
+  gu::create_const(*pg, *Dlop::create_integer(1)).connect_sink(cat.create_sink_pin(3));
+  auto packed = cat.create_driver_pin(0);
+  gu::set_ubits(packed, 2);
+  packed.connect_sink(sub.create_sink_pin(1));
+  y.connect_sink(pg->get_output_pin("q"));
+  pio->add_input("clk", 3);
+  pio->set_bits("clk", 1);
+  pio->add_output("z", 4);
+  pio->set_bits("z", 2);
+  pg->get_input_pin("clk").connect_sink(sub.create_sink_pin(3));
+  sub.create_driver_pin(4).connect_sink(pg->get_output_pin("z"));
+  return pg;
+}
+
+int count_subs(hhds::Graph* g) {
+  int n = 0;
+  for (auto node : g->body().nodes()) {
+    n += gu::type_op_of(node) == Ntype_op::Sub ? 1 : 0;
+  }
+  return n;
+}
+}  // namespace
+
+// A loop that exists only at PORT level -- the instance's output re-enters a
+// packed input bus, but in a bit the output does not read -- is no loop: the
+// instance keeps its boundary (inlining such loops on XiangShan's `io` record
+// buses cascaded CSR into ExuBlock and broke hierarchical LEC).
+TEST(LegalizeAcyclic, PackedBusFalseLoopKeepsTheInstance) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_legalize_packed_false");
+  auto  top = build_packed_feedback(lib, /*feedback_in_msb=*/true);
+  livehd::legalize::Split_state state;
+  const auto r = livehd::legalize::make_acyclic({lib.find_io("lane")->get_graph(), top}, state);
+  EXPECT_EQ(r.instances_inlined, 0);
+  EXPECT_EQ(r.loops, 0);
+  EXPECT_EQ(count_subs(top.get()), 1);
+}
+
+// The same shape feeding the bit the output DOES read is a real combinational
+// loop through the instance: it must still be broken (inlined) or reported.
+TEST(LegalizeAcyclic, PackedBusRealLoopIsStillCaught) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_legalize_packed_real");
+  auto  top = build_packed_feedback(lib, /*feedback_in_msb=*/false);
+  livehd::legalize::Split_state state;
+  const auto r = livehd::legalize::make_acyclic({lib.find_io("lane")->get_graph(), top}, state);
+  EXPECT_TRUE(r.instances_inlined > 0 || r.loops > 0);
+}
+
+// A rolled loop (Sub with loop annotations) is never split or inlined. A TRUE
+// combinational loop through it -- its result fed back into its own invariant
+// input -- is reported as an error and the instance is left alone.
+TEST(LegalizeAcyclic, RolledLoopIsNeverSplitOrInlinedAndATrueLoopIsReported) {
+  auto& lib  = livehd::Hhds_graph_library::instance("lgdb_legalize_loop_true");
+  auto  body = two_carry_body(lib, "body");
+  auto  host = lib.create_io("host")->create_graph();
+  auto  sub  = instantiate_loop(*host, body, 4);
+  // inv := iout[0..8): replace the graph-input binding with the loop's own result.
+  auto inv_sink = sub.create_sink_pin(kLInv);
+  gu::drop_drivers(inv_sink);
+  auto sel = gu::create_typed_node(*host, Ntype_op::Get_mask, 8);
+  gu::connect_mask_operands(sel, sub.create_driver_pin(kLIout), 0, 8);
+  sel.create_driver_pin(0).connect_sink(inv_sink);
+
+  livehd::legalize::Split_state state;
+  const auto r = livehd::legalize::make_acyclic({body, host}, state);
+  EXPECT_EQ(r.instances_inlined, 0);
+  EXPECT_EQ(r.loops_split, 0);
+  EXPECT_GT(r.loops, 0) << "a real comb loop through a rolled loop must be an error";
+  EXPECT_EQ(loop_subs(host.get()), 1u);
 }

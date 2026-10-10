@@ -7,6 +7,7 @@
 #include "diag.hpp"
 #include "node_util.hpp"
 #include "pass_partition.hpp"
+#include "specialize.hpp"
 
 namespace livehd::synth {
 
@@ -93,7 +94,7 @@ std::optional<uint64_t> expand_plain_clock_cells(hhds::Graph* g, Preparation_bud
 }  // namespace
 
 std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<hhds::Graph>> sources, bool unroll_carry,
-                                                std::string_view from_pass, Preparation_budget* budget) {
+                                                std::string_view from_pass, Preparation_budget* budget, bool specialize) {
   if (!admit_preparation(budget, "begin", 0)) {
     return {};
   }
@@ -224,6 +225,21 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     if (auto graph = result->library.get_graph(gid)) {
       result->definitions.push_back(std::move(graph));
     }
+  }
+  // pass.specialize: constants an instance is tied to (and constants a callee
+  // returns) cross the instance boundary in the PRIVATE copy, after pass.color
+  // decided the regions -- the same specialization the simulator runs on its
+  // private library. Only STATE-FREE callees: a stateful definition keeps its
+  // identity (register names, DFF picks, clock-gate mapping, LEC pairing).
+  // The nodes it creates (only those) inherit a neighbor's color, so no stray
+  // color-0 region appears; nothing else is refolded or recolored, so a region
+  // no specialization touched maps exactly as before.
+  if (const int specialized
+      = specialize ? specialize::specialize_constants(result->definitions, {.inherit_colors = true, .state_free_only = true}) : 0;
+      specialized > 0) {
+    livehd::diag::info(from_pass, "constant-specialized", "progress")
+        .msg("{}: {} constant-specialized instance definition(s)", from_pass, specialized)
+        .emit();
   }
   if (!prepare_loop_bodies(result->definitions, unroll_carry, result->loops, from_pass, budget)) {
     return {};

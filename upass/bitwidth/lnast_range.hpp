@@ -133,6 +133,28 @@ struct Lnast_range {
   //    escaped [0x55,0xaa]) ─────────────────────────────────────────────────
 
   // Smallest all-ones mask covering v (v >= 0): 0→0, 5→7, 0xaa→0xff.
+  // Both operands bounded but one may be negative: every bitwise result of two
+  // values that fit k signed bits fits k signed bits too. Unbounded used to
+  // skip the declared-fit check, so `o:U5 = (-i3 >> i3) | x` compiled while
+  // `o:U5 = -i3 >> i3` was rejected (random Pyrope fuzz, 2026-10-09).
+  static Lnast_range signed_cover(const Lnast_range& a, const Lnast_range& b) noexcept {
+    if (a.unbounded || b.unbounded) {
+      return make_unbounded();
+    }
+    const auto sbits = [](int64_t v) {
+      int k = 1;
+      while (k < 63 && (v < -(int64_t{1} << (k - 1)) || v > (int64_t{1} << (k - 1)) - 1)) {
+        ++k;
+      }
+      return k;
+    };
+    const int k = std::max({sbits(a.min), sbits(a.max), sbits(b.min), sbits(b.max)});
+    if (k >= 63) {
+      return make_unbounded();
+    }
+    return bounded(-(int64_t{1} << (k - 1)), (int64_t{1} << (k - 1)) - 1);
+  }
+
   static constexpr int64_t ones_cover(int64_t v) noexcept {
     uint64_t u = static_cast<uint64_t>(v);
     u |= u >> 1;
@@ -160,7 +182,7 @@ struct Lnast_range {
     if (a_nonneg || b_nonneg) {
       return bounded(0, a_nonneg ? max : b.max);
     }
-    return make_unbounded();
+    return signed_cover(*this, b);
   }
 
   // a | b: for non-negatives, max(min_a, min_b) <= a|b <= ones-cover of the
@@ -169,8 +191,11 @@ struct Lnast_range {
     if (!unbounded && !b.unbounded && is_constant() && b.is_constant()) {
       return constant(min | b.min);  // single points fold exactly (any sign)
     }
-    if (unbounded || b.unbounded || min < 0 || b.min < 0) {
+    if (unbounded || b.unbounded) {
       return make_unbounded();
+    }
+    if (min < 0 || b.min < 0) {
+      return signed_cover(*this, b);
     }
     return bounded(std::max(min, b.min), ones_cover(std::max(max, b.max)));
   }
@@ -180,8 +205,11 @@ struct Lnast_range {
     if (!unbounded && !b.unbounded && is_constant() && b.is_constant()) {
       return constant(min ^ b.min);  // single points fold exactly (any sign)
     }
-    if (unbounded || b.unbounded || min < 0 || b.min < 0) {
+    if (unbounded || b.unbounded) {
       return make_unbounded();
+    }
+    if (min < 0 || b.min < 0) {
+      return signed_cover(*this, b);
     }
     return bounded(0, ones_cover(std::max(max, b.max)));
   }

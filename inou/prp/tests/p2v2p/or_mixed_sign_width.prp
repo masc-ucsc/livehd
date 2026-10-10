@@ -1,0 +1,8 @@
+// p2v2p fuzz find (2026-10-08): bitwidth stamped `u16 | s4` as s16, so a set
+// top bit read back negative; it needs s17 (pass/bitwidth process_bit_or).
+pub comb or_mixed_sign_width(i2:U16) -> (orv:U32, o1:U16) {
+  mut t0:S4 = 0
+  wrap t0 = i2
+  wrap orv = i2 | (~t0)  // ~t0 may be negative: the value needs `wrap` into a U32
+  sat o1 = (i2 - (i2 | (~t0)))
+}

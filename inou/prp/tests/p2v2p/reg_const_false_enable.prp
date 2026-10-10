@@ -1,0 +1,11 @@
+// Fuzz: the write guard reads bit 8 of a U8, so it folds to a constant-false
+// flop enable. cprop and the Verilog writer used to read a constant enable as
+// "no enable", and r0 loaded i4 on every edge instead of holding its reset.
+pub mod reg_const_false_enable(i0:U8, i4:U3, i5:U3) -> (o0:U4@[0], o1:U4@[0]) {
+  reg r0:U4 = 5
+  reg r1:U4 = 0
+  if (i0#[8] == 1) { r0 = i4 }
+  if (i0#[7] == 1) { r1 = i5 }
+  o0 = r0
+  o1 = r1
+}

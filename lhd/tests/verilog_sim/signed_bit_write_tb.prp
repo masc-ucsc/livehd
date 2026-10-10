@@ -1,0 +1,13 @@
+const dut_m = import("lg:signed_bit_write")
+
+test signed_bit_write.icarus {
+  mut dut = dut_m
+  tick 3 {
+    dut.reset = false
+    dut.a = if clock == 0 { 1 } elif clock == 1 { 2 } else { 0 }
+    dut.b = clock != 1
+    step
+    const want = if clock == 0 { -1 } elif clock == 1 { 0 } else { -2 }
+    assert(dut.o == want, "b over a bit 0, read as a signed 2-bit value")
+  }
+}

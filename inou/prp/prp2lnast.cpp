@@ -686,6 +686,7 @@ void prp_collect_generic_names(const Lnast* ln, const Lnast_nid& func_def, absl:
     }
   }
 }
+
 }  // namespace
 
 void Prp2lnast::check_undeclared_writes() const {
@@ -703,8 +704,11 @@ void Prp2lnast::check_undeclared_writes() const {
 // ENCLOSING scope is variable shadowing. Both resolved against `scope_stack` (a
 // scoped symbol table built in this single walk); see the header.
 void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<absl::flat_hash_set<std::string>>& scope_stack,
-                                      size_t barrier, const absl::flat_hash_set<std::string>& seed_here) const {
+                                      size_t barrier, const absl::flat_hash_set<std::string>& seed_here,
+                                      const absl::flat_hash_set<std::string>& readonly_here) const {
   scope_stack.emplace_back(seed_here.begin(), seed_here.end());
+  readonly_frames_.resize(scope_stack.size());
+  readonly_frames_.back() = readonly_here;
   const size_t lvl = scope_stack.size() - 1;
 
   // Declared in a STRICTLY enclosing frame (>= barrier, < this scope) — shadowing.
@@ -744,6 +748,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<
     // for(value, iterable, body, mode [, idx [, key]]).
     if (Lnast_ntype::is_for(ct)) {
       absl::flat_hash_set<std::string> binds;
+      absl::flat_hash_set<std::string> index_binds;
       Lnast_nid                        body_stmts;
       int                              pos = 0;
       for (auto cc = lnast->get_first_child(c); !cc.is_invalid(); cc = lnast->get_sibling_next(cc), ++pos) {
@@ -753,6 +758,9 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<
           std::string name(lnast->get_name(cc));
           if (name.empty() || prp_name_is_tmp(name)) {
             continue;
+          }
+          if (pos != 0) {
+            index_binds.insert(name);  // the index/key is const; the value is a copy
           }
           // Shadows if the name is already declared in this-or-an-enclosing scope
           // — `mut c` then `for c …` at the same level both forbid reusing `c`.
@@ -767,7 +775,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<
         }
       }
       if (!body_stmts.is_invalid()) {
-        check_writes_in_scope(body_stmts, scope_stack, barrier, binds);
+        check_writes_in_scope(body_stmts, scope_stack, barrier, binds, index_binds);
       }
       continue;
     }
@@ -837,6 +845,24 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<
                      "assign-no-decl",
                      "name",
                      std::format("assignment to undeclared variable '{}' (declare it with `mut`/`const` first)", name));
+      } else if (!name.empty() && !prp_name_is_tmp(name)) {
+        // The innermost frame declaring the name decides: a `for` index is the
+        // const position (05b-statements.md); writing one used to be accepted
+        // and changed every later use in that iteration. (A non-`ref` lambda
+        // input is a by-value copy the body may write -- tests/comptime/ref_comb.)
+        for (size_t i = lvl + 1; i-- > barrier;) {
+          if (!scope_stack[i].contains(name)) {
+            continue;
+          }
+          if (readonly_frames_[i].contains(name)) {
+            report_error(c,
+                         "assign-readonly",
+                         "name",
+                         std::format("assignment to '{}', a `for` index (the const position of the element)", name),
+                         "copy it into a `mut` local first; the loop VALUE is a writable copy");
+          }
+          break;
+        }
       }
     }
 
@@ -3441,7 +3467,22 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // POINT.
     std::optional<int64_t> known_int;
     {
+      // A `wrap`/`sat` write narrows the value into the declared type, and a
+      // bit-pattern literal (0sb/0ub) into a typed binding is a reinterpret:
+      // neither is the rvalue's own integer. `mut t0:U1 = 0; wrap t0 = 0sb1011`
+      // recorded -5 and `x#[t0]` failed "negative bit index" (random Pyrope
+      // round-trip fuzz, 2026-10-08). Leave those statically unknown.
+      const bool typed_write = !ts_node_is_null(tc) || (!has_decl && [&] {
+                                 const auto* b = find_binding(canonical_escaped_ident(trim(get_text(id))));
+                                 return b != nullptr && b->typed;
+                               }());
+      const bool reinterpret = !overflow_kind.empty()
+                               || (typed_write && rvalue.is_const() && rvalue.get_name().size() > 2
+                                   && rvalue.get_name()[0] == '0' && (rvalue.get_name()[1] == 's' || rvalue.get_name()[1] == 'u'));
       auto as_int = [&]() -> std::optional<int64_t> {
+        if (reinterpret) {
+          return std::nullopt;
+        }
         if (resolved_rvalue_int) {
           return resolved_rvalue_int;
         }

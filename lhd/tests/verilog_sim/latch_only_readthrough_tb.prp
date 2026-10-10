@@ -1,0 +1,16 @@
+const dut_m = import("lg:latch_only_readthrough")
+
+test latch_only_readthrough.icarus {
+  mut dut = dut_m
+  tick 6 {
+    dut.reset = clock < 1
+    dut.i0 = (9 + clock * 5) & 31
+    step
+    if clock >= 1 {
+      const lo = (9 + clock * 5) & 3
+      assert(dut.o2 == lo, "the clock-high latch holds i0[1:0]")
+      assert(dut.o3 == lo, "data-enable spelling reads through")
+      assert(dut.o4 == lo + 1, "always_latch spelling reads through too")
+    }
+  }
+}

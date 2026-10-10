@@ -1,0 +1,39 @@
+/*
+:name: icarus_div0_neg_shift
+:type: simulation
+:sim_sweep: sim.tune.backend=slop,llvm
+*/
+// Runtime cases Pyrope leaves to the emitted Verilog's meaning (user ruling
+// 2026-10-09: match Icarus Verilog). A signed shift amount is its bit pattern
+// read unsigned at its width (s:S3 == -1 shifts by 7, -2 by 6); slop used to
+// read it signed and disagree with llvm and Icarus. A zero divisor is X:
+// simulation draws a random in-range value, and both backends used to die on
+// SIGFPE.
+pub mod icarus_div0_neg_shift(a:U8, sa:S8, s:S3, b:U2) -> (o1:U8@[0], o3:U8@[0], o6:S8@[0], o7:U8@[0], o8:U8@[0]) {
+  wrap o1 = a >> s
+  wrap o3 = a << s
+  wrap o6 = sa >> s
+  wrap o7 = a / b
+  wrap o8 = a % b
+}
+
+test icarus_div0_neg_shift.icarus {
+  mut dut = icarus_div0_neg_shift
+  tick 4 {
+    dut.a  = 0xb5
+    dut.sa = -75
+    dut.s  = if clock == 0 { -1 } elif clock == 1 { -2 } elif clock == 2 { 2 } else { 0 }
+    dut.b  = if clock == 3 { 3 } else { 0 }
+    step
+    if clock == 0 {
+      assert(dut.o1 == 1 and dut.o3 == 128 and dut.o6 == -1, "s = -1 shifts by 7")
+    } elif clock == 1 {
+      assert(dut.o1 == 2 and dut.o3 == 64 and dut.o6 == -2, "s = -2 shifts by 6")
+    } elif clock == 2 {
+      assert(dut.o1 == 45 and dut.o3 == 212 and dut.o6 == -19, "s = 2")
+    } else {
+      assert(dut.o7 == 60 and dut.o8 == 1, "a / 3, a % 3")
+    }
+    assert(dut.o7 <= 255 and dut.o8 <= 255, "a zero divisor still lands in range")
+  }
+}

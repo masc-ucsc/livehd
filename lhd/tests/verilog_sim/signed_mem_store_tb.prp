@@ -1,0 +1,16 @@
+const dut_m = import("lg:signed_mem_store")
+
+test signed_mem_store.icarus {
+  mut dut = dut_m
+  tick 4 {
+    dut.reset = clock < 2
+    dut.d  = -8
+    dut.wa = 1
+    dut.ra = 1
+    step
+    if clock >= 2 {
+      assert(dut.q == -8 and dut.o == 0, "mem[1] holds -8; 0 <= -8 is false")
+      assert(dut.q2 == -13 and dut.o2 == 0, "16'sd26323 into a signed 5-bit element is -13")
+    }
+  }
+}

@@ -1,0 +1,53 @@
+`timescale 1ns/1ps
+module tb;
+  reg clock = 0;
+  reg reset = 1;
+  reg signed [1:0] i0;
+  reg [30:0] i1;
+  wire [11:0] o0;
+  wire signed [2:0] o1;
+  fz dut(.clock(clock), .reset(reset), .i0(i0), .i1(i1), .o0(o0), .o1(o1));
+  initial begin
+    reset = 1; i0 = 2'd0; i1 = 31'd188887131;
+    #1 clock = 1; #1;
+    $display("refv0 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 1; i0 = -2'sd2; i1 = 31'd1224957864;
+    #1 clock = 1; #1;
+    $display("refv1 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 2'd1; i1 = 31'd153317690;
+    #1 clock = 1; #1;
+    $display("refv2 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = -2'sd1; i1 = 31'd723744919;
+    #1 clock = 1; #1;
+    $display("refv3 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 2'd0; i1 = 31'd973541573;
+    #1 clock = 1; #1;
+    $display("refv4 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 2'd0; i1 = 31'd493248368;
+    #1 clock = 1; #1;
+    $display("refv5 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = -2'sd1; i1 = 31'd1857579805;
+    #1 clock = 1; #1;
+    $display("refv6 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = -2'sd2; i1 = 31'd343399194;
+    #1 clock = 1; #1;
+    $display("refv7 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = -2'sd1; i1 = 31'd1787228982;
+    #1 clock = 1; #1;
+    $display("refv8 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 2'd1; i1 = 31'd395808332;
+    #1 clock = 1; #1;
+    $display("refv9 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    $finish;
+  end
+endmodule

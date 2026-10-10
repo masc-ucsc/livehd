@@ -1,0 +1,32 @@
+// :name: loop_inline_colors
+// :type: simulation
+// Two conditional recurrences share a rolled body, but belong to different
+// colors. Both bodies must be inlined into the native ordinal loop.
+mod loop_inline_colors(data:U32, select_a:U4, select_b:U4) -> (a:U8@[0], b:U8@[0]) {
+  mut carry_a:U8 = 128
+  mut carry_b:U8 = 64
+  for i in 0..<4 {
+    if select_a#[i] != 0 {
+      carry_a |= data#[(i*8)..+8]
+    }
+  }
+  for j in 0..<4 {
+    if select_b#[j] != 0 {
+      carry_b |= data#[(j*8)..+8]
+    }
+  }
+  a = carry_a
+  b = carry_b
+}
+
+test loop_inline_colors.masks {
+  mut dut = loop_inline_colors
+  tick 16 {
+    dut.data = 134480385
+    dut.select_a = clock
+    dut.select_b = 15 - clock
+    step
+    assert(dut.a == (128 | clock), "first conditional carry")
+    assert(dut.b == (64 | (15 - clock)), "second conditional carry")
+  }
+}

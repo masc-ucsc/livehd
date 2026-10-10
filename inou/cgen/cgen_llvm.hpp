@@ -46,6 +46,8 @@ public:
   // Packed ABI: inputs, outputs, and changed are disjoint buffers and do not
   // overlap resource storage. Generated callers guarantee this for LLVM noalias.
   // Values (and boundary casts) load lazily at their first arithmetic use.
+  // Scalar ABI: inputs are word arguments; outputs are concatenated into one
+  // uint64_t return, first-added output in the low bits (at most 64 bits total).
   explicit Cgen_llvm(std::string_view function_name, const std::vector<std::pair<uint32_t, bool>>& inputs, bool scalar_abi = false);
   // Native simulator ABI: void(uint64_t* state, void** resources). Every
   // field occupies whole little-endian words in one caller-owned allocation.
@@ -77,6 +79,8 @@ public:
   [[nodiscard]] Value constant(uint32_t width, uint64_t value, bool unsign = true);
   [[nodiscard]] Value constant_words(uint32_t width, const std::vector<uint64_t>& words, bool unsign = true);
   [[nodiscard]] Value resize(Value value, uint32_t result_width, bool result_unsign);
+  // Most-significant lane first; adjacent slices of one value stay a wide slice.
+  [[nodiscard]] Value concat(const std::vector<Value>& lanes);
   [[nodiscard]] Value unary_not(Value value, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value reduce_or(Value value, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value count_bits(Value value, uint32_t count, uint32_t result_width, bool parity);
@@ -111,7 +115,11 @@ public:
     bool     gated              = false;
     bool     commit_before_read = false;
     bool     packed_value       = false;
+    // sim.warn_undefined: resource of this port's __lhd_undef_site (an
+    // enabled write or a read outside [0, size)), or no_site.
+    size_t   warn_site          = no_site;
   };
+  static constexpr size_t no_site = ~size_t{0};
   void                bind_memory(std::string_view symbol, const Memory& memory);
   [[nodiscard]] Value memory_read(std::string_view symbol, Value address, uint32_t result_width, bool result_unsign);
   [[nodiscard]] Value memory_read_all(std::string_view symbol, uint32_t result_width, bool result_unsign);
@@ -121,6 +129,10 @@ public:
   bool                memory_stage_write(std::string_view symbol, Value enable, Value address, Value data);
   // Phase-barrier entry writes, emitted into a native commit object.
   bool                memory_commit(std::string_view symbol);
+  // sim.warn_undefined: on a cold branch taken when `condition` is non-zero,
+  // set the `hit` flag of resource `site` (a __lhd_undef_site*); the caller
+  // polls it after the call and reports the first hit of each site.
+  bool                undefined_if(Value condition, size_t site);
 
   // Values cross the ABI as packed little-endian 64-bit words. `index` is the
   // logical output number; physical word offsets are derived from the exact
@@ -152,6 +164,15 @@ public:
   // void entry(const uint64_t* inputs, uint64_t* outputs,
   //            uint64_t count, int64_t first, int64_t step)
   bool add_loop(std::string_view entry, const Loop_layout& layout, std::string& error, bool track_changed = true);
+
+  // A sealed, resource-free color can be embedded in a larger body without
+  // introducing a runtime call. Bitcode crosses contexts, never LLVM pointers.
+  struct Inline_body {
+    std::string                            bitcode;
+    std::vector<std::pair<uint32_t, bool>> inputs, outputs;
+    bool                                   scalar = false;
+  };
+  bool inline_body(const Inline_body& body, const std::vector<Value>& inputs, std::vector<Value>& outputs, std::string& error);
 
   // Finalize the ABI and return exact bitcode with the color and optional loop
   // entry symbols normalized. Equal keys can share code; mutable instance storage is still

@@ -1372,7 +1372,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         continue;
       }
       auto sio = n.get_subnode_io();
-      if (sio == nullptr || (sio->get_name() != gu::fproperty_module_name && sio->get_name() != gu::lgassert_module_name)) {
+      if (sio == nullptr || !gu::is_marker_module_name(sio->get_name())) {
         continue;
       }
       // ASSERTS ONLY. An `fproperty` carries "<kind>\x1f<loc>\x1f<msg>" in its

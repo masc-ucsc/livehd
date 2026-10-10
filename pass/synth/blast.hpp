@@ -817,8 +817,8 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         if (const auto chain = affine_chain(b_d); chain && gu::is_unsign(chain->index)) {
           const int iw    = eff_width(chain->index);
           bool      valid = iw > 0 && iw <= 16
-                            && (uint64_t{1} << iw) * static_cast<uint64_t>(demand_w)
-                                   < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1));
+                       && (uint64_t{1} << iw) * static_cast<uint64_t>(demand_w)
+                              < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1));
           for (size_t i = 0; valid && i < chain->links.size(); ++i) {
             valid = region.contains(chain->links[i].first);
           }
@@ -936,9 +936,45 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         acc[0] = abc_const_bit(true);  // empty product == 1
       }
     } else {
-      acc = extend(ds[0]);
-      for (size_t k = 1; k < ds.size(); ++k) {
-        acc = arith::build_mul(opts_.multiplier, opts_.multiplier_adder.value_or(opts_.adder), bs, ops, acc, extend(ds[k]), out_w);
+      if (opts_.multiplier == arith::Mult_kind::sn && ds.size() > 1) {
+        const auto signed_operand
+            = [&](const hhds::Pin_class& d) { return d.is_const() ? gu::const_of(d).is_negative() : !gu::is_unsign(d); };
+        const auto native_bits = [&](const hhds::Pin_class& d) {
+          std::vector<Bit> v(std::min(eff_width(d), out_w));
+          for (size_t i = 0; i < v.size(); ++i) {
+            v[i] = abc_eff_bit(d, i);
+          }
+          return v;
+        };
+        acc             = native_bits(ds[0]);
+        bool acc_signed = signed_operand(ds[0]);
+        for (size_t k = 1; k < ds.size(); ++k) {
+          const bool rhs_signed = signed_operand(ds[k]);
+          const auto rhs        = native_bits(ds[k]);
+          // A full-width unsigned intermediate keeps a zero sign guard when
+          // multiplied by another signed operand; each stage remains modulo W.
+          acc                   = arith::build_mul(opts_.multiplier,
+                                 opts_.multiplier_adder.value_or(opts_.adder),
+                                 bs,
+                                 ops,
+                                 acc,
+                                 rhs,
+                                 out_w,
+                                 acc_signed,
+                                 rhs_signed);
+          acc_signed            = acc_signed || rhs_signed;
+        }
+      } else {
+        acc = extend(ds[0]);
+        for (size_t k = 1; k < ds.size(); ++k) {
+          acc = arith::build_mul(opts_.multiplier,
+                                 opts_.multiplier_adder.value_or(opts_.adder),
+                                 bs,
+                                 ops,
+                                 acc,
+                                 extend(ds[k]),
+                                 out_w);
+        }
       }
     }
     // low out_w bits are the product; the spare bit(s) above the magnitude

@@ -1,0 +1,102 @@
+{
+ "icarus_vs_verilator": [
+  {
+   "cycle": 3,
+   "output": "o2",
+   "icarus": "1",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 4,
+   "output": "o2",
+   "icarus": "1",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 5,
+   "output": "o2",
+   "icarus": "1",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 6,
+   "output": "o2",
+   "icarus": "1",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 7,
+   "output": "o2",
+   "icarus": "1",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 8,
+   "output": "o2",
+   "icarus": "1",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 9,
+   "output": "o2",
+   "icarus": "1",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  }
+ ],
+ "inputs": [
+  {
+   "i0": 499,
+   "i1": 1988480284
+  },
+  {
+   "i0": 506,
+   "i1": 595296697
+  },
+  {
+   "i0": 402,
+   "i1": 80628401
+  },
+  {
+   "i0": 414,
+   "i1": 2116522854
+  },
+  {
+   "i0": 409,
+   "i1": 2031319205
+  },
+  {
+   "i0": 341,
+   "i1": 163498521
+  },
+  {
+   "i0": 208,
+   "i1": 1857022076
+  },
+  {
+   "i0": 369,
+   "i1": 3495447159
+  },
+  {
+   "i0": 260,
+   "i1": 3909646340
+  },
+  {
+   "i0": 144,
+   "i1": 580462862
+  }
+ ]
+}

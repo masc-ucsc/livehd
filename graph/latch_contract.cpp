@@ -984,7 +984,7 @@ const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph
     // report INCOMPLETE -- and a refused instance is then left UNGATED. Same
     // exemption pass_single_edge and the LEC box scan already apply.
     if (auto sio = n.get_subnode_io();
-        sio != nullptr && (sio->get_name() == gu::lgassert_module_name || sio->get_name() == gu::fproperty_module_name)) {
+        sio != nullptr && gu::is_marker_module_name(sio->get_name())) {
       continue;
     }
     const auto  child_graph = n.get_subnode_graph();
@@ -1064,7 +1064,7 @@ const Reset_input_ports& reset_input_ports(const std::shared_ptr<hhds::Graph>& d
     // clock walk above: a null `lgassert`/`fproperty` body is not an unwalkable
     // subtree, so it must not turn the whole interface INCOMPLETE.
     if (auto sio = n.get_subnode_io();
-        sio != nullptr && (sio->get_name() == gu::lgassert_module_name || sio->get_name() == gu::fproperty_module_name)) {
+        sio != nullptr && gu::is_marker_module_name(sio->get_name())) {
       continue;
     }
     const auto  child_graph = n.get_subnode_graph();

@@ -202,3 +202,20 @@ TEST(PinTrackerSmoke, OverlappingOrMarksOnlyTheOverlappingBitAndOpaqueClearsIt) 
   }
   EXPECT_FALSE(tracker.has_ambiguous("o"));
 }
+
+// A word select `bus >> (k*W)` tracks only its own W-bit driver width, not the
+// whole rest of the bus: N selects of an N*W-bit bus must stay linear.
+TEST(PinTrackerSmoke, ArithmeticRightShiftHonorsDriverWidthCap) {
+  Pin_tracker<std::string> tracker{"zero"};
+
+  tracker.add_input("bus", 4096);
+  tracker.add_sra("word3", "bus", 4096, *Dlop::create_integer(3 * 64), 64);
+  tracker.add_sra("uncapped", "bus", 4096, *Dlop::create_integer(4000));
+
+  const auto& word = tracker.get_pin_vector("word3");
+  ASSERT_EQ(word.size(), 64);
+  EXPECT_EQ(word[0].id(), "bus");
+  EXPECT_EQ(word[0].pos, 192);
+  EXPECT_EQ(word[63].pos, 255);
+  EXPECT_EQ(tracker.get_pin_vector("uncapped").size(), 96);
+}

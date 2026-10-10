@@ -977,6 +977,7 @@ public:
     // assert can report it even AFTER the tick loop (e.g. a `wait`-timeout assert),
     // where the loop variable is out of C++ scope. -1 means "before any clock edge".
     o << "  [[maybe_unused]] long _clk = -1;\n";
+    o << "  __lhd_sim_cycle = -1;  // sim.warn_undefined: no cycle until a tick loop runs\n";
 
     // ---- Parameters bound from the shared `_args` map (`+<name>=VALUE`). A
     // parameter defaults to its signature default; one with no default (or
@@ -1027,7 +1028,7 @@ public:
     for (const auto& [var, m] : inst_of_var) {
       includes_out.insert(duts_.at(m).hpp);
       o << "  auto _dut_storage_" << var << " = std::make_unique<" << duts_.at(m).cls << ">(); auto& " << var << " = *_dut_storage_"
-        << var << "; " << var << ".reset_cycle(_init_zero);\n";
+        << var << "; __lhd_sim_initializing = true; " << var << ".reset_cycle(_init_zero); __lhd_sim_initializing = false;\n";
       if (!vcd_dir_.empty()) {
         // one VCD per test: <vcd_dir>/<test>.vcd (suffixed by instance when >1).
         // Stash the path; set it immediately for a whole-run trace, but for a
@@ -2101,6 +2102,13 @@ private:
       std::replace(lit.begin(), lit.end(), '?', '0');
     }
     const int w = literal_slop_width(lit);
+    if (w == 0 && lit.size() > 1 && lit[0] == '-' && literal_slop_width(lit.substr(1)) > 0) {
+      // A negative literal (`-1480…` parses as ONE integer_literal) is the
+      // negated magnitude. The long-plane fallback pasted a 126-bit number into
+      // `Slop<64>::create_integer(...)`, which no C++ integer type holds
+      // (random Pyrope sim fuzz, 2026-10-09).
+      return apply_unary("-", literal_val(lit.substr(1)));
+    }
     if (w == 0) {
       return long_val(lit);
     }
@@ -3681,6 +3689,7 @@ private:
     emit_restart_block(o, ind, clk_name);  // --restart-cycle: load nearest ckpt, resume at its cycle
     o << ind << "for (; " << clk_name << " < (long)(" << count << "); ++" << clk_name << ") {\n";
     o << ind << "  _clk = " << clk_name << ";\n";    // current cycle, for located asserts (survives the loop)
+    o << ind << "  __lhd_sim_cycle = " << clk_name << ";\n";  // the cycle a sim.warn_undefined report names
     emit_vcd_window_block(o, ind + "  ", clk_name);  // --vcd-from/--vcd-to: enable/disable trace
     emit_checkpoint_block(o, ind + "  ", clk_name);  // periodic DUT+tb checkpoint
     std::vector<TSNode> body;
@@ -4258,6 +4267,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // every module header: include-guarded, so after a DUT header this is a no-op,
   // and it is the only copy for a driver whose tests include no DUT header.
   o << livehd::sim::kUnknownLiteralHelper;
+  o << livehd::sim::kUndefinedWarnHelper;  // sim.warn_undefined: the switch + __lhd_sim_cycle
   o << livehd::sim::kPlusargHelper;
   o << livehd::sim::kTuneHashHelper;
   // Width-adapting input poke: a testbench value is a Slop of its OWN width, so
@@ -4270,15 +4280,20 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // 80-bit port) still zero-fills. Past 64 bits the value's own width governs,
   // so a constant of ANY width drives exactly — the 64-bit staging that used to
   // clip a wide poke is gone.
+  // Any OTHER width is a literal/expression carrying its own sign bit: stage at
+  // max(M,N) so a negative value sign-fills a port wider than 64 bits
+  // (`dut.a = -5` into an s128 port used to poke 2^64-5, and a 126-bit
+  // negative literal 2^126-|v|; random Pyrope sim fuzz, 2026-10-09). Only the
+  // 64-bit word, whose top bit may be data, keeps the zero fill.
   // zext_to<N,N+1>() performs the truncation without making bit N-1 a sign;
   // the cross-width Slop<N> constructor then sign-extends that exact N-bit
   // pattern. A same-width zext_to<N>() assignment left signed inputs such as
   // s8 0xff stored as +255, so every signed operation consumed a noncanonical
   // carrier after the literal-width migration.
   o << "template<int N, int M> static inline void __prp_poke(Slop<N>& d, const Slop<M>& v){ "
-       "constexpr int S = (M > 64 ? M : 64); d = Slop<N>{Slop<S>(v).template zext_to<N,N+1>()}; }\n";
+       "constexpr int S = M == 64 ? 64 : (M > N ? M : N); d = Slop<N>{Slop<S>(v).template zext_to<N,N+1>()}; }\n";
   o << "template<int N, int M> static inline void __prp_poke(Slop_u<N>& d, const Slop<M>& v){ "
-       "constexpr int S = (M > 64 ? M : 64); d = Slop_u<N>{Slop<S>(v).template zext_to<N,N+1>()}; }\n";
+       "constexpr int S = M == 64 ? 64 : (M > N ? M : N); d = Slop_u<N>{Slop<S>(v).template zext_to<N,N+1>()}; }\n";
   o << "template<int N, int M> static inline void __prp_poke(Slop_u<N>& d, const Slop_u<M>& v){ d = Slop_u<N>{v}; }\n";
   // `{val:spec}` puts interpolation for PLAIN locals: grammar
   // `[width][b/o/x/X/d][s]` — width zero-pads, `s` groups digits `_`-separated

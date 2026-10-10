@@ -4,6 +4,7 @@
 // (pass/synth loop_cleanup) and enclosed arithmetic modules (pass/synth
 // ware_module), each mapped by the ABC backend and checked with LEC.
 #include <cstdlib>
+#include <set>
 
 #include "abc_map.hpp"
 #include "color_common.hpp"
@@ -419,6 +420,54 @@ TEST(WareModule, NarySumPreservesAllPortsAndSharesEqualRealizations) {
   gu::create_const(*mapped, *Dlop::create_integer(0)).connect_sink(second);
   auto wrong = livehd::lec::prove_equal(child.get(), mapped.get(), proof_options, &sub_lib);
   EXPECT_NE(wrong.verdict, livehd::lec::Verdict::Proven) << wrong.detail;
+}
+
+// Color numbers move whenever an edit adds or removes a region, so they must
+// not name a width specialization: equal-shaped Sums in different colors share
+// ONE module (one stable callee for the region cache). A color that carries
+// its own options -- the CLI region_opts keys or an embedded coloring_info
+// entry -- still gets a module of its own, so its overrides keep applying.
+TEST(WareModule, ColorNamesTheModuleOnlyWithSectionOptions) {
+  const auto build = [](hhds::GraphLibrary& lib, const std::set<int>& option_colors, const char* info) {
+    auto io = lib.create_io("top");
+    io->add_input("a", 1);
+    io->add_input("b", 2);
+    io->set_bits("a", 16);
+    io->set_bits("b", 16);
+    for (int k = 0; k < 3; ++k) {
+      io->add_output("y" + std::to_string(k), 3 + k);
+      io->set_bits("y" + std::to_string(k), 16);
+    }
+    auto g = io->create_graph();
+    if (info) {
+      g->get_input_node().attr(livehd::attrs::coloring_info).set(info);
+    }
+    for (int k = 0; k < 3; ++k) {
+      auto sum = gu::create_typed_node(*g, Ntype_op::Sum);
+      gu::set_color(sum, 7 + k);
+      for (const auto* in : {"a", "b"}) {
+        auto pin = g->get_input_pin(in);
+        gu::set_ubits(pin, 16);
+        pin.connect_sink(gu::setup_sink_pid(sum, 0));
+      }
+      auto out = sum.create_driver_pin(0);
+      gu::set_ubits(out, 16);
+      out.connect_sink(g->get_output_pin("y" + std::to_string(k)));
+    }
+    return livehd::synth::build_ware_modules({g}, {}, option_colors);
+  };
+  {
+    hhds::GraphLibrary lib;
+    EXPECT_EQ(build(lib, {}, nullptr).size(), 1u);
+  }
+  {
+    hhds::GraphLibrary lib;
+    EXPECT_EQ(build(lib, {8}, nullptr).size(), 2u);  // --set pass.abc.region_opts for color 8
+  }
+  {
+    hhds::GraphLibrary lib;
+    EXPECT_EQ(build(lib, {}, R"({"params":{},"region_opts":{"9":{"adder":"cla"}}})").size(), 2u);
+  }
 }
 
 TEST(WareModule, PolicyFallbackAndExplicitFalse) {

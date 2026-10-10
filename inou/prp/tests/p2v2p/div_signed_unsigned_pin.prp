@@ -1,0 +1,7 @@
+// p2v2p fuzz find (2026-10-08): a SIGNED division with a proven non-negative
+// (unsigned) result, spliced into the SHL zero pad, was re-evaluated unsigned:
+// -1/2 became 7/2.
+pub comb div_signed_unsigned_pin(i0:U1, i1:U16) -> (o0:U16) {
+  mut t0 = ((i0#[0..=0] - i1#sext[14..=15]) / 2)
+  wrap o0 = (((t0 << i0) % 6) | (~i0))
+}

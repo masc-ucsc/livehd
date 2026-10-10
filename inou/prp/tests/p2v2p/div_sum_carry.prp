@@ -1,0 +1,6 @@
+// p2v2p fuzz find (2026-10-08): an inlined `a7 + b16` under `/ 6` was evaluated
+// at the 16-bit LHS width and lost its carry.
+pub comb div_sum_carry(i0:U16) -> (o0:U16) {
+  mut t0 = ((i0#[1..<8] + i0) / 6)
+  wrap o0 = t0
+}

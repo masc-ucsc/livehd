@@ -239,6 +239,19 @@ template <typename Node>
 // needed and LEC (which only compares data outputs) is unaffected.
 inline constexpr std::string_view lgassert_module_name = "lgassert";
 
+// Reserved sub-module name for a sim.warn_undefined marker (the slang reader's
+// out-of-range memory access, user ruling 2026-10-09): a body-less primitive
+// Sub with one 1-bit `cond` input -- true while the access stays defined, the
+// path condition already folded in -- and "<what>\x1f<loc>" in its instance
+// name. The simulator reports the first cycle it is false; every other pass
+// treats it like `lgassert`, a marker with no hardware.
+inline constexpr std::string_view lgundef_module_name = "lgundef";
+// The instance-name prefix of an `lgundef` marker: "\x1flgundef\x1f<what>\x1f<loc>".
+// A loaded `lg:` artifact does not keep the body-less primitive's binding, so
+// consumers recognize the marker by this payload (no fproperty kind or lgassert
+// location starts with \x1f).
+inline constexpr std::string_view lgundef_name_prefix = "\x1flgundef\x1f";
+
 // Reserved sub-module name for a materialized user property (pass/formal, task
 // 2f-formal): an `fproperty` Sub instance carries a 1-bit `cond` plus, packed in
 // its instance-name attr, "<kind>\x1f<loc>\x1f<msg>" (kind = assert |
@@ -247,6 +260,12 @@ inline constexpr std::string_view lgassert_module_name = "lgassert";
 // lgassert it is a recognized PRIMITIVE, not a real sub-graph, so LEC (which
 // compares data outputs) is unaffected.
 inline constexpr std::string_view fproperty_module_name = "fproperty";
+
+// The reserved marker primitives (fproperty, lgassert, lgundef): body-less,
+// stateless, no hardware. One predicate so a new marker reaches every walk.
+[[nodiscard]] inline bool is_marker_module_name(std::string_view nm) {
+  return nm == fproperty_module_name || nm == lgassert_module_name || nm == lgundef_module_name;
+}
 
 // Name of the phase register pass.single_edge synthesizes when it slots a design
 // into P > 1 sub-steps (2f-latch M8). Chosen to survive canon_flop_name (no '$'
@@ -505,7 +524,7 @@ template <typename Node_like>
 [[nodiscard]] inline bool is_property_marker(const Node_like& n) {
   if (const auto sio = n.get_subnode_io(); sio) {
     const auto nm = sio->get_name();
-    return nm == fproperty_module_name || nm == lgassert_module_name;
+    return nm == fproperty_module_name || nm == lgassert_module_name || nm == lgundef_module_name;
   }
   // No subnode binding left. A marker still identifies itself by the payload
   // it packs into its NAME attr -- "<kind>\x1f<loc>\x1f<msg>" for fproperty,

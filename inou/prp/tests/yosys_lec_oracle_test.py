@@ -95,6 +95,21 @@ def check_exit_mapping(runner, test, tmp):
     return rc
 
 
+def decided(label, run, verdict):
+    """run() must return 0 AND print the oracle's real `verdict` line (a tolerated
+    inconclusive/timeout also returns 0, and is exactly what this must not accept)."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        got = run()
+    out = buf.getvalue()
+    sys.stdout.write(out)
+    if got == 0 and verdict not in out:
+        print("{}: FAILED - the oracle did not decide it ({!r} missing; a TOLERATED non-decision is not enough)".format(
+            label, verdict))
+        return 1
+    return check(label, got, 0)
+
+
 def main():
     runner = PrpRunner()
     if runner._lgcheck_tools()[0] is None:
@@ -115,14 +130,20 @@ def main():
 
         test = make_test(tmp)
         rc |= check_exit_mapping(runner, test, tmp)
-        rc |= check("equivalent pair (oracle must not fail it)",
-                    runner.run_yosys_lec(test, str(impl), "oracle_dut", str(same), "oracle_dut",
-                                         os.path.join(tmp, "same"), strict=True),
-                    0)
-        rc |= check("off-by-one pair (refuted or inconclusive)",
-                    runner.run_yosys_lec(test, str(impl), "oracle_dut", str(diff), "oracle_dut",
-                                         os.path.join(tmp, "diff"), expect='refuted', strict=True),
-                    0)
+        # The two trivial pairs MUST be decided: strict mode tolerates an
+        # inconclusive/timeout result, so an oracle that never decides (always
+        # exit 2, or a hang) would otherwise pass this guard while checking
+        # nothing. The generous budget only matters on a slow machine -- a
+        # decided pair returns as soon as it is decided.
+        decide_test = make_test(tmp, ":yosys_lec_timeout: 30\n")
+        rc |= decided("equivalent pair (oracle must PROVE it)",
+                      lambda: runner.run_yosys_lec(decide_test, str(impl), "oracle_dut", str(same), "oracle_dut",
+                                                   os.path.join(tmp, "same"), strict=True),
+                      "proven (yosys equiv agrees)")
+        rc |= decided("off-by-one pair (oracle must REFUTE it)",
+                      lambda: runner.run_yosys_lec(decide_test, str(impl), "oracle_dut", str(diff), "oracle_dut",
+                                                   os.path.join(tmp, "diff"), expect='refuted', strict=True),
+                      "refuted (yosys equiv agrees)")
         mem_gold = Path(tmp) / "mem_reset_gold.v"
         mem_gold.write_text(MEM_RESET_GOLD)
         mem_bad = Path(tmp) / "mem_reset_power_on_only.v"

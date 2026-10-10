@@ -126,6 +126,7 @@ private:
   // (Deliberately transient walk state, like the coalescer's pending set: a
   // one-shot per-write policy handshake, not a per-name fact.)
   absl::flat_hash_set<std::string> wrap_sat_exempt_;
+  absl::flat_hash_set<std::string> index_range_reported_;  // check_index_in_size: one error per (array, location)
 
   // Names declared WITH a type in this walk (a typed declare, or a named
   // type_spec target such as an inlined comb's param/output). Only these (and
@@ -308,6 +309,7 @@ private:
   // literals/temps): the shift-amount / divisor sign fallback when no value
   // range was derived.
   Lnast_range envelope_of_operand(const upass::Operand& o) const;
+  Lnast_range count_pattern(const Lnast_range& amt, const upass::Operand& o) const;
 
   // Shift-amount sanity for shl/sra (negative-shift): a hardware shift count
   // must be >= 0, judged on the amount's derived range — error when the range
@@ -319,6 +321,7 @@ private:
   // An array index must be >= 0; a bw_min < 0 index is a compile error. The
   // runner has rebased an index-range array's index (`idx_name` is its temp).
   void check_index_nonneg(const Lnast_range& idx, std::string_view idx_name);
+  void check_index_in_size(std::string_view array_name, const Lnast_range& idx);
 
   // ── Inferred array shape (08-memories.md) ─────────────────────────────────
   // `reg mem:[] = 0` / `mut a:[] = nil` take their extent from the indices

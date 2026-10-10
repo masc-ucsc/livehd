@@ -741,6 +741,55 @@ TEST(Semdiff, TransparentSiblingInstancesKeepDistinctCutKeys) {
   auto anon  = build_two_lanes("lgdb_semdiff_tsib_anon", "", "", false);
   auto anonb = build_two_lanes("lgdb_semdiff_tsib_anonb", "", "", true);
   EXPECT_FALSE(livehd::semdiff::structural_identical(anon.get(), anonb.get(), o));
+  // ...but an UNCHANGED copy with two anonymous instances of one def (extracted
+  // ware modules) is identical: they are signed structurally, not by a shared
+  // def-name cut key whose obligations collided (a comment-only false miss).
+  auto anon2 = build_two_lanes("lgdb_semdiff_tsib_anon2", "", "", false);
+  EXPECT_TRUE(livehd::semdiff::structural_identical(anon.get(), anon2.get(), o));
+}
+
+// A mapped netlist keeps its registers inside Subs (Liberty flops, mapped
+// regions), so a Q -> logic -> D loop runs through an instance. Digests
+// seed a named instance -- or the only anonymous instance of its def -- as a
+// cut point; before, the stalled loop left the native memory/flop operand
+// unsigned and every mapped netlist was undigestable (STA never reused).
+TEST(Semdiff, DigestBreaksLoopsThroughInstances) {
+  using livehd::semdiff::Sub_fold;
+  auto build = [](const std::string& dir, Ntype_op op, const std::string& inst) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  cio = lib.create_io("cell");
+    cio->add_input("a", 1);
+    cio->add_output("y", 2);  // bodyless: a Liberty leaf cell
+    auto pio = lib.create_io("top");
+    pio->add_input("d", 1);
+    pio->add_output("q", 2);
+    auto pg  = pio->create_graph();
+    auto sub = create_typed_node(*pg, Ntype_op::Sub);
+    sub.set_subnode(cio);
+    if (!inst.empty()) {
+      sub.set_name(inst);
+    }
+    auto gate = create_typed_node(*pg, op);  // the loop: sub.y -> gate -> sub.a
+    sub.create_driver_pin(2).connect_sink(setup_sink_pid(gate, 0));
+    pg->get_input_pin("d").connect_sink(setup_sink_pid(gate, 0));
+    gate.create_driver_pin(0).connect_sink(setup_sink_pid(sub, 1));
+    auto flop = create_typed_node(*pg, Ntype_op::Flop);
+    flop.set_name("r");
+    gate.create_driver_pin(0).connect_sink(setup_sink_pid(flop, 3));  // din
+    auto q = flop.create_driver_pin(0);
+    livehd::graph_util::set_pin_name(q, "r");
+    q.connect_sink(pg->get_output_pin("q"));
+    livehd::semdiff::Digest_resolver none = [](hhds::Gid) -> hhds::Graph* { return nullptr; };
+    return livehd::semdiff::canonical_digest(pg.get(), none, Sub_fold::merkle);
+  };
+  const auto a  = build("lgdb_semdiff_loopi_a", Ntype_op::And, "u0");
+  const auto a2 = build("lgdb_semdiff_loopi_a2", Ntype_op::And, "u0");
+  const auto o  = build("lgdb_semdiff_loopi_o", Ntype_op::Or, "u0");
+  const auto an = build("lgdb_semdiff_loopi_an", Ntype_op::And, "");
+  EXPECT_TRUE(a.valid && a2.valid && o.valid && an.valid);
+  EXPECT_EQ(a, a2);
+  EXPECT_NE(a, o);   // the loop logic still reaches the digest
+  EXPECT_NE(a, an);  // instance identity is part of it
 }
 
 TEST(Semdiff, AggregateProvenanceLossKeepsPhysicalLeafIdentity) {

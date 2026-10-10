@@ -168,6 +168,15 @@ void Pass_color::setup() {
                        "while their union stays under it, and stop a cone's walk past it. 0 = raw cones, no merge. "
                        "Distinct from max_ge, which is the GE size window of the synth/pipe modes",
                        "30000");
+  m.add_label_optional("boundary_wiring",
+                       "cones: expose constant bit packing, slices and sign extension inside each consuming region; "
+                       "only wiring is copied, and incremental pre-bodies include the copied context",
+                       "false");
+  m.add_label_optional("min_gate",
+                       "cones: soft lower bound in predicted AIG size; a smaller data color joins its most-sharing "
+                       "connected neighbour, even past max_gate. Disconnected and explicit operator/source cuts "
+                       "may remain below it. 0 disables this floor; mapped cells are not predicted AIG nodes",
+                       "0");
   m.add_label_optional("flop_to_flop",
                        "cones mode: every cone walks to the register boundary and all overlapping cones merge, whatever "
                        "max_gate says, so each combinational path lies inside one color (max_gate then only bounds the "
@@ -295,6 +304,7 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
                        opts.flop_to_flop,
                        opts.forward.empty() ? "false" : opts.forward,
                        opts.min_nodes);
+      s += std::format(",\"min_gate\":{},\"boundary_wiring\":{}", opts.min_gate, opts.boundary_wiring);
       // Only the control walk reads it; without ctrl_cones there is no mux
       // policy to report, and printing one would claim a decision nothing made.
       if (opts.ctrl_cones) {
@@ -461,6 +471,8 @@ void Pass_color::color(Eprp_var& var) {
   opts.max_ge        = parse_ge_bound(var, "max_ge", "5000");
   opts.name_weight   = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
   opts.max_gate      = parse_ge_bound(var, "max_gate", "30000");
+  opts.boundary_wiring = parse_bool(var.get("boundary_wiring", "false"));
+  opts.min_gate      = parse_ge_bound(var, "min_gate", "0");
   // The mapper profile supplies the stop_*, ctrl_cones, flop_to_flop and ware_*
   // DEFAULTS only (see setup()); an explicit setting of any one of them always
   // wins.

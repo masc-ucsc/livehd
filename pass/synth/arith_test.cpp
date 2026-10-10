@@ -52,7 +52,7 @@ uint64_t from_bits(const std::vector<B>& v) {
   return r;
 }
 
-constexpr Adder_kind kKinds[]  = {Adder_kind::rca, Adder_kind::cska, Adder_kind::cla, Adder_kind::prefix};
+constexpr Adder_kind kKinds[]  = {Adder_kind::rca, Adder_kind::cska, Adder_kind::cla, Adder_kind::prefix, Adder_kind::brent};
 constexpr int        kBlocks[] = {1, 2, 3, 4, 8};
 
 }  // namespace
@@ -62,10 +62,12 @@ TEST(abc_arith, parse_and_default_block_size) {
   EXPECT_EQ(parse_adder_kind("cska").value(), Adder_kind::cska);
   EXPECT_EQ(parse_adder_kind("cla").value(), Adder_kind::cla);
   EXPECT_EQ(parse_adder_kind("prefix").value(), Adder_kind::prefix);
+  EXPECT_EQ(parse_adder_kind("brent").value(), Adder_kind::brent);
   EXPECT_FALSE(parse_adder_kind("nope").has_value());
 
   EXPECT_EQ(parse_mult_kind("array").value(), Mult_kind::array);
   EXPECT_EQ(parse_mult_kind("csa").value(), Mult_kind::csa);
+  EXPECT_EQ(parse_mult_kind("sn").value(), Mult_kind::sn);
   EXPECT_FALSE(parse_mult_kind("wallace").has_value());
   EXPECT_FALSE(parse_mult_kind("").has_value());
 
@@ -100,6 +102,40 @@ TEST(abc_arith, add_all_architectures) {
             }
           }
         }
+      }
+    }
+  }
+}
+
+TEST(abc_arith, brent_exhaustive_and_irregular_widths) {
+  ByteOps ops;
+  EXPECT_TRUE(brent_add<B>(ops, {}, {}, ops.one()).sum.empty());
+  EXPECT_EQ(brent_add<B>(ops, {}, {}, ops.one()).carry_out, B{1});
+  EXPECT_EQ(brent_add<B>(ops, {}, {}, ops.zero()).carry_out, B{0});
+  for (int w = 1; w <= 6; ++w) {
+    const auto limit = uint64_t{1} << w;
+    for (uint64_t a = 0; a < limit; ++a) {
+      for (uint64_t b = 0; b < limit; ++b) {
+        for (B cin : {B{0}, B{1}}) {
+          const auto r = brent_add(ops, to_bits(a, w), to_bits(b, w), cin);
+          EXPECT_EQ(from_bits(r.sum), (a + b + cin) & (limit - 1));
+          EXPECT_EQ(r.carry_out, static_cast<B>((a + b + cin) >> w));
+        }
+      }
+    }
+  }
+  uint64_t seed = 0x8fbced49;
+  for (int w : {7, 9, 15, 17, 31, 33, 48, 63}) {
+    const auto mask = (uint64_t{1} << w) - 1;
+    for (int sample = 0; sample < 64; ++sample) {
+      seed         = seed * 6364136223846793005ULL + 1;
+      const auto a = seed & mask;
+      seed         = seed * 6364136223846793005ULL + 1;
+      const auto b = seed & mask;
+      for (B cin : {B{0}, B{1}}) {
+        const auto r = brent_add(ops, to_bits(a, w), to_bits(b, w), cin);
+        EXPECT_EQ(from_bits(r.sum), (a + b + cin) & mask);
+        EXPECT_EQ(r.carry_out, static_cast<B>((a + b + cin) >> w));
       }
     }
   }
@@ -205,6 +241,9 @@ TEST(abc_arith, carry_save_multiplier_depth) {
       }
       return result;
     };
+    const auto sn          = build_mul(Mult_kind::sn, Adder_kind::brent, 0, ops, inputs, inputs, w);
+    const auto array_brent = build_mul(Mult_kind::array, Adder_kind::brent, 0, ops, inputs, inputs, w);
+    EXPECT_LT(depth(sn), depth(array_brent));
     EXPECT_LT(depth(csa), depth(serial));
     uint32_t rounds = 0;
     for (int rows = w; rows > 2; rows -= rows / 3) {
@@ -538,6 +577,65 @@ TEST(abc_arith, nary_sum_mixed_width_signed_subtract) {
           EXPECT_EQ(from_bits(build_sum(kind, 4, ops, operands, out_w)), expected & mask)
               << "width=" << out_w << " operands=" << count;
         }
+      }
+    }
+  }
+}
+
+TEST(abc_arith, sn_multiplier_signed_rectangular_and_output_widths) {
+  ByteOps    ops;
+  const auto value = [](uint64_t bits, int width, bool sign) -> int64_t {
+    return sign && (bits & (uint64_t{1} << (width - 1))) ? static_cast<int64_t>(bits) - (int64_t{1} << width)
+                                                         : static_cast<int64_t>(bits);
+  };
+  for (int aw = 1; aw <= 5; ++aw) {
+    for (int bw = 1; bw <= 5; ++bw) {
+      for (bool as : {false, true}) {
+        for (bool bs : {false, true}) {
+          for (uint64_t a = 0; a < (uint64_t{1} << aw); ++a) {
+            for (uint64_t b = 0; b < (uint64_t{1} << bw); ++b) {
+              for (int out_w : {1, std::max(aw, bw), aw + bw, aw + bw + 3}) {
+                const auto expected = static_cast<uint64_t>(value(a, aw, as) * value(b, bw, bs));
+                EXPECT_EQ(
+                    from_bits(build_mul(Mult_kind::sn, Adder_kind::brent, 0, ops, to_bits(a, aw), to_bits(b, bw), out_w, as, bs)),
+                    expected & ((uint64_t{1} << out_w) - 1));
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(build_mul(Mult_kind::sn, Adder_kind::brent, 0, ops, to_bits(1, 1), to_bits(1, 1), 0).empty());
+  EXPECT_EQ(from_bits(build_mul(Mult_kind::sn, Adder_kind::brent, 0, ops, std::vector<B>{}, to_bits(1, 1), 8)), 0u);
+}
+
+TEST(abc_arith, sn_multiplier_random_wide_and_square) {
+  ByteOps  ops;
+  uint64_t rng = 0xba091123ULL;
+  for (int width : {7, 12, 24, 26, 28, 31, 32, 48, 63, 64}) {
+    for (bool sign : {false, true}) {
+      for (int trial = 0; trial < 40; ++trial) {
+        rng    = rng * 6364136223846793005ULL + 1442695040888963407ULL;
+        auto a = rng;
+        rng    = rng * 6364136223846793005ULL + 1442695040888963407ULL;
+        auto b = trial % 2 ? rng : a;
+        if (width < 64) {
+          const auto mask  = (uint64_t{1} << width) - 1;
+          a               &= mask;
+          b               &= mask;
+          if (sign) {
+            if (a & (uint64_t{1} << (width - 1))) {
+              a |= ~mask;
+            }
+            if (b & (uint64_t{1} << (width - 1))) {
+              b |= ~mask;
+            }
+          }
+        }
+        EXPECT_EQ(
+            from_bits(build_mul(Mult_kind::sn, Adder_kind::brent, 0, ops, to_bits(a, width), to_bits(b, width), 64, sign, sign)),
+            a * b);
       }
     }
   }

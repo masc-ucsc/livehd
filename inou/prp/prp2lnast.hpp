@@ -208,8 +208,13 @@ protected:
   // frames, so reusing a name across branches is fine. `barrier` is the lowest
   // visible frame index (a func body is a fresh namespace → barrier = its frame).
   // O(N * depth), no per-scope set copy.
+  // `readonly_here` names among the seeds that may not be written: a `for`
+  // loop's index/key (05b-statements.md: the index is the const position).
   void check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<absl::flat_hash_set<std::string>>& scope_stack,
-                             size_t barrier, const absl::flat_hash_set<std::string>& seed_here = {}) const;
+                             size_t barrier, const absl::flat_hash_set<std::string>& seed_here = {},
+                             const absl::flat_hash_set<std::string>& readonly_here = {}) const;
+  // Parallel to check_writes_in_scope's scope_stack: the readonly names of each frame.
+  mutable std::vector<absl::flat_hash_set<std::string>> readonly_frames_;
 
   // Reject reading a name that is not visible at the read site (04-variables.md
   // "Variable scope": a variable is visible from its declaration to the end of

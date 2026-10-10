@@ -1,0 +1,7 @@
+// p2v2p fuzz find (2026-10-08): a signed Rem result whose operands read
+// unsigned was emitted as unsigned text, so `rem - (-1)` zero-extended the -1.
+pub comb rem_signed_result(i1:S2) -> (o1:S16) {
+  mut t0:S5 = 0
+  mut t2 = (((i1 + 0x97) % 5) - (~t0))
+  wrap o1 = t2
+}

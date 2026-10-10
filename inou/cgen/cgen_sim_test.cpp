@@ -2,20 +2,25 @@
 
 #include "cgen_sim.hpp"
 
+#include <algorithm>
+#include <array>
+#include <bit>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
 #include <regex>
+#include <set>
 #include <string>
 
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
 #include "sim_color_plan.hpp"
-#include "sim_specialize.hpp"
+#include "sim_native_rt.hpp"
 #include "sim_tune_vector.hpp"
+#include "specialize.hpp"
 
 namespace {
 namespace gu = livehd::graph_util;
@@ -199,6 +204,72 @@ TEST(CgenSim, IdenticalColorsShareOneNativeObject) {
   std::filesystem::remove_all(name);
 }
 
+TEST(CgenSim, LlvmSlicesExtendNarrowSignedConstants) {
+  const std::string name = "llvm_signed_constant_slices";
+  auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io   = lib.create_io(name);
+  unsigned          port = 0;
+  for (const auto* output : {"zero", "negative", "cross"}) {
+    io->add_output(output, port++);
+    io->set_bits(output, output == std::string("cross") ? 70 : 8);
+    io->set_unsign(output, true);
+  }
+  auto       graph = io->create_graph();
+  const auto slice = [&](const char* output, int value, int lo, int hi) {
+    const auto input = gu::create_const(*graph, *Dlop::create_integer(value));
+    auto       mask  = gu::create_get_mask(*graph, input, lo, hi);
+    auto       pin   = mask.create_driver_pin(0);
+    gu::set_ubits(pin, hi - lo);
+    pin.connect_sink(graph->get_output_pin(output));
+  };
+  slice("zero", 0, 4, 12);
+  slice("negative", -1, 4, 12);
+  slice("cross", -1, 1, 71);
+  const auto plan = livehd::sim::Color_plan::discover(graph.get(), false, false, 1);
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  std::filesystem::create_directories(name);
+  Cgen_sim emitter(name, "", name, "false", &plan, false, false, true, true, false, false, false, true, true, 1);
+  ASSERT_NO_THROW(emitter.do_from_graph(graph));
+  size_t                      objects = 0;
+  livehd::sim::Native_objects native;
+  std::string                 error;
+  for (const auto& entry : std::filesystem::directory_iterator(name)) {
+    if (entry.path().filename().string().ends_with(".llvm.o")) {
+      ASSERT_TRUE(native.load(entry.path().string(), error)) << error;
+      ++objects;
+    }
+  }
+  EXPECT_GT(objects, 0u);
+  const auto            declarations = slurp(std::filesystem::path(name) / (name + ".color-kernels.hpp"));
+  const std::regex      prototype{R"(extern "C" void ([A-Za-z0-9_]+)\()"};
+  std::vector<uint64_t> observed;
+  std::set<std::string> executed;
+  for (std::sregex_iterator it(declarations.begin(), declarations.end(), prototype), end; it != end; ++it) {
+    // Phase variants can reuse a kernel and repeat its declaration.
+    const auto symbol = (*it)[1].str();
+    if (!executed.insert(symbol).second) {
+      continue;
+    }
+    const auto function = native.lookup(symbol, error);
+    ASSERT_NE(function, nullptr) << error;
+    std::array<uint64_t, 16> inputs{};
+    std::array<uint64_t, 16> outputs;
+    std::array<uint64_t, 16> changed{};
+    constexpr uint64_t       sentinel = 0x123456789abcdef0;
+    outputs.fill(sentinel);
+    using Kernel = void (*)(const uint64_t*, uint64_t*, uint64_t*, void*);
+    std::bit_cast<Kernel>(function)(inputs.data(), outputs.data(), changed.data(), nullptr);
+    for (const auto value : outputs) {
+      if (value != sentinel) {
+        observed.push_back(value);
+      }
+    }
+  }
+  std::ranges::sort(observed);
+  EXPECT_EQ(observed, (std::vector<uint64_t>{0, 63, 255, ~uint64_t{0}}));
+  std::filesystem::remove_all(name);
+}
+
 TEST(CgenSim, DynamicSplicesRespectColorKernelBindings) {
   const std::string name = "dynamic_splice_boundary";
   auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
@@ -331,6 +402,35 @@ TEST(CgenSim, MaskWritesUseRangesIncludingWholeAndOutsideCarrier) {
   EXPECT_EQ(code.find(".set_mask_op("), std::string::npos);
   EXPECT_EQ(code.find("UNRESOLVED-CYCLE"), std::string::npos);
 }
+// A flop enable that is the constant 0 never writes. Both commit paths used to
+// read any constant active-high enable as "no enable" and loaded din every tick
+// (random Pyrope round-trip fuzz, 2026-10-08; cprop now folds it to din = q,
+// but an emitter must not depend on that).
+TEST(CgenSim, ConstantFalseFlopEnableHolds) {
+  const std::string name = "const_false_enable";
+  auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io   = lib.create_io(name);
+  io->add_input("d", 0);
+  io->set_bits("d", 8);
+  io->set_unsign("d", true);
+  io->add_input("clock", 1);
+  io->set_bits("clock", 1);
+  io->set_unsign("clock", true);
+  io->add_output("q", 2);
+  io->set_bits("q", 8);
+  io->set_unsign("q", true);
+  auto graph = io->create_graph();
+  auto flop  = gu::create_typed_node(*graph, Ntype_op::Flop, 8);
+  auto q     = flop.create_driver_pin(0);
+  gu::set_ubits(q, 8);
+  q.connect_sink(graph->get_output_pin("q"));
+  graph->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+  graph->get_input_pin("d").connect_sink(gu::setup_sink_by_name(flop, "din"));
+  gu::create_const(*graph, *Dlop::create_integer(0)).connect_sink(gu::setup_sink_by_name(flop, "enable"));
+  const auto code = emit(graph, name);
+  EXPECT_NE(code.find("(false ? "), std::string::npos) << code;
+}
+
 TEST(CgenSim, EmitsNativeCountedReductions) {
   for (int width : {1, 3, 8, 65, 129}) {
     const auto         name = "native_reduce_" + std::to_string(width);
@@ -766,7 +866,7 @@ TEST(CgenSim, ConstantSpecializationPropagatesThroughEarlierParents) {
   }
   const auto top = graphs.back();
   std::ranges::reverse(graphs);  // every parent is visited before its callee
-  livehd::sim::specialize_constants(graphs);
+  livehd::specialize::specialize_constants(graphs, {.refold_all = true, .max_versions = 1 << 20});
   const auto value = top->get_output_pin("y").get_driver_pin();
   ASSERT_TRUE(value.is_const());
   EXPECT_EQ(gu::const_of(value).to_just_i64(), 31);
@@ -818,7 +918,7 @@ TEST(CgenSim, ConstantSpecializationKeepsInstancesAndRolledCarriesSeparate) {
     loops.push_back(loop);
   }
   std::vector<std::shared_ptr<hhds::Graph>> graphs{body, parent};
-  livehd::sim::specialize_constants(graphs);
+  livehd::specialize::specialize_constants(graphs, {.refold_all = true, .max_versions = 1 << 20});
   EXPECT_TRUE(parent->get_output_pin("y0").get_driver_pin().is_known_false());
   EXPECT_FALSE(parent->get_output_pin("y1").get_driver_pin().is_const());
   EXPECT_EQ(loops[0].subnode_loop()->count, 17u);
@@ -866,7 +966,7 @@ TEST(CgenSim, ZeroShiftSpecializationUsesTheLoopDomainAndPortBoundary) {
     loops.push_back(loop);
   }
   std::vector<std::shared_ptr<hhds::Graph>> graphs{body, graph};
-  livehd::sim::specialize_constants(graphs);
+  livehd::specialize::specialize_constants(graphs, {.refold_all = true, .max_versions = 1 << 20});
   EXPECT_TRUE(graph->get_output_pin("y0").get_driver_pin().is_known_false());
   EXPECT_EQ(loops[0].subnode_loop()->count, 4u);
   // A negative first index and an S3 index that wraps at 4 cannot use the proof.
@@ -901,7 +1001,7 @@ TEST(CgenSim, ZeroTripIdentityCarryKeepsTheSeedInputBoundary) {
   y.connect_sink(loop.create_sink_pin(0));
   y.connect_sink(graph->get_output_pin("y"));
   std::vector<std::shared_ptr<hhds::Graph>> graphs{body, graph};
-  livehd::sim::specialize_constants(graphs);
+  livehd::specialize::specialize_constants(graphs, {.refold_all = true, .max_versions = 1 << 20});
   const auto output = graph->get_output_pin("y").get_driver_pin();
   ASSERT_TRUE(output.is_const());
   EXPECT_TRUE(gu::const_of(output).eq_op(Dlop::create_integer(255))->is_known_true());
@@ -1009,4 +1109,129 @@ TEST(CgenSim, CompactLoopStaysRolledByDefaultAndSplicesFlatOnlyWhenAsked) {
     ASSERT_TRUE(prep.prepare_graph(f.parent));
     EXPECT_EQ(count_loops(f.parent), 1u);
   }
+}
+
+namespace {
+// child(x, m) -> y = x & m, 8-bit unsigned (or `xbits` wide for x); a parent
+// with two instances whose `m` inputs are tied to `m0` / `m1` (nullopt: the
+// parent's own input) and whose `x` comes from a `drive_bits`-wide parent input.
+struct Shared_fixture {
+  std::shared_ptr<hhds::Graph>              child;
+  std::shared_ptr<hhds::Graph>              parent;
+  std::vector<hhds::Node_class>             instances;
+  std::vector<std::shared_ptr<hhds::Graph>> graphs;
+};
+Shared_fixture shared_fixture(const std::string& lib, std::optional<int> m0, std::optional<int> m1, uint32_t xbits = 8,
+                              uint32_t drive_bits = 8) {
+  auto&          library = livehd::Hhds_graph_library::instance(lib);
+  Shared_fixture f;
+  auto           cio = library.create_io("shared_child");
+  cio->add_input("x", 0);
+  cio->add_input("m", 1);
+  cio->add_output("y", 2);
+  cio->set_bits("x", xbits);
+  cio->set_bits("m", 8);
+  cio->set_bits("y", 8);
+  for (auto name : {"x", "m", "y"}) {
+    cio->set_unsign(name, true);
+  }
+  f.child   = cio->create_graph();
+  auto andn = gu::create_typed_node(*f.child, Ntype_op::And, 8);
+  f.child->get_input_pin("x").connect_sink(andn.create_sink_pin(0));
+  f.child->get_input_pin("m").connect_sink(andn.create_sink_pin(1));
+  gu::set_ubits(andn.create_driver_pin(0), 8);
+  andn.create_driver_pin(0).connect_sink(f.child->get_output_pin("y"));
+
+  auto pio = library.create_io("shared_parent");
+  pio->add_input("a", 0);
+  pio->add_input("mm", 1);
+  pio->add_output("o0", 2);
+  pio->add_output("o1", 3);
+  pio->set_bits("a", drive_bits);
+  for (auto name : {"mm", "o0", "o1"}) {
+    pio->set_bits(name, 8);
+  }
+  for (auto name : {"a", "mm", "o0", "o1"}) {
+    pio->set_unsign(name, true);
+  }
+  f.parent  = pio->create_graph();
+  // a sized wire so the instance's x driver carries `drive_bits`
+  auto wire = gu::create_typed_node(*f.parent, Ntype_op::Or, 8);
+  f.parent->get_input_pin("a").connect_sink(wire.create_sink_pin(0));
+  gu::set_ubits(wire.create_driver_pin(0), static_cast<int32_t>(drive_bits));
+  int k = 0;
+  for (auto m : {m0, m1}) {
+    auto inst = gu::create_typed_node(*f.parent, Ntype_op::Sub);
+    inst.set_subnode(f.child->get_io());
+    wire.create_driver_pin(0).connect_sink(inst.create_sink_pin(0));
+    if (m) {
+      gu::create_const(*f.parent, *Dlop::create_integer(*m)).connect_sink(inst.create_sink_pin(1));
+    } else {
+      f.parent->get_input_pin("mm").connect_sink(inst.create_sink_pin(1));
+    }
+    auto y = inst.create_driver_pin(2);
+    gu::set_ubits(y, 8);
+    y.connect_sink(f.parent->get_output_pin(k == 0 ? "o0" : "o1"));
+    f.instances.push_back(inst);
+    ++k;
+  }
+  f.graphs = {f.parent, f.child};
+  return f;
+}
+}  // namespace
+
+// max_versions == 1: every instance agrees on m = 0x0F, so ONE copy carries it,
+// both instances re-point at it, and the original child is untouched (it stays
+// in the design: a testbench may drive it directly).
+TEST(CgenSim, SharedSpecializationCopiesOnceWhenAllInstancesAgree) {
+  auto       f      = shared_fixture("lgdb_shared_agree", 0x0F, 0x0F);
+  const auto copies = livehd::specialize::specialize_constants(f.graphs, {});
+  EXPECT_EQ(copies, 1);
+  const auto copy = f.instances[0].get_subnode_graph();
+  ASSERT_TRUE(copy);
+  EXPECT_NE(copy, f.child);
+  EXPECT_EQ(f.instances[1].get_subnode_graph(), copy);
+  EXPECT_TRUE(std::string{copy->get_name()}.starts_with("shared_child__k"));
+  // the copy no longer reads m; the original still does
+  const auto m_copy = copy->get_input_pin("m");
+  EXPECT_EQ(m_copy.out_edges().begin(), m_copy.out_edges().end());
+  const auto m_orig = f.child->get_input_pin("m");
+  EXPECT_NE(m_orig.out_edges().begin(), m_orig.out_edges().end());
+  EXPECT_EQ(std::ranges::count(f.graphs, f.child), 1);
+  EXPECT_EQ(std::ranges::count(f.graphs, copy), 1);
+}
+
+// Two instances that would need DIFFERENT specializations keep the shared
+// definition (copies are the max_versions > 1 opt-in).
+TEST(CgenSim, SharedSpecializationRevertsWhenInstancesDisagree) {
+  auto       f      = shared_fixture("lgdb_shared_disagree", 0x0F, 0xF0);
+  const auto copies = livehd::specialize::specialize_constants(f.graphs, {});
+  EXPECT_EQ(copies, 0);
+  EXPECT_EQ(f.instances[0].get_subnode_graph(), f.child);
+  EXPECT_EQ(f.instances[1].get_subnode_graph(), f.child);
+}
+
+// Not only constants: every instance drives the 32-bit x from a 4-bit value,
+// so the shared copy reads x through a 4-bit fit -- its interface unchanged.
+TEST(CgenSim, SharedSpecializationNarrowsAnInputEveryInstanceDrivesNarrow) {
+  auto       f      = shared_fixture("lgdb_shared_width", std::nullopt, std::nullopt, 32, 4);
+  const auto copies = livehd::specialize::specialize_constants(f.graphs, {});
+  EXPECT_EQ(copies, 1);
+  const auto copy = f.instances[0].get_subnode_graph();
+  ASSERT_TRUE(copy);
+  EXPECT_NE(copy, f.child);
+  EXPECT_EQ(copy->get_io()->get_bits("x"), 32u);  // the interface never changes
+  EXPECT_EQ(f.child->get_io()->get_bits("x"), 32u);
+  const auto x = copy->get_input_pin("x");
+  ASSERT_NE(x.out_edges().begin(), x.out_edges().end());
+  for (const auto& e : x.out_edges()) {
+    EXPECT_EQ(gu::type_op_of(e.sink.get_master_node()), Ntype_op::Get_mask);
+  }
+}
+
+TEST(CgenSim, SharedSpecializationOffKeepsEveryBoundary) {
+  auto       f      = shared_fixture("lgdb_shared_off", 0x0F, 0x0F);
+  const auto copies = livehd::specialize::specialize_constants(f.graphs, {.max_versions = 0});
+  EXPECT_EQ(copies, 0);
+  EXPECT_EQ(f.instances[0].get_subnode_graph(), f.child);
 }

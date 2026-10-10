@@ -16,6 +16,7 @@
 
 #include "slang/analysis/AnalysisManager.h"  // complete type for runAnalysis's unique_ptr
 #include "slang/ast/Compilation.h"
+#include "slang/diagnostics/ExpressionsDiags.h"  // CannotIndexScalar
 #include "slang/driver/Driver.h"
 #include "slang_context.hpp"
 #include "slang_diag.hpp"
@@ -58,6 +59,18 @@ static int driverMain(int argc, TArgs argv, Slang_context& slang_tree) {
     // Route slang's diagnostics through LiveHD's sink instead of stderr text.
     driver.diagEngine.clearClients();
     driver.diagEngine.addClient(std::make_shared<livehd::slang_diag::Sink_client>());
+
+    // `a[0]` on a scalar (1-bit, unranged) net: yosys read_verilog, Icarus and
+    // Verilator all accept it as the bit itself, and LiveHD accepts what yosys
+    // reads (user ruling 2026-10-09). Keep it a warning, never an error.
+    driver.diagEngine.setSeverity(slang::diag::CannotIndexScalar, slang::DiagnosticSeverity::Warning);
+    // A CONSTANT out-of-range array index (`mem[5]` on `mem[0:3]`): yosys reads
+    // it, and Verilog defines the write as ignored and the read as X.
+    driver.diagEngine.setSeverity(slang::diag::IndexOOB, slang::DiagnosticSeverity::Warning);
+    // The same for a constant part-select past the vector (`fb[18666 +: 1]` on a
+    // 4-bit reg): yosys reads it, the read is X and the write is ignored.
+    driver.diagEngine.setSeverity(slang::diag::RangeOOB, slang::DiagnosticSeverity::Warning);
+    driver.diagEngine.setSeverity(slang::diag::RangeWidthOOB, slang::DiagnosticSeverity::Warning);
 
     // NB: procedural writes to nets (`output d` + `d <= ...`, accepted by the
     // lax yosys readers) cannot be relaxed: slang invalidates the assignment

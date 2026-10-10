@@ -1,0 +1,14 @@
+const dut_m = import("lg:warn_div")
+
+test warn_div.zero_divisor {
+  mut dut = dut_m
+  tick 6 {
+    dut.reset = false
+    dut.a = 10
+    dut.b = if clock == 1 or clock == 4 { 0 } else { 5 }
+    step
+    if clock != 1 and clock != 4 {
+      assert(dut.q == 2 and dut.r == 0, "10 / 5")
+    }
+  }
+}

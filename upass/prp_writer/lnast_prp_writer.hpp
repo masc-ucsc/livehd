@@ -285,6 +285,10 @@ private:
   // Per-variable type recorded by a `type_spec` statement, folded into the
   // variable's first declaration (`mut x:T = v`).
   absl::flat_hash_map<std::string, std::string> type_specs_;
+  // Per-variable type of a typed `declare` (stripped name -> rendered type).
+  // An SSA copy `x__wN` of a declared `x` is a fresh `mut`, and a lane write
+  // into it needs x's width, not the narrower one its seed value would infer.
+  absl::flat_hash_map<std::string, std::string> declare_types_;
   // Names introduced by `declare(..., type)`. Slang represents a structural
   // type literal as type_spec(field, T)* + tuple_add(%tmp, field...)
   // + store(type_name, %tmp). The type binding itself is compile-time residue

@@ -1,0 +1,6 @@
+// p2v2p fuzz find (2026-10-08): `$signed(r0 - i0) >>> 2` re-read the 9-bit
+// difference at its 8-bit natural width and wrapped before the shift.
+pub comb sra_inlined_wide(i0:S8, r0:S8) -> (o0:U8) {
+  mut t0 = ((r0 - i0) >> 2)
+  wrap o0 = Unsigned((r0 >= t0))
+}

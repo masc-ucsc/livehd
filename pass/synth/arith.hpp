@@ -28,7 +28,7 @@
 
 namespace livehd::synth::arith {
 
-enum class Adder_kind { rca, cska, cla, prefix };
+enum class Adder_kind { rca, cska, cla, prefix, brent };
 
 inline std::optional<Adder_kind> parse_adder_kind(std::string_view s) {
   if (s == "rca") {
@@ -43,14 +43,18 @@ inline std::optional<Adder_kind> parse_adder_kind(std::string_view s) {
   if (s == "prefix") {
     return Adder_kind::prefix;
   }
+  if (s == "brent") {
+    return Adder_kind::brent;
+  }
   return std::nullopt;
 }
 
 // Combinational multiplier architecture (mirrors Adder_kind). `array` is the
 // simple shift-and-add multiplier; `tree` sums partial products in balanced
 // pairs. `csa` compresses three rows to two without propagating carries until
-// the final addition. All reuse the selected adder for carry propagation.
-enum class Mult_kind { array, tree, csa };
+// the final addition. `sn` uses depth-ordered column compression and signed
+// Baugh-Wooley encoding at native operand widths. All reuse the selected adder for carry propagation.
+enum class Mult_kind { array, tree, csa, sn };
 
 inline std::optional<Mult_kind> parse_mult_kind(std::string_view s) {
   if (s == "tree") {
@@ -61,6 +65,9 @@ inline std::optional<Mult_kind> parse_mult_kind(std::string_view s) {
   }
   if (s == "csa") {
     return Mult_kind::csa;
+  }
+  if (s == "sn") {
+    return Mult_kind::sn;
   }
   return std::nullopt;
 }
@@ -225,6 +232,48 @@ inline Add_result<Bit> prefix_add(Ops& ops, const std::vector<Bit>& a, const std
   return r;
 }
 
+// Brent-Kung: an up-sweep reduces adjacent generate/propagate groups, then
+// a sparse down-sweep supplies the remaining prefixes. Unlike prefix_add's
+// all-prefix doubling network, this uses O(W) prefix cells. Fold the dynamic
+// carry-in into bit zero's generate; sums retain the original bit propagates.
+template <class Bit, class Ops>
+inline Add_result<Bit> brent_add(Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b, Bit cin) {
+  const size_t    w = a.size();
+  Add_result<Bit> r;
+  r.sum.resize(w);
+  if (w == 0) {
+    r.carry_out = cin;
+    return r;
+  }
+  std::vector<Bit> p(w), g(w);
+  for (size_t i = 0; i < w; ++i) {
+    p[i] = ops.xor_(a[i], b[i]);
+    g[i] = ops.and_(a[i], b[i]);
+  }
+  const auto bit_p   = p;
+  g[0]               = ops.or_(g[0], ops.and_(p[0], cin));
+  const auto combine = [&](size_t hi, size_t lo) {
+    g[hi] = ops.or_(g[hi], ops.and_(p[hi], g[lo]));
+    p[hi] = ops.and_(p[hi], p[lo]);
+  };
+  size_t step = 2;
+  for (; step / 2 < w; step *= 2) {
+    for (size_t i = step - 1; i < w; i += step) {
+      combine(i, i - step / 2);
+    }
+  }
+  for (step /= 2; step >= 2; step /= 2) {
+    for (size_t i = 3 * step / 2 - 1; i < w; i += step) {
+      combine(i, i - step / 2);
+    }
+  }
+  for (size_t i = 0; i < w; ++i) {
+    r.sum[i] = ops.xor_(bit_p[i], i == 0 ? cin : g[i - 1]);
+  }
+  r.carry_out = g.back();
+  return r;
+}
+
 // Dispatch on the selected architecture. `a`, `b` equal length; `cin` the
 // incoming carry (one() for the +1 of a two's-complement subtract).
 template <class Bit, class Ops>
@@ -234,6 +283,7 @@ inline Add_result<Bit> build_add(Adder_kind kind, int block_size, Ops& ops, cons
     case Adder_kind::cska  : return cska_add(ops, a, b, cin, block_size);
     case Adder_kind::cla   : return cla_add(ops, a, b, cin, block_size);
     case Adder_kind::prefix: return prefix_add(ops, a, b, cin);
+    case Adder_kind::brent : return brent_add(ops, a, b, cin);
     case Adder_kind::rca   : break;
   }
   return rca_add(ops, a, b, cin);
@@ -536,6 +586,104 @@ inline std::vector<Bit> build_affine_shr_prefix(Ops& ops, const std::vector<Bit>
   return build_table_shr_prefix(ops, a, index, fill, amounts, out_w);
 }
 
+// SN-style multiplication: Baugh-Wooley signed partial products, a column
+// compressor selecting the three shallowest signals, then one selected adder.
+// The construction follows ABC's SN default (snBlast.h / Wlc_BlastReduceMatrix),
+// including its seven-AND full adder and sum/carry scheduling levels. Inputs
+// retain their native widths; signed extension happens only after multiplication.
+// Mixed signedness is handled by adding a zero sign bit to the unsigned input.
+template <class Bit, class Ops>
+inline std::vector<Bit> sn_mul(Adder_kind adder, int block_size, Ops& ops, std::vector<Bit> a, std::vector<Bit> b, int out_w,
+                               bool a_signed, bool b_signed) {
+  if (out_w <= 0) {
+    return {};
+  }
+  if (a.empty() || b.empty()) {
+    return std::vector<Bit>(out_w, ops.zero());
+  }
+  const bool signed_matrix = a_signed || b_signed;
+  if (signed_matrix && !a_signed) {
+    a.push_back(ops.zero());
+  }
+  if (signed_matrix && !b_signed) {
+    b.push_back(ops.zero());
+  }
+  const size_t aw = a.size(), bw = b.size(), width = aw + bw;
+  struct Term {
+    Bit      bit;
+    uint32_t level;
+  };
+  using Column = std::vector<Term>;
+  std::vector<Column> columns(width + 1);
+  // Descending depth, stable ties: popping from the back selects the least
+  // deep signals in the same order as SN, including carries from the left.
+  const auto          push = [](Column& column, Bit bit, uint32_t level) {
+    auto at = std::find_if(column.begin(), column.end(), [level](const Term& t) { return t.level < level; });
+    column.insert(at, {bit, level});
+  };
+  for (size_t i = 0; i < aw; ++i) {
+    for (size_t j = 0; j < bw; ++j) {
+      auto pp = ops.and_(a[i], b[j]);
+      if (signed_matrix && ((i + 1 == aw) != (j + 1 == bw))) {
+        pp = ops.inv(pp);
+      }
+      push(columns[i + j], pp, 0);
+    }
+  }
+  if (signed_matrix) {
+    push(columns[aw - 1], ops.one(), 0);
+    push(columns[bw - 1], ops.one(), 0);
+    push(columns[width - 1], ops.one(), 0);
+  }
+  std::vector<Bit> row0(width, ops.zero()), row1(width, ops.zero());
+  for (size_t i = 0; i < width; ++i) {
+    auto& column = columns[i];
+    while (column.size() > 2) {
+      const auto pop = [&]() {
+        auto t = column.back();
+        column.pop_back();
+        return t;
+      };
+      auto       x = pop(), y = pop(), z = pop();
+      const auto level      = std::max({x.level, y.level, z.level});
+      // Complement all three inputs when a one is present. Complementing
+      // both outputs restores the full-adder identity and exposes constants.
+      bool       complement = false;
+      if constexpr (requires { x.bit == ops.one(); }) {
+        complement = x.bit == ops.one() || y.bit == ops.one() || z.bit == ops.one();
+      }
+      if (complement) {
+        x.bit = ops.inv(x.bit);
+        y.bit = ops.inv(y.bit);
+        z.bit = ops.inv(z.bit);
+      }
+      const auto ab     = ops.and_(x.bit, y.bit);
+      const auto nab    = ops.and_(ops.inv(x.bit), ops.inv(y.bit));
+      const auto parity = ops.and_(ops.inv(ab), ops.inv(nab));
+      const auto pc     = ops.and_(parity, z.bit);
+      const auto npc    = ops.and_(ops.inv(parity), ops.inv(z.bit));
+      auto       sum    = ops.and_(ops.inv(pc), ops.inv(npc));
+      auto       carry  = ops.or_(ab, pc);
+      if (complement) {
+        sum   = ops.inv(sum);
+        carry = ops.inv(carry);
+      }
+      push(column, sum, level + 2);
+      push(columns[i + 1], carry, level + 1);
+    }
+    if (!column.empty()) {
+      row0[i] = column[0].bit;
+    }
+    if (column.size() == 2) {
+      row1[i] = column[1].bit;
+    }
+  }
+  auto       result = build_add(adder, block_size, ops, row0, row1, ops.zero()).sum;
+  const auto fill   = signed_matrix ? result.back() : ops.zero();
+  result.resize(out_w, fill);
+  return result;
+}
+
 // Unsigned array multiplier `a * b`, result truncated to out_w bits: the sum of
 // shifted partial products pp_k = (b_k ? a : 0) << k, accumulated with the chosen
 // adder architecture (one add per b bit). Both operands are pre-extended to out_w
@@ -547,7 +695,10 @@ inline std::vector<Bit> build_affine_shr_prefix(Ops& ops, const std::vector<Bit>
 // pick the architecture of the internal partial-product additions.
 template <class Bit, class Ops>
 inline std::vector<Bit> build_mul(Mult_kind kind, Adder_kind adder, int block_size, Ops& ops, const std::vector<Bit>& a,
-                                  const std::vector<Bit>& b, int out_w) {
+                                  const std::vector<Bit>& b, int out_w, bool a_signed = false, bool b_signed = false) {
+  if (kind == Mult_kind::sn) {
+    return sn_mul(adder, block_size, ops, a, b, out_w, a_signed, b_signed);
+  }
   std::vector<std::vector<Bit>> rows;
   int                           aw = static_cast<int>(a.size());
   int                           bw = static_cast<int>(b.size());

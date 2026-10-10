@@ -1,0 +1,5 @@
+// p2v2p fuzz find (2026-10-08): `(-4) ^ (i0 << 6)` folds to `((~i0) << 6) |
+// 0x3c`; the inlined signed shift operand was zero-padded and came out positive.
+pub comb shl_inlined_signed(i0:U16) -> (o0:S24) {
+  wrap o0 = (i0 + ((-4) ^ (i0 << 6)))
+}

@@ -17,6 +17,7 @@ PRPS=(
   "inou/prp/tests/sim/loop_roll_conditional_state_call.prp"
   "inou/prp/tests/sim/loop_state_multi_carry.prp"
   "inou/prp/tests/sim/loop_mixed_carry.prp"
+  "inou/prp/tests/sim/loop_inline_colors.prp"
   "inou/prp/tests/sim/div_narrow_result.prp"
   "inou/prp/tests/sim/llvm_native_division.prp"
   "inou/prp/tests/sim/llvm_boundary_slices.prp"
@@ -85,13 +86,13 @@ switch_work="$work/backend-switch"
 (
   set -e
   for backend in llvm slop llvm; do
-    run sim inou/prp/tests/sim/loop_hierarchy.prp --set sim.jobs="$BRANCH_JOBS" --set sim.checkpoint=false \
+    run sim inou/prp/tests/sim/loop_inline_colors.prp --set sim.jobs="$BRANCH_JOBS" --set sim.checkpoint=false \
       --set "sim.tune.backend=$backend" --workdir "$switch_work"
     if [ "$backend" = slop ]; then
       switch_objects=("$switch_work"/sim/*.llvm.o)
       [ ! -e "${switch_objects[0]}" ] || fail "backend switch retained LLVM kernels"
     else
-      switch_objects=("$switch_work"/sim/*.__loop*.color-kernel-*.llvm.o)
+      switch_objects=("$switch_work"/sim/*.native-loop.llvm.o)
       [ -f "${switch_objects[0]}" ] || fail "switch to LLVM lost the compact kernel"
     fi
   done
@@ -161,8 +162,19 @@ selected = [p for p in adapters if '__has_native_loop() { return true; }' in p.r
 assert selected, 'no stateless loop selected the native entry'
 for path in selected:
     body = path.read_text()
-    assert '_llvm_loop(inputs, outputs, count, first, step);' in body, path
+    assert '(inputs, outputs, count, first, step);' in body, path
     assert 'for (' not in body and '__pure_eval(' not in body, path
+# Fusion retains two conditional regions; neither color covers both outputs.
+import re
+root = pathlib.Path(sys.argv[1])
+header = (root / 'smoke.loop_inline_colors.hpp').read_text()
+names = re.findall(r'using Callee = (__sim_fused_loop_\w+);', header)
+assert len(names) == 1, names
+for name in names:
+    adapter = (root / (name + '.native-loop.inc')).read_text()
+    assert '__has_native_loop() { return true; }' in adapter, name
+    assert 'for (' not in adapter and '__pure_eval(' not in adapter, name
+    assert (root / (name + '.native-loop.llvm.o')).is_file(), name
 PYCODE
 slop_objects=("$work"/slop/sim/*.llvm.o)
 [ ! -e "${slop_objects[0]}" ] || fail "Slop backend emitted LLVM kernels"

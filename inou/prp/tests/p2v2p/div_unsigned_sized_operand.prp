@@ -1,0 +1,6 @@
+// Fuzz: the inlined dividend `183 >> t1` is unsigned, but its text computes on
+// the signed `9'shb7`; the size cast kept that sign, so 183 sized to 8 bits read
+// as -73 and the division ran signed (o0 came out 4 instead of 30 & 7 = 6).
+pub comb div_unsigned_sized_operand(t1:U3) -> (o0:U3) {
+  wrap o0 = ((183 >> t1) / 6)
+}

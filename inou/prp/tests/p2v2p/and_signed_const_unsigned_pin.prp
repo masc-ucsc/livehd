@@ -1,0 +1,8 @@
+// p2v2p fuzz find (2026-10-08): `s2 & 6` is non-negative (an unsigned pin) but
+// must evaluate with s2 sign-extended; inside an enclosing unsigned Sum the
+// s2 = -2 zero-extended and the And gave 2 instead of 6.
+pub comb and_signed_const_unsigned_pin(i0:U8) -> (o0:U17) {
+  mut t0 = (((i0#sext[5..=6] & 6) << 2) + i0)
+  mut t1 = t0#[30]
+  o0 = (t0 + (t0 ^ ((7 + t1) & t0)))
+}

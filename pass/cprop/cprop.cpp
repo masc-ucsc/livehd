@@ -1762,7 +1762,28 @@ void Cprop::scalar_sext(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
     self_pos = v.to_just_i64();
   }
 
-  const auto wire_dpin = inp_edges_ordered[0].get_driver_pin();
+  auto wire_dpin = inp_edges_ordered[0].get_driver_pin();
+
+  // Sext(Get_mask(y, [0,w)), b) == Sext(y, b) for b <= w: Sext keeps b bits
+  // (sign at b-1), all inside the low window, so they are y's. Width-free (the
+  // operands are unlimited signed integers), so it holds whatever the stamps.
+  if (self_pos >= 1 && !wire_dpin.is_const() && !is_graph_input_pin(wire_dpin)) {
+    auto mask_node = wire_dpin.get_master_node();
+    if (type_op_of(mask_node) == Ntype_op::Get_mask && mask_node.get_class_index() != node.get_class_index()) {
+      const auto window = livehd::graph_util::bit_range(mask_node);
+      const auto y      = drv_at(mask_node, 0);
+      if (window && window->first == 0 && self_pos <= window->second && !y.is_invalid()
+          && y.get_master_node().get_class_index() != node.get_class_index()) {
+        inp_edges_ordered[0].del_sink();
+        setup_sink_by_name(node, "a").connect_driver(y);
+        if (!mask_node.has_out_edges()) {
+          bwd_del_node(mask_node);
+        }
+        inp_edges_ordered = ordered_inp_edges(node);
+        wire_dpin         = y;
+      }
+    }
+  }
 
   // Sext(X,1) maps boolean 1 to -1. It preserves truthiness only, so bypass
   // it on a selector with a proven boolean input, never on a Mux data arm.
@@ -2934,6 +2955,29 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
     return false;
   }
 
+  // Get_mask(Sext(x, b), [lo,hi)) == Get_mask(x, [lo,hi)) for hi <= b: Sext
+  // keeps bits [0,b) of x and the window reads none above them.
+  if (!a_pin.is_const() && !is_graph_input_pin(a_pin)) {
+    auto sext_node = a_pin.get_master_node();
+    if (type_op_of(sext_node) == Ntype_op::Sext && sext_node.get_class_index() != node.get_class_index()) {
+      const auto pos = livehd::graph_util::get_driver_of_sink_name(sext_node, "b");
+      const auto x   = drv_at(sext_node, 0);
+      if (pos.is_const() && const_of(pos).is_just_i64() && const_of(pos).to_just_i64() >= 1
+          && mask_pin->second <= const_of(pos).to_just_i64() && !x.is_invalid()
+          && x.get_master_node().get_class_index() != node.get_class_index()) {
+        auto a_sink = find_sink_pin(node, "a");
+        if (!a_sink.is_invalid()) {
+          a_sink.del_sink();
+          x.connect_sink(a_sink);
+          if (!sext_node.has_out_edges()) {
+            bwd_del_node(sext_node);
+          }
+          a_pin = x;
+        }
+      }
+    }
+  }
+
   const auto& mask_const = livehd::graph_util::mask_window_const(mask_pin->first, mask_pin->second);
 
   // A private modular Sum region is absorbed only at its terminal mask.
@@ -3438,6 +3482,45 @@ void Cprop::scalar_node(hhds::Node_class& node) {
   }
 }
 
+// A flop enable folded to a constant. True is the unconditional write tolg
+// spells by omitting the pin; false is a register that never loads, which a
+// depth-1 flop says exactly as din = q with no enable. The emitters read a
+// constant enable as "no enable", so a never-written register used to load
+// din on every edge (fuzz: `if (i0#[8] == 1) { r0 = i4 }` with i0:U8). A
+// pipelined flop keeps its constant-false enable: din = q there would rotate
+// the stages instead of holding them.
+static void fold_constant_flop_enables(hhds::Graph* graph) {
+  for (auto flop : graph->body().nodes()) {
+    if (type_op_of(flop) != Ntype_op::Flop) {
+      continue;
+    }
+    auto en = livehd::graph_util::get_driver_of_sink_name(flop, "enable");
+    if (en.is_invalid() || !en.is_const() || const_of(en).has_unknowns()) {
+      continue;
+    }
+    if (en.is_known_true()) {
+      setup_sink_by_name(flop, "enable").del_sink();
+      continue;
+    }
+    if (!en.is_known_false()) {
+      continue;
+    }
+    bool depth_one = true;
+    for (auto name : {"pipe_min", "pipe_max"}) {
+      auto p = livehd::graph_util::get_driver_of_sink_name(flop, name);
+      depth_one = depth_one
+                  && (p.is_invalid() || (p.is_const() && const_of(p).is_just_i64() && const_of(p).to_just_i64() == 1));
+    }
+    if (!depth_one) {
+      continue;
+    }
+    setup_sink_by_name(flop, "enable").del_sink();
+    auto din = setup_sink_by_name(flop, "din");
+    din.del_sink();
+    din.connect_driver(flop.create_driver_pin(0));
+  }
+}
+
 void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   if (!g) {
     return;
@@ -3485,6 +3568,7 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
       merge_concat_slices(node);
     }
   }
+  fold_constant_flop_enables(current_graph);
   cleanup_dead_nodes(current_graph);
   current_graph = nullptr;
 }

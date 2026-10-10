@@ -1763,6 +1763,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       if (active->graphs.empty()) {
         return;
       }
+      set_crash_context("pass.legalize", {});
       Phase_timer                               phase(res, "pass.legalize");
       std::vector<std::shared_ptr<hhds::Graph>> design(active->graphs.begin(), active->graphs.end());
       const auto legalized_design = livehd::legalize::legalize_design(design, /*freeze_graphs=*/false);
@@ -1784,6 +1785,15 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
           }
         }
       }
+      // Not run through run_step, so the halting-error gate is spelled out: a
+      // genuine combinational loop (comb-loop) must stop the pipeline HERE, not
+      // let enableopt / cprop / satopt walk a graph already known to be cyclic
+      // and fail later under their own name.
+      res.recipe_steps.emplace_back("pass.legalize");
+      if (livehd::diag::sink().has_halting_errors()) {
+        throw classify_engine_failure("pass.legalize reported errors");
+      }
+      set_crash_context({}, {});
     };
     for (const auto& [set_name, method] : compile_graph_passes(opts)) {
       if (active->graphs.empty()) {
@@ -1870,16 +1880,20 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     }
 
     // SEAL: after every pass that may still reshape the graph (formal only
-    // annotates), re-check one driver per sink pin on the settled design and
-    // FREEZE it. Everything downstream of here -- cgen, the emits, and the LEC
-    // / synthesis / simulation consumers -- reads a graph nobody may reshape.
-    // With the freeze check on (debug builds) also re-scan that no pass after
-    // legalize re-created a combinational cycle.
+    // annotates), re-check one driver per sink pin on the settled design,
+    // re-scan that no pass after legalize re-created a combinational cycle
+    // (loop_hoist, satopt and enableopt add or rewire logic; the scan is the
+    // same cost as one legalize round, so it runs in EVERY build), and FREEZE
+    // (debug builds only: a full digest per graph). Everything downstream of
+    // here -- cgen, the emits, and the LEC / synthesis / simulation consumers
+    // -- reads a graph nobody may reshape.
     if (!active->graphs.empty()) {
       Phase_timer                               phase(res, "pass.legalize.seal");
       std::vector<std::shared_ptr<hhds::Graph>> design(active->graphs.begin(), active->graphs.end());
-      const bool                                check = verify_frozen_enabled(opts);
-      (void)livehd::legalize::seal_design(design, check, check);
+      (void)livehd::legalize::seal_design(design, /*freeze_graphs=*/verify_frozen_enabled(opts), /*check_acyclic=*/true);
+      if (livehd::diag::sink().has_halting_errors()) {
+        throw classify_engine_failure("pass.legalize.seal reported errors");
+      }
     }
   }
 

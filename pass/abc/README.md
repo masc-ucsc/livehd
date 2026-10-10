@@ -544,7 +544,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `threads` | maximum ABC workers (`0` = automatic cap of 8 or available CPUs when fewer); `lhd synth` sets this through `synth.threads`, which defaults to `0` | `1` |
 | `memory_budget_mb` | per-color physical-memory growth budget in MiB; the 16 GiB default is the soft target, independent of the process ceiling | `16384` |
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
-| `multiplier` | `auto` starts with serial partial-product addition and trials balanced `tree`; explicit `array`/`tree` locks the multiplier and its internal adder | `auto` |
+| `multiplier` | `auto` starts with serial partial-product addition and trials balanced `tree`; explicit `array`/`tree`/`csa`/`sn` locks the multiplier and its internal adder | `auto` |
 | `delay` / `load` | the timing BUDGET in ps / the load: `{D}` / `{L}` expand to the full flag (`-D <val>` / `-L <val>`) when set, to nothing when empty — `&nf {D}` needs `-D`, a bare value is silently ignored by ABC. `delay` is also the target the built-in objective sizes to and judges the area candidate against (see below); `{B}` is the per-region budget (`delay` minus `reg_margin` when the region holds flops) as `-D <ps>` | empty |
 | `area_relax` | max percent of a MET delay budget to trade back for area, via ABC's `&nf -R` (bounded by the real slack too); `0` disables that remap — see below | `200` |
 | `area_flow` | AREA command string: empty = the former baseline (`&fraig`/`dc2`/`&dch`/`&nf`); used without delay or as a second candidate after meeting a delay budget. Built-ins append `buffer -N {F}; dnsize {B}`, adding `upsize {B}` before `dnsize` for a timed candidate. `none` disables only the second candidate. Custom strings run verbatim (`{D}`/`{L}`/`{F}`/`{B}` substituted, no tail appended); explicit `flow` takes precedence | empty |
@@ -947,7 +947,23 @@ bound the requested result width; a right shifter retains its full input width.
 Shift counts retain all their bits, so an oversized count produces zero or sign
 fill instead of wrapping to a smaller count.
 The Sum builder compresses three operand rows at a time without propagating
-carry, then uses the selected RCA/CSKA/CLA for the final addition.
+carry, then uses the selected adder for the final addition.
+
+`--set pass.abc.adder=brent` selects a Brent-Kung sparse parallel-prefix
+adder, including non-power-of-two widths and incoming/outgoing carry. It is an
+explicit alternative to `rca`, `cska`, `cla`, and `prefix`; the `auto` default
+and its candidate set are unchanged. For a fixed arithmetic comparison, also
+pin `pass.abc.multiplier=sn` and `pass.abc.barrel=log` so those operators
+do not trigger automatic implementation trials.
+
+`--set pass.abc.multiplier=sn` selects ABC SN's default multiplier construction:
+unsigned partial products or signed Baugh-Wooley encoding at native operand
+widths, a depth-ordered column full-adder compressor, and one final selected
+adder. Mixed operands add a zero sign guard to the unsigned operand. The
+seven-AND full-adder and scheduling follow ABC's `snBlast.h` / WLC algorithm.
+Select `adder=brent` to match SN's final adder. The compiler default and auto
+multiplier candidates remain unchanged; `array`, `tree`, and `csa` remain
+available. An explicit `sn` choice performs no multiplier trials.
 
 After baseline mapping and boundary sizing, the enabled ware families compare
 alternative implementations of adders/comparisons, multipliers, and runtime barrel shifters.

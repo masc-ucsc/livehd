@@ -426,3 +426,91 @@ TEST(PartitionColors, SharedNestedOccurrencesSurvivePersistenceAndRecoloring) {
   }
   std::filesystem::remove_all(path);
 }
+
+
+TEST(PartitionWiringContext, CopiesConstantSliceWithoutMergingOwnersAndIncludesItInPreBody) {
+  namespace gu = livehd::graph_util;
+  using namespace livehd::partition;
+  for (const bool enabled : {false, true}) {
+    hhds::GraphLibrary input, output;
+    auto io = input.create_io("context");
+    io->add_input("a", 1);
+    io->add_output("y", 2);
+    io->set_bits("a", 4);
+    io->set_bits("y", 8);
+    auto graph = io->create_graph();
+    gu::set_ubits(graph->get_input_pin("a"), 4);
+    const auto slice = gu::create_get_mask(*graph, graph->get_input_pin("a"), 0, 8);
+    gu::set_bits(slice.create_driver_pin(0), 8);
+    const auto consumer = gu::create_typed_node(*graph, Ntype_op::Not, 8);
+    slice.create_driver_pin(0).connect_sink(consumer.create_sink_pin(0));
+    consumer.create_driver_pin(0).connect_sink(graph->get_output_pin("y"));
+    gu::set_color(slice, 1);
+    gu::set_color(consumer, 2);
+    graph->get_input_node().attr(livehd::attrs::coloring_info).set(
+        enabled ? "{\"boundary_wiring\":true}" : "{\"boundary_wiring\":false}");
+    unsigned visited = 0;
+    const Body_builder hook = [&](const Region_body& rb) {
+      ++visited;
+      ASSERT_NE(rb.pre_body, nullptr);
+      if (rb.color != 2) {
+        return;
+      }
+      EXPECT_EQ(rb.nodes.size(), enabled ? 2U : 1U);
+      ASSERT_EQ(rb.inputs.size(), 1U);
+      EXPECT_EQ(rb.inputs.front().src_driver, enabled ? graph->get_input_pin("a") : slice.create_driver_pin(0));
+      EXPECT_EQ(rb.inputs.front().bits, enabled ? 4 : 8);
+      unsigned copies = 0;
+      for (const auto node : rb.pre_body->body().nodes()) {
+        if (gu::type_op_of(node) == Ntype_op::Get_mask) {
+          ++copies;
+          EXPECT_TRUE(gu::bit_range(node).has_value());
+        }
+      }
+      EXPECT_EQ(copies, enabled ? 1U : 0U);
+    };
+    ASSERT_TRUE(Pass_partition::build_decomposition({graph}, &output, "context", false,
+                                                    hook, Flatten_mode::off, true));
+    EXPECT_EQ(visited, 2U);
+    EXPECT_EQ(gu::node_color_of(slice), 1);
+    EXPECT_EQ(gu::node_color_of(consumer), 2);
+    EXPECT_EQ(consumer.get_sink_pin(0).get_driver_pin(), slice.create_driver_pin(0));
+  }
+}
+
+TEST(PartitionWiringContext, OrdinaryNarrowLogicSliceRemainsTheExportedInterface) {
+  namespace gu = livehd::graph_util;
+  using namespace livehd::partition;
+  hhds::GraphLibrary input, output;
+  auto io = input.create_io("narrow_context");
+  io->add_input("a", 1);
+  io->add_output("y", 2);
+  io->set_bits("a", 8);
+  io->set_bits("y", 4);
+  auto graph = io->create_graph();
+  gu::set_ubits(graph->get_input_pin("a"), 8);
+  const auto logic = gu::create_typed_node(*graph, Ntype_op::Not, 8);
+  graph->get_input_pin("a").connect_sink(logic.create_sink_pin(0));
+  const auto slice = gu::create_get_mask(*graph, logic.create_driver_pin(0), 0, 4);
+  gu::set_bits(slice.create_driver_pin(0), 4);
+  const auto consumer = gu::create_typed_node(*graph, Ntype_op::Not, 4);
+  slice.create_driver_pin(0).connect_sink(consumer.create_sink_pin(0));
+  consumer.create_driver_pin(0).connect_sink(graph->get_output_pin("y"));
+  gu::set_color(logic, 1);
+  gu::set_color(slice, 1);
+  gu::set_color(consumer, 2);
+  graph->get_input_node().attr(livehd::attrs::coloring_info).set("{\"boundary_wiring\":true}");
+  unsigned visited = 0;
+  const Body_builder hook = [&](const Region_body& rb) {
+    ++visited;
+    if (rb.color == 2) {
+      ASSERT_EQ(rb.nodes.size(), 1U);
+      ASSERT_EQ(rb.inputs.size(), 1U);
+      EXPECT_EQ(rb.inputs.front().src_driver, slice.create_driver_pin(0));
+      EXPECT_EQ(rb.inputs.front().bits, 4);
+    }
+  };
+  ASSERT_TRUE(Pass_partition::build_decomposition({graph}, &output, "narrow_context", false,
+                                                  hook, Flatten_mode::off, true));
+  EXPECT_EQ(visited, 2U);
+}

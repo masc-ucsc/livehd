@@ -1155,6 +1155,7 @@ sh_test(
         "//inou/prp:tests/sim/loop_inlined_capture.prp",
         "//inou/prp:tests/sim/loop_invariant_broadcast.prp",
         "//inou/prp:tests/sim/loop_mixed_carry.prp",
+        "//inou/prp:tests/sim/loop_inline_colors.prp",
         "//inou/prp:tests/sim/loop_roll_conditional_state_call.prp",
         "//inou/prp:tests/sim/loop_state_multi_carry.prp",
         "//inou/prp:tests/sim/mem_sim_gated_clock.prp",
@@ -2357,4 +2358,20 @@ sh_test(
     srcs = ["sim_reachable_smoke.sh"],
     data = ["//lhd"],
     env_inherit = ["PATH"],
+)
+
+sh_test(
+    name = "verilog_sim_parity_test",
+    size = "large",
+    srcs = ["verilog_sim_parity_test.sh"],
+    data = glob(["verilog_sim/*.v", "verilog_sim/*.prp"]) + ["//lhd"],
+    env = {"LHD": "lhd/lhd"},
+)
+
+sh_test(
+    name = "sim_warn_undefined_test",
+    size = "large",
+    srcs = ["sim_warn_undefined_test.sh"],
+    data = glob(["sim_warn_undefined/*.v", "sim_warn_undefined/*.prp"]) + ["//lhd"],
+    env = {"LHD": "lhd/lhd"},
 )

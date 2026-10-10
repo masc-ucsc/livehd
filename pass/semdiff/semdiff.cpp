@@ -113,13 +113,23 @@ bool is_state(Ntype_op op) {
 // not-loop_break Sub is not hoisted, gets a normal structural fsig, and needs no
 // seed). IO is NOT here: it is two singleton nodes below kFirstUserNodeIdx that
 // forward_class never emits, and its pins already resolve by name.
+// An unnamed, non-loop_break instance (an extracted ware/arith module): it has
+// no instance identity to anchor a cut key on. Its hier-name fallback is the
+// DEF name, so two instances of one def in a region shared one cut key and
+// their obligations collided (cut_unknown on an unchanged region). It is signed
+// structurally instead -- def + interface + operands, like any comb node.
+bool is_anonymous_sub(const hhds::Node_class& node) {
+  return gu::type_op_of(node) == Ntype_op::Sub && node.get_name().empty() && !node.is_loop_break();
+}
+
 bool is_cut(const hhds::Node_class& node, bool blackbox_subs = false) {
   auto op = gu::type_op_of(node);  // set_subnode rewrites only bit 0, so the op survives it
-  // blackbox_subs (incremental region reuse): EVERY Sub is a cut point, not just
-  // loop_break ones -- its inputs are still folded here (input rewiring is caught)
-  // but its outputs are seeded sources, so a comb loop through a submodule breaks
-  // and the compare keys on the Sub's IO wiring, not its (separately-cached) body.
-  return is_state(op) || (op == Ntype_op::Sub && (blackbox_subs || node.is_loop_break()));
+  // blackbox_subs (incremental region reuse): EVERY NAMED Sub is a cut point,
+  // not just loop_break ones -- its inputs are still folded here (input rewiring
+  // is caught) but its outputs are seeded sources, so a comb loop through a
+  // submodule breaks and the compare keys on the Sub's IO wiring, not its
+  // (separately-cached) body. An anonymous Sub is not (is_anonymous_sub).
+  return is_state(op) || (op == Ntype_op::Sub && ((blackbox_subs && !is_anonymous_sub(node)) || node.is_loop_break()));
 }
 
 // Name-normalization mirror of pass/lec/encode.cpp's flop_state_key (kept local
@@ -1561,6 +1571,7 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
 struct Side {
   hhds::Graph*                                     g                 = nullptr;
   bool                                             matching_io_names = true;
+  bool                                             blackbox_subs     = false;
   std::vector<hhds::Node_class>                    order;  // forward_class order
   // Identity Get_mask nodes are representation-only boundaries. They are not
   // members of the structural node bijection; signatures walk through them.
@@ -1679,11 +1690,20 @@ bool cut_signature(const Side& s, const hhds::Node_class& node, uint64_t& out) {
   return true;
 }
 
+// The forward-pass kind of a node. A blackboxed anonymous Sub is not a cut
+// point, so its interface (port names/widths/signs) must enter its signature
+// here: an interface change has to miss, exactly as for a seeded named Sub.
+uint64_t forward_kind_key(const Side& s, const hhds::Node_class& node) {
+  const uint64_t k = node_kind_key(node);
+  return s.blackbox_subs && is_anonymous_sub(node) ? hcombine(k, sub_iface_key(node)) : k;
+}
+
 Side analyze(hhds::Graph* g, const Semdiff_options& opts,
              const absl::flat_hash_map<hhds::Class_index, uint64_t>* state_seeds = nullptr) {
   Side s;
   s.g                 = g;
   s.matching_io_names = opts.matching_io_names;
+  s.blackbox_subs     = opts.blackbox_subs;
 
   // Seed state cells (cut points). With matching_names they get a cross-side
   // identity by hierarchical name so structure flows through them in BOTH
@@ -1736,7 +1756,7 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
     if (!ready) {
       continue;  // past a frontier => no forward signature
     }
-    uint64_t h = fold_operands(node_kind_key(node), by_port);
+    uint64_t h = fold_operands(forward_kind_key(s, node), by_port);
     s.fsig[ci] = h;
     s.fvals.insert(h);
   }
@@ -1780,7 +1800,7 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
       if (!ready) {
         continue;
       }
-      s.fsig[ci] = fold_operands(node_kind_key(node), by_port);
+      s.fsig[ci] = fold_operands(forward_kind_key(s, node), by_port);
       s.fvals.insert(s.fsig[ci]);
       changed = true;
     }
@@ -1940,7 +1960,7 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
           }
           // loop_break Subs are always cut points; blackbox_subs makes EVERY Sub
           // one (incremental region reuse -- see is_cut).
-          if (!opts.blackbox_subs && !node.is_loop_break()) {
+          if (!is_cut(node, opts.blackbox_subs)) {
             continue;
           }
           uint64_t seed = hcombine(hstr("\x01sub"), hstr(cut_point_key(g, node)));
@@ -3452,7 +3472,45 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
   opts.matching_names    = true;  // state cells keyed by hierarchical name — lec's
   opts.matching_io_names = matching_io_names;
   // correspondence basis, so digest-equal transfers
-  Side s                 = analyze(g, opts);
+  //
+  // A NAMED Sub instance is a cut point, seeded by its instance
+  // name like a state cell. A mapped netlist keeps its state inside Subs (a
+  // Liberty flop, a mapped region holding registers), so a Q -> logic -> D loop
+  // through one is a combinational cycle to the forward pass. That stalled the
+  // whole loop cone -- and with it every native state cell it feeds (a kept
+  // memory) -- so every mapped netlist was undigestable and its STA was never
+  // reused. The instance's operands are folded as an obligation below and its
+  // body digest is still folded by the Merkle step, so the digest loses
+  // nothing. An ANONYMOUS instance (pass.partition's region instances are) is
+  // keyed by its def name when that def is instantiated exactly once here --
+  // the def name is then a unique, content-stable instance identity. Several
+  // anonymous instances of one def stay structural (no stable tiebreak).
+  absl::flat_hash_map<hhds::Class_index, uint64_t> seeds;
+  absl::flat_hash_set<hhds::Class_index>           named_cuts;
+  absl::flat_hash_map<hhds::Gid, int>              anonymous_uses;
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+    if (gu::type_op_of(node) == Ntype_op::Sub && node.get_name().empty() && !node.is_loop_subnode()) {
+      ++anonymous_uses[node.get_subnode_gid()];
+    }
+  }
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+    const auto op = gu::type_op_of(node);
+    if (is_state(op)) {
+      seeds.emplace(node.get_class_index(), hcombine(hstr("\x01state"), hstr(state_key(g, node))));
+    } else if (op == Ntype_op::Sub && !node.is_loop_subnode()) {
+      uint64_t seed = 0;
+      if (!node.get_name().empty()) {
+        seed = hcombine(hcombine(hstr("\x01inst"), hstr(node.get_name())), node_kind_key(node));
+      } else if (auto io = node.get_subnode_io(); io && anonymous_uses[node.get_subnode_gid()] == 1) {
+        seed = hcombine(hcombine(hstr("\x01inst1"), hstr(io->get_name())), node_kind_key(node));
+      }
+      if (seed != 0) {
+        seeds.emplace(node.get_class_index(), seed);
+        named_cuts.insert(node.get_class_index());
+      }
+    }
+  }
+  Side s = analyze(g, opts, &seeds);
 
   // Order-independent fold: one token per node (fsig = input-cone identity,
   // bsig = output-cone identity, kind = local shape), sorted so allocation /
@@ -3485,6 +3543,13 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
         return {};
       }
       tok = hcombine(hcombine(tok, hstr("\x01cut")), cs);
+    } else if (named_cuts.contains(ci)) {
+      // A seeded instance's fsig is its name; its operands live here. One that
+      // is still unsigned (an anonymous comb loop) folds nothing extra -- the
+      // same information an unseeded stalled instance contributed before.
+      if (uint64_t cs = 0; cut_signature(s, node, cs)) {
+        tok = hcombine(hcombine(tok, hstr("\x01instcut")), cs);
+      }
     }
     // interface mode: a Sub folds ONLY its def identity (the gid in node_kind_key)
     // and its boundary connectivity (already in f/b) -- exactly a bodyless

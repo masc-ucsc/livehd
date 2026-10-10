@@ -92,7 +92,7 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!multiplier) {
     livehd::diag::err("pass.usyn", "invalid-options", "syntax")
         .msg("invalid native USYN multiplier '{}'", multiplier_text)
-        .hint("multiplier=csa|tree|array")
+        .hint("multiplier=csa|tree|array|sn")
         .emit();
     return false;
   }
@@ -196,9 +196,10 @@ bool read_options(const Eprp_var& var, Options& options) {
     return invalid_option("reg_margin", "`auto` (the mapped DFF's clk->Q + setup) or a non-negative number of ps");
   }
   options.design.max_source_nodes = logical.max_nodes;
+  options.design.specialize       = std::string(var.get_stage("specialize", "true")) != "false";
   options.design.cost_policy      = std::string(var.get_stage("cost_mode", "proxy"));
   // EXPERIMENT: literal-network statistics, one JSON line per region (literal_stats.hpp).
-  options.design.literal_stats = std::string(var.get_stage("literal_stats", ""));
+  options.design.literal_stats    = std::string(var.get_stage("literal_stats", ""));
   {
     const auto text = std::string(var.get_stage("literal_extract", "0"));
     if (text != "0" && text != "1" && text != "2" && text != "3") {
@@ -260,11 +261,17 @@ void Pass_usyn::setup() {
                        "shares native work and process/time limits; tmap=none runs one network",
                        "2");
   m.add_label_optional("target", "Output target; currently cmos retains original state", "cmos");
+  m.add_label_optional("specialize",
+                       "true|false: run pass.specialize (constant instance inputs folded into state-free callees) on the "
+                       "private copy after pass.color (default true; the synth.specialize spelling)",
+                       "true");
   m.add_label_optional("adder",
                        "Native arithmetic: auto (prefix wide sums, comparisons and multiplier carry), rca, cska, cla or prefix",
                        "auto");
   m.add_label_optional("adder_block", "Native CSKA/CLA group width (0: derive from operating width)", "0");
-  m.add_label_optional("multiplier", "Native partial-product summation: csa (carry-save), tree or array", "csa");
+  m.add_label_optional("multiplier",
+                       "Native partial-product summation: csa (carry-save), tree, array or sn (depth-ordered columns)",
+                       "csa");
   m.add_label_optional("mux_lowering",
                        "Indexed mux lowering: decode or experimental tree; predicates retain nonzero semantics",
                        "decode");
@@ -535,7 +542,7 @@ void Pass_usyn::work(Eprp_var& var) {
     options.design.literal_tmap_provider = options.tmap;
     options.design.literal_tmap->cache_directory.clear();  // the experiment's cones must not pollute the mapped cache
   }
-  auto       selected    = usyn::synthesize_cmos_design(top, options.design, native_work);
+  auto selected = usyn::synthesize_cmos_design(top, options.design, native_work);
   work.absorb(native_work);
   if (!selected.design) {
     livehd::diag::err("pass.usyn", "synthesis-refused", "unsupported")

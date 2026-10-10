@@ -1,0 +1,13 @@
+// A signed local seeded with unknown bits and then fully written lane by lane
+// is fully known. The seed entered at its own (wider) width, so the re-sign to
+// the declared S8 was a no-op and `m < -64` read the seed's unknown upper bits.
+pub comb signed_lanes_unknown_base(a:U4, b:U4) -> (n:Bool, p:Bool) {
+  mut m:S8 = 0sb????????
+  m#[0..<4] = a
+  m#[4..<8] = b
+  n = m < -64
+  mut q:S8 = nil
+  q#[0..<4] = b
+  q#[4..<8] = a
+  p = q < 0
+}

@@ -48,6 +48,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "affine_amount.hpp"
 #include "color_region_graph.hpp"
 #include "color_synth.hpp"
 #include "diag.hpp"
@@ -117,6 +118,7 @@ struct Cone_stats {
 struct Cones {
   hhds::Graph* g            = nullptr;
   uint64_t     max_gate     = 0;
+  uint64_t     min_gate     = 0;
   bool         flop_to_flop = false;  // walks and the overlap merge ignore max_gate
   Forward_mode forward      = Forward_mode::off;
 
@@ -190,6 +192,11 @@ struct Cones {
   // rather than the graph, so root ids, sweep order and the renumber are one
   // deterministic function of the graph and never of hash iteration.
   std::vector<uint32_t> forward_idx;
+
+  // A lookup's stride/bias expression is part of the operator, not an opaque
+  // region input: otherwise index*64 turns into an arbitrary shift amount.
+  // Materialized once in preparation, never by a per-root edge walk.
+  std::vector<std::vector<uint32_t>> affine_groups;
 
   // Roots, flattened: root `c` (1-based, == its color id) seeds from
   // seed_pool[root_start[c-1] .. +root_cnt[c-1]) and starts its budget at
@@ -1217,7 +1224,7 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
 // emitted (collect_control_roots).
 void absorb_small(Cones& cn, Int_union_find& cuf) {
   const auto n_roots = static_cast<uint32_t>(cn.root_start.size());
-  if (cn.min_nodes == 0 || cn.max_gate == 0 || n_roots == 0) {
+  if ((cn.min_nodes == 0 && cn.min_gate == 0) || cn.max_gate == 0 || n_roots == 0) {
     return;  // raw cones merge nothing, and absorbing is a merge
   }
   const auto cut = [&](uint32_t i) {
@@ -1246,7 +1253,10 @@ void absorb_small(Cones& cn, Int_union_find& cuf) {
       pred[c] = graph_util::sat_add(pred[c], cn.pred[i]);
     }
   }
-  const auto small = [&](uint32_t c) { return nodes[c] != 0 && nodes[c] < cn.min_nodes && pred[c] <= cn.small_limit(); };
+  const auto small = [&](uint32_t c) {
+    return nodes[c] != 0 && ((cn.min_gate != 0 && pred[c] < cn.min_gate)
+                            || (nodes[c] < cn.min_nodes && pred[c] <= cn.small_limit()));
+  };
   // Contact between classes: (shared sub-cone weight, connecting edges). Keyed
   // by the class ids of the moment; a later merge is resolved through cuf.
   struct Contact {
@@ -1360,6 +1370,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
   cn.ctrl_min_gate = opts.ctrl_min_gate;
   cn.min_nodes     = opts.min_nodes;
   cn.max_gate      = opts.max_gate;
+  cn.min_gate      = opts.min_gate;
   cn.flop_to_flop  = opts.flop_to_flop;
   cn.forward       = opts.forward == "pair" ? Forward_mode::pair : (opts.forward == "all" ? Forward_mode::all : Forward_mode::off);
 
@@ -1429,6 +1440,35 @@ void Color_synth::label_cones(hhds::Graph* g) {
       }
     }
     cn.fin_cnt[i] = static_cast<uint32_t>(cn.fin_drv.size()) - cn.fin_start[i];
+  }
+
+  // Preserve the structural facts the bit blaster uses to lower a packed
+  // word lookup. The narrow index can cross a region boundary; its scale/bias
+  // chain and the observed output slice must travel with the shift. Explicit
+  // source/operator walls win. The group may exceed the soft max_gate target.
+  for (auto node : g->body().nodes()) {
+    const auto i = idx_of(node);
+    if (cn.max_gate == 0 || (cn.flag[i] & kRuntimeSra) == 0 || (cn.flag[i] & (kSeeded | kArithCut)) != 0) {
+      continue;
+    }
+    const auto chain = livehd::synth::affine_chain(graph_util::get_driver_of_sink_name(node, "b"));
+    if (!chain || !graph_util::is_unsign(chain->index) || graph_util::bits_of(chain->index) > 16) {
+      continue;
+    }
+    std::vector<uint32_t> group{i};
+    bool allowed = true;
+    for (const auto& [link, output] : chain->links) {
+      (void)output;
+      const auto j = idx_of(link);
+      if (!cn.traversable(j) || (cn.flag[j] & (kArithCut | kLoopBreak)) != 0) {
+        allowed = false;
+        break;
+      }
+      group.push_back(j);
+    }
+    if (allowed) {
+      cn.affine_groups.push_back(std::move(group));
+    }
   }
 
   // Fan-out, by counting sort over the fan-in pool. Deriving it costs O(E) and
@@ -1509,6 +1549,29 @@ void Color_synth::label_cones(hhds::Graph* g) {
   // ---- A5: merge ----------------------------------------------------------
   Int_union_find cuf;
   merge_colors(cn, static_cast<uint32_t>(cn.root_start.size()), cuf);
+  for (const auto& group : cn.affine_groups) {
+    const auto shift = group.front();
+    if (cn.owner[shift] == 0 || !cn.traversable(shift)) {
+      continue;
+    }
+    if (std::ranges::any_of(group, [&](uint32_t member) {
+          return cn.owner[member] != 0 && cn.is_ctrl(cn.owner[member]) != cn.is_ctrl(cn.owner[shift]);
+        })) {
+      continue;
+    }
+    for (const auto member : group) {
+      if (cn.owner[member] != 0) {
+        cuf.merge(static_cast<int>(cn.owner[shift]), static_cast<int>(cn.owner[member]));
+      }
+    }
+    for (uint32_t k = cn.fout_start[shift]; k < cn.fout_start[shift] + cn.fout_cnt[shift]; ++k) {
+      const auto consumer = cn.fout[k];
+      if (cn.traversable(consumer) && (cn.flag[consumer] & kConstMaskGet) != 0 && cn.owner[consumer] != 0
+          && cn.is_ctrl(cn.owner[consumer]) == cn.is_ctrl(cn.owner[shift])) {
+        cuf.merge(static_cast<int>(cn.owner[shift]), static_cast<int>(cn.owner[consumer]));
+      }
+    }
+  }
   absorb_small(cn, cuf);
 
   // ---- A6: finalize -------------------------------------------------------

@@ -1,0 +1,24 @@
+/*
+:name: tb_wide_negative_poke
+:type: simulation
+:sim_sweep: sim.tune.backend=slop,llvm
+*/
+// A negative testbench value poked into a port wider than 64 bits must
+// sign-fill it. The poke staged every value at 64 bits and zero-filled above,
+// so `dut.a = -5` drove 2^64-5 into an s128 port, and a negative literal wider
+// than 64 bits did not even compile (it was pasted as a C++ integer literal).
+pub mod tb_wide_negative_poke(a:S128, b:S70) -> (o:S128@[0], p:S70@[0]) {
+  o = a
+  p = b
+}
+
+test tb_wide_negative_poke.signs {
+  mut dut = tb_wide_negative_poke
+  tick 3 {
+    dut.a = if clock == 0 { -5 } elif clock == 1 { -14806658979981463984927681802957456164 } else { 77 }
+    dut.b = if clock == 0 { -1 } else { -590295810358705651712 }
+    step
+    assert(dut.o == (if clock == 0 { -5 } elif clock == 1 { -14806658979981463984927681802957456164 } else { 77 }), "s128")
+    assert(dut.p == (if clock == 0 { -1 } else { -590295810358705651712 }), "s70")
+  }
+}

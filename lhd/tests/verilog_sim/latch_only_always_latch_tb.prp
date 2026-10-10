@@ -1,0 +1,18 @@
+const dut_m = import("lg:latch_only_always_latch")
+
+test latch_only_always_latch.icarus {
+  mut dut = dut_m
+  tick 6 {
+    dut.reset = clock < 2
+    dut.e = clock != 4
+    dut.d = clock + 10
+    step
+    if clock < 2 {
+      assert(dut.o0 == 0, "reset opens the latch and loads 0")
+    } elif clock == 4 {
+      assert(dut.o0 == 13, "e == 0 holds the cycle-3 value")
+    } else {
+      assert(dut.o0 == clock + 10, "open while the clock is high")
+    }
+  }
+}

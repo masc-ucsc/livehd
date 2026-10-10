@@ -138,6 +138,10 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   // exactly like tolg's `std::string kind = "assert";`.  Defaulting to true
   // made an unknown-valued plain assert a hard error AND dropped the node.
   bool                elaboration_assert = false;
+  // `__fkind__undefined` (sim.warn_undefined, the slang reader's out-of-range
+  // memory access): not an obligation. A known-true one is dropped; anything
+  // else stays for tolg to lower into a warning marker -- never an error.
+  bool                undefined_check    = false;
   bool                got_child          = move_to_child();
   if (got_child) {
     operand_text = std::string{current_text()};
@@ -158,6 +162,7 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     bool have_msg_child = move_to_sibling();
     if (have_msg_child && current_text().rfind("__fkind__", 0) == 0) {
       elaboration_assert = current_text() == "__fkind__cassert";
+      undefined_check    = current_text() == "__fkind__undefined";
       have_msg_child     = move_to_sibling();
     }
     if (have_msg_child) {
@@ -193,6 +198,9 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   }
 
   const bool known = val && !val->is_invalid() && !val->has_unknowns();
+  if (undefined_check) {
+    return known && val->is_known_true() ? upass::Emit_decision::drop() : upass::Emit_decision::emit_node();
+  }
   if (!known) {
     // 1i comb-inliner: a cassert whose operand is (transitively) a runtime
     // comb result — an inliner nil-seed (Symbol_table::nil_seeded, propagated

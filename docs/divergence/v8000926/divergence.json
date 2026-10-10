@@ -1,0 +1,206 @@
+{
+ "icarus_vs_verilator": [
+  {
+   "cycle": 0,
+   "output": "o0",
+   "icarus": "x",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 0,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "2",
+   "lhd_slop": "2",
+   "lhd_llvm": "2"
+  },
+  {
+   "cycle": 1,
+   "output": "o0",
+   "icarus": "x",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 1,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 2,
+   "output": "o0",
+   "icarus": "x",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 2,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 3,
+   "output": "o0",
+   "icarus": "x",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 3,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "2",
+   "lhd_slop": "2",
+   "lhd_llvm": "2"
+  },
+  {
+   "cycle": 4,
+   "output": "o0",
+   "icarus": "x",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 4,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 5,
+   "output": "o0",
+   "icarus": "x",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 5,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 6,
+   "output": "o0",
+   "icarus": "x",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 6,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 7,
+   "output": "o0",
+   "icarus": "x",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 7,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "0",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 8,
+   "output": "o0",
+   "icarus": "x",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 8,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 9,
+   "output": "o0",
+   "icarus": "x",
+   "verilator": "1",
+   "lhd_slop": "1",
+   "lhd_llvm": "1"
+  },
+  {
+   "cycle": 9,
+   "output": "o1",
+   "icarus": "x",
+   "verilator": "3",
+   "lhd_slop": "3",
+   "lhd_llvm": "3"
+  }
+ ],
+ "inputs": [
+  {
+   "i0": -2102768364,
+   "i1": -25354
+  },
+  {
+   "i0": -1956028198,
+   "i1": -7313
+  },
+  {
+   "i0": 635698171,
+   "i1": 21357
+  },
+  {
+   "i0": 1847701642,
+   "i1": -12474
+  },
+  {
+   "i0": 192625527,
+   "i1": 16825
+  },
+  {
+   "i0": 1035019996,
+   "i1": -28194
+  },
+  {
+   "i0": 35059994,
+   "i1": 22429
+  },
+  {
+   "i0": 1793444043,
+   "i1": 46668
+  },
+  {
+   "i0": 1771904817,
+   "i1": -26118
+  },
+  {
+   "i0": -49613037,
+   "i1": -14416
+  }
+ ]
+}

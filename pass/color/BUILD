@@ -20,6 +20,7 @@ cc_library(
         # hierarchy so a region can cross module boundaries.
         "//pass/partition:flatten",
         "//pass/common:pass",
+        "//pass/synth:affine_amount",
         "//third_party/viecut",
         "@rapidjson",
     ],

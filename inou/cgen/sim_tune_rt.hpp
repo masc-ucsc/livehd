@@ -19,7 +19,8 @@ namespace livehd::sim {
 // for the whole program, drawn on FIRST CALL (after main() has seeded hlop and
 // applied `--set sim.unknown_zero=true`). A function template's local static is
 // ONE object across every TU, so every site that emits the same literal gets
-// the same value -- an unknown net has one value per run.
+// the same value -- an unknown net has one value per run, and that value is a
+// function of (seed, literal) only, so every backend and call order agrees.
 //
 // `__lhd_unknown_zero` is the RUN-TIME spelling of sim.unknown_zero=true: every
 // `?` bit resolves to 0, byte-for-byte the value a build generated with
@@ -41,9 +42,21 @@ inline constexpr std::string_view kUnknownLiteralHelper
       "  static const Slop<W> __v = [__txt]() -> Slop<W> {\n"
       "    if (std::strchr(__txt, '?') == nullptr) return Slop<W>::from_pyrope(__txt);\n"
       "    ++__lhd_unknown_draws;\n"
-      "    if (!__lhd_unknown_zero) return Slop<W>::from_pyrope(__txt);\n"
+      "    // Each literal's bits come from (run seed, key) alone, never from the\n"
+      "    // shared PRNG's position: which literal a backend touches first must\n"
+      "    // not change its value (slop and llvm reach them in different orders).\n"
+      "    unsigned long long __s = hlop_random_seed() ^ (K * 0x9E3779B97F4A7C15ull) ^ static_cast<unsigned long long>(W);\n"
       "    std::string __z(__txt);\n"
-      "    for (auto& __c : __z) if (__c == '?') __c = '0';\n"
+      "    for (auto& __c : __z) {\n"
+      "      if (__c != '?') continue;\n"
+      "      __s += 0x9E3779B97F4A7C15ull;\n"
+      "      unsigned long long __r = __s;\n"
+      "      __r = (__r ^ (__r >> 30)) * 0xBF58476D1CE4E5B9ull;\n"
+      "      __r = (__r ^ (__r >> 27)) * 0x94D049BB133111EBull;\n"
+      "      __r ^= __r >> 31;\n"
+      "      if (!__lhd_unknown_zero) ++hlop_random_draws();  // a random-filled run is not deterministic\n"
+      "      __c = (!__lhd_unknown_zero && (__r & 1)) ? '1' : '0';\n"
+      "    }\n"
       "    return Slop<W>::from_pyrope(__z.c_str());\n"
       "  }();\n"
       "  return __v;\n"
@@ -150,6 +163,123 @@ inline constexpr std::string_view kTuneHashHelper
       "  const std::uint64_t* class_cost;       // [classes] simulation words (loops: body x lanes)\n"
       "  const std::uint64_t* class_cost_flat;  // [classes] simulation words, no body multiplier\n"
       "  const std::uint64_t* occ_cost;         // [occs] cost of the occurrence's own live sites\n"
+      "};\n"
+      "#endif\n";
+
+// sim.warn_undefined (run time, default on): the FIRST time one site hits
+// behavior the source language leaves undefined -- a division or remainder by
+// zero, a memory write or read outside its array -- the run prints one warning
+// naming the site. One report per site is a soft limit (a hot loop does not
+// repeat the same line), not a count of occurrences. C++ code reports through
+// __lhd_sim_undefined. A native LLVM kernel may not call out (its object has no
+// external symbols), so it stores 1 into the site's `hit` byte and the C++ glue
+// polls the kernel's sites after the call. __lhd_undef_site_of<K> is ONE site
+// program-wide per key K (a function template's local static), so the several
+// places one node is emitted from (initial evaluation, the cycle) share it.
+// drv.bin's `--set sim.warn_undefined=false` clears __lhd_warn_undefined, and
+// the driver's tick loops publish __lhd_sim_cycle for the message.
+inline constexpr std::string_view kUndefinedWarnHelper
+    = "#ifndef LHD_SIM_UNDEFINED_WARN_V1\n"
+      "#define LHD_SIM_UNDEFINED_WARN_V1\n"
+      "#include <cstddef>\n"
+      "#include <cstdio>\n"
+      "struct __lhd_undef_site {\n"
+      "  const char*   what;   // e.g. \"division by zero\"\n"
+      "  const char*   where;  // source location, or the cell name\n"
+      "  unsigned char hit;    // set by a native LLVM kernel, polled by its caller\n"
+      "  bool          reported;\n"
+      "};\n"
+      "static_assert(offsetof(__lhd_undef_site, hit) == 2 * sizeof(const char*));  // Cgen_llvm::undefined_if\n"
+      "inline bool      __lhd_warn_undefined = true;\n"
+      "inline long long __lhd_sim_cycle      = -1;\n"
+      "// The power-on evaluation runs before the testbench drives any input, so a\n"
+      "// zero divisor there is the default 0, not the design's: it is not reported.\n"
+      "inline bool __lhd_sim_initializing = false;\n"
+      "[[gnu::cold, gnu::noinline]] inline void __lhd_sim_undefined(__lhd_undef_site* s) {\n"
+      "  s->hit = 0;\n"
+      "  if (s->reported || !__lhd_warn_undefined || __lhd_sim_initializing) {\n"
+      "    return;\n"
+      "  }\n"
+      "  s->reported = true;\n"
+      "  char when[40] = \"\";\n"
+      "  if (__lhd_sim_cycle >= 0) {\n"
+      "    std::snprintf(when, sizeof(when), \" (cycle %lld)\", __lhd_sim_cycle);\n"
+      "  }\n"
+      "  std::fprintf(stderr,\n"
+      "               \"lhd sim: warning: %s at %s%s: the value is undefined; later occurrences at this site are \"\n"
+      "               \"not reported (--set sim.warn_undefined=false silences)\\n\",\n"
+      "               s->what,\n"
+      "               s->where,\n"
+      "               when);\n"
+      "}\n"
+      "inline void __lhd_undef_poll(__lhd_undef_site* s) {\n"
+      "  if (s->hit) [[unlikely]] {\n"
+      "    __lhd_sim_undefined(s);\n"
+      "  }\n"
+      "}\n"
+      "template <unsigned long long K>\n"
+      "__lhd_undef_site* __lhd_undef_site_of(const char* what, const char* where) {\n"
+      "  static __lhd_undef_site s{what, where, 0, false};\n"
+      "  return &s;\n"
+      "}\n"
+      "#endif\n";
+
+// The memory side of sim.warn_undefined, for module headers (it needs
+// hlop/memory.hpp): an array whose ENABLED staged write or whose read falls
+// outside [0, size) reports once per port. `S::site` holds the sites, write
+// ports first (write port w is site w, read port r is site n_wr + r). The
+// wrapped type keeps every other member, so the out-of-range result itself (a
+// dropped write, a 0 read) is unchanged.
+inline constexpr std::string_view kUndefinedMemHelper
+    = "#ifndef LHD_SIM_UNDEFINED_MEM_V1\n"
+      "#define LHD_SIM_UNDEFINED_MEM_V1\n"
+      "template <class M, class S>\n"
+      "struct __lhd_warn_mem : M {\n"
+      "  using __lhd_sites = S;  // the LLVM kernels take &__lhd_sites::site[i]\n"
+      "  template <class A>\n"
+      "  static bool __lhd_outside(const A& a) {\n"
+      "    if (!hlop::Mem_val<A>::addr_known(a)) {\n"
+      "      return false;\n"
+      "    }\n"
+      "    const auto i = hlop::Mem_val<A>::to_i64(a);\n"
+      "    return i < 0 || static_cast<unsigned long long>(i) >= M::size();\n"
+      "  }\n"
+      "  template <class E>\n"
+      "  static bool __lhd_enabled(const E& e) {\n"
+      "    if constexpr (requires { e.is_known_false(); }) {\n"
+      "      return !e.is_known_false();\n"
+      "    } else {\n"
+      "      return static_cast<bool>(e);\n"
+      "    }\n"
+      "  }\n"
+      "  template <int W, class E, class A, class D>\n"
+      "  void stage_write(const E& wen, const A& addr, const D& din) {\n"
+      "    if (__lhd_outside(addr) && __lhd_enabled(wen)) [[unlikely]] {\n"
+      "      __lhd_sim_undefined(&S::site[W]);\n"
+      "    }\n"
+      "    M::template stage_write<W>(wen, addr, din);\n"
+      "  }\n"
+      "  template <class E, class A, class D>\n"
+      "  void stage_write(int w, const E& wen, const A& addr, const D& din) {\n"
+      "    if (__lhd_outside(addr) && __lhd_enabled(wen)) [[unlikely]] {\n"
+      "      __lhd_sim_undefined(&S::site[w]);\n"
+      "    }\n"
+      "    M::stage_write(w, wen, addr, din);\n"
+      "  }\n"
+      "  template <int R, class A>\n"
+      "  auto read(const A& addr) const {\n"
+      "    if (__lhd_outside(addr)) [[unlikely]] {\n"
+      "      __lhd_sim_undefined(&S::site[M::n_wr + R]);\n"
+      "    }\n"
+      "    return M::template read<R>(addr);\n"
+      "  }\n"
+      "  template <class A>\n"
+      "  auto read(int r, const A& addr) const {\n"
+      "    if (__lhd_outside(addr)) [[unlikely]] {\n"
+      "      __lhd_sim_undefined(&S::site[M::n_wr + r]);\n"
+      "    }\n"
+      "    return M::read(r, addr);\n"
+      "  }\n"
       "};\n"
       "#endif\n";
 

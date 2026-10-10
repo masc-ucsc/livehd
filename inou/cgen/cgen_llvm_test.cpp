@@ -18,12 +18,90 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "sim_compile_workers.hpp"
 #include "sim_native_rt.hpp"
+
+TEST(CgenLlvm, ConcatCoalescesRepeatedContiguousSlices) {
+  Cgen_llvm                     kernel("concat_slices", Cgen_llvm::State_layout{9, {{0, 64, true}}});
+  std::vector<Cgen_llvm::Value> lanes;
+  for (unsigned repeat = 0; repeat < 16; ++repeat) {
+    for (unsigned bit = 49; bit-- > 17;) {
+      lanes.push_back(kernel.binary(Cgen_llvm::Binary_op::lshr, kernel.input(0), kernel.constant(64, bit), 1, true));
+    }
+  }
+  std::string error;
+  const auto  result = kernel.concat(lanes);
+  ASSERT_EQ(result.width, 512u);
+  ASSERT_TRUE(kernel.add_state_output(1, 1, result, {}, error)) << error;
+  const auto dir     = std::filesystem::temp_directory_path();
+  const auto bitcode = dir / "livehd-concat-slices.bc";
+  ASSERT_TRUE(kernel.write_bitcode(bitcode.string(), error, false)) << error;
+  auto buffer = llvm::MemoryBuffer::getFile(bitcode.string());
+  ASSERT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  ASSERT_TRUE(module);
+  size_t shifts = 0;
+  for (const auto& function : **module) {
+    for (const auto& block : function) {
+      for (const auto& instruction : block) {
+        shifts += instruction.isShift();
+      }
+    }
+  }
+  // Reconstructing a repeated 32-bit bus must not retain hundreds of bit shifts.
+  EXPECT_LT(shifts, 32u);
+  const auto object = dir / "livehd-concat-slices.o";
+  ASSERT_TRUE(kernel.write_object(object.string(), error, false)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(object.string(), error)) << error;
+  const auto fn = objects.lookup("concat_slices", error);
+  ASSERT_NE(fn, nullptr) << error;
+  for (const uint64_t input : {uint64_t{0}, ~uint64_t{0}, uint64_t{0x243f6a8885a308d3}, uint64_t{0xdeadbeef12345678}}) {
+    uint64_t state[9] = {input};
+    fn(state, nullptr);
+    const uint64_t lane = (input >> 17) & 0xffffffff;
+    for (size_t word = 1; word < 9; ++word) {
+      EXPECT_EQ(state[word], lane | (lane << 32));
+    }
+  }
+  std::filesystem::remove(bitcode);
+  std::filesystem::remove(object);
+}
+
+TEST(CgenLlvm, ConcatPreservesExtensionsGapsAndLaneOrder) {
+  Cgen_llvm   kernel("concat_mixed", Cgen_llvm::State_layout{4, {{0, 8, false}}});
+  const auto  input    = kernel.input(0);
+  const auto  low      = kernel.resize(input, 4, true);
+  const auto  high     = kernel.binary(Cgen_llvm::Binary_op::lshr, input, kernel.constant(8, 4), 4, true);
+  const auto  extended = kernel.resize(input, 16, false);
+  const auto  sign     = kernel.binary(Cgen_llvm::Binary_op::lshr, extended, kernel.constant(16, 8), 8, true);
+  const auto  swapped  = kernel.concat({low, high});
+  const auto  mixed    = kernel.concat({sign, kernel.constant(3, 5), high, kernel.constant(1, 0), low});
+  std::string error;
+  ASSERT_TRUE(kernel.add_state_output(1, 1, swapped, {}, error)) << error;
+  ASSERT_TRUE(kernel.add_state_output(2, 2, mixed, {}, error)) << error;
+  ASSERT_EQ(kernel.concat({}).width, 0u);
+  const auto object = std::filesystem::temp_directory_path() / "livehd-concat-mixed.o";
+  ASSERT_TRUE(kernel.write_object(object.string(), error, false)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(object.string(), error)) << error;
+  const auto fn = objects.lookup("concat_mixed", error);
+  ASSERT_NE(fn, nullptr) << error;
+  for (uint64_t input_bits = 0; input_bits < 256; ++input_bits) {
+    uint64_t state[] = {input_bits, 0, 0, 0};
+    fn(state, nullptr);
+    EXPECT_EQ(state[1], ((input_bits & 15) << 4) | (input_bits >> 4));
+    const uint64_t upper = (input_bits & 128) ? 255 : 0;
+    EXPECT_EQ(state[2], (upper << 12) | (5 << 9) | ((input_bits >> 4) << 5) | (input_bits & 15));
+  }
+  std::filesystem::remove(object);
+}
 
 TEST(CgenLlvm, SharedCodePreservesBindingsAndIndependentState) {
   const auto make = [](std::string_view name, uint64_t increment, size_t input_word) {
@@ -106,12 +184,137 @@ TEST(CgenLlvm, CachedObjectsValidateInputsAndObjectBytes) {
   std::filesystem::remove_all(dir);
 }
 
+TEST(CgenLlvm, DynamicSingleBitExtractionUsesOneSourceWord) {
+  Cgen_llvm   kernel("extract_bit",
+                   Cgen_llvm::State_layout{
+                       7,
+                         {{0, 256, true}, {4, 64, true}}
+  });
+  std::string error;
+  const auto  bit = kernel.dynamic_extract(kernel.input(0), kernel.input(1), 1, 64, true);
+  ASSERT_TRUE(kernel.add_state_output(5, 5, bit, {}, error)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-dynamic-bit.bc";
+  ASSERT_TRUE(kernel.write_bitcode(path.string(), error, false)) << error;
+  auto buffer = llvm::MemoryBuffer::getFile(path.string());
+  ASSERT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  ASSERT_TRUE(module);
+  // Exactly one source-word load plus the index load; no adjacent-word load.
+  size_t loads = 0;
+  for (const auto& block : *(*module)->getFunction("extract_bit")) {
+    for (const auto& instruction : block) {
+      loads += llvm::isa<llvm::LoadInst>(instruction);
+    }
+  }
+  EXPECT_EQ(loads, 2u);
+  const auto object = path.string() + ".o";
+  ASSERT_TRUE(kernel.write_object(object, error, false)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(object, error)) << error;
+  const auto fn = objects.lookup("extract_bit", error);
+  ASSERT_NE(fn, nullptr) << error;
+  for (uint64_t index = 0; index < 320; ++index) {
+    uint64_t   state[]  = {0x8000000000000001, 0xaaaaaaaaaaaaaaaa, 0x5555555555555555, 0xfedcba9876543210, index, 0, 0};
+    const auto expected = index < 256 ? ((state[index / 64] >> (index % 64)) & 1) : 0;
+    fn(state, nullptr);
+    EXPECT_EQ(state[5], expected) << index;
+  }
+  std::filesystem::remove(path);
+  std::filesystem::remove(object);
+}
+
+TEST(CgenLlvm, ComputedExtractionScratchIsLocalToTheLoopFrame) {
+  Cgen_llvm   kernel("extract_after_shift",
+                     {
+                       {4097, true},
+                       {  32, true},
+                       {  32, true}
+  });
+  std::string error;
+  // The packed shift leaves the insertion point in a non-entry block.
+  // Extracting from that computed value must not allocate each iteration.
+  const auto  shifted = kernel.binary(Cgen_llvm::Binary_op::lshr, kernel.input(0), kernel.input(1), 130, true);
+  const auto  lane    = kernel.dynamic_extract(shifted, kernel.constant(32, 65), 8, 32, true);
+  const auto  sum     = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(2), lane, 32, true);
+  ASSERT_TRUE(kernel.add_output(0, sum, error)) << error;
+  Cgen_llvm::Loop_layout layout;
+  layout.inputs = {
+      {4097, true},
+      {  32, true},
+      {  32, true}
+  };
+  layout.bindings = {
+      {0, 0},
+      {1, 0},
+      {2, 0}
+  };
+  layout.index   = 1;
+  layout.carries = {
+      {2, 0}
+  };
+  ASSERT_TRUE(kernel.add_loop("extract_loop", layout, error)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-local-extraction.bc";
+  ASSERT_TRUE(kernel.write_bitcode(path.string(), error)) << error;
+  auto buffer = llvm::MemoryBuffer::getFile(path.string());
+  ASSERT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  ASSERT_TRUE(module);
+  ASSERT_FALSE(llvm::verifyModule(**module, &llvm::errs()));
+  const auto* loop_ir = (*module)->getFunction("extract_loop");
+  ASSERT_NE(loop_ir, nullptr);
+  for (const auto& block : *loop_ir) {
+    for (const auto& instruction : block) {
+      if (const auto* allocation = llvm::dyn_cast<llvm::AllocaInst>(&instruction)) {
+        EXPECT_TRUE(allocation->isStaticAlloca());
+      }
+      if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction)) {
+        const auto* callee = call->getCalledFunction();
+        ASSERT_NE(callee, nullptr);
+        EXPECT_TRUE(callee->isIntrinsic());
+        EXPECT_NE(callee->getIntrinsicID(), llvm::Intrinsic::stacksave);
+        EXPECT_NE(callee->getIntrinsicID(), llvm::Intrinsic::stackrestore);
+      }
+    }
+  }
+  const auto object = path.string() + ".o";
+  ASSERT_TRUE(kernel.write_object(object, error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(object, error)) << error;
+  using Loop      = void (*)(const uint64_t*, uint64_t*, uint64_t, int64_t, int64_t);
+  const auto loop = std::bit_cast<Loop>(objects.lookup("extract_loop", error));
+  ASSERT_NE(loop, nullptr) << error;
+  std::vector<uint64_t> inputs(67);
+  for (size_t word = 0; word < 64; ++word) {
+    inputs[word] = 0x123456789abcdef0ULL ^ (word * 0x87654321ULL);
+  }
+  inputs[64] = 1;
+  inputs[66] = 123;
+  for (uint64_t trips : {0, 1, 257, 5000}) {
+    uint64_t output = 0;
+    loop(inputs.data(), &output, trips, 0, 1);
+    uint32_t expected = 123;
+    for (uint64_t index = 0; index < trips; ++index) {
+      for (unsigned bit = 0; bit < 8; ++bit) {
+        const auto position = index + 65 + bit;
+        if (position < 4097) {
+          expected += ((inputs[position / 64] >> (position % 64)) & 1) << bit;
+        }
+      }
+    }
+    EXPECT_EQ(output, expected) << trips;
+  }
+  std::filesystem::remove(path);
+  std::filesystem::remove(object);
+}
+
 TEST(CgenLlvm, WideVariableShiftsCompileAsPackedLoops) {
   for (const uint32_t width : {4096u, 4097u, 131064u}) {
     Cgen_llvm   kernel("variable_shift",
                        {
-                           {width, false},
-                           {   17,  true}
+                         {width, false},
+                         {   17,  true}
     });
     std::string error;
     size_t      output = 0;
@@ -260,9 +463,9 @@ TEST(CgenLlvm, LinksWideBitTestCounts) {
   llvm::IRBuilder<> builder(context);
   auto*             word     = builder.getInt64Ty();
   auto*             function = llvm::Function::Create(llvm::FunctionType::get(word, {word, builder.getPtrTy()}, false),
-                                                      llvm::GlobalValue::ExternalLinkage,
-                                                      "narrow_bt_count",
-                                                      host);
+                                          llvm::GlobalValue::ExternalLinkage,
+                                          "narrow_bt_count",
+                                          host);
   builder.SetInsertPoint(llvm::BasicBlock::Create(context, "entry", function));
   auto* value = function->getArg(0);
   auto* count = builder.CreateAnd(value, builder.getInt64(3));
@@ -295,8 +498,8 @@ TEST(CgenLlvm, LinksWideBitTestCounts) {
 TEST(CgenLlvm, EmitsBitcode) {
   Cgen_llvm   llvm("lhd_llvm_add",
                    {
-                       {8, true},
-                       {8, true}
+                     {8, true},
+                     {8, true}
   });
   auto        sum = llvm.binary(Cgen_llvm::Binary_op::add, llvm.input(0), llvm.input(1), 9, true);
   std::string error;
@@ -306,6 +509,15 @@ TEST(CgenLlvm, EmitsBitcode) {
   ASSERT_TRUE(llvm.write_bitcode(path.string(), error)) << error;
   EXPECT_TRUE(std::filesystem::is_regular_file(path));
   EXPECT_GT(std::filesystem::file_size(path), 0u);
+  auto buffer = llvm::MemoryBuffer::getFile(path.string());
+  ASSERT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  ASSERT_TRUE(module);
+  const auto* function = (*module)->getFunction("lhd_llvm_add");
+  ASSERT_NE(function, nullptr);
+  EXPECT_TRUE(function->hasFnAttribute(llvm::Attribute::OptimizeForSize));
+  EXPECT_FALSE(function->hasFnAttribute(llvm::Attribute::MinSize));  // Os, not Oz.
   std::filesystem::remove(path);
 }
 
@@ -345,9 +557,9 @@ TEST(CgenLlvm, WidePackedInputsUseConstantSizeLoads) {
   }
   Cgen_llvm   kernel("packed_wide",
                      {
-                         {     7, true},
-                         {131048, true},
-                         {    65, true}
+                       {     7, true},
+                       {131048, true},
+                       {    65, true}
   });
   std::string error;
   ASSERT_TRUE(kernel.add_output(0, kernel.input(1), error)) << error;
@@ -379,7 +591,9 @@ TEST(CgenLlvm, WidePackedInputsUseConstantSizeLoads) {
         EXPECT_EQ(load->getType()->getIntegerBitWidth(), 131048u);
       } else {
         EXPECT_EQ(offset.getZExtValue(), 2049u * 8);
-        EXPECT_EQ(load->getType()->getIntegerBitWidth(), 65u);
+        // A width that is not a whole number of bytes loads its whole words and
+        // truncates: `load i65` over sign-extended packed words is undefined.
+        EXPECT_EQ(load->getType()->getIntegerBitWidth(), 128u);
       }
       EXPECT_EQ(load->getAlign().value(), alignof(uint64_t));
     }
@@ -391,9 +605,9 @@ TEST(CgenLlvm, WidePackedInputsUseConstantSizeLoads) {
 TEST(CgenLlvm, DefersInputLoadsAndCastsAndMarksDisjointBuffers) {
   Cgen_llvm         kernel("late_inputs",
                            {
-                               {64, true},
-                               {64, true},
-                               {64, true}
+                       {64, true},
+                       {64, true},
+                       {64, true}
   });
   const auto        later = kernel.resize(kernel.input(1), 65, true);
   const auto        first = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.constant(64, 1), 64, true);
@@ -448,9 +662,9 @@ TEST(CgenLlvm, DefersInputLoadsAndCastsAndMarksDisjointBuffers) {
 TEST(CgenLlvm, EmitsIndependentNativeObjects) {
   Cgen_llvm         kernel("native_memory",
                            {
-                               {32, true},
-                               { 8, true},
-                               { 1, true}
+                       {32, true},
+                       { 8, true},
+                       { 1, true}
   });
   Cgen_llvm::Memory memory;
   memory.data    = 0;
@@ -474,8 +688,8 @@ TEST(CgenLlvm, NativeWideCopiesAndDivisionHaveNoRuntimeDependencies) {
   for (const uint32_t width : {65u, 128u, 256u, 4097u, 131064u}) {
     Cgen_llvm   kernel("native_wide",
                        {
-                           {width, true},
-                           {width, true}
+                         {width, true},
+                         {width, true}
     });
     std::string error;
     auto        result
@@ -490,8 +704,8 @@ TEST(CgenLlvm, NativeWideCopiesAndDivisionHaveNoRuntimeDependencies) {
 TEST(CgenLlvm, StateObjectsRunWithoutHostCompilationAndPreserveAliasing) {
   const auto  path = std::filesystem::temp_directory_path() / "livehd-native-state-swap.o";
   Cgen_llvm   kernel("state_swap",
-                     Cgen_llvm::State_layout{
-                         6,
+                   Cgen_llvm::State_layout{
+                       6,
                          {{0, 64, true}, {1, 64, true}, {2, 9, true, 60}}
   });
   std::string error;
@@ -798,16 +1012,203 @@ TEST(CgenLlvm, NativeStateDescriptorRejectsInvalidInitialization) {
   std::filesystem::remove(path);
 }
 
+TEST(CgenLlvm, ScalarResultsPackMultipleWidthsIntoOneRegister) {
+  Cgen_llvm   kernel("packed_results",
+                     {
+                       { 8, false},
+                       {56,  true}
+  },
+                   true);
+  std::string error;
+  auto        negative = kernel.binary(Cgen_llvm::Binary_op::lt, kernel.input(0), kernel.constant(8, 0, false), 1, true);
+  ASSERT_TRUE(kernel.add_output(0, negative, error)) << error;
+  ASSERT_TRUE(kernel.add_output(1, kernel.resize(kernel.input(0), 7, false), error)) << error;
+  ASSERT_TRUE(kernel.add_output(2, kernel.input(1), error)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-packed-results.o";
+  ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(path.string(), error)) << error;
+  using Kernel_function = uint64_t (*)(uint64_t, uint64_t, void*);
+  const auto run        = std::bit_cast<Kernel_function>(objects.lookup("packed_results", error));
+  ASSERT_NE(run, nullptr) << error;
+  for (uint64_t a : {0, 1, 63, 127, 128, 255}) {
+    for (uint64_t b : {uint64_t{0}, uint64_t{0x00abcdef87654321}, uint64_t{0xffffffffffffffff}}) {
+      EXPECT_EQ(run(a, b, nullptr), ((a >> 7) & 1) | ((a & 127) << 1) | ((b & 0x00ffffffffffffffULL) << 8));
+    }
+  }
+  std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, ScalarResultsRejectMoreThanOneRegister) {
+  Cgen_llvm   kernel("too_wide",
+                     {
+                       {64, true}
+  },
+                   true);
+  std::string error;
+  ASSERT_TRUE(kernel.add_output(0, kernel.input(0), error)) << error;
+  ASSERT_TRUE(kernel.add_output(1, kernel.constant(1, 1), error)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-too-wide-scalar.o";
+  EXPECT_FALSE(kernel.write_object(path.string(), error));
+  EXPECT_NE(error.find("exceed 64 packed bits"), std::string::npos);
+  std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, NativeScalarLoopUnpacksAllResults) {
+  Cgen_llvm   kernel("packed_loop_body",
+                     {
+                       {8, true},
+                       {8, true}
+  },
+                   true);
+  std::string error;
+  auto        sum = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.input(1), 8, true);
+  ASSERT_TRUE(kernel.add_output(0, sum, error)) << error;
+  ASSERT_TRUE(kernel.add_output(1, kernel.input(0), error)) << error;
+  ASSERT_TRUE(kernel.add_output(2, kernel.resize(kernel.input(0), 1, true), error)) << error;
+  Cgen_llvm::Loop_layout layout;
+  layout.inputs = {
+      {8, true},
+      {8, true}
+  };
+  layout.bindings = {
+      {0, 0},
+      {1, 0}
+  };
+  layout.index   = 0;
+  layout.carries = {
+      {1, 0}
+  };
+  ASSERT_TRUE(kernel.add_loop("packed_loop", layout, error)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-packed-loop.bc";
+  ASSERT_TRUE(kernel.write_bitcode(path.string(), error)) << error;
+  auto buffer = llvm::MemoryBuffer::getFile(path.string());
+  ASSERT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  ASSERT_TRUE(module);
+  ASSERT_FALSE(llvm::verifyModule(**module, &llvm::errs()));
+  const auto* fn = (*module)->getFunction("packed_loop");
+  ASSERT_NE(fn, nullptr);
+  bool rolled = false;
+  for (const auto& block : *fn) {
+    for (const auto& instruction : block) {
+      EXPECT_FALSE(llvm::isa<llvm::CallBase>(instruction));
+      rolled |= instruction.getMetadata(llvm::LLVMContext::MD_loop) != nullptr;
+    }
+  }
+  EXPECT_TRUE(rolled);
+  const auto object = path.string() + ".o";
+  ASSERT_TRUE(kernel.write_object(object, error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(object, error)) << error;
+  using Loop      = void (*)(const uint64_t*, uint64_t*, uint64_t, int64_t, int64_t);
+  const auto loop = std::bit_cast<Loop>(objects.lookup("packed_loop", error));
+  ASSERT_NE(loop, nullptr) << error;
+  uint64_t inputs[] = {99, 200};
+  for (uint64_t count : {0, 1, 8, 300}) {
+    for (int64_t step : {-1, 1}) {
+      uint64_t output[] = {12345, 12345, 12345};
+      loop(inputs, output, count, 252, step);
+      uint64_t expected = 200, last = 0;
+      for (uint64_t i = 0; i < count; ++i) {
+        last     = (252 + i * static_cast<uint64_t>(step)) & 255;
+        expected = (expected + last) & 255;
+      }
+      EXPECT_EQ(output[0], expected);
+      EXPECT_EQ(output[1], last);
+      EXPECT_EQ(output[2], last & 1);
+    }
+  }
+  std::filesystem::remove(path);
+  std::filesystem::remove(object);
+}
+
+TEST(CgenLlvm, MultipleColorBodiesInlineIntoOneRolledLoop) {
+  // Two independently emitted colors, one scalar and one packed, chained
+  // through a temporary. This used to require a scheduler visit per trip.
+  std::string                                  error;
+  const std::vector<std::pair<uint32_t, bool>> ports{
+      {64, true},
+      {64, true}
+  };
+  Cgen_llvm first("first", ports, true);
+  ASSERT_TRUE(first.add_output(0, first.binary(Cgen_llvm::Binary_op::add, first.input(0), first.input(1), 64, true), error));
+  Cgen_llvm::Inline_body scalar{first.sharing_key(error), ports, {{64, true}}, true};
+  Cgen_llvm              second("second", ports);
+  const auto             sum = second.binary(Cgen_llvm::Binary_op::add, second.input(0), second.input(1), 64, true);
+  ASSERT_TRUE(second.add_output(0, second.mux(second.input(1), second.input(0), sum, 64, true), error));
+  Cgen_llvm::Inline_body        packed{second.sharing_key(error), ports, {{64, true}}, false};
+  Cgen_llvm                     body("composed", ports);
+  std::vector<Cgen_llvm::Value> a, b;
+  ASSERT_TRUE(body.inline_body(scalar, {body.input(0), body.input(1)}, a, error)) << error;
+  ASSERT_TRUE(body.inline_body(packed, {a[0], body.input(0)}, b, error)) << error;
+  // Repeated import must not resolve to or retain another occurrence's body.
+  ASSERT_TRUE(body.inline_body(scalar, {b[0], body.constant(64, 1)}, a, error)) << error;
+  ASSERT_TRUE(body.add_output(0, a[0], error)) << error;
+  Cgen_llvm::Loop_layout layout;
+  layout.inputs   = ports;
+  layout.bindings = {
+      {0, 0},
+      {1, 0}
+  };
+  layout.index   = 0;
+  layout.carries = {
+      {1, 0}
+  };
+  ASSERT_TRUE(body.add_loop("composed_loop", layout, error, false)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-composed-loop.bc";
+  ASSERT_TRUE(body.write_bitcode(path.string(), error, false)) << error;
+  auto buffer = llvm::MemoryBuffer::getFile(path.string());
+  ASSERT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  ASSERT_TRUE(module);
+  auto* fn = (*module)->getFunction("composed_loop");
+  ASSERT_NE(fn, nullptr);
+  unsigned rolled = 0;
+  for (const auto& block : *fn) {
+    for (const auto& instruction : block) {
+      EXPECT_FALSE(llvm::isa<llvm::CallBase>(instruction));
+      EXPECT_FALSE(llvm::isa<llvm::AllocaInst>(instruction));
+      if (const auto* md = instruction.getMetadata(llvm::LLVMContext::MD_loop)) {
+        for (unsigned i = 1; i < md->getNumOperands(); ++i) {
+          const auto* property = llvm::dyn_cast<llvm::MDNode>(md->getOperand(i));
+          if (property && property->getNumOperands() == 1) {
+            const auto* name  = llvm::dyn_cast<llvm::MDString>(property->getOperand(0));
+            rolled           += name && name->getString() == "llvm.loop.unroll.disable";
+          }
+        }
+      }
+    }
+  }
+  EXPECT_EQ(rolled, 1u);
+  const auto object = path.string() + ".o";
+  ASSERT_TRUE(body.write_object(object, error, false)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(object, error)) << error;
+  using Loop      = void (*)(const uint64_t*, uint64_t*, uint64_t, int64_t, int64_t);
+  const auto loop = std::bit_cast<Loop>(objects.lookup("composed_loop", error));
+  ASSERT_NE(loop, nullptr) << error;
+  for (uint64_t count : {0, 1, 4, 257, 5000}) {
+    uint64_t inputs[] = {99, 7}, outputs[] = {0};
+    loop(inputs, outputs, count, 0, 1);
+    EXPECT_EQ(outputs[0], 7 + count * count);
+  }
+  std::filesystem::remove(path);
+  std::filesystem::remove(object);
+}
+
 TEST(CgenLlvm, NativeReductionStaysRolledWithNoBodyCall) {
   for (unsigned variant = 0; variant < 4; ++variant) {
     const bool  scalar  = (variant & 1) != 0;
     const bool  bounded = (variant & 2) != 0;
     Cgen_llvm   kernel("body",
                        {
-                           { 8, false},
-                           {64,  true}
+                         { 8, false},
+                         {64,  true}
     },
-                       scalar);
+                     scalar);
     std::string error;
     const auto  sum = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.input(1), 64, true);
     ASSERT_TRUE(kernel.add_output(0, sum, error)) << error;
@@ -886,13 +1287,104 @@ TEST(CgenLlvm, NativeReductionStaysRolledWithNoBodyCall) {
   }
 }
 
+TEST(CgenLlvm, AbsorbingBooleanCarrySkipsReadsButRetainsOtherOutputs) {
+  for (bool conjunction : {false, true}) {
+    Cgen_llvm   kernel("carry_body",
+                       {
+                         { 64, false},
+                         {256,  true},
+                         {  1,  true}
+    });
+    std::string error;
+    auto        index      = kernel.input(0);
+    auto        next_index = kernel.binary(Cgen_llvm::Binary_op::add, index, kernel.constant(64, 17), 64, true);
+    auto        a          = kernel.dynamic_extract(kernel.input(1), index, 1, 1, true);
+    auto        b          = kernel.dynamic_extract(kernel.input(1), next_index, 1, 1, true);
+    auto        expensive  = kernel.binary(Cgen_llvm::Binary_op::bit_xor, a, b, 1, true);
+    auto        value      = kernel.binary(conjunction ? Cgen_llvm::Binary_op::bit_and : Cgen_llvm::Binary_op::bit_or,
+                               kernel.input(2),
+                               expensive,
+                               1,
+                               true);
+    ASSERT_TRUE(kernel.add_output(0, value, error)) << error;
+    ASSERT_TRUE(kernel.add_output(1, index, error)) << error;
+    Cgen_llvm::Loop_layout layout;
+    layout.inputs = {
+        { 64, false},
+        {256,  true},
+        {  1,  true}
+    };
+    layout.bindings = {
+        {0, 0},
+        {1, 0},
+        {2, 0}
+    };
+    layout.index   = 0;
+    layout.carries = {
+        {2, 0}
+    };
+    ASSERT_TRUE(kernel.add_loop("carry_loop", layout, error)) << error;
+    const auto path = std::filesystem::temp_directory_path() / (conjunction ? "livehd-and-carry.bc" : "livehd-or-carry.bc");
+    ASSERT_TRUE(kernel.write_bitcode(path.string(), error)) << error;
+    auto buffer = llvm::MemoryBuffer::getFile(path.string());
+    ASSERT_TRUE(buffer);
+    llvm::LLVMContext context;
+    auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+    ASSERT_TRUE(module);
+    ASSERT_FALSE(llvm::verifyModule(**module, &llvm::errs()));
+    const auto* fn = (*module)->getFunction("carry_loop");
+    ASSERT_NE(fn, nullptr);
+    bool guarded_read = false;
+    for (const auto& block : *fn) {
+      if (block.getName().starts_with("carry.eval")) {
+        for (const auto& instruction : block) {
+          guarded_read |= llvm::isa<llvm::LoadInst>(instruction);
+        }
+      }
+    }
+    EXPECT_TRUE(guarded_read);
+    const auto object = path.string() + ".o";
+    ASSERT_TRUE(kernel.write_object(object, error)) << error;
+    livehd::sim::Native_objects objects;
+    ASSERT_TRUE(objects.load(object, error)) << error;
+    using Loop      = void (*)(const uint64_t*, uint64_t*, uint64_t, int64_t, int64_t);
+    const auto loop = std::bit_cast<Loop>(objects.lookup("carry_loop", error));
+    ASSERT_NE(loop, nullptr) << error;
+    uint64_t inputs[] = {0, 0x123456789abcdef0ULL, 0xfedcba9876543210ULL, 0xaaaaaaaa55555555ULL, 0xf0f00f0f96966969ULL, 0};
+    for (uint64_t initial : {0, 1}) {
+      inputs[5] = initial;
+      for (int64_t first : {-20, 0, 63, 255, 300}) {
+        for (int64_t step : {-1, 1}) {
+          for (uint64_t count : {0, 1, 40, 320}) {
+            uint64_t outputs[] = {42, 42};
+            loop(inputs, outputs, count, first, step);
+            bool       expected = initial != 0;
+            uint64_t   last     = 0;
+            const auto bit
+                = [&](uint64_t position) { return position < 256 && ((inputs[1 + position / 64] >> (position % 64)) & 1) != 0; };
+            for (uint64_t i = 0; i < count; ++i) {
+              last               = static_cast<uint64_t>(first) + i * static_cast<uint64_t>(step);
+              const bool operand = bit(last) != bit(last + 17);
+              expected           = conjunction ? expected && operand : expected || operand;
+            }
+            EXPECT_EQ(outputs[0], static_cast<uint64_t>(expected));
+            EXPECT_EQ(outputs[1], last);
+          }
+        }
+      }
+    }
+    std::filesystem::remove(path);
+    std::filesystem::remove(object);
+  }
+}
+
 TEST(CgenLlvm, NativeLoopRetainsWideCarriesWhenInactive) {
   Cgen_llvm   kernel("active_body",
                      {
-                         {  8, true},
-                         {128, true},
-                         {  1, true},
-                         {  8, true}
+                       {  8, true},
+                       {128, true},
+                       {  1, true},
+                       {  8, true}
   });
   std::string error;
   auto        sum    = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(1), kernel.input(0), 128, true);
@@ -969,8 +1461,8 @@ TEST(CgenLlvm, NativeLoopSharingIgnoresEntryAndInlineScopeNames) {
   const auto make = [](std::string_view name, size_t carry_input) {
     Cgen_llvm   kernel(name,
                        {
-                           {8, true},
-                           {8, true}
+                         {8, true},
+                         {8, true}
     });
     std::string error;
     const auto  sum = kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.input(1), 8, true);

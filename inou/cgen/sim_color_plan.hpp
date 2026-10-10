@@ -107,6 +107,9 @@ public:
     observation_output,
     state_current,
     state_pending,
+    // sim.warn_undefined: the `cond` of an `lgundef` marker (no output of its
+    // own), stored where the generated cycle() reads it after the colors run.
+    effect_input,
   };
 
   struct Site {

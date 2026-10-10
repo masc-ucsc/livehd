@@ -1,0 +1,15 @@
+const dut_m = import("lg:wide_rem_signed_input")
+
+test wide_rem_signed_input.icarus {
+  mut dut = dut_m
+  tick 1 {
+    dut.reset = 1
+    dut.i0 = 741947085
+    dut.i1 = 61
+    dut.i2 = 0
+    dut.i3 = -91960576027075403946
+    dut.i4 = 87
+    step
+    assert(dut.r == 91960576027075403904, "(2^70-1) % 0x3b03ca6754d5de1f7f")
+  }
+}

@@ -1,0 +1,11 @@
+/*
+:name: signed_or_unsigned_fit
+:type: error
+:error: may not fit
+*/
+
+// A bitwise op over a possibly-negative operand has a bounded range (k signed
+// bits); it used to be unbounded, which silently skipped the declared-fit check.
+pub comb signed_or_unsigned_fit(i3:S3, a:U4) -> (o0:U5) {
+  o0 = (i3 | a) // locate_error_here
+}

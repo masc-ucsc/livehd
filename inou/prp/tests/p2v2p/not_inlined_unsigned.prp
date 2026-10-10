@@ -1,0 +1,7 @@
+// p2v2p fuzz find (2026-10-08): `~u1` is -1/-2; the inlined `~g` on a one-bit
+// unsigned g was 0/1 and turned the whole expression unsigned.
+pub comb not_inlined_unsigned(i1:U9, i2:U15, i3:S5) -> (o3:S32) {
+  mut t2:S32 = 0
+  sat t2 = i2#[2]
+  wrap o3 = (((~t2) * i1) ^ i3)
+}

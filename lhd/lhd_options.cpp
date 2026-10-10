@@ -506,14 +506,22 @@ Options parse_args(int argc, char** argv) {
         }
         start = end + 1;
       }
-    } else if (a == "--impl") {
-      auto tp        = parse_check_side(a, need_value(a, i, argc, argv));
-      opts.impl_kind = tp.kind;
-      opts.impl_path = tp.path;
-    } else if (a == "--ref") {
-      auto tp       = parse_check_side(a, need_value(a, i, argc, argv));
-      opts.ref_kind = tp.kind;
-      opts.ref_path = tp.path;
+    } else if (a == "--impl" || a == "--ref") {
+      // Each side is ONE source. A repeated side used to be last-wins, so
+      // `--impl p2/fz.prp --impl p2/h0.prp` checked only h0 and reported the
+      // top missing (random Pyrope round-trip fuzz, 2026-10-08): the same
+      // ambiguity add_cli_set rejects for --set.
+      const bool impl  = a == "--impl";
+      auto       tp    = parse_check_side(a, need_value(a, i, argc, argv));
+      const auto& prev = impl ? opts.impl_path : opts.ref_path;
+      if (!prev.empty() && prev != tp.path) {
+        throw Lhd_error{"usage",
+                        std::format("{} given twice ('{}' then '{}'): each side is one source", a, prev, tp.path),
+                        "a Pyrope top resolves its import()s from its own directory, pyrope:DIR/ loads every .prp in it, "
+                        "and a multi-file Verilog side compiles to lg:DIR first"};
+      }
+      (impl ? opts.impl_kind : opts.ref_kind) = tp.kind;
+      (impl ? opts.impl_path : opts.ref_path) = tp.path;
     } else if (a == "--formal") {  // formal verify / lec: fnmatch glob over formal-block dotted names
       // Block names are canonical (`cnt`.`bounded` == cnt.bounded), so is the glob.
       opts.formal_filter = str_tools::canonical_escaped_path(need_value(a, i, argc, argv));

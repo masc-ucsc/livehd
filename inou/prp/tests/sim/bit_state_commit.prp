@@ -1,0 +1,54 @@
+/*
+:name: bit_state_commit
+:type: simulation
+:set: sim.tune.backend=llvm sim.tune.dirty=on sim.tune.live_words=1
+*/
+// Independent one-bit captures share the old-Q phase barrier. Inactive
+// captures must hold Q even when their previously staged D is different.
+pub mod bit_state_commit(en:Bool, d:U1, other:U1) -> (a:U1@[0], b:U1@[0], c:U1@[0]) {
+  reg first:U1 = 0
+  reg second:U1 = 1
+  reg third:U1 = 0
+  a = first
+  b = second
+  c = third
+  if en {
+    first = d
+    second = first ^ other
+  }
+  if second != 0 {
+    third = first
+  }
+}
+
+test bit_state_commit.capture_hold_and_old_q {
+  mut dut = bit_state_commit
+  mut expected_a:U1 = 0
+  mut expected_b:U1 = 1
+  mut expected_c:U1 = 0
+  tick 64 {
+    dut.reset = clock == 0 or clock == 31
+    dut.en = (clock & 3) != 2
+    dut.d = (clock ^ (clock >> 2))#[0]
+    dut.other = (clock >> 1)#[0]
+    const old_a = expected_a
+    const old_b = expected_b
+    if dut.reset {
+      expected_a = 0
+      expected_b = 1
+      expected_c = 0
+    } else {
+      if dut.en {
+        expected_a = dut.d
+        expected_b = old_a ^ dut.other
+      }
+      if old_b != 0 {
+        expected_c = old_a
+      }
+    }
+    step
+    assert(dut.a == expected_a, "one-bit capture and hold")
+    assert(dut.b == expected_b, "same-edge old-Q read")
+    assert(dut.c == expected_c, "Q-dependent capture guard")
+  }
+}

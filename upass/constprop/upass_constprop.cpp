@@ -1527,7 +1527,20 @@ upass::Vote uPass_constprop::process_div(std::string_view dst_name, Bundle& dst,
   // yields nil, and a nil reaching a constprop output must be REPORTED, not
   // silently folded (`1/0` otherwise compares ==0 AND ==1). Emit a clean
   // compile error rather than storing the nil. (2f-nil_diag)
-  for (size_t i = 1; i < src.size(); ++i) {
+  // Verilog defines `x / 0` as X (Icarus: all-x), and Dlop::div_op folds it
+  // to unknown(): a Verilog-origin unit keeps that meaning instead of being
+  // rejected (the Verilog -> Pyrope trip of a design whose divisor folded to
+  // 0 failed here; random Pyrope fuzz, 2026-10-09).
+  const bool verilog_x = lm && lm->get_lnast() && lm->get_lnast()->is_verilog_origin();
+  if (verilog_x) {
+    for (size_t i = 1; i < src.size(); ++i) {
+      if (const Dlop d = operand_value(src[i]); d.is_integer() && !d.has_unknowns() && d.is_known_zero()) {
+        store_trivial(dst_name, *Dlop::unknown());  // X whatever the dividend is
+        return classify_vote();
+      }
+    }
+  }
+  for (size_t i = 1; i < src.size() && !verilog_x; ++i) {
     const Dlop d = operand_value(src[i]);
     if (d.is_integer() && !d.has_unknowns() && d.is_known_zero()) {
       // 2c-shortcircuit: park it when this is an operand sub-expression — an
@@ -1590,7 +1603,17 @@ upass::Vote uPass_constprop::process_mod(std::string_view dst_name, Bundle& dst,
   // Modulo by a comptime-known zero is illegal for the same reason as division:
   // Dlop::rem_op yields nil, and a nil reaching a constprop output must be
   // REPORTED, not silently folded. Mirror process_div's guard. (2f-nil_diag)
-  for (size_t i = 1; i < src.size(); ++i) {
+  // A Verilog-origin unit keeps Verilog's `x % 0` == X (see process_div).
+  const bool verilog_x = lm && lm->get_lnast() && lm->get_lnast()->is_verilog_origin();
+  if (verilog_x) {
+    for (size_t i = 1; i < src.size(); ++i) {
+      if (const Dlop d = operand_value(src[i]); d.is_integer() && !d.has_unknowns() && d.is_known_zero()) {
+        store_trivial(dst_name, *Dlop::unknown());  // X whatever the dividend is
+        return classify_vote();
+      }
+    }
+  }
+  for (size_t i = 1; i < src.size() && !verilog_x; ++i) {
     const Dlop d = operand_value(src[i]);
     if (d.is_integer() && !d.has_unknowns() && d.is_known_zero()) {
       defer_or_emit_illegal(dst_name,

@@ -203,7 +203,12 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
       if (old && old.get() != bundle.get()) {
         const auto& oe        = old->get_entry(bundle_path::of_string("0"));
         const auto& ne        = bundle->get_entry(bundle_path::of_string("0"));
-        const bool  scalar_ok = bundle->is_empty() || bundle->has_trivial(bundle_path::of_string("0"));
+        // An attr-only value (the binding of an opaque Sub output, `t3 = t0`
+        // with `t0 = mod_call(...)`) is a scalar too: rejecting it dropped
+        // t3's declared envelope inside an if-arm, and a later `wrap t3 = ...`
+        // found no type and leaked to tolg as a call to `wrap` (random Pyrope
+        // round-trip fuzz, 2026-10-08).
+        const bool  scalar_ok = bundle->has_no_data() || bundle->has_trivial(bundle_path::of_string("0"));
         const bool  need_mode = old->get_mode() != upass::Mode::unknown && bundle->get_mode() != old->get_mode();
         const bool  need_tn   = !old->get_type_name().empty() && bundle->get_type_name().empty();
         // Declared facts are NAME facts: when the old binding carries them

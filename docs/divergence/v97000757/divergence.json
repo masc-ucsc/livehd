@@ -1,0 +1,52 @@
+{
+ "icarus_vs_verilator": [
+  {
+   "cycle": 3,
+   "output": "o0",
+   "icarus": "0",
+   "verilator": "4",
+   "lhd_slop": "4",
+   "lhd_llvm": "4"
+  },
+  {
+   "cycle": 6,
+   "output": "o0",
+   "icarus": "0",
+   "verilator": "5",
+   "lhd_slop": "5",
+   "lhd_llvm": "5"
+  }
+ ],
+ "inputs": [
+  {
+   "i0": 5
+  },
+  {
+   "i0": 2
+  },
+  {
+   "i0": 4
+  },
+  {
+   "i0": 2
+  },
+  {
+   "i0": 5
+  },
+  {
+   "i0": 5
+  },
+  {
+   "i0": 2
+  },
+  {
+   "i0": 6
+  },
+  {
+   "i0": 6
+  },
+  {
+   "i0": 6
+  }
+ ]
+}

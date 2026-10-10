@@ -1,0 +1,15 @@
+/*
+:name: index_past_size_read
+:type: error
+:error: has 3 entries but its index may reach 3
+:help: stays below 3
+*/
+
+// User ruling 2026-10-09: a Pyrope runtime index that can address past a
+// declared array's last entry is a compile error (bitwidth sees the index
+// range). A U2 index reaches 3 on a 3-entry memory.
+pub mod top(x:U8, wa:U1, ra:U2) -> (y:U8@[0]) {
+  reg a:[3]U8 = 0
+  a[wa] = x
+  y = a[ra]   // locate_error_here
+}

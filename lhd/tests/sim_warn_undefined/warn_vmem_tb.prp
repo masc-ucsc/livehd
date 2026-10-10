@@ -1,0 +1,15 @@
+const dut_m = import("lg:warn_vmem")
+
+test warn_vmem.outside {
+  mut d = dut_m
+  tick 5 {
+    d.reset = clock < 1
+    d.a  = 77
+    d.wa = if clock >= 2 { 4 } else { 1 }
+    d.ra = if clock >= 3 { 5 } else { 1 }
+    step
+    if clock >= 1 and clock < 3 {
+      assert(d.m == 77, "mem[1] holds 77")
+    }
+  }
+}

@@ -987,6 +987,18 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
         auto amount = to_pattern(rhs, ri.bits, ri.is_signed);
         return fit_wrap(builder_.create_shl_stmts("1", amount), ti.bits, ti.is_signed);
       }
+      // A runtime base with a small constant exponent is repeated
+      // multiplication in the result's context width (x ** 0 is 1, also 0 ** 0).
+      if (auto e = try_eval_int(re); e && *e >= 0 && *e <= 64) {
+        if (*e == 0) {
+          return "1";
+        }
+        auto acc = lhs;
+        for (int64_t i = 1; i < *e; ++i) {
+          acc = fit_wrap(builder_.create_mult_stmts(acc, lhs), ti.bits, ti.is_signed);
+        }
+        return fit_wrap(acc, ti.bits, ti.is_signed);
+      }
       emit_unsupported(expr.sourceRange,
                        "unsupported-power",
                        "only constant powers or deferred `2 ** n` are supported by --reader slang");
@@ -1970,8 +1982,66 @@ std::string Slang_context::inline_call(const slang::ast::CallExpression& expr, c
   // are shared symbols across call sites, so binding first could alias).
   std::vector<std::string> argv;
   argv.reserve(actuals.size());
+  // A formal is an integer variable: a comparison actual (`f(a < b)`) is a
+  // boolean and must land as 0/1, as any other variable write does.
   for (const auto* a : actuals) {
-    argv.push_back(lower_rvalue(*a));
+    argv.push_back(to_int_value(lower_rvalue(*a)));
+  }
+  // Each call binds its OWN copy of the subroutine's variables (formals, the
+  // return slot, body locals): the symbols are shared by every call site, and
+  // a declaration emitted once -- inside the FIRST call's branch scope -- left
+  // the later calls writing a name with no declared type in their scope, whose
+  // range was then inferred from one call's actual (`f0(fb[4])` pinned `a0` to
+  // [0, 1] and `f0(w)` no longer fit; random Verilog fuzz). Restored below.
+  struct Saved_binding {
+    const slang::ast::Symbol*  sym;
+    std::optional<std::string> name;
+    bool                       declared;
+  };
+  std::vector<Saved_binding>                     saved_bindings;
+  absl::flat_hash_set<const slang::ast::Symbol*> rebound;
+  struct Restore_bindings {
+    Slang_context&              ctx;
+    std::vector<Saved_binding>& saved;
+    ~Restore_bindings() {
+      for (auto it = saved.rbegin(); it != saved.rend(); ++it) {
+        if (it->name) {
+          ctx.sym_lname_[it->sym] = *it->name;
+        } else {
+          ctx.sym_lname_.erase(it->sym);
+        }
+        if (it->declared) {
+          ctx.declared_.insert(it->sym);
+        } else {
+          ctx.declared_.erase(it->sym);
+        }
+      }
+    }
+  } restore_bindings{*this, saved_bindings};
+  const auto rebind = [&](const slang::ast::Symbol& sym) {
+    if (!rebound.insert(&sym).second) {
+      return;
+    }
+    const auto it = sym_lname_.find(&sym);
+    saved_bindings.push_back(
+        {&sym, it == sym_lname_.end() ? std::nullopt : std::optional<std::string>(it->second), declared_.contains(&sym)});
+    std::string stem;
+    for (const char c : sym.name) {
+      stem.push_back(std::isalnum(static_cast<unsigned char>(c)) ? c : '_');
+    }
+    sym_lname_[&sym] = fresh_local(stem.empty() ? std::string("fn_var") : stem);
+    declared_.erase(&sym);
+  };
+  for (const auto* fa : formals) {
+    rebind(*fa);
+  }
+  if (sub.returnValVar != nullptr) {
+    rebind(*sub.returnValVar);
+  }
+  for (const auto& member : sub.members()) {
+    if (member.kind == slang::ast::SymbolKind::Variable) {
+      rebind(member);
+    }
   }
   for (size_t i = 0; i < formals.size(); ++i) {
     const auto& fa = *formals[i];

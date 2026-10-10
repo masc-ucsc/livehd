@@ -2835,6 +2835,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       std::vector<gu::Concat_lane> concat_tbl;
 
       Term result;
+      // Div/Rem by zero is X (user ruling 2026-10-09; Icarus: all-x): the
+      // value is 0, the same concretization a `?` constant gets on both sides,
+      // and under gold_x=ignore the result is ref-side don't-care while the
+      // divisor is 0. cvc5's own x/0 (all ones) and x%0 (x) made the ref
+      // disagree with a Verilog side whose constant `x % 0` folded to X.
+      Term div_by_zero;
 
       switch (op) {
         case Ntype_op::And:
@@ -2975,6 +2981,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           Term        a  = fit(av, dw);
           Term        b  = fit(bv, dw);
           Term        q  = tm_.mkTerm(signed_math ? Kind::BITVECTOR_SDIV : Kind::BITVECTOR_UDIV, {a, b});
+          div_by_zero    = tm_.mkTerm(Kind::EQUAL, {b, bv_const(tm_, dw, 0)});
+          q              = tm_.mkTerm(Kind::ITE, {div_by_zero, bv_const(tm_, dw, 0), q});
           result         = fit(Val{q, dw, signed_math}, W);
           break;
         }
@@ -3000,6 +3008,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           Term        a  = fit(av, dw);
           Term        b  = fit(bv, dw);
           Term        r  = tm_.mkTerm(Kind::BITVECTOR_SREM, {a, b});
+          div_by_zero    = tm_.mkTerm(Kind::EQUAL, {b, bv_const(tm_, dw, 0)});
+          r              = tm_.mkTerm(Kind::ITE, {div_by_zero, bv_const(tm_, dw, 0), r});
           result         = fit(Val{r, dw, true}, W);
           break;
         }
@@ -3607,6 +3617,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             out_val.x_mask = tm_.mkTerm(Kind::ITE, {any, ones_w, zero_w});
           }
         }
+        if (!div_by_zero.isNull()) {
+          auto zero_w    = tm_.mkBitVector(static_cast<uint32_t>(W), 0);
+          auto ones_w    = tm_.mkTerm(Kind::BITVECTOR_NOT, {zero_w});
+          auto zero_mask = tm_.mkTerm(Kind::ITE, {div_by_zero, ones_w, zero_w});
+          out_val.x_mask = out_val.x_mask.isNull() ? zero_mask : tm_.mkTerm(Kind::BITVECTOR_OR, {out_val.x_mask, zero_mask});
+        }
       }
       if (op == Ntype_op::Sum && !node.out_edges().empty()) {
         for (const auto& e : node.out_edges()) {
@@ -3785,7 +3801,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // DISPROOF, with a headline claiming the module is empty. rc 7 and rc 10
       // must never be conflated (pass/lec/tests/lec_verdict_policy_test.sh).
       return fail_unsupported("operand of '" + gu::debug_name(node)
-                              + "' has no encodable driver (combinational cycle?); root: " + diag);
+                              + "' has no encodable driver (combinational cycle?); root: " + diag
+                              + " [an lg: input must have been through pass.legalize: re-run `lhd compile ... --emit-dir lg:`"
+                                " on it if a producer skipped the compile pipeline]");
     }
   }
 

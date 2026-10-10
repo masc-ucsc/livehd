@@ -1,0 +1,16 @@
+// Fuzz: copying a mod instance's output into a typed `mut` inside one arm
+// dropped the variable's declared U16 (the output's binding carries no value of
+// its own), so the sibling arm's `wrap t3 = ...` found no type and failed as
+// "call to undefined function 'wrap'".
+mod wrap_sub_h0(b:U16) -> (z:U4@[0]) {
+  wrap z = b
+}
+pub mod wrap_after_sub_output_copy(i0:U4, i3:U16) -> (o0:U16@[0]) {
+  mut t0 = wrap_sub_h0(b=i3)
+  mut t1 = (mut a = 1, mut b = t0)
+  mut t3:U16 = 0
+  if (i0 > 3) { t3 = t0 } else { wrap t3 = i3 + 1 }
+  mut t4:U16 = 0
+  if (i0 == 1) { t4 = t0 } else { wrap t4 = t1.b }
+  o0 = t3 ^ t4
+}

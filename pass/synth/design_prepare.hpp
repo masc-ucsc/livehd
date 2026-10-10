@@ -28,7 +28,10 @@ struct Prepared_design {
 // as bodies, so nested blackboxes retain their declared ports. Optional budget
 // refusal returns no partial design and sets budget->refused; other failures
 // retain their existing diagnostics. A refused budget stays refused.
+// `specialize` runs pass.specialize (state-free callees only) on the private
+// copy, after pass.color decided the regions (synth.specialize, default true).
 std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<hhds::Graph>> sources, bool unroll_carry,
-                                                std::string_view from_pass, Preparation_budget* budget = nullptr);
+                                                std::string_view from_pass, Preparation_budget* budget = nullptr,
+                                                bool specialize = true);
 
 }  // namespace livehd::synth

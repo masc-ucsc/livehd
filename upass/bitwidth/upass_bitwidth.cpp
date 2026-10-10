@@ -862,6 +862,30 @@ Lnast_range uPass_bitwidth::envelope_of_operand(const upass::Operand& o) const {
   return Lnast_range::make_unbounded();
 }
 
+// A count that may be negative shifts by its bit pattern read unsigned at its
+// width (user ruling 2026-10-09, Icarus semantics: s:S3 == -1 shifts by 7), so
+// its range is [0, 2^w - 1] for the w bits holding [min, max]. Left unbounded,
+// the shift result skipped the declared-fit check: `o0:U5 = (-i3) >> i3`
+// (i3:S3) compiled while the same with i3:U2 was rejected (random Pyrope fuzz).
+Lnast_range uPass_bitwidth::count_pattern(const Lnast_range& amt, const upass::Operand& o) const {
+  Lnast_range r = amt.is_unbounded() ? envelope_of_operand(o) : amt;
+  if (r.is_unbounded() || r.min >= 0) {
+    return amt;
+  }
+  int bits = 1;
+  while (bits < 62 && ((int64_t{1} << (bits - 1)) <= r.max || -(int64_t{1} << (bits - 1)) > r.min)) {
+    ++bits;
+  }
+  if (bits >= 62) {
+    return amt;
+  }
+  Lnast_range pattern;
+  pattern.min       = 0;
+  pattern.max       = (int64_t{1} << bits) - 1;
+  pattern.unbounded = false;
+  return pattern;
+}
+
 void uPass_bitwidth::check_shift_amount(const Lnast_range& amt) {
   if (amt.is_unbounded() || amt.min >= 0) {
     return;
@@ -915,6 +939,74 @@ void uPass_bitwidth::check_index_nonneg(const Lnast_range& idx, std::string_view
   });
 }
 
+// A Pyrope runtime index whose range reaches past a MEMORY's (`reg` array's)
+// last entry is a compile error (user ruling 2026-10-09): `reg a:[3]U8` read
+// at a U2 index can address entry 3. The outer extent is `__array_size`; the
+// check needs a bounded index range. It is path-insensitive, so an access
+// under an `if`, and a combinational `mut` array (often indexed by a rolled
+// loop's ordinal under a guard), keep the runtime bounds assert instead. Verilog-origin code keeps
+// SystemVerilog's X read / ignored write, and a constant index is judged
+// elsewhere.
+void uPass_bitwidth::check_index_in_size(std::string_view array_name, const Lnast_range& idx) {
+  if (runner_st == nullptr || idx.is_unbounded() || idx.is_constant()) {
+    return;
+  }
+  if (const auto& ln = lm->get_lnast(); !ln || ln->is_template() || ln->is_verilog_origin()) {
+    return;
+  }
+  const std::string_view base = ssa_base_name(array_name);
+  int64_t                size = 0;
+  if (lm->unit_lnast()->io_meta().find(base) != nullptr) {
+    return;  // a port array is not a memory
+  }
+  if (const auto b = runner_st->get_bundle(base); b && b->get_mode() == upass::Mode::reg_kind
+                                                  && b->get_attr("__array_dim_pending").is_invalid()
+                                                  && b->get_attr("__array_size").is_just_i64()) {
+    size = b->get_attr("__array_size").to_just_i64();
+  }
+  if (size <= 0 || idx.max < size) {
+    return;
+  }
+  // No branch refinement here: an access under an `if` may be guarded by it
+  // (`if ri < 126 { mem[ri] }`) and keeps the runtime bounds check instead.
+  {
+    const auto& ln  = lm->get_lnast();
+    auto        nid = lm->get_current_nid();
+    for (int hops = 0; hops < 4096 && !nid.is_invalid(); ++hops) {
+      if (Lnast_ntype::is_if_like(ln->get_type(nid))) {
+        return;
+      }
+      if (nid == ln->get_root()) {
+        break;
+      }
+      nid = ln->get_parent(nid);
+    }
+  }
+  auto span = lm->current_span();
+  if (!index_range_reported_
+           .insert(std::format("{}@{}:{}:{}", base, span.file, span.start_line.value_or(0), span.start_col.value_or(0)))
+           .second) {
+    return;  // the pass revisits a statement; one report per access
+  }
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::error,
+      .code     = "index-out-of-range",
+      .category = "bitwidth",
+      .pass     = "upass.bitwidth",
+      .message  = std::format("array `{}` has {} entries but its index may reach {} (range [{}, {}])",
+                             upass::Lnast_manager::user_name(std::string(base)),
+                             size,
+                             idx.max,
+                             idx.min,
+                             idx.max),
+      .span     = std::move(span),
+      .hint     = std::format("narrow the index's range so it stays below {} (any range, not only a power of two: `i % {}`), or "
+                              "size the array to cover it",
+                              size,
+                              size),
+  });
+}
+
 // ── Process hooks (push form) ────────────────────────────────────────────────
 
 upass::Vote uPass_bitwidth::process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -950,6 +1042,9 @@ upass::Vote uPass_bitwidth::process_store(std::string_view dst_name, Bundle& dst
   // Every selector (index) preceding the value must be a non-negative index.
   for (std::size_t i = 0; i + 1 < src.size(); ++i) {
     check_index_nonneg(range_of_operand(src[i]), src[i].name);
+  }
+  if (src.size() >= 2 && is_array_name(dst_name)) {
+    check_index_in_size(dst_name, range_of_operand(src.front()));
   }
   // (Never on an array: lane 0 of `r:[2]s8` is an element, judged above, not
   // the packed port.)
@@ -1071,14 +1166,14 @@ upass::Vote uPass_bitwidth::process_shl(std::string_view dst_name, Bundle& dst, 
   }
   const auto amt = range_of_operand(src[1]);
   check_shift_amount(amt.is_unbounded() ? envelope_of_operand(src[1]) : amt);
-  return stamp_arith(dst_name, dst, range_of_operand(src[0]).shl(amt), src);
+  return stamp_arith(dst_name, dst, range_of_operand(src[0]).shl(count_pattern(amt, src[1])), src);
 }
 
 upass::Vote uPass_bitwidth::process_sra(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   if (src.size() < 2) { return stamp_carry(dst_name, dst, Lnast_range::make_unbounded(), src); }
   const auto amt = range_of_operand(src[1]);
   check_shift_amount(amt.is_unbounded() ? envelope_of_operand(src[1]) : amt);
-  return stamp_carry(dst_name, dst, range_of_operand(src[0]).sra(amt), src);
+  return stamp_carry(dst_name, dst, range_of_operand(src[0]).sra(count_pattern(amt, src[1])), src);
 }
 
 // Bitwise ops — conservative: join of operand ranges (not tight).
@@ -1424,8 +1519,24 @@ void uPass_bitwidth::process_tuple_get() {
   // owned here, the operands view them.
   std::vector<std::string>    idx_names;
   std::vector<upass::Operand> idx;
+  std::optional<upass::Operand> first_index;  // a declared array's outer selector
   if (move_to_sibling()) {
     src = std::string{current_text()};
+    if (live_inferred(src) == nullptr && is_array_name(src)) {
+      const auto saved = lm->save_cursor();
+      if (move_to_sibling()) {
+        if (Lnast_ntype::is_const(get_raw_ntype())) {
+          if (const auto v = upass::int_literal(current_text())) {
+            first_index = upass::Operand{.name = {}, .bundle = Bundle::make_const(*Dlop::create_integer(*v), upass::Kind::integer)};
+          }
+        } else {
+          const std::string nm{current_text()};
+          const auto        b = runner_st->get_bundle(nm);
+          first_index         = upass::Operand{.name = nm, .bundle = b ? b : std::make_shared<Bundle>()};
+        }
+      }
+      lm->restore_cursor(saved);
+    }
     while (live_inferred(src) != nullptr && move_to_sibling()) {
       if (Lnast_ntype::is_const(get_raw_ntype())) {
         const auto v = upass::int_literal(current_text());
@@ -1442,6 +1553,9 @@ void uPass_bitwidth::process_tuple_get() {
     }
   }
   move_to_parent();
+  if (first_index) {
+    check_index_in_size(src, range_of_operand(*first_index));
+  }
   for (size_t i = 0, n = 0; i < idx.size(); ++i) {
     if (idx[i].bundle == nullptr) {  // a ref: bind it now that idx_names is stable
       const auto& nm = idx_names[n++];

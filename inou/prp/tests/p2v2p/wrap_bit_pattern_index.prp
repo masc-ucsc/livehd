@@ -1,0 +1,13 @@
+// Fuzz: the front end recorded `wrap t0 = 0sb1011` as the integer -5 (the
+// literal's own value, ignoring the U1 wrap), so `i2#[t0]` was rejected as a
+// negative bit index. The wrapped value is 1; a saturated one is 3.
+pub comb wrap_bit_pattern_index(i2:S8) -> (o0:U1, o1:U1, o2:U8) {
+  mut t0:U1 = 0
+  wrap t0 = 0sb1011
+  o0 = i2#[t0]
+  mut t1:U2 = 0
+  sat t1 = 7
+  o1 = i2#[t1]
+  mut t2:U8 = 0sb1111
+  o2 = t2
+}

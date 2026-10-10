@@ -89,6 +89,7 @@ inline constexpr std::string_view kFormalCommonFlags[] = {
 // pass.abc honors under ANY coloring, and the other algorithms' own knobs --
 // stays `pass.color.<flag>`.
 inline constexpr std::string_view kColorSynthFlags[] = {
+    "boundary_wiring",
     "ctrl_cones",
     "ctrl_max_gate",
     "ctrl_min_gate",
@@ -98,6 +99,7 @@ inline constexpr std::string_view kColorSynthFlags[] = {
     "max_gate",
     "max_ge",
     "min_color_nodes",
+    "min_gate",
     "min_ge",
     "mode",
     "name_weight",

@@ -1,0 +1,16 @@
+const dut_m = import("lg:function_formal_per_call")
+
+test function_formal_per_call.icarus {
+  mut dut = dut_m
+  tick 3 {
+    dut.reset = false
+    dut.s  = clock
+    dut.fb = 16 + clock
+    dut.w  = 0xA5 + clock
+    step
+    const lo = (0xA5 + clock) & 15
+    assert(dut.o1 == 1, "f0(fb[4]) == 1")
+    assert(dut.o2 == lo, "f0(w) keeps w's low nibble")
+    assert(dut.o0 == (if clock == 1 { lo } else { 0 }), "the branch-scoped call")
+  }
+}

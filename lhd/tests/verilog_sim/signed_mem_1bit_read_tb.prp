@@ -1,0 +1,16 @@
+const dut_m = import("lg:signed_mem_1bit_read")
+
+test signed_mem_1bit_read.icarus {
+  mut dut = dut_m
+  tick 4 {
+    dut.reset = clock < 2
+    dut.d  = 3
+    dut.s  = 1
+    dut.wa = 2
+    dut.ra = 2
+    step
+    if clock >= 3 {
+      assert(dut.o == 1 and dut.q == 255, "1'sb1 sign-extends to 8'hff")
+    }
+  }
+}

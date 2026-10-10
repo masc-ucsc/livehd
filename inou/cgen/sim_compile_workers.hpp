@@ -4,13 +4,14 @@
 #include <condition_variable>
 #include <deque>
 #include <future>
+#include <memory>
 #include <mutex>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "sim_compile_jobs.hpp"
+#include "worker_pool.hpp"
 
 namespace livehd::sim {
 // Bound outstanding work, including queued jobs. Completion by ANY worker
@@ -29,7 +30,7 @@ public:
     }
     ready_.notify_all();
     for (auto& worker : workers_) {
-      worker.join();
+      worker->join();
     }
   }
 
@@ -40,8 +41,12 @@ public:
     std::unique_lock                               lock(mutex_);
     space_.wait(lock, [&] { return outstanding_ < limit_; });
     // Start threads on demand: a one-object module need not launch hundreds.
+    // Big-stack workers (livehd::Async_worker): LLVM's SelectionDAG legalization
+    // of a very wide value recurses deeply, and a Darwin secondary thread gets
+    // only 512 KiB by default.
     if (workers_.size() < outstanding_ + 1) {
-      workers_.emplace_back([this] { run(); });
+      workers_.push_back(std::make_unique<livehd::Async_worker>());
+      workers_.back()->start([this] { run(); });
     }
     jobs_.emplace_back([job = std::move(job)]() mutable { job(); });
     ++outstanding_;
@@ -76,7 +81,7 @@ private:
   std::mutex                             mutex_;
   std::condition_variable                ready_, space_;
   std::deque<std::packaged_task<void()>> jobs_;
-  std::vector<std::thread>               workers_;
+  std::vector<std::unique_ptr<livehd::Async_worker>> workers_;
   size_t                                 outstanding_ = 0;
   bool                                   stopping_    = false;
 };

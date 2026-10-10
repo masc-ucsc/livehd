@@ -224,11 +224,11 @@ bool parse_region_opts_entry(const rapidjson::Value& v, Region_opts& ro, std::st
       }
     } else if (key == "adder") {
       if (!val.IsString()) {
-        return bad("'adder' must be a string (rca|cska|cla)");
+        return bad("'adder' must be a string (rca|cska|cla|prefix|brent)");
       }
       auto a = arith::parse_adder_kind({val.GetString(), val.GetStringLength()});
       if (!a.has_value()) {
-        return bad(std::format("unknown adder '{}' (use rca|cska|cla)", val.GetString()));
+        return bad(std::format("unknown adder '{}' (use rca|cska|cla|prefix|brent)", val.GetString()));
       }
       ro.adder = a.value();
     } else if (key == "barrel") {
@@ -238,7 +238,7 @@ bool parse_region_opts_entry(const rapidjson::Value& v, Region_opts& ro, std::st
       ro.reverse_barrel = std::string_view(val.GetString()) == "reverse";
     } else if (key == "multiplier") {
       if (!val.IsString()) {
-        return bad("'multiplier' must be a string (array|tree)");
+        return bad("'multiplier' must be a string (array|tree|csa|sn)");
       }
       auto m = arith::parse_mult_kind({val.GetString(), val.GetStringLength()});
       if (!m.has_value()) {
@@ -246,7 +246,7 @@ bool parse_region_opts_entry(const rapidjson::Value& v, Region_opts& ro, std::st
         // explicit pick (leaving the key out is what keeps the search on), and
         // parse_mult_kind rejects the spelling -- advertising it made the
         // message name a value this very call refuses.
-        return bad(std::format("unknown multiplier '{}' (use array|tree)", val.GetString()));
+        return bad(std::format("unknown multiplier '{}' (use array|tree|csa|sn)", val.GetString()));
       }
       ro.multiplier = m.value();
     } else if (key == "block_size") {
@@ -535,14 +535,14 @@ bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, si
                                 : std::format(" (after {} completed color(s), whose retained memory is the cost)", qor_.size());
   refusal_                = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB{} "
-      "(was {} MiB, {} added {} MiB){}, {}{}",
+                     "(was {} MiB, {} added {} MiB){}, {}{}",
       region,
       blasted,
       total,
       100.0 * fraction,
       mib(rss),
       pending_bytes ? std::format(" (incl. {} MiB estimated for the ABC netlist not yet built)", mib(pending_bytes))
-                    : std::string{},
+                                   : std::string{},
       mib(rss_before),
       coordinator_ ? "process" : "color",
       mib(grown),
@@ -1314,8 +1314,8 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   {
     constexpr uint64_t kTrimInterval = 64;
     const uint64_t     ceiling       = cost::configured_budget_bytes();
-    const bool         due   = !pressure_relief_done_ || completed_regions_ - last_pressure_relief_region_ >= kTrimInterval;
-    const bool         tight = ceiling != 0 && cost::process_footprint_bytes() > ceiling - ceiling / 4;
+    const bool         due           = !pressure_relief_done_ || completed_regions_ - last_pressure_relief_region_ >= kTrimInterval;
+    const bool         tight         = ceiling != 0 && cost::process_footprint_bytes() > ceiling - ceiling / 4;
     if (due || tight) {
       (void)malloc_trim(0);
       last_pressure_relief_region_ = completed_regions_;
@@ -1415,8 +1415,8 @@ void Region_driver::remember_ware(const livehd::partition::Region_body& rb, cons
     ge      += gu::synthesis_ge_weight(n);
     auto op  = gu::type_op_of(n);
     w.add   |= options.auto_adder
-               && ((options.ware_arith && op == Ntype_op::Sum) || (options.ware_cmp && (op == Ntype_op::LT || op == Ntype_op::GT)));
-    w.mult  |= options.ware_arith && options.auto_multiplier && op == Ntype_op::Mult;
+             && ((options.ware_arith && op == Ntype_op::Sum) || (options.ware_cmp && (op == Ntype_op::LT || op == Ntype_op::GT)));
+    w.mult   |= options.ware_arith && options.auto_multiplier && op == Ntype_op::Mult;
     w.barrel |= options.ware_shift && options.auto_barrel && (op == Ntype_op::SHL || op == Ntype_op::SRA);
   }
   if ((!w.add && !w.mult && !w.barrel) || (options.large_ge && ge >= options.large_ge)) {
@@ -1633,10 +1633,10 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
       if (saved_cache && w.rb.pre_body) {
         const auto& o   = candidate.options;
         const auto  key = std::format("a{}_b{}_m{}_s{}",
-                                      static_cast<int>(o.adder),
-                                      o.block_size,
-                                      static_cast<int>(o.multiplier),
-                                      o.reverse_barrel);
+                                     static_cast<int>(o.adder),
+                                     o.block_size,
+                                     static_cast<int>(o.multiplier),
+                                     o.reverse_barrel);
         candidate_cache
             = std::make_unique<Region_cache>(saved_cache->dir() + "/ware/" + name + "/" + key, saved_cache->salt(), true);
         incr_ = candidate_cache.get();
@@ -1653,12 +1653,12 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
       if (qor_.size() > count) {
         qor_.resize(count);
       }
-      auto       trial_score      = mapped ? score_ware(outlib, top) : Ware_score{};
-      const bool keep             = trial_score.valid
-                                    && ware_qor_better(score, trial_score, timing)
-                                    // Area-only sections must not degrade another section's
-                                    // constrained stitched paths.
-                                    && (timing || score.delays.empty() || !ware_qor_better(trial_score, score, true));
+      auto       trial_score = mapped ? score_ware(outlib, top) : Ware_score{};
+      const bool keep        = trial_score.valid
+                        && ware_qor_better(score, trial_score, timing)
+                        // Area-only sections must not degrade another section's
+                        // constrained stitched paths.
+                        && (timing || score.delays.empty() || !ware_qor_better(trial_score, score, true));
       trial_q.ware_trials         = previous.ware_trials + 1;
       const bool   candidate_hit  = mapped && !trial_q.resynth;
       const double trial_ms       = mapped ? trial_q.ms : 0.0;

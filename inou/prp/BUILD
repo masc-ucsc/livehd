@@ -34,6 +34,7 @@ exports_files([
     "tests/sim/loop_roll_conditional_state_call.prp",
     "tests/sim/loop_state_multi_carry.prp",
     "tests/sim/loop_mixed_carry.prp",
+    "tests/sim/loop_inline_colors.prp",
     "tests/sim/div_narrow_result.prp",
     "tests/sim/llvm_native_division.prp",
     "tests/sim/llvm_boundary_slices.prp",
@@ -1515,6 +1516,28 @@ _V2PRP2V_VERILOG_FIXME = [
     for base in [
         "clz_nest",  # deep nested-ternary terminal constant (now proven)
     ]
+]
+
+# prp->verilog->prp round trip (the random Pyrope round-trip fuzz direction):
+# the emitted Verilog AND the Pyrope regenerated from it must both prove
+# equivalent to the source. Every tests/p2v2p/ fixture is a minimized fuzz find.
+[
+    sh_test(
+        name = "prp-p2v2p-%s" % f[len("tests/p2v2p/"):-len(".prp")],
+        srcs = ["tests/p2v2p_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:%s)" % f,
+        ],
+        data = [
+            "//inou/prp:tests/lec.py",
+            "//inou/prp:tests/p2v2p_test.py",
+            "//inou/prp:%s" % f,
+            "//lhd",
+        ],
+        deps = ["//inou/yosys:scripts"],
+    )
+    for f in glob(["tests/p2v2p/*.prp"])
 ]
 
 # prp->prp round-trip: a Pyrope source re-emitted through pass.prp_writer must

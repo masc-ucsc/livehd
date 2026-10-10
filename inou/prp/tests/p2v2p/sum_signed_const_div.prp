@@ -1,0 +1,10 @@
+// p2v2p fuzz find (2026-10-08): `t0 - 8` with an S4 result spelled the 8 as
+// `4'sh8` (== -8); re-read in the division's wider context, `(t0 - 8) / 8`
+// computed +1 instead of -1.
+pub comb sum_signed_const_div(i0:U8) -> (o1:S8) {
+  mut t0:U1 = 0
+  if (i0 != i0) {
+    wrap t0 = (i0 + i0)
+  }
+  sat o1 = ((t0 - 8) / 8)
+}

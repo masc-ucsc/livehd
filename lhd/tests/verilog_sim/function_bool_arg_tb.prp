@@ -1,0 +1,26 @@
+const dut_m = import("lg:function_bool_arg")
+
+test function_bool_arg.icarus {
+  mut dut = dut_m
+  tick 3 {
+    dut.reset = false
+    if clock == 0 {
+      dut.a = 2
+      dut.b = 5
+    } elif clock == 1 {
+      dut.a = 9
+      dut.b = 2
+    } else {
+      dut.a = 0
+      dut.b = 0
+    }
+    step
+    if clock == 0 {
+      assert(dut.o == 1 and dut.p == 1, "a < b binds 1 to the 1-bit formal")
+    } elif clock == 1 {
+      assert(dut.o == 0 and dut.p == 1, "neither comparison holds")
+    } else {
+      assert(dut.o == 1 and dut.p == 0, "a == b; f0 is 31 bits so p keeps its low 3")
+    }
+  }
+}

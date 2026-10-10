@@ -1,0 +1,55 @@
+`timescale 1ns/1ps
+module tb;
+  reg clock = 0;
+  reg reset = 1;
+  reg [47:0] i0;
+  reg [69:0] i1;
+  reg [3:0] i2;
+  reg [1:0] i3;
+  wire [15:0] o0;
+  wire [4:0] o1;
+  fz dut(.clock(clock), .reset(reset), .i0(i0), .i1(i1), .i2(i2), .i3(i3), .o0(o0), .o1(o1));
+  initial begin
+    reset = 1; i0 = 48'd259113995004639; i1 = 70'd1061309806703290792767; i2 = 4'd6; i3 = 2'd0;
+    #1 clock = 1; #1;
+    $display("refv0 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 1; i0 = 48'd110200414375015; i1 = 70'd718640327784617049721; i2 = 4'd14; i3 = 2'd1;
+    #1 clock = 1; #1;
+    $display("refv1 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 48'd19290669108767; i1 = 70'd1040232467591645378933; i2 = 4'd3; i3 = 2'd0;
+    #1 clock = 1; #1;
+    $display("refv2 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 48'd153015221672126; i1 = 70'd292269212451707405464; i2 = 4'd0; i3 = 2'd0;
+    #1 clock = 1; #1;
+    $display("refv3 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 48'd16327794109222; i1 = 70'd973344784015457677032; i2 = 4'd10; i3 = 2'd1;
+    #1 clock = 1; #1;
+    $display("refv4 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 48'd267073948447630; i1 = 70'd668694087760066846719; i2 = 4'd3; i3 = 2'd3;
+    #1 clock = 1; #1;
+    $display("refv5 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 48'd249486057066986; i1 = 70'd830530871942228575813; i2 = 4'd4; i3 = 2'd1;
+    #1 clock = 1; #1;
+    $display("refv6 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 48'd265865839816352; i1 = 70'd607611608921658369902; i2 = 4'd1; i3 = 2'd3;
+    #1 clock = 1; #1;
+    $display("refv7 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 48'd264437949713699; i1 = 70'd474732341130464021659; i2 = 4'd8; i3 = 2'd3;
+    #1 clock = 1; #1;
+    $display("refv8 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    reset = 0; i0 = 48'd93156878473217; i1 = 70'd613881320988661965633; i2 = 4'd10; i3 = 2'd0;
+    #1 clock = 1; #1;
+    $display("refv9 o0=%0d o1=%0d", o0, o1);
+    clock = 0; #1;
+    $finish;
+  end
+endmodule

@@ -6155,6 +6155,12 @@ void Lnast_prp_writer::write_cassert() {
       kw = "assume_nocheck";
     } else if (t == "__fkind__cassert") {
       kw = "cassert";
+    } else if (t == "__fkind__undefined") {
+      // A sim.warn_undefined marker (the slang reader's out-of-range memory
+      // access), not a Pyrope obligation: written as an `assert` it would turn
+      // SystemVerilog's X read / ignored write into a runtime failure.
+      move_to_parent();
+      return;
     } else {
       msg = render_value(cur, /*operand_ctx=*/false);  // no sentinel: this IS the message
     }
@@ -6715,8 +6721,20 @@ void Lnast_prp_writer::write_set_mask() {
   if (dst != val) {
     multi_def_tmp_.insert(dst);
     single_store_.erase(dst);
-    print(decl_prefix(dst));
-    os << std::format("{} = {}\n", dst, val);
+    const auto kw = decl_prefix(dst);
+    print(kw);
+    // A fresh SSA copy of a declared variable (`x___ssa_N` -> `mut x__wN`)
+    // takes x's declared type: its seed value can be narrower than the lane
+    // written next, `mut w2 = u3_value; w2#[3..<6] = ...` failed to recompile
+    // (random Pyrope round-trip fuzz, 2026-10-08).
+    std::string typed;
+    const auto  raw = lnast->get_name(result);
+    if (const auto at = raw.find("___ssa_"); !kw.empty() && at != std::string_view::npos) {
+      if (const auto it = declare_types_.find(strip_prefix(raw.substr(0, at))); it != declare_types_.end()) {
+        typed = ":" + it->second;
+      }
+    }
+    os << std::format("{}{} = {}\n", dst, typed, val);
     print_indent();
   }
   os << std::format("{} = {}", selection(dst), ins);
@@ -7198,7 +7216,11 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
     if (!var_nid.is_invalid()) {
       auto type_nid = lnast->get_sibling_next(var_nid);
       if (!type_nid.is_invalid()) {
-        note_port_width(strip_prefix(lnast->get_name(var_nid)), render_type_at(type_nid));
+        const auto tt = render_type_at(type_nid);
+        note_port_width(strip_prefix(lnast->get_name(var_nid)), tt);
+        if (!tt.empty()) {
+          declare_types_[std::string(strip_prefix(lnast->get_name(var_nid)))] = tt;
+        }
       }
       auto qualifier_nid = type_nid.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(type_nid);
       if (!qualifier_nid.is_invalid() && lnast->get_type(qualifier_nid) == Lnast_ntype::Lnast_ntype_const
@@ -7974,6 +7996,7 @@ void Lnast_prp_writer::analyze_folding() {
   element_store_by_value_.clear();
   const_get_mask_by_source_.clear();
   type_specs_.clear();
+  declare_types_.clear();
   type_declared_.clear();
   stage_decls_.clear();
 
@@ -8299,6 +8322,19 @@ std::string Lnast_prp_writer::render_def_rhs(Lnast_nid def, bool operand_ctx) {
   auto t  = lnast->get_type(def);
   auto c0 = lnast->get_child(def);
 
+  // A Verilog `x / 0` or `x % 0` is X whatever x is (Icarus: all-x). Pyrope
+  // rejects a literal zero divisor, so spell the value itself: the unknown
+  // literal (random Pyrope round-trip fuzz, 2026-10-09).
+  if (t == N::Lnast_ntype_div || t == N::Lnast_ntype_mod) {
+    for (auto d = c0.is_invalid() ? c0 : lnast->get_sibling_next(lnast->get_sibling_next(c0)); !d.is_invalid();
+         d    = lnast->get_sibling_next(d)) {
+      if (N::is_const(lnast->get_type(d))) {
+        if (const auto v = Dlop::from_pyrope(lnast->get_name(d)); v && v->is_integer() && !v->has_unknowns() && v->is_known_zero()) {
+          return "0sb?";
+        }
+      }
+    }
+  }
   // Infix arithmetic / bitwise / logical / comparison: `a <op> b [<op> c …]`.
   if (auto sym = infix_symbol(t); !sym.empty()) {
     return render_infix_rhs(def, t, sym, operand_ctx);

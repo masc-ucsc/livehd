@@ -1,0 +1,102 @@
+{
+ "icarus_vs_verilator": [
+  {
+   "cycle": 3,
+   "output": "o2",
+   "icarus": "0",
+   "verilator": "-5",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 4,
+   "output": "o2",
+   "icarus": "0",
+   "verilator": "-5",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 5,
+   "output": "o2",
+   "icarus": "0",
+   "verilator": "-5",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 6,
+   "output": "o2",
+   "icarus": "0",
+   "verilator": "-5",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 7,
+   "output": "o2",
+   "icarus": "0",
+   "verilator": "-5",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 8,
+   "output": "o2",
+   "icarus": "0",
+   "verilator": "-5",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  },
+  {
+   "cycle": 9,
+   "output": "o2",
+   "icarus": "0",
+   "verilator": "-5",
+   "lhd_slop": "0",
+   "lhd_llvm": "0"
+  }
+ ],
+ "inputs": [
+  {
+   "i0": 19,
+   "i1": -2
+  },
+  {
+   "i0": 2,
+   "i1": -2
+  },
+  {
+   "i0": 4,
+   "i1": 1
+  },
+  {
+   "i0": 7,
+   "i1": -2
+  },
+  {
+   "i0": 21,
+   "i1": -1
+  },
+  {
+   "i0": 6,
+   "i1": -1
+  },
+  {
+   "i0": 22,
+   "i1": 1
+  },
+  {
+   "i0": 3,
+   "i1": -2
+  },
+  {
+   "i0": 22,
+   "i1": -1
+  },
+  {
+   "i0": 20,
+   "i1": 1
+  }
+ ]
+}

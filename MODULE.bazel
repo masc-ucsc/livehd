@@ -107,7 +107,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "5945f87700cc33340254892c3f953d021ce3ae51",
+    commit = "b0a61425993d2b88ddea8eda614004090e5bd2c9",
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:

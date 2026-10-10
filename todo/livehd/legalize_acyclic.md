@@ -19,25 +19,30 @@ open. Owner rulings from the 2026-10-06 sim-speed review.
    ATOMIC is inlined too: no state moves, and a consumer would otherwise
    evaluate the callee in pieces (sim's per-output-group partitions; minion's
    two such instances cost ~5 s of sim setup). A rolled loop on such an
-   atomic-only ring is split instead (ruling 5).
+   atomic-only ring is left alone (ruling 5).
 2. A **true** combinational loop (a bit depends on itself with no register,
    latch or registered memory read on the path) is a diag **error**.
 3. A **false** loop (word/port granularity only: packed Get_mask/And/Or/Concat
    fields, or an instance output that does not depend on the instance input it
-   feeds) is **removed** by legalize -- by inlining, by a loop split, or by
-   rewiring packed slices inside a body (`split_packed_cycle_slices`). No
+   feeds) is **removed** by legalize -- by inlining or by rewiring packed
+   slices inside a body (`split_packed_cycle_slices`). A loop that exists only
+   at port level (a packed bus whose fed-back field the output does not read)
+   is not a loop: the arc view is refined to BITS inside each port-level
+   cycle (2026-10-08, slice-refined arcs), so such an instance keeps its
+   boundary (the XS CSR -> ExuBlock inlining cascade that broke LEC). No
    module ports are split today. The warning names the instances involved
    ("combinational path loops through module port(s) ... ideally split the
    bus/module in the RTL").
 4. Loops INSIDE one module are already removed at `lnast.tolg`
    (`split_packed_selfref_wire`); that stays.
-5. **Sub-loops (compact loop subnodes) are never unrolled to fix a loop.**
-   Keeping loops rolled through synthesis, simulation and LEC is a key
-   contribution (cf. XLS `counted_for`). A ring through a loop instance is
-   repaired by splitting the loop BODY into `__ring<ports>`/`__free` halves by
-   carries (legalize's `split_loops` machinery), never by materializing
-   iterations. A path that really goes through a loop instance (arc level) is
-   no false ring: no split breaks it, so it is reported.
+5. **Sub-loops (compact loop subnodes) are never unrolled, split or inlined
+   by legalize** (ruling 2026-10-08). Keeping loops rolled through synthesis,
+   simulation and LEC is a key contribution (cf. XLS `counted_for`). A ring
+   through a loop instance that is a cycle only while the instance is atomic
+   is no combinational loop and is left alone; consumers evaluate the loop as
+   a unit. A path that really goes through a loop instance (arc level) is a
+   TRUE loop: it is reported as an error (`comb-loop-through-loop`).
+   (`split_loop_by_ring` remains as a utility; legalize no longer calls it.)
    The two current ring-dodging unrollers (cgen_sim
    `compact_loop_has_external_ring`, upass `loop_output_rings_back`) go away.
    A loop instance's arcs are its body summary CLOSED over the carries (from
@@ -75,10 +80,11 @@ Per def, callee first, to a fixpoint (64 rounds):
    over the carries for a rolled loop. Iterative Tarjan over the atomic view;
    each SCC through an instance is re-searched in the arc view.
 2. **Repair.** Inline every non-loop instance on an arc-level SCC (warning)
-   and every state-free instance on an atomic SCC; split every rolled loop on
-   an atomic-only SCC by ring/free carries (`split_loop_by_ring`, never
-   unrolled; carries that read each other share a half, and the half names
-   carry the ring's ports).
+   and every state-free (non-loop) instance on an atomic SCC. Rolled loops are
+   never touched. The arc view is port-level first; inside each port-level
+   SCC it is re-searched at BIT level (field selects resolved through
+   wiring, instance outputs through a backward bit walk of the callee), so a
+   packed-bus false loop is no cycle.
 3. **What is left** gets `split_packed_cycle_slices`; anything still cyclic is
    a diag error (`comb-loop`, or `comb-loop-through-loop`), category "time"
    (exit 6).
@@ -111,6 +117,31 @@ split_selfref.cpp `__settle_g<k>`, lhd_kernel_formal.cpp, comb_false_loop_sub
 vtb, cgen_sim_comb_loop_test, inou/prp/BUILD notes, cgen/tests/comb_loop.
 
 ## Stage 4 -- cross-color constant propagation (ruling 6)
+
+Partly done 2026-10-07: the simulator's `specialize_constants` is now the
+shared `pass/specialize` (content-named `<callee>__k<hash>` specializations),
+run by sim on its private library and by synthesis on the mapper's private
+copy AFTER pass.color (`synth.specialize`, default true; state-free callees
+only -- a stateful def keeps its identity for DFF picks, clock-gate mapping and
+LEC pairing; only the nodes it creates inherit a neighbor's color; no full
+refold). Measured with test.lib: dino and picorv32 identical with it on or off
+(no constant-tied state-free instance survives their compile). An earlier
+variant that refolded/recolored every def moved regions and broke the ICG
+mapping. LEC does not specialize (it compares the original modules).
+2026-10-07 (owner ruling): the hierarchical round shares ONE specialization
+per definition (`max_versions`: 0 off, 1 = the join of all instance contexts
+-- the default, N = per-binding clones capped at N). A specialized definition
+is always a COPY `<name>__k<hash>` with every instance re-pointed; the
+original is never edited (incremental reuse) and stays available (a sim
+testbench may drive any module directly). Interfaces never change: a narrower
+input is a Get_mask/Sext inside the copy (narrowing the DECLARATION broke the
+sim emitter's lane reads -- lhd_sim_packed_child_input_test), a narrower child
+output is a fit in the parent. Contexts so far: constant inputs every instance
+agrees on, narrower input widths (widest instance), constant and narrower
+outputs (into parents). Open: boundary cones (a parent Sum collapsing
+with a child Sum: push the single-fanout driver cone into the copy, its
+leaves as ports; the mirror for outputs), LEC with both sides specialized
+alike (only where ref and impl agree), and the knob as a user option.
 
 After coloring, run cprop+bitwidth once over the color partitions, passing
 constants across colors (an instance input tied to a constant in its parent

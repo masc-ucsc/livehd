@@ -582,6 +582,12 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "per run — the value is stable across cycles. true restores the deterministic-zero fill, which also lets the "
      "literal fold at C++ compile time. Orthogonal to sim.init_zero, which covers the power-on value of state "
      "having neither an initializer nor a reset", Sim_set_option::Stage::both},
+    {"warn_undefined",
+     "true", Sim_set_option::Kind::boolean,
+     "print a warning on stderr the FIRST time each site computes a value the source leaves undefined -- a division "
+     "or remainder by zero, a memory write or read outside its array -- naming the source location and cycle. One "
+     "line per site (a soft limit, not a count); the simulated value is unchanged (X for a division, a dropped write, "
+     "a 0 read). Usually a design bug, hence on by default", Sim_set_option::Stage::run},
     {"checkpoint",
      "true", Sim_set_option::Kind::boolean,
      "periodic editable state checkpoints of the DUT + testbench (default on; --restart-cycle needs them)", Sim_set_option::Stage::run},
@@ -735,31 +741,36 @@ inline constexpr Mapper kMappers[] = {
 }
 
 inline constexpr Synth_set_option kSynthSetOptions[] = {
-    {   "mapper",
+    {    "mapper",
      "abc",  Synth_set_option::Kind::mapper,
      "abc|usyn: ABC synthesis (pass.abc), or unate synthesis (pass.usyn: a domino-gate LUT cover of every region, "
-     "technology-mapped by ABC, with the ABC flow as the fallback)"                                                       },
-    {  "threads",
+     "technology-mapped by ABC, with the ABC flow as the fallback)"                                                        },
+    {   "threads",
      "0", Synth_set_option::Kind::integer,
      "shared maximum concurrent ABC workers for synth and pass abc: 0 selects the machine's available CPUs; 1 maps serially. "
      "IGNORED by synth.mapper=usyn, which pins one synthesis tree at a time. "
-     "New workers require actual process memory plus outstanding and new projections below half of physical RAM"          },
-    {  "liberty",
+     "New workers require actual process memory plus outstanding and new projections below half of physical RAM"           },
+    {   "liberty",
      "",    Synth_set_option::Kind::file,
      "PATH -- THE Liberty .lib, for every command that reads one: `lhd synth`, `lhd pass abc` (maps to its cells) "
      "and `lhd pass opentimer` (times with it, when no .lib positional is given). Empty = "
      "$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). It is the ONE spelling -- a "
-     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                     },
-    {"opentimer",
+     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                      },
+    { "opentimer",
      "true", Synth_set_option::Kind::boolean,
      "run OpenTimer STA on the mapped netlist (timing.json under --workdir/synth, the critical path in the "
-     "report). false stops after the ABC map"                                                                             },
-    {   "reduce",
+     "report). false stops after the ABC map"                                                                              },
+    {    "reduce",
      "false", Synth_set_option::Kind::boolean,
      "experimental: can reduce synthesis time but degrade QoR (area and depth). Extract repeated one- and two-node "
-     "combinational cones into shared definitions before coloring; disabled by default"                                   },
-    {      "sdc", "",    Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
-    {     "spef", "",    Synth_set_option::Kind::file,        "PATH -- optional .spef parasitics handed to pass.opentimer"},
+     "combinational cones into shared definitions before coloring; disabled by default"                                    },
+    {"specialize",
+     "true", Synth_set_option::Kind::boolean,
+     "run pass.specialize on the mapper's private copy after pass.color: a constant instance input is folded into a "
+     "content-named copy of its state-free callee, and a constant a callee returns reaches its parent. false keeps "
+     "every instance boundary as compiled"                                                                                 },
+    {       "sdc", "",    Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
+    {      "spef", "",    Synth_set_option::Kind::file,        "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };
 
 // The `lhd pass` subcommand vocabulary (pass_command dispatches exactly these).

@@ -697,6 +697,7 @@ TEST_F(DesignSynth, NodeLimitRefusesBeforeTheSearchNeverAtEmission) {
   for (uint32_t limit = 44; limit <= 112; limit += 4) {
     Design_options options;
     options.logical.max_nodes = limit;
+    options.specialize        = false;  // the admission window is measured on the fixture as built
     Budget work{100000000};
     auto   result = synthesize_cmos_design(design, options, work);
     if (result.design) {

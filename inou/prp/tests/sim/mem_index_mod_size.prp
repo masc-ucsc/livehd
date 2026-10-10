@@ -1,0 +1,26 @@
+/*
+:name: mem_index_mod_size
+:type: simulation
+*/
+
+// upass.bitwidth's index-out-of-range check judges the index RANGE, not its
+// bit width: a 3-entry memory indexed by `i % 3` (a U4 whose value stays in
+// [0, 2]) is legal, non-power-of-two size and all.
+pub mod mem3(x:U8, wa:U4, ra:U4) -> (y:U8@[0]) {
+  reg a:[3]U8 = 0
+  a[wa % 3] = x
+  y = a[ra % 3]
+}
+
+test mem3.mod_index {
+  mut d = mem3
+  tick 6 {
+    d.x  = clock + 10
+    d.wa = clock + 3     // entries 0, 1, 2, 0, 1, 2
+    d.ra = clock + 5     // reads the entry written one cycle earlier
+    step
+    if clock >= 1 {
+      assert(d.y == clock + 9, "mem[(clock + 5) % 3] holds the previous cycle's x")
+    }
+  }
+}

@@ -3,6 +3,7 @@
 #include "pass_partition.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cctype>
 #include <cstdint>
@@ -844,6 +845,77 @@ bool Partitioner::collect() {
       }
     }
   }
+  // Constant wiring has no Boolean implementation to duplicate. Expand a
+  // region's input context through it, so ABC sees constant lanes and repeated
+  // sign bits rather than treating a packed bus as independent unknown bits.
+  // Ownership/export remains unique. The ordinary edge classifier and pre-body
+  // builder then describe exactly the same local copies as the mapper sees.
+  std::vector<bool> shared(region_nodes_.size(), false);
+  const auto        info = g_->get_input_node().attr(livehd::attrs::coloring_info);
+  const bool        boundary_wiring = info.has()
+                               && std::string_view{info.get()}.find("\"boundary_wiring\":true") != std::string_view::npos;
+  const auto wiring = [](const hhds::Node_class& node) {
+    const auto op = gu::type_op_of(node);
+    if (op == Ntype_op::Concat) {
+      return true;
+    }
+    if (op == Ntype_op::Sext) {
+      return gu::get_driver_of_sink_name(node, "b").is_const();
+    }
+    if (op == Ntype_op::Set_mask) {
+      return gu::bit_range(node).has_value();
+    }
+    if (op == Ntype_op::Get_mask) {
+      const auto range = gu::bit_range(node);
+      const auto data  = gu::get_driver_of_sink_name(node, "a");
+      if (!range || data.is_invalid()) {
+        return false;
+      }
+      // A slice of real logic already exports exactly the selected bits.
+      // Copying that slice would instead export the unsliced, wide producer,
+      // hiding narrow demand and increasing its implementation. Follow slices
+      // only to expose packing/extension facts, not to enlarge logic boundaries.
+      if (data.is_const() || (gu::bits_of(data) > 0 && range->second > gu::bits_of(data))) {
+        return true;
+      }
+      const auto source = data.get_master_node();
+      const auto type   = gu::type_op_of(source);
+      if (type == Ntype_op::Concat) {
+        return true;
+      }
+      if (type == Ntype_op::Sext) {
+        return gu::get_driver_of_sink_name(source, "b").is_const();
+      }
+      if (type == Ntype_op::Get_mask || type == Ntype_op::Set_mask) {
+        return gu::bit_range(source).has_value();
+      }
+      return (type == Ntype_op::SHL || type == Ntype_op::SRA) && gu::get_driver_of_sink_name(source, "b").is_const();
+    }
+    if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
+      const auto amount = gu::get_driver_of_sink_name(node, "b");
+      return !amount.is_invalid() && amount.is_const();
+    }
+    return false;
+  };
+  if (boundary_wiring) {
+    for (uint32_t r = 0; r < region_nodes_.size(); ++r) {
+      admit("collect-step");
+      absl::flat_hash_set<hhds::Node_class> local(region_nodes_[r].begin(), region_nodes_[r].end());
+      for (size_t i = 0; i < region_nodes_[r].size(); ++i) {
+        const auto node = region_nodes_[r][i];
+        for (const auto& pin : node.inp_sorted_pins()) {
+          for (const auto& driver : pin.get_driver_pins()) {
+            admit("collect-step");
+            const auto producer = driver.get_master_node();
+            if (is_partitionable(producer) && wiring(producer) && local.insert(producer).second) {
+              region_nodes_[r].push_back(producer);
+              shared[r] = true;
+            }
+          }
+        }
+      }
+    }
+  }
   // The ABC bit-blaster consumes dependency order. Appending secondary members
   // must not put a shared producer after an owned consumer.
   absl::flat_hash_map<hhds::Node_class, uint32_t> rank;
@@ -854,7 +926,7 @@ bool Partitioner::collect() {
   }
   for (uint32_t r = 0; r < region_nodes_.size(); ++r) {
     admit("collect-step");
-    if (region_ctrl_[r]) {
+    if (region_ctrl_[r] || shared[r]) {
       std::sort(region_nodes_[r].begin(), region_nodes_[r].end(), [&](const auto& a, const auto& b) {
         return rank.at(a) < rank.at(b);
       });
@@ -873,7 +945,7 @@ bool Partitioner::collect() {
   for (uint32_t r = 0; r < nregions; ++r) {
     admit("collect-step");
     absl::flat_hash_set<hhds::Node_class> local;
-    if (region_ctrl_[r]) {
+    if (region_ctrl_[r] || shared[r]) {
       local.insert(region_nodes_[r].begin(), region_nodes_[r].end());
     }
     for (auto n : region_nodes_[r]) {
@@ -1006,6 +1078,134 @@ void Partitioner::name_ports() {
   // (hundreds of MB on a multi-million-node def), and (b) an output port can
   // no longer take an input port's name -- the previous per-loop pristine
   // copies let `input x` and `output x` coexist in one module.
+  // LOCAL port signatures. An anonymous crossing used to be named by its WHOLE
+  // producer and consumer cones (sig_memo / fwd_memo, up to the nearest named
+  // node), and in a flattened design those cones are huge: on dino every
+  // operand/forwarding signal's consumer cone runs through the ALU, so a one-
+  // operator ALU edit renamed the ports -- and so missed the cache -- of 40 of
+  // 52 regions whose logic never changed. A name only has to be REPRODUCIBLE and
+  // DISTINCT within its region (the cache's structural compare, not the name,
+  // is what proves a hit; a tie still refuses reuse), so it is built from a
+  // BOUNDED neighborhood: `depth` levels of the same producer/consumer hashing,
+  // stopping early at the same named anchors. A port is deepened (8, 16 levels,
+  // then the full cone) only while it TIES with another port of its region, so
+  // an edit renames only ports within a few levels of it.
+  absl::flat_hash_map<std::pair<hhds::Pin_class, int>, uint64_t> prod_k_memo, fwd_k_memo;
+  std::function<uint64_t(const hhds::Pin_class&, int)>            prod_k;
+  prod_k = [&](const hhds::Pin_class& pin, int k) -> uint64_t {
+    if (auto anchor = producer_anchor(pin)) {
+      return *anchor;
+    }
+    if (k <= 0) {
+      return sig_mix(producer_shape(pin), 0xb0d0U);  // the bounded frontier: shape only
+    }
+    const auto key = std::make_pair(pin, k);
+    if (auto it = prod_k_memo.find(key); it != prod_k_memo.end()) {
+      return it->second;
+    }
+    absl::flat_hash_map<int, std::vector<uint64_t>> by_bank;  // per sink bank, as producer_signatures
+    for (const auto& in_pin : pin.get_master_node().inp_sorted_pins()) {
+      admit("name_ports-step");
+      const auto bank = static_cast<int>(Ntype::sink_bank(gu::type_op_of(in_pin.get_master_node()), in_pin.get_port_id()));
+      for (const auto& in_drv : in_pin.get_driver_pins()) {
+        by_bank[bank].push_back(prod_k(in_drv, k - 1));
+      }
+    }
+    const uint64_t node = sig_mix(producer_shape(pin), hhds::group_fold(0, by_bank));
+    const uint64_t v    = sig_mix(node, static_cast<uint64_t>(pin.get_port_id()));
+    prod_k_memo.emplace(key, v);
+    return v;
+  };
+  std::function<uint64_t(const hhds::Pin_class&, int)> fwd_k;
+  fwd_k = [&](const hhds::Pin_class& driver, int k) -> uint64_t {
+    const auto key = std::make_pair(driver, k);
+    if (auto it = fwd_k_memo.find(key); it != fwd_k_memo.end()) {
+      return it->second;
+    }
+    constexpr uint64_t   kSeed = 0x84222325cbf29ce4ULL;  // as fwd_local_sig / fwd_resolved_sig
+    hhds::Field_combiner uses;                           // a multiset: out-edge order is storage order
+    for (const auto& e : driver.out_edges()) {
+      admit("name_ports-step");
+      const auto& snk = e.sink;
+      uint64_t    u;
+      if (gu::is_graph_output_pin(snk)) {
+        u = sig_str(sig_mix(kSeed, 1), gu::pin_name_of(snk));
+      } else if (auto cm = snk.get_master_node(); gu::has_name(cm)) {
+        u = sig_mix(sig_str(sig_mix(kSeed, 2), gu::node_name_of(cm)), static_cast<uint64_t>(snk.get_port_id()));
+      } else {
+        u = sig_mix(sig_mix(kSeed, 4), static_cast<uint64_t>(type_op_of(cm)));
+        u = sig_mix(u, static_cast<uint64_t>(snk.get_port_id()));
+        hhds::Field_combiner cin;
+        for (const auto& in_pin : cm.inp_sorted_pins()) {
+          for (const auto& in_drv : in_pin.get_driver_pins()) {
+            if (in_drv.is_const()) {
+              cin.add(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(in_drv).serialize()),
+                              static_cast<uint64_t>(in_pin.get_port_id())));
+            }
+          }
+        }
+        u = sig_mix(u, cin.value());
+        hhds::Field_combiner outs;
+        each_fwd_child(cm, admission_, [&](const auto& child) {
+          outs.add(k <= 0 ? static_cast<uint64_t>(child.get_port_id()) : fwd_k(child, k - 1));
+        });
+        u = sig_mix(u, outs.value());
+      }
+      uses.add(u);
+    }
+    const uint64_t v = sig_mix(kSeed, uses.value());
+    fwd_k_memo.emplace(key, v);
+    return v;
+  };
+  // Escalation ladder: bounded depths, then the full cone (level kFullLevel).
+  static constexpr std::array<int, 3> kLocalDepths{4, 8, 16};
+  static constexpr size_t             kFullLevel = kLocalDepths.size();
+  // Name each port's signature at the shallowest level that is unique within
+  // its region. `full` reports the ports that needed the whole cone.
+  const auto local_signatures = [&](const auto& drivers, bool with_consumers, absl::flat_hash_set<hhds::Pin_class>& full) {
+    absl::flat_hash_map<hhds::Pin_class, uint64_t> sig;
+    absl::flat_hash_map<hhds::Pin_class, size_t>   level;
+    const auto compute = [&](const hhds::Pin_class& d) {
+      const size_t l = level[d];
+      if (l >= kFullLevel) {
+        full.insert(d);
+        return with_consumers ? sig_mix(sig_memo.at(d), fwd_memo.at(d)) : sig_memo.at(d);
+      }
+      const int depth = kLocalDepths[l];
+      return with_consumers ? sig_mix(prod_k(d, depth), fwd_k(d, depth)) : prod_k(d, depth);
+    };
+    for (const auto& d : drivers) {
+      level.emplace(d, 0);
+    }
+    for (const auto& d : drivers) {
+      sig[d] = compute(d);
+    }
+    for (size_t round = 0; round < kFullLevel; ++round) {
+      absl::flat_hash_map<uint64_t, std::vector<hhds::Pin_class>> by_sig;
+      for (const auto& d : drivers) {
+        by_sig[sig[d]].push_back(d);
+      }
+      bool deepened = false;
+      for (auto& [v, members] : by_sig) {
+        (void)v;
+        if (members.size() < 2) {
+          continue;
+        }
+        for (const auto& d : members) {
+          if (level[d] < kFullLevel) {
+            ++level[d];
+            sig[d]   = compute(d);
+            deepened = true;
+          }
+        }
+      }
+      if (!deepened) {
+        break;
+      }
+    }
+    return sig;
+  };
+
   for (uint32_t r = 0; r < static_cast<uint32_t>(region_nodes_.size()); ++r) {
     admit("name_ports-step");
     const auto&                      nodes = region_nodes_[r];
@@ -1023,6 +1223,128 @@ void Partitioner::name_ports() {
       // uncolored design that folds the whole graph into one color-0 region.
       used.insert(sanitize(gu::default_instance_name(n)));
     }
+
+    // REGION-LOCAL port identity. A region's mapped netlist depends only on its
+    // own content, so an anonymous port is named by its ROLE INSIDE the region:
+    // an input by what the region's nodes do with it (op, operand bank,
+    // constants, a few levels of internal fan-out), an output by its internal
+    // producer cone down to the region's own inputs. Nothing outside the region
+    // enters the name, so an edit elsewhere renames nothing here (dino: an ALU
+    // edit renamed the ports of 1-node mux regions next to it, through their
+    // external producer cones). Only ports whose internal roles TIE fall back to
+    // the external signature ladder below to tell them apart, and a tie that
+    // survives that still refuses reuse.
+    const int  rcol      = region_color_[r];
+    const auto in_region = [&](const hhds::Node_class& n) { return is_partitionable(n) && node_color_of(n) == rcol; };
+    constexpr int                                                  kInternalDepth = 8;
+    absl::flat_hash_map<std::pair<hhds::Pin_class, int>, uint64_t> ifwd_memo, iprod_memo;
+    std::function<uint64_t(const hhds::Pin_class&, int, bool)>     ifwd;
+    ifwd = [&](const hhds::Pin_class& drv, int k, bool root) -> uint64_t {
+      const auto key = std::make_pair(drv, root ? -1 - k : k);
+      if (auto it = ifwd_memo.find(key); it != ifwd_memo.end()) {
+        return it->second;
+      }
+      constexpr uint64_t   kSeed = 0x7a3c9e1d2b4f6085ULL;
+      hhds::Field_combiner uses;  // a multiset: out-edge order is storage order
+      for (const auto& e : drv.out_edges()) {
+        admit("name_ports-step");
+        const auto& snk = e.sink;
+        const auto  cm  = snk.get_master_node();
+        if (gu::is_graph_output_pin(snk) || !in_region(cm)) {
+          if (!root) {
+            uses.add(sig_mix(kSeed, 1));  // leaves the region (a region output): a marker, never what is outside
+          }
+          continue;  // the root's OUTSIDE uses are none of this region's business
+        }
+        const auto op = gu::type_op_of(cm);
+        uint64_t   u  = sig_mix(sig_mix(kSeed, 2), static_cast<uint64_t>(op));
+        u             = sig_mix(u, static_cast<uint64_t>(Ntype::sink_bank(op, snk.get_port_id())));
+        if (gu::has_name(cm)) {
+          u = sig_str(u, gu::node_name_of(cm));  // a named node (a register) is a stable source anchor
+        }
+        hhds::Field_combiner cin;
+        for (const auto& in_pin : cm.inp_sorted_pins()) {
+          for (const auto& in_drv : in_pin.get_driver_pins()) {
+            if (in_drv.is_const()) {
+              cin.add(sig_mix(sig_str(sig_mix(kSeed, 3), gu::const_of(in_drv).serialize()),
+                              static_cast<uint64_t>(Ntype::sink_bank(op, in_pin.get_port_id()))));
+            }
+          }
+        }
+        u = sig_mix(u, cin.value());
+        if (k > 0) {
+          hhds::Field_combiner outs;
+          each_fwd_child(cm, admission_, [&](const auto& child) {
+            outs.add(sig_mix(ifwd(child, k - 1, false), static_cast<uint64_t>(child.get_port_id())));
+          });
+          u = sig_mix(u, outs.value());
+        }
+        uses.add(u);
+      }
+      const uint64_t v = sig_mix(kSeed, uses.value());
+      ifwd_memo.emplace(key, v);
+      return v;
+    };
+    absl::flat_hash_map<hhds::Pin_class, uint64_t>       input_name_sig;  // boundary input driver -> its final name
+    std::function<uint64_t(const hhds::Pin_class&, int)> iprod;
+    iprod = [&](const hhds::Pin_class& pin, int k) -> uint64_t {
+      constexpr uint64_t kSeed = 0x2d4f6a8c1e3b5079ULL;
+      if (pin.is_const()) {
+        return sig_str(sig_mix(kSeed, 1), gu::const_of(pin).serialize());
+      }
+      const auto m = pin.get_master_node();
+      if (!in_region(m)) {  // a region INPUT: identified by the name it was just given
+        auto it = input_name_sig.find(pin);
+        return it != input_name_sig.end() ? it->second : sig_mix(kSeed, 2);
+      }
+      if (auto anchor = producer_anchor(pin)) {
+        return *anchor;
+      }
+      if (k <= 0) {
+        return sig_mix(producer_shape(pin), 0xb0d1U);
+      }
+      const auto key = std::make_pair(pin, k);
+      if (auto it = iprod_memo.find(key); it != iprod_memo.end()) {
+        return it->second;
+      }
+      absl::flat_hash_map<int, std::vector<uint64_t>> by_bank;
+      for (const auto& in_pin : m.inp_sorted_pins()) {
+        admit("name_ports-step");
+        const auto bank = static_cast<int>(Ntype::sink_bank(gu::type_op_of(m), in_pin.get_port_id()));
+        for (const auto& in_drv : in_pin.get_driver_pins()) {
+          by_bank[bank].push_back(iprod(in_drv, k - 1));
+        }
+      }
+      const uint64_t v = sig_mix(sig_mix(producer_shape(pin), hhds::group_fold(0, by_bank)), static_cast<uint64_t>(pin.get_port_id()));
+      iprod_memo.emplace(key, v);
+      return v;
+    };
+    // Region-local signatures first; the external ladder only for the ports
+    // that tie on them. `full` collects ports that needed the whole cone.
+    const auto region_signatures = [&](const std::vector<hhds::Pin_class>& drivers, bool input,
+                                       absl::flat_hash_set<hhds::Pin_class>& full) {
+      absl::flat_hash_map<hhds::Pin_class, uint64_t> sig;
+      absl::flat_hash_map<uint64_t, std::vector<hhds::Pin_class>> by_sig;
+      for (const auto& d : drivers) {
+        sig[d] = input ? ifwd(d, kInternalDepth, true) : iprod(d, kInternalDepth);
+        by_sig[sig[d]].push_back(d);
+      }
+      std::vector<hhds::Pin_class> tied;
+      for (const auto& [v, members] : by_sig) {
+        (void)v;
+        if (members.size() > 1) {
+          tied.insert(tied.end(), members.begin(), members.end());
+        }
+      }
+      if (!tied.empty()) {
+        std::sort(tied.begin(), tied.end(), [&](const auto& a, const auto& b) { return sig[a] < sig[b]; });
+        const auto ext = local_signatures(tied, /*with_consumers=*/input, full);
+        for (const auto& d : tied) {
+          sig[d] = sig_mix(sig[d], ext.at(d));
+        }
+      }
+      return sig;
+    };
 
     // ONE boundary scheme, always -- names AND order. There used to be a second,
     // cheaper one here (sort by `debug_nid`, name anonymous crossings
@@ -1052,27 +1374,23 @@ void Partitioner::name_ports() {
     //
     // The cached body is stitched into a freshly rebuilt wrapper BY PORT NAME,
     // so the name must be reproducible across recompiles (not `<op>_<nid>`).
-    auto sig_of     = [&](const hhds::Pin_class& drv) { return sig_memo.at(drv); };
     // Proposal 2: a boundary INPUT is identified by BOTH its producer cone
     // (sig_of, backward) AND its consumer cone (fwd_sig_of, forward). Producer
     // alone is a coarse tie -- two lanes fed by identical logic but used
     // differently downstream (different packed-state bit ranges) collide; adding
     // the consumer side separates them, so a distinguishable lane gets a distinct,
     // reproducible name instead of an arbitrary-tiebreak _k suffix.
-    auto fwd_sig_of = [&](const hhds::Pin_class& drv) {
-      auto it = fwd_memo.find(drv);
-      I(it != fwd_memo.end());
-      return it->second;
-    };
+    // (Both now feed local_signatures above, as the last rung of its ladder.)
 
     {
-      auto&                                          ports = module_inputs_[r];
-      absl::flat_hash_map<hhds::Pin_class, uint64_t> psig;
-      psig.reserve(ports.size());
-      for (auto& p : ports) {
-        admit("name_ports-step");
-        psig[p.driver] = sig_mix(sig_of(p.driver), fwd_sig_of(p.driver));
+      auto&                                ports = module_inputs_[r];
+      absl::flat_hash_set<hhds::Pin_class> full_cone;  // ports that needed the whole cone to be distinct
+      std::vector<hhds::Pin_class>         drivers;
+      drivers.reserve(ports.size());
+      for (const auto& p : ports) {
+        drivers.push_back(p.driver);
       }
+      auto psig = region_signatures(drivers, /*input=*/true, full_cone);
       // Sort by the content signature (nid-free, reproducible) so the port_id
       // numbering and the `_k` dedup are stable across recompiles; the port_id
       // tiebreak only orders the this-run-arbitrary tie handled just below.
@@ -1103,7 +1421,10 @@ void Partitioner::name_ports() {
       // Refuse reuse for those, inputs and outputs alike.
       for (size_t i = 0; i < ports.size(); ++i) {
         admit("name_ports-step");
-        if (sig_coarse.contains(ports[i].driver) || (i > 0 && psig[ports[i].driver] == psig[ports[i - 1].driver])) {
+        // The cyclic residue only matters for a port named by the full cone; a
+        // bounded signature carries real content up to its depth.
+        if ((full_cone.contains(ports[i].driver) && sig_coarse.contains(ports[i].driver))
+            || (i > 0 && psig[ports[i].driver] == psig[ports[i - 1].driver])) {
           region_reuse_ok_[r] = 0;
           break;
         }
@@ -1127,17 +1448,19 @@ void Partitioner::name_ports() {
         }
         used.insert(nm);
         p.name = nm;
+        input_name_sig[p.driver] = sig_str(0x51ULL, nm);
       }
     }
 
     {
-      auto&                                          ports = module_outputs_[r];
-      absl::flat_hash_map<hhds::Pin_class, uint64_t> psig;
-      psig.reserve(ports.size());
-      for (auto& p : ports) {
-        admit("name_ports-step");
-        psig[p.driver] = sig_of(p.driver);
+      auto&                                ports = module_outputs_[r];
+      absl::flat_hash_set<hhds::Pin_class> full_cone;
+      std::vector<hhds::Pin_class>         drivers;
+      drivers.reserve(ports.size());
+      for (const auto& p : ports) {
+        drivers.push_back(p.driver);
       }
+      auto psig = region_signatures(drivers, /*input=*/false, full_cone);
       std::sort(ports.begin(), ports.end(), [&](const OutputPort& a, const OutputPort& b) {
         auto sa = psig[a.driver];
         auto sb = psig[b.driver];
@@ -1151,9 +1474,14 @@ void Partitioner::name_ports() {
       // cover it: two unrelated outputs can tie and the port_id tiebreak that
       // orders them is this-run arbitrary, which would let a cached body be
       // stitched back by name onto swapped ports.
-      for (const auto& p : ports) {
+      for (size_t i = 0; i < ports.size(); ++i) {
         admit("name_ports-step");
-        if (sig_coarse.contains(p.driver)) {
+        const auto& p = ports[i];
+        // Only the cyclic residue of a FULL cone is contentless. A tie on an
+        // exact signature (bounded internal + the full external cone) means
+        // the two outputs compute the same value from the same sources, so
+        // they stay interchangeable and the region stays reusable.
+        if (full_cone.contains(p.driver) && sig_coarse.contains(p.driver)) {
           region_reuse_ok_[r] = 0;
           break;
         }

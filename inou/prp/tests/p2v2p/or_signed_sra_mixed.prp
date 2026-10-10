@@ -1,0 +1,6 @@
+// Fuzz: `(49 - i3) >> i3` shifts an unsigned value (logical text) but lands on
+// a signed pin; beside the signed `(-i3) >> i3` the `|` read mixed signs in
+// Verilog and zero-extended -1 into 15.
+pub comb or_signed_sra_mixed(i3:S3) -> (o0:S5) {
+  wrap o0 = (((-i3) >> i3) | ((49 - i3) >> i3))  // 49 >> 0 does not fit S5
+}

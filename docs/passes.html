@@ -207,7 +207,9 @@ svg .lane { font-size: 12px; font-weight: 700; fill: var(--fg); }
 <h2><span class="secnum">1</span>Overview</h2>
 <p>LiveHD [1] compiles hardware through two intermediate representations. <em>LNAST</em> is a language-neutral abstract syntax tree: front ends for Pyrope [2] and SystemVerilog produce it, and the <em>upasses</em> elaborate, check and simplify it while it still has names, scopes and statements. <em>LGraph</em> is a hierarchical, word-level netlist (an <code>hhds::Graph</code> per definition, nodes typed as logic, arithmetic, muxes, state and instances): every downstream pass — optimization, legalization, code generation, simulation, synthesis and equivalence — operates on it. <code>lnast.tolg</code> is the single bridge between the two.</p>
 <p>Every <code>lhd</code> command starts with the same compile pipeline (Figure 1) and then adds its own back end (Figure 2). The kernel runs each pass as one recorded step (its name and labels appear in the result JSON <code>recipe</code>, e.g. <code>pass.upass constprop:1 dce:mark inline:true unroll:false verifier:true</code>). Options are set with <code>--set &lt;scope&gt;.&lt;pass&gt;.&lt;knob&gt;=value</code>; inside a command a bare <code>--set cprop.x</code> resolves to the command's scope (<code>compile.cprop.x</code>). <code>lhd list options</code> prints every knob with its default and help; the tables below list the ones that change what a pass does.</p>
-<figure><svg viewBox="0 0 800 616" role="img" aria-label="lhd compile pipeline: front ends inou.prp and inou.slang produce LNAST; pass.upass runs lambda split, ssa, one runner walk with verifier, semacheck, attributes, typecheck, constprop, bitwidth, coalescer and assert, then timecheck and pipe; lnast.tolg lowers to LGraph; the LGraph recipe runs optional bitfuzz, cprop, bitwidth, enableopt, cprop, bitwidth and optional satopt, then the latch contract check, pass.formal and pass.legalize; the emits are lg:, Verilog, the C++ simulator, Pyrope and ln:.">
+<p>The LGraph order is fixed by one rule: <b>only passes that work inside one definition may run before <code>pass.legalize</code>; anything hierarchical runs after it</b>. Legalize is the one owner of combinational loops, so every hierarchical pass already sees an acyclic design:</p>
+<p class="mono" style="text-align:center">lnast.tolg → cprop (no hoist) → bitwidth → <b>legalize</b> → enableopt → cprop (+ loop hoist) → bitwidth → [satopt] → latch check → formal → <b>seal</b></p>
+<figure><svg viewBox="0 0 800 616" role="img" aria-label="lhd compile pipeline: front ends inou.prp and inou.slang produce LNAST; pass.upass runs lambda split, ssa, one runner walk with verifier, semacheck, attributes, typecheck, constprop, bitwidth, coalescer and assert, then timecheck and pipe; lnast.tolg lowers to LGraph; the LGraph recipe runs optional bitfuzz, cprop without loop hoisting and bitwidth (intra-module only), then pass.legalize, then enableopt, cprop with loop hoisting, bitwidth and optional satopt, then the latch contract check, pass.formal and the seal (one-driver check and freeze); the emits are lg:, Verilog, the C++ simulator, Pyrope and ln:.">
 <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--fig-stroke)"/></marker></defs>
 <g font-family="-apple-system, Segoe UI, Roboto, sans-serif" fill="var(--fg)">
 <text class="lane" x="14" y="45" text-anchor="start">SOURCE</text>
@@ -262,29 +264,38 @@ svg .lane { font-size: 12px; font-weight: 700; fill: var(--fg); }
 <path class="lnd" d="M690,64 L690,76 L796,76 L796,340 L760,340 L760,350" marker-end="url(#ar)"/>
 <rect class="grpbox" x="100" y="350" width="690" height="180" rx="8"/>
 <text class="g" x="110" y="366" text-anchor="start">LGraph passes — hhds::Graph per definition, fixed recipe</text>
-<rect class="b3 opt" x="110" y="378" width="78" height="44" rx="4"/>
-<text class="t" x="149.0" y="397.5" text-anchor="middle">bitfuzz</text>
-<text class="s" x="149.0" y="411.5" text-anchor="middle">test</text>
-<rect class="b3" x="203" y="378" width="78" height="44" rx="4"/>
-<text class="t" x="242.0" y="404.0" text-anchor="middle">cprop</text>
-<rect class="b3" x="296" y="378" width="82" height="44" rx="4"/>
-<text class="t" x="337.0" y="404.0" text-anchor="middle">bitwidth</text>
-<rect class="b3" x="393" y="378" width="98" height="44" rx="4"/>
-<text class="t" x="442.0" y="404.0" text-anchor="middle">enableopt</text>
-<rect class="b3" x="506" y="378" width="78" height="44" rx="4"/>
-<text class="t" x="545.0" y="404.0" text-anchor="middle">cprop</text>
-<rect class="b3" x="599" y="378" width="82" height="44" rx="4"/>
-<text class="t" x="640.0" y="404.0" text-anchor="middle">bitwidth</text>
-<rect class="b3 opt" x="696" y="378" width="84" height="44" rx="4"/>
-<text class="t" x="738.0" y="397.5" text-anchor="middle">satopt</text>
-<text class="s" x="738.0" y="411.5" text-anchor="middle">opt-in</text>
-<path class="ln" d="M188,400 L203,400" marker-end="url(#ar)"/>
-<path class="ln" d="M281,400 L296,400" marker-end="url(#ar)"/>
-<path class="ln" d="M378,400 L393,400" marker-end="url(#ar)"/>
-<path class="ln" d="M491,400 L506,400" marker-end="url(#ar)"/>
-<path class="ln" d="M584,400 L599,400" marker-end="url(#ar)"/>
-<path class="ln" d="M681,400 L696,400" marker-end="url(#ar)"/>
-<path class="ln" d="M738,422 L738,436 L170,436 L170,450" marker-end="url(#ar)"/>
+<rect class="b3 opt" x="110" y="378" width="72" height="44" rx="4"/>
+<text class="t" x="146.0" y="397.5" text-anchor="middle">bitfuzz</text>
+<text class="s" x="146.0" y="411.5" text-anchor="middle">test</text>
+<rect class="b3" x="195" y="378" width="72" height="44" rx="4"/>
+<text class="t" x="231.0" y="397.5" text-anchor="middle">cprop</text>
+<text class="s" x="231.0" y="411.5" text-anchor="middle">no hoist</text>
+<rect class="b3" x="280" y="378" width="72" height="44" rx="4"/>
+<text class="t" x="316.0" y="404.0" text-anchor="middle">bitwidth</text>
+<rect class="b2" x="365" y="378" width="72" height="44" rx="4"/>
+<text class="t" x="401.0" y="397.5" text-anchor="middle">legalize</text>
+<text class="s" x="401.0" y="411.5" text-anchor="middle">acyclic</text>
+<rect class="b3" x="450" y="378" width="72" height="44" rx="4"/>
+<text class="t" x="486.0" y="404.0" text-anchor="middle">enableopt</text>
+<rect class="b3" x="535" y="378" width="72" height="44" rx="4"/>
+<text class="t" x="571.0" y="397.5" text-anchor="middle">cprop</text>
+<text class="s" x="571.0" y="411.5" text-anchor="middle">+ hoist</text>
+<rect class="b3" x="620" y="378" width="72" height="44" rx="4"/>
+<text class="t" x="656.0" y="404.0" text-anchor="middle">bitwidth</text>
+<rect class="b3 opt" x="705" y="378" width="72" height="44" rx="4"/>
+<text class="t" x="741.0" y="397.5" text-anchor="middle">satopt</text>
+<text class="s" x="741.0" y="411.5" text-anchor="middle">opt-in</text>
+<path class="ln" d="M182,400 L195,400" marker-end="url(#ar)"/>
+<path class="ln" d="M267,400 L280,400" marker-end="url(#ar)"/>
+<path class="ln" d="M352,400 L365,400" marker-end="url(#ar)"/>
+<path class="ln" d="M437,400 L450,400" marker-end="url(#ar)"/>
+<path class="ln" d="M522,400 L535,400" marker-end="url(#ar)"/>
+<path class="ln" d="M607,400 L620,400" marker-end="url(#ar)"/>
+<path class="ln" d="M692,400 L705,400" marker-end="url(#ar)"/>
+<path class="lnd" d="M358,374 L358,426"/>
+<text class="s" x="110" y="434" text-anchor="start">◀ intra-module only</text>
+<text class="s" x="365" y="434" text-anchor="start">hierarchical allowed (after legalize) ▶</text>
+<path class="ln" d="M741,422 L741,440 L170,440 L170,450" marker-end="url(#ar)"/>
 <rect class="b" x="110" y="450" width="120" height="50" rx="4"/>
 <text class="t" x="170.0" y="472.5" text-anchor="middle">latch contract</text>
 <text class="s" x="170.0" y="486.5" text-anchor="middle">check</text>
@@ -292,13 +303,13 @@ svg .lane { font-size: 12px; font-weight: 700; fill: var(--fg); }
 <text class="t" x="330.0" y="472.5" text-anchor="middle">pass.formal</text>
 <text class="s" x="330.0" y="486.5" text-anchor="middle">mode=fast · annotates</text>
 <rect class="b2" x="430" y="450" width="210" height="50" rx="4"/>
-<text class="t" x="535.0" y="472.5" text-anchor="middle">pass.legalize</text>
-<text class="s" x="535.0" y="486.5" text-anchor="middle">acyclic · loop split · freeze</text>
+<text class="t" x="535.0" y="472.5" text-anchor="middle">seal</text>
+<text class="s" x="535.0" y="486.5" text-anchor="middle">one-driver check · freeze</text>
 <path class="ln" d="M230,475 L250,475" marker-end="url(#ar)"/>
 <path class="ln" d="M410,475 L430,475" marker-end="url(#ar)"/>
-<text class="s" x="652" y="470" text-anchor="start">the ONE structural</text>
-<text class="s" x="652" y="484" text-anchor="start">transform; frozen</text>
-<text class="s" x="652" y="498" text-anchor="start">for every consumer</text>
+<text class="s" x="652" y="470" text-anchor="start">frozen for every</text>
+<text class="s" x="652" y="484" text-anchor="start">consumer (reshape</text>
+<text class="s" x="652" y="498" text-anchor="start">only private copies)</text>
 <path class="ln" d="M535,500 L535,546 M160,546 L730,546"/>
 <path class="ln" d="M160.0,546 L160.0,562" marker-end="url(#ar)"/>
 <rect class="b" x="110" y="562" width="100" height="44" rx="4"/>
@@ -320,78 +331,74 @@ svg .lane { font-size: 12px; font-weight: 700; fill: var(--fg); }
 <rect class="b" x="680" y="562" width="100" height="44" rx="4"/>
 <text class="t" x="730.0" y="581.5" text-anchor="middle">ln:</text>
 <text class="s" x="730.0" y="595.5" text-anchor="middle">LNAST dump</text>
-</g></svg><figcaption class="cap"><b>Figure 1.</b> The <code>lhd compile</code> pipeline. Dashed boxes are optional (enabled by an option or used for testing); <code>inou.yosys.tolg</code> is a debug reader that builds LGraphs directly and skips the LNAST stage. Shaded blue: the two points that define the contract with later stages — the single upass walk and legalize.</figcaption></figure>
-<figure><svg viewBox="0 0 800 285" role="img" aria-label="Back ends: lhd sim compiles with formal off, copies the design privately, specializes constants, prepares and fuses loops, builds the color plan, emits C++ and the driver, then builds and runs; lhd synth compiles, optionally runs pass.color reduce, runs pass.color synth, builds regions in pass/synth, maps with ABC or uSyn and runs OpenTimer; lhd lec compiles or loads each side, repairs lg: sides, matches structure with semdiff, runs the lec engine and reports a verdict.">
+</g></svg><figcaption class="cap"><b>Figure 1.</b> The <code>lhd compile</code> pipeline. Dashed boxes are optional (enabled by an option or used for testing); <code>inou.yosys.tolg</code> is a debug reader that builds LGraphs directly and skips the LNAST stage (its graphs still go through the whole LGraph recipe, legalize included). The dashed divider marks the ordering rule: left of legalize only intra-module passes, right of it anything hierarchical. Shaded blue: the points that define the contract with later stages — the single upass walk, legalize, and the seal.</figcaption></figure>
+<figure><svg viewBox="0 0 800 285" role="img" aria-label="Back ends: lhd sim compiles with formal off, runs pass.specialize on a private copy, prepares and fuses loops, builds the color plan, emits C++ and the driver, then builds and runs; lhd synth compiles, optionally runs pass.color reduce, runs pass.color synth, runs pass.specialize on the mapper private copy, maps with ABC or uSyn and runs OpenTimer; lhd lec compiles or loads each side, matches structure with semdiff, runs the lec engine and reports a verdict.">
 <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--fig-stroke)"/></marker></defs>
 <g font-family="-apple-system, Segoe UI, Roboto, sans-serif" fill="var(--fg)">
 <text class="lane" x="14" y="50" text-anchor="start">lhd sim</text>
-<rect class="b" x="110" y="20" width="110" height="50" rx="4"/>
-<text class="t" x="165.0" y="42.5" text-anchor="middle">compile</text>
-<text class="s" x="165.0" y="56.5" text-anchor="middle">formal=none</text>
-<rect class="b3" x="235" y="20" width="135" height="50" rx="4"/>
-<text class="t" x="302.5" y="42.5" text-anchor="middle">private copy</text>
-<text class="s" x="302.5" y="56.5" text-anchor="middle">specialize_constants</text>
-<rect class="b3" x="385" y="20" width="100" height="50" rx="4"/>
-<text class="t" x="435.0" y="42.5" text-anchor="middle">prepare</text>
-<text class="s" x="435.0" y="56.5" text-anchor="middle">fuse loops</text>
-<rect class="b2" x="500" y="20" width="105" height="50" rx="4"/>
-<text class="t" x="552.5" y="42.5" text-anchor="middle">Color_plan</text>
-<text class="s" x="552.5" y="56.5" text-anchor="middle">colors · schedule</text>
-<rect class="b3" x="615" y="20" width="75" height="50" rx="4"/>
-<text class="t" x="652.5" y="42.5" text-anchor="middle">C++ emit</text>
-<text class="s" x="652.5" y="56.5" text-anchor="middle">drvgen</text>
-<rect class="b" x="705" y="20" width="80" height="50" rx="4"/>
-<text class="t" x="745.0" y="42.5" text-anchor="middle">host build</text>
-<text class="s" x="745.0" y="56.5" text-anchor="middle">run</text>
-<path class="ln" d="M220,45 L235,45" marker-end="url(#ar)"/>
-<path class="ln" d="M370,45 L385,45" marker-end="url(#ar)"/>
-<path class="ln" d="M485,45 L500,45" marker-end="url(#ar)"/>
-<path class="ln" d="M605,45 L615,45" marker-end="url(#ar)"/>
-<path class="ln" d="M690,45 L705,45" marker-end="url(#ar)"/>
+<rect class="b" x="110" y="20" width="100" height="50" rx="4"/>
+<text class="t" x="160.0" y="42.5" text-anchor="middle">compile</text>
+<text class="s" x="160.0" y="56.5" text-anchor="middle">formal=none</text>
+<rect class="b2" x="222" y="20" width="120" height="50" rx="4"/>
+<text class="t" x="282.0" y="42.5" text-anchor="middle">pass.specialize</text>
+<text class="s" x="282.0" y="56.5" text-anchor="middle">private copy</text>
+<rect class="b3" x="354" y="20" width="100" height="50" rx="4"/>
+<text class="t" x="404.0" y="42.5" text-anchor="middle">prepare</text>
+<text class="s" x="404.0" y="56.5" text-anchor="middle">fuse loops</text>
+<rect class="b2" x="466" y="20" width="105" height="50" rx="4"/>
+<text class="t" x="518.5" y="42.5" text-anchor="middle">Color_plan</text>
+<text class="s" x="518.5" y="56.5" text-anchor="middle">colors · schedule</text>
+<rect class="b3" x="583" y="20" width="85" height="50" rx="4"/>
+<text class="t" x="625.5" y="42.5" text-anchor="middle">C++ emit</text>
+<text class="s" x="625.5" y="56.5" text-anchor="middle">drvgen</text>
+<rect class="b" x="680" y="20" width="100" height="50" rx="4"/>
+<text class="t" x="730.0" y="42.5" text-anchor="middle">host build</text>
+<text class="s" x="730.0" y="56.5" text-anchor="middle">run</text>
+<path class="ln" d="M210,45 L222,45" marker-end="url(#ar)"/>
+<path class="ln" d="M342,45 L354,45" marker-end="url(#ar)"/>
+<path class="ln" d="M454,45 L466,45" marker-end="url(#ar)"/>
+<path class="ln" d="M571,45 L583,45" marker-end="url(#ar)"/>
+<path class="ln" d="M668,45 L680,45" marker-end="url(#ar)"/>
 <text class="lane" x="14" y="150" text-anchor="start">lhd synth</text>
-<rect class="b" x="110" y="120" width="110" height="50" rx="4"/>
-<text class="t" x="165.0" y="142.5" text-anchor="middle">compile</text>
-<text class="s" x="165.0" y="156.5" text-anchor="middle">→ synth/lg</text>
-<rect class="b3 opt" x="235" y="120" width="110" height="50" rx="4"/>
-<text class="t" x="290.0" y="142.5" text-anchor="middle">pass.color</text>
-<text class="s" x="290.0" y="156.5" text-anchor="middle">alg=reduce</text>
-<rect class="b3" x="360" y="120" width="110" height="50" rx="4"/>
-<text class="t" x="415.0" y="142.5" text-anchor="middle">pass.color</text>
-<text class="s" x="415.0" y="156.5" text-anchor="middle">alg=synth</text>
-<rect class="b3" x="485" y="120" width="100" height="50" rx="4"/>
-<text class="t" x="535.0" y="142.5" text-anchor="middle">pass/synth</text>
-<text class="s" x="535.0" y="156.5" text-anchor="middle">copy · regions</text>
-<rect class="b2" x="600" y="120" width="95" height="50" rx="4"/>
-<text class="t" x="647.5" y="142.5" text-anchor="middle">abc | usyn</text>
-<text class="s" x="647.5" y="156.5" text-anchor="middle">synth.mapper</text>
-<rect class="b" x="710" y="120" width="75" height="50" rx="4"/>
-<text class="t" x="747.5" y="142.5" text-anchor="middle">opentimer</text>
-<text class="s" x="747.5" y="156.5" text-anchor="middle">STA</text>
-<path class="ln" d="M220,145 L235,145" marker-end="url(#ar)"/>
-<path class="ln" d="M345,145 L360,145" marker-end="url(#ar)"/>
-<path class="ln" d="M470,145 L485,145" marker-end="url(#ar)"/>
-<path class="ln" d="M585,145 L600,145" marker-end="url(#ar)"/>
-<path class="ln" d="M695,145 L710,145" marker-end="url(#ar)"/>
+<rect class="b" x="110" y="120" width="95" height="50" rx="4"/>
+<text class="t" x="157.5" y="142.5" text-anchor="middle">compile</text>
+<text class="s" x="157.5" y="156.5" text-anchor="middle">→ synth/lg</text>
+<rect class="b3 opt" x="217" y="120" width="100" height="50" rx="4"/>
+<text class="t" x="267.0" y="142.5" text-anchor="middle">pass.color</text>
+<text class="s" x="267.0" y="156.5" text-anchor="middle">alg=reduce</text>
+<rect class="b3" x="329" y="120" width="100" height="50" rx="4"/>
+<text class="t" x="379.0" y="142.5" text-anchor="middle">pass.color</text>
+<text class="s" x="379.0" y="156.5" text-anchor="middle">alg=synth</text>
+<rect class="b2" x="441" y="120" width="120" height="50" rx="4"/>
+<text class="t" x="501.0" y="142.5" text-anchor="middle">pass.specialize</text>
+<text class="s" x="501.0" y="156.5" text-anchor="middle">private copy</text>
+<rect class="b3" x="573" y="120" width="100" height="50" rx="4"/>
+<text class="t" x="623.0" y="142.5" text-anchor="middle">abc | usyn</text>
+<text class="s" x="623.0" y="156.5" text-anchor="middle">synth.mapper</text>
+<rect class="b" x="685" y="120" width="95" height="50" rx="4"/>
+<text class="t" x="732.5" y="142.5" text-anchor="middle">opentimer</text>
+<text class="s" x="732.5" y="156.5" text-anchor="middle">STA</text>
+<path class="ln" d="M205,145 L217,145" marker-end="url(#ar)"/>
+<path class="ln" d="M317,145 L329,145" marker-end="url(#ar)"/>
+<path class="ln" d="M429,145 L441,145" marker-end="url(#ar)"/>
+<path class="ln" d="M561,145 L573,145" marker-end="url(#ar)"/>
+<path class="ln" d="M673,145 L685,145" marker-end="url(#ar)"/>
 <text class="lane" x="14" y="250" text-anchor="start">lhd lec</text>
-<rect class="b" x="110" y="220" width="130" height="50" rx="4"/>
-<text class="t" x="175.0" y="242.5" text-anchor="middle">compile each side</text>
-<text class="s" x="175.0" y="256.5" text-anchor="middle">or load lg:</text>
-<rect class="b3" x="255" y="220" width="120" height="50" rx="4"/>
-<text class="t" x="315.0" y="242.5" text-anchor="middle">acyclic repair</text>
-<text class="s" x="315.0" y="256.5" text-anchor="middle">own defs only</text>
-<rect class="b3" x="390" y="220" width="110" height="50" rx="4"/>
-<text class="t" x="445.0" y="242.5" text-anchor="middle">semdiff</text>
-<text class="s" x="445.0" y="256.5" text-anchor="middle">structural match</text>
-<rect class="b2" x="515" y="220" width="150" height="50" rx="4"/>
-<text class="t" x="590.0" y="242.5" text-anchor="middle">lec engine</text>
-<text class="s" x="590.0" y="256.5" text-anchor="middle">hier · cvc5 · ind/BMC</text>
-<rect class="b" x="680" y="220" width="105" height="50" rx="4"/>
-<text class="t" x="732.5" y="242.5" text-anchor="middle">verdict</text>
-<text class="s" x="732.5" y="256.5" text-anchor="middle">proven / refuted</text>
-<path class="ln" d="M240,245 L255,245" marker-end="url(#ar)"/>
-<path class="ln" d="M375,245 L390,245" marker-end="url(#ar)"/>
-<path class="ln" d="M500,245 L515,245" marker-end="url(#ar)"/>
-<path class="ln" d="M665,245 L680,245" marker-end="url(#ar)"/>
+<rect class="b" x="110" y="220" width="150" height="50" rx="4"/>
+<text class="t" x="185.0" y="242.5" text-anchor="middle">compile each side</text>
+<text class="s" x="185.0" y="256.5" text-anchor="middle">or load lg:</text>
+<rect class="b3" x="275" y="220" width="140" height="50" rx="4"/>
+<text class="t" x="345.0" y="242.5" text-anchor="middle">semdiff</text>
+<text class="s" x="345.0" y="256.5" text-anchor="middle">structural match</text>
+<rect class="b2" x="430" y="220" width="180" height="50" rx="4"/>
+<text class="t" x="520.0" y="242.5" text-anchor="middle">lec engine</text>
+<text class="s" x="520.0" y="256.5" text-anchor="middle">hier · cvc5 · ind/BMC</text>
+<rect class="b" x="625" y="220" width="155" height="50" rx="4"/>
+<text class="t" x="702.5" y="242.5" text-anchor="middle">verdict</text>
+<text class="s" x="702.5" y="256.5" text-anchor="middle">proven / refuted</text>
+<path class="ln" d="M260,245 L275,245" marker-end="url(#ar)"/>
+<path class="ln" d="M415,245 L430,245" marker-end="url(#ar)"/>
+<path class="ln" d="M610,245 L625,245" marker-end="url(#ar)"/>
 </g></svg><figcaption class="cap"><b>Figure 2.</b> What each command adds after (or around) the compile pipeline. Every back end works on the legalized, frozen design; passes that must reshape it (sim specialization, synthesis regions) do so on a private copy.</figcaption></figure>
 <h2><span class="secnum">2</span>Front Ends</h2>
 <div class="pass"><p><span class="nm"><code>inou.prp</code></span><span class="tag">Pyrope → LNAST</span></p><p>Parses Pyrope sources with the tree-sitter grammar and builds one LNAST per file, discovering <code>import</code>s so the referenced modules are parsed as well. With <code>lhd.incremental</code> and a user <code>--workdir</code>, unchanged parses are restored from the compile cache instead.</p></div>
@@ -418,25 +425,26 @@ svg .lane { font-size: 12px; font-weight: 700; fill: var(--fg); }
 <p class="note">Framework-wide knobs: <code>compile.upass.order</code> replaces the whole plugin list (e.g. <code>verifier,constprop,verifier</code>); <code>compile.upass.inline</code> inlines fully defined <code>comb</code> calls (the compile kernel turns it on); <code>compile.unroll</code> requests per-iteration expansion instead of keeping a loop rolled (default false: an eligible loop stays one compact <code>u_loop</code> instance); <code>compile.upass.reset_style</code> (sync|async) wires implicit resets; <code>compile.upass.toln</code> materializes the rewritten LNAST.</p>
 <div class="pass"><p><span class="nm"><code>lnast.tolg</code></span><span class="tag">LNAST → LGraph</span><span class="tag">separate step</span></p><p>Lowers each post-upass function tree into an <code>hhds::Graph</code>: ports from <code>io_meta</code>, widths from <code>bw_meta</code>, <code>if</code> to muxes, pipeline registers to flops, and <code>pipe</code>/<code>mod</code> calls to <code>Sub</code> instances. Callees are lowered before their callers. It runs only when some output needs graphs, and is skipped for graphs restored from the cache.</p></div>
 <h2><span class="secnum">4</span>LGraph Stage</h2>
-<div class="grp"><p class="lead">Common characteristics of the LGraph passes</p><ul><li><b>Operate on LGraph.</b> One <code>hhds::Graph</code> per module definition in a <code>GraphLibrary</code>; an instance is a <code>Sub</code> node pointing at its callee's definition (rolled loops are <code>Sub</code>s with a loop descriptor).</li><li><b>Per definition, hierarchical.</b> A pass transforms one definition at a time and treats an instance through its declared interface; flattening is local to the passes that need it (formal preflight, sim, STA), never in place.</li><li><b>Fixed recipe.</b> <code>cprop → bitwidth → enableopt → cprop → bitwidth</code>: the second round folds what width inference and enable optimization exposed. No pass re-runs the others privately.</li><li><b>Parallel inside a pass.</b> cprop and enableopt process independent definitions on worker threads; passes themselves run in sequence.</li><li><b>Optimize, then freeze.</b> Everything up to <code>pass.formal</code> may reshape the graph; <code>pass.legalize</code> is the last structural change, after which every consumer reads the same structure (<code>compile.verify_frozen</code> re-checks it).</li><li><b>Registered EPRP methods.</b> Each pass registers a method (<code>pass.cprop</code>, …) with its labels; the kernel runs it as a step with its own log, timer and diagnostics (halting errors stop the pipeline at that step).</li></ul></div>
+<div class="grp"><p class="lead">Common characteristics of the LGraph passes</p><ul><li><b>Operate on LGraph.</b> One <code>hhds::Graph</code> per module definition in a <code>GraphLibrary</code>; an instance is a <code>Sub</code> node pointing at its callee's definition (rolled loops are <code>Sub</code>s with a loop descriptor).</li><li><b>Per definition, hierarchical.</b> A pass transforms one definition at a time and treats an instance through its declared interface; flattening is local to the passes that need it (formal preflight, sim, STA), never in place.</li><li><b>Fixed recipe.</b> <code>cprop → bitwidth → legalize → enableopt → cprop → bitwidth</code>: legalize runs as soon as packed fields are canonical and widths are known; the second round folds what legalization, width inference and enable optimization exposed. No pass re-runs the others privately.</li><li><b>Parallel inside a pass.</b> cprop and enableopt process independent definitions on worker threads; passes themselves run in sequence.</li><li><b>Intra-module before legalize, hierarchical after.</b> Only passes that work inside one definition (bitfuzz, cprop's per-body transform, bitwidth — which reads a callee only through its declared interface) run before <code>pass.legalize</code>; anything that crosses definitions (cprop's loop-invariant hoist, formal's hierarchical preflight, satopt's design-level use) runs after it.</li><li><b>Legalize early, seal last.</b> Every pass after <code>pass.legalize</code> — enableopt, the second cprop/bitwidth, satopt and <code>pass.formal</code> — sees an acyclic design and must keep it acyclic. The <em>seal</em> at the end checks one driver per sink and freezes the structure every consumer reads (<code>compile.verify_frozen</code> re-checks it, and in debug builds re-scans for a re-created loop).</li><li><b>Registered EPRP methods.</b> Each pass registers a method (<code>pass.cprop</code>, …) with its labels; the kernel runs it as a step with its own log, timer and diagnostics (halting errors stop the pipeline at that step).</li></ul></div>
 <div class="pass"><p><span class="nm"><code>pass.bitfuzz</code></span><span class="tag">test only</span></p><p>Strips derived width/sign annotations right after lowering, to prove that cprop keeps integer semantics without them and that bitwidth recovers them.</p><p class="opt">Options: <code>compile.bitfuzz.mode</code> (wires; <code>off</code> removes the step), <code>compile.bitfuzz.reg_pct</code>, <code>compile.bitfuzz.seed</code></p></div>
-<div class="pass"><p><span class="nm"><code>pass.cprop</code></span><span class="tag">mutates</span><span class="tag">runs twice</span></p><p>Constant and copy propagation, common-subexpression elimination, mux sharing, packed-field canonicalization and dead-node deletion. Afterwards it hoists iteration-invariant work out of rolled loop bodies.</p><p class="opt">Options: <code>compile.cprop.loop_hoist</code> (true), <code>compile.cprop.low_lanes</code> (true)</p></div>
+<div class="pass"><p><span class="nm"><code>pass.cprop</code></span><span class="tag">mutates</span><span class="tag">runs twice</span></p><p>Constant and copy propagation, common-subexpression elimination, mux sharing, packed-field canonicalization and dead-node deletion, one definition at a time. In its second run (after legalize) it also hoists iteration-invariant work out of rolled loop bodies into their hosts, the one cross-definition rewrite.</p><p class="opt">Options: <code>compile.cprop.loop_hoist</code> (true), <code>compile.cprop.low_lanes</code> (true)</p></div>
 <div class="pass"><p><span class="nm"><code>pass.bitwidth</code></span><span class="tag">mutates annotations</span><span class="tag">runs twice</span></p><p>Range-based width and sign inference in the spirit of Stephenson et al. [4]: propagates value ranges and annotates every driver pin with bits and signedness, plus the rewrites a range enables. An instance's widths come from its declared interface.</p><p class="opt">Options: <code>compile.bitwidth.max_iterations</code> (3)</p></div>
-<div class="pass"><p><span class="nm"><code>pass.enableopt</code></span><span class="tag">mutates</span></p><p>State-context optimization: removes flop and latch hold loops, recognizes reset and hold structure, simplifies data that only matters under an enable, and shares stateful muxes. It preserves initialization, reset priority, clocking and pipeline depth; the second cprop/bitwidth round cleans up after it.</p></div>
-<div class="pass"><p><span class="nm"><code>pass.satopt</code></span><span class="tag">opt-in</span><span class="tag">mutates</span></p><p>Proof-backed logic simplification: rewrites committed only after a solver proves them, within a per-cone budget.</p><p class="opt">Options: <code>pass.satopt</code> (false), <code>pass.satopt.budget_k</code>, <code>pass.satopt.cone_max</code></p></div>
+<div class="pass"><p><span class="nm"><code>pass.legalize</code></span><span class="tag">mutates</span><span class="tag">early</span><span class="tag">one owner of loops</span></p><p>The one sanctioned structural transform, run right after the first cprop+bitwidth so enableopt, satopt and <code>pass.formal</code> (and its hierarchy views) already see a legal design. (1) <em>Acyclic repair</em>, the only place combinational loops are handled: afterwards every definition is acyclic at arc level (an instance output depends on the inputs its port summary lists). Instances on a real cycle through ports and state-free instances on a false one are inlined; a rolled loop on a false ring is split by its carries, never unrolled; packed slices are rewired; a genuine loop is a <code>comb-loop</code> error. (2) Loop split of rolled loops into parallel and induction halves. It is not an optimizer. Every path that produces graphs runs it (Pyrope, slang, the Yosys reader, <code>lhd compile lg:</code>); a consumer never repairs loops itself.</p></div>
+<div class="pass"><p><span class="nm"><code>pass.enableopt</code></span><span class="tag">mutates</span><span class="tag">always on</span><span class="tag">structural</span></p><p>State-context optimization: removes flop and latch hold loops (a mux feeding <code>q</code> back becomes the enable), recognizes reset and hold structure, simplifies data that only matters under an enable, and shares stateful muxes. It decides with structural facts and Boolean identities, never a solver. It preserves initialization, reset priority, clocking and pipeline depth; the second cprop/bitwidth round cleans up after it.</p></div>
+<div class="pass"><p><span class="nm"><code>pass.satopt</code></span><span class="tag">opt-in</span><span class="tag">mutates</span><span class="tag">proof-backed</span></p><p>Solver-backed simplification (cvc5, plus ABC <code>&amp;fraig</code> for mux-arm facts): every rewrite is nominated, proven and only then committed, within a per-cone budget. Where enableopt matches enable structure syntactically, satopt <em>proves</em> facts about controls: an enable or select that is always 0/1 (<code>constants</code>), an enable/select re-derived from up to three existing one-bit signals (<code>simp_ctrl</code>), a memory write enable that is never active or ports to merge/narrow (<code>memory</code>); its other stages (<code>equiv</code>, <code>complement</code>, <code>odc</code>, <code>muxtree</code>, <code>share</code>, <code>hotmux</code>, <code>resub</code>) simplify general logic. Off by default: proofs cost solver time and mapped QoR effects are mixed.</p><p class="opt">Options: <code>pass.satopt</code> (false), <code>pass.satopt.stages</code>, <code>pass.satopt.budget_k</code>, <code>pass.satopt.cone_max</code></p></div>
 <div class="pass"><p><span class="nm"><code>pass.formal</code></span><span class="tag">annotates</span></p><p>Proves Pyrope <code>assert</code>/<code>assume</code> properties and <code>Hotmux</code> one-hotness with cvc5 [5], marking each <code>proven</code> or <code>runtime_check</code>; a refutation at the top boundary fails the build. The hierarchical preflight virtually flattens from the top. <code>lhd compile</code> runs it in <code>fast</code> mode (induction); <code>lhd sim</code> turns it off.</p><p class="opt">Options: <code>compile.formal.mode</code> (none|fast|normal), <code>compile.formal.timeout</code> (10 s total), <code>compile.formal.on_refute</code> (error|warn), <code>compile.formal.bmc_bound</code>, <code>compile.formal.cone_max</code>, <code>compile.formal.warn_*</code></p></div>
-<div class="pass"><p><span class="nm"><code>pass.legalize</code></span><span class="tag">mutates</span><span class="tag">last structural change</span></p><p>The one sanctioned structural transform between optimization and every consumer. (1) <em>Acyclic repair</em>, the only place combinational loops are handled: afterwards every definition is acyclic at arc level (an instance output depends on the inputs its port summary lists). Instances on a real cycle through ports and state-free instances on a false one are inlined; a rolled loop on a false ring is split by its carries, never unrolled; packed slices are rewired; a genuine loop is a <code>comb-loop</code> error. (2) Loop split of rolled loops into parallel and induction halves. (3) Freeze. It is not an optimizer.</p><p class="opt">Options: <code>compile.verify_frozen</code> (re-check the frozen structure after the emits)</p></div>
+<div class="pass"><p><span class="nm"><code>seal</code></span><span class="tag">end of compile</span></p><p>After the last pass that may reshape the graph: re-checks one driver per sink pin on the settled design and freezes every definition. From here only attributes may change; a consumer that must reshape (sim, synthesis) works on a private copy.</p><p class="opt">Options: <code>compile.verify_frozen</code> (debug builds: freeze, re-verify after the emits, and re-scan that no pass re-created a combinational loop)</p></div>
 <div class="pass"><p><span class="nm"><code>Emits</code></span></p><p><code>lg:</code> saves the graph library; <code>inou.cgen.verilog</code> writes one <code>.v</code> per module (read-only, with an optional source map, <code>compile.cgen.srcmap</code>); <code>inou.cgen.sim</code> builds the simulator (Section 5.1); <code>pass.prp_writer</code> writes Pyrope from the LNAST with a recompile self-check; <code>ln:</code> dumps the LNAST. Isabelle and Lean emits export the design to proof assistants.</p></div>
 <h2><span class="secnum">5</span>Back Ends</h2>
-<div class="grp"><p class="lead">Common characteristics of the back ends</p><ul><li><b>Read the frozen design.</b> Each back end starts from the legalized graphs and never reshapes the shared library: sim and synthesis work on a private copy.</li><li><b>Partition into regions.</b> Simulation (colors) and synthesis (regions) both cut the hierarchy into pieces that can be processed independently and in parallel.</li><li><b>Incremental by construction.</b> Stable structural ids and per-region caches let an edit recompile only what changed (<code>lhd.incremental</code> is the one switch for every reuse tier).</li></ul></div>
+<div class="grp"><p class="lead">Common characteristics of the back ends</p><ul><li><b>Read the frozen design.</b> Each back end starts from the sealed graphs and never reshapes the shared library: sim and synthesis work on a private copy.</li><li><b>Specialize after partitioning.</b> Once the partitions are decided (sim colors, synthesis regions), <code>pass.specialize</code> pushes constants across instance boundaries in the private copy. LEC compares the original modules, so it does not specialize (a per-color LEC would).</li><li><b>Partition into regions.</b> Simulation (colors) and synthesis (regions) both cut the hierarchy into pieces that can be processed independently and in parallel.</li><li><b>Incremental by construction.</b> Stable structural ids and per-region caches let an edit recompile only what changed (<code>lhd.incremental</code> is the one switch for every reuse tier).</li></ul></div>
 <h3>5.1 <code>lhd sim</code></h3>
-<div class="pass"><p><span class="nm"><code>inou.cgen.sim</code></span><span class="tag">private copy</span></p><p>Generates a cycle-based C++ simulator over hlop <code>Slop&lt;N&gt;</code> values. On a private copy it specializes constants across instances (skipped when observing signals or writing a VCD), prepares the graph (clock gates folded into enables) and fuses parallel loops. <code>Color_plan</code> then groups the flattened design into <em>colors</em> — kernels with bounded live state — schedules them, and assigns stable structural ids so the layout and kernels can be reused across runs. <code>sim.drvgen</code> writes the testbench driver; the host compiler builds it in parallel (with precompiled headers on large designs) and runs it.</p><p class="opt">Options: <code>sim.jobs</code>, <code>sim.ninja</code>, <code>sim.vcd</code>, <code>sim.tune.backend</code> (slop|llvm), <code>sim.tune.live_words</code>, <code>sim.tune.fence</code>, <code>sim.tune.dirty</code>, <code>sim.tune.profile</code>, <code>sim.init_zero</code>, <code>sim.unknown_zero</code>, <code>sim.checkpoint*</code></p></div>
+<div class="pass"><p><span class="nm"><code>inou.cgen.sim</code></span><span class="tag">private copy</span></p><p>Generates a cycle-based C++ simulator over hlop <code>Slop&lt;N&gt;</code> values. On a private copy it runs <code>pass.specialize</code> (skipped when observing signals or writing a VCD), prepares the graph (clock gates folded into enables) and fuses parallel loops. <code>Color_plan</code> then groups the flattened design into <em>colors</em> — kernels with bounded live state — schedules them, and assigns stable structural ids so the layout and kernels can be reused across runs. <code>sim.drvgen</code> writes the testbench driver; the host compiler builds it in parallel (with precompiled headers on large designs) and runs it.</p><p class="opt">Options: <code>sim.jobs</code>, <code>sim.ninja</code>, <code>sim.vcd</code>, <code>sim.tune.backend</code> (slop|llvm), <code>sim.tune.live_words</code>, <code>sim.tune.fence</code>, <code>sim.tune.dirty</code>, <code>sim.tune.profile</code>, <code>sim.init_zero</code>, <code>sim.unknown_zero</code>, <code>sim.checkpoint*</code></p></div>
 <h3>5.2 <code>lhd synth</code></h3>
 <div class="pass"><p><span class="nm"><code>pass.color</code></span><span class="tag">annotates</span></p><p>Colors every definition into regions: <code>alg=synth</code> bounds each region by gate-equivalents and keeps named boundaries stable; <code>alg=reduce</code> (behind <code>synth.reduce</code>) extracts repeated subgraphs as shared definitions. Other algorithms (acyclic, mincut, path, …) serve <code>lhd pass color</code>.</p><p class="opt">Options: <code>pass.color.alg</code>, <code>pass.color.synth.max_ge</code> (5000), <code>pass.color.hier</code>, <code>synth.reduce</code> (false)</p></div>
+<div class="pass"><p><span class="nm"><code>pass.specialize</code></span><span class="tag">private copy</span><span class="tag">after partitioning</span><span class="tag">hierarchical</span><span class="tag">sim and synth</span></p><p>The hierarchical cprop/bitwidth round (<code>pass/specialize</code>): information that crosses an instance boundary. Into a child: an input every instance ties to the same constant, or drives narrower than declared (the widest instance wins; the copy reads it through a mask/sign-extend, its interface unchanged). Out of a child: a constant output, or an output narrower than declared (the parent reads it through a fit of that width). Per definition only the specialization <em>all</em> its instances share is applied, as ONE copy <code>&lt;name&gt;__k&lt;hash&gt;</code> (named by that context) that every instance is re-pointed at; the original is never edited and stays available (a testbench may drive it directly). Instances that disagree keep the shared definition: double synthesis or simulation code is worse than a missed specialization. Runs to a fixpoint on a private copy once partitions are decided: sim before <code>Color_plan</code>, synthesis on the mapper's copy after <code>pass.color</code> (state-free callees only; created nodes inherit a neighbor's color). LEC will specialize both sides alike (a definition only where ref and impl agree), so the hierarchies stay pairable. Next: boundary cones (a parent <code>Sum</code> collapsing with a child <code>Sum</code>) through the same copy/re-point machinery.</p><p class="opt">Options: <code>max_versions</code> (0: no hierarchical traversal; 1: the shared specialization only, the default; N: up to N per-binding clones), <code>synth.specialize</code> (true)</p></div>
 <div class="pass"><p><span class="nm"><code>pass/synth → pass.abc | pass.usyn</code></span><span class="tag">private copy</span></p><p>Shared region infrastructure builds each region as a module on a private copy, then the mapper optimizes and technology-maps it: ABC [6] (<code>pass.abc</code>) or the native unate synthesizer (<code>pass.usyn</code>). Region results are cached for incremental resynthesis [7]. Details in <a href="synthesis.html">synthesis.html</a> and <a href="synth_usyn.html">synth_usyn.html</a>.</p><p class="opt">Options: <code>synth.mapper</code> (abc|usyn), <code>synth.liberty</code>, <code>synth.threads</code>, <code>pass.abc.memory</code>, <code>pass.abc.flow</code>, <code>pass.abc.boundary</code>, and the <code>pass.usyn.*</code> family</p></div>
 <div class="pass"><p><span class="nm"><code>pass.opentimer</code></span><span class="tag">read-only</span></p><p>Static timing analysis of the mapped netlist with OpenTimer [8]; by default it flattens the hierarchy into a scratch definition and reports the critical path into <code>timing.json</code>.</p><p class="opt">Options: <code>synth.opentimer</code> (true), <code>pass.opentimer.hier</code>, <code>synth.sdc</code>, <code>synth.spef</code></p></div>
 <h3>5.3 <code>lhd lec</code> and <code>lhd formal verify</code></h3>
-<div class="pass"><p><span class="nm"><code>acyclic repair of lg: sides</code></span><span class="tag">own definitions only</span></p><p>Each side is compiled through Figure 1 (or loaded from <code>lg:</code>). Because an <code>lg:</code> side may come from a producer that never legalized, LEC runs the same acyclic repair on each side's own definitions; on a compiled side it is a read-only scan.</p></div>
 <div class="pass"><p><span class="nm"><code>pass.semdiff</code></span><span class="tag">annotates</span></p><p>Structural matching of the two designs: stamps a <code>match</code> attribute on corresponding nodes and definitions, so the solver only reasons about what actually differs.</p><p class="opt">Options: <code>formal.lec.semdiff</code> (structural)</p></div>
 <div class="pass"><p><span class="nm"><code>pass.lec</code></span><span class="tag">read-only</span></p><p>Relational equivalence of the two designs: hierarchical (proves children first and collapses proven ones into boxes, top-down by default), with state pairing, induction and BMC over cvc5, and a flat confirmation before any refutation is reported. <code>lhd formal verify</code> uses the same engine to check <code>assert</code>/<code>assume</code> with BMC or induction.</p><p class="opt">Options: <code>formal.engine</code>, <code>formal.solver</code> (cvc5), <code>formal.timeout</code>, <code>formal.lec.hier</code>, <code>formal.lec.hier_order</code>, <code>formal.lec.collapse</code>, <code>formal.lec.trust</code>, <code>formal.bound</code></p></div>
 <h3>5.4 Standalone passes</h3>

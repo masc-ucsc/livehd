@@ -112,6 +112,8 @@ if [ "$MAPPER" = abc ]; then
   # (`--set adder=cla` after `pass <mapper>` resolves to pass.abc.adder).
   map_and_lec cla auto --set adder=cla
   map_and_lec cla 3 --set pass.$MAPPER.adder=cla --set pass.$MAPPER.block_size=3
+  # Fixed Brent-Kung implementation, with every arithmetic trial selector pinned.
+  map_and_lec brent fixed --set pass.abc.adder=brent --set pass.abc.multiplier=array --set pass.abc.barrel=log
   NET_CTRL="$W/net_rca_default"
 else
   # Default native flow (tmap=abc: the selected logical network is only
@@ -202,3 +204,32 @@ for r in $CREGIONS; do
   run lec --impl lg:"$C/net" --ref lg:"$C/re" --lib lg:"$W/models" --top "$r" --workdir "$C/wlec"
 done
 echo "PASS: pass.$MAPPER constant-operand multiply lhd-lec-equivalent (no const0 collapse)"
+
+# SN multiplier: signed/unsigned rectangles, mixed signs, squaring, constant
+# multiplication and a three-factor product, proven after technology mapping.
+if [ "$MAPPER" = abc ]; then
+  S="$W/sn_mul"
+  mkdir -p "$S"
+  cat > "$S/sn_mul.prp" <<'PRP'
+mod sn_mul(a:S4, b:S5, c:U3) -> (s:S12@[0], u:U12@[0], m:S12@[0], q:S12@[0], k:S12@[0], n:S16@[0]) {
+  s = a * b
+  u = c * c
+  m = a * c
+  q = a * a
+  k = a * -7
+  n = a * b * c
+}
+PRP
+  run compile "$S/sn_mul.prp" --top sn_mul.sn_mul --emit-dir lg:"$S/lg" --workdir "$S/compile"
+  run pass abc --top sn_mul.sn_mul lg:"$S/lg" --emit-dir lg:"$S/net" --set synth.liberty="$LIB" \
+    --set pass.abc.adder=brent --set pass.abc.multiplier=sn --set pass.abc.barrel=log --workdir "$S/map"
+  run pass partition --top sn_mul.sn_mul lg:"$S/lg" --emit-dir lg:"$S/re" --workdir "$S/partition"
+  run lec --impl lg:"$S/net" --ref lg:"$S/re" --lib lg:"$W/models" --top sn_mul.sn_mul --workdir "$S/lec"
+  python3 - "$S/map/qor.json" <<'JSON'
+import json, sys
+q = json.load(open(sys.argv[1]))
+assert q['regions'] and all(r['ware_trials'] == 0 for r in q['regions']), q
+JSON
+  [ "$?" = 0 ] || fail "SN multiplier unexpectedly ran arithmetic trials"
+  echo "PASS: fixed SN multiplier signed/mixed/square/constant/n-ary mapped LEC, zero trials"
+fi

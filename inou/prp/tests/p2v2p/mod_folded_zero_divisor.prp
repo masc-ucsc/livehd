@@ -1,0 +1,13 @@
+// Fuzz: a divisor that only folds to 0 after optimization (`i0 - i0`) is X,
+// not an error: the Verilog carries `x % 0`, LEC treats the ref's x/0 as X
+// (it used to compare cvc5's x % 0 == x against the reader's folded X), the
+// Verilog reader keeps Verilog's meaning, and the Pyrope writer spells the
+// value as `0sb?` (a literal `% 0` does not recompile).
+pub comb mod_folded_zero_divisor(i0:S7, b:U8) -> (o:U8, p:U8) {
+  mut a:U8 = 0
+  wrap a = (i0 - i0)
+  mut q:U8 = 0
+  wrap q = (0x6f % a)
+  wrap o = (b & q) | 1
+  wrap p = b + 1
+}

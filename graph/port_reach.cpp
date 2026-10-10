@@ -574,6 +574,202 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       }
     };
 
+    // PORT-ONLY summaries (slices off: tolg's stamp, legalize's arc view) are
+    // computed in ONE pass over the def: Tarjan SCCs over driver pins, each
+    // SCC's input support the union of its successors', with identical sets
+    // shared. The per-output walk below re-traversed the shared fan-in cone
+    // once per output -- quadratic on a wide def (XiangShan Backend: 1.3k s
+    // of lnast.tolg, from ~70 s before the stamp existed). Same traversal
+    // rules as run_walk: state cuts, port-accurate memories, Sub splices.
+    if (!slices_) {
+      struct Info {
+        uint32_t index;
+        uint32_t low;
+        bool     on_stack;
+        uint32_t set = 0;  // interned support, valid once the SCC closes
+      };
+      std::vector<std::vector<uint32_t>>                       sets{{}};  // id 0 = empty
+      absl::flat_hash_map<std::vector<uint32_t>, uint32_t>     set_ids;
+      const auto intern = [&](std::vector<uint32_t>&& v) -> uint32_t {
+        if (v.empty()) {
+          return 0;
+        }
+        auto [it, fresh] = set_ids.try_emplace(v, static_cast<uint32_t>(sets.size()));
+        if (fresh) {
+          sets.push_back(std::move(v));
+        }
+        return it->second;
+      };
+      absl::flat_hash_map<hhds::Class_index, Info> info;
+      struct Frame {
+        hhds::Pin_class              pin;
+        std::vector<hhds::Pin_class> succ;
+        std::vector<uint32_t>        direct;  // input pids read directly
+        size_t                       next = 0;
+      };
+      std::vector<Frame>           frames;
+      std::vector<hhds::Pin_class> stack;
+      // Frames of finished-but-open SCC members keep their successor lists
+      // until the SCC closes (the union needs them).
+      absl::flat_hash_map<hhds::Class_index, std::pair<std::vector<hhds::Pin_class>, std::vector<uint32_t>>> parked;
+      uint32_t                     counter = 0;
+      const auto successors = [&](const hhds::Pin_class& d, Frame& f) {
+        const auto add = [&](const hhds::Pin_class& q) {
+          if (q.is_invalid() || q.is_const()) {
+            return;
+          }
+          if (gu::is_graph_input_pin(q)) {
+            f.direct.push_back(static_cast<uint32_t>(q.get_port_id()));
+            return;
+          }
+          f.succ.push_back(q);
+        };
+        const auto all_inputs = [&](const hhds::Node_class& m) {
+          for (auto e_sink : m.inp_sorted_pins()) {
+            for (auto e_drv : e_sink.get_driver_pins()) {
+              add(e_drv);
+            }
+          }
+        };
+        auto       m  = d.get_master_node();
+        const auto op = gu::type_op_of(m);
+        if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+          return;  // true state boundary
+        }
+        if (op == Ntype_op::Sub) {
+          auto cg = m.get_subnode_graph();
+          if (!cg) {
+            all_inputs(m);  // body-less blackbox: depend on everything connected
+            return;
+          }
+          const auto& cr = callee_of(cg);
+          if (auto it = cr.out2ins.find(static_cast<uint32_t>(d.get_port_id())); it != cr.out2ins.end()) {
+            const auto& inputs = sub_inputs_of(m);
+            for (const uint32_t ipid : it->second) {
+              if (auto input = inputs.find(ipid); input != inputs.end()) {
+                for (auto driver : input->second.get_driver_pins()) {
+                  add(driver);
+                }
+              }
+            }
+          }
+          return;
+        }
+        if (op == Ntype_op::Memory) {
+          if (!mem_deps_of(m).deps(static_cast<hhds::Port_id>(d.get_port_id()), add)) {
+            all_inputs(m);
+          }
+          return;
+        }
+        all_inputs(m);
+      };
+      const auto push = [&](const hhds::Pin_class& p) {
+        info[p.get_class_index()] = Info{counter, counter, true, 0};
+        ++counter;
+        stack.push_back(p);
+        Frame f;
+        f.pin = p;
+        successors(p, f);
+        frames.push_back(std::move(f));
+      };
+      const auto close_scc = [&](const hhds::Pin_class& root) {
+        std::vector<hhds::Pin_class> members;
+        for (;;) {
+          const auto top = stack.back();
+          stack.pop_back();
+          info[top.get_class_index()].on_stack = false;
+          members.push_back(top);
+          if (top.get_class_index() == root.get_class_index()) {
+            break;
+          }
+        }
+        absl::flat_hash_set<hhds::Class_index> inside;
+        for (const auto& mpin : members) {
+          inside.insert(mpin.get_class_index());
+        }
+        std::vector<uint32_t> u;
+        for (const auto& mpin : members) {
+          auto pk = parked.find(mpin.get_class_index());
+          if (pk == parked.end()) {
+            continue;
+          }
+          u.insert(u.end(), pk->second.second.begin(), pk->second.second.end());
+          for (const auto& q : pk->second.first) {
+            if (inside.contains(q.get_class_index())) {
+              continue;
+            }
+            const auto& qs = sets[info[q.get_class_index()].set];
+            u.insert(u.end(), qs.begin(), qs.end());
+          }
+          parked.erase(pk);
+        }
+        std::ranges::sort(u);
+        u.erase(std::unique(u.begin(), u.end()), u.end());
+        const auto id = intern(std::move(u));
+        for (const auto& mpin : members) {
+          info[mpin.get_class_index()].set = id;
+        }
+      };
+      const auto support_of = [&](const hhds::Pin_class& root) -> uint32_t {
+        if (root.is_invalid() || root.is_const()) {
+          return 0;
+        }
+        if (auto it = info.find(root.get_class_index()); it != info.end()) {
+          return it->second.set;  // finished by an earlier output
+        }
+        push(root);
+        while (!frames.empty()) {
+          auto& f = frames.back();
+          if (f.next < f.succ.size()) {
+            const auto q  = f.succ[f.next++];
+            auto       it = info.find(q.get_class_index());
+            if (it == info.end()) {
+              push(q);  // invalidates `f`
+            } else if (it->second.on_stack) {
+              auto& mine = info[f.pin.get_class_index()];
+              mine.low   = std::min(mine.low, it->second.index);
+            }
+            continue;
+          }
+          const auto pin = f.pin;
+          parked.emplace(pin.get_class_index(), std::make_pair(std::move(f.succ), std::move(f.direct)));
+          frames.pop_back();
+          const auto me = info[pin.get_class_index()];
+          if (!frames.empty()) {
+            auto& parent = info[frames.back().pin.get_class_index()];
+            parent.low   = std::min(parent.low, me.low);
+          }
+          if (me.low == me.index) {
+            close_scc(pin);
+          }
+        }
+        return info[root.get_class_index()].set;
+      };
+      for (const auto& od : io->get_output_pin_decls()) {
+        auto  opin = g->get_output_pin(od.name);
+        auto& ins  = r.out2ins[static_cast<uint32_t>(od.port_id)];
+        if (opin.is_invalid()) {
+          continue;
+        }
+        for (auto e_sink : opin.get_master_node().inp_sorted_pins()) {
+          if (e_sink.get_port_id() != opin.get_port_id()) {
+            continue;
+          }
+          const auto drv = e_sink.get_driver_pin();
+          if (drv.is_invalid() || drv.is_const()) {
+            break;
+          }
+          if (gu::is_graph_input_pin(drv)) {
+            ins.insert(static_cast<uint32_t>(drv.get_port_id()));
+            break;
+          }
+          for (const auto pid : sets[support_of(drv)]) {
+            ins.insert(pid);
+          }
+          break;
+        }
+      }
+    } else
     for (const auto& od : io->get_output_pin_decls()) {
       auto  opin = g->get_output_pin(od.name);
       auto& ins  = r.out2ins[static_cast<uint32_t>(od.port_id)];

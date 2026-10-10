@@ -374,6 +374,7 @@ std::string_view boundary_kind_name(Boundary_kind kind) {
     case Boundary_kind::observation_output: return "observation-output";
     case Boundary_kind::state_current     : return "state-current";
     case Boundary_kind::state_pending     : return "state-pending";
+    case Boundary_kind::effect_input      : return "effect-input";
   }
   return "invalid";
 }
@@ -1863,7 +1864,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       const auto gate   = lc::control_root(enable);
       // With multiple input clocks the slot alone does not determine this
       // net's level; its secondary-clock protocol must retain the held read.
-      if (!held_read && clocks.n_clock_inputs() == 1 && !gate.net.is_invalid() && gu::is_graph_input_pin(gate.net)
+      // NO flop clock (a latch-only design: Design_clocks counts flops) with a
+      // gate that is a clock input is the single-clock case too -- the held
+      // read there published a clock-low latch's rise value after the fall,
+      // while the same latch spelled as a data enable read through.
+      if (!held_read && clocks.n_clock_inputs() <= 1 && !gate.net.is_invalid() && gu::is_graph_input_pin(gate.net)
           && clocks.is_clock(gate.net) && gate.inverted == (version != State_version::post_rise)) {
         role = Version_role::data;
       }
@@ -2014,6 +2019,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     uint32_t      width         = 1;
     bool          unsign        = false;
     std::string   literal;
+    bool          effect        = false;  // an lgundef marker's cond (Boundary_kind::effect_input)
   };
   std::vector<Output_use> output_uses;
   struct Input_use {
@@ -3384,6 +3390,39 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       } else {
         for (auto edge_drv : output.get_driver_pins()) {
           add_output_driver(edge_drv);
+        }
+      }
+    }
+  }
+
+  // sim.warn_undefined markers: an `lgundef` instance has no output, so nothing
+  // above asks for its `cond`. Demand the driver's value at both cycle points
+  // (the edge a write commits at, and the end of the cycle) as an effect slot.
+  for (size_t i = 0; i < plan.sites_.size(); ++i) {
+    const auto& marker = plan.sites_[i];
+    if (marker.kind != Site_kind::instance || !marker.live) {
+      continue;
+    }
+    const auto sio       = marker.node.base_node().get_subnode_io();
+    const bool by_name   = sio && sio->get_name() == gu::lgundef_module_name;
+    const bool by_marker = gu::node_name_of(marker.node.base_node()).starts_with(gu::lgundef_name_prefix);
+    if (!by_name && !by_marker) {
+      continue;
+    }
+    for (const auto& sink : marker.node.inp_sorted_pins()) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        for (const auto version : {State_version::pre_rise, State_version::post_fall}) {
+          Output_use use{static_cast<hhds::Port_id>(sink.get_port_id()), i, false, Color_plan::invalid_index, driver.get_port_id(),
+                         version, 1, true, {}, true};
+          if (driver.is_const()) {
+            use.literal = gu::const_of(driver).to_pyrope();
+          } else if (const auto found = index.find(driver.get_master_node().get_occurrence_index());
+                     found != index.end() && plan.sites_[found->second].live) {
+            use.producer = producer_version(found->second, version, driver.get_port_id());
+          } else if (!(gu::is_graph_input_pin(driver) && driver.get_graph() == root)) {
+            continue;  // not resolvable here: the marker stays silent
+          }
+          output_uses.push_back(std::move(use));
         }
       }
     }
@@ -5040,13 +5079,21 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
   }
   for (const auto& output : output_uses) {
-    const auto   kind      = output.top ? Boundary_kind::top_output : Boundary_kind::observation_output;
-    const auto   signature = output.top ? Id_hash("top-output").u(output.public_port).u(static_cast<uint64_t>(output.version)).finish()
-                                        : Id_hash("observation-output")
-                                            .id(plan.sites_[output.body_anchor].storage_id)
-                                            .u(output.public_port)
-                                            .u(static_cast<uint64_t>(output.version))
-                                            .finish();
+    const auto   kind      = output.effect ? Boundary_kind::effect_input
+                             : output.top  ? Boundary_kind::top_output
+                                           : Boundary_kind::observation_output;
+    const auto   signature = output.effect ? Id_hash("effect-input")
+                                                 .id(plan.sites_[output.body_anchor].storage_id)
+                                                 .u(output.public_port)
+                                                 .u(static_cast<uint64_t>(output.version))
+                                                 .finish()
+                             : output.top
+                                 ? Id_hash("top-output").u(output.public_port).u(static_cast<uint64_t>(output.version)).finish()
+                                 : Id_hash("observation-output")
+                                       .id(plan.sites_[output.body_anchor].storage_id)
+                                       .u(output.public_port)
+                                       .u(static_cast<uint64_t>(output.version))
+                                       .finish();
     const size_t slot      = ensure_slot(signature,
                                          kind,
                                          output.version,

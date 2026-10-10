@@ -431,7 +431,11 @@ public:
         if (has_latches && (op == Ntype_op::Get_mask || op == Ntype_op::Sext)) {
           auto source = drv_at(node, 0);
           auto it     = hold_sources.find(source.get_class_index());
-          hold_sources.emplace(output.get_class_index(), it == hold_sources.end() ? source : it->second);
+          // Copy before emplacing: `it->second` is a reference into the map,
+          // and a rehash inside emplace freed it before the new entry was
+          // built from it (garbage Pin_class, random Verilog latch fuzz).
+          const hhds::Pin_class held = it == hold_sources.end() ? source : it->second;
+          hold_sources.emplace(output.get_class_index(), held);
         }
       }
     }
