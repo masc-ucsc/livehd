@@ -873,5 +873,281 @@ TEST(DesignScan, RejectsCombinationalCycleAndZeroWidth) {
   auto empty = empty_io->create_graph();
   EXPECT_THROW(scan_design(*empty, {}), std::runtime_error);
 }
+
+// ---------------------------------------------------------------------------
+// Clock-domain resolution (MASTER_INTEGRATION.md R13.3, step 2).
+//
+// Every test here is about a REFUSAL or an ORDINAL, because those are the two
+// ways domain resolution goes wrong silently. A refusal that does not happen
+// ships a design whose timing nobody checked; an ordinal that merges two roots
+// makes two time bases commit together forever after. Neither surfaces as a
+// proof failure -- a certificate proves whatever it was given.
+// ---------------------------------------------------------------------------
+
+// `clock_of[i]` names the input flop i clocks on; "" leaves it implicit.
+struct ClockFixture {
+  std::shared_ptr<hhds::Graph> g;
+};
+
+ClockFixture build_flops(std::string_view lgdb, const std::vector<std::string>& clock_of,
+                         const std::vector<uint32_t>& clock_bits = {}) {
+  auto&                 lib = livehd::Hhds_graph_library::instance(std::string(lgdb));
+  auto                  io  = lib.create_io("clockfix");
+  uint32_t              pid = 1;
+  std::set<std::string> added;
+  for (size_t i = 0; i < clock_of.size(); ++i) {
+    if (clock_of[i].empty() || added.count(clock_of[i])) {
+      continue;
+    }
+    io->add_input(clock_of[i], pid++);
+    io->set_bits(clock_of[i], clock_bits.empty() ? 1 : clock_bits[i]);
+    added.insert(clock_of[i]);
+  }
+  io->add_input("d", pid++);
+  io->set_bits("d", 8);
+  for (size_t i = 0; i < clock_of.size(); ++i) {
+    io->add_output("q" + std::to_string(i), static_cast<uint32_t>(i + 1));
+    io->set_bits("q" + std::to_string(i), 8);
+  }
+  ClockFixture f;
+  f.g = io->create_graph();
+  for (size_t i = 0; i < clock_of.size(); ++i) {
+    auto flop = create_typed_node(*f.g, Ntype_op::Flop);
+    set_bits(flop.create_driver_pin(0), 8);
+    f.g->get_input_pin("d").connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "din")));
+    if (!clock_of[i].empty()) {
+      f.g->get_input_pin(clock_of[i]).connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")));
+    }
+    flop.create_driver_pin(0).connect_sink(f.g->get_output_pin("q" + std::to_string(i)));
+  }
+  return f;
+}
+
+// Expect a refusal whose message explains itself. A refusal nobody can act on
+// is only marginally better than no refusal.
+void expect_refusal(hhds::Graph& g, std::string_view needle) {
+  try {
+    scan_design(g, {});
+    ADD_FAILURE() << "expected a refusal mentioning: " << needle;
+  } catch (const std::exception& e) {
+    EXPECT_NE(std::string(e.what()).find(std::string(needle)), std::string::npos)
+        << "refused, but not for the expected reason: " << e.what();
+  }
+}
+
+// INDEPENDENT clocks get DISTINCT ordinals. Merging them is the failure that
+// cannot be seen downstream: both flops would commit on every edge of one net
+// and the certificate would prove exactly that.
+TEST(DesignScanClocks, IndependentClocksGetDistinctOrdinals) {
+  auto       f      = build_flops("lgdb_clk_independent", {"clk_a", "clk_b"});
+  const auto design = scan_design(*f.g, {});
+  ASSERT_EQ(design.flops.size(), 2u);
+  EXPECT_EQ(design.clocks.size(), 2u);
+  EXPECT_NE(design.flops[0].clock_ordinal, design.flops[1].clock_ordinal);
+  // Both ordinals IN RANGE -- this is the `_clock_bounds` obligation the
+  // emitted certificate has to discharge.
+  for (const auto& fl : design.flops) {
+    EXPECT_LT(fl.clock_ordinal, design.clocks.size());
+  }
+}
+
+// Two flops on the SAME net share ONE ordinal. The converse failure: a resolver
+// that gave every flop its own domain would quietly stop any two flops from
+// ever committing in the same step.
+TEST(DesignScanClocks, SameClockSharesOneOrdinal) {
+  auto       f      = build_flops("lgdb_clk_shared", {"clk", "clk"});
+  const auto design = scan_design(*f.g, {});
+  ASSERT_EQ(design.flops.size(), 2u);
+  EXPECT_EQ(design.clocks.size(), 1u);
+  EXPECT_EQ(design.flops[0].clock_ordinal, design.flops[1].clock_ordinal);
+}
+
+// Ordinals are a function of the DESIGN, not of traversal order: two scans must
+// number the domains identically or a certificate diff means nothing.
+TEST(DesignScanClocks, OrdinalAssignmentIsDeterministicAndSorted) {
+  auto       f1 = build_flops("lgdb_clk_det1", {"clk_z", "clk_a", "clk_m"});
+  auto       f2 = build_flops("lgdb_clk_det2", {"clk_z", "clk_a", "clk_m"});
+  const auto a  = scan_design(*f1.g, {});
+  const auto b  = scan_design(*f2.g, {});
+  ASSERT_EQ(a.clocks.size(), 3u);
+  ASSERT_EQ(a.clocks.size(), b.clocks.size());
+  for (size_t i = 0; i < a.clocks.size(); ++i) {
+    EXPECT_EQ(a.clocks[i].key, b.clocks[i].key) << "domain " << i << " differs between two scans";
+  }
+  for (size_t i = 1; i < a.clocks.size(); ++i) {
+    EXPECT_LT(a.clocks[i - 1].key, a.clocks[i].key) << "table is not sorted by structural key";
+  }
+}
+
+// An IMPLICITLY clocked flop is a real domain, not an unresolvable cone -- it is
+// the single most common state element in the tree.
+TEST(DesignScanClocks, ImplicitClockIsADomain) {
+  auto       f      = build_flops("lgdb_clk_implicit", {""});
+  const auto design = scan_design(*f.g, {});
+  ASSERT_EQ(design.flops.size(), 1u);
+  ASSERT_EQ(design.clocks.size(), 1u);
+  EXPECT_TRUE(design.clocks[0].implicit);
+  EXPECT_EQ(design.flops[0].clock_ordinal, 0u);
+}
+
+// A MULTI-BIT clock root is REFUSED, not merged. `control_root` follows every
+// Get_mask to the whole input, so `clks[0]` and `clks[1]` share one key and
+// would otherwise land in one ordinal -- two time bases in one domain.
+TEST(DesignScanClocks, MultiBitClockRootIsRefused) {
+  auto f = build_flops("lgdb_clk_bus", {"clks"}, {4});
+  expect_refusal(*f.g, "cannot be discriminated");
+}
+
+// A CONSTANT clock is refused. `commit_class_of` is not a refusal oracle here:
+// the cone walk behind it stops at a constant and returns the CONSTANT as the
+// net, so a flop clocked by a literal comes back with a well-formed commit
+// class and would be accepted as an ordinary domain.
+TEST(DesignScanClocks, ConstantClockIsRefused) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_clk_const");
+  auto  io  = lib.create_io("constclk");
+  io->add_input("d", 1);
+  io->set_bits("d", 8);
+  io->add_output("q", 1);
+  io->set_bits("q", 8);
+  auto g    = io->create_graph();
+  auto flop = create_typed_node(*g, Ntype_op::Flop);
+  set_bits(flop.create_driver_pin(0), 8);
+  g->get_input_pin("d").connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "din")));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(1))
+      .connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")));
+  flop.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+  expect_refusal(*g, "CONSTANT");
+}
+
+// A clock whose name is NOT a conventional spelling is still a clock, because a
+// flop takes an edge from it. The name fallback in Design_clocks is for designs
+// that wire no flop straight to an input; it must not become a requirement.
+TEST(DesignScanClocks, UnconventionallyNamedClockStillResolves) {
+  auto       f      = build_flops("lgdb_clk_oddname", {"tick_strobe"});
+  const auto design = scan_design(*f.g, {});
+  ASSERT_EQ(design.flops.size(), 1u);
+  ASSERT_EQ(design.clocks.size(), 1u);
+  EXPECT_FALSE(design.clocks[0].implicit);
+  EXPECT_EQ(design.clocks[0].name, "tick_strobe");
+}
+
+// A design with no state resolves no domain and still gets a table, so the
+// `_clock_bounds` obligation is discharged against something real rather than a
+// field default.
+TEST(DesignScanClocks, CombinationalDesignStillHasAClockTable) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_clk_comb");
+  auto  io  = lib.create_io("comb");
+  io->add_input("a", 1);
+  io->set_bits("a", 8);
+  io->add_output("z", 1);
+  io->set_bits("z", 8);
+  auto g  = io->create_graph();
+  auto op = create_typed_node(*g, Ntype_op::Or);
+  set_bits(op.create_driver_pin(0), 8);
+  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  op.create_driver_pin(0).connect_sink(g->get_output_pin("z"));
+  const auto design = scan_design(*g, {});
+  EXPECT_TRUE(design.flops.empty());
+  EXPECT_EQ(design.clocks.size(), 1u);
+}
+
+// The resolved domain reaches the CERTIFICATE. Resolving correctly and then
+// dropping the result on the floor is indistinguishable from not resolving.
+TEST(DesignScanClocks, OrdinalsAndClockTableReachTheCertificate) {
+  auto       f      = build_flops("lgdb_clk_cert", {"clk_a", "clk_b"});
+  const auto design = scan_design(*f.g, {});
+  const auto cert   = build_certificate(design, {});
+  ASSERT_EQ(cert.clocks.size(), design.clocks.size());
+  for (size_t i = 0; i < cert.clocks.size(); ++i) {
+    EXPECT_EQ(cert.clocks[i].name, design.clocks[i].name);
+  }
+  ASSERT_EQ(cert.flops.size(), 2u);
+  std::set<uint32_t> seen;
+  for (const auto& fl : cert.flops) {
+    EXPECT_LT(fl.clock, cert.clocks.size());
+    seen.insert(fl.clock);
+  }
+  EXPECT_EQ(seen.size(), 2u) << "two independent clocks collapsed into one certificate domain";
+}
+
+// The JOIN is DESIGN-WIDE, and these three fixtures are why it has to be.
+//
+// Joining per memory, before the flops were scanned, was wrong in two
+// directions at once -- it joined when it had no right to, and failed to join
+// when it should have.
+
+// POSITIVE: one explicit domain plus an implicit flop. The implicit element IS
+// on that clock, and before the join was made design-wide nothing ever joined
+// them, because no memory was involved to trigger the per-memory pass.
+TEST(DesignScanClocks, OneExplicitDomainJoinsAnImplicitFlop) {
+  auto       f      = build_flops("lgdb_clk_join_pos", {"clk", ""});
+  const auto design = scan_design(*f.g, {});
+  ASSERT_EQ(design.flops.size(), 2u);
+  EXPECT_EQ(design.clocks.size(), 1u) << "the implicit flop kept a domain of its own";
+  EXPECT_EQ(design.flops[0].clock_ordinal, design.flops[1].clock_ordinal);
+  EXPECT_FALSE(design.clocks[0].implicit) << "joined to the explicit clock, not the other way round";
+}
+
+// COUNTEREXAMPLE: TWO explicit domains plus an implicit flop. There is nothing
+// to join the implicit element to without guessing which, so it must KEEP its
+// own domain. The per-memory version would have seen one explicit domain among
+// a memory's own ports and joined to it, while the design had two.
+TEST(DesignScanClocks, TwoExplicitDomainsDoNotJoinAnImplicitFlop) {
+  auto       f      = build_flops("lgdb_clk_join_neg", {"clk_a", "clk_b", ""});
+  const auto design = scan_design(*f.g, {});
+  ASSERT_EQ(design.flops.size(), 3u);
+  EXPECT_EQ(design.clocks.size(), 3u) << "an implicit element was guessed onto one of two explicit domains";
+  std::set<uint32_t> ords;
+  for (const auto& fl : design.flops) {
+    ords.insert(fl.clock_ordinal);
+    EXPECT_LT(fl.clock_ordinal, design.clocks.size());
+  }
+  EXPECT_EQ(ords.size(), 3u);
+  EXPECT_EQ(std::count_if(design.clocks.begin(), design.clocks.end(), [](const ClockDomain& c) { return c.implicit; }), 1);
+}
+
+// The join must not be ORDER-dependent: the implicit flop declared first must
+// reach the same answer as the implicit flop declared last.
+TEST(DesignScanClocks, JoinIsIndependentOfDeclarationOrder) {
+  auto       a = build_flops("lgdb_clk_join_o1", {"clk", ""});
+  auto       b = build_flops("lgdb_clk_join_o2", {"", "clk"});
+  const auto da = scan_design(*a.g, {});
+  const auto db = scan_design(*b.g, {});
+  EXPECT_EQ(da.clocks.size(), 1u);
+  EXPECT_EQ(db.clocks.size(), 1u);
+  EXPECT_EQ(da.clocks[0].key, db.clocks[0].key);
+}
+
+// An OPAQUE computed clock is refused.
+//
+// `Design_clocks::is_clock` cannot be the test here and the first version of
+// this check used it anyway: the constructor records `resolve_phase(clock_pin)`
+// for EVERY flop, including a computed root, so asking whether a flop's own
+// root is a clock always answers yes. The check is vacuous and this design
+// would have sailed through it.
+TEST(DesignScanClocks, OpaqueComputedClockIsRefused) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_clk_opaque");
+  auto  io  = lib.create_io("opaqueclk");
+  io->add_input("a", 1);
+  io->set_bits("a", 1);
+  io->add_input("b", 2);
+  io->set_bits("b", 1);
+  io->add_input("d", 3);
+  io->set_bits("d", 8);
+  io->add_output("q", 1);
+  io->set_bits("q", 8);
+  auto g = io->create_graph();
+  // A computed net -- not a design input, so the runtime has no edge to supply.
+  auto xo = create_typed_node(*g, Ntype_op::Xor);
+  set_bits(xo.create_driver_pin(0), 1);
+  g->get_input_pin("a").connect_sink(xo.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(xo.create_sink_pin(1));
+  auto flop = create_typed_node(*g, Ntype_op::Flop);
+  set_bits(flop.create_driver_pin(0), 8);
+  g->get_input_pin("d").connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "din")));
+  xo.create_driver_pin(0).connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")));
+  flop.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+  expect_refusal(*g, "an internal net rather than a design input");
+}
 }  // namespace
 }  // namespace lean_export

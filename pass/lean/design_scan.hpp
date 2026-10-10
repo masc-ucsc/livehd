@@ -70,11 +70,15 @@ struct Port {
 // traversal order, so two scans of the same design agree. It is the grouping
 // identity; `name` is only for humans and for the emitted `ClockDesc.name`.
 //
-// Bit discrimination is part of `key` because `net_key()` distinguishes
-// `clks[0]` from `clks[1]`. R13.3 requires that a bus clock's BIT survive into
-// the ordinal rather than being merged -- two 180-degrees-apart domains that
-// compare equal are exactly the clock-blindness false-PROVEN class the latch
-// contract guards against.
+// `key` does NOT discriminate bus BITS. `net_key()` names a graph input by its
+// NAME, and `control_root` follows every Get_mask to the whole input, so
+// `clks[0]` and `clks[1]` produce the SAME key. R13.3 requires that a bus
+// clock's bit either survive into the ordinal or be refused, never merged --
+// two 180-degrees-apart domains that compare equal are exactly the
+// clock-blindness false-PROVEN class the latch contract guards against. The
+// scanner therefore REFUSES a multi-bit clock root outright
+// (`clock_root_bit_refusal`); preserving the bit is the stronger option and is
+// not implemented here.
 struct ClockDomain {
   std::string key;                // Commit_class::key() -- structural identity
   std::string name;               // human-facing; emitted as ClockDesc.name

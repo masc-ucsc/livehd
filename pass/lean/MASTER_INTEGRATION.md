@@ -2008,53 +2008,58 @@ resolved source set against the manifest), which does not exist yet and is
 listed in R14.9. Removing `nodes>0` must not be read as making accidental
 elaboration acceptable.
 
-### R14.4 Four proven CORE-ET modules carry a model defect
+### R14.4 The 18 flagged modules are a mask-operand question, not constant-width defects
 
-| Module | Violations | First |
+| Module | Flags | First |
 | --- | ---: | --- |
 | `trans_top` | 31 | `const width 1 cannot hold value 8192 (needs 14 bits)` |
 | `intpipe_csr_msgs` | 8 | `const width 46 cannot hold value 1152886320234758144 (needs 60 bits)` |
 | `vpu_ml` | 1 | `const width 29 cannot hold value 4160749568 (needs 32 bits)` |
 | `vpu_tensorfma` | 1 | `const width 29 cannot hold value 4160749568 (needs 32 bits)` |
 
-These four typechecked and passed the axiom audit. They are **conservative gate
-failures awaiting investigation, not confirmed model defects** — an earlier
-draft of this section asserted the stronger claim and was wrong to.
+Plus 14 CVA6 modules the gate refuses before typecheck — 18 in all,
+`CONST_WIDTH_CASES.tsv`.
 
-Why the gate cannot settle it on its own: `CertificateBuilder::dep` sets
-`source.width` to the **consumer's** requested width, deliberately, not to the
-raw pin's declared width. The upstream "a width that cannot hold its value is a
-lie" contract (`graph/node_util.hpp:323`) is about the raw pin, which is a
-different number. A narrow emitted constant can therefore be perfectly correct
-modular arithmetic — the consumer genuinely uses only the low bits — or it can
-be a real truncation. The gate flags the shape; it does not distinguish the two.
+**Every flagged constant occupies one operand position.** Measured over 13 of
+the 18 modules (4 CORE-ET, 9 CVA6), **168 of 168** flagged constants are
+**operand 1 of `Op_GetMask`** — the *mask*, never a data operand — and in
+**168 of 168** the declared mask width is **greater than or equal to the width
+of the data operand it masks**.
 
-What *is* established: a certificate is proved as written, so if one of these is
-a real truncation, `native_decide` proves it faithfully against a model that is
-not the RTL. That is the one failure class nothing downstream can catch, which
-is why the gate must run — and why its absence on the CORE-ET path mattered —
-even though a flag is not yet a diagnosis.
+That changes what the flag means. A mask bit above the data operand's width
+selects a bit that does not exist, so dropping it cannot change the result.
+These are not constants whose value is being truncated in an arithmetic
+context; they are masks declared at the width of the thing they mask. An
+independent primitive oracle run alongside this one compares emitted-width
+against intrinsic-width masks for eight values each and reports
+**2,024 / 2,024 agreement**, including `-1` and high-bit values at the data
+width.
 
-Settling each case needs three things the sweep does not have: the **raw pin
-width**, the **consumer operation**, and a **value oracle** on the affected
-output. Until then these four stay counted in the 81 with the qualification
-recorded here; no separate "trustworthy" count is asserted. They are listed in
-`CONST_WIDTH_CASES.tsv` with the 14 CVA6 modules the gate refused *before*
-typecheck — **18 flagged modules across both families**, the largest open
-investigation in the corpus.
+**So "const-width defect" is the wrong label and this plan previously used it.**
+An earlier draft of this section called these model defects and subtracted them
+from a "trustworthy" count; a later one called them unexplained flags. Both
+overstated. What is established is narrower and more useful: the gate is
+over-broad *for this operand position*, and the evidence available points at
+benign mask semantics.
 
-A pattern worth checking first: many violations are near a power of two
-(`width 1` / value 2 at 56 occurrences in two hpdcache modules; `width 61` /
-value 9223372036854775804; `width 29` / value 4160749568 = `0xF8000000`). That
-shape suggests a signed/unsigned or sign-extension width computation rather than
-genuine RTL truncation — but that is a hypothesis from the numbers, not a
-diagnosis.
+What the evidence is **not**: it is finite, certificate-level agreement on
+chosen values. It is not a proof over arbitrary inputs, and it is not agreement
+with the raw RTL or with its signedness. `CertificateBuilder::dep` sets a
+constant source to the **consumer's** width by design, while the upstream
+"a width that cannot hold its value is a lie" contract
+(`graph/node_util.hpp:323`) is about the **raw pin** — a different number — so
+the two were never measuring the same thing.
 
-**No constant will be widened and no truncation semantics changed on this
-hypothesis.** The next step is to audit raw graph widths and values against
-upstream semantics per module, and any semantic change goes to the user for a
-decision before adoption. These are investigation cases; they do not displace
-the approved R13 clock-provenance work.
+The investigation is therefore **mask semantics and raw graph provenance
+first**: what `Op_GetMask` does with a mask narrower than its literal, and what
+width the raw pin actually carried. Not a generic constant-width repair. **No
+constant will be widened and no truncation semantics changed**, and any actual
+semantic repair goes to the user for a decision before adoption.
+
+The practical cost stands regardless: these 18 are refused before typecheck, and
+one of them — `intpipe_csr_msgs` — is the only genuinely two-domain design in
+the corpus (R15.5). The best multi-clock fixture available is blocked behind a
+gate that is probably firing on a benign pattern.
 
 ### R14.5 Why a module does not emit, by verified cause
 
@@ -2264,10 +2269,13 @@ is needed on top of it, because non-empty does not mean correct.
 
 ### R14.9 Open items in priority order
 
-1. **Const-width, 18 modules across both families** (R14.4). Audit raw graph
-   widths and values against upstream semantics per module. Do **not** widen
-   constants or alter truncation semantics; bring any semantic change to the
-   user first.
+1. **The 18 flagged modules** (R14.4). All 168 measured flags are the **mask**
+   operand of `Op_GetMask`, with mask width always at least the data width, so
+   investigate **mask semantics and raw graph provenance** — not a generic
+   constant-width repair. Likely outcome is narrowing the gate for this operand
+   position. Do **not** widen constants or alter truncation semantics; any
+   semantic change goes to the user first. Unblocking this also unblocks
+   `intpipe_csr_msgs`, the corpus's only two-domain design.
 2. **R13.4 step 2 — clock-domain resolution**, per R13.3: owned clock provenance
    in `DesignScan` → `CertificateIR` / builder / memory lowering → emitter;
    `asyncReset` commit flag; synthetic sync-read flop and ROM domains;
@@ -2276,7 +2284,9 @@ is needed on top of it, because non-empty does not mean correct.
    normalized. Emitter stays graph-free; all-fire semantics preserved.
    `prim_phase_pair_lo_hi` / `prim_write_commit_en` are refusal fixtures for it,
    not modules it will convert — they are refused upstream by `pass.single_edge`
-   before the scanner runs.
+   before the scanner runs. **Implemented; see R15.** Note that
+   `SWEEP_multiclock6` cannot be its acceptance gate (R15.6): all six members
+   stop before `pass.lean`.
 3. **Re-run the corpus under the new queue** so every module has a retained
    per-module log and a full axiom audit, with artifact, library and toolchain
    hashes recorded (R14.6).
@@ -2298,3 +2308,283 @@ is needed on top of it, because non-empty does not mean correct.
     transport, and FP's pinned implementation — each recorded in a destination
     ledger, with no graph-coupled exporter copied and no omitted clock/reset
     transport metadata silently defaulted.
+
+## R15. Step 2 — clock-domain resolution
+
+R13.4 step 2, implemented. The scan now **owns** clock provenance: it resolves
+every committing state element to a domain, stores the ordinal, and the emitter
+formats what it is given. The emitter never consults HHDS and never
+reconstructs a domain.
+
+Landed across the stage boundary R13.3 specifies:
+
+| Stage | File | What it carries |
+| --- | --- | --- |
+| scan | `design_scan.{hpp,cpp}` | `ClockDomain{key,name,rising,implicit}`, `DesignScan::clocks`, `Flop::clock_ordinal`, `MemoryPort::{clock_ordinal,has_domain}`, `Memory::clock_ordinal` |
+| IR | `certificate_ir.{hpp,cpp}` | `CertClock`, `FlopDriver::{clock,async_reset}`, `MemoryDriver::clock` |
+| lowering | `memory_lowering.cpp` | synthetic sync-read flops inherit their **port's** domain, never async |
+| emit | `emit_design_cert.cpp` | `clocks := #[…]`, per-flop `clock`/`asyncReset`, per-memory `clock` |
+
+### R15.1 Everything fails closed
+
+A domain that cannot be resolved is refused **by name**, never defaulted to
+ordinal 0. The asymmetry matters: a wrong merge is invisible downstream — two
+elements placed in one domain commit together forever after, and the certificate
+proves that behaviour faithfully.
+
+| Refused | Why it cannot be a domain |
+| --- | --- |
+| unresolvable cone | the certificate cannot name what the element commits on |
+| falling edge (cone form) | an inversion carried in the cone, not on the `posclk` pin |
+| unnormalized clock gate | accepting the root would **drop the enables** |
+| constant clock | the element never commits, or always does |
+| opaque root | neither a design input nor a net any state element clocks on |
+| multi-bit clock root | the bit cannot be discriminated (R15.3) |
+| memory on two domains | one `MemoryDesc` carries one clock |
+
+**`commit_class_of` is not a refusal oracle, and assuming it was would have been
+the quiet failure here.** It reports a commit *class*, and for a flop it sets
+`role = Clock` unconditionally — "a flop's `clock_pin` cone IS a clock by
+definition of the pin". The cone walk behind it (`resolve_phase`) **stops at a
+constant and returns the constant as the net** rather than failing, so a flop
+clocked by a literal comes back with a perfectly well-formed `Commit_class`.
+Constant and opaque roots are therefore refused explicitly, in
+`clock_root_validity_refusal`, because nothing upstream refuses them.
+
+### R15.2 The implicit-domain join runs before any rejection
+
+A memory whose write port names `clk` and whose read port names nothing is not a
+two-domain memory: the unnamed port is on the module's implicit clock, which in
+a design with exactly **one** explicit domain is that same clock. Joining it is
+correct; rejecting it as "more than one domain" would refuse an ordinary cell.
+
+The join is only justified when the explicit domain is **unique**. With two
+explicit domains there is nothing to join an implicit port to without guessing
+which, so the implicit entry is retained and the common-domain check refuses the
+memory — the honest outcome, and the rule R13.3 states.
+
+### R15.3 Bus bits are refused, not preserved — and the earlier note was backwards
+
+`net_key()` names a graph input by its **name**, and `control_root` follows every
+`Get_mask` to the whole input, so `clks[0]` and `clks[1]` produce the **same
+key**. An earlier comment in `design_scan.hpp` claimed `net_key()` distinguishes
+them; it is exactly the opposite, and that note has been corrected.
+
+`pass/single_edge` tracks the selected bit separately (`clock_bit_on`) and
+refuses what it cannot decide, but that walker is file-local there. Rather than
+duplicate a parity-sensitive cone walk — the mistake `latch_contract.hpp` warns
+about in as many words, since a parity bit counted in two places is how a double
+negation survives — the scanner **refuses a multi-bit clock root outright**.
+R13.3 permits exactly that: preserve bit discrimination or refuse, never merge.
+A one-bit root has no ambiguity to preserve, which covers the whole current
+corpus. Preserving the bit is the stronger option and is not implemented.
+
+### R15.4 A refusal that did not fire on its own test
+
+`clock_root_bit_refusal` first read the width with the one-argument
+`bits_of(pin)`. That returns 0 whenever the width lives on the IO declaration
+rather than the pin — which is the normal case — so the refusal **never fired**,
+including on the unit test written to prove it fires. It now reads
+`ctx.input_width`, the same source the scan uses for every other input width.
+
+This is worth recording because the failure mode is the one this whole section
+is about: a guard that silently never runs is indistinguishable from a guard
+that always passes, and only a test that *expects the refusal* catches it. The
+test was written first and failed; that is why the bug is in this paragraph
+rather than in the corpus.
+
+### R15.5 The corpus contains a real two-domain design, and the old default was wrong on it
+
+`intpipe_csr_msgs` resolves **two** clocks:
+
+```
+clocks := #[ { name := "clk_i" }, { name := "clk_wr_i" } ]
+```
+
+with **51 flops on `clk_i`**, **2 flops on `clk_wr_i`**, and its memory on
+`clk_wr_i` as well:
+
+```
+{ aw := 1, dw := 60, nextImg := 3380, clock := 1 }
+```
+
+What this does and does not say. The old exported `_step` **advanced every state
+element on each call** — it had no clock concept, so there was no binding of
+ordinal 0 to `clk_i` or to anything else, and it is wrong to describe the old
+model as having committed these elements "on `clk_i`'s edge". It committed them
+unconditionally, as it did every other element.
+
+What the two-domain metadata adds is the ability for a **clock-sensitive caller**
+to advance `clk_i` and `clk_wr_i` independently. `allEdges` continues to fire
+every domain, so the exported compatibility step keeps exactly the old schedule
+and R13.1's conservativity argument is untouched. The gain is that the
+distinction now *exists* in the certificate: before, a caller had no way to
+express it, and a design with two genuinely separate clocks was
+indistinguishable from one with a single clock.
+
+It is also the first exercise of the memory path: the memory's committing port
+resolves to `clk_wr_i`, independently of the flops, and the common-domain check
+accepts it because every committing port agrees.
+
+The awkward part: `intpipe_csr_msgs` is also one of the 18 modules the mask
+gate flags (R14.4), so it is currently refused before typecheck and cannot be
+proven. The only genuinely two-domain design in the corpus is blocked behind a
+gate that the evidence suggests is over-broad for that operand position, which
+raises that item's priority (R14.9 item 1).
+
+### R15.6 `SWEEP_multiclock6` cannot be the acceptance gate
+
+R13.4 names `SWEEP_multiclock6` as step 2's gate. It cannot serve as one today: **no member of it
+produces a certificate**, so none exercises the resolver's output.
+
+These rows are the **historical** D2-era inventory
+([SWEEP_multiclock6.tsv](SWEEP_multiclock6.tsv)), not fresh results from this
+master:
+
+| Module | Where it stops (historical) |
+| --- | --- |
+| `intpipe_csr_file` | reaches `pass.lean`, then TIMEOUT in emission (2 h, 4.5 GB) |
+| `intpipe_mul_div_top` | accepted on D2; refused here by `single_edge` (enable-latch) |
+| `intpipe_top` | `single_edge`: coincident commit edge |
+| `core_top` | `single_edge`: memory-type-unsupported (type=24) |
+| `vpu_ctrl` | `single_edge`: memory-latch-array |
+| `minion_frontend` | `single_edge`: memory-type-unsupported (type=24) |
+
+Five stop **before** `pass.lean`. `intpipe_csr_file` is the exception: it reaches
+`pass.lean` and dies in emission on scale, which is a different wall and not a
+clock question at all.
+
+Worse for the gate's purpose: the inventory's own notes record that four of the
+six resolve to **one** clock domain once `single_edge` folds their gated clocks.
+Only `vpu_ctrl` is "genuinely two clocks" (`clock_sec` 600 flops, `clock_aon`
+185), and it is refused for a memory reason, not a clock one. A gate made of
+modules that never reach the code under test, most of which are single-domain
+anyway, cannot distinguish a correct resolution from a plausible-looking merge.
+
+`intpipe_csr_msgs` (R15.5) is a better fixture than any of the six: it is
+genuinely two-domain, it reaches the scanner, and it resolves correctly. It is
+not in the inventory. The acceptance gate for step 2 should be **extended** with
+modules that actually reach `pass.lean` — `intpipe_csr_msgs` first, once the
+const-width gate stops refusing it. The six existing rows and their required
+dispositions are **kept**, not replaced: each still records a real upstream
+refusal that must not silently start passing.
+
+### R15.7 Tests
+
+`DesignScanClocks.*` in `pass/lean/design_scan_test.cpp`, every one about a
+refusal or an ordinal:
+
+- independent clocks get **distinct** ordinals, all in range;
+- two flops on one net **share** an ordinal (the converse failure: a resolver
+  giving each flop its own domain stops any two from ever committing together);
+- ordinals are **deterministic** across two scans of the same design, and the
+  table is sorted by structural key;
+- the **implicit** clock is a real domain, not an unresolved cone;
+- a **multi-bit** root is refused;
+- a **constant** clock is refused;
+- an **unconventionally named** clock (`tick_strobe`) still resolves — the name
+  fallback in `Design_clocks` is for designs that wire no flop to an input, and
+  must not become a requirement;
+- a combinational design still gets a clock table, so `_clock_bounds` is
+  discharged against something real rather than a field default;
+- resolved ordinals and the table **reach the certificate** — resolving
+  correctly and dropping the result is indistinguishable from not resolving.
+
+All `//pass/lean:*` tests pass.
+
+Beyond the unit tests, one invariant is checked across the whole emitted corpus
+rather than on fixtures. R13.3 requires the commit-side `FlopDesc.asyncReset`
+to agree with the read-side `SourceDesc.flopQAsync` — the Lean checker calls a
+disagreement `asyncFlagMismatch`, and the two are written by different code
+paths (`certificate_ir.cpp`'s `dep` for the source, the flop driver for the
+commit), so agreement is not structural. Across **81 emitted artifacts**, of
+which **11 contain at least one asynchronous flop**, there are **zero**
+mismatches in either direction.
+
+### R15.8 Regression: zero clock refusals across the corpus
+
+The risk this change carries is not that it fails to resolve a domain — it is
+that one of its seven new refusals fires on a design that previously exported.
+Measured, over the full authoritative CORE-ET manifest plus a CVA6 subset and
+all of DINO:
+
+| Family | Covered | Exported | Clock refusals fired |
+| --- | ---: | ---: | ---: |
+| CORE-ET | 123 of 125 | 77 | **0** |
+| CVA6 subset | 6 committed wrappers | 5 | **0** |
+| DINO | 3 | 3 (all **PROVEN**) | **0** |
+
+**These CORE-ET figures are from the sweep run BEFORE the design-wide join and
+the opaque-root correction** (R15.2, R15.1). They are retained because they are
+what established "no clock refusal fires", which those two changes only make
+stricter in one direction (opaque roots) and more permissive in another (the
+join). A fresh 125-module sweep against the corrected resolver is in flight; its
+table will be committed separately rather than folded in here. DINO was re-run
+against the corrected resolver and still exports all three with a resolved
+`clock` domain.
+
+**Not one of the seven refusals fired anywhere.** Every `EXPORT_FAIL` is a
+pre-existing cause: `single_edge`, a combinational loop, the const-width gate,
+or a `read_slang` failure. `cva6_tlb`, the one CVA6 non-emit, is its usual
+combinational loop.
+
+Four modules changed disposition against the R14 baseline, and all four are the
+**mask-operand** cases of R14.4 — `intpipe_csr_msgs`, `trans_top`, `vpu_ml`,
+`vpu_tensorfma`. That is the gate de-duplication of R14.3 taking effect, not the
+clock work: the CORE-ET path now runs the same gates CVA6 always ran, so these
+four are refused before typecheck instead of reaching a green PROVEN with the
+flag unexamined. All 18 flagged modules are now refused uniformly across both
+families. Given R14.4's finding that the gate is probably over-broad for this
+operand position, uniform refusal is the right state to *investigate* from, but
+it is not a result to leave standing. Nothing else moved.
+
+DINO re-proves with clock metadata emitted: 3/3, `axioms=2/2`, 25.6 s / 20.5 s /
+32.7 s. The emitted flop lines are byte-identical to the pre-step-2 export apart
+from the two new fields, so the resolution added provenance without disturbing
+the model.
+
+A caveat on the CVA6 figure: the 124 generated wrappers lived under `temp/` and
+are gone, so this used the 6 wrappers committed in
+`scripts/cva6_module_wrappers/`. That is enough to show no clock refusal fires
+on CVA6's shape; it is not the 110-module sweep, and re-running that needs the
+wrappers regenerated.
+
+### R15.9 Scope: implemented, **not** accepted
+
+Implemented: owned provenance through all four stages; the `asyncReset` commit
+flag (0 mismatches against `flopQAsync` over 81 artifacts); synthetic sync-read
+flop and ROM domains; deterministic ordinals with unused domains pruned; the
+design-wide implicit join; the memory common-domain restriction; and seven
+refusals, none of which fires anywhere in the corpus.
+
+**This is not an acceptance.** The 13 `DesignScanClocks` tests are about
+ordinals and refusals — which domain an element lands in, and which designs are
+turned away. They say nothing about what the resolved metadata *means* at
+runtime. The gates that would establish that have not been written:
+
+- **independent / quiet / simultaneous edges** — a domain that does not fire
+  must hold its elements, and two domains firing together must behave as both
+  firing;
+- **quiet synchronous vs asynchronous reset and Q reads** — a synchronous reset
+  must hold while its clock is quiet; an asynchronous one must act with no
+  edge, on both the visible Q and the committed state;
+- **memory and synchronous-ROM hold/commit** across quiet and firing domains;
+- **invalid edge vectors and out-of-range ordinals** — `fires` reads only the
+  edge array and will fire a present entry at an undeclared ordinal, so
+  `checkDesign`/`checkRuntime` must be the thing that rejects these;
+- **graph-closed emission** — that the emitter's output depends on nothing but
+  the `CertificateIR` it is handed;
+- **`allEdges` versus the preserved schedule**, on a design with more than one
+  resolved domain.
+
+Every one of these needs a *fresh scanner-produced certificate* driven through
+Lean, not a C++ unit test. Until they exist, R15 is an implementation with a
+no-regression result, and the clock semantics are unvalidated.
+
+Also not implemented: **bus-bit preservation** (refused instead, R15.3) and the
+**IO/clock sidecar** — ordinal mapping, `runtime_input_arity`, `used_by_model`,
+and the ignored-input / ordinal-gap distinction. Both remain open, and the
+sidecar is explicitly incomplete rather than deferred-by-silence.
+
+No upstream contract was touched. `pass.single_edge`, native LEC and the graph
+contracts are unchanged, and nothing was weakened to make an export pass.

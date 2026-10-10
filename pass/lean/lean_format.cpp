@@ -16,6 +16,34 @@ const std::unordered_set<std::string> kLeanReserved = {
     "theorem", "then",      "true", "universe", "variable", "where",    "with",
 };
 
+std::string lean_string(std::string_view text) {
+  std::string out;
+  out.reserve(text.size() + 2);
+  out.push_back('"');
+  for (unsigned char c : text) {
+    switch (c) {
+      case '"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '\t': out += "\\t"; break;
+      default:
+        // Anything else non-printable becomes an escape rather than a raw byte:
+        // a clock root key can carry the \x01/\x02 sentinels latch_contract
+        // uses, and a raw control byte in a source file is not portable.
+        if (c < 0x20 || c == 0x7f) {
+          char buf[16];
+          std::snprintf(buf, sizeof(buf), "\\x%02x", c);
+          out += buf;
+        } else {
+          out.push_back(static_cast<char>(c));
+        }
+    }
+  }
+  out.push_back('"');
+  return out;
+}
+
 std::string sanitize_lean(std::string_view name) {
   std::string out;
   out.reserve(name.size() + 4);
