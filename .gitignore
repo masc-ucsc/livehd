@@ -77,3 +77,9 @@ generated/master_port/
 # A real design's certificate literal is megabytes of array elements; the
 # generator is tracked, its output is not.
 /formal/lean/Sims/
+
+# Locally provisioned validation tools (pinned Icarus Verilog, built from
+# source into the project). The FINGERPRINT.txt that records the pinned tag,
+# commit and binary hashes is what belongs in the ledger; a built toolchain
+# does not belong in the repository.
+/generated/validation-tools/
