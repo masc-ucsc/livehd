@@ -142,7 +142,7 @@ def prove(label, directory):
 work = root / "incremental"
 write_design()
 cold, cold_report = cold_run("cold", work)
-assert (len(cold_report["regions"]) > 1) == (per_definition or per_occurrence), cold_report["regions"]
+assert len(cold_report["regions"]) > 1, cold_report["regions"]
 prove("cold-oracle", work)
 for label in ("warm1", "warm2", "comment"):
     if label == "comment":
@@ -168,8 +168,8 @@ prove("fresh-oracle", fresh)
 # Reusing unchanged regions must yield the same design as a fresh run.
 assert costs(edited_report) == costs(fresh_report), (costs(edited_report), costs(fresh_report))
 assert mapped(edited) == mapped(fresh_value), (edited["qor"]["abc"], fresh_value["qor"]["abc"])
-# A semantic edit invalidates the only virtual-flat color in the default case.
-# Definition boundaries and occurrence colors leave unchanged regions reusable.
+# Shared definitions remain synthesis units in the default flow too.
+# Editing one occurrence leaves the unchanged implementation reusable.
 evidence = ("edited", summary(edited_report), "cold", summary(cold_report), edited_report["cache"])
 reused = [row for row in edited_report["regions"] if row["cache_reused"]]
 if per_occurrence:
@@ -178,7 +178,7 @@ if per_occurrence:
     untouched = [row for row in edited_report["regions"] if (row["module"], row["artifact"]["path"]) in decisions(cold_report)]
     assert untouched, evidence
     assert all(row["cache_reused"] and row["cache_key"] == keys(cold_report)[row["module"]] for row in untouched), evidence
-assert bool(reused) == (per_definition or per_occurrence), evidence
+assert reused, evidence
 if per_definition:
     # The unedited FLIP=0 specialization is renamed once the FLIP=1 one
     # appears; its decision must still come from the cold entry.

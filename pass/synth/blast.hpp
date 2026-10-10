@@ -82,11 +82,14 @@ struct Blast_options {
       {false, false, false},
       {false, false, false}
   };
-  bool verbose = false;
+  bool                             verbose      = false;
   // Targeted CLI choices beat source hints; global defaults do not.
-  bool source_adder = true, source_multiplier = true, source_barrel = true;
-  bool usyn = false;
-
+  bool                             source_adder = true, source_multiplier = true, source_barrel = true, source_block = true;
+  bool                             usyn = false;
+  // Freeze inherited concrete defaults while a local explicit auto is tuned.
+  std::optional<arith::Adder_kind> inherited_adder;
+  std::optional<arith::Mult_kind>  inherited_multiplier;
+  std::optional<bool>              inherited_barrel;
 
   // Snapshot source semantics independently of mapping. Expanded memories use
   // their structural memory_module attribute; other special scopes are explicit.
@@ -194,23 +197,52 @@ public:
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 template <class Ops, class ReadBit, class Slots, class Refuse, class RefuseShift>
-void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops, const ReadBit& abc_bit, const Blast_options& defaults,
-                const livehd::partition::Region_body& rb, const absl::flat_hash_set<hhds::Node_class>& region, const Refuse& refuse,
-                const RefuseShift& refuse_shift_amount) {
-  auto opts_ = defaults;
-  if (auto a=n.attr(livehd::attrs::synth_policy);a.has()) {
-    const auto p=livehd::synth_attr::read(a.get());
-    const auto adder=livehd::synth_attr::get(p,"adder");
-    if (opts_.source_adder && !adder.empty() && adder!="auto") {
-      opts_.adder=*arith::parse_adder_kind(adder);
-      opts_.sum_adder.reset();opts_.comparator_adder.reset();opts_.multiplier_adder.reset();
+void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops, const ReadBit& abc_bit,
+                const Blast_options& defaults, const livehd::partition::Region_body& rb,
+                const absl::flat_hash_set<hhds::Node_class>& region, const Refuse& refuse, const RefuseShift& refuse_shift_amount) {
+  auto       opts_            = defaults;
+  const auto policy_attribute = n.attr(livehd::attrs::synth_policy);
+  const auto node_policy = policy_attribute.has() ? livehd::synth_attr::read(policy_attribute.get()) : livehd::synth_attr::Policy{};
+  if (opts_.inherited_adder && livehd::synth_attr::get(node_policy, "adder") != "auto") {
+    opts_.adder     = *opts_.inherited_adder;
+    opts_.sum_adder = opts_.comparator_adder = opts_.multiplier_adder = opts_.adder;
+    opts_.sum_adder_min_width = opts_.comparator_adder_min_width = 0;
+  }
+  if (opts_.inherited_multiplier && livehd::synth_attr::get(node_policy, "multiplier") != "auto") {
+    opts_.multiplier = *opts_.inherited_multiplier;
+  }
+  if (opts_.inherited_barrel && livehd::synth_attr::get(node_policy, "barrel") != "auto") {
+    opts_.reverse_barrel = *opts_.inherited_barrel;
+  }
+  if (policy_attribute.has()) {
+    const auto adder = livehd::synth_attr::get(node_policy, "adder");
+    if (opts_.source_adder && !adder.empty() && adder != "auto") {
+      opts_.adder               = *arith::parse_adder_kind(adder);
+      opts_.sum_adder           = opts_.adder;
+      opts_.comparator_adder    = opts_.adder;
+      opts_.multiplier_adder    = opts_.adder;
+      opts_.sum_adder_min_width = opts_.comparator_adder_min_width = 0;
     }
-    const auto mult=livehd::synth_attr::get(p,"multiplier");
-    if (opts_.source_multiplier && !mult.empty() && mult!="auto") opts_.multiplier=*arith::parse_mult_kind(mult);
-    const auto barrel=livehd::synth_attr::get(p,"barrel");
-    if (opts_.source_barrel && !barrel.empty() && barrel!="auto") opts_.reverse_barrel=barrel=="reverse";
-    if (auto b=p.find("block_size");b!=p.end()) opts_.block_size=std::stoi(b->second.value);
-    if (opts_.usyn && p.contains("abc")) refuse(n,"synth-abc-usyn","unsupported","synth.abc cannot be honored by USYN","remove synth.abc or select the ABC mapper",hhds::Pin_class{},std::string_view{});
+    const auto mult = livehd::synth_attr::get(node_policy, "multiplier");
+    if (opts_.source_multiplier && !mult.empty() && mult != "auto") {
+      opts_.multiplier = *arith::parse_mult_kind(mult);
+    }
+    const auto barrel = livehd::synth_attr::get(node_policy, "barrel");
+    if (opts_.source_barrel && !barrel.empty() && barrel != "auto") {
+      opts_.reverse_barrel = barrel == "reverse";
+    }
+    if (auto b = node_policy.find("block_size"); opts_.source_block && b != node_policy.end()) {
+      opts_.block_size = std::stoi(b->second.value);
+    }
+    if (opts_.usyn && node_policy.contains("abc")) {
+      refuse(n,
+             "synth-abc-usyn",
+             "unsupported",
+             "synth.abc cannot be honored by USYN",
+             "remove synth.abc or select the ABC mapper",
+             hhds::Pin_class{},
+             std::string_view{});
+    }
   }
   namespace gu             = livehd::graph_util;
   using Bit                = decltype(ops.zero());

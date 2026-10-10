@@ -38,12 +38,12 @@
 #include "lnast_ntype.hpp"
 #include "mask_eval.hpp"
 #include "node_util.hpp"
-#include "synth_policy.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "port_reach.hpp"
 #include "range_bits.hpp"
 #include "split_selfref.hpp"
+#include "synth_policy.hpp"
 
 namespace {
 
@@ -1252,8 +1252,8 @@ private:
   // non-zero gets livehd::attrs::color, which pass.partition/pass.abc turn
   // into a per-region mapping unit. region_abc_ collects the per-color ABC
   // flow payloads for the coloring_info "region_opts" member.
-  livehd::synth_attr::Policy cur_synth_;
-  std::map<std::string, livehd::synth_attr::Policy> synth_targets_;
+  livehd::synth_attr::Policy                            cur_synth_;
+  std::map<std::string, livehd::synth_attr::Policy>     synth_targets_;
   int32_t                                               cur_color_ = 0;
   std::map<int32_t, std::string>                        region_abc_;
   std::map<int32_t, std::map<std::string, std::string>> region_options_;
@@ -1329,7 +1329,9 @@ private:
     if (cur_srcid_ != hhds::SourceId_invalid) {
       n.attr(hhds::attrs::srcid).set(cur_srcid_);
     }
-    if (!cur_synth_.empty()) n.attr(livehd::attrs::synth_policy).set(livehd::synth_attr::write(cur_synth_));
+    if (!cur_synth_.empty()) {
+      n.attr(livehd::attrs::synth_policy).set(livehd::synth_attr::write(cur_synth_));
+    }
     if (cur_color_ != 0) {
       livehd::graph_util::set_color(n, cur_color_);
       region_colors_stamped_.insert(cur_color_);
@@ -1767,16 +1769,21 @@ private:
     const auto synth_key = lnast_->get_name(key_n);
     if (synth_key == "__synth_scope") {
       auto val = lnast_->get_sibling_next(key_n);
-      if (!val.is_invalid()) livehd::synth_attr::overlay(cur_synth_,livehd::synth_attr::decode(lnast_->get_name(val)));
+      if (!val.is_invalid()) {
+        livehd::synth_attr::overlay(cur_synth_, livehd::synth_attr::decode(lnast_->get_name(val)));
+      }
       return;
     }
     if (synth_key.starts_with("synth.")) {
       const auto val = lnast_->get_sibling_next(key_n);
-      if (val.is_invalid()) error_at(nid,"synthesis attribute needs a value");
+      if (val.is_invalid()) {
+        error_at(nid, "synthesis attribute needs a value");
+      }
       const std::string key{synth_key.substr(6)};
-      const auto value = livehd::synth_attr::literal(lnast_->get_name(val));
-      livehd::synth_attr::validate(key,value);
-      synth_targets_[std::string(lnast_->get_name(tgt))][key] = {value,4};
+      const auto        value = livehd::synth_attr::literal(lnast_->get_name(val));
+      livehd::synth_attr::validate(key, value);
+      synth_targets_[std::string(lnast_->get_name(tgt))][key]             = {value, 4};
+      synth_targets_[std::string(lnast_->get_name(tgt))]["_anchor_srcid"] = {std::to_string(cur_srcid_), 4};
       return;
     }
     if (lnast_->get_name(key_n) == "__region" || lnast_->get_name(key_n) == "__region_ware"
@@ -1932,35 +1939,108 @@ private:
   // for pass.abc. Emitted only when at least one annotated block exists, so
   // ordinary compiles keep no coloring_info.
   void apply_synth_targets() {
+    std::map<std::string, std::vector<Pin>>            target_roots;
+    absl::flat_hash_map<hhds::Node_class, std::string> anchor_owner;
+    // Establish every declaration anchor before walking any cone. Source-name
+    // ordering must never decide whether a later explicit boundary survives.
     for (const auto& [target, hints] : synth_targets_) {
-      std::vector<Pin> roots;
-      auto base = target.substr(0,target.find("___ssa_"));
-      for (const auto& [name,pin] : pin_map_) {
-        if (name == target || name.substr(0,name.find("___ssa_")) == base) roots.push_back(pin);
+      auto&      roots = target_roots[target];
+      const auto base  = target.substr(0, target.find("___ssa_"));
+      for (const auto& [name, pin] : pin_map_) {
+        if (name == target || name.substr(0, name.find("___ssa_")) == base) {
+          roots.push_back(pin);
+        }
       }
-      if (auto it=logical_last_.find(base);it!=logical_last_.end()) roots.push_back(it->second.first);
-      absl::flat_hash_set<hhds::Node_class> seen;
-      for (size_t i=0;i<roots.size();++i) {
-        auto pin=roots[i];
-        if (pin.is_invalid() || pin.is_const() || livehd::graph_util::is_graph_input_pin(pin)) continue;
-        auto node=pin.get_master_node();
-        if (!seen.insert(node).second) continue;
-        auto a=node.attr(livehd::attrs::synth_policy);
-        auto policy=a.has()?livehd::synth_attr::read(a.get()):livehd::synth_attr::Policy{};
-        const auto old_path=livehd::synth_attr::path(policy), new_path=livehd::synth_attr::path(hints);
-        if (!old_path.empty() && !new_path.empty() && old_path!=new_path && policy.at("color").rank>=4) {
-          warn_at(Lnast_nid{}, {"synth-anchor-conflict","unsupported"}, "synthesis anchor '{}' meets another explicit group; preserving the existing boundary",target);
+      if (auto it = logical_last_.find(base); it != logical_last_.end()) {
+        roots.push_back(it->second.first);
+      }
+      for (auto pin : roots) {
+        if (pin.is_invalid() || pin.is_const() || livehd::graph_util::is_graph_input_pin(pin)) {
           continue;
         }
-        livehd::synth_attr::overlay(policy,hints);
-        node.attr(livehd::attrs::synth_policy).set(livehd::synth_attr::write(policy));
-        // Follow D, never Q's consumers. Clock/reset/stall remain separate.
-        for (auto sink:node.inp_sorted_pins()) {
-          if (node.is_loop_break() && sink.get_port_id()!=3) continue;
-          auto drv=sink.get_driver_pin();
-          if (!drv.is_invalid() && !drv.is_const() && drv.get_master_node().is_loop_break()) continue;
+        auto node   = pin.get_master_node();
+        auto a      = node.attr(livehd::attrs::synth_policy);
+        auto policy = a.has() ? livehd::synth_attr::read(a.get()) : livehd::synth_attr::Policy{};
+        if (auto it = anchor_owner.find(node); it != anchor_owner.end() && it->second != target) {
+          for (const auto& [key, hint] : hints) {
+            auto old = policy.find(key);
+            if (key.starts_with("_") || old == policy.end() || old->second.value == hint.value) {
+              continue;
+            }
+            error_at(Lnast_nid{},
+                     "indivisible synthesis anchors '{}' and '{}' conflict on synth.{} (SourceIds {} and {})",
+                     it->second,
+                     target,
+                     key,
+                     livehd::synth_attr::get(policy, "_anchor_srcid"),
+                     livehd::synth_attr::get(hints, "_anchor_srcid"));
+          }
+        }
+        anchor_owner[node] = target;
+        livehd::synth_attr::overlay(policy, hints);
+        a.set(livehd::synth_attr::write(policy));
+      }
+    }
+    for (const auto& [target, hints] : synth_targets_) {
+      auto                                  roots      = target_roots[target];
+      const auto                            root_count = roots.size();
+      absl::flat_hash_set<hhds::Node_class> seen;
+      size_t                                attributed = 0;
+      for (size_t i = 0; i < roots.size(); ++i) {
+        auto pin = roots[i];
+        if (pin.is_invalid() || pin.is_const() || livehd::graph_util::is_graph_input_pin(pin)) {
+          continue;
+        }
+        auto node = pin.get_master_node();
+        if (!seen.insert(node).second) {
+          continue;
+        }
+        auto       a        = node.attr(livehd::attrs::synth_policy);
+        auto       policy   = a.has() ? livehd::synth_attr::read(a.get()) : livehd::synth_attr::Policy{};
+        const auto old_path = livehd::synth_attr::path(policy), new_path = livehd::synth_attr::path(hints);
+        if (i >= root_count) {
+          if (!old_path.empty() && !new_path.empty() && old_path != new_path) {
+            warn_at(Lnast_nid{},
+                    {"synth-anchor-conflict", "unsupported"},
+                    "synthesis anchor '{}' stops at group {} (requested {}; SourceIds {} and {})",
+                    target,
+                    old_path,
+                    new_path,
+                    livehd::synth_attr::get(policy, "_anchor_srcid"),
+                    livehd::synth_attr::get(hints, "_anchor_srcid"));
+            continue;
+          }
+          // An upstream variable keeps its own implementation choices, even
+          // when both anchors request one color. No duplication or trial is
+          // allowed to resolve contradictory ownership of a shared producer.
+          if (auto it = anchor_owner.find(node); it != anchor_owner.end() && it->second != target) {
+            continue;
+          }
+        }
+        ++attributed;
+        livehd::synth_attr::overlay(policy, hints);
+        a.set(livehd::synth_attr::write(policy));
+        for (auto sink : node.inp_sorted_pins()) {
+          if (node.is_loop_break() && sink.get_port_id() != 3) {
+            continue;
+          }
+          auto drv = sink.get_driver_pin();
+          if (!drv.is_invalid() && !drv.is_const() && drv.get_master_node().is_loop_break()) {
+            continue;
+          }
           roots.push_back(drv);
         }
+      }
+      if (!attributed && hints.contains("color")) {
+        warn_at(Lnast_nid{},
+                {"synth-empty-anchor", "unsupported"},
+                "synthesis anchor '{}' has no hardware to synthesize (SourceId {})",
+                target,
+                livehd::synth_attr::get(hints, "_anchor_srcid"));
+        auto a                      = g_->get_input_node().attr(livehd::attrs::synth_policy);
+        auto policy                 = a.has() ? livehd::synth_attr::read(a.get()) : livehd::synth_attr::Policy{};
+        policy["_elided_" + target] = {livehd::synth_attr::quote(livehd::synth_attr::write(hints)), 4};
+        a.set(livehd::synth_attr::write(policy));
       }
     }
   }
@@ -2579,10 +2659,10 @@ private:
       }
       const auto lane = output_lane_text(name, std::distance(it->second.begin(), miss));
       auto       d    = locate_record(decl,
-                                      livehd::diag::Severity::error,
-                                      "undriven-output",
-                                      "type",
-                                      std::format("lane {} of output `{}` is never driven", lane.what, name));
+                             livehd::diag::Severity::error,
+                             "undriven-output",
+                             "type",
+                             std::format("lane {} of output `{}` is never driven", lane.what, name));
       d.hint = std::format("every bit of a value built from pieces must be driven: write `{}{}`, or give `{}` a whole value first",
                            name,
                            lane.index,
@@ -6462,12 +6542,12 @@ private:
       } else if (!mi.is_array) {
         // A file preload initializes persistent contents, but an unwritten
         // array has only asynchronous reads. It needs no clock connection.
-        const auto  init_sink         = driven_sink_at(mi.node, Ntype::get_sink_pid(Ntype_op::Memory, "initial"));
-        const auto  init              = init_sink.is_invalid() ? Pin{} : init_sink.get_driver_pin();
-        const bool  read_only_preload = mi.n_user_wr == 0 && !mi.has_update && !mi.reset_init && !mi.is_pub && init.is_const()
-                                        && livehd::graph_util::const_of(init).is_string()
-                                        && hlop::memory_image(livehd::graph_util::const_of(init).to_string()).has_value();
-        bool        posclk_val        = true;
+        const auto init_sink         = driven_sink_at(mi.node, Ntype::get_sink_pid(Ntype_op::Memory, "initial"));
+        const auto init              = init_sink.is_invalid() ? Pin{} : init_sink.get_driver_pin();
+        const bool read_only_preload = mi.n_user_wr == 0 && !mi.has_update && !mi.reset_init && !mi.is_pub && init.is_const()
+                                       && livehd::graph_util::const_of(init).is_string()
+                                       && hlop::memory_image(livehd::graph_util::const_of(init).to_string()).has_value();
+        bool        posclk_val = true;
         std::string clock_pin_name;
         if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
           if (auto cit = pit->second.find("clock_pin"); cit != pit->second.end()) {
@@ -8288,7 +8368,9 @@ private:
         }
         const auto key = lnast_->get_name(an);
         if (key == "__synth_call") {
-          if (auto v=lnast_->get_sibling_next(an);!v.is_invalid()) sub.attr(livehd::attrs::synth_policy).set(livehd::synth_attr::write(livehd::synth_attr::decode(lnast_->get_name(v))));
+          if (auto v = lnast_->get_sibling_next(an); !v.is_invalid()) {
+            sub.attr(livehd::attrs::synth_policy).set(livehd::synth_attr::write(livehd::synth_attr::decode(lnast_->get_name(v))));
+          }
           continue;
         }
         if (key != "__inst_name" && key != "__inst_suffix") {
@@ -8409,7 +8491,7 @@ private:
           = std::find_if(cio.inputs.begin(), cio.inputs.end(), [&](const auto& e) { return canon_io_name(e.name) == pname; });
       const bool tuple_array = input != cio.inputs.end() && input->array_size > 0 && Lnast_ntype::is_ref(lnast_->get_type(val))
                                && tuple_recs_.contains(std::string(lnast_->get_name(val)));
-      auto       v           = tuple_array ? whole_array_value(val, array_view_of(*input), pname) : leaf(val);
+      auto v = tuple_array ? whole_array_value(val, array_view_of(*input), pname) : leaf(val);
       // Generated activation-capable definitions expose `__valid` for
       // source-visible side effects. An unconditional call passes true; a call
       // under if/match conjoins the caller path so nested activation composes.
@@ -9173,9 +9255,9 @@ private:
     // instance-name attr so cgen can fold it into the assertion message.
     // The attr is the WHOLE message: the array-index guard below shares the
     // primitive, and cgen used to prefix every lgassert with this one's text.
-    const auto  sp  = lnast_->span_of(loc_nid);
-    std::string loc = "descending bit-range select (hi < lo) at ";
-    loc += sp.file.empty() ? std::string{"?"} : sp.file;
+    const auto  sp   = lnast_->span_of(loc_nid);
+    std::string loc  = "descending bit-range select (hi < lo) at ";
+    loc             += sp.file.empty() ? std::string{"?"} : sp.file;
     if (sp.start_line) {
       loc += ":" + std::to_string(*sp.start_line);
     }
@@ -13600,10 +13682,10 @@ void check_foreign_instances(hhds::GraphLibrary& lib, const hhds::GraphIO& gio, 
       const auto now = name_at(input ? gio.get_input_pin_decls() : gio.get_output_pin_decls(), pid);
       if (!stale && was != now) {
         stale = Stale_instance{.callee = std::string(gio.get_name()),
-                               .caller = std::string(caller->get_name()),
-                               .pid    = pid,
-                               .was    = std::string(was),
-                               .now    = std::string(now)};
+                                                  .caller = std::string(caller->get_name()),
+                                                  .pid    = pid,
+                                                  .was    = std::string(was),
+                                                  .now    = std::string(now)};
       }
     };
     for (auto node : caller->body().nodes()) {

@@ -71,6 +71,8 @@ cc_library(
         "//pass/bitwidth:pass_bitwidth",
         "//pass/cost:host_mem",
         "//pass/liberty:liberty_dff",
+        "//pass/liberty:pass_liberty",
+        "//pass/lec:lec_query",
         "//pass/partition:pass_partition",
         "//pass/semdiff:semdiff",
         "//pass/formal:formal",

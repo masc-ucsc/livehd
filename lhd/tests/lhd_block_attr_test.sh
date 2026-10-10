@@ -106,7 +106,7 @@ def synth(name, attrs, *opts):
     d = w/name; d.mkdir(exist_ok=True)
     source = d/'abc_ware_attr.prp'
     source.write_text(fixture.replace('color=2, ware=true, delay=500',attrs))
-    j = run('synth',source,'--top',top,'--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
+    j = run('synth',source,'--top',top,'--set',f'synth.liberty={lib}','--set','synth.opentimer=false','--set','synth.tune.profile=on',
             '--workdir',d/'work','--emit-dir',f'lg:{d}/net', '--emit',f'verilog:{d}/mapped.v',*opts)
     rows = j['qor']['abc']['regions']
     assert len(rows)==2 and all(r['color']==2 for r in rows), rows
@@ -147,7 +147,7 @@ source.write_text("""mod mixed(a:U64,b:U64,c:U64,d:U64) -> (y:U1@[0],z:U1@[0]) {
 }
 """)
 j=run('synth',source,'--top','mixed.mixed','--set',f'synth.liberty={lib}',
-      '--set','synth.opentimer=false','--workdir',d/'work','--emit-dir',f'lg:{d}/net')
+      '--set','synth.opentimer=false','--set','synth.tune.profile=on','--workdir',d/'work','--emit-dir',f'lg:{d}/net')
 rows={r['color']:r for r in j['qor']['abc']['regions'] if r['module'].startswith('__ware_lt_')}
 assert rows[2]['ware_trials']==0 and rows[3]['ware_trials']>0,rows
 assert rows[3]['delay'] < rows[2]['delay'],rows

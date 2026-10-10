@@ -55,7 +55,12 @@ public:
   // flattening: the scorer keeps distinct occurrence contexts across modules.
   void optimize_ware(hhds::GraphLibrary& outlib, std::string_view top);
 
-  void save_tuning() { if (opts_.tune_store) opts_.tune_store->save(); }
+  void validate_tuning(const std::function<bool(hhds::Graph*, hhds::Graph*, std::string_view)>& proof);
+  void save_tuning() {
+    if (opts_.tune_store) {
+      opts_.tune_store->save();
+    }
+  }
   void set_outlib(hhds::GraphLibrary* l) { outlib_ = l; }
 
   // Whole-design flatten: the run maps ONE region and the emitted netlist is
@@ -136,16 +141,16 @@ private:
   Ware_score score_ware(hhds::GraphLibrary& outlib, std::string_view top);
   Design_ctx design_ctx();
   void remember_ware(const livehd::partition::Region_body& rb, const Driver_options& options, const Backend_overrides& overrides);
-  std::map<std::string,std::string> tune_keys_;
-  std::vector<Ware_region> ware_regions_;
-  hhds::GraphLibrary       ware_shells_, ware_sources_, ware_pre_;
+  std::map<std::string, std::string> tune_keys_;
+  std::vector<Ware_region>           ware_regions_;
+  hhds::GraphLibrary                 ware_shells_, ware_sources_, ware_pre_;
   // Nodes of INLINED regions whose pre-map snapshot ware_pre_ retains for trial
   // cache reuse (extracted primitives are not counted): bounds that copy.
-  uint64_t                 ware_pre_inlined_nodes_ = 0;
-  bool                     ware_trial_             = false;
-  Backend_overrides        trial_overrides_;  // a ware trial's recorded region overrides
-  std::string              refusal_;
-  std::string              time_refusal_;
+  uint64_t                           ware_pre_inlined_nodes_ = 0;
+  bool                               ware_trial_             = false;
+  Backend_overrides                  trial_overrides_;  // a ware trial's recorded region overrides
+  std::string                        refusal_;
+  std::string                        time_refusal_;
 
   // True (and fills refusal_) when the process has grown past the memory budget
   // while translating `region`. `blasted`/`total` describe how far the
@@ -237,7 +242,7 @@ private:
   // backend's implementation chatter.
   void report_completion(const Region_qor& q);
 
-  uint64_t completed_regions_ = 0;
+  uint64_t completed_regions_           = 0;
   // Allocator housekeeping is rate-limited per completed color: Darwin's
   // maximal malloc-zone relief walks every zone (fragmenting address space when
   // repeated), and glibc's malloc_trim(0) walks the whole heap.

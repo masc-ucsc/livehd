@@ -48,6 +48,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "@rapidjson",
         ":flatten",
         "//graph",
         "//pass/color:pass_color",

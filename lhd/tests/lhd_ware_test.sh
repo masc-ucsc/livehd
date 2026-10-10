@@ -15,7 +15,7 @@ def run(*args):
     return json.loads(result.read_text())
 
 def synth(name, src, *opts):
-    j = run('synth', src, '--top', 'top', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false',
+    j = run('synth', src, '--top', 'top', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false', '--set', 'synth.tune.profile=on',
             '--workdir', w/name, '--emit', f'verilog:{w/name}_mapped.v', '--emit-dir', f'lg:{w/name}-net', *opts)
     return j['qor']['abc']['regions']
 

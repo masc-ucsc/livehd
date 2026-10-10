@@ -19,6 +19,7 @@
 #include "llvm/Support/SHA256.h"
 #include "native_report.hpp"
 #include "provenance.hpp"
+#include "query.hpp"
 #include "resource_budget.hpp"
 #include "tmap.hpp"
 #include "usyn_salt.hpp"
@@ -96,14 +97,27 @@ bool read_options(const Eprp_var& var, Options& options) {
         .emit();
     return false;
   }
-  options.design.multiplier = *multiplier;
-  const auto barrel=var.get_stage("barrel","auto");
-  if (barrel!="auto" && barrel!="log" && barrel!="reverse") {
-    livehd::diag::err("pass.usyn","invalid-options","syntax").msg("barrel must be auto|log|reverse").emit();return false;
+  options.design.multiplier      = *multiplier;
+  options.design.auto_multiplier = multiplier_text == "auto";
+  const auto barrel              = var.get_stage("barrel", "auto");
+  if (barrel != "auto" && barrel != "log" && barrel != "reverse") {
+    livehd::diag::err("pass.usyn", "invalid-options", "syntax").msg("barrel must be auto|log|reverse").emit();
+    return false;
   }
-  options.design.reverse_barrel=barrel=="reverse";
-  if (!var.get_stage("block_size","").empty() && (!parse(var.get_stage("block_size",""),options.design.adder_block)||options.design.adder_block<0)) return false;
-  const auto mux_lowering   = var.get_stage("mux_lowering", "decode");
+  if (const auto text = var.get_stage("region_opts", ""); !text.empty()) {
+    auto parsed = livehd::synth::parse_region_opts(text, "pass.usyn.region_opts");
+    if (!parsed) {
+      return false;
+    }
+    options.design.region_opts = std::move(*parsed);
+  }
+  options.design.reverse_barrel = barrel == "reverse";
+  options.design.auto_barrel    = barrel == "auto";
+  if (!var.get_stage("block_size", "").empty()
+      && (!parse(var.get_stage("block_size", ""), options.design.adder_block) || options.design.adder_block < 0)) {
+    return false;
+  }
+  const auto mux_lowering = var.get_stage("mux_lowering", "decode");
   if (mux_lowering != "decode" && mux_lowering != "tree") {
     livehd::diag::err("pass.usyn", "invalid-options", "syntax")
         .msg("invalid native USYN mux_lowering '{}'", mux_lowering)
@@ -274,16 +288,16 @@ void Pass_usyn::setup() {
   m.add_label_optional("adder",
                        "Native arithmetic: auto (prefix wide sums, comparisons and multiplier carry), rca, cska, cla or prefix",
                        "auto");
-  m.add_label_optional("tune_profile","internal synth.tune.profile","auto");
-  m.add_label_optional("tune_validate","internal synth.tune.validate","structural");
-  m.add_label_optional("tune_file","internal synth.tune.file","");
-  m.add_label_optional("tune_export","internal synth.tune.export","");
-  m.add_label_optional("tune_dir","internal workdir synthesis tune root","");
-  m.add_label_optional("tune_persist","internal lhd.incremental gate","true");
-  m.add_label_optional("tune_attempts","internal synth.tune.attempts","24");
-  m.add_label_optional("tune_time_ms","internal synth.tune.time_ms","60000");
-  m.add_label_optional("barrel","auto|log|reverse shared barrel architecture","auto");
-  m.add_label_optional("block_size","Shared CSKA/CLA width (alias of adder_block)","");
+  m.add_label_optional("tune_profile", "internal synth.tune.profile", "auto");
+  m.add_label_optional("tune_validate", "internal synth.tune.validate", "structural");
+  m.add_label_optional("tune_file", "internal synth.tune.file", "");
+  m.add_label_optional("tune_export", "internal synth.tune.export", "");
+  m.add_label_optional("tune_dir", "internal workdir synthesis tune root", "");
+  m.add_label_optional("tune_persist", "internal lhd.incremental gate", "true");
+  m.add_label_optional("tune_attempts", "internal synth.tune.attempts", "24");
+  m.add_label_optional("tune_time_ms", "internal synth.tune.time_ms", "60000");
+  m.add_label_optional("barrel", "auto|log|reverse shared barrel architecture", "auto");
+  m.add_label_optional("block_size", "Shared CSKA/CLA width (alias of adder_block)", "");
   m.add_label_optional("adder_block", "Native CSKA/CLA group width (0: derive from operating width)", "0");
   m.add_label_optional("multiplier",
                        "Native partial-product summation: csa (carry-save), tree, array or sn (depth-ordered columns)",
@@ -401,6 +415,7 @@ void Pass_usyn::setup() {
   m.add_label_optional("memory_budget_mb", "Invocation memory-growth admission limit in MiB", "16384");
   m.add_label_optional("time_budget_ms", "Invocation wall-time admission limit (0: unlimited)", "0");
   m.add_label_optional("threads", "INTERNAL shared worker setting; USYN currently serializes synthesis", "1");
+  m.add_label_optional("region_opts", "Per-color targeted synthesis options JSON", "");
   m.add_label_optional("library", "INTERNAL Liberty from synth.liberty; required only for tmap=abc", "");
   m.add_label_optional("out", "Output graph-library directory", "");
   m.add_label_optional("qor", "Output report path", "");
@@ -433,6 +448,16 @@ void Pass_usyn::work(Eprp_var& var) {
         .emit();
     return;
   }
+  options.design.tune_profile  = std::string(var.get_stage("tune_profile", "auto"));
+  options.design.tune_validate = std::string(var.get_stage("tune_validate", "structural"));
+  options.design.tune_attempts = static_cast<uint32_t>(std::stoul(std::string(var.get_stage("tune_attempts", "24"))));
+  options.design.tune_time_ms  = std::stoull(std::string(var.get_stage("tune_time_ms", "60000")));
+  options.design.tune_store    = std::make_shared<livehd::synth::Tune_store>(std::string(var.get_stage("tune_dir", "")),
+                                                                          std::string(var.get_stage("tune_file", "")),
+                                                                          std::string(var.get_stage("tune_export", "")),
+                                                                          var.get_stage("tune_persist", "true") != "false",
+                                                                          options.design.tune_profile != "off",
+                                                                          options.design.tune_validate);
   const auto                   requested_top = var.get("top", "");
   std::shared_ptr<hhds::Graph> top;
   for (const auto& graph : var.graphs) {
@@ -545,6 +570,25 @@ void Pass_usyn::work(Eprp_var& var) {
     options.design.cache.context
         += "/native-cost-v1/" + options.design.cost_policy + "/" + identity + "/delay-" + std::to_string(options.mapping.delay_ps);
   }
+  options.design.tune_context = options.tmap + "/delay-" + std::to_string(options.mapping.delay_ps);
+  if (!options.mapping.library.empty()) {
+    std::ifstream           library(options.mapping.library, std::ios::binary);
+    llvm::SHA256            hash;
+    std::array<char, 65536> bytes;
+    while (library) {
+      library.read(bytes.data(), bytes.size());
+      hash.update(llvm::StringRef(bytes.data(), library.gcount()));
+    }
+    if (!library.eof()) {
+      livehd::diag::err("pass.usyn", "tune-library", "io").msg("cannot hash synthesis Liberty").emit();
+      return;
+    }
+    constexpr char hex[] = "0123456789abcdef";
+    for (const auto byte : hash.final()) {
+      options.design.tune_context += hex[byte >> 4];
+      options.design.tune_context += hex[byte & 15];
+    }
+  }
   // A bounded alternative has a fixed share, independent of the first trial's
   // cache hits or search consumption. Reserve publication work in the parent.
   // Source graphs stay immutable; selection/artifacts and mapped output move
@@ -642,6 +686,37 @@ void Pass_usyn::work(Eprp_var& var) {
     livehd::diag::err("pass.usyn", "publication-refused", "unsupported").msg("{}", resources.reason).emit();
     return;
   }
+  if (options.design.tune_profile == "on" && options.design.tune_validate != "structural") {
+    livehd::lec::Lec_options policy;
+    policy.engine            = "ind";
+    policy.timeout           = 20;
+    policy.min_timeout       = 1;
+    policy.hard_timeout_mult = 2;
+    const auto prove         = [&](hhds::Graph* ref, hhds::Graph* impl, std::string_view name) {
+      const auto result = livehd::lec::prove_equal_isolated(ref, impl, policy);
+      const bool proven = result.verdict == livehd::lec::Verdict::Proven && !result.bounded && !result.nothing_compared;
+      std::print("[synth.tune] mapper=usyn validation={} region={} result={}\n",
+                 options.design.tune_validate,
+                 name,
+                 proven                                            ? "proven"
+                         : result.verdict == livehd::lec::Verdict::Refuted ? "refuted"
+                                                                           : "unknown");
+      if (result.verdict == livehd::lec::Verdict::Refuted) {
+        livehd::diag::err("pass.usyn", "synth-tune-refuted", "unsupported").msg("synthesis tuning refuted for {}", name).fatal();
+      }
+      return proven;
+    };
+    if (options.design.tune_validate == "design") {
+      options.design.tune_store->authorize_all(prove(top.get(), selected.design->top.get(), requested_top));
+    } else {
+      for (const auto& [name, key] : selected.design->tune_keys) {
+        auto ref  = selected.design->proof_library.find_io(selected.design->tune_refs[name]),
+             impl = selected.design->library.find_io(name);
+        options.design.tune_store->authorize(key, ref && impl && prove(ref->get_graph().get(), impl->get_graph().get(), name));
+      }
+    }
+  }
+  options.design.tune_store->save();
   const auto artifact_path = fs::path(base + ".usyn.artifacts");
   fs::create_directories(artifact_path);
   std::vector<std::string> artifact_paths;

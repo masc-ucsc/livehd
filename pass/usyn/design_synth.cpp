@@ -3,14 +3,19 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <format>
 #include <fstream>
+#include <print>
 #include <unordered_map>
 
 #include "design_prepare.hpp"
 #include "diag.hpp"
+#include "hash_util.hpp"
 #include "literal_stats.hpp"
 #include "node_util.hpp"
+#include "synth_policy.hpp"
+#include "usyn_salt.hpp"
 
 namespace livehd::usyn {
 namespace {
@@ -178,14 +183,58 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       return;
     }
     synth::Blast_options blast_options;
-    blast_options.usyn       = true;
+    blast_options.usyn           = true;
     blast_options.reverse_barrel = options.reverse_barrel;
-    blast_options.adder      = options.adder;
-    blast_options.block_size = options.adder_block;
-    blast_options.multiplier = options.multiplier;
-    blast_options.mux_tree   = options.mux_tree;
-    blast_options.eq_balance = options.eq_balance;
-    if (options.auto_sum_adder) {
+    blast_options.adder          = options.adder;
+    blast_options.block_size     = options.adder_block;
+    blast_options.multiplier     = options.multiplier;
+    blast_options.mux_tree       = options.mux_tree;
+    blast_options.eq_balance     = options.eq_balance;
+    bool auto_adder = options.auto_sum_adder, auto_multiplier = options.auto_multiplier, auto_barrel = options.auto_barrel;
+    bool allow_tune = true;
+    synth_attr::Policy mapping_policy;
+    for (auto n : rb.nodes) {
+      auto a = n.attr(attrs::synth_policy);
+      if (!a.has()) {
+        continue;
+      }
+      const auto p = synth_attr::read(a.get());
+      if (p.contains("abc")) {
+        fail(Status::invalid, "synth.abc cannot be honored by USYN in " + rb.module_name);
+        return;
+      }
+      for (const auto* key : {"delay", "ware"}) {
+        if (auto hint = p.find(key); hint != p.end()) {
+          auto old = mapping_policy.find(key);
+          if (old != mapping_policy.end() && old->second.rank == hint->second.rank && old->second.value != hint->second.value) {
+            fail(Status::invalid, "conflicting source synthesis policy in " + rb.module_name);
+            return;
+          }
+          if (old == mapping_policy.end() || old->second.rank <= hint->second.rank) {
+            mapping_policy[key] = hint->second;
+          }
+        }
+      }
+      if (synth_attr::get(p, "ware") == "false") {
+        allow_tune = false;
+      }
+      if (!auto_adder && synth_attr::get(p, "adder") == "auto") {
+        blast_options.inherited_adder = blast_options.adder;
+        blast_options.adder           = synth::arith::Adder_kind::rca;
+        auto_adder                    = true;
+      }
+      if (!auto_multiplier && synth_attr::get(p, "multiplier") == "auto") {
+        blast_options.inherited_multiplier = blast_options.multiplier;
+        blast_options.multiplier           = synth::arith::Mult_kind::csa;
+        auto_multiplier                    = true;
+      }
+      if (!auto_barrel && synth_attr::get(p, "barrel") == "auto") {
+        blast_options.inherited_barrel = blast_options.reverse_barrel;
+        blast_options.reverse_barrel   = false;
+        auto_barrel                    = true;
+      }
+    }
+    if (auto_adder) {
       // The native mapper has no subsequent Boolean restructuring to remove
       // a ripple carry chain. Keep narrow sums and divider internals compact;
       // wide sums and the final multiplier addition use logarithmic carries.
@@ -195,9 +244,60 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       blast_options.comparator_adder           = synth::arith::Adder_kind::prefix;
       blast_options.comparator_adder_min_width = 8;
     }
+    if (auto it = options.region_opts.find(rb.color); it != options.region_opts.end()) {
+      const auto& ro = it->second;
+      if (ro.flow) {
+        fail(Status::invalid, "synth.abc cannot be honored by USYN");
+        return;
+      }
+      if (ro.ware) {
+        allow_tune = *ro.ware;
+      }
+      if (ro.adder) {
+        blast_options.source_adder = false;
+        blast_options.inherited_adder.reset();
+        auto_adder              = false;
+        blast_options.adder     = *ro.adder;
+        blast_options.sum_adder = blast_options.comparator_adder = blast_options.multiplier_adder = *ro.adder;
+        blast_options.sum_adder_min_width = blast_options.comparator_adder_min_width = 0;
+      }
+      if (ro.multiplier) {
+        blast_options.source_multiplier = false;
+        blast_options.inherited_multiplier.reset();
+        blast_options.multiplier = *ro.multiplier;
+        auto_multiplier          = false;
+      }
+      if (ro.reverse_barrel) {
+        blast_options.source_barrel = false;
+        blast_options.inherited_barrel.reset();
+        blast_options.reverse_barrel = *ro.reverse_barrel;
+        auto_barrel                  = false;
+      }
+      if (ro.block_size) {
+        blast_options.source_block = false;
+        blast_options.block_size   = *ro.block_size;
+      }
+    }
     blast_options.logical_state     = true;
     blast_options.state_target      = synth::State_target::cmos;
     blast_options.logical_max_nodes = options.logical.max_nodes;
+    const auto encoded              = [](const synth::Blast_options& o) {
+      const char* adder = o.adder == synth::arith::Adder_kind::rca      ? "rca"
+                                       : o.adder == synth::arith::Adder_kind::cla    ? "cla"
+                                       : o.adder == synth::arith::Adder_kind::cska   ? "cska"
+                                       : o.adder == synth::arith::Adder_kind::prefix ? "prefix"
+                                                                                     : "brent";
+      const char* mult  = o.multiplier == synth::arith::Mult_kind::array  ? "array"
+                                       : o.multiplier == synth::arith::Mult_kind::tree ? "tree"
+                                       : o.multiplier == synth::arith::Mult_kind::csa  ? "csa"
+                                                                                       : "sn";
+      return std::format("{{\"adder\":\"{}\",\"multiplier\":\"{}\",\"barrel\":\"{}\",\"block_size\":{},\"heuristic\":{}}}",
+                         adder,
+                         mult,
+                         o.reverse_barrel ? "reverse" : "log",
+                         o.block_size,
+                         o.sum_adder_min_width > 0 || o.comparator_adder_min_width > 0);
+    };
     synth::Blast_hooks hooks;
     hooks.over_budget = [&](uint64_t, size_t, size_t, size_t) {
       // Force process admission at a blaster checkpoint; do not charge the
@@ -218,6 +318,60 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       fail(Status::invalid, "logical translation failed for " + rb.module_name);
       return;
     }
+    std::string tune_key;
+    bool        replay = false;
+    if (options.tune_store && options.tune_profile != "off") {
+      Budget identity_work{options.cache.entry_work};
+      identity_work.admission = work.admission;
+      const auto  names       = identity_names(rb, blast, top->get_name(), identity_work);
+      auto        identity    = serialize_logical_identity(blast.lnet,
+                                                 *blast.source_state,
+                                                 names,
+                                                 options.logical,
+                                                 kUsynSrcSalt,
+                                                 options.cache.context,
+                                                 identity_work,
+                                                 cache_options.limits);
+      std::string recipe
+          = identity.bytes + encoded(blast_options) + options.tune_context
+            + std::format("|inherited={}/{}/{}",
+                          blast_options.inherited_adder ? static_cast<int>(*blast_options.inherited_adder) : -1,
+                          blast_options.inherited_multiplier ? static_cast<int>(*blast_options.inherited_multiplier) : -1,
+                          blast_options.inherited_barrel ? static_cast<int>(*blast_options.inherited_barrel) : -1);
+      for (auto n : rb.nodes) {
+        if (auto a = n.attr(attrs::synth_policy); a.has()) {
+          recipe += std::string(a.get());
+        }
+      }
+      if (identity.status == Status::feasible) {
+        tune_key = "usyn-" + std::format("{:016x}", livehd::hash_util::fnv1a64(recipe));
+      }
+      if (!tune_key.empty()) {
+        const auto stored = options.tune_store->find(tune_key);
+        if (!stored.empty()) {
+          rapidjson::Document doc;
+          doc.Parse(stored.c_str());
+          const auto& o = doc["options"];
+          if (auto_adder && (!o.HasMember("heuristic") || !o["heuristic"].GetBool())) {
+            blast_options.sum_adder_min_width = blast_options.comparator_adder_min_width = 0;
+            blast_options.adder     = *synth::arith::parse_adder_kind(o["adder"].GetString());
+            blast_options.sum_adder = blast_options.comparator_adder = blast_options.multiplier_adder = blast_options.adder;
+          }
+          if (auto_multiplier) {
+            blast_options.multiplier = *synth::arith::parse_mult_kind(o["multiplier"].GetString());
+          }
+          if (auto_barrel) {
+            blast_options.reverse_barrel = std::string_view(o["barrel"].GetString()) == "reverse";
+          }
+          blast  = synth::blast_region(rb, blast_options, hooks);
+          replay = true;
+          if (blast.status != synth::Region_blast::Status::blasted || !blast.source_state) {
+            fail(Status::invalid, "tuning replay translation failed");
+            return;
+          }
+        }
+      }
+    }
     // Validate fresh source semantics before any reuse. Cached metadata cannot
     // authorize a target that the current source does not support.
     if (!synth::validate_state_target(*blast.source_state, synth::State_target::cmos)) {
@@ -235,13 +389,13 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     if (output->cache.enabled) {
       const auto names = identity_names(rb, blast, top->get_name(), io);
       cached           = probe_logical_cache(cache_options,
-                                             rb.module_name,
-                                             blast.lnet,
-                                             *blast.source_state,
-                                             names,
-                                             options.logical,
-                                             credits,
-                                             io);
+                                   rb.module_name,
+                                   blast.lnet,
+                                   *blast.source_state,
+                                   names,
+                                   options.logical,
+                                   credits,
+                                   io);
     }
     if (io.resource_exhausted) {
       work.resource_exhausted = work.exhausted = true;
@@ -299,6 +453,123 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       fail(selected.status, rb.module_name + ": " + selected.reason);
       return;
     }
+    if (options.tune_store) {
+      options.tune_store->applied(rb.module_name,
+                                  std::format("{{\"key\":{},\"options\":{},\"origin\":\"{}\",\"score_kind\":\"native_logic\"}}",
+                                              synth_attr::quote(tune_key),
+                                              encoded(blast_options),
+                                              replay ? "stored" : "source/default"));
+    }
+    if (options.tune_store && options.tune_profile == "on" && allow_tune && !tune_key.empty()) {
+      bool add = false, mult = false, barrel = false;
+      for (auto n : rb.nodes) {
+        const auto op     = graph_util::type_op_of(n);
+        auto       a      = n.attr(attrs::synth_policy);
+        auto       p      = a.has() ? synth_attr::read(a.get()) : synth_attr::Policy{};
+        const auto pinned = [&](std::string_view key) {
+          const auto v = synth_attr::get(p, key);
+          return !v.empty() && v != "auto";
+        };
+        add    |= auto_adder && !pinned("adder") && (op == Ntype_op::Sum || op == Ntype_op::LT || op == Ntype_op::GT);
+        mult   |= auto_multiplier && !pinned("multiplier") && op == Ntype_op::Mult;
+        barrel |= auto_barrel && !pinned("barrel") && (op == Ntype_op::SHL || op == Ntype_op::SRA);
+      }
+      std::vector<synth::Blast_options> candidates;
+      if (mult) {
+        for (auto kind : {synth::arith::Mult_kind::sn,
+                          synth::arith::Mult_kind::csa,
+                          synth::arith::Mult_kind::tree,
+                          synth::arith::Mult_kind::array}) {
+          auto o       = blast_options;
+          o.multiplier = kind;
+          candidates.push_back(o);
+        }
+      }
+      if (add) {
+        for (auto kind : {synth::arith::Adder_kind::rca,
+                          synth::arith::Adder_kind::cska,
+                          synth::arith::Adder_kind::cla,
+                          synth::arith::Adder_kind::prefix,
+                          synth::arith::Adder_kind::brent}) {
+          auto o      = blast_options;
+          o.adder     = kind;
+          o.sum_adder = o.multiplier_adder = o.comparator_adder = kind;
+          o.sum_adder_min_width = o.comparator_adder_min_width = 0;
+          candidates.push_back(o);
+        }
+      }
+      if (barrel) {
+        auto o           = blast_options;
+        o.reverse_barrel = !o.reverse_barrel;
+        candidates.push_back(o);
+      }
+      const auto start    = std::chrono::steady_clock::now();
+      uint32_t   attempts = 0;
+      for (const auto& candidate : candidates) {
+        if (attempts++ >= options.tune_attempts
+            || (options.tune_time_ms
+                && std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count()
+                       >= static_cast<int64_t>(options.tune_time_ms))) {
+          break;
+        }
+        const auto trial_start = std::chrono::steady_clock::now();
+        auto       trial_blast = synth::blast_region(rb, candidate, hooks);
+        if (trial_blast.status != synth::Region_blast::Status::blasted || !trial_blast.source_state) {
+          continue;
+        }
+        Budget trial_work      = work.slice(work.remaining / 4), trial_search{credits};
+        trial_search.admission = work.admission;
+        auto       trial       = synthesize_stateful_region(trial_blast.lnet,
+                                                *trial_blast.source_state,
+                                                synth::State_target::cmos,
+                                                options.logical,
+                                                trial_work,
+                                                trial_search);
+        const auto used        = trial_work.consumed;
+        work.absorb(trial_work);
+        const bool keep = trial.region && trial.report.after.total() < selected.report.after.total();
+        options.tune_store->history(std::format(
+            "{{\"region\":{},\"candidate\":{},\"kept\":{},\"native_logic\":{},\"validation\":\"structural\",\"time_ms\":{}}}",
+            synth_attr::quote(rb.module_name),
+            encoded(candidate),
+            keep,
+            trial.report.after.total(),
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - trial_start).count()));
+        if (keep) {
+          selected      = std::move(trial);
+          blast         = std::move(trial_blast);
+          blast_options = candidate;
+          credit        = trial_search.credit_floor();
+          structural    = used;
+          cached.key.clear();
+        }
+        if (work.resource_exhausted) {
+          fail(Status::search_exhausted, "synthesis tune process admission");
+          return;
+        }
+      }
+      if (!candidates.empty()) {
+        const auto row = std::format(
+            "{{\"options\":{},\"validation\":\"structural\",\"native_logic\":{},\"region\":{},\"score_kind\":\"native_logic\"}}",
+            encoded(blast_options),
+            selected.report.after.total(),
+            synth_attr::quote(rb.module_name));
+        options.tune_store->put(tune_key, row);
+        options.tune_store->applied(rb.module_name, row);
+        output->tune_keys[rb.module_name] = tune_key;
+        if (options.tune_validate == "region" && rb.pre_body && rb.pre_lib) {
+          if (!output->proof_library.copy_from(*rb.pre_lib, rb.pre_name)) {
+            fail(Status::invalid, "cannot preserve tuning proof reference");
+            return;
+          }
+          output->tune_refs[rb.module_name] = rb.pre_name;
+        }
+        std::print("[synth.tune] mapper=usyn region={} selected={} native_logic={} validation=structural\n",
+                   rb.module_name,
+                   encoded(blast_options),
+                   selected.report.after.total());
+      }
+    }
     // P2-C always starts from the freshly validated behavioral expansion, even
     // on a selection-cache hit. Its search is separate from cached selection,
     // but consumes the same design-wide remainder before later regions run.
@@ -326,17 +597,19 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
                                options.multi_rep,
                                options.cost_model.get(),
                                options.gate_objective};
-    auto emitted  = emit_logical_region(rb,
-                                        blast,
-                                        *selected.region,
-                                        work,
-                                        options.logical.max_nodes,
-                                        options.cmos_cleanup || options.sop_tree || options.multi_rep ? &cleanup : nullptr,
-                                        literal_plan);
-    search_left  -= std::min(search_left, cmos_search.consumed);
+    auto               emitted  = emit_logical_region(rb,
+                                       blast,
+                                       *selected.region,
+                                       work,
+                                       options.logical.max_nodes,
+                                       options.cmos_cleanup || options.sop_tree || options.multi_rep ? &cleanup : nullptr,
+                                       literal_plan);
+    search_left                -= std::min(search_left, cmos_search.consumed);
     if (options.literal_extract && !literal_plan.empty()) {
       livehd::diag::info("pass.usyn", "literal-extract", "progress")
-          .msg("{}: rebuilt {} next state(s) as literal network (depth {}) + template", rb.module_name, literal_plan.size(),
+          .msg("{}: rebuilt {} next state(s) as literal network (depth {}) + template",
+               rb.module_name,
+               literal_plan.size(),
                options.literal_extract)
           .emit();
     }
@@ -344,6 +617,11 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     if (emitted.status != Status::feasible) {
       fail(emitted.status, rb.module_name + ": " + emitted.reason);
       return;
+    }
+    if (!mapping_policy.empty()) {
+      for (auto node : rb.body->body().nodes()) {
+        node.attr(attrs::synth_policy).set(synth_attr::write(mapping_policy));
+      }
     }
     if (output->cache.enabled && !reused && !cached.key.empty()) {
       if (!replaces_stored_record(cached, credit)) {
@@ -398,7 +676,7 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
                                                                false,
                                                                build,
                                                                options.flatten,
-                                                               false,
+                                                               options.tune_profile == "on" && options.tune_validate == "region",
                                                                {},
                                                                1,
                                                                prepared->loops.preserved_defs,

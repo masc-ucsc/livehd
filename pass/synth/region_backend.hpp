@@ -63,10 +63,10 @@ struct Driver_options {
 
   // Re-map each arithmetic/shifter ware region under the alternative adder,
   // multiplier and barrel lowerings and keep the best stitched result.
-  bool                                  ware_trials = false;
-  std::string tune_profile="auto", tune_validate="structural";
-  uint32_t tune_attempts=24;
-  uint64_t tune_time_ms=60000;
+  bool                        ware_trials  = false;
+  std::string                 tune_profile = "auto", tune_validate = "structural";
+  uint32_t                    tune_attempts = 24;
+  uint64_t                    tune_time_ms  = 60000;
   std::shared_ptr<Tune_store> tune_store;
 
   std::string                           library;  // Liberty .lib
@@ -98,16 +98,22 @@ struct Driver_options {
   // combinational cone; the period OpenSTA checks includes the launch flop's
   // clk->Q and the capture flop's setup (69 ps of a 400 ps ASAP7 period on
   // br_arb_rr), so a region sized to the full period misses it by exactly that.
-  std::string                           reg_margin       = "auto";
-  bool                                  verbose          = false;
+  std::string                           reg_margin   = "auto";
+  bool                                  verbose      = false;
   // Combinational adder architecture for Sum/comparators (arith.hpp) and the
   // CSKA/CLA block width (0 => auto from the operating width).
-  arith::Adder_kind                     adder            = arith::Adder_kind::rca;
-  bool                                  ware             = true;  // source-section permission, not a global CLI option
-  bool                                  ware_arith       = true;
-  bool                                  ware_cmp         = true;
-  bool                                  ware_shift       = true;
-  bool source_adder=true, source_multiplier=true, source_barrel=true;
+  arith::Adder_kind                     adder        = arith::Adder_kind::rca;
+  bool                                  ware         = true;  // source-section permission, not a global CLI option
+  bool                                  ware_arith   = true;
+  bool                                  ware_cmp     = true;
+  bool                                  ware_shift   = true;
+  bool                                  source_adder = true, source_multiplier = true, source_barrel = true, source_block = true;
+  // Freeze inherited concrete defaults while a local explicit auto is tuned.
+  std::optional<arith::Adder_kind>      inherited_adder;
+  std::optional<arith::Mult_kind>       inherited_multiplier;
+  std::optional<bool>                   inherited_barrel;
+  uint64_t                              tune_salt        = 0;
+  bool                                  force_remap      = false;
   bool                                  auto_adder       = true;
   bool                                  auto_multiplier  = true;
   bool                                  auto_barrel      = true;
@@ -226,15 +232,16 @@ public:
   [[nodiscard]] virtual std::shared_ptr<void> region_scope()               = 0;
 
   // Per region, before translation (and before the cache lookup).
-  [[nodiscard]] virtual Region_plan                 plan(const Region_ctx& ctx)                       = 0;
+  [[nodiscard]] virtual Region_plan                 plan(const Region_ctx& ctx) = 0;
   // Map the translated region (or the hook's rewrite of it), filling the
   // backend's part of `q`. nullopt: refused (recorded through ctx) or failed
   // (diagnosed).
   [[nodiscard]] virtual std::optional<Cell_netlist> map(const Region_ctx& ctx, const Region_blast& blast,
-                                                        const Region_rewrite& rewrite, Region_qor& q) = 0;
-  [[nodiscard]] virtual const Cell_library&         cells() const                                     = 0;
+                                                        const Region_rewrite& rewrite, Region_qor& q)
+      = 0;
+  [[nodiscard]] virtual const Cell_library& cells() const = 0;
   // Release the region's workspace once it is written.
-  virtual void                                      end_region()                                      = 0;
+  virtual void                              end_region()  = 0;
 
   // Scheduling estimate for a parallel lane mapping a region of `aig_nodes`.
   [[nodiscard]] virtual uint64_t projected_memory(uint64_t aig_nodes) const = 0;

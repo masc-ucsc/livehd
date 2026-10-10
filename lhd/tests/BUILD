@@ -2375,3 +2375,10 @@ sh_test(
     data = glob(["sim_warn_undefined/*.v", "sim_warn_undefined/*.prp"]) + ["//lhd"],
     env = {"LHD": "lhd/lhd"},
 )
+
+sh_test(
+    name = "lhd_synth_attributes_smoke",
+    size = "medium",
+    srcs = ["lhd_synth_attributes_smoke.py"],
+    data = ["//lhd", "//inou/prp:abc_tests"],
+)

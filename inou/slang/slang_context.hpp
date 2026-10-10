@@ -26,6 +26,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "slang_location.hpp"
+#include "synth_policy.hpp"
 
 // clang-format off
 #include "slang/ast/Compilation.h"
@@ -59,7 +60,7 @@ inline const slang::ast::ValueSymbol* lhs_base_symbol(const slang::ast::Expressi
   const auto* e = &lhs;
   while (true) {
     switch (e->kind) {
-      case slang::ast::ExpressionKind::NamedValue       :
+      case slang::ast::ExpressionKind::NamedValue:
       case slang::ast::ExpressionKind::HierarchicalValue: return &e->as<slang::ast::ValueExpressionBase>().symbol;
       case slang::ast::ExpressionKind::ElementSelect    : e = &e->as<slang::ast::ElementSelectExpression>().value(); break;
       case slang::ast::ExpressionKind::RangeSelect      : e = &e->as<slang::ast::RangeSelectExpression>().value(); break;
@@ -556,20 +557,22 @@ private:
   };
 
   // ── structure (slang_structure.cpp) ───────────────────────────────────────
-  void        prepare_plusargs(const slang::ast::InstanceBodySymbol& body);
-  void        hoist_plusargs(const slang::ast::RootSymbol& root);
-  bool        lower_module(const slang::ast::InstanceSymbol& symbol);
-  std::string module_name_of(const slang::ast::InstanceSymbol& symbol);
-  void        emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup, const Lnast_nid& out_tup);
-  void        collect_state_vars(const slang::ast::Scope& body);
+  void                       prepare_plusargs(const slang::ast::InstanceBodySymbol& body);
+  void                       hoist_plusargs(const slang::ast::RootSymbol& root);
+  bool                       lower_module(const slang::ast::InstanceSymbol& symbol);
+  std::string                module_name_of(const slang::ast::InstanceSymbol& symbol);
+  livehd::synth_attr::Policy synth_attributes(std::span<const slang::ast::AttributeSymbol* const> attrs, int rank);
+  void                       emit_synth_marker(const livehd::synth_attr::Policy& policy, std::string_view target = "");
+  void emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup, const Lnast_nid& out_tup);
+  void collect_state_vars(const slang::ast::Scope& body);
   // Module bodies emit DRIVERS (continuous assigns, processes, instances) in
   // dataflow dependency order, not source order: LNAST/tolg resolve reads
   // sequentially, while verilog wires are order-free nets. Combinational
   // cycles fall back to source order + settled reads (LNAST-tier only).
-  void        lower_members(const slang::ast::Scope& scope);
-  void        lower_process(const slang::ast::ProceduralBlockSymbol& pbs);
-  bool        lower_latch_process(const slang::ast::Statement& body);
-  void        lower_comb_process(const slang::ast::Statement& body);
+  void lower_members(const slang::ast::Scope& scope);
+  void lower_process(const slang::ast::ProceduralBlockSymbol& pbs);
+  bool lower_latch_process(const slang::ast::Statement& body);
+  void lower_comb_process(const slang::ast::Statement& body);
   void lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
                         std::vector<const slang::ast::Statement*>& prologue, const std::vector<std::string>& inactive_async_guards);
   // Constant register values collected from one reset arm. `stores` are
@@ -938,12 +941,12 @@ private:
   //  * past_span: `index` may land in [span, 2^k) (a span that is not a power
   //    of two); emit_guarded_read returns 0 there.
   struct Unpacked_address {
-    std::string index;
-    std::string in_range;
-    int64_t     span      = 1;
-    bool        past_span = false;
-    bool        constant  = false;  // `index` is a literal
-    slang::SourceRange range;       // the selectors, for the sim.warn_undefined marker
+    std::string        index;
+    std::string        in_range;
+    int64_t            span      = 1;
+    bool               past_span = false;
+    bool               constant  = false;  // `index` is a literal
+    slang::SourceRange range;              // the selectors, for the sim.warn_undefined marker
   };
   Unpacked_address build_unpacked_address(const Mem_info& mi, const std::vector<const slang::ast::Expression*>& sels);
   void             note_out_of_range(const Unpacked_address& addr, std::string_view what);

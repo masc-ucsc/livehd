@@ -22,11 +22,12 @@
 #include "color_reduce.hpp"
 #include "color_stats.hpp"
 #include "color_synth.hpp"
-#include "synth_groups.hpp"
 #include "diag.hpp"
 #include "flatten.hpp"
 #include "node_util.hpp"
 #include "str_tools.hpp"
+#include "synth_groups.hpp"
+#include "synth_policy.hpp"
 
 using namespace livehd::color;
 
@@ -256,15 +257,15 @@ uint64_t parse_count(const Eprp_var& var, std::string_view label, std::string_vi
 
 // JSON object string of the algorithm parameters (for the metadata blob).
 std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp_var& var, bool hier_flat) {
-  std::string s  = "{";
-  s             += std::format("\"hier\":{},", opts.hier);
-  s             += std::format("\"continuous\":{},", opts.continuous);
-  s             += std::format("\"keep_colored\":{}", opts.keep_colored);
-  const char* ware_default = var.get("mapper", "abc") == "usyn" ? "false" : "true";  // the mapper profile (setup())
-  s             += std::format(",\"ware_arith\":{},\"ware_cmp\":{},\"ware_shift\":{}",
-                               parse_bool(var.get("ware_arith", ware_default)),
-                               parse_bool(var.get("ware_cmp", ware_default)),
-                               parse_bool(var.get("ware_shift", ware_default)));
+  std::string s             = "{";
+  s                        += std::format("\"hier\":{},", opts.hier);
+  s                        += std::format("\"continuous\":{},", opts.continuous);
+  s                        += std::format("\"keep_colored\":{}", opts.keep_colored);
+  const char* ware_default  = var.get("mapper", "abc") == "usyn" ? "false" : "true";  // the mapper profile (setup())
+  s                        += std::format(",\"ware_arith\":{},\"ware_cmp\":{},\"ware_shift\":{}",
+                   parse_bool(var.get("ware_arith", ware_default)),
+                   parse_bool(var.get("ware_cmp", ware_default)),
+                   parse_bool(var.get("ware_shift", ware_default)));
 
   if (alg == "acyclic") {
     s += std::format(",\"cutoff\":{},\"merge\":{}", var.get("cutoff", "1"), parse_bool(var.get("merge", "false")));
@@ -273,10 +274,10 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
     // min/max under `acyclic` would claim a bound nothing enforced.
     const auto salg  = std::string{var.get("mode", "cones")};
     s               += std::format(",\"mode\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
-                                   salg,
-                                   opts.min_ge,
-                                   opts.max_ge,
-                                   opts.name_weight);
+                     salg,
+                     opts.min_ge,
+                     opts.max_ge,
+                     opts.name_weight);
     // The marker pass.partition / pass.abc key `flatten=auto` off: these colors
     // describe the FLAT design and only mean what they say once the hierarchy is
     // inlined again downstream. Recorded only when the flat coloring ACTUALLY
@@ -413,7 +414,9 @@ void run_one(std::string_view alg, hhds::Graph* g, const Color_opts& opts, const
 void Pass_color::color(Eprp_var& var) {
   auto alg = std::string{var.get("alg", "acyclic")};
   auto top = std::string{var.get("top", "")};
-  if(alg=="synth") livehd::synth_attr::specialize_calls(var.graphs);
+  if (alg == "synth") {
+    livehd::synth_attr::specialize_calls(var.graphs);
+  }
 
   if (alg == "clear") {
     for (const auto& g : var.graphs) {
@@ -464,21 +467,21 @@ void Pass_color::color(Eprp_var& var) {
   }
 
   Color_opts opts;
-  opts.hier          = parse_bool(var.get("hier", "true"));
-  opts.verbose       = parse_bool(var.get("verbose", "false"));
-  const bool stats   = parse_bool(var.get("stats", "false"));
-  opts.continuous    = parse_bool(var.get("continuous", "false"));
-  opts.keep_colored  = parse_bool(var.get("keep_colored", "false"));
-  opts.min_ge        = parse_ge_bound(var, "min_ge", "500");
-  opts.max_ge        = parse_ge_bound(var, "max_ge", "5000");
-  opts.name_weight   = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
-  opts.max_gate      = parse_ge_bound(var, "max_gate", "30000");
+  opts.hier            = parse_bool(var.get("hier", "true"));
+  opts.verbose         = parse_bool(var.get("verbose", "false"));
+  const bool stats     = parse_bool(var.get("stats", "false"));
+  opts.continuous      = parse_bool(var.get("continuous", "false"));
+  opts.keep_colored    = parse_bool(var.get("keep_colored", "false"));
+  opts.min_ge          = parse_ge_bound(var, "min_ge", "500");
+  opts.max_ge          = parse_ge_bound(var, "max_ge", "5000");
+  opts.name_weight     = std::max(1, std::atoi(std::string{var.get("name_weight", "4")}.c_str()));
+  opts.max_gate        = parse_ge_bound(var, "max_gate", "30000");
   opts.boundary_wiring = parse_bool(var.get("boundary_wiring", "false"));
-  opts.min_gate      = parse_ge_bound(var, "min_gate", "0");
+  opts.min_gate        = parse_ge_bound(var, "min_gate", "0");
   // The mapper profile supplies the stop_*, ctrl_cones, flop_to_flop and ware_*
   // DEFAULTS only (see setup()); an explicit setting of any one of them always
   // wins.
-  const auto mapper = std::string{var.get("mapper", "abc")};
+  const auto mapper    = std::string{var.get("mapper", "abc")};
   if (mapper != "abc" && mapper != "usyn") {
     livehd::diag::err("pass.color", "bad-mapper", "unsupported")
         .msg("unknown mapper profile '{}' (expected abc|usyn)", mapper)
@@ -494,9 +497,9 @@ void Pass_color::color(Eprp_var& var) {
   opts.stop_cmp            = parse_bool(var.get("stop_cmp", stop_default));
   opts.stop_shift          = parse_bool(var.get("stop_shift", stop_default));
   opts.flop_to_flop        = parse_bool(var.get("flop_to_flop", mapper == "usyn" ? "true" : "false"));
-  opts.ctrl_max_gate = parse_ge_bound(var, "ctrl_max_gate", "0");
-  opts.ctrl_min_gate = parse_ge_bound(var, "ctrl_min_gate", "0");
-  opts.min_nodes     = static_cast<uint32_t>(std::min<uint64_t>(parse_count(var, "min_color_nodes", "12"), UINT32_MAX));
+  opts.ctrl_max_gate       = parse_ge_bound(var, "ctrl_max_gate", "0");
+  opts.ctrl_min_gate       = parse_ge_bound(var, "ctrl_min_gate", "0");
+  opts.min_nodes           = static_cast<uint32_t>(std::min<uint64_t>(parse_count(var, "min_color_nodes", "12"), UINT32_MAX));
   if (opts.ctrl_cones && (alg != "synth" || synth_mode != "cones")) {
     opts.ctrl_cones = false;
   }
@@ -695,6 +698,45 @@ void Pass_color::color(Eprp_var& var) {
     }
   }
 
+  // Repeated implementations are synthesis units, not physical replicas in
+  // the flat overlap view. Keep their nested definitions too, so every body
+  // is colored and mapped once with its own source annotation scope.
+  std::unordered_map<hhds::Gid, uint64_t> references;
+  for (const auto& [gid, graph] : gid2graph) {
+    for (auto node : graph->body().nodes()) {
+      if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
+        ++references[node.get_subnode_gid()];
+      }
+    }
+  }
+  std::unordered_set<hhds::Gid> reused_bodies;
+  if (alg == "synth") {
+    for (const auto& [gid, count] : references) {
+      if (count > 1 && gid2graph.contains(gid) && !loop_bodies.contains(gid)) {
+        reused_bodies.insert(gid);
+      }
+    }
+    std::vector<hhds::Gid> todo(reused_bodies.begin(), reused_bodies.end());
+    for (size_t i = 0; i < todo.size(); ++i) {
+      for (auto node : gid2graph.at(todo[i])->body().nodes()) {
+        if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub) {
+          continue;
+        }
+        auto gid = node.get_subnode_gid();
+        if (gid2graph.contains(gid) && !loop_bodies.contains(gid) && reused_bodies.insert(gid).second) {
+          todo.push_back(gid);
+        }
+      }
+    }
+    for (auto gid : reused_bodies) {
+      auto attr              = gid2graph.at(gid)->get_input_node().attr(livehd::attrs::synth_policy);
+      auto p                 = attr.has() ? livehd::synth_attr::read(attr.get()) : livehd::synth_attr::Policy{};
+      p["_reuse_definition"] = {"true", 0};
+      attr.set(livehd::synth_attr::write(p));
+    }
+  }
+  auto retained_bodies = loop_bodies;
+  retained_bodies.insert(reused_bodies.begin(), reused_bodies.end());
   bool virtual_flat = false;
   if (alg == "synth" && opts.hier && top_g != nullptr && gid2graph.size() > 1) {
     auto*       lib = top_g->get_io() ? top_g->get_io()->get_library() : nullptr;
@@ -711,7 +753,7 @@ void Pass_color::color(Eprp_var& var) {
     if (lib != nullptr) {
       const std::string                  flat_name = std::string{top_g->get_name()} + "__color_flat_tmp";
       livehd::partition::Flat_origin_map origin;
-      auto flat = livehd::partition::flatten_hierarchy(top_g, lib, flat_name, &origin, false, loop_bodies);
+      auto flat = livehd::partition::flatten_hierarchy(top_g, lib, flat_name, &origin, false, retained_bodies);
       if (!flat) {
         return;  // diag already emitted (recursive hierarchy, replicated Sub, ...)
       }
@@ -723,7 +765,9 @@ void Pass_color::color(Eprp_var& var) {
       // Colors are only meaningful as the flat coloring, so the descriptor is
       // built from the FLAT graph (accurate region/instance counts per color)
       // while it still exists.
-      flat_info = build_coloring_info_json(flat.get(), top_g->get_name(), alg, params_json(alg, opts, var, /*hier_flat=*/true));
+      flat_info = preserve_seeded_info(
+          flat.get(),
+          build_coloring_info_json(flat.get(), top_g->get_name(), alg, params_json(alg, opts, var, /*hier_flat=*/true)));
 
       // Write back. Clear first: a def node whose flat clone was dropped (dead
       // logic the flattener did not reach) must not keep a stale color from an
@@ -796,7 +840,7 @@ void Pass_color::color(Eprp_var& var) {
   if (virtual_flat) {
     // The flat view contains each loop as an opaque node. Its shared body was
     // not part of that view and still needs its single implementation color.
-    for (auto gid : loop_bodies) {
+    for (auto gid : retained_bodies) {
       color_def(gid2graph.at(gid));
     }
   } else if (top_g != nullptr && opts.hier) {

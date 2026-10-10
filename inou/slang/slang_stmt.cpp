@@ -108,7 +108,19 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
         emit_unsupported(stmt.sourceRange, "unsupported-fork", "fork/join blocks are not supported by --reader slang");
         return;
       }
-      lower_statement(block.body);
+      auto policy = synth_attributes(body_->getCompilation().getAttributes(stmt), 2);
+      if (block.blockSymbol) {
+        livehd::synth_attr::overlay(policy, synth_attributes(body_->getCompilation().getAttributes(*block.blockSymbol), 2));
+      }
+      if (!policy.empty()) {
+        auto scope = builder_.add_child(Lnast_ntype::create_stmts());
+        builder_.push_stmts(scope);
+        emit_synth_marker(policy);
+        lower_statement(block.body);
+        builder_.pop_stmts();
+      } else {
+        lower_statement(block.body);
+      }
       return;
     }
     case StatementKind::ExpressionStatement: {
@@ -391,8 +403,8 @@ bool Slang_context::lower_concurrent_assertion(const slang::ast::ConcurrentAsser
 
   // Unwrap the clocking event and any `disable iff`, collecting the disable
   // conditions on the way down.
-  const slang::ast::AssertionExpr*              spec = &stmt.propertySpec;
-  std::vector<const slang::ast::Expression*>    disables;
+  const slang::ast::AssertionExpr*           spec = &stmt.propertySpec;
+  std::vector<const slang::ast::Expression*> disables;
   for (bool peeled = true; peeled;) {
     peeled = false;
     if (spec->kind == AssertionExprKind::Clocking) {

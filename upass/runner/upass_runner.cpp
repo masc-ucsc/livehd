@@ -1717,11 +1717,11 @@ void uPass_runner::check_concat_dest(std::string_view dest_name, std::string_vie
         .span     = std::move(span),
         .hint     = std::format("a concat's destination must declare the {}-bit width its lanes add up to "
                                 "(e.g. `{}:U{}` or `{}:S{}`)",
-                                cit->second,
-                                dest_name,
-                                cit->second,
-                                dest_name,
-                                cit->second),
+                            cit->second,
+                            dest_name,
+                            cit->second,
+                            dest_name,
+                            cit->second),
     });
     return;
   }
@@ -2553,10 +2553,10 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
                 .category = "bitwidth",
                 .pass     = "upass.runner",
                 .message  = std::format("`{}` (value {}) does not fit its declared range [{}, {}]",
-                                        user,
-                                        e0.trivial.to_decimal_string(),
-                                        e0.bw_min.to_decimal_string(),
-                                        e0.bw_max.to_decimal_string()),
+                                       user,
+                                       e0.trivial.to_decimal_string(),
+                                       e0.bw_min.to_decimal_string(),
+                                       e0.bw_max.to_decimal_string()),
                 .span     = lm->current_span(),
                 .hint     = "widen the declared type, force fewer bits with a bit-select, or adjust the value",
             });
@@ -6499,8 +6499,7 @@ bool uPass_runner::sub_input_may_be_omitted(const std::shared_ptr<Lnast>& callee
 void uPass_runner::warn_auto_wire_to_minted(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e, std::string_view bare,
                                             const livehd::diag::Span& call_span) const {
   const bool is_clock = upass::io_port::is_clock_candidate(e);
-  if (!callee || (!is_clock && !upass::io_port::is_reset_candidate(e))
-      || upass::io_port::declares_input_default(callee.get(), e)) {
+  if (!callee || (!is_clock && !upass::io_port::is_reset_candidate(e)) || upass::io_port::declares_input_default(callee.get(), e)) {
     return;
   }
   const auto caller = lm->get_lnast();
@@ -6513,13 +6512,13 @@ void uPass_runner::warn_auto_wire_to_minted(const std::shared_ptr<Lnast>& callee
     return;  // the caller's own declared Clock/Reset is what auto-wires: no mint
   }
   static const absl::flat_hash_set<std::string_view> clock_names{"clk", "clock", "clk_i", "clk_in"};
-  static const absl::flat_hash_set<std::string_view> reset_names{
-      "rst", "reset", "rst_n", "reset_n", "rstn", "resetn", "rst_i", "rst_ni", "arst", "arst_n", "srst", "srst_n"};
+  static const absl::flat_hash_set<std::string_view>
+      reset_names{"rst", "reset", "rst_n", "reset_n", "rstn", "resetn", "rst_i", "rst_ni", "arst", "arst_n", "srst", "srst_n"};
   const auto&       conventional = is_clock ? clock_names : reset_names;
   const std::string minted       = is_clock ? "clock" : "reset";
   // A data input spelled exactly `clock`/`reset` collides with the mint itself:
   // that is its own compile error, not this warning.
-  const auto data = std::find_if(ins.begin(), ins.end(), [&](const Lnast_io_entry& i) {
+  const auto        data         = std::find_if(ins.begin(), ins.end(), [&](const Lnast_io_entry& i) {
     return i.sig == Io_sig::none && i.name != minted && (i.name == e.name || conventional.contains(i.name));
   });
   if (data == ins.end()) {
@@ -6534,22 +6533,23 @@ void uPass_runner::warn_auto_wire_to_minted(const std::shared_ptr<Lnast>& callee
       .pass     = "upass.runner",
       .message  = std::format("the `{}` input `{}` of `{}` is auto-wired to the minted `{}` of `{}`, not to its data input `{}`; "
                               "nothing drives `{}` unless the caller of `{}` sets it",
-                              is_clock ? "Clock" : "Reset",
-                              e.name,
-                              bare,
-                              minted,
-                              caller_bare,
-                              data->name,
-                              minted,
-                              caller_bare),
+                             is_clock ? "Clock" : "Reset",
+                             e.name,
+                             bare,
+                             minted,
+                             caller_bare,
+                             data->name,
+                             minted,
+                             caller_bare),
       .span     = call_span,
-      .hint     = is_clock ? std::format("bind it explicitly, or declare `{}:Clock` in `{}` so it is the clock", data->name, caller_bare)
-                           : std::format("bind it explicitly (`{}=Bool({})` for an integer `{}`), or declare `{}:Reset` in `{}`",
-                                         e.name,
-                                         data->name,
-                                         data->name,
-                                         data->name,
-                                         caller_bare),
+      .hint     = is_clock
+                      ? std::format("bind it explicitly, or declare `{}:Clock` in `{}` so it is the clock", data->name, caller_bare)
+                      : std::format("bind it explicitly (`{}=Bool({})` for an integer `{}`), or declare `{}:Reset` in `{}`",
+                                e.name,
+                                data->name,
+                                data->name,
+                                data->name,
+                                caller_bare),
   });
 }
 
@@ -7094,13 +7094,13 @@ bool uPass_runner::try_lower_array_index() {
   const auto shown_array = upass::Lnast_manager::user_name(array);
   const auto fail        = [&](std::string_view code, std::string msg, std::string hint) {
     livehd::diag::sink().emit(livehd::diag::Diagnostic{
-        .severity = livehd::diag::Severity::error,
-        .code     = std::string(code),
-        .category = "type",
-        .pass     = "upass.runner",
-        .message  = std::move(msg),
-        .span     = lm->current_span(),
-        .hint     = std::move(hint),
+               .severity = livehd::diag::Severity::error,
+               .code     = std::string(code),
+               .category = "type",
+               .pass     = "upass.runner",
+               .message  = std::move(msg),
+               .span     = lm->current_span(),
+               .hint     = std::move(hint),
     });
     return false;
   };
@@ -7409,9 +7409,9 @@ bool uPass_runner::check_call_array_arg(const std::shared_ptr<Lnast>& callee, co
     return true;
   }
   const auto declared   = std::format("[{}] with elements in [{}, {}]",
-                                      shape->lanes,
-                                      shape->elem_min.to_decimal_string(),
-                                      shape->elem_max.to_decimal_string());
+                                    shape->lanes,
+                                    shape->elem_min.to_decimal_string(),
+                                    shape->elem_max.to_decimal_string());
   const auto shape_fail = [&](std::string_view what) {
     if (probe) {
       return;
@@ -7541,7 +7541,7 @@ bool uPass_runner::try_inline_func_call() {
     lm->restore_cursor(saved);
     return false;
   }
-  std::string callee_name(lm->current_raw_text());  // function id — never renamed
+  std::string       callee_name(lm->current_raw_text());  // function id — never renamed
   // The same identifier as a VARIABLE in the current scope: inside an inline
   // frame it carries the frame tag (`inl<N>_lf`). A callee spelled through a
   // value binding — a lambda-ref/import alias (`const lf = import("leaf.leaf")`,
@@ -7569,7 +7569,7 @@ bool uPass_runner::try_inline_func_call() {
   // the import-namespace exemption below need it after callee_name rebinds).
   const std::string source_callee_name(callee_name);
 
-  auto callee                = lookup_callee(callee_name);
+  auto callee = lookup_callee(callee_name);
   // A value binding of the callee identifier in the CURRENT scope (an import /
   // lambda-ref alias, `const lf = import("leaf.leaf")`) shadows a same-named
   // registry function found by name: inside an inline frame the bare-name
@@ -7750,11 +7750,11 @@ bool uPass_runner::try_inline_func_call() {
     if (io.inputs.empty() || io.inputs.back().is_varargs || is_ctor_call) {
       return;
     }
-    const std::size_t first = io.inputs.front().name == "self" ? 1 : 0;
+    const std::size_t first           = io.inputs.front().name == "self" ? 1 : 0;
     // The sole parameter is ONE input, or a positional tuple port
     // `v:(_:U4, _:U8)` flattened to the leaves `v.0`, `v.1`, ... (digit-only
     // suffixes of one prefix; a named-tuple group keeps its named-argument rule).
-    const auto sole_anon_group = [&]() {
+    const auto        sole_anon_group = [&]() {
       if (io.inputs.size() < first + 2) {
         return false;
       }
@@ -7763,7 +7763,9 @@ bool uPass_runner::try_inline_func_call() {
         const auto& nm  = io.inputs[i].name;
         const auto  dot = nm.find('.');
         if (dot == std::string::npos || dot == 0 || dot + 1 >= nm.size() || io.inputs[i].is_ref || io.inputs[i].is_varargs
-            || !std::all_of(nm.begin() + static_cast<std::ptrdiff_t>(dot) + 1, nm.end(), [](char c) { return c >= '0' && c <= '9'; })) {
+            || !std::all_of(nm.begin() + static_cast<std::ptrdiff_t>(dot) + 1, nm.end(), [](char c) {
+                 return c >= '0' && c <= '9';
+               })) {
           return false;
         }
         const auto pre = nm.substr(0, dot);
@@ -7982,8 +7984,8 @@ bool uPass_runner::try_inline_func_call() {
       actuals[i].src_base = known ? ctor_args[i - 1].src_base : std::string{};
     }
   }
-  lm->restore_cursor(saved);                               // back on the func_call node (gather left it on the callee ref)
-  const std::string call_synth = gathered_synth_call_;
+  lm->restore_cursor(saved);  // back on the func_call node (gather left it on the callee ref)
+  const std::string call_synth     = gathered_synth_call_;
   const std::string call_inst_name = gathered_inst_name_;  // call-site name= (if any); stable past later gathers
 
   const auto& io = callee->io_meta();
@@ -8122,13 +8124,18 @@ bool uPass_runner::try_inline_func_call() {
         }
       }
       named.insert(named.end(), minted_actuals.begin(), minted_actuals.end());
-      if(!call_synth.empty()) named.emplace_back("__synth_call",Lnast_node::create_const(call_synth));
+      if (!call_synth.empty()) {
+        named.emplace_back("__synth_call", Lnast_node::create_const(call_synth));
+      }
       emit_named_instance_call(dst_name, frame_portable_callee_name(callee_name, callee), call_inst_name, named);
       return true;
     }
   }
 
-  if(!call_synth.empty()) { stash_sub_instance_port_facts(dst_name,callee);return false; }
+  if (!call_synth.empty()) {
+    stash_sub_instance_port_facts(dst_name, callee);
+    return false;
+  }
 
   // A `pipe` callee (any output carries a stages annotation) is
   // never comb-inlined: its outputs are flopped, and a call site must consume
@@ -8304,7 +8311,9 @@ bool uPass_runner::try_inline_func_call() {
         }
       }
       named.insert(named.end(), minted_actuals.begin(), minted_actuals.end());
-      if(!call_synth.empty()) named.emplace_back("__synth_call",Lnast_node::create_const(call_synth));
+      if (!call_synth.empty()) {
+        named.emplace_back("__synth_call", Lnast_node::create_const(call_synth));
+      }
       emit_named_instance_call(dst_name, frame_portable_callee_name(callee_name, callee), call_inst_name, named);
       return true;
     }
@@ -9108,8 +9117,8 @@ void uPass_runner::split_runtime_tuple_store(const std::optional<std::vector<std
           .pass     = "upass",
           .message  = std::format("conditional write of tuple `{}`: field `{}` cannot be merged across the `if` (a "
                                   "compile-time POSITIONAL field, or a field that is not a scalar)",
-                                  base,
-                                  missing),
+                                 base,
+                                 missing),
           .span     = lm->current_span(),
           .hint     = std::format("name the fields (`mut {} = (a=…, b=…)`) or declare the tuple's type", base),
       });
@@ -9505,7 +9514,7 @@ bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const s
     // this shape. Named values still require an explicit non-reg mode so a
     // registered/typed array cannot be mistaken for a constant ROM tuple.
     const bool muxable_mode   = (!facts && std::string_view(src).starts_with("%"))
-                                || (facts && (facts->mode == upass::Mode::const_kind || facts->mode == upass::Mode::mut_kind));
+                              || (facts && (facts->mode == upass::Mode::const_kind || facts->mode == upass::Mode::mut_kind));
     if (is_array_typed || !muxable_mode) {
       return false;
     }
@@ -10084,7 +10093,7 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
   // runs before the clone is pushed as a source, so lookup_callee still
   // resolves in the caller's scope.
   absl::flat_hash_map<std::string, Generic_bind> portable_subst;
-  const auto* subst_src = &type_subst;
+  const auto*                                    subst_src = &type_subst;
   for (const auto& [generic, binding] : type_subst) {
     if (binding.func_name.empty()) {
       continue;
@@ -10392,10 +10401,10 @@ void collect_body_vars(const Lnast& ln, const Lnast_nid& nid, bool parent_makes_
   // v)` WRITES x: the slang bit-write lowering updates a function-local vector
   // in place).
   const bool value_op   = Lnast_ntype::is_primitive_op(t) && !Lnast_ntype::is_attr_set(t) && !is_store && !is_declare
-                          && !Lnast_ntype::is_stages(t) && !Lnast_ntype::is_timecheck(t) && !Lnast_ntype::is_ref(t)
-                          && !Lnast_ntype::is_const(t);
-  const bool defines    = is_store || is_declare || is_call || is_for || Lnast_ntype::is_tuple_add(t) || Lnast_ntype::is_attr_set(t)
-                          || Lnast_ntype::is_tuple_get(t) || value_op;
+                        && !Lnast_ntype::is_stages(t) && !Lnast_ntype::is_timecheck(t) && !Lnast_ntype::is_ref(t)
+                        && !Lnast_ntype::is_const(t);
+  const bool defines = is_store || is_declare || is_call || is_for || Lnast_ntype::is_tuple_add(t) || Lnast_ntype::is_attr_set(t)
+                       || Lnast_ntype::is_tuple_get(t) || value_op;
 
   const auto target = ln.get_first_child(nid);
   const auto target_name
@@ -12047,8 +12056,8 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
           const auto parent      = tree.get_parent(nid);
           const auto grandparent = parent.is_invalid() ? parent : tree.get_parent(parent);
           const bool io_port     = Lnast_ntype::is_store(tree.get_type(nid)) && !parent.is_invalid()
-                                   && Lnast_ntype::is_tuple_add(tree.get_type(parent)) && !grandparent.is_invalid()
-                                   && Lnast_ntype::is_io(tree.get_type(grandparent));
+                               && Lnast_ntype::is_tuple_add(tree.get_type(parent)) && !grandparent.is_invalid()
+                               && Lnast_ntype::is_io(tree.get_type(grandparent));
           if (Lnast_ntype::is_declare(tree.get_type(nid)) || io_port) {
             auto target = tree.get_first_child(nid);
             auto type_n = target.is_invalid() ? target : tree.get_sibling_next(target);
@@ -12073,10 +12082,10 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
                 const auto* ci = encl_input(std::string(wanted));
                 if (ci != nullptr && ci->array_size > 0 && ci->elem_bits > 0 && ci->inner_dims.empty() && !ci->elem_bool
                     && ci->kind != Io_kind::boolean) {
-                  const auto elem_max = ci->elem_signed ? upass::signed_max_from_bits(ci->elem_bits)
-                                                        : upass::unsigned_max_from_bits(ci->elem_bits);
+                  const auto elem_max
+                      = ci->elem_signed ? upass::signed_max_from_bits(ci->elem_bits) : upass::unsigned_max_from_bits(ci->elem_bits);
                   const auto elem_min = ci->elem_signed ? upass::signed_min_from_bits(ci->elem_bits) : *Dlop::from_pyrope("0");
-                  sp = Spec_port{.inject = true, .max = elem_max, .min = elem_min, .array_size = ci->array_size};
+                  sp                  = Spec_port{.inject = true, .max = elem_max, .min = elem_min, .array_size = ci->array_size};
                   return true;
                 }
               }
@@ -13466,9 +13475,10 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       if (!ga.name.empty()) {
         continue;  // named binds already applied above
       }
-      const Generic_bind cand         = bind_of_explicit_arg(ga.value, std::format("the explicit `<…>` argument `{}`", ga.value), ga.src_name);
-      const bool         cand_is_type = cand.const_text.empty() && cand.func_name.empty();  // type bind vs value/lambda
-      std::size_t        target       = gens.size();
+      const Generic_bind cand
+          = bind_of_explicit_arg(ga.value, std::format("the explicit `<…>` argument `{}`", ga.value), ga.src_name);
+      const bool  cand_is_type = cand.const_text.empty() && cand.func_name.empty();  // type bind vs value/lambda
+      std::size_t target       = gens.size();
       // Exception 2: a bare identifier whose SOURCE name matches an unbound
       // generic name (`ga.value` is frame-renamed inside an inlined body),
       // the exact name first (see Actual::src_name).
@@ -14279,9 +14289,12 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
       // Loop-iteration tag stamped by a previous unroll (emit_op_with_fold).
       // Consumed like `__inst_name` — it is a naming marker, never an actual —
       // and re-added by the emitter, so it need not be carried here.
-      if(a.key == "__synth_call") {
-        if(lm->move_to_sibling()) gathered_synth_call_=std::string(lm->current_raw_text());
-        lm->restore_cursor(here);continue;
+      if (a.key == "__synth_call") {
+        if (lm->move_to_sibling()) {
+          gathered_synth_call_ = std::string(lm->current_raw_text());
+        }
+        lm->restore_cursor(here);
+        continue;
       }
       if (a.key == call_inst_suffix_marker) {
         lm->restore_cursor(here);
@@ -15831,47 +15844,47 @@ namespace {
 bool dce_is_def_producing(Lnast_ntype::Lnast_ntype_int t) {
   using N = Lnast_ntype;
   switch (t) {
-    case N::Lnast_ntype_store       :  // store defines its first-child target (the unified write node)
-    case N::Lnast_ntype_dp_assign   :
-    case N::Lnast_ntype_range       :  // a comptime range whose for-loop unrolled away is dead scaffolding
-    case N::Lnast_ntype_tuple_add   :
+    case N::Lnast_ntype_store:  // store defines its first-child target (the unified write node)
+    case N::Lnast_ntype_dp_assign:
+    case N::Lnast_ntype_range:  // a comptime range whose for-loop unrolled away is dead scaffolding
+    case N::Lnast_ntype_tuple_add:
     case N::Lnast_ntype_tuple_concat:
-    case N::Lnast_ntype_tuple_get   :
-    case N::Lnast_ntype_plus        :
-    case N::Lnast_ntype_minus       :
-    case N::Lnast_ntype_mult        :
-    case N::Lnast_ntype_div         :
-    case N::Lnast_ntype_mod         :
-    case N::Lnast_ntype_shl         :
-    case N::Lnast_ntype_sra         :
-    case N::Lnast_ntype_sext        :
-    case N::Lnast_ntype_set_mask    :
-    case N::Lnast_ntype_get_mask    :
-    case N::Lnast_ntype_concat      :
-    case N::Lnast_ntype_bit_and     :
-    case N::Lnast_ntype_bit_or      :
-    case N::Lnast_ntype_bit_xor     :
-    case N::Lnast_ntype_bit_not     :
-    case N::Lnast_ntype_red_and     :
-    case N::Lnast_ntype_red_or      :
-    case N::Lnast_ntype_red_xor     :
-    case N::Lnast_ntype_popcount    :
-    case N::Lnast_ntype_log_and     :
-    case N::Lnast_ntype_log_or      :
-    case N::Lnast_ntype_log_not     :
-    case N::Lnast_ntype_eq          :
-    case N::Lnast_ntype_ne          :
-    case N::Lnast_ntype_lt          :
-    case N::Lnast_ntype_le          :
-    case N::Lnast_ntype_gt          :
-    case N::Lnast_ntype_ge          :
-    case N::Lnast_ntype_func_call   :
-    case N::Lnast_ntype_func_does   :
-    case N::Lnast_ntype_func_equals :
-    case N::Lnast_ntype_func_in     :
-    case N::Lnast_ntype_func_has    :
-    case N::Lnast_ntype_func_case   :
-    case N::Lnast_ntype_attr_set    :
+    case N::Lnast_ntype_tuple_get:
+    case N::Lnast_ntype_plus:
+    case N::Lnast_ntype_minus:
+    case N::Lnast_ntype_mult:
+    case N::Lnast_ntype_div:
+    case N::Lnast_ntype_mod:
+    case N::Lnast_ntype_shl:
+    case N::Lnast_ntype_sra:
+    case N::Lnast_ntype_sext:
+    case N::Lnast_ntype_set_mask:
+    case N::Lnast_ntype_get_mask:
+    case N::Lnast_ntype_concat:
+    case N::Lnast_ntype_bit_and:
+    case N::Lnast_ntype_bit_or:
+    case N::Lnast_ntype_bit_xor:
+    case N::Lnast_ntype_bit_not:
+    case N::Lnast_ntype_red_and:
+    case N::Lnast_ntype_red_or:
+    case N::Lnast_ntype_red_xor:
+    case N::Lnast_ntype_popcount:
+    case N::Lnast_ntype_log_and:
+    case N::Lnast_ntype_log_or:
+    case N::Lnast_ntype_log_not:
+    case N::Lnast_ntype_eq:
+    case N::Lnast_ntype_ne:
+    case N::Lnast_ntype_lt:
+    case N::Lnast_ntype_le:
+    case N::Lnast_ntype_gt:
+    case N::Lnast_ntype_ge:
+    case N::Lnast_ntype_func_call:
+    case N::Lnast_ntype_func_does:
+    case N::Lnast_ntype_func_equals:
+    case N::Lnast_ntype_func_in:
+    case N::Lnast_ntype_func_has:
+    case N::Lnast_ntype_func_case:
+    case N::Lnast_ntype_attr_set:
     case N::Lnast_ntype_attr_get    : return true;
     default                         : return false;
   }
@@ -15897,8 +15910,8 @@ bool dce_is_keepalive_attr_set(const Lnast& staging, const Lnast_nid& node) {
   // opens a block-scoped partition region for tolg. Its %-target never has
   // readers by construction, so without this exemption DCE would silently
   // delete the user's block annotation.
-  if (staging.get_name(key) == "__synth_scope" || staging.get_name(key).starts_with("synth.") || staging.get_name(key) == "__region" || staging.get_name(key) == "__region_ware"
-      || staging.get_name(key) == "__region_delay") {
+  if (staging.get_name(key) == "__synth_scope" || staging.get_name(key).starts_with("synth.") || staging.get_name(key) == "__region"
+      || staging.get_name(key) == "__region_ware" || staging.get_name(key) == "__region_delay") {
     return true;
   }
   if (staging.get_name(key) != "type") {
@@ -17218,8 +17231,8 @@ bool uPass_runner::try_detuple_store() {
     // a body write.
     const bool binds_shape = detuple_pending_decl_->shape_tmp && rest.size() == 1 && rest[0].is_ref()
                              && rest[0].get_name() == *detuple_pending_decl_->shape_tmp;
-    const bool binds_init  = !detuple_pending_decl_->shape_tmp && detuple_pending_decl_->init_ref && rest.size() == 1
-                             && rest[0].is_ref() && rest[0].get_name() == *detuple_pending_decl_->init_ref;
+    const bool binds_init = !detuple_pending_decl_->shape_tmp && detuple_pending_decl_->init_ref && rest.size() == 1
+                            && rest[0].is_ref() && rest[0].get_name() == *detuple_pending_decl_->init_ref;
     if ((binds_shape || binds_init) && !detuple_pending_decl_->fields.empty()) {
       auto pending = std::move(*detuple_pending_decl_);
       detuple_pending_decl_.reset();
@@ -18659,8 +18672,8 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
                 .pass     = "upass.runner",
                 .message  = std::format("the dimension `[{}]` of array `{}` is not a compile-time integer, an index range or "
                                         "an enum type",
-                                        dim,
-                                        upass::Lnast_manager::user_name(var)),
+                                       dim,
+                                       upass::Lnast_manager::user_name(var)),
                 .span     = lm->current_span(),
                 .hint     = "size an array with a literal or a `comptime const` (`[16]`), an index range (`[100..<132]`) or "
                             "an enum type (`[State]`)",
@@ -19785,11 +19798,11 @@ void uPass_runner::process_if() {
     //   - matched-already (previous arm was known-true): emit verbatim.
     //   - unknown / partially-known: process normally (conservative —
     //     the symbol table merges values across both branches today).
-    bool last_cond_false     = false;
-    bool last_cond_true      = false;
-    bool last_was_cond       = false;
-    bool already_matched     = false;  // a *previous* arm already fired
-    bool any_prior_uncertain = false;  // some earlier cond folded to neither true nor false
+    bool                     last_cond_false     = false;
+    bool                     last_cond_true      = false;
+    bool                     last_was_cond       = false;
+    bool                     already_matched     = false;  // a *previous* arm already fired
+    bool                     any_prior_uncertain = false;  // some earlier cond folded to neither true nor false
     // The ref of every condition seen so far (the last one is the current
     // arm's): what holds on an arm's path, for notify_arm_guard.
     std::vector<std::string> cond_refs;

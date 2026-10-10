@@ -8,6 +8,7 @@
 #include "node_util.hpp"
 #include "pass_partition.hpp"
 #include "specialize.hpp"
+#include "synth_policy.hpp"
 
 namespace livehd::synth {
 
@@ -245,6 +246,12 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     return {};
   }
   result->definitions.insert(result->definitions.end(), result->loops.shared_bodies.begin(), result->loops.shared_bodies.end());
+  for (const auto& graph : result->definitions) {
+    auto a = graph->get_input_node().attr(livehd::attrs::synth_policy);
+    if (a.has() && livehd::synth_attr::read(a.get()).contains("_reuse_definition")) {
+      result->loops.preserved_defs.insert(graph->get_gid());
+    }
+  }
   uint64_t clock_cells = 0;
   for (const auto& graph : result->definitions) {
     const auto expanded = expand_plain_clock_cells(graph.get(), budget);

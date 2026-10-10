@@ -667,18 +667,18 @@ protected:
   Lnast_node                 attribute_set_to_node(TSNode n);
 
   // Type handling
-  void                 emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
+  void                                        emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
   // 2f-nested_type — stamp `path.<field>` type_specs for a tuple-shaped type,
   // descending into nested tuple fields (leaves only). See the definition.
-  void                 emit_tuple_type_field_specs(std::string_view path, TSNode tuple_node);
+  void                                        emit_tuple_type_field_specs(std::string_view path, TSNode tuple_node);
   // The inner `tuple` node when `type_cast_node`'s type is a tuple SHAPE.
-  TSNode               tuple_type_inner(TSNode type_cast_node) const;
+  TSNode                                      tuple_type_inner(TSNode type_cast_node) const;
   std::vector<std::pair<std::string, TSNode>> synth_attribute_items(TSNode attrs);
-  void emit_synth_scope(TSNode attrs, int rank);
-  void                 emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
+  void                                        emit_synth_scope(TSNode attrs, int rank);
+  void                                        emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
   // Rulings on one attribute's value: `sync` is deprecated, a runtime `*_pin`
   // value needs `ref`. `rv` is null for a flag-only attribute.
-  void                 check_attribute_value(TSNode item, std::string_view key, TSNode rv) const;
+  void                                        check_attribute_value(TSNode item, std::string_view key, TSNode rv) const;
   // Catch typical attribute-name mistakes (`initial`→`init`, `clk`→`clock_pin`,
   // `bit`→`bits`, …) at parse time with a targeted hint. `has_value` is true
   // when the attribute carries `=value` — it disambiguates `[clock=x]` (meant

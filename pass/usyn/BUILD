@@ -440,6 +440,7 @@ cc_library(
         ":usyn_semantic",
         "//core",
         "//graph",
+        "//pass/lec:lec_query",
         "//pass/common:pass",
         "//pass/cost:host_mem",
         "//pass/cprop:pass_cprop",

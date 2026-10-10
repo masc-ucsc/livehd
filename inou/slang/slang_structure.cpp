@@ -23,6 +23,8 @@
 #include "slang/ast/Statement.h"
 #include "slang/ast/TimingControl.h"
 #include "slang/ast/expressions/AssertionExpr.h"
+#include "slang/ast/symbols/AttributeSymbol.h"
+#include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/types/AllTypes.h"
 #include "slang/syntax/AllSyntax.h"
@@ -1368,6 +1370,70 @@ std::string Slang_context::module_name_of(const slang::ast::InstanceSymbol& symb
   return name;
 }
 
+livehd::synth_attr::Policy Slang_context::synth_attributes(std::span<const slang::ast::AttributeSymbol* const> attrs, int rank) {
+  livehd::synth_attr::Policy p;
+  for (const auto* attr : attrs) {
+    if (!attr->name.starts_with("synth.")) {
+      continue;
+    }
+    const std::string key{attr->name.substr(6)};
+    const auto&       cv = attr->getValue();
+    std::string       value;
+    const auto*       syntax = attr->getSyntax();
+    bool              quoted = false;
+    if (syntax && syntax->kind == slang::syntax::SyntaxKind::AttributeSpec) {
+      const auto& spec = syntax->as<slang::syntax::AttributeSpecSyntax>();
+      quoted           = spec.value && spec.value->expr->kind == slang::syntax::SyntaxKind::StringLiteralExpression;
+    }
+    if (cv.isString() || quoted) {
+      const auto string_value = cv.convertToStr();
+      value                   = livehd::synth_attr::quote(string_value.str());
+    } else if (cv.isInteger()) {
+      auto v = cv.integer().as<int64_t>();
+      if (!v) {
+        emit_unsupported(attr->location, "synth-value", "synthesis attribute must have a known integer/string value");
+        continue;
+      }
+      if (key == "grow" || key == "ware") {
+        value = *v ? "true" : "false";
+      } else {
+        value = std::to_string(*v);
+      }
+    } else {
+      emit_unsupported(attr->location, "synth-value", "synthesis attributes require a literal scalar");
+      continue;
+    }
+    try {
+      livehd::synth_attr::validate(key, value);
+    } catch (const std::exception& e) {
+      emit_unsupported(attr->location, "synth-value", e.what());
+      continue;
+    }
+    if (!p.emplace(key, livehd::synth_attr::Hint{value, rank}).second) {
+      emit_unsupported(attr->location, "synth-duplicate", "duplicate synthesis attribute");
+    }
+  }
+  return p;
+}
+void Slang_context::emit_synth_marker(const livehd::synth_attr::Policy& policy, std::string_view target) {
+  if (policy.empty()) {
+    return;
+  }
+  if (target.empty()) {
+    auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
+    builder_.lnast->add_child(idx, Lnast_node::create_ref(builder_.create_lnast_tmp()));
+    builder_.lnast->add_child(idx, Lnast_node::create_const("__synth_scope"));
+    builder_.lnast->add_child(idx, Lnast_node::create_const("'" + livehd::synth_attr::encode(policy) + "'"));
+  } else {
+    for (const auto& [key, h] : policy) {
+      auto idx = builder_.add_child(Lnast_ntype::create_attr_set());
+      builder_.lnast->add_child(idx, Lnast_node::create_ref(target));
+      builder_.lnast->add_child(idx, Lnast_node::create_const("synth." + key));
+      builder_.lnast->add_child(idx, Lnast_node::create_const(h.value));
+    }
+  }
+}
+
 void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup, const Lnast_nid& out_tup) {
   // Register the ports of the CANONICAL body — the same body lower_module walks
   // (line: `body = symbol.getCanonicalBody()`). slang deduplicates structurally
@@ -1591,7 +1657,7 @@ void Slang_context::emit_local_param_consts(const slang::ast::Scope& body) {
     }
     std::string name(ps.name);
     const bool  plain = !name.empty() && !std::isdigit(static_cast<unsigned char>(name.front()))
-                        && std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
+                       && std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) != 0 || c == '_'; });
     if (!plain || used_names_.count(name) != 0u) {
       continue;  // colliding / exotic name — keep folding this param
     }
@@ -1937,6 +2003,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto in_tup        = builder_.lnast->add_child(io_nid, Lnast_ntype::create_tuple_add());
   auto out_tup       = builder_.lnast->add_child(io_nid, Lnast_ntype::create_tuple_add());
   builder_.idx_stmts = builder_.lnast->add_child(root_nid, Lnast_ntype::create_stmts());
+  emit_synth_marker(synth_attributes(body->getCompilation().getAttributes(body->getDefinition()), 1));
 
   // Port-vector SROA is body-profitable and internal-only. The port symbols
   // belong to the canonical body, exactly like emit_module_io's registrations.
@@ -2590,7 +2657,7 @@ void Slang_context::collect_initial_values(const slang::ast::Statement& stmt) {
             emit_unsupported(e.sourceRange,
                              "readmem-unsupported",
                              "$readmemh/$readmemb requires a constant filename and a whole zero-based, one-dimensional integral "
-                             "memory; bounds and mixed initializers are unsupported");
+                              "memory; bounds and mixed initializers are unsupported");
           };
           if (args.size() != 2) {
             bad();
@@ -3116,6 +3183,7 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
   if (reg_declared_.contains(&sym)) {
     return;
   }
+  emit_synth_marker(synth_attributes(body_->getCompilation().getAttributes(sym), 4), lname_of(sym));
   reg_declared_.insert(&sym);
   declared_.insert(&sym);
 
@@ -3338,6 +3406,7 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
     return;
   }
   declared_.insert(&sym);
+  emit_synth_marker(synth_attributes(body_->getCompilation().getAttributes(sym), 4), lname_of(sym));
 
   const auto& type = sym.getType();
   if (type.getCanonicalType().isUnpackedArray()) {
@@ -3987,7 +4056,7 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
 
   void note_lhs(const slang::ast::Expression& lhs) {
     switch (lhs.kind) {
-      case ExpressionKind::NamedValue       :
+      case ExpressionKind::NamedValue:
       case ExpressionKind::HierarchicalValue: writes.insert(&lhs.as<slang::ast::ValueExpressionBase>().symbol); return;
       case ExpressionKind::Conversion       : note_lhs(lhs.as<slang::ast::ConversionExpression>().operand()); return;
       case ExpressionKind::Concatenation:
@@ -4245,22 +4314,22 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   std::function<void(const slang::ast::Scope&)> collect = [&](const slang::ast::Scope& sc) {
     for (const auto& member : sc.members()) {
       switch (member.kind) {
-        case SymbolKind::Port             :
-        case SymbolKind::Parameter        :
-        case SymbolKind::TypeParameter    :
-        case SymbolKind::TypeAlias        :
+        case SymbolKind::Port:
+        case SymbolKind::Parameter:
+        case SymbolKind::TypeParameter:
+        case SymbolKind::TypeAlias:
         case SymbolKind::TransparentMember:
-        case SymbolKind::EmptyMember      :
-        case SymbolKind::Genvar           :
-        case SymbolKind::StatementBlock   :  // lowered where referenced (slang puts them next to procedures)
-        case SymbolKind::Subroutine       :  // bodies fold at call sites or are diagnosed there
-        case SymbolKind::ElabSystemTask   :  // $info/$warning/$error handled by slang itself
-        case SymbolKind::WildcardImport   :  // `import pkg::*` — slang already resolved the names
-        case SymbolKind::ExplicitImport   :  // `import pkg::sym` — ditto
-        case SymbolKind::Modport          :  // interface modport view; not codegen-relevant here
-        case SymbolKind::AssertionPort    :  // property/sequence formal args
-        case SymbolKind::Sequence         :  // named sequences (assertion-only, not synthesized)
-        case SymbolKind::Property         :  // named properties (assertion-only, not synthesized)
+        case SymbolKind::EmptyMember:
+        case SymbolKind::Genvar:
+        case SymbolKind::StatementBlock:  // lowered where referenced (slang puts them next to procedures)
+        case SymbolKind::Subroutine:      // bodies fold at call sites or are diagnosed there
+        case SymbolKind::ElabSystemTask:  // $info/$warning/$error handled by slang itself
+        case SymbolKind::WildcardImport:  // `import pkg::*` — slang already resolved the names
+        case SymbolKind::ExplicitImport:  // `import pkg::sym` — ditto
+        case SymbolKind::Modport:         // interface modport view; not codegen-relevant here
+        case SymbolKind::AssertionPort:   // property/sequence formal args
+        case SymbolKind::Sequence:        // named sequences (assertion-only, not synthesized)
+        case SymbolKind::Property:        // named properties (assertion-only, not synthesized)
           break;
 
         case SymbolKind::Net: {
@@ -6020,7 +6089,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       // gives din = cond?d:q, enable = cond), exactly as for a reg.
       lower_comb_process(pbs.getBody());
       return;
-    case ProceduralBlockKind::Always  :
+    case ProceduralBlockKind::Always:
     case ProceduralBlockKind::AlwaysFF: break;
   }
 
@@ -6031,8 +6100,8 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
   // synthesized, so ignore such bodies (mirrors lower_statement in slang_stmt.cpp).
   std::function<bool(const slang::ast::Statement&)> assertion_only = [&](const slang::ast::Statement& s) -> bool {
     switch (s.kind) {
-      case StatementKind::Empty              :
-      case StatementKind::ImmediateAssertion :
+      case StatementKind::Empty:
+      case StatementKind::ImmediateAssertion:
       case StatementKind::ConcurrentAssertion: return true;
       case StatementKind::Block              : return assertion_only(s.as<slang::ast::BlockStatement>().body);
       case StatementKind::List:
@@ -6950,7 +7019,7 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
       }
       auto reset_val = Dlop::from_pyrope(initial);
       agrees         = decl_val && reset_val && !decl_val->is_invalid() && !reset_val->is_invalid()
-                       && decl_val->eq_op(*reset_val)->is_known_true();
+               && decl_val->eq_op(*reset_val)->is_known_true();
     }
     if (!agrees) {
       emit_unsupported(slang::SourceRange(sym.location, sym.location),
@@ -8001,12 +8070,18 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   // br_fifo_shared_* family, 11 lhdtrack rtl-vs-netlist rows).
   auto qualify   = [&](const std::string& raw) {
     return genblk_prefix_.empty() ? Slang_context::ref_name_of_raw(raw)
-                                  : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
+                                    : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
   };
   auto result
       = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name)) : qualify(std::string(inst.name));
   ln.add_child(fcall_idx, Lnast_node::create_ref(result));
   ln.add_child(fcall_idx, Lnast_node::create_ref(ref_name_of_raw(callee)));
+  const auto synthesis = synth_attributes(body_->getCompilation().getAttributes(inst), 3);
+  if (!synthesis.empty()) {
+    auto arg = ln.add_child(fcall_idx, Lnast_ntype::create_store());
+    ln.add_child(arg, Lnast_node::create_ref("__synth_call"));
+    ln.add_child(arg, Lnast_node::create_const("'" + livehd::synth_attr::encode(synthesis) + "'"));
+  }
   for (const auto& [pname, v] : in_args) {
     auto arg = ln.add_child(fcall_idx, Lnast_ntype::create_store());
     ln.add_child(arg, Lnast_node::create_ref(pname));
@@ -8211,7 +8286,7 @@ void Slang_context::lower_unknown_instance(const slang::ast::UninstantiatedDefSy
   // br_fifo_shared_* family, 11 lhdtrack rtl-vs-netlist rows).
   auto qualify   = [&](const std::string& raw) {
     return genblk_prefix_.empty() ? Slang_context::ref_name_of_raw(raw)
-                                  : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
+                                    : Slang_context::ref_name_of_raw(absl::StrCat(genblk_prefix_, raw));
   };
   auto result
       = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name)) : qualify(std::string(inst.name));

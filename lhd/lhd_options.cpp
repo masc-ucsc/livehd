@@ -511,8 +511,8 @@ Options parse_args(int argc, char** argv) {
       // `--impl p2/fz.prp --impl p2/h0.prp` checked only h0 and reported the
       // top missing (random Pyrope round-trip fuzz, 2026-10-08): the same
       // ambiguity add_cli_set rejects for --set.
-      const bool impl  = a == "--impl";
-      auto       tp    = parse_check_side(a, need_value(a, i, argc, argv));
+      const bool  impl = a == "--impl";
+      auto        tp   = parse_check_side(a, need_value(a, i, argc, argv));
       const auto& prev = impl ? opts.impl_path : opts.ref_path;
       if (!prev.empty() && prev != tp.path) {
         throw Lhd_error{"usage",

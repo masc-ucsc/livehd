@@ -25,16 +25,16 @@
 #include "absl/container/btree_map.h"
 #include "cell.hpp"
 #include "diag.hpp"
+#include "hash_util.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "host_mem.hpp"
 #include "node_util.hpp"
 #include "predict_abc_size.hpp"
 #include "rapidjson/document.h"
 #include "region_cache.hpp"
+#include "semdiff.hpp"
 #include "synthesis_cost.hpp"
 #include "worker_pool.hpp"
-#include "semdiff.hpp"
-#include "hash_util.hpp"
 
 namespace livehd::synth {
 namespace gu = livehd::graph_util;
@@ -357,9 +357,18 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
       overrides.load = *ro.load;
     }
     if (src == "--set region_opts") {
-      if(ro.adder) opts_.source_adder=false;
-      if(ro.multiplier) opts_.source_multiplier=false;
-      if(ro.reverse_barrel) opts_.source_barrel=false;
+      if (ro.adder) {
+        opts_.source_adder = false;
+      }
+      if (ro.multiplier) {
+        opts_.source_multiplier = false;
+      }
+      if (ro.reverse_barrel) {
+        opts_.source_barrel = false;
+      }
+      if (ro.block_size) {
+        opts_.source_block = false;
+      }
     }
     if (ro.adder.has_value()) {
       opts_.adder      = *ro.adder;
@@ -384,17 +393,33 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
   // Non-arithmetic source options affect this region. Arithmetic choices stay
   // on individual nodes, so mixed architectures never force a partition cut.
   livehd::synth_attr::Policy source;
-  for (const auto& node:rb.nodes) if(auto a=node.attr(livehd::attrs::synth_policy);a.has()) {
-    for(const auto& [key,h]:livehd::synth_attr::read(a.get())) if(key=="delay"||key=="ware"||key=="abc") {
-      auto it=source.find(key);
-      if(it!=source.end()&&it->second.rank==h.rank&&it->second.value!=h.value)
-        livehd::diag::err("pass.abc","synth-region-conflict","syntax").msg("region '{}' has conflicting synth.{} values",rb.module_name,key).fatal();
-      if(it==source.end()||it->second.rank<=h.rank) source[key]=h;
+  for (const auto& node : rb.nodes) {
+    if (auto a = node.attr(livehd::attrs::synth_policy); a.has()) {
+      for (const auto& [key, h] : livehd::synth_attr::read(a.get())) {
+        if (key == "delay" || key == "ware" || key == "abc") {
+          auto it = source.find(key);
+          if (it != source.end() && it->second.rank == h.rank && it->second.value != h.value) {
+            livehd::diag::err("pass.abc", "synth-region-conflict", "syntax")
+                .msg("region '{}' has conflicting synth.{} values", rb.module_name, key)
+                .fatal();
+          }
+          if (it == source.end() || it->second.rank <= h.rank) {
+            source[key] = h;
+          }
+        }
+      }
     }
   }
-  if(source.contains("delay")) opts_.delay=livehd::synth_attr::get(source,"delay")=="0"?"":livehd::synth_attr::get(source,"delay");
-  if(source.contains("ware")) opts_.ware=livehd::synth_attr::get(source,"ware")=="true";
-  if(source.contains("abc")) {overrides.flow=livehd::synth_attr::get(source,"abc");flow_overridden=true;}
+  if (source.contains("delay")) {
+    opts_.delay = livehd::synth_attr::get(source, "delay") == "0" ? "" : livehd::synth_attr::get(source, "delay");
+  }
+  if (source.contains("ware")) {
+    opts_.ware = livehd::synth_attr::get(source, "ware") == "true";
+  }
+  if (source.contains("abc")) {
+    overrides.flow  = livehd::synth_attr::get(source, "abc");
+    flow_overridden = true;
+  }
   // Graph-embedded overrides first (the block-attribute channel writes a
   // "region_opts" member into coloring_info), CLI second so --set wins.
   auto git = graph_region_opts_.find(rb.src);
@@ -417,6 +442,28 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
   }
   if (auto it = region_opts_cli_.find(rb.color); it != region_opts_cli_.end()) {
     apply(it->second, "--set region_opts");
+  }
+  for (const auto& n : rb.nodes) {
+    auto a = n.attr(attrs::synth_policy);
+    if (!a.has()) {
+      continue;
+    }
+    const auto p = synth_attr::read(a.get());
+    if (opts_.source_adder && !opts_.auto_adder && synth_attr::get(p, "adder") == "auto") {
+      opts_.inherited_adder = opts_.adder;
+      opts_.adder           = arith::Adder_kind::rca;
+      opts_.auto_adder      = true;
+    }
+    if (opts_.source_multiplier && !opts_.auto_multiplier && synth_attr::get(p, "multiplier") == "auto") {
+      opts_.inherited_multiplier = opts_.multiplier;
+      opts_.multiplier           = arith::Mult_kind::array;
+      opts_.auto_multiplier      = true;
+    }
+    if (opts_.source_barrel && !opts_.auto_barrel && synth_attr::get(p, "barrel") == "auto") {
+      opts_.inherited_barrel = opts_.reverse_barrel;
+      opts_.reverse_barrel   = false;
+      opts_.auto_barrel      = true;
+    }
   }
   return flow_overridden;
 }
@@ -812,30 +859,140 @@ void Region_driver::map_regions(std::span<const livehd::partition::Region_body> 
 
 namespace {
 std::string tune_options(const Driver_options& o) {
-  const char* adder=o.adder==arith::Adder_kind::rca?"rca":o.adder==arith::Adder_kind::cla?"cla":o.adder==arith::Adder_kind::cska?"cska":o.adder==arith::Adder_kind::prefix?"prefix":"brent";
-  const char* mult=o.multiplier==arith::Mult_kind::array?"array":o.multiplier==arith::Mult_kind::tree?"tree":o.multiplier==arith::Mult_kind::csa?"csa":"sn";
-  return std::format("{{\"adder\":\"{}\",\"multiplier\":\"{}\",\"barrel\":\"{}\",\"block_size\":{}}}",adder,mult,o.reverse_barrel?"reverse":"log",o.block_size);
+  const char* adder = o.adder == arith::Adder_kind::rca      ? "rca"
+                      : o.adder == arith::Adder_kind::cla    ? "cla"
+                      : o.adder == arith::Adder_kind::cska   ? "cska"
+                      : o.adder == arith::Adder_kind::prefix ? "prefix"
+                                                             : "brent";
+  const char* mult  = o.multiplier == arith::Mult_kind::array  ? "array"
+                      : o.multiplier == arith::Mult_kind::tree ? "tree"
+                      : o.multiplier == arith::Mult_kind::csa  ? "csa"
+                                                               : "sn";
+  return std::format("{{\"adder\":\"{}\",\"multiplier\":\"{}\",\"barrel\":\"{}\",\"block_size\":{}}}",
+                     adder,
+                     mult,
+                     o.reverse_barrel ? "reverse" : "log",
+                     o.block_size);
 }
-std::string tune_key(const partition::Region_body& rb,const Driver_options& options,uint64_t salt) {
-  if(!rb.pre_body) return {};
-  const auto digest=semdiff::canonical_digest(rb.pre_body,{},semdiff::Sub_fold::interface,false);
-  if(!digest.valid) return {};
+std::string applied_operations(std::span<const hhds::Node_class> nodes, const Driver_options& options, std::string_view origin) {
+  std::string         rows = "[";
+  rapidjson::Document defaults;
+  const auto          encoded = tune_options(options);
+  defaults.Parse(encoded.c_str());
+  for (const auto& node : nodes) {
+    const auto op  = gu::type_op_of(node);
+    const bool add = op == Ntype_op::Sum || op == Ntype_op::LT || op == Ntype_op::GT, mult = op == Ntype_op::Mult,
+               shift = op == Ntype_op::SHL || op == Ntype_op::SRA;
+    if (!add && !mult && !shift) {
+      continue;
+    }
+    auto       a      = node.attr(attrs::synth_policy);
+    const auto policy = a.has() ? synth_attr::read(a.get()) : synth_attr::Policy{};
+    if (rows.size() > 1) {
+      rows += ",";
+    }
+    rows       += std::format("{{\"node\":{},\"source_id\":{},\"operation\":\"{}\",\"choices\":{{",
+                        node.get_debug_nid(),
+                        node.attr(hhds::attrs::srcid).has() ? node.attr(hhds::attrs::srcid).get() : 0,
+                        mult    ? "multiplier"
+                              : shift ? "barrel"
+                                      : "adder");
+    bool first  = true;
+    for (const auto* key : {"adder", "multiplier", "barrel", "block_size"}) {
+      if ((std::string_view(key) == "adder" && !add && !mult) || (std::string_view(key) == "multiplier" && !mult)
+          || (std::string_view(key) == "barrel" && !shift) || (std::string_view(key) == "block_size" && shift)) {
+        continue;
+      }
+      const bool source = std::string_view(key) == "adder"        ? options.source_adder
+                          : std::string_view(key) == "multiplier" ? options.source_multiplier
+                          : std::string_view(key) == "barrel"     ? options.source_barrel
+                                                                  : options.source_block;
+      auto       it     = policy.find(key);
+      const bool pinned = source && it != policy.end() && synth_attr::text(it->second.value) != "auto";
+      auto       value  = pinned ? it->second.value : synth_attr::json(defaults[key]);
+      if (!pinned && (it == policy.end() || synth_attr::text(it->second.value) != "auto")) {
+        auto fixed = options;
+        if (options.inherited_adder) {
+          fixed.adder = *options.inherited_adder;
+        }
+        if (options.inherited_multiplier) {
+          fixed.multiplier = *options.inherited_multiplier;
+        }
+        if (options.inherited_barrel) {
+          fixed.reverse_barrel = *options.inherited_barrel;
+        }
+        rapidjson::Document inherited;
+        const auto          data = tune_options(fixed);
+        inherited.Parse(data.c_str());
+        value = synth_attr::json(inherited[key]);
+      }
+      const auto provenance = pinned    ? (it->second.rank == 4   ? "variable"
+                                           : it->second.rank == 3 ? "call"
+                                           : it->second.rank == 2 ? "block"
+                                                                  : "module")
+                              : !source ? "cli"
+                                        : origin;
+      if (!first) {
+        rows += ",";
+      }
+      first  = false;
+      rows  += synth_attr::quote(key) + ":{\"value\":" + value + ",\"origin\":" + synth_attr::quote(provenance) + "}";
+    }
+    rows += "}}";
+  }
+  return rows + "]";
+}
+std::string tune_key(const partition::Region_body& rb, const Driver_options& options, uint64_t salt) {
+  if (!rb.pre_body) {
+    return {};
+  }
+  const auto digest = semdiff::canonical_digest(rb.pre_body, {}, semdiff::Sub_fold::interface, false);
+  if (!digest.valid) {
+    return {};
+  }
   std::vector<std::string> hints;
-  for(const auto& node:rb.nodes) if(auto a=node.attr(attrs::synth_policy);a.has()) hints.emplace_back(a.get());
-  std::sort(hints.begin(),hints.end());
-  std::string recipe=tune_options(options)+options.delay+options.region_hook_recipe;
-  for(const auto& hint:hints) recipe+=hint;
-  return std::format("{:016x}{:016x}-{:016x}-{:016x}",digest.h0,digest.h1,salt,hash_util::fnv1a64(recipe));
+  for (const auto& node : rb.nodes) {
+    if (auto a = node.attr(attrs::synth_policy); a.has()) {
+      hints.emplace_back(a.get());
+    }
+  }
+  std::sort(hints.begin(), hints.end());
+  std::string recipe = tune_options(options) + options.delay + options.region_hook_recipe
+                       + std::format("|inherited={}/{}/{}",
+                                     options.inherited_adder ? static_cast<int>(*options.inherited_adder) : -1,
+                                     options.inherited_multiplier ? static_cast<int>(*options.inherited_multiplier) : -1,
+                                     options.inherited_barrel ? static_cast<int>(*options.inherited_barrel) : -1);
+  recipe += std::format("|source={}/{}/{}/{}|auto={}/{}/{}",
+                        options.source_adder,
+                        options.source_multiplier,
+                        options.source_barrel,
+                        options.source_block,
+                        options.auto_adder,
+                        options.auto_multiplier,
+                        options.auto_barrel);
+  for (const auto& hint : hints) {
+    recipe += hint;
+  }
+  return std::format("{:016x}{:016x}-{:016x}-{:016x}", digest.h0, digest.h1, salt, hash_util::fnv1a64(recipe));
 }
-void replay_tune(Driver_options& o,std::string_view row) {
-  rapidjson::Document d;d.Parse(row.data(),row.size());
-  if(!d.IsObject()||!d.HasMember("options")) return;
-  const auto& p=d["options"];
-  if(o.auto_adder) o.adder=*arith::parse_adder_kind(p["adder"].GetString());
-  if(o.auto_multiplier) o.multiplier=*arith::parse_mult_kind(p["multiplier"].GetString());
-  if(o.auto_barrel) o.reverse_barrel=std::string_view(p["barrel"].GetString())=="reverse";
+void replay_tune(Driver_options& o, std::string_view row) {
+  rapidjson::Document d;
+  d.Parse(row.data(), row.size());
+  if (!d.IsObject() || !d.HasMember("options")) {
+    return;
+  }
+  const auto& p = d["options"];
+  if (o.auto_adder) {
+    o.adder = *arith::parse_adder_kind(p["adder"].GetString());
+  }
+  if (o.auto_multiplier) {
+    o.multiplier = *arith::parse_mult_kind(p["multiplier"].GetString());
+  }
+  if (o.auto_barrel) {
+    o.reverse_barrel = std::string_view(p["barrel"].GetString()) == "reverse";
+  }
 }
-}
+}  // namespace
 
 void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   std::unique_lock graph_lock(coordinator_ ? coordinator_->graph_mutex_ : graph_mutex_);
@@ -964,15 +1121,25 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     (void)apply_region_overrides(rb, overrides);
   }
   if (!ware_trial_) {
-    auto key=tune_key(rb,opts_,incr_?incr_->salt():0);
-    auto* owner=coordinator_?coordinator_:this;
-    owner->tune_keys_[rb.module_name]=key;
-    bool replay=false;
-    if(opts_.tune_store&&opts_.tune_profile!="off"&&!key.empty()) {
-      const auto stored=opts_.tune_store->find(key);
-      if(!stored.empty()) { replay_tune(opts_,stored); replay=true; }
+    auto  key                         = tune_key(rb, opts_, opts_.tune_salt);
+    auto* owner                       = coordinator_ ? coordinator_ : this;
+    owner->tune_keys_[rb.module_name] = key;
+    bool replay                       = false;
+    if (opts_.tune_store && opts_.tune_profile != "off" && !key.empty()) {
+      const auto stored = opts_.tune_store->find(key);
+      if (!stored.empty()) {
+        replay_tune(opts_, stored);
+        replay = true;
+      }
     }
-    if(opts_.tune_store) opts_.tune_store->applied(rb.module_name,std::format("{{\"key\":{},\"options\":{},\"origin\":\"{}\"}}",synth_attr::quote(key),tune_options(opts_),replay?"stored":"source/default"));
+    if (opts_.tune_store) {
+      opts_.tune_store->applied(rb.module_name,
+                                std::format("{{\"key\":{},\"options\":{},\"origin\":\"{}\",\"operations\":{}}}",
+                                            synth_attr::quote(key),
+                                            tune_options(opts_),
+                                            replay ? "stored" : "source/default",
+                                            applied_operations(rb.nodes, opts_, replay ? "stored" : "global")));
+    }
   }
   region_delay_targets_[rb.module_name] = ware_delay_target(opts_.delay);
   // The region's delay BUDGET: the target minus the register margin when the
@@ -1050,12 +1217,24 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // carries them: nothing fact-specific reaches the blaster or the cache key.
   // The backend's recipe for this region, and the hook's, verbatim in the
   // cache key.
-  std::string recipe = opts_.region_hook ? std::format("{}|hook={}", plan.recipe, opts_.region_hook_recipe) : plan.recipe;
+  std::string recipe  = opts_.region_hook ? std::format("{}|hook={}", plan.recipe, opts_.region_hook_recipe) : plan.recipe;
+  recipe             += std::format("|inherited={}/{}/{}",
+                        opts_.inherited_adder ? static_cast<int>(*opts_.inherited_adder) : -1,
+                        opts_.inherited_multiplier ? static_cast<int>(*opts_.inherited_multiplier) : -1,
+                        opts_.inherited_barrel ? static_cast<int>(*opts_.inherited_barrel) : -1);
+  recipe
+      += std::format("|source={}/{}/{}/{}", opts_.source_adder, opts_.source_multiplier, opts_.source_barrel, opts_.source_block);
   std::vector<std::string> local_hints;
-  for(const auto& node:rb.nodes) if(auto a=node.attr(attrs::synth_policy);a.has()) local_hints.emplace_back(a.get());
-  std::sort(local_hints.begin(),local_hints.end());
-  for(const auto& hint:local_hints) recipe+="|source="+hint;
-  hhds::Graph*      pre_g  = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
+  for (const auto& node : rb.nodes) {
+    if (auto a = node.attr(attrs::synth_policy); a.has()) {
+      local_hints.emplace_back(a.get());
+    }
+  }
+  std::sort(local_hints.begin(), local_hints.end());
+  for (const auto& hint : local_hints) {
+    recipe += "|source=" + hint;
+  }
+  hhds::Graph* pre_g = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
   // EXPERIMENTAL (ABC_INCR_COMPARE_ONLY): exercise compare/store with NO ABC -- a
   // fast diagnostic for why a region misses on a comment edit.
   if (incr_ != nullptr && std::getenv("ABC_INCR_COMPARE_ONLY") != nullptr) {
@@ -1081,7 +1260,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     return;
   }
   if (incr_ != nullptr && rb.reuse_eligible) {
-    if (pre_g != nullptr) {
+    if (pre_g != nullptr && !opts_.force_remap) {
       auto                               res = incr_->lookup_compare(rb, pre_g, recipe);
       std::shared_ptr<const std::string> evidence;
       if (res.hit && opts_.evidence_valid) {
@@ -1184,19 +1363,23 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
 
   // The region's logic, translated onto a backend-neutral RAW Lnet.
   Blast_options blast_options;
-  blast_options.capture_state  = static_cast<bool>(opts_.region_hook);
-  blast_options.source_adder=opts_.source_adder;
-  blast_options.source_multiplier=opts_.source_multiplier;
-  blast_options.source_barrel=opts_.source_barrel;
-  blast_options.adder          = opts_.adder;
-  blast_options.block_size     = opts_.block_size;
-  blast_options.multiplier     = opts_.multiplier;
-  blast_options.reverse_barrel = opts_.reverse_barrel;
-  blast_options.map_register   = opts_.map_register;
+  blast_options.capture_state        = static_cast<bool>(opts_.region_hook);
+  blast_options.source_adder         = opts_.source_adder;
+  blast_options.source_multiplier    = opts_.source_multiplier;
+  blast_options.source_barrel        = opts_.source_barrel;
+  blast_options.source_block         = opts_.source_block;
+  blast_options.inherited_adder      = opts_.inherited_adder;
+  blast_options.inherited_multiplier = opts_.inherited_multiplier;
+  blast_options.inherited_barrel     = opts_.inherited_barrel;
+  blast_options.adder                = opts_.adder;
+  blast_options.block_size           = opts_.block_size;
+  blast_options.multiplier           = opts_.multiplier;
+  blast_options.reverse_barrel       = opts_.reverse_barrel;
+  blast_options.map_register         = opts_.map_register;
   // A QN-only DFF cell under a flow that keeps every latch: the latch carries
   // ~next_state and the mapper folds the inversion into its phase assignment
   // (Seq_flop::d_inverted).
-  blast_options.qn_encode      = dff_.has_value() && dff_->q_inverted && plan.preserves_latches;
+  blast_options.qn_encode            = dff_.has_value() && dff_->q_inverted && plan.preserves_latches;
   // Asynchronous-reset registers cross as latches only under a flow that keeps
   // every latch as crossed: the read-back attributes each cell's reset pin to
   // its source register by latch position (Seq_flop::async_reset).
@@ -1478,12 +1661,15 @@ void Region_driver::remember_ware(const livehd::partition::Region_body& rb, cons
   Ware_region w;
   uint64_t    ge = 0;
   for (auto n : rb.nodes) {
-    ge      += gu::synthesis_ge_weight(n);
-    auto op  = gu::type_op_of(n);
-    auto a=n.attr(attrs::synth_policy);
-    auto hints=a.has()?synth_attr::read(a.get()):synth_attr::Policy{};
-    const auto pinned=[&](std::string_view key) {const auto v=synth_attr::get(hints,key);return !v.empty()&&v!="auto";};
-    w.add   |= options.auto_adder && !pinned("adder")
+    ge                += gu::synthesis_ge_weight(n);
+    auto       op      = gu::type_op_of(n);
+    auto       a       = n.attr(attrs::synth_policy);
+    auto       hints   = a.has() ? synth_attr::read(a.get()) : synth_attr::Policy{};
+    const auto pinned  = [&](std::string_view key) {
+      const auto v = synth_attr::get(hints, key);
+      return !v.empty() && v != "auto";
+    };
+    w.add |= options.auto_adder && !pinned("adder")
              && ((options.ware_arith && op == Ntype_op::Sum) || (options.ware_cmp && (op == Ntype_op::LT || op == Ntype_op::GT)));
     w.mult   |= options.ware_arith && options.auto_multiplier && !pinned("multiplier") && op == Ntype_op::Mult;
     w.barrel |= options.ware_shift && options.auto_barrel && !pinned("barrel") && (op == Ntype_op::SHL || op == Ntype_op::SRA);
@@ -1548,6 +1734,18 @@ void Region_driver::remember_ware(const livehd::partition::Region_body& rb, cons
     ware_shells_.find_io(rb.module_name)->get_graph()->get_input_node().attr(attrs::ware_module).set(a.get());
   }
   ware_regions_.push_back(std::move(w));
+}
+
+void Region_driver::validate_tuning(const std::function<bool(hhds::Graph*, hhds::Graph*, std::string_view)>& proof) {
+  if (!startup_opts_.tune_store) {
+    return;
+  }
+  for (const auto& w : ware_regions_) {
+    auto       io     = outlib_->find_io(w.rb.module_name);
+    const bool proven = w.rb.pre_body && io && proof(w.rb.pre_body, io->get_graph().get(), w.rb.module_name);
+    startup_opts_.tune_store->authorize(tune_keys_[w.rb.module_name], proven);
+  }
+  startup_opts_.tune_store->save();
 }
 
 void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view top) {
@@ -1632,10 +1830,20 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
         {w.options, ""}
     };
     if (w.add || (w.mult && w.options.auto_adder)) {
-      for (auto kind : {arith::Adder_kind::cla, arith::Adder_kind::cska, arith::Adder_kind::prefix, arith::Adder_kind::brent}) {
+      for (auto kind : {arith::Adder_kind::rca,
+                        arith::Adder_kind::cla,
+                        arith::Adder_kind::cska,
+                        arith::Adder_kind::prefix,
+                        arith::Adder_kind::brent}) {
         auto o  = w.options;
         o.adder = kind;
-        candidates.push_back({o, "adder="+synth_attr::text(synth_attr::quote(kind==arith::Adder_kind::cla?"cla":kind==arith::Adder_kind::cska?"cska":kind==arith::Adder_kind::prefix?"prefix":"brent"))});
+        candidates.push_back({o,
+                              "adder="
+                                  + synth_attr::text(synth_attr::quote(kind == arith::Adder_kind::rca      ? "rca"
+                                                                       : kind == arith::Adder_kind::cla    ? "cla"
+                                                                       : kind == arith::Adder_kind::cska   ? "cska"
+                                                                       : kind == arith::Adder_kind::prefix ? "prefix"
+                                                                                                           : "brent"))});
       }
     }
     const auto append = [](std::string label, std::string_view selector) {
@@ -1648,9 +1856,15 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
     if (w.mult) {
       const auto count = candidates.size();
       for (size_t i = 0; i < count; ++i) {
-        for(auto kind:{arith::Mult_kind::tree,arith::Mult_kind::csa,arith::Mult_kind::sn}) {
-          auto o=candidates[i].options;o.multiplier=kind;
-          candidates.push_back({o,append(candidates[i].label,kind==arith::Mult_kind::tree?"multiplier=tree":kind==arith::Mult_kind::csa?"multiplier=csa":"multiplier=sn")});
+        for (auto kind : {arith::Mult_kind::array, arith::Mult_kind::tree, arith::Mult_kind::csa, arith::Mult_kind::sn}) {
+          auto o       = candidates[i].options;
+          o.multiplier = kind;
+          candidates.push_back({o,
+                                append(candidates[i].label,
+                                       kind == arith::Mult_kind::array  ? "multiplier=array"
+                                       : kind == arith::Mult_kind::tree ? "multiplier=tree"
+                                       : kind == arith::Mult_kind::csa  ? "multiplier=csa"
+                                                                        : "multiplier=sn")});
         }
       }
     }
@@ -1663,11 +1877,33 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
       }
     }
     candidates.erase(candidates.begin());  // baseline already measured
-    auto selected=w.options;
-    const auto tune_start=std::chrono::steady_clock::now();
-    uint32_t attempts=0;
+    // Try alternate multipliers before multiplying a wide array by every
+    // adder choice. A single slow array trial can consume the soft time budget.
+    if (w.mult) {
+      std::stable_sort(candidates.begin(), candidates.end(), [&](const auto& a, const auto& b) {
+        const auto rank = [](arith::Mult_kind m) {
+          return m == arith::Mult_kind::sn ? 0 : m == arith::Mult_kind::csa ? 1 : m == arith::Mult_kind::tree ? 2 : 3;
+        };
+        const bool a_changes_adder = a.options.adder != w.options.adder;
+        const bool b_changes_adder = b.options.adder != w.options.adder;
+        if (a_changes_adder != b_changes_adder) {
+          return !a_changes_adder;
+        }
+        return rank(a.options.multiplier) < rank(b.options.multiplier);
+      });
+    }
+    const auto baseline = tune_options(w.options);
+    std::erase_if(candidates, [&](const auto& c) { return tune_options(c.options) == baseline; });
+    auto       selected   = w.options;
+    const auto tune_start = std::chrono::steady_clock::now();
+    uint32_t   attempts   = 0;
     for (const auto& candidate : candidates) {
-      if(attempts++>=startup_opts_.tune_attempts || (startup_opts_.tune_time_ms&&std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-tune_start).count()>=static_cast<int64_t>(startup_opts_.tune_time_ms))) break;
+      if (attempts++ >= startup_opts_.tune_attempts
+          || (startup_opts_.tune_time_ms
+              && std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - tune_start).count()
+                     >= static_cast<int64_t>(startup_opts_.tune_time_ms))) {
+        break;
+      }
       hhds::GraphLibrary backup;
       if (!backup.copy_from(outlib, name)) {
         break;
@@ -1758,10 +1994,20 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
       if (incr_) {
         std::print("[pass.abc] ware candidate cache {}\n", candidate_hit ? "hit" : "miss");
       }
-      if(startup_opts_.tune_store) startup_opts_.tune_store->history(std::format("{{\"region\":{},\"candidate\":{},\"kept\":{},\"cells\":{},\"delay_ps\":{},\"time_ms\":{},\"validation\":\"structural\"}}",synth_attr::quote(name),tune_options(candidate.options),keep,trial_q.gates,trial_q.delay,trial_ms));
+      if (startup_opts_.tune_store) {
+        startup_opts_.tune_store->history(
+            std::format("{{\"region\":{},\"candidate\":{},\"kept\":{},\"cells\":{},\"delay_ps\":{},\"time_ms\":{},\"validation\":"
+                        "\"structural\"}}",
+                        synth_attr::quote(name),
+                        tune_options(candidate.options),
+                        keep,
+                        trial_q.gates,
+                        trial_q.delay,
+                        trial_ms));
+      }
       if (keep) {
-        selected=candidate.options;
-        score = std::move(trial_score);
+        selected = candidate.options;
+        score    = std::move(trial_score);
       }
       incr_ = nullptr;  // candidate_cache releases its libraries at the end of this iteration
       if (!refusal_.empty() || !time_refusal_.empty()) {
@@ -1771,14 +2017,37 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
         break;
       }
     }
-    if(startup_opts_.tune_store && !tune_keys_[name].empty()) {
-      const auto record=std::format("{{\"options\":{},\"validation\":\"structural\",\"cells\":{},\"delay_ps\":{},\"region\":{}}}",tune_options(selected),qor_[row].gates,qor_[row].delay,synth_attr::quote(name));
-      startup_opts_.tune_store->put(tune_keys_[name],record);
-      startup_opts_.tune_store->applied(name,record);
-      std::print("[synth.tune] region={} selected={} validation=structural; source pin hint: ::[synth.adder=\"{}\", synth.multiplier=\"{}\", synth.barrel=\"{}\"]\n",name,tune_options(selected),selected.adder==arith::Adder_kind::rca?"rca":selected.adder==arith::Adder_kind::cla?"cla":selected.adder==arith::Adder_kind::cska?"cska":selected.adder==arith::Adder_kind::prefix?"prefix":"brent",selected.multiplier==arith::Mult_kind::array?"array":selected.multiplier==arith::Mult_kind::tree?"tree":selected.multiplier==arith::Mult_kind::csa?"csa":"sn",selected.reverse_barrel?"reverse":"log");
+    if (startup_opts_.tune_store && !tune_keys_[name].empty()) {
+      const auto record = std::format("{{\"options\":{},\"validation\":\"structural\",\"cells\":{},\"delay_ps\":{},\"region\":{}}}",
+                                      tune_options(selected),
+                                      qor_[row].gates,
+                                      qor_[row].delay,
+                                      synth_attr::quote(name));
+      startup_opts_.tune_store->put(tune_keys_[name], record);
+      auto applied = record;
+      applied.pop_back();
+      applied += ",\"operations\":" + applied_operations(w.rb.nodes, selected, "explored") + "}";
+      startup_opts_.tune_store->applied(name, applied);
+      std::print(
+          "[synth.tune] region={} selected={} validation=structural; source pin hint: ::[synth.adder=\"{}\", "
+          "synth.multiplier=\"{}\", synth.barrel=\"{}\"]\n",
+          name,
+          tune_options(selected),
+          selected.adder == arith::Adder_kind::rca      ? "rca"
+          : selected.adder == arith::Adder_kind::cla    ? "cla"
+          : selected.adder == arith::Adder_kind::cska   ? "cska"
+          : selected.adder == arith::Adder_kind::prefix ? "prefix"
+                                                        : "brent",
+          selected.multiplier == arith::Mult_kind::array  ? "array"
+          : selected.multiplier == arith::Mult_kind::tree ? "tree"
+          : selected.multiplier == arith::Mult_kind::csa  ? "csa"
+                                                          : "sn",
+          selected.reverse_barrel ? "reverse" : "log");
     }
   }
-  if(startup_opts_.tune_store) startup_opts_.tune_store->save();
+  if (startup_opts_.tune_store) {
+    startup_opts_.tune_store->save();
+  }
   if (global_target > 0 && !score.delays.empty()) {
     std::print("[pass.abc] ware: selected stitched delay={:.3f} ps target={:.3f} ps {}\n",
                score.delays.front(),

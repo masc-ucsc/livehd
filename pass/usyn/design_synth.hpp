@@ -1,16 +1,25 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include "tmap.hpp"
-
 #include "arith.hpp"
 #include "logical_cache.hpp"
 #include "region_emit.hpp"
+#include "region_qor.hpp"
+#include "tmap.hpp"
+#include "tune_store.hpp"
 
 namespace livehd::usyn {
 
 struct Design_options {
-  Logical_options                          logical;
+  Logical_options                    logical;
+  std::shared_ptr<synth::Tune_store> tune_store;
+  std::string                        tune_profile = "auto", tune_validate = "structural";
+  uint32_t                           tune_attempts   = 24;
+  uint64_t                           tune_time_ms    = 60000;
+  bool                               auto_multiplier = false, auto_barrel = true;
+  std::string                        tune_context;
+  synth::Region_opts_map             region_opts;
+
   synth::arith::Adder_kind                 adder          = synth::arith::Adder_kind::rca;
   bool                                     auto_sum_adder = true;
   int                                      adder_block    = 0;
@@ -56,10 +65,12 @@ struct Design_region {
 struct Logical_design {
   // Declared first so the library outlives all graph handles. Region selection
   // records own their Boolean data and source provenance, not scratch handles.
-  hhds::GraphLibrary           library;
-  std::shared_ptr<hhds::Graph> top;
-  std::vector<Design_region>   regions;
-  Logical_cache_stats          cache{};
+  hhds::GraphLibrary                 library;
+  hhds::GraphLibrary                 proof_library;
+  std::map<std::string, std::string> tune_keys, tune_refs;
+  std::shared_ptr<hhds::Graph>       top;
+  std::vector<Design_region>         regions;
+  Logical_cache_stats                cache{};
 };
 
 struct Design_result {

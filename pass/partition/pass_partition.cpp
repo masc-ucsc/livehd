@@ -1,6 +1,9 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_partition.hpp"
+#include "synth_policy.hpp"
+
+#include <rapidjson/document.h>
 
 #include <algorithm>
 #include <array>
@@ -670,17 +673,17 @@ private:
                         const std::vector<IntEdge>& redges, const std::vector<ConstEdge>& rconsts, bool decl_only_subs);
   // Rebuild region r's original logic into `dst_lib` under `name` (decl-only
   // Subs); returns the committed body. The abc cache's stable compare artifact.
-  hhds::Graph* build_pre_body_into(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
-                                   const std::vector<hhds::Node_class>& rnodes);
+  hhds::Graph*                        build_pre_body_into(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
+                                                          const std::vector<hhds::Node_class>& rnodes);
   // As above but for the single-region "as top" shape (primary IO names,
   // top_outputs_ instead of region ports) -- shared by build_module_as_top's
   // classic body and its incremental pre-body.
-  void         emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::GraphLibrary* dst_lib,
-                                       const std::vector<hhds::Node_class>& rnodes, const std::vector<IntEdge>& redges,
-                                       const std::vector<ConstEdge>& rconsts, bool decl_only_subs);
-  void         emit_top_passthrough_outputs(hhds::Graph* body);  // primary/const-driven outputs (no region)
-  hhds::Graph* build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
-                                     const std::vector<hhds::Node_class>& rnodes);
+  void                                emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::GraphLibrary* dst_lib,
+                                                              const std::vector<hhds::Node_class>& rnodes, const std::vector<IntEdge>& redges,
+                                                              const std::vector<ConstEdge>& rconsts, bool decl_only_subs);
+  void                                emit_top_passthrough_outputs(hhds::Graph* body);  // primary/const-driven outputs (no region)
+  hhds::Graph*                        build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
+                                                            const std::vector<hhds::Node_class>& rnodes);
   // Regions in a reproducible order: by color, then by the smallest member node
   // id (invariant to which member the union-find picked as representative).
   // Region indices are already deterministic; this order is what fixes the
@@ -692,6 +695,9 @@ private:
 
 void Partitioner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo, hhds::GraphLibrary* dst_lib) {
   admit("carry_node_attrs");
+  if (auto a = orig.attr(livehd::attrs::synth_policy); a.has()) {
+    neo.attr(livehd::attrs::synth_policy).set(std::string(a.get()));
+  }
   if (gu::has_name(orig)) {
     neo.attr(hhds::attrs::name).set(std::string{gu::node_name_of(orig)});
   }
@@ -853,8 +859,8 @@ bool Partitioner::collect() {
   // builder then describe exactly the same local copies as the mapper sees.
   std::vector<bool> shared(region_nodes_.size(), false);
   const auto        info = g_->get_input_node().attr(livehd::attrs::coloring_info);
-  const bool        boundary_wiring = info.has()
-                               && std::string_view{info.get()}.find("\"boundary_wiring\":true") != std::string_view::npos;
+  const bool        boundary_wiring
+      = info.has() && std::string_view{info.get()}.find("\"boundary_wiring\":true") != std::string_view::npos;
   const auto wiring = [](const hhds::Node_class& node) {
     const auto op = gu::type_op_of(node);
     if (op == Ntype_op::Concat) {
@@ -1092,7 +1098,7 @@ void Partitioner::name_ports() {
   // then the full cone) only while it TIES with another port of its region, so
   // an edit renames only ports within a few levels of it.
   absl::flat_hash_map<std::pair<hhds::Pin_class, int>, uint64_t> prod_k_memo, fwd_k_memo;
-  std::function<uint64_t(const hhds::Pin_class&, int)>            prod_k;
+  std::function<uint64_t(const hhds::Pin_class&, int)>           prod_k;
   prod_k = [&](const hhds::Pin_class& pin, int k) -> uint64_t {
     if (auto anchor = producer_anchor(pin)) {
       return *anchor;
@@ -1166,7 +1172,7 @@ void Partitioner::name_ports() {
   const auto local_signatures = [&](const auto& drivers, bool with_consumers, absl::flat_hash_set<hhds::Pin_class>& full) {
     absl::flat_hash_map<hhds::Pin_class, uint64_t> sig;
     absl::flat_hash_map<hhds::Pin_class, size_t>   level;
-    const auto compute = [&](const hhds::Pin_class& d) {
+    const auto                                     compute = [&](const hhds::Pin_class& d) {
       const size_t l = level[d];
       if (l >= kFullLevel) {
         full.insert(d);
@@ -1235,9 +1241,9 @@ void Partitioner::name_ports() {
     // external producer cones). Only ports whose internal roles TIE fall back to
     // the external signature ladder below to tell them apart, and a tie that
     // survives that still refuses reuse.
-    const int  rcol      = region_color_[r];
-    const auto in_region = [&](const hhds::Node_class& n) { return is_partitionable(n) && node_color_of(n) == rcol; };
-    constexpr int                                                  kInternalDepth = 8;
+    const int     rcol           = region_color_[r];
+    const auto    in_region      = [&](const hhds::Node_class& n) { return is_partitionable(n) && node_color_of(n) == rcol; };
+    constexpr int kInternalDepth = 8;
     absl::flat_hash_map<std::pair<hhds::Pin_class, int>, uint64_t> ifwd_memo, iprod_memo;
     std::function<uint64_t(const hhds::Pin_class&, int, bool)>     ifwd;
     ifwd = [&](const hhds::Pin_class& drv, int k, bool root) -> uint64_t {
@@ -1316,36 +1322,37 @@ void Partitioner::name_ports() {
           by_bank[bank].push_back(iprod(in_drv, k - 1));
         }
       }
-      const uint64_t v = sig_mix(sig_mix(producer_shape(pin), hhds::group_fold(0, by_bank)), static_cast<uint64_t>(pin.get_port_id()));
+      const uint64_t v
+          = sig_mix(sig_mix(producer_shape(pin), hhds::group_fold(0, by_bank)), static_cast<uint64_t>(pin.get_port_id()));
       iprod_memo.emplace(key, v);
       return v;
     };
     // Region-local signatures first; the external ladder only for the ports
     // that tie on them. `full` collects ports that needed the whole cone.
-    const auto region_signatures = [&](const std::vector<hhds::Pin_class>& drivers, bool input,
-                                       absl::flat_hash_set<hhds::Pin_class>& full) {
-      absl::flat_hash_map<hhds::Pin_class, uint64_t> sig;
-      absl::flat_hash_map<uint64_t, std::vector<hhds::Pin_class>> by_sig;
-      for (const auto& d : drivers) {
-        sig[d] = input ? ifwd(d, kInternalDepth, true) : iprod(d, kInternalDepth);
-        by_sig[sig[d]].push_back(d);
-      }
-      std::vector<hhds::Pin_class> tied;
-      for (const auto& [v, members] : by_sig) {
-        (void)v;
-        if (members.size() > 1) {
-          tied.insert(tied.end(), members.begin(), members.end());
-        }
-      }
-      if (!tied.empty()) {
-        std::sort(tied.begin(), tied.end(), [&](const auto& a, const auto& b) { return sig[a] < sig[b]; });
-        const auto ext = local_signatures(tied, /*with_consumers=*/input, full);
-        for (const auto& d : tied) {
-          sig[d] = sig_mix(sig[d], ext.at(d));
-        }
-      }
-      return sig;
-    };
+    const auto region_signatures
+        = [&](const std::vector<hhds::Pin_class>& drivers, bool input, absl::flat_hash_set<hhds::Pin_class>& full) {
+            absl::flat_hash_map<hhds::Pin_class, uint64_t>              sig;
+            absl::flat_hash_map<uint64_t, std::vector<hhds::Pin_class>> by_sig;
+            for (const auto& d : drivers) {
+              sig[d] = input ? ifwd(d, kInternalDepth, true) : iprod(d, kInternalDepth);
+              by_sig[sig[d]].push_back(d);
+            }
+            std::vector<hhds::Pin_class> tied;
+            for (const auto& [v, members] : by_sig) {
+              (void)v;
+              if (members.size() > 1) {
+                tied.insert(tied.end(), members.begin(), members.end());
+              }
+            }
+            if (!tied.empty()) {
+              std::sort(tied.begin(), tied.end(), [&](const auto& a, const auto& b) { return sig[a] < sig[b]; });
+              const auto ext = local_signatures(tied, /*with_consumers=*/input, full);
+              for (const auto& d : tied) {
+                sig[d] = sig_mix(sig[d], ext.at(d));
+              }
+            }
+            return sig;
+          };
 
     // ONE boundary scheme, always -- names AND order. There used to be a second,
     // cheaper one here (sort by `debug_nid`, name anonymous crossings
@@ -1448,7 +1455,7 @@ void Partitioner::name_ports() {
           nm = base + "_" + std::to_string(k++);
         }
         used.insert(nm);
-        p.name = nm;
+        p.name                   = nm;
         input_name_sig[p.driver] = sig_str(0x51ULL, nm);
       }
     }
@@ -1800,8 +1807,48 @@ hhds::Graph* Partitioner::build_pre_body_into(uint32_t r, hhds::GraphLibrary& ds
 void Partitioner::build_module(uint32_t r) {
   admit("build_module", 0);
   int         color = region_color_[r];
-  auto group=livehd::synth_attr::group_name(g_,color);
-  std::string name = group.empty()?std::format("{}__c{}",top_,color):std::format("{}__g_{}",top_,group);
+  auto        group = livehd::synth_attr::group_name(g_, color);
+  std::string name;
+  if (!group.empty()) {
+    name = std::format("{}__g_{}", top_, group);
+  } else {
+    // Legacy exact walls retain their published names. Automatic regions use
+    // stable output/state anchors, never the dense color allocation order.
+    bool legacy = false;
+    if (auto info = g_->get_input_node().attr(livehd::attrs::coloring_info); info.has()) {
+      rapidjson::Document d;
+      const std::string   json{info.get()};
+      d.Parse(json.c_str());
+      legacy = d.IsObject() && d.HasMember("region_opts") && d["region_opts"].HasMember(std::to_string(color).c_str());
+    }
+    if (legacy) {
+      name = std::format("{}__c{}", top_, color);
+    } else {
+      std::vector<std::string> anchors;
+      for (const auto& node : region_nodes_[r]) {
+        if (node.is_loop_break()) {
+          const auto anchor = gu::node_name_of(node);
+          if (!anchor.empty()) {
+            anchors.push_back("state:" + std::string(anchor));
+          }
+        }
+      }
+      for (const auto& port : module_outputs_[r]) {
+        anchors.push_back("out:" + port.name);
+      }
+      if (anchors.empty()) {
+        for (const auto& port : module_inputs_[r]) {
+          anchors.push_back("in:" + port.name);
+        }
+      }
+      std::sort(anchors.begin(), anchors.end());
+      uint64_t key = 0xcbf29ce484222325ULL;
+      for (const auto& anchor : anchors) {
+        key = sig_str(sig_mix(key, anchor.size()), anchor);
+      }
+      name = std::format("{}__a_{:016x}", top_, key);
+    }
+  }
   // Disambiguate if this color has multiple regions.
   if (outlib_->find_io(name)) {
     int         suffix = 1;
@@ -2338,7 +2385,7 @@ bool Partitioner::run() {
   // name_ports() is skipped outright here. Multi-region defs keep the
   // wrapper+regions shape (the wrapper wires the several `__c<id>` regions
   // together).
-  if (regs.size() == 1) {
+  if (regs.size() == 1 && livehd::synth_attr::group_name(g_, region_color_[regs.front()]).empty()) {
     build_module_as_top(regs.front());
     return true;
   }
@@ -2552,7 +2599,10 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
       check_admission(admission, "flattened", 0);
       flat_src = flat_holder.get();
     }
-    if (preserved_defs.contains(g->get_gid())) {
+    const auto retained_policy = g->get_input_node().attr(livehd::attrs::synth_policy);
+    const bool source_reused
+        = retained_policy.has() && livehd::synth_attr::read(retained_policy.get()).contains("_reuse_definition");
+    if (preserved_defs.contains(g->get_gid()) && !source_reused) {
       // A shared loop implementation is one synthesis unit, including ordinary
       // helpers flattened into it. Do not resurrect their former color cuts.
       for (auto node : flat_src->body().nodes()) {

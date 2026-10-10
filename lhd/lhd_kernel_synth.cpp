@@ -40,16 +40,22 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <iterator>
+#include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "attrs.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "node_util.hpp"
 #include "pass.hpp"
+#include "synth_policy.hpp"
 
 namespace lhd {
 
@@ -185,9 +191,9 @@ void synth_command(Options& opts, Result& res) {
   if (!mapped_output && truthy(synth_set(opts, "opentimer", ""))) {
     throw Lhd_error{"usage", "logical-only USYN cannot run OpenTimer", "use tmap=abc or synth.opentimer=false"};
   }
-  const bool        run_reduce    = truthy(synth_set(opts, "reduce", "false"));
-  const std::string sdc           = synth_set(opts, "sdc", "");
-  const std::string spef          = synth_set(opts, "spef", "");
+  const bool        run_reduce = truthy(synth_set(opts, "reduce", "false"));
+  const std::string sdc        = synth_set(opts, "sdc", "");
+  const std::string spef       = synth_set(opts, "spef", "");
   {
     std::vector<std::string> extra;
     if (!sdc.empty()) {
@@ -360,6 +366,94 @@ void synth_command(Options& opts, Result& res) {
     run_step("pass.color", var, labels, opts, res);
   }
 
+  {
+    std::map<hhds::Gid, std::shared_ptr<hhds::Graph>> definitions;
+    for (const auto& g : var.graphs) {
+      if (g) {
+        definitions[g->get_gid()] = g;
+      }
+    }
+    std::map<hhds::Gid, uint64_t>        occurrences;
+    std::vector<hhds::Gid>               order;
+    std::set<hhds::Gid>                  visited;
+    const std::function<void(hhds::Gid)> visit = [&](hhds::Gid id) {
+      if (!visited.insert(id).second) {
+        return;
+      }
+      auto it = definitions.find(id);
+      if (it == definitions.end()) {
+        return;
+      }
+      for (auto n : it->second->body().nodes()) {
+        if (livehd::graph_util::type_op_of(n) == Ntype_op::Sub) {
+          if (auto io = n.get_subnode_io()) {
+            visit(io->get_gid());
+          }
+        }
+      }
+      order.push_back(id);
+    };
+    for (const auto& [id, g] : definitions) {
+      if (g->get_name() == top) {
+        occurrences[id] = 1;
+        visit(id);
+      }
+    }
+    for (auto it = order.rbegin(); it != order.rend(); ++it) {
+      for (auto n : definitions.at(*it)->body().nodes()) {
+        if (livehd::graph_util::type_op_of(n) == Ntype_op::Sub) {
+          if (auto io = n.get_subnode_io()) {
+            occurrences[io->get_gid()] += occurrences[*it];
+          }
+        }
+      }
+    }
+    std::string groups = "{\"schema_version\":1,\"top\":" + livehd::synth_attr::quote(top) + ",\"definitions\":[";
+    bool        first  = true;
+    for (const auto& graph : var.graphs) {
+      if (!first) {
+        groups += ",";
+      }
+      first   = false;
+      groups += "{\"module\":" + livehd::synth_attr::quote(graph->get_name())
+                + ",\"physical_instances\":" + std::to_string(occurrences[graph->get_gid()]) + ",\"specialized\":"
+                + (graph->get_name().find("__s_") != std::string_view::npos ? "true" : "false") + ",\"coloring\":";
+      auto info  = graph->get_input_node().attr(livehd::attrs::coloring_info);
+      groups    += info.has() ? std::string(info.get()) : "{}";
+      if (auto policy = graph->get_input_node().attr(livehd::attrs::synth_policy); policy.has()) {
+        groups += ",\"definition_policy\":" + std::string(policy.get());
+      }
+      groups            += ",\"members\":[";
+      bool member_first  = true;
+      for (auto node : graph->body().nodes()) {
+        if (!member_first) {
+          groups += ",";
+        }
+        member_first  = false;
+        groups       += std::format("{{\"node\":{},\"color\":{},\"source_id\":{}",
+                              node.get_debug_nid(),
+                              livehd::graph_util::node_color_of(node),
+                              node.attr(hhds::attrs::srcid).has() ? node.attr(hhds::attrs::srcid).get() : 0);
+        if (auto a = node.attr(livehd::attrs::synth_policy); a.has()) {
+          groups += ",\"source_policy\":" + std::string(a.get());
+        }
+        groups += "}";
+      }
+      groups += "]}";
+    }
+    groups          += "]}";
+    const auto path  = root + "/synth_groups.json";
+    {
+      std::ofstream out(path);
+      if (!(out << groups << '\n')) {
+        throw Lhd_error{"config", "cannot write synth_groups.json", "check workdir permissions"};
+      }
+    }
+    if (user_workdir) {
+      res.outputs.push_back(path);
+    }
+  }
+
   // ---- 3. ABC tech-map --------------------------------------------------------
   const std::string qor_path = root + "/qor.json";
   {
@@ -367,11 +461,11 @@ void synth_command(Options& opts, Result& res) {
     fs::remove_all(net_dir, ec);  // a stale netlist must never shadow a region shell the mapper fills
     ensure_dir(net_dir);
     Eprp_var::Eprp_dict labels;
-    labels["top"]     = top;
-    labels["out"]     = net_dir;
-    labels["qor"]     = qor_path;
+    labels["top"]        = top;
+    labels["out"]        = net_dir;
+    labels["qor"]        = qor_path;
     // synth.threads is the shared ABC worker limit for every command.
-    labels["threads"] = synth_set(opts, "threads", "0");
+    labels["threads"]    = synth_set(opts, "threads", "0");
     labels["specialize"] = synth_set(opts, "specialize", "true");
     // Each mapper receives its own labels. Native USYN does not inherit
     // ABC optimization settings; standalone dispatch uses the same rule.

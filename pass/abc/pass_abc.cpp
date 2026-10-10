@@ -29,8 +29,10 @@
 #include "memory_module.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
+#include "pass_liberty.hpp"
 #include "pass_partition.hpp"
 #include "predict_abc_size.hpp"  // sat_add
+#include "query.hpp"
 #include "region_cache.hpp"
 #include "satopt.hpp"
 #include "ware_module.hpp"
@@ -208,14 +210,15 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
       "adder",
       "auto|rca|cska|cla|prefix|brent: auto compares mapped area or critical-path timing, including inlined arithmetic",
       "auto");
-  m.add_label_optional("tune_profile","internal synth.tune.profile","auto");
-  m.add_label_optional("tune_validate","internal synth.tune.validate","structural");
-  m.add_label_optional("tune_file","internal synth.tune.file","");
-  m.add_label_optional("tune_export","internal synth.tune.export","");
-  m.add_label_optional("tune_dir","internal workdir synthesis tune root","");
-  m.add_label_optional("tune_persist","internal lhd.incremental gate","true");
-  m.add_label_optional("tune_attempts","internal synth.tune.attempts","24");
-  m.add_label_optional("tune_time_ms","internal synth.tune.time_ms","60000");
+  m.add_label_optional("tune_profile", "internal synth.tune.profile", "auto");
+  m.add_label_optional("tune_validate", "internal synth.tune.validate", "structural");
+  m.add_label_optional("tune_file", "internal synth.tune.file", "");
+  m.add_label_optional("tune_export", "internal synth.tune.export", "");
+  m.add_label_optional("tune_finalize", "internal canonical mapping after explicit exploration", "false");
+  m.add_label_optional("tune_dir", "internal workdir synthesis tune root", "");
+  m.add_label_optional("tune_persist", "internal lhd.incremental gate", "true");
+  m.add_label_optional("tune_attempts", "internal synth.tune.attempts", "24");
+  m.add_label_optional("tune_time_ms", "internal synth.tune.time_ms", "60000");
   m.add_label_optional("barrel", "auto|log|reverse: barrel mux stage order; explicit selection disables trials", "auto");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   m.add_label_optional("threads",
@@ -940,12 +943,18 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   opts.verbose           = verbose;
   opts.adder             = adder.value();
   opts.auto_adder        = adder_s == "auto" && block_size == 0;
-  opts.tune_profile = std::string(var.get("tune_profile","auto"));
-  opts.tune_validate = std::string(var.get("tune_validate","structural"));
-  opts.ware_trials = opts.tune_profile == "on";
-  opts.tune_attempts = static_cast<uint32_t>(std::stoul(std::string(var.get("tune_attempts","24"))));
-  opts.tune_time_ms = std::stoull(std::string(var.get("tune_time_ms","60000")));
-  opts.tune_store = std::make_shared<livehd::synth::Tune_store>(std::string(var.get("tune_dir","")),std::string(var.get("tune_file","")),std::string(var.get("tune_export","")),var.get("tune_persist","true") != "false",opts.tune_profile!="off");
+  opts.force_remap       = truthy(var.get("tune_finalize", "false"));
+  opts.tune_profile      = std::string(var.get("tune_profile", "auto"));
+  opts.tune_validate     = std::string(var.get("tune_validate", "structural"));
+  opts.ware_trials       = opts.tune_profile == "on";
+  opts.tune_attempts     = static_cast<uint32_t>(std::stoul(std::string(var.get("tune_attempts", "24"))));
+  opts.tune_time_ms      = std::stoull(std::string(var.get("tune_time_ms", "60000")));
+  opts.tune_store        = std::make_shared<livehd::synth::Tune_store>(std::string(var.get("tune_dir", "")),
+                                                                std::string(var.get("tune_file", "")),
+                                                                std::string(var.get("tune_export", "")),
+                                                                var.get("tune_persist", "true") != "false",
+                                                                opts.tune_profile != "off",
+                                                                opts.tune_validate);
   opts.auto_multiplier   = mult_s == "auto";
   auto barrel            = std::string{var.get("barrel", "auto")};
   if (barrel != "auto" && barrel != "log" && barrel != "reverse") {
@@ -1117,6 +1126,12 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
           .emit();
     }
   }
+  opts.tune_salt = livehd::synth::Region_cache::make_salt(livehd::abc::kAbcSrcSalt,
+                                                          opts.library,
+                                                          opts.map_register,
+                                                          opts.memory_fold,
+                                                          opts.memory_max_bits,
+                                                          livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell));
   if (!cache_dir.empty()) {
     std::error_code ec;
     const auto      canon_cache = std::filesystem::weakly_canonical(cache_dir, ec);
@@ -1180,7 +1195,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
       dbg,
       [&mapper](const livehd::partition::Region_body& rb) { mapper.map_region(rb); },
       flatten,
-      /*want_pre_bodies=*/mapper.incremental(),
+      /*want_pre_bodies=*/mapper.incremental() || opts.ware_trials || !var.get("tune_file", "").empty(),
       threads == 1 ? livehd::partition::Body_batch_builder{}
                    : [&mapper](std::span<const livehd::partition::Region_body> batch) { mapper.map_regions(batch); },
       2 * livehd::synth::synthesis_thread_limit(threads, std::thread::hardware_concurrency()),
@@ -1227,8 +1242,96 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   mapper.save_tuning();
   if (opts.ware_trials && mapper.admission_refusal() == nullptr && mapper.time_refusal() == nullptr) {
     mapper.optimize_ware(outlib, top);
+    // Apply the ordinary final boundary environment to the selected bodies,
+    // exactly as a cold replay does. Trial scores alone are not the final QoR.
+    mapper.refine_boundaries(outlib, top);
   }
   mapper.stop();  // no-op when neither mapping nor ware trials need ABC
+  bool       canonical_final = false;
+  const auto canonical_qor   = out + "/tune_finalize_qor.json";
+  if (opts.ware_trials && std::any_of(mapper.qor().begin(), mapper.qor().end(), [](const auto& q) { return q.ware_trials > 0; })
+      && !mapper.admission_refusal() && !mapper.time_refusal()) {
+    // Trials size one body against an evolving stitched environment. Reset
+    // that history before publication: the selected policy gets exactly the
+    // same cold mapping and one boundary refinement as an ordinary replay.
+    // Keep the compilation, and publish final bodies into the normal cache.
+    const auto selection = out + "/tune_finalize_selection.json";
+    opts.tune_store->export_selection(selection);
+    Eprp_var final = var;
+    final.add("tune_profile", "auto");
+    final.add("tune_validate", "structural");
+    final.add("tune_finalize", "true");
+    final.add("tune_dir", "");
+    final.add("tune_file", selection);
+    final.add("tune_export", "");
+    final.add("qor", canonical_qor);
+    std::print("[synth.tune] finalizing selected policy with a canonical cold mapping (no trials)\n");
+    work_with(final, configure);
+    canonical_final = true;
+  }
+  if (opts.ware_trials && opts.tune_validate != "structural") {
+    const auto model_path = out + "/tune_models";
+    Eprp_var   models;
+    models.add("files", library);
+    models.add("out", model_path);
+    Pass_liberty::gensim(models);
+    auto&                                        model_lib = livehd::Hhds_graph_library::instance(model_path);
+    absl::flat_hash_map<hhds::Gid, hhds::Graph*> definitions;
+    for (auto gid : model_lib.all_gids()) {
+      if (auto g = model_lib.get_graph(gid)) {
+        definitions[gid] = g.get();
+      }
+    }
+    for (const auto& g : resolve_graphs) {
+      if (g) {
+        definitions[g->get_gid()] = g.get();
+      }
+    }
+    for (auto gid : outlib.all_gids()) {
+      if (auto g = outlib.get_graph(gid)) {
+        definitions[gid] = g.get();
+      }
+    }
+    const auto proof = [&](hhds::Graph* ref, hhds::Graph* impl, std::string_view name) {
+      livehd::lec::Lec_options policy;
+      policy.engine            = "ind";
+      policy.timeout           = 20;
+      policy.min_timeout       = 1;
+      policy.hard_timeout_mult = 2;
+      auto       result        = livehd::lec::prove_equal_isolated(ref, impl, policy, &definitions);
+      const bool proven        = result.verdict == livehd::lec::Verdict::Proven && !result.bounded && !result.nothing_compared;
+      std::print("[synth.tune] validation={} region={} result={} bounded={} detail={}\n",
+                 opts.tune_validate,
+                 name,
+                 proven                                            ? "proven"
+                 : result.verdict == livehd::lec::Verdict::Refuted ? "refuted"
+                                                                   : "unknown",
+                 result.bounded,
+                 result.detail);
+      if (result.verdict == livehd::lec::Verdict::Refuted) {
+        opts.tune_store->authorize_all(false);
+        opts.tune_store->save();
+        livehd::diag::err("pass.abc", "synth-tune-refuted", "unsupported")
+            .msg("synthesis tuning refuted for {}: {}", name, result.witness)
+            .fatal();
+      }
+      return proven;
+    };
+    if (opts.tune_validate == "region") {
+      mapper.validate_tuning(proof);
+    } else {
+      hhds::Graph* ref = nullptr;
+      for (const auto& g : occurrence_graphs) {
+        if (g && g->get_name() == top) {
+          ref = g.get();
+        }
+      }
+      auto       impl   = outlib.find_io(top);
+      const bool proven = ref && impl && proof(ref, impl->get_graph().get(), top);
+      opts.tune_store->authorize_all(proven);
+      opts.tune_store->save();
+    }
+  }
 
   // Instantiation counts from the netlist that was just emitted (see Abc_hier).
   Abc_hier hier;
@@ -1274,7 +1377,36 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     std::print("pass.abc cache: {} hit(s), {} miss(es) ({})\n", incr->hits(), incr->misses(), incr->dir());
   }
 
-  emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.backend_started(), hier, dff_sel, mapper.parallel_stats());
+  if (!canonical_final) {
+    emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.backend_started(), hier, dff_sel, mapper.parallel_stats());
+  } else if (!qor_path.empty()) {
+    std::ifstream       in(canonical_qor);
+    const std::string   contents{std::istreambuf_iterator<char>(in), {}};
+    rapidjson::Document doc;
+    doc.Parse(contents.c_str());
+    if (!doc.IsObject() || !doc.HasMember("regions")) {
+      livehd::diag::err("pass.abc", "tune-finalize", "unsupported").msg("canonical tuning mapping produced no QoR").fatal();
+    }
+    double search_ms = 0;
+    for (auto& row : doc["regions"].GetArray()) {
+      for (const auto& trial : mapper.qor()) {
+        if (trial.module != row["module"].GetString()) {
+          continue;
+        }
+        row["ware_trials"].SetInt(trial.ware_trials);
+        row["ware_selected"].SetString(trial.ware_selected.c_str(), doc.GetAllocator());
+        row["ms"].SetDouble(row["ms"].GetDouble() + trial.ms);
+        search_ms += trial.ms;
+      }
+    }
+    if (doc.HasMember("incremental") && doc["incremental"].HasMember("miss_ms")) {
+      auto& ms = doc["incremental"]["miss_ms"];
+      ms.SetDouble(ms.GetDouble() + search_ms);
+    }
+    doc.AddMember("tune_canonical_finalization", true, doc.GetAllocator());
+    std::ofstream file(qor_path);
+    file << livehd::synth_attr::json(doc) << '\n';
+  }
   if (const auto* refusal = mapper.time_refusal()) {
     livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
         .msg("{}", *refusal)

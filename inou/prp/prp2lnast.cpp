@@ -26,7 +26,6 @@
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "prp_builtins.hpp"
-#include "synth_policy.hpp"
 #include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
 #include "prpparse/prp_diag.hpp"
@@ -35,6 +34,7 @@
 #include "range_bits.hpp"  // kMaxIntTypeWidth, std_clog2 (//upass/core:range_bits_hdr, header-only)
 #include "source_path.hpp"
 #include "str_tools.hpp"
+#include "synth_policy.hpp"
 
 static constexpr std::string_view call_ref_arg_marker           = "__ref_arg";
 // Marks the receiver actual of a UFCS method call `obj.method(...)`
@@ -710,7 +710,7 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<
   scope_stack.emplace_back(seed_here.begin(), seed_here.end());
   readonly_frames_.resize(scope_stack.size());
   readonly_frames_.back() = readonly_here;
-  const size_t lvl = scope_stack.size() - 1;
+  const size_t lvl        = scope_stack.size() - 1;
 
   // Declared in a STRICTLY enclosing frame (>= barrier, < this scope) — shadowing.
   auto in_enclosing = [&](std::string_view name) {
@@ -2791,13 +2791,20 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
 
   bool legacy_scope = false;
   for (TSNode item : ts_node_named_children(attrs)) {
-    auto lv = child_by_field(item,"lvalue");
-    if (!ts_node_is_null(lv)) { auto k=trim(get_text(lv)); legacy_scope |= k != "synth" && !k.starts_with("synth."); }
+    auto lv = child_by_field(item, "lvalue");
+    if (!ts_node_is_null(lv)) {
+      auto k        = trim(get_text(lv));
+      legacy_scope |= k != "synth" && !k.starts_with("synth.");
+    }
   }
   if (!legacy_scope) {
     auto idx = builder.add_child(Lnast_ntype::create_stmts());
-    attach_loc(idx,n); builder.push_stmts(idx); emit_synth_scope(attrs,2);
-    walk_statement_block(n); builder.pop_stmts(); return;
+    attach_loc(idx, n);
+    builder.push_stmts(idx);
+    emit_synth_scope(attrs, 2);
+    walk_statement_block(n);
+    builder.pop_stmts();
+    return;
   }
   // 2opt-freq B: `{ ::[abc="…", color=…] stmts }` — the annotated block is its
   // own synthesis partition region. Lower to a NESTED stmts (tolg recurses
@@ -2842,7 +2849,7 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
     lnast->add_child(idx, Lnast_node::create_const("__region_" + key));
     lnast->add_child(idx, expr_to_node(value));
   }
-  emit_synth_scope(attrs,2);
+  emit_synth_scope(attrs, 2);
   walk_statement_block(n);
   builder.pop_stmts();
 }
@@ -2881,7 +2888,9 @@ bool Prp2lnast::parse_scope_attributes(TSNode attr_list_node, int& region_id, TS
       return t.size() >= 2 && ((t.front() == '\'' && t.back() == '\'') || (t.front() == '"' && t.back() == '"'));
     };
     auto key = trim(get_text(lv));
-    if (key == "synth" || key.starts_with("synth.")) continue;
+    if (key == "synth" || key.starts_with("synth.")) {
+      continue;
+    }
     if (key == "abc") {
       auto txt = value_txt(rv);
       if (!is_quoted(txt) || (txt.front() == '"' && txt.find('{') != std::string_view::npos)) {
@@ -3486,12 +3495,12 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       // recorded -5 and `x#[t0]` failed "negative bit index" (random Pyrope
       // round-trip fuzz, 2026-10-08). Leave those statically unknown.
       const bool typed_write = !ts_node_is_null(tc) || (!has_decl && [&] {
-                                 const auto* b = find_binding(canonical_escaped_ident(trim(get_text(id))));
-                                 return b != nullptr && b->typed;
-                               }());
+        const auto* b = find_binding(canonical_escaped_ident(trim(get_text(id))));
+        return b != nullptr && b->typed;
+      }());
       const bool reinterpret = !overflow_kind.empty()
-                               || (typed_write && rvalue.is_const() && rvalue.get_name().size() > 2
-                                   && rvalue.get_name()[0] == '0' && (rvalue.get_name()[1] == 's' || rvalue.get_name()[1] == 'u'));
+                               || (typed_write && rvalue.is_const() && rvalue.get_name().size() > 2 && rvalue.get_name()[0] == '0'
+                                   && (rvalue.get_name()[1] == 's' || rvalue.get_name()[1] == 'u'));
       auto as_int = [&]() -> std::optional<int64_t> {
         if (reinterpret) {
           return std::nullopt;
@@ -5394,7 +5403,7 @@ void prp_stmt_rw(const Lnast& ln, const Lnast_nid& stmt, Prp_stmt_rw& rw,
   }
   const bool no_dst = Lnast_ntype::is_cassert(t) || Lnast_ntype::is_timecheck(t) || Lnast_ntype::is_func_break(t)
                       || Lnast_ntype::is_func_continue(t) || Lnast_ntype::is_func_return(t);
-  auto       c      = ln.get_first_child(stmt);
+  auto c = ln.get_first_child(stmt);
   if (Lnast_ntype::is_func_call(t) && !c.is_invalid()) {
     const auto fn = ln.get_sibling_next(c);
     if (!fn.is_invalid() && Lnast_ntype::is_ref(ln.get_type(fn))) {
@@ -6509,8 +6518,8 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // method body re-enter tuple lowering before the enclosing tuple has been
   // completed.  File/nested source definitions (which have no synthetic
   // hoist_name) can stream directly into their final sibling tree.
-  const bool                       stream_lambda = hoist_name.empty() && lambda_ref.is_ref() && !lambda_ref.get_name().empty()
-                                                   && (kind == "comb" || kind == "pipe" || kind == "mod");
+  const bool stream_lambda = hoist_name.empty() && lambda_ref.is_ref() && !lambda_ref.get_name().empty()
+                             && (kind == "comb" || kind == "pipe" || kind == "mod");
   absl::flat_hash_set<std::string> outer_hoisted_names;
   if (stream_lambda) {
     // Types, enums, and sibling function names are file/function-scope
@@ -6634,7 +6643,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
                        "generic-typed-param",
                        "type",
                        std::format("generic parameter `{}` cannot declare a type (`{}:{}`): a generic is substituted as "
-                                   "written, with no constraint clause",
+                                               "written, with no constraint clause",
                                    gname,
                                    gname,
                                    gtype),
@@ -6698,7 +6707,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
                                        trim(get_text(def)),
                                        trim(get_text(id))),
                            "`.[bits]`/`.[max]`/`.[min]` of a comptime value declared without bounds (`Z:Unsigned`) "
-                           "is nil: give it a width, or write the number");
+                                       "is nil: give it a width, or write the number");
             } else {
               default_text             = std::string(trim(get_text(def)));
               // Signed numeric defaults are grouped by the grammar (`N=(-1)`).
@@ -6794,10 +6803,10 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // param-tuple scope — an EARLIER param is readable — and is self-contained).
   std::vector<std::pair<std::string, TSNode>> input_defaults;
   auto                                        collect_args = [&](TSNode                    container,
-                                                                 const Lnast_nid&          parent_tup,
-                                                                 std::vector<std::string>* names_out,
-                                                                 std::vector<Param_attr>*  attrs_out,
-                                                                 bool                      is_io_output) {
+                          const Lnast_nid&          parent_tup,
+                          std::vector<std::string>* names_out,
+                          std::vector<Param_attr>*  attrs_out,
+                          bool                      is_io_output) {
     TSNode pending_typed{};
     TSNode pending_def{};
     bool   pending_is_ref    = false;
@@ -6855,7 +6864,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         // is a compile error. (`ref self` methods expand locally via UFCS and
         // never expose the receiver as a port.) (2f-ref_wrap_sat B.)
         if (pending_is_ref && !is_io_output && kind != "comb") {
-          TSNode           rid   = child_by_field(pending_typed, "identifier");
+          TSNode           rid = child_by_field(pending_typed, "identifier");
           std::string_view rname = ts_node_is_null(rid) ? std::string_view{} : get_text(rid);
           if (rname != "self") {
             report_error(pending_typed,
@@ -6983,7 +6992,9 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   builder.push_stmts(body_idx);
   if (!ts_node_is_null(fdef)) {
     for (TSNode pc : ts_node_named_children(fdef)) {
-      if (std::string_view(ts_node_type(pc)) == "attribute_sq") emit_synth_scope(pc,1);
+      if (std::string_view(ts_node_type(pc)) == "attribute_sq") {
+        emit_synth_scope(pc, 1);
+      }
     }
   }
   if (stream_lambda) {
@@ -8810,7 +8821,7 @@ static std::string unescape_cooked_string(std::string_view raw) {
         ++i;
         break;
       case '\\':
-      case '"' :
+      case '"':
       case '\'':
       case '`':
         out.push_back(next);
@@ -9185,8 +9196,8 @@ std::optional<std::pair<Dlop, Dlop>> Prp2lnast::folded_int_type_range(TSNode ty)
     kw = trim(kw.substr(0, kw.find('(')));
   }
   // `U<N>`/`S<N>` (sized) or `Unsigned`/`Signed` (unsized; sign from the node kind).
-  const bool          sized     = kw.size() >= 2 && (kw[0] == 'U' || kw[0] == 'S')
-                                  && std::all_of(kw.begin() + 1, kw.end(), [](unsigned char ch) { return std::isdigit(ch); });
+  const bool sized = kw.size() >= 2 && (kw[0] == 'U' || kw[0] == 'S')
+                     && std::all_of(kw.begin() + 1, kw.end(), [](unsigned char ch) { return std::isdigit(ch); });
   const bool          is_signed = t == "sint_type";
   std::optional<Dlop> mx;
   std::optional<Dlop> mn;
@@ -9635,8 +9646,8 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
                            "type-bound-not-comptime",
                            "type",
                            std::format("`{}(...)` bound `{}` reads const `{}`, whose value this declaration cannot "
-                                       "evaluate (it is computed by statements -- a loop, an `if`, a call -- or from a "
-                                       "runtime value)",
+                                             "evaluate (it is computed by statements -- a loop, an `if`, a call -- or from a "
+                                             "runtime value)",
                                        kw,
                                        which,
                                        nm),
@@ -9646,7 +9657,7 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
                          "type-bound-not-comptime",
                          "type",
                          std::format("`{}(...)` bound `{}` reads `{}`, a runtime value: a type bound must be a compile-time "
-                                     "value",
+                                           "value",
                                      kw,
                                      which,
                                      nm),
@@ -9659,12 +9670,12 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
                      "type-bound-not-comptime",
                      "type",
                      std::format("`{}(...)` bound `{}` reads comptime const `{}`, whose value is computed by statements (a "
-                                 "loop, an `if`, a call) this declaration cannot evaluate",
+                                       "loop, an `if`, a call) this declaration cannot evaluate",
                                  kw,
                                  which,
                                  *cpt),
                      "size it with a literal, a generic parameter, or a comptime const folded from literals (`comptime "
-                     "const W = N + 1`)");
+                           "const W = N + 1`)");
       }
       if (prelowered_here) {
         // A site prelowering DID visit: the bound is genuinely not comptime, so
@@ -10006,8 +10017,8 @@ void Prp2lnast::emit_tuple_type_field_specs(std::string_view path, TSNode tuple_
     if (ts_node_is_null(fid) || ts_node_is_null(ftc)) {
       continue;
     }
-    const std::string fname = trim(get_text(fid)) == "_" ? std::to_string(anon_pos++)
-                                                         : std::string{canonical_escaped_ident(trim(get_text(fid)))};
+    const std::string fname
+        = trim(get_text(fid)) == "_" ? std::to_string(anon_pos++) : std::string{canonical_escaped_ident(trim(get_text(fid)))};
     // The parser supplies one identifier here. A dot can only be inside an
     // escaped field name; retain its backticks in the qualified path.
     if (fname.empty()) {
@@ -10840,8 +10851,10 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
               continue;
             }
             std::string val_txt = ts_node_is_null(rv) ? std::string{} : std::string(trim(get_text(rv)));
-            if (key_txt == "synth" || key_txt.starts_with("synth.")) continue;
-        reject_common_mistakes_attr_name(lv, key_txt, !ts_node_is_null(rv));
+            if (key_txt == "synth" || key_txt.starts_with("synth.")) {
+              continue;
+            }
+            reject_common_mistakes_attr_name(lv, key_txt, !ts_node_is_null(rv));
             attrs_out->push_back({std::string(get_text(id)), std::string(key_txt), std::move(val_txt)});
           } else if (it == "identifier" || it == "ref_identifier") {
             auto kt = trim(get_text(item));
@@ -11028,7 +11041,7 @@ void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) 
       if (std::string_view(ts_node_type(inner)) != "tuple") {
         continue;
       }
-      auto tup_idx = lnast->add_child(assign_parent, Lnast_ntype::create_tuple_add());
+      auto   tup_idx      = lnast->add_child(assign_parent, Lnast_ntype::create_tuple_add());
       size_t anon_entries = 0;  // `_:T` entries seen: the position of the next one
       bool   named_entry  = false;
       for (TSNode item : ts_node_named_children(inner)) {
@@ -11183,29 +11196,42 @@ void Prp2lnast::check_attribute_value(TSNode item, std::string_view key, TSNode 
 
 std::vector<std::pair<std::string, TSNode>> Prp2lnast::synth_attribute_items(TSNode attrs) {
   std::vector<std::pair<std::string, TSNode>> out;
-  auto add = [&](std::string key, TSNode value) {
+  auto                                        add = [&](std::string key, TSNode value) {
     if (std::any_of(out.begin(), out.end(), [&](const auto& x) { return x.first == key; })) {
       report_error(value, "synth-duplicate", "syntax", "duplicate synthesis attribute synth." + key, "specify each key once");
       return;
     }
-    try { livehd::synth_attr::validate(key, livehd::synth_attr::literal(trim(get_text(value)))); }
-    catch (const std::exception& e) { report_error(value, "synth-value", "syntax", e.what(), "see syntha.md for the synthesis vocabulary"); return; }
+    try {
+      livehd::synth_attr::validate(key, livehd::synth_attr::literal(trim(get_text(value))));
+    } catch (const std::exception& e) {
+      report_error(value, "synth-value", "syntax", e.what(), "see syntha.md for the synthesis vocabulary");
+      return;
+    }
     out.emplace_back(std::move(key), value);
   };
   for (TSNode item : ts_node_named_children(attrs)) {
     TSNode lv = child_by_field(item, "lvalue"), rv = child_by_field(item, "rvalue");
-    if (ts_node_is_null(lv)) continue;
+    if (ts_node_is_null(lv)) {
+      continue;
+    }
     auto key = trim(get_text(lv));
-    if (key.starts_with("synth.")) { add(std::string(key.substr(6)), rv); }
-    else if (key == "synth") {
+    if (key.starts_with("synth.")) {
+      add(std::string(key.substr(6)), rv);
+    } else if (key == "synth") {
       if (ts_node_is_null(rv) || trim(get_text(rv)).front() != '(') {
         report_error(item, "synth-tuple", "syntax", "synth= requires a named tuple", "synth=(color=\"crit\", adder=\"cla\")");
         continue;
       }
       for (TSNode field : ts_node_named_children(rv)) {
         TSNode fl = child_by_field(field, "lvalue"), fr = child_by_field(field, "rvalue");
-        if (ts_node_is_null(fl)) { fl = child_by_field(field,"identifier"); fr = child_by_field(field,"definition"); }
-        if (ts_node_is_null(fl) || ts_node_is_null(fr)) { report_error(field,"synth-tuple","syntax","synth tuple fields require key=value", ""); continue; }
+        if (ts_node_is_null(fl)) {
+          fl = child_by_field(field, "identifier");
+          fr = child_by_field(field, "definition");
+        }
+        if (ts_node_is_null(fl) || ts_node_is_null(fr)) {
+          report_error(field, "synth-tuple", "syntax", "synth tuple fields require key=value", "");
+          continue;
+        }
         add(std::string(trim(get_text(fl))), fr);
       }
     }
@@ -11215,10 +11241,14 @@ std::vector<std::pair<std::string, TSNode>> Prp2lnast::synth_attribute_items(TSN
 
 void Prp2lnast::emit_synth_scope(TSNode attrs, int rank) {
   livehd::synth_attr::Policy p;
-  for (const auto& [key, value] : synth_attribute_items(attrs)) p[key] = {livehd::synth_attr::literal(trim(get_text(value))), rank};
-  if (p.empty()) return;
+  for (const auto& [key, value] : synth_attribute_items(attrs)) {
+    p[key] = {livehd::synth_attr::literal(trim(get_text(value))), rank};
+  }
+  if (p.empty()) {
+    return;
+  }
   auto idx = builder.add_child(Lnast_ntype::create_attr_set());
-  lnast->add_child(idx, Lnast_node::create_ref(std::format("%__synth_scope_{}",region_marker_seq_++)));
+  lnast->add_child(idx, Lnast_node::create_ref(std::format("%__synth_scope_{}", region_marker_seq_++)));
   lnast->add_child(idx, Lnast_node::create_const("__synth_scope"));
   lnast->add_child(idx, Lnast_node::create_const("'" + livehd::synth_attr::encode(p) + "'"));
   attach_loc(idx, attrs);
@@ -12152,13 +12182,13 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
           // relational node — they previously fell through to `eq`, silently
           // turning `< rhs` into `== rhs`. Operand order is (subject, rhs).
           auto compare_ntype = use_case             ? Lnast_ntype::create_func_case()
-                               : use_does           ? Lnast_ntype::create_func_does()
-                               : use_in             ? Lnast_ntype::create_func_in()
-                               : pending_op == "<"  ? Lnast_ntype::create_lt()
-                               : pending_op == "<=" ? Lnast_ntype::create_le()
-                               : pending_op == ">"  ? Lnast_ntype::create_gt()
-                               : pending_op == ">=" ? Lnast_ntype::create_ge()
-                                                    : Lnast_ntype::create_eq();
+                                     : use_does           ? Lnast_ntype::create_func_does()
+                                     : use_in             ? Lnast_ntype::create_func_in()
+                                     : pending_op == "<"  ? Lnast_ntype::create_lt()
+                                     : pending_op == "<=" ? Lnast_ntype::create_le()
+                                     : pending_op == ">"  ? Lnast_ntype::create_gt()
+                                     : pending_op == ">=" ? Lnast_ntype::create_ge()
+                                                          : Lnast_ntype::create_eq();
           auto idx           = builder.add_child(compare_ntype);
           auto ref           = builder.mint_tmp_ref();
           lnast->add_child(idx, ref);
@@ -12956,7 +12986,7 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   // reserved `__inst_name` actual — consumed by the runner inliner as the
   // hierarchical prefix for the inlined regs/mems, or by tolg as the Sub
   // instance name for a non-inlined pipe/mod. Only `name` is supported today.
-  std::string_view callsite_inst_name;
+  std::string_view           callsite_inst_name;
   livehd::synth_attr::Policy callsite_synth;
   if (!ts_node_is_null(func) && std::string_view(ts_node_type(func)) == "attribute_set") {
     for (TSNode sq : ts_node_named_children(func)) {
@@ -12964,7 +12994,9 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
       if (sqt != "attribute_sq" && sqt != "tuple_sq") {
         continue;  // the `argument` child (the callee) — handled below
       }
-      for (const auto& [key,value] : synth_attribute_items(sq)) callsite_synth[key] = {livehd::synth_attr::literal(trim(get_text(value))),3};
+      for (const auto& [key, value] : synth_attribute_items(sq)) {
+        callsite_synth[key] = {livehd::synth_attr::literal(trim(get_text(value))), 3};
+      }
       for (TSNode item : ts_node_named_children(sq)) {
         std::string_view it(ts_node_type(item));
         if (it != "assignment" && it != "attribute_assignment") {
@@ -12977,7 +13009,9 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
         TSNode           lv  = child_by_field(item, "lvalue");
         TSNode           rv  = child_by_field(item, "rvalue");
         std::string_view key = ts_node_is_null(lv) ? std::string_view{} : trim(get_text(lv));
-        if (key == "synth" || key.starts_with("synth.")) continue;
+        if (key == "synth" || key.starts_with("synth.")) {
+          continue;
+        }
         if (key != "name") {
           report_error(item,
                        "callsite-attribute",
@@ -13183,7 +13217,8 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
         *seen = true;
       }
       // `invert` picks the gate flavour at compile time: a literal `true`/`false`.
-      if (a.is_assign && a.assign_key == "invert" && !(a.value.is_const() && (a.value.get_name() == "true" || a.value.get_name() == "false"))) {
+      if (a.is_assign && a.assign_key == "invert"
+          && !(a.value.is_const() && (a.value.get_name() == "true" || a.value.get_name() == "false"))) {
         bad = true;
       }
     }
@@ -13191,7 +13226,8 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
       report_error(n,
                    "clock-gate-args",
                    "type",
-                   "`Clock(...)` gates a clock and takes the named arguments `clock_pin` and `enable` (and optionally a literal `invert=true`)",
+                   "`Clock(...)` gates a clock and takes the named arguments `clock_pin` and `enable` (and optionally a literal "
+                   "`invert=true`)",
                    "write `Clock(clock_pin=clk, enable=en)`: `clk` a `Clock`, `en` a `Bool` enable; "
                    "`invert=true` makes it an active-low gate");
     }
@@ -13230,8 +13266,10 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
     return ref;
   }
   if (!callsite_synth.empty()) {
-    Call_arg ia; ia.is_assign=true; ia.assign_key="__synth_call";
-    ia.value=Lnast_node::create_const("'" + livehd::synth_attr::encode(callsite_synth) + "'");
+    Call_arg ia;
+    ia.is_assign  = true;
+    ia.assign_key = "__synth_call";
+    ia.value      = Lnast_node::create_const("'" + livehd::synth_attr::encode(callsite_synth) + "'");
     call_args.push_back(std::move(ia));
   }
   if (!callsite_inst_name.empty()) {
