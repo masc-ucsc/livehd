@@ -2051,14 +2051,16 @@ acceptance.
 
 ### 28.1 The designs, and why these
 
-Two real designs plus a memory addendum, staged with recorded input hashes in
+**Two real CORE-ET exports and one supplied fixture.** `tiny_sync_ram` is a
+fixture, not a benchmark design, and the three must not be described as if they
+were all real exports. Staged with recorded input hashes in
 `generated/master_port/d3_pilot/certs/`:
 
 | design | role | shape | input sha256 |
 |---|---|---|---|
 | `intpipe_alu` | combinational | 1536 sources, 2133 nodes, 0 flops, 0 memories | `16703b19dca910d1…` |
 | `txfma_f4` | **stateful** | 750 sources, 1867 nodes, 6 flops, **2 clock domains** | `014b5c9983b32f70…` |
-| `tiny_sync_ram` | memory addendum | 6 sources, 8 nodes, 1 flop, **1 memory** | `861d069e45936b82…` |
+| `tiny_sync_ram` | memory addendum — **supplied fixture, not an export** | 6 sources, 8 nodes, 1 flop, **1 memory** | `861d069e45936b82…` |
 
 `txfma_f4` carries `ctrl_f3_clk` and `ctrl_f4_clk` with **three flops on each**
 — real post-D2 clock transport from the scanner, not a fixture. The memory
@@ -2190,30 +2192,44 @@ The unsolved goal is a `flopNextV …` equality — the **flop update**. So
 `prove_reified` does not close the commit side on this design, and the gate
 catches it. `proof=0` with a named cause, not a silent pass.
 
-**The module backend is unavailable in this environment**, and says so:
+**The module backend refused in the ordinary session**, and says so:
 
 ```
 d3_guarded_build: REFUSING -- no delegated cgroup v2 base. The build would run
 unguarded, which is what this wrapper exists to prevent.
 ```
 
-Checked directly: this user's session cgroup has `cpu memory pids` in
-`cgroup.controllers` but an EMPTY `cgroup.subtree_control`, and
-`systemd-run --user --scope -p Delegate=yes` does not make it writable. D4's
-emission guard works because systemd sets `MemoryMax` on the scope itself;
-D3's module build needs to create its own child cgroup, which needs
-delegation. `module_proof_status=group_build_failed` is therefore an
-**environment prerequisite and an UNDECIDED disposition**, not a failed
-theorem — and the wrapper refusing to build unguarded is the correct
-behaviour, not something to work around.
+**I then concluded that the module backend "cannot run on this host". That
+was wrong.** It runs under
+
+```
+systemd-run --user --scope --quiet --property=Delegate=yes
+```
+
+where the sweep's own `cgroup_base()` returns
+`/sys/fs/cgroup/user.slice/user-1008.slice/user@1008.service`. My check tested
+whether one cgroup's `cgroup.subtree_control` was WRITABLE — not what
+`cgroup_base()` asks — and I ran it from the ordinary session rather than
+inside the scope, so I measured the wrong thing in the wrong place and
+generalised from it. §29 has the run that works.
 
 ### 28.7 What this does and does not close
 
 Three designs. **Nothing here closes the per-design D3 obligations for the 122
 CORE-ET or frozen-30 CVA6 corpora**, the published scaling sweeps, the 38 FP
 modules, or the final four-mode validation. The `--prove` coverage is one
-design on two working backends; `txfma_f4` under `named --prove` is still
-running.
+design on two working backends.
+
+`txfma_f4` under `named --prove` reached **88,118,504 KiB** (84 GiB) at 953 s
+and I terminated it: `proof=0`, caller exit 143, with the executable agreement
+(`verdict=agree`) retained. The time file's trailing `exit status 0` does not
+override the signal-15 termination. That is **unproven after a resource stop**,
+not a semantic counterexample.
+
+I ran it without `--kill-over-rss-kb`, which defaults to **0** — no hard limit
+— while `--max-aggregate-rss-kb` is a SOFT cap that stops LAUNCHING new work
+and does not terminate a running probe. Nothing was going to stop it. The guard
+existed and I did not arm it.
 
 ## 20. D3 replay backlog — repaired
 
