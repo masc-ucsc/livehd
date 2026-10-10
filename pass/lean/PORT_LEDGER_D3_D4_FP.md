@@ -2115,14 +2115,105 @@ without `--reifier chunked` refuses; `--prove --reifier shared` refuses
 covers"). An unsupported combination is a **refusal with a reason**, never a
 row.
 
-### 28.4 In flight, and not yet credited
+### 28.4 All four reifiers
 
-`named` is still on `intpipe_alu` — 18 minutes, 2.17 GB, stalled after
-`residual_ready` inside `report`, against a 1800 s per-target bound, where
-`legacy` finished the same design in 40 s. `shared` and `chunked` rows are
-still the stale pre-build ones. Phase-only, phase-split and `--prove` on both
-backends have not run. **Nothing here closes the per-design D3 obligations for
-the 122 CORE-ET or frozen-30 CVA6 corpora**; this is three designs.
+| reifier | `intpipe_alu` | `tiny_sync_ram` | `txfma_f4` |
+|---|---|---|---|
+| `legacy` | agree (40.15 s, 2,129,808 KiB) | agree (3.26 s) | agree (20.22 s) |
+| `named` | **timeout** (1803.11 s) | agree (7.17 s) | agree (42.38 s) |
+| `shared` | agree (28.76 s, 1,826,940 KiB) | agree (3.38 s) | agree (16.85 s) |
+| `chunked` | agree (24.60 s, 1,828,368 KiB) | agree (2.97 s) | agree (13.52 s) |
+
+**11 of 12 reach `agree`.** Every applicable mutation is `rejected` in every
+one of those 11 rows, and every `na` is paired with its `mutable_*` column at
+0, so an inapplicable mutation is never scored as a pass.
+
+The one exception is a **TIMEOUT, which is undecided and not a failure**:
+`named` on `intpipe_alu` (2133 bindings) ran the full 1800 s per-target bound
+and was killed inside `report`, after `residual_ready`, at ~2.2 GB. The other
+three reifiers finish the same design in 25–40 s. That is a characterisation
+of `reify_design_named`'s executable stage at this size, not a verdict about
+the design, and the row says `timeout` with no observation counts.
+
+### 28.5 Phase diagnostics
+
+`--phase-only`, all six components on `tiny_sync_ram`, `--reifier named`, each
+alone in a fresh process:
+
+| component | result |
+|---|---|
+| `none` | (no component; residual only) |
+| `selftest` | `selftest base=true` |
+| `agree` | `agree=true samples=32` |
+| `distinct` | `distinct=32 samples=32` |
+| `fast1` | `fast1 obs=510` |
+| `fast2` | `fast2 obs=512` |
+
+Every one stops at **`verdict=typecheck`**, which is what the flag promises:
+no `report` call is made, no `D3GATE` line is printed, and the row **cannot be
+credited**. A diagnostic run is visibly not a passing one. `fast1` and `fast2`
+differ (510 vs 512 observations), so the comparison the gate makes is not
+vacuous.
+
+`--phase-split` on both supported reifiers reaches **`agree`** — `named` and
+`shared`, `sim_one_result obs=510` in each — because it runs the components
+one at a time and *then* calls `report` unchanged. The contrast with
+`--phase-only` is exactly the documented one.
+
+### 28.6 `--prove`, on all three backends
+
+| backend | design | result |
+|---|---|---|
+| `legacy`, in-process | `tiny_sync_ram` | **proof=0** — refused |
+| `named`, in-process | `tiny_sync_ram` | **proof=1** |
+| `chunked`, module | `tiny_sync_ram` | **module_proof=0**, `group_build_failed` |
+
+**`named` closes a stateful design.** `prove_reified_incr: d3_fast.correct
+proved over 8 named value(s), 3 terminal slot(s), max live cut 4`, and
+
+```
+D3GATE proof=1 thm=d3_fast.correct axioms=[propext, Classical.choice, Quot.sound]
+```
+
+Standard axioms only, on a design with a flop AND a memory — post-D2 transport
+exercised by the theorem, not just by the executable. 12.37 s, 6,849,492 KiB.
+
+**`legacy` does not**, and refuses rather than reporting success:
+
+```
+prove_reified: the generated `d3_fast.correct` depends on DISALLOWED axiom(s)
+[sorryAx]; allowed: [propext, Classical.choice, Quot.sound]. The theorem did
+not close -- refusing to report success.
+```
+
+The unsolved goal is a `flopNextV …` equality — the **flop update**. So
+`prove_reified` does not close the commit side on this design, and the gate
+catches it. `proof=0` with a named cause, not a silent pass.
+
+**The module backend is unavailable in this environment**, and says so:
+
+```
+d3_guarded_build: REFUSING -- no delegated cgroup v2 base. The build would run
+unguarded, which is what this wrapper exists to prevent.
+```
+
+Checked directly: this user's session cgroup has `cpu memory pids` in
+`cgroup.controllers` but an EMPTY `cgroup.subtree_control`, and
+`systemd-run --user --scope -p Delegate=yes` does not make it writable. D4's
+emission guard works because systemd sets `MemoryMax` on the scope itself;
+D3's module build needs to create its own child cgroup, which needs
+delegation. `module_proof_status=group_build_failed` is therefore an
+**environment prerequisite and an UNDECIDED disposition**, not a failed
+theorem — and the wrapper refusing to build unguarded is the correct
+behaviour, not something to work around.
+
+### 28.7 What this does and does not close
+
+Three designs. **Nothing here closes the per-design D3 obligations for the 122
+CORE-ET or frozen-30 CVA6 corpora**, the published scaling sweeps, the 38 FP
+modules, or the final four-mode validation. The `--prove` coverage is one
+design on two working backends; `txfma_f4` under `named --prove` is still
+running.
 
 ## 20. D3 replay backlog — repaired
 
