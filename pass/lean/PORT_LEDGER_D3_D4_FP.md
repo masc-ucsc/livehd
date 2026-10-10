@@ -423,16 +423,47 @@ The disposition:
   single-clock assumption in its name**, so the assumption cannot be made by
   accident or inherited by a caller that did not ask for it.
 
-### 11.4 Obligations, none of them discharged yet
+### 11.4 A contradiction in the first draft of this section
+
+The first version of §11 asked for **both**:
+
+- `parseCert_renderCert` holding for **every** `DesignCert`; and
+- `parseCert` **rejecting** a flop whose clock ordinal is outside `clocks`.
+
+Those cannot both hold. A `DesignCert` with an out-of-range ordinal is a
+perfectly good inhabitant of the type, so it is itself a counterexample to the
+universal round-trip the moment the parser rejects it. Asking for both is
+asking for an inconsistent API, and it would have been discovered only after
+the proof failed to close.
+
+**The split.** Syntax and admission are separated:
+
+| layer | promise |
+| --- | --- |
+| `renderCert` / `parseCert` — the **codec** | `parseCert (renderCert D) = .ok D` for **every** `DesignCert`, unconditionally. It is a faithful encoding of the record, and it judges nothing. |
+| `readCertChecked` — **checked admission** | parses, then applies the well-formedness predicate: a clock ordinal outside `clocks`, a slot out of range, a runtime shape that cannot execute. Rejection here is a **semantic** verdict and is named as one. |
+
+So the universal codec theorem keeps its universal promise, the rejection lives
+where a rejection belongs, and no API claims both. This mirrors the split
+already in the tree: `cert_shape_check.py` refuses statically what
+`checkDesign` refuses semantically (R24.1), and `direct_sweep`'s
+`PROVENANCE_MISMATCH` is a refusal that does not pretend to be a parse error.
+
+**Which contract applies is recorded before DCERT2 is extended**, not after:
+the codec is total and unconditional; the checked read is the only thing that
+may refuse on meaning.
+
+### 11.5 Obligations, none of them discharged yet
 
 1. `renderCert`/`parseCert` extended with the clocks section, `FlopDesc.clock`,
    `FlopDesc.asyncReset` and `MemoryDesc.clock`;
-2. `parseCert_renderCert` re-established over the **clock-aware** record — D4's
-   proof is ~900 lines over the clockless one, and the promise must not be
-   narrowed to the fields that happen to be covered;
-3. negatives: a flop naming a clock ordinal outside `clocks` must **fail to
-   parse**, not default to 0; truncated input; extra fields; an unsupported
-   version;
+2. `parseCert_renderCert` re-established over the **clock-aware** record as the
+   **universal codec** theorem — D4's proof is ~900 lines over the clockless
+   one, and the promise must not be narrowed to the fields that happen to be
+   covered;
+3. negatives, all on the **checked read**, never on the codec: a flop naming a
+   clock ordinal outside `clocks`; truncated input; extra fields; an
+   unsupported version;
 4. names with whitespace, multi-byte UTF-8 and an embedded newline must
    round-trip;
 5. byte/field parity against a fresh C++ `CertificateIR` serializer;
@@ -442,7 +473,7 @@ The disposition:
 7. the stale header calling the reader "UNVERIFIED, and therefore trusted" is
    corrected: the implementation below it is already `TOTAL, not partial`.
 
-### 11.5 The `Compiler.CertIO` name collision
+### 11.6 The `Compiler.CertIO` name collision
 
 D4 and FP both define `Compiler.CertIO`, and FP's deliberately drops what D4
 keeps. **Neither is dropped.** They become separate internal modules behind a
@@ -509,7 +540,7 @@ files would have brought it.
 unchanged by the guards.
 
 **Boundary matrix: `BOUNDARY-MATRIX OK`**, 1.70 s, 473,172 kB — D3's own
-`d3_shift_boundary_test.lean`, 33 `#guard`s, run unchanged. Stimulus bounds were
+`d3_shift_boundary_test.lean`, **32** `#guard`s, run unchanged. Stimulus bounds were
 not shrunk.
 
 ### 12.4 Reify, ReifyGen and D3Harness onto the clock-aware runtime
@@ -575,3 +606,82 @@ Mathlib.
 - The sweep/manifest scripts still carry D3's private absolute paths.
 - `agree` remains **sampled** evidence and `proof` remains **unattempted** —
   neither is upgraded by anything here.
+
+## 13. ReifyGen emitted clockless models — building it proved nothing
+
+`ReifyGen` built, exit 0, and that checked **the generator**. The terms a
+generator writes are elaborated only when a design is actually reified, so
+nothing about them had been checked at all.
+
+Run on a real certificate, three of the four commands failed outright:
+`reify_design_named`, `reify_design_shared` and `reify_design_chunked` each
+emitted a `flopNextV` application of type `Bool → Bool → BV` where `BV` was
+required — the two new arguments were simply missing at `ReifyGen.lean` lines
+294, 395 and 580. The file was byte-identical to pinned D3; adding the
+parameters to `flopNextV` had not touched its callers in the emitter.
+
+And the fourth was worse for being silent: `reify_design` hand-rolls its flop
+update and has **no notion of an edge at all** — it applies the reset whenever
+the pin is asserted, then takes `din` or holds on the **enable alone**. It
+compiles. It is simply wrong on any step where the domain is quiet.
+
+### 13.1 What was repaired
+
+| path | flop update | memory |
+| --- | --- | --- |
+| `reify_design` (default) | hand-rolled, clockless → now emits `flopNextV` | committed unconditionally → gated |
+| `reify_design_named` | missing 2 args | committed unconditionally → gated |
+| `reify_design_shared` | missing 2 args | committed unconditionally → gated |
+| `reify_design_chunked` | missing 2 args | committed unconditionally → gated |
+
+**The memory arm was wrong in all four.** `denoteResidual` commits a memory
+only when `fires e m.clock` and otherwise **holds** the previous image; every
+generated model committed on every step. A quiet domain's memory was being
+written.
+
+The default path's hand-rolled update could not be repaired in place —
+`flopNext`'s rule is three-way (a quiet domain holds, *except* for an
+asynchronous reset, which does not wait for an edge) and the hand-rolled shape
+has nowhere to put the edge. It now emits the same `flopNextV` application as
+the other three: one rule, one place, already bridged by `flopNext_eq`.
+
+All four generated models take an explicit `(e : ClockEdges)` as their first
+parameter. D3's historical comparison is preserved as the **explicitly named**
+`allEdges D` at the two `D3Harness` call sites — a wrapper around an
+edge-aware model, not a default hidden inside one.
+
+### 13.2 The regression that catches it
+
+`probes/d3_generated_clock_test.lean` runs **all four commands** on one
+certificate and compares each generated model against `denoteResidual` **on the
+same edge vector, input and state**. A build-only or shape-only check cannot
+catch any of the above.
+
+The fixture carries, deliberately: two clock domains; a **synchronous**
+active-high reset and an **asynchronous** active-low one; a **nonzero** reset
+value (7); an **enable**, so the hold path is reached with the clock firing; a
+memory on the second domain, so commit-versus-hold is observable; and distinct
+source and output widths (8-bit sources, a 4-bit output).
+
+Four edge vectors — **quiet** `#[f,f]`, **independent** each way `#[t,f]` and
+`#[f,t]`, and **simultaneous** `#[t,t]` — crossed with five input cases
+covering reset asserted and released on each polarity and the enable high and
+low: **20 comparisons per command, 80 in all**, each on outputs, flop state and
+the memory image read at four addresses.
+
+Plus a **non-vacuity** guard: the quiet and simultaneous edge vectors must give
+*different* results on the same input, or the comparison would pass for a model
+that ignored its edges entirely.
+
+Result: `GENERATED-CLOCK-REGRESSION OK`, exit 0.
+
+### 13.3 Two further defects found by running it
+
+Fixing the emission exposed a second layer, both hygiene:
+
+- a bare `Compiler.mk_bv` inside a syntax quotation is hygienically marked and
+  does not resolve where the generated code is elaborated —
+  `Unknown identifier Compiler.mk_bv✝`. Spliced as `$(mkIdent ...)` instead;
+- and it is not `Compiler.mk_bv` at all: `mk_bv` is at the **root**. The first
+  correction swapped one unknown name for another, and only running the
+  fixture again showed it.

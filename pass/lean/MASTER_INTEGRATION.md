@@ -4866,3 +4866,26 @@ Two bugs, both now fixed and both caught by re-deriving rather than by reading:
 Current derivation: 11 + 6 + 11 = **28 doc/attribute blocks moved with their
 declarations**, 0 leaked theorems, 0 orphaned doc comments in either the
 definition modules or the proof wrappers.
+
+## R41. Reporting a long job by the launcher's RSS
+
+I described the long CVA6 `csr_regfile` run as "stable 793 MB", and drew from
+its elapsed time that it was "legitimate, not stalled". Both halves were poorly
+founded.
+
+`lake env lean` is a **launcher**. The 793 MB figure was the launcher's own
+resident set; the work is its child. Measured on the live job:
+
+```
+205575  lake env lean …   0.76 GB   38:14   <- what I reported
+205727    └─ lean …       6.46 GB   38:19   <- the actual work
+```
+
+An order of magnitude out, and the number I quoted could not have moved however
+the job went. **Elapsed time alone establishes nothing about a stall either** —
+what distinguishes progress from a hang is the child's behaviour and, at the
+end, its `/usr/bin/time` result, which is the figure to quote.
+
+The rule this leaves: when a process is wrapped — `lake env`, `/usr/bin/time`,
+`timeout`, `nice` — resolve to the process doing the work before reporting
+anything about it. The wrapper's numbers describe the wrapper.
