@@ -128,30 +128,21 @@ for f in "$@"; do
   # obligation identity, parses wrapped lists, allowlists the axioms, and
   # requires `_step_legacy_correct` to actually cite the separately proved
   # `_clock_bounds` native fact (the R13.1 guard).
-  # MODE-SPECIFIC obligations.  This queue serves both exports: a
-  # verified_compiler artifact proves _step_correct/_step_legacy_correct, a
-  # legacy bridge artifact proves _comb/_next/_step_refines_fast (which is why
-  # the build step above also builds LegacyCertWF).  Requiring the verified
-  # names unconditionally rejects a perfectly good legacy artifact for not being
-  # a verified one.  The mode is read from the ARTIFACT, never inferred from how
-  # many `#print axioms` lines it happens to contain.
-  if grep -q "^theorem ${name}_step_correct" "$f"; then
-    ax_required="_step_correct,_step_legacy_correct"
-    ax_witnesses="_compiles,_clock_bounds"
-  elif grep -q "^theorem ${name}_comb_refines_fast" "$f"; then
-    ax_required="_comb_refines_fast,_next_refines_fast,_step_refines_fast"
-    ax_witnesses="auto"   # derived from the theorems the artifact declares
-  else
-    ax_required=""        # no recognized obligation set; the audit will say so
-    ax_witnesses="auto"
-  fi
-  if [[ -z "$ax_required" ]]; then
-    echo "[queue] WARNING $name: no recognized obligation set (neither a" >&2
-    echo "        verified _step_correct nor a legacy _comb_refines_fast)." >&2
-  fi
+  # MODE AND SCOPE COME FROM THE ARTIFACT, not from this script and not from how
+  # many `#print axioms` lines a file happens to contain.  axiom_audit.py reads
+  # the artifact's structural markers -- `_designCert` for a verified export,
+  # `structure <Top>_state` for a legacy design WITH STATE, `<Top>_graphCert` for
+  # a well-formedness obligation -- and derives the required set from them.
+  #
+  # The previous version of this block picked the mode HERE by grepping for an
+  # obligation, and fell back to `--required ""` when it recognized neither.  An
+  # empty obligation set is a vacuous audit: an artifact proving only
+  # `Unrecognized : True` passed it, and every other condition below then passed
+  # too, so the queue could print PROVEN for a file that proves nothing about
+  # the design.  axiom_audit.py now refuses an empty set outright, and this
+  # block no longer tries to choose one.
   if python3 -I "$ROOT/pass/lean/scripts/axiom_audit.py" "$log" "$name" \
-       --required "$ax_required" --witnesses "$ax_witnesses" --artifact "$f" \
-       >> "$log" 2>&1; then
+       --artifact "$f" >> "$log" 2>&1; then
     ax_audit=ok
   else
     ax_audit=FAIL
