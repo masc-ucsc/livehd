@@ -1151,3 +1151,72 @@ The full CLI source-drift admission — a run **refusing** on a changed digest,
 rather than the digest merely changing — and the imported module-backend tests.
 Both remain untested, and the backend remains deferred and uncredited while the
 baseline queue is live.
+
+## 19. D4: the DCERT2 codec, and a redesign I should not have made
+
+### 19.1 The UTF-8 inverse was provable all along
+
+I replaced the length-prefixed UTF-8 clock name with a **code-point** encoding,
+on the view that the round-trip needed `String.fromUTF8? s.toUTF8 = some s` and
+that the pinned toolchain had no such lemma.
+
+The second half was true; the conclusion was wrong. `String.fromUTF8?` is a
+dependent `if` over `IsValidUTF8`, and a `String` carries its own
+`isValidUTF8`, so:
+
+```lean
+theorem clockName_utf8_inverse (s : String) :
+    String.fromUTF8? s.toUTF8 = some s := by
+  unfold String.fromUTF8?
+  simp only [String.toUTF8_eq_toByteArray, dif_pos s.isValidUTF8]
+  congr 1
+```
+
+Verified here: exit 0, axioms `[propext, Classical.choice, Quot.sound]`.
+
+**Searching for a named lemma is not the same as trying to prove it.** I ran
+`exact?` and grepped the toolchain and Mathlib for `fromUTF8` theorems, found
+none, and let that stand in for a proof attempt — then redesigned a wire format
+around the gap. The redesign is reverted; the readable encoding stays.
+
+### 19.2 Where the codec stands
+
+`parseCert`/`renderCert` carry the full post-D2 record: the clocks section,
+`FlopDesc.clock`, `FlopDesc.asyncReset` and `MemoryDesc.clock`, with the name
+length-prefixed and its separator **checked** rather than assumed.
+
+The probe passes — exit 0, zero errors — over: names that are empty, contain a
+space, contain a newline, and are multi-byte UTF-8 (`clk_日本語`, `αβγ`);
+several clocks with order preserved; the full-metadata record with the new
+fields verified carried; the byte-level format including the `3xabc` separator
+defect, a missing separator and a newline separator all refused; DCERT1
+refused, truncation, a short name, trailing data and empty input refused; the
+codec round-tripping a certificate the **checked** read then refuses; and
+runtime admission refusing an empty edge vector, an overlong one, a missing
+input and a wrong flop state while raw `runChecked` keeps its compiler-only
+contract.
+
+### 19.3 What is NOT yet proved
+
+`parseCert_renderCert` over the clock-aware record. The per-record lemmas for
+memory and flop are extended and close; the magic and `certBytes` lemmas are
+extended; what remains is `readClock_reads` — relating `ByteArray.extract` at
+an offset to the name's bytes, then applying the inverse above — and the sixth
+section in the top-level chain. **Until that builds and its axioms are audited,
+the universal round trip is not credited**, and the probe above is tests, not a
+theorem.
+
+## 20. D3 replay backlog (recorded, not yet repaired)
+
+Two gaps in restored D3 procedures, kept visible so they are not mistaken for
+done:
+
+- **`d3_gen.py`** — the scaling generator still emits **old-arity**
+  `denoteResidual` calls. Its n=2 chain outputs for naive, composed and pruned
+  all fail typechecking against the repaired library. The original scaling
+  procedures are **not credited** until it is adapted and validated, preserving
+  the variants, shapes, sizes and proof obligations.
+- **`d3_bench.sh` / `d3_bench2.sh`** — they write timing and log files under
+  `/tmp`, against this workspace's project-local rule, and their status logic
+  can label a non-timeout non-zero exit `OK` when its narrow error-text pattern
+  misses. Neither has been executed here.
