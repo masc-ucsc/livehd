@@ -3206,3 +3206,91 @@ the old cell on that step and only sees the new value on the next.
 `fwd` matrix's per-(read, write) structure is exercised only in its 1×1 case.
 
 The **IO/clock sidecar** and **graph-closed publication** remain untouched.
+
+## R19. The IO/clock sidecar, and publishing a pair without losing one
+
+A `DesignCert` names its inputs by **ordinal and nothing else**. A caller holding
+an RTL port list has no way to build the input array from it: which port is
+ordinal 3, how wide it is, whether the model reads it at all, and how long the
+array must be are all outside the certificate. That mapping is the sidecar
+(`pass/lean/design_io_meta.{hpp,cpp}`).
+
+It is derived from the **same owned scan and certificate IR the emitter
+formats**, never from the graph. A sidecar reconstructed from HHDS could
+disagree with the certificate it describes, and the disagreement would surface
+only at runtime.
+
+### R19.1 What it records, and the bug the tests caught
+
+| Field | Why |
+| --- | --- |
+| `runtime_input_arity` | how long `RuntimeInput` must be |
+| per-input `ordinal`, `width`, `used_by_model` | which slot, how wide, read or ignored |
+| outputs in emission order | position *is* identity in the output array |
+| clocks with ordinals and `implicit` | which `ClockEdges` entry drives which domain |
+
+**The runtime ordinal is the index into `design.inputs`, not `Port::id`.**
+`Port::id` is the scan's internal source id — an opaque 2,000,000,000-based
+counter — which `certificate_ir.cpp` remaps to the dense position that actually
+indexes `RuntimeInput`. The first implementation published `Port::id`, so a
+caller driving a four-input design would have been handed ordinals in the
+billions. The test caught it; nothing else would have until a runtime tried to
+use the file.
+
+**Arity counts reset-only inputs.** A port that drives only a flop's reset pin
+is never an `.input` source — it is reached through `flopQAsync`'s reset input —
+so an arity computed from inputs alone is too small, and `checkRuntime` would
+then reject an array a caller had built correctly from the sidecar. This matches
+`Direct.inputArity`, which takes `max` over both.
+
+**Unused ports are listed, never compacted.** Ordinals are dense, so preserving
+"gaps" means keeping every declared port in the list: dropping an unused
+*interior* port would shift every later port down one and silently misalign the
+caller's array. Both an interior and a trailing unused port are covered, with
+their declared widths.
+
+JSON escaping is tested against quotes, backslashes and control bytes — not
+theoretical, since port names come from RTL and a clock name can be
+`net_key()`'s `\x01`/`\x02` sentinel.
+
+### R19.2 Emission is graph-closed
+
+`emit_design_cert` and `build_io_meta` both take a `DesignScan` and a
+`CertificateIR` and nothing else. `DesignIoMeta.EmissionAndMetadataOutliveTheGraph`
+builds a design, scans it, lets the graph go out of scope, and *then* emits both
+the certificate and the sidecar — so the property is demonstrated rather than
+asserted. Neither certificate nor model equations changed, and no import
+requirement widened.
+
+### R19.3 Publishing the pair: restore, do not delete
+
+A certificate and its sidecar are only useful together, and publishing them is
+**two renames**. D2's helper, on a failed second rename, removed the newly
+published certificate and did **not** restore the preexisting one — losing
+*both*, so a caller ended with no certificate where it had had a working pair.
+
+`publish_pair` stages both files before publishing either, moves any existing
+pair aside rather than overwriting it, and on failure **restores** what was
+there instead of deleting the half-published result.
+`DesignIoMeta.FailedPublicationKeepsThePreviousPair` pins all of it: a complete
+preexisting pair survives a throwing second emit with both files unchanged, the
+same failure against *fresh* targets leaves neither file behind, staged `.tmp`
+and `.bak` artifacts are cleaned in both cases, and a successful publish still
+replaces both.
+
+**The guarantee, stated rather than implied.** This is **exception- and
+command-failure-safe**: a throw from either emit, or a failed open, write, close
+or rename, unwinds to the previous state. It is **not crash atomic** — two
+renames cannot be, and a crash between them leaves the new first file beside the
+old second. It is **not concurrency-safe**: the backups are keyed on the target
+names, so a second publisher to the same targets would race them. Anything
+stronger needs a single-file container or a directory swap, neither of which is
+implemented.
+
+### R19.4 Still open
+
+Write-port **collision ordering** (one write port in the fixtures, so the `fwd`
+matrix is exercised only in its 1×1 case) and a **real multi-clock CORE-ET
+direct/compiled trace** remain required before D2 acceptance. The configured
+125 CORE-ET + 61 CVA6 + 3 DINO replay is untouched, and D3/D4/FP are not started
+— green fixtures are not a reason to begin them.

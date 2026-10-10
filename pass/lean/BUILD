@@ -14,8 +14,8 @@ cc_library(
 
 cc_library(
     name = "lean_certificate_ir",
-    srcs = ["certificate_ir.cpp", "memory_lowering.cpp"],
-    hdrs = ["certificate_ir.hpp", "certificate_builder.hpp", "memory_lowering.hpp", "design_scan.hpp"],
+    srcs = ["certificate_ir.cpp", "memory_lowering.cpp", "design_io_meta.cpp"],
+    hdrs = ["certificate_ir.hpp", "certificate_builder.hpp", "memory_lowering.hpp", "design_scan.hpp", "design_io_meta.hpp"],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],

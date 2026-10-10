@@ -24,4 +24,25 @@ std::string lit_one(uint32_t width);
 std::string nat_list(const std::vector<uint32_t>& values);
 std::string bst_literal(std::vector<std::pair<uint32_t, std::string>> pairs);
 void        write_atomic(const std::string& path, const std::function<void(std::ostream&)>& emit);
+
+// Publish TWO files as a pair, keeping the previous coherent pair on failure.
+//
+// `write_atomic` is atomic for ONE file. A certificate and its sidecar are only
+// useful together, and publishing them is TWO renames -- so a failure between
+// them leaves a new certificate beside a stale sidecar unless something undoes
+// it. D2's helper removed the newly published certificate and did NOT restore
+// the preexisting one, which loses BOTH: the caller ends with no certificate at
+// all where it previously had a working pair.
+//
+// Here, a failure at any point leaves whatever was there before. If both targets
+// existed they are both still the old ones; if neither did, neither is created.
+//
+// WHAT THIS DOES AND DOES NOT GUARANTEE. It is exception- and
+// command-failure-safe: a throw from either `emit`, a failed open, write, close
+// or rename unwinds to the previous state. It is NOT crash atomic -- two renames
+// cannot be, and a crash between them leaves the new first file with the old
+// second. Nor is it safe against a CONCURRENT writer to the same targets; the
+// backups are keyed on the target names and a second publisher would race them.
+void publish_pair(const std::string& path_a, const std::function<void(std::ostream&)>& emit_a,
+                  const std::string& path_b, const std::function<void(std::ostream&)>& emit_b);
 }  // namespace lean_export

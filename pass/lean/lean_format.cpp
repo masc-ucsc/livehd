@@ -110,6 +110,73 @@ void write_atomic(const std::string& path, const std::function<void(std::ostream
     throw;
   }
 }
+namespace {
+// Stage `emit` into `path + suffix`, so a failed write never touches `path`.
+void stage(const std::string& path, const std::string& suffix,
+           const std::function<void(std::ostream&)>& emit) {
+  std::ofstream out;
+  out.exceptions(std::ios::failbit | std::ios::badbit);
+  out.open(path + suffix);
+  emit(out);
+  out.close();
+}
+}  // namespace
+
+void publish_pair(const std::string& path_a, const std::function<void(std::ostream&)>& emit_a,
+                  const std::string& path_b, const std::function<void(std::ostream&)>& emit_b) {
+  const std::string ta = path_a + ".tmp", tb = path_b + ".tmp";
+  const std::string ba = path_a + ".bak", bb = path_b + ".bak";
+  std::error_code   ec;
+  // Both files are written BEFORE either is published, so an emit that throws
+  // cannot leave one target replaced and the other not.
+  auto scrub = [&] {
+    std::filesystem::remove(ta, ec);
+    std::filesystem::remove(tb, ec);
+  };
+  try {
+    stage(path_a, ".tmp", emit_a);
+    stage(path_b, ".tmp", emit_b);
+  } catch (...) {
+    scrub();
+    throw;
+  }
+
+  const bool had_a = std::filesystem::exists(path_a, ec);
+  const bool had_b = std::filesystem::exists(path_b, ec);
+  // Move the existing pair aside rather than overwriting it, so there is
+  // something to put back. A rename over a backup that already exists would
+  // destroy it, so stale backups are cleared first.
+  std::filesystem::remove(ba, ec);
+  std::filesystem::remove(bb, ec);
+  try {
+    if (had_a) {
+      std::filesystem::rename(path_a, ba);
+    }
+    if (had_b) {
+      std::filesystem::rename(path_b, bb);
+    }
+    std::filesystem::rename(ta, path_a);
+    std::filesystem::rename(tb, path_b);
+  } catch (...) {
+    // RESTORE, do not merely delete. Deleting the half-published pair is what
+    // loses a working one.
+    std::filesystem::remove(path_a, ec);
+    std::filesystem::remove(path_b, ec);
+    if (had_a) {
+      std::filesystem::rename(ba, path_a, ec);
+    }
+    if (had_b) {
+      std::filesystem::rename(bb, path_b, ec);
+    }
+    scrub();
+    std::filesystem::remove(ba, ec);
+    std::filesystem::remove(bb, ec);
+    throw;
+  }
+  std::filesystem::remove(ba, ec);
+  std::filesystem::remove(bb, ec);
+}
+
 std::string lit_bv(uint32_t w, std::string_view v) { return "(BitVec.ofInt " + std::to_string(w) + " (" + std::string(v) + "))"; }
 
 std::string lit_zero(uint32_t w) { return "(0#" + std::to_string(w) + ")"; }

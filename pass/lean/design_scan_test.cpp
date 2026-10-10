@@ -11,7 +11,9 @@
 #include <tuple>
 
 #include "certificate_ir.hpp"
+#include "design_io_meta.hpp"
 #include "emit_design_cert.hpp"
+#include "lean_format.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
@@ -1969,12 +1971,233 @@ TEST(DesignScanClocks, ByteEnableAndForwardingValueOracle) {
       << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << other << "] " << st
       << ").nextState.flops[0]!) = mk_bv 8 255 := by native_decide\n";
 
+  // PER-LANE REGRESSION. The paired masks above (0b0011 / 0b1100) cannot catch a
+  // SWAP of two lanes inside one nibble: both lanes move together, so exchanging
+  // them leaves the nibble-level result identical. A value that differs in every
+  // 2-bit lane, written over a value that differs in every lane, pins each lane
+  // individually.
+  //
+  //   old 0x6C = 01 10 11 00      new 0xB2 = 10 11 00 10
+  //
+  // Lane k (k=0 lowest) enabled => bits [2k+1:2k] come from `new`.
+  const char* st6c = "(⟨#[mk_bv 8 99, mk_bv 8 99], #[fun _ => mk_bv 8 108]⟩ : RuntimeState)";
+  auto wrb2 = [&](int en) {
+    return inputs({{"we", en, 4}, {"re", 1, 1}, {"waddr", 1, 2}, {"wdata", 0xB2, 8},
+                   {"raddr", 1, 2}, {"romaddr", 0, 2}});
+  };
+  out << "\n-- PER-LANE table: 0x6C overwritten by 0xB2, one lane at a time.\n"
+      << "-- Every 2-bit lane differs, so a lane swap inside a nibble shows here\n"
+      << "-- and cannot show in the 0b0011 / 0b1100 pair above.\n";
+  const int old_v = 0x6C, new_v = 0xB2;
+  for (int en = 0; en < 16; ++en) {
+    int expect = 0;
+    for (int lane = 0; lane < 4; ++lane) {
+      const int mask = 0x3 << (2 * lane);
+      expect |= ((en >> lane) & 1 ? new_v : old_v) & mask;
+    }
+    out << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << wrb2(en) << "] "
+        << st6c << ").nextState.mems[0]! (1 : Int)) = mk_bv 8 " << expect << " := by native_decide\n";
+  }
+
   out << "\n-- direct vs compiled over the byte-enable cases, every tiny address.\n";
   for (int en : {0x0, 0x3, 0xC, 0xF}) {
     out << "example : diffStep memfix_designCert memfix_residual " << edges(true, true) << " #[" << wr(en, 0)
         << "] " << st << " [0,1,2,3] = none := by native_decide\n";
   }
   ASSERT_TRUE(out.good());
+}
+
+// ---------------------------------------------------------------------------
+// IO/clock SIDECAR.
+//
+// A DesignCert names its inputs by ORDINAL and nothing else, so a caller holding
+// an RTL port list cannot build the input array from it. The sidecar is that
+// mapping, derived from the SAME owned scan and certificate the emitter formats.
+// ---------------------------------------------------------------------------
+
+// Ordinals and GAPS survive, and a port the model never reads is still listed.
+TEST(DesignIoMeta, PreservesOrdinalsGapsAndIgnoredPorts) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_io_meta_gaps");
+  auto  io  = lib.create_io("gapfix");
+  // `mid` and `tail` are declared and never read: one INTERIOR, one TRAILING.
+  // Compacting the list would renumber `c` and misalign every later argument.
+  io->add_input("a", 1);
+  io->set_bits("a", 8);
+  io->add_input("mid", 2);
+  io->set_bits("mid", 4);
+  io->add_input("c", 3);
+  io->set_bits("c", 8);
+  io->add_input("tail", 4);
+  io->set_bits("tail", 2);
+  io->add_output("z", 1);
+  io->set_bits("z", 8);
+  auto g  = io->create_graph();
+  auto op = create_typed_node(*g, Ntype_op::Or);
+  set_bits(op.create_driver_pin(0), 8);
+  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("c").connect_sink(op.create_sink_pin(1));
+  op.create_driver_pin(0).connect_sink(g->get_output_pin("z"));
+
+  const auto design = scan_design(*g, {});
+  const auto cert   = build_certificate(design, {});
+  const auto meta   = build_io_meta(design, cert);
+
+  ASSERT_EQ(meta.inputs.size(), 4u) << "an unread port was dropped from the sidecar";
+  std::map<std::string, IoPortMeta> by;
+  for (const auto& p : meta.inputs) {
+    by[p.name] = p;
+  }
+  EXPECT_TRUE(by.at("a").used_by_model);
+  EXPECT_TRUE(by.at("c").used_by_model);
+  EXPECT_FALSE(by.at("mid").used_by_model) << "an interior unused port claims to be read";
+  EXPECT_FALSE(by.at("tail").used_by_model);
+  // Widths are the DECLARED ones, including for ports the model ignores.
+  EXPECT_EQ(by.at("mid").width, 4u);
+  EXPECT_EQ(by.at("tail").width, 2u);
+  // Ordinals are the RUNTIME index, dense and strictly increasing, and the list
+  // is not compacted: every declared port keeps its slot whether or not the
+  // model reads it. Dropping `mid` would shift `c` and `tail` down one.
+  for (size_t i = 0; i < meta.inputs.size(); ++i) {
+    EXPECT_EQ(meta.inputs[i].ordinal, i) << "ordinals are not the runtime index";
+  }
+  // `c` is read, so arity must reach past it; `tail` is not, so arity need not
+  // reach the port COUNT.
+  EXPECT_GE(meta.runtime_input_arity, by.at("c").ordinal + 1);
+  EXPECT_LE(meta.runtime_input_arity, meta.inputs.size());
+  EXPECT_EQ(meta.outputs.size(), 1u);
+  EXPECT_EQ(meta.outputs[0].name, "z");
+}
+
+// A RESET-ONLY port is referenced through `flopQAsync` and is never an `.input`
+// source. Computing arity from inputs alone makes it too small, and
+// `checkRuntime` then rejects an array the caller built correctly.
+TEST(DesignIoMeta, ArityCountsResetOnlyInputs) {
+  const std::vector<ResetFlopSpec> specs{{"clk", true, false, 7, false}};
+  auto                             g      = build_reset_flops("lgdb_io_meta_reset", specs);
+  const auto                       design = scan_design(*g, {});
+  const auto                       cert   = build_certificate(design, {});
+  const auto                       meta   = build_io_meta(design, cert);
+
+  // `rst` drives only the flop's reset pin; no node reads it.
+  const IoPortMeta* rst = nullptr;
+  for (const auto& p : meta.inputs) {
+    if (p.name == "rst") {
+      rst = &p;
+    }
+  }
+  ASSERT_NE(rst, nullptr);
+  EXPECT_TRUE(rst->used_by_model) << "a reset-only port was reported as ignored";
+  EXPECT_GE(meta.runtime_input_arity, rst->ordinal + 1)
+      << "arity excludes the reset input; checkRuntime would reject a correct array";
+}
+
+// An implicitly clocked design still names its domain.
+TEST(DesignIoMeta, ImplicitOnlyDesignNamesItsClock) {
+  auto       f      = build_flops("lgdb_io_meta_implicit", {""});
+  const auto design = scan_design(*f.g, {});
+  const auto cert   = build_certificate(design, {});
+  const auto meta   = build_io_meta(design, cert);
+  ASSERT_EQ(meta.clocks.size(), 1u);
+  EXPECT_TRUE(meta.clocks[0].implicit);
+  EXPECT_EQ(meta.clocks[0].ordinal, 0u);
+  EXPECT_FALSE(meta.clocks[0].name.empty());
+}
+
+// Control bytes and quotes reach this from RTL names and from `net_key()`'s
+// \x01/\x02 sentinels, so escaping is not theoretical.
+TEST(DesignIoMeta, JsonEscapesControlBytesAndQuotes) {
+  DesignIoMeta meta;
+  meta.top = "a\"b\\c";
+  meta.inputs.push_back({std::string("x\x01y"), 0, 1, true});
+  meta.clocks.push_back({std::string("\x02""111"), 0, false});
+  const auto json = io_meta_json(meta);
+  EXPECT_NE(json.find("\\\""), std::string::npos) << "a quote was not escaped";
+  EXPECT_NE(json.find("\\\\"), std::string::npos) << "a backslash was not escaped";
+  EXPECT_NE(json.find("\\u0001"), std::string::npos) << "a control byte was emitted raw";
+  EXPECT_NE(json.find("\\u0002"), std::string::npos);
+  EXPECT_EQ(json.find('\x01'), std::string::npos) << "a raw control byte survived into the JSON";
+}
+
+// PUBLICATION. The pair is only useful together, so a failure must leave the
+// PREVIOUS pair intact -- not delete it.
+TEST(DesignIoMeta, FailedPublicationKeepsThePreviousPair) {
+  const auto dir = std::filesystem::temp_directory_path() / "lean_pub_test";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  const auto a = (dir / "cert.lean").string();
+  const auto b = (dir / "io.json").string();
+
+  // A complete, coherent preexisting pair.
+  publish_pair(a, [](std::ostream& o) { o << "OLD-CERT"; },
+               b, [](std::ostream& o) { o << "OLD-JSON"; });
+  auto slurp = [](const std::string& p) {
+    std::ifstream in(p);
+    std::ostringstream o;
+    o << in.rdbuf();
+    return o.str();
+  };
+  ASSERT_EQ(slurp(a), "OLD-CERT");
+  ASSERT_EQ(slurp(b), "OLD-JSON");
+
+  // The SECOND emit throws -- D2's helper removed the newly published
+  // certificate here and did not restore the old one, losing both.
+  EXPECT_THROW(publish_pair(a, [](std::ostream& o) { o << "NEW-CERT"; },
+                            b, [](std::ostream&) { throw std::runtime_error("sidecar failed"); }),
+               std::exception);
+  EXPECT_EQ(slurp(a), "OLD-CERT") << "the previous certificate was lost";
+  EXPECT_EQ(slurp(b), "OLD-JSON") << "the previous sidecar was lost";
+  // ...and nothing staged is left lying around.
+  EXPECT_FALSE(std::filesystem::exists(a + ".tmp"));
+  EXPECT_FALSE(std::filesystem::exists(b + ".tmp"));
+  EXPECT_FALSE(std::filesystem::exists(a + ".bak"));
+  EXPECT_FALSE(std::filesystem::exists(b + ".bak"));
+
+  // The same failure against FRESH targets must leave neither file behind.
+  const auto c = (dir / "fresh.lean").string();
+  const auto d = (dir / "fresh.json").string();
+  EXPECT_THROW(publish_pair(c, [](std::ostream& o) { o << "C"; },
+                            d, [](std::ostream&) { throw std::runtime_error("boom"); }),
+               std::exception);
+  EXPECT_FALSE(std::filesystem::exists(c)) << "a half-published pair was left on a fresh target";
+  EXPECT_FALSE(std::filesystem::exists(d));
+
+  // And a SUCCESSFUL publish replaces both.
+  publish_pair(a, [](std::ostream& o) { o << "NEW-CERT"; },
+               b, [](std::ostream& o) { o << "NEW-JSON"; });
+  EXPECT_EQ(slurp(a), "NEW-CERT");
+  EXPECT_EQ(slurp(b), "NEW-JSON");
+  std::filesystem::remove_all(dir);
+}
+
+// The emitter takes a DesignScan and a CertificateIR -- no graph. Both outlive
+// the graph by construction, which is what lets emission happen after the
+// graph's lifetime ends.
+TEST(DesignIoMeta, EmissionAndMetadataOutliveTheGraph) {
+  DesignScan    design;
+  CertificateIR cert;
+  {
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_io_meta_lifetime");
+    auto  io  = lib.create_io("lifefix");
+    io->add_input("a", 1);
+    io->set_bits("a", 8);
+    io->add_output("z", 1);
+    io->set_bits("z", 8);
+    auto g  = io->create_graph();
+    auto op = create_typed_node(*g, Ntype_op::Or);
+    set_bits(op.create_driver_pin(0), 8);
+    g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+    op.create_driver_pin(0).connect_sink(g->get_output_pin("z"));
+    design = scan_design(*g, {});
+    cert   = build_certificate(design, {});
+    // `g` goes out of scope here.
+  }
+  const auto meta = build_io_meta(design, cert);
+  EXPECT_EQ(meta.top, "lifefix");
+  EXPECT_EQ(meta.inputs.size(), 1u);
+  std::ostringstream out;
+  emit_design_cert(design, cert, out);
+  EXPECT_NE(out.str().find("lifefix_designCert"), std::string::npos);
+  EXPECT_FALSE(io_meta_json(meta).empty());
 }
 }  // namespace
 }  // namespace lean_export
