@@ -28,12 +28,13 @@ LHD="${LHD:-$LIVEHD_ROOT/bazel-bin/lhd/lhd}"
 LAKE="${LAKE:-lake}"
 
 RUN_LEAN="${RUN_LEAN:-false}"
-# DEFAULT OFF, because the gate cannot run (see the block below): its
-# procedure is retired and `lhd lec` rejects the reader it used. Defaulting
-# it ON produced 162 recorded "gate logs" that are API usage errors, which
-# read like evidence and are not. Off by default means an export is plainly
-# an export; asking for the gate explicitly gets an explanation instead of a
-# fake result.
+# DEFAULT OFF. The gate works again (see the block below), but it is a real
+# solver run and an export census does not want it. Off by default also
+# means an export row is plainly an export rather than something that might
+# or might not carry an equivalence result -- which is how 162 usage errors
+# came to sit beside rows that looked validated. RUN_LEC_GATE=true now
+# performs a real comparison and REFUSES to continue on anything but
+# `proven`.
 RUN_LEC_GATE="${RUN_LEC_GATE:-false}"
 LEC_STRICT="${LEC_STRICT:-false}"
 EMIT_CERT="${LEAN_EMIT_CERT:-true}"
@@ -132,40 +133,72 @@ fi
 #    catches the 2f-latch READERS bugs, which build a wrong graph silently.
 # ---------------------------------------------------------------------------
 if [[ "$RUN_LEC_GATE" == "true" ]]; then
-  # THIS GATE DOES NOT CURRENTLY RUN, and it used to hide that.
+  # RTL equivalence: the compiled LGraph against the raw RTL read INDEPENDENTLY.
   #
-  # `lhd lec` on master REFUSES a yosys reader: lhd/lhd_options.cpp:799 permits
-  # `--reader yosys-slang` only for `lhd compile`.  The invocation below was the
-  # retired procedure, so every single run exited 2 with
-  # {"command":"usage","status":"fail"} -- an API rejection, not a solver result.
-  # Measured: 162 of 162 recorded lec_gate.log files are that usage error, which
-  # means NO CORE-ET row has ever carried an RTL equivalence result.
+  # THE REFERENCE FRONTEND IS SLANG, NOT A YOSYS READER, and that is a real
+  # difference worth stating rather than a detail. `lhd lec` permits source
+  # inputs only through the default Slang reader (lhd/lhd_options.cpp:797 rejects
+  # every other reader for a non-compile command); the implementation side here
+  # was built by `inou.yosys.tolg` with yosys-slang. So the two sides come
+  # through DIFFERENT front ends, which is what makes this a comparison rather
+  # than a self-comparison.
   #
-  # Worse, the shell treated it as "inconclusive, recorded, not fatal" and
-  # carried on, and LEC_STRICT did not help: it is passed as
-  # `--set formal.strict=`, which the usage check rejects before any setting is
-  # read.  A gate that cannot run must not look like a gate that ran and was
-  # unsure.
+  # This block previously asked for `--reader yosys-slang` and set
+  # `formal.strict`. Both are refused: the reader is compile-only, and
+  # `formal.strict` is retired. Every invocation therefore exited 2 with
+  # {"command":"usage","status":"fail"} -- 162 of 162 recorded gate logs on this
+  # master are that usage error, and the shell called it "inconclusive" and
+  # carried on. A gate that cannot run must never look like a gate that ran and
+  # was unsure.
   #
-  # The supported procedure is the one the error message itself names:
-  #   lhd compile --reader yosys SOURCE --emit-dir lg:DIR
-  #   lhd lec --ref lg:DIR --impl lg:OTHER
-  # i.e. BOTH sides are pre-built LGraphs and `lhd lec` reads no source.
-  # Adapting the runner to it is real work -- the reference side has to be built
-  # through a reader whose graph is independent of the implementation side's, or
-  # the comparison is a self-comparison and proves nothing -- and it is NOT done
-  # here.  Until it is, this refuses rather than producing another 162 usage
-  # errors that look like evidence.
+  # Verified on this binary with a 4-bit adder: identical RTL gives exit 0
+  # "verdict":"proven"; mutating `y` to `(a+b)^1` gives exit 10
+  # "verdict":"refuted" with `counterexample: diff y(ref=1 impl=0) @ a=0, b=0`.
   #
-  # Native LEC, the frontend and single_edge are untouched; this is a runner/CLI
-  # problem only.
-  echo "FATAL: the LEC gate procedure is retired and this runner has not been adapted." >&2
-  echo "  lhd lec rejects --reader yosys-slang (lhd/lhd_options.cpp:799); it is compile-only." >&2
-  echo "  Supported shape: lhd compile --reader yosys SRC --emit-dir lg:DIR, then lhd lec --ref lg:DIR" >&2
-  echo "  Re-enabling it needs an INDEPENDENT reference graph plus positive and negative" >&2
-  echo "  equivalence controls; a self-comparison is not RTL validation." >&2
-  echo "  Run with RUN_LEC_GATE=false to export without it -- export is not an equivalence proof." >&2
-  exit 5
+  # ref side: the raw RTL, all modules CONCATENATED into one .sv and elaborated
+  # independently. `--ref` takes a single path and `compile.yosys.filelist_file`
+  # does not reach the ref read, so the filelist's include path has to be
+  # re-supplied by hand (intpipe_csr_file's .svh set needs it).
+  mapfile -t ref_srcs < <(grep '\.sv$' "$FILELIST")
+  REF_SV="$GEN_DIR/raw_${TOP}.sv"
+  cat "${ref_srcs[@]}" > "$REF_SV"
+  declare -a ref_slang=(--ignore-assertions --relax-enum-conversions)
+  if grep -q '+incdir+' "$FILELIST"; then
+    ref_slang+=(-I "$(grep -m1 '^+incdir+' "$FILELIST" | sed 's/^+incdir+//')")
+  fi
+  rm -f "$LOG_DIR/lec_gate.json"
+  "$LHD" lec --impl lg:"$LG_NORM" --ref verilog:"$REF_SV" --top "$TOP" \
+    --workdir "$WORK_DIR/lec" \
+    --set formal.engine=auto --set formal.lec.hier=true \
+    --set formal.lec.semdiff=structural \
+    --result-json "$LOG_DIR/lec_gate.json" \
+    -- "${ref_slang[@]}" \
+    > "$LOG_DIR/lec_gate.log" 2>&1
+  lec_status=$?
+  lec_verdict="$(grep -oP '"verdict":"\K[^"]*' "$LOG_DIR/lec_gate.json" 2>/dev/null | tail -1)"
+  echo "lec gate exit=$lec_status verdict=${lec_verdict:-<none>}"
+
+  # FOUR OUTCOMES, and only one of them is a pass. Collapsing them is how 162
+  # usage errors came to sit beside rows that looked validated.
+  if [[ ! -s "$LOG_DIR/lec_gate.json" ]]; then
+    echo "FATAL: LEC produced no result JSON -- the gate did not run (usage or" >&2
+    echo "       infrastructure failure, NOT an equivalence outcome). See" >&2
+    echo "       $LOG_DIR/lec_gate.log" >&2
+    exit 5
+  fi
+  case "$lec_verdict" in
+    proven)
+      echo "  LEC: PROVEN equivalent to the RTL" ;;
+    refuted)
+      echo "FATAL: LEC REFUTED -- the LGraph does not match the RTL; do NOT generate" >&2
+      grep -m1 'counterexample' "$LOG_DIR/lec_gate.log" >&2 || true
+      exit 4 ;;
+    *)
+      # Native UNKNOWN already exits nonzero on its own; do not soften it.
+      echo "FATAL: LEC did not prove equivalence (verdict='${lec_verdict:-<none>}'," >&2
+      echo "       exit $lec_status). An undecided gate is not a passed gate." >&2
+      exit 6 ;;
+  esac
 fi
 [[ "$STOP_AFTER" == "lec" ]] && exit 0
 

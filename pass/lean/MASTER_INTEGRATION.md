@@ -2743,7 +2743,7 @@ resolves 4.34.1 while the `.olean` files are built with `formal/lean`'s pinned
 4.31.0 — every artifact failed in 0.24 s with `incompatible header`, which looks
 nothing like a toolchain mismatch until you read the first line of the log.
 
-### R16.3 The LEC gate has never run, on any module
+### R16.3 The LEC gate was not running on current master — and now does
 
 `lhd lec` on master **refuses a yosys reader**: `lhd/lhd_options.cpp:797`
 permits `--reader yosys-slang` for `lhd compile` only. The runner called the
@@ -2754,8 +2754,14 @@ retired procedure anyway, so every invocation exited 2 with
  "message":"Yosys readers are only supported by lhd compile; …"}}
 ```
 
-**162 of 162** recorded `lec_gate.log` files are that usage error. No CORE-ET
-row has ever carried an RTL equivalence result.
+**162 of 162** recorded `lec_gate.log` files are that usage error, so no CORE-ET
+row in **this** corpus carried an RTL equivalence result.
+
+Scope that claim carefully: those 162 logs are from runs against **current
+master**. They say nothing about whether the gate worked on an earlier branch,
+before the reader restriction and the retirement of `formal.strict`. An earlier
+draft of this section said the gate had "never run, on any module"; that is more
+than the evidence supports.
 
 Two things kept this invisible. The shell treated a nonzero exit as
 "inconclusive; recorded, not fatal" and continued. And `LEC_STRICT=true` did not
@@ -2783,14 +2789,54 @@ lhd lec --ref lg:DIR --impl lg:OTHER
 
 — both sides pre-built LGraphs, with `lhd lec` reading no source.
 
-**It is deliberately not re-implemented here.** The reference side has to be
-built through a reader whose graph is genuinely independent of the
-implementation side's, or the comparison is a self-comparison and proves
-nothing; and it needs positive and negative equivalence controls before any
-claim of procedural parity. `RUN_LEC_GATE` now defaults to **false**, because
-defaulting it on is what produced 162 "gate logs" that read like evidence.
+### R16.4 The supported route, and the gate restored
 
-Native LEC, the frontend and `single_edge` are untouched: this is a runner/CLI
-problem. **Export-only rows remain useful and are not RTL equivalence proofs**,
-and nothing in R14 or R15 ever claimed otherwise — but the `lec_gate.log` files
+An earlier draft of this section concluded the gate could not be adapted without
+substantial work and left it refusing outright. That was wrong, and wrong in the
+expensive direction: **only the yosys readers are rejected.**
+`lhd/lhd_options.cpp:797` tests `opts.reader != "slang"`, so a source reference
+through the **default Slang reader** is supported for `lhd lec`. The two-prebuilt-
+graph form in the error message is a debug route, not the requirement.
+
+Two changes were needed, both small:
+
+- drop `--reader yosys-slang` and let the reference come through Slang;
+- drop `--set formal.strict=`, which is **retired** and is itself a second usage
+  failure. Native UNKNOWN already exits nonzero without it.
+
+**The reference frontend is therefore Slang while the implementation side is
+built by `inou.yosys.tolg` with yosys-slang.** That is worth stating rather than
+burying: the two sides come through *different* front ends, which is exactly
+what makes this a comparison and not a self-comparison.
+
+Verified on this binary, both directions:
+
+| Control | Exit | Verdict | Detail |
+| --- | ---: | --- | --- |
+| identical RTL | 0 | `proven` | structurally identical, no solver call |
+| `y` mutated to `(a+b)^1` | 10 | `refuted` | `counterexample: diff y(ref=1 impl=0) @ a=0, b=0` |
+
+and then on a real CORE-ET module: **`intpipe_imm` PROVEN equivalent to the
+RTL** — the first genuine equivalence result in this corpus.
+
+`scripts/lec_gate_controls.sh` keeps both directions runnable. A gate nobody has
+watched *refute* something is a gate nobody knows can fail, which is the whole
+lesson of the 162 logs.
+
+The runner now separates the four outcomes and **refuses to continue on any of
+them but `proven`**: a missing result JSON is an infrastructure failure (exit 5),
+`refuted` is fatal and prints the counterexample (exit 4), and anything
+undecided is fatal too (exit 6) — an undecided gate is not a passed gate.
+`RUN_LEC_GATE` stays **false by default** because an export census does not want
+a solver run, and because an export row should plainly be an export.
+
+**The binary is a debug build.** It announces `lec-debug-build-slow`, and the
+controls now warn about it. That is fine for correctness and disqualifying for
+timings: any timed replay must fingerprint the actual binary and build mode
+rather than trusting the `bazel-bin` symlink name, and record it alongside the
+pinned Lean/Mathlib environment.
+
+Native LEC, the frontend and `single_edge` are untouched: this was a runner/CLI
+problem throughout. **Export-only rows remain useful and are not RTL equivalence
+proofs** — nothing in R14 or R15 claimed otherwise, but the `lec_gate.log` files
 sitting beside those rows did.
