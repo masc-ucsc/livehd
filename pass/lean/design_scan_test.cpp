@@ -1149,5 +1149,126 @@ TEST(DesignScanClocks, OpaqueComputedClockIsRefused) {
   flop.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
   expect_refusal(*g, "an internal net rather than a design input");
 }
+
+// ---------------------------------------------------------------------------
+// VALUE gates for clock-domain resolution.
+//
+// Every test above is about an ordinal or a refusal: WHICH domain an element
+// lands in, and which designs are turned away. None says what the resolved
+// metadata MEANS when the design is stepped. A resolver can assign every
+// ordinal correctly and still be useless if a quiet domain commits anyway.
+//
+// These emit a certificate from the real scanner and hand it to Lean, which
+// decides concrete steps with `native_decide`. The fixture is elaborated by
+// pass/lean/scripts/clock_oracle.sh.
+// ---------------------------------------------------------------------------
+
+// A two-domain design: flop A on `clk_a`, flop B on `clk_b`, each loading its
+// own input. Four edge vectors cover the whole table -- neither fires, only A,
+// only B, both -- which is what distinguishes a real domain from an ordinal
+// that is carried but never consulted.
+TEST(DesignScanClocks, TwoDomainValueOracle) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_clk_value_oracle");
+  auto  io  = lib.create_io("clk_value_oracle");
+  io->add_input("clk_a", 1);
+  io->set_bits("clk_a", 1);
+  io->add_input("clk_b", 2);
+  io->set_bits("clk_b", 1);
+  io->add_input("da", 3);
+  io->set_bits("da", 8);
+  io->add_input("db", 4);
+  io->set_bits("db", 8);
+  io->add_output("qa", 1);
+  io->set_bits("qa", 8);
+  io->add_output("qb", 2);
+  io->set_bits("qb", 8);
+  auto g = io->create_graph();
+  auto mk = [&](const char* clk, const char* din, const char* q) {
+    auto flop = create_typed_node(*g, Ntype_op::Flop);
+    set_bits(flop.create_driver_pin(0), 8);
+    g->get_input_pin(din).connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "din")));
+    g->get_input_pin(clk).connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")));
+    flop.create_driver_pin(0).connect_sink(g->get_output_pin(q));
+  };
+  mk("clk_a", "da", "qa");
+  mk("clk_b", "db", "qb");
+
+  const auto design = scan_design(*g, {});
+  const auto cert   = build_certificate(design, {});
+  ASSERT_EQ(design.clocks.size(), 2u) << "fixture is not two-domain; the rest of this test is meaningless";
+  ASSERT_EQ(design.flops.size(), 2u);
+  ASSERT_NE(design.flops[0].clock_ordinal, design.flops[1].clock_ordinal);
+
+  const char* path = std::getenv("LEAN_CLOCK_FIXTURE");
+  if (path == nullptr) {
+    GTEST_SKIP() << "set LEAN_CLOCK_FIXTURE to emit the Lean oracle";
+  }
+  std::ofstream out(path);
+  emit_design_cert(design, cert, out);
+
+  // Input ordinals are the index in design.inputs, which is scanned order, not
+  // declaration order -- build the argument vector from the scan.
+  auto arg_index = [&](std::string_view name) -> size_t {
+    for (size_t i = 0; i < design.inputs.size(); ++i) {
+      if (design.inputs[i].name == name) {
+        return i;
+      }
+    }
+    ADD_FAILURE() << "no input named " << name;
+    return 0;
+  };
+  const auto i_da = arg_index("da");
+  const auto i_db = arg_index("db");
+  // Which CERTIFICATE flop ordinal is on which domain. The emitted flop array
+  // is ordered by nid, so read the mapping rather than assuming it.
+  const auto ord_a = design.flops[0].clock_ordinal;
+  const size_t fa = 0, fb = 1;
+
+  auto inputs = [&](int da, int db) {
+    std::ostringstream o;
+    for (size_t k = 0; k < design.inputs.size(); ++k) {
+      o << (k ? ", " : "") << "mk_bv 8 " << (k == i_da ? da : (k == i_db ? db : 0));
+    }
+    return o.str();
+  };
+  // Pre-state: both flops hold 7 and 9.
+  const char* st0 = "(⟨#[mk_bv 8 7, mk_bv 8 9], #[]⟩ : RuntimeState)";
+  auto edges = [&](bool a, bool b) {
+    std::ostringstream o;
+    // positional over design.clocks; ord_a is flop[0]'s domain
+    o << "#[";
+    for (size_t c = 0; c < design.clocks.size(); ++c) {
+      const bool fire = (c == ord_a) ? a : b;
+      o << (c ? ", " : "") << (fire ? "true" : "false");
+    }
+    o << "]";
+    return o.str();
+  };
+  out << "\n-- VALUE GATES: a quiet domain must HOLD, a firing domain must COMMIT.\n";
+  struct Case { bool a, b; int qa, qb; const char* why; };
+  const Case cases[] = {
+      {false, false, 7, 9, "both quiet: both hold their pre-state"},
+      {true,  false, 3, 9, "only clk_a fires: A commits, B HOLDS"},
+      {false, true,  7, 5, "only clk_b fires: B commits, A HOLDS"},
+      {true,  true,  3, 5, "both fire: simultaneous commit, same as allEdges"},
+  };
+  for (const auto& c : cases) {
+    out << "\n-- " << c.why << "\n"
+        << "example : (compileAndRun clk_value_oracle_designCert " << edges(c.a, c.b) << " #[" << inputs(3, 5) << "] "
+        << st0 << ").nextState.flops[" << fa << "]! = mk_bv 8 " << c.qa << " := by native_decide\n"
+        << "example : (compileAndRun clk_value_oracle_designCert " << edges(c.a, c.b) << " #[" << inputs(3, 5) << "] "
+        << st0 << ").nextState.flops[" << fb << "]! = mk_bv 8 " << c.qb << " := by native_decide\n";
+  }
+  // allEdges must agree with the all-true vector -- the compatibility claim.
+  out << "\n-- allEdges IS the all-fire vector: the preserved schedule.\n"
+      << "example : allEdges clk_value_oracle_designCert = " << edges(true, true) << " := by native_decide\n";
+  // An OUT-OF-RANGE ordinal never fires: `fires` reads e[c]? and defaults false.
+  out << "\n-- A SHORT edge vector leaves the missing domain quiet (fail-safe), it does not fire it.\n"
+      << "example : (compileAndRun clk_value_oracle_designCert #[] #[" << inputs(3, 5) << "] " << st0
+      << ").nextState.flops[" << fa << "]! = mk_bv 8 7 := by native_decide\n"
+      << "example : (compileAndRun clk_value_oracle_designCert #[] #[" << inputs(3, 5) << "] " << st0
+      << ").nextState.flops[" << fb << "]! = mk_bv 8 9 := by native_decide\n";
+  ASSERT_TRUE(out.good());
+}
 }  // namespace
 }  // namespace lean_export

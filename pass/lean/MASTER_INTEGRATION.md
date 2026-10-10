@@ -2557,14 +2557,30 @@ flop and ROM domains; deterministic ordinals with unused domains pruned; the
 design-wide implicit join; the memory common-domain restriction; and seven
 refusals, none of which fires anywhere in the corpus.
 
-**This is not an acceptance.** The 13 `DesignScanClocks` tests are about
-ordinals and refusals — which domain an element lands in, and which designs are
-turned away. They say nothing about what the resolved metadata *means* at
-runtime. The gates that would establish that have not been written:
+**The first value gate exists.** `pass/lean/scripts/clock_oracle.sh` takes a
+certificate from the **real scanner** — a two-domain design, flop A on `clk_a`,
+flop B on `clk_b` — and has Lean decide 11 concrete steps with `native_decide`.
+All 11 pass:
 
-- **independent / quiet / simultaneous edges** — a domain that does not fire
-  must hold its elements, and two domains firing together must behave as both
-  firing;
+| Edge vector | Result |
+| --- | --- |
+| `#[false, false]` | both flops **hold** their pre-state |
+| `#[true, false]` | A commits, **B holds** |
+| `#[false, true]` | B commits, **A holds** |
+| `#[true, true]` | both commit simultaneously |
+| `allEdges` | equals `#[true, true]` — the preserved schedule |
+| `#[]` (short) | every missing domain is **quiet**, fail-safe |
+
+The discriminating rows are the two middle ones: if the resolver had merged the
+domains, firing one clock would commit both, and those cases would fail. The
+script refuses to run at all unless the emitted certificate really declares both
+`clk_a` and `clk_b`, so the gate cannot pass vacuously on a one-clock
+certificate.
+
+**This is still not an acceptance.** The 13 `DesignScanClocks` tests are about
+ordinals and refusals, and the oracle above covers only flop hold/commit on two
+independent domains. These remain unwritten:
+
 - **quiet synchronous vs asynchronous reset and Q reads** — a synchronous reset
   must hold while its clock is quiet; an asynchronous one must act with no
   edge, on both the visible Q and the committed state;
@@ -2577,9 +2593,10 @@ runtime. The gates that would establish that have not been written:
 - **`allEdges` versus the preserved schedule**, on a design with more than one
   resolved domain.
 
-Every one of these needs a *fresh scanner-produced certificate* driven through
-Lean, not a C++ unit test. Until they exist, R15 is an implementation with a
-no-regression result, and the clock semantics are unvalidated.
+Each needs a *fresh scanner-produced certificate* driven through Lean, as the
+oracle above does, not a C++ unit test. Until they exist, R15 is an
+implementation with a no-regression result and one value gate; the reset,
+memory/ROM and `checkDesign` semantics are unvalidated.
 
 Also not implemented: **bus-bit preservation** (refused instead, R15.3) and the
 **IO/clock sidecar** — ordinal mapping, `runtime_input_arity`, `used_by_model`,
