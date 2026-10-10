@@ -78,7 +78,11 @@ for f in "$@"; do
   # fast proof failure.
   f="$(cd "$(dirname "$f")" && pwd)/$(basename "$f")"
   name="$(basename "$f" _Lgraph.lean)"
-  log="$(dirname "$f")/../logs/lean_typecheck.log"
+  # PER-MODULE, not a shared name.  This used to be `../logs/lean_typecheck.log`
+  # for every module, so a sweep whose artifacts share one output directory kept
+  # only the LAST module's log -- the full axiom report for the other 86 was
+  # overwritten and could not be re-audited without re-running the whole sweep.
+  log="$(dirname "$f")/../logs/lean_typecheck.${name}.log"
   mkdir -p "$(dirname "$log")"
 
   # Static gates are a precondition, not a formality: a file with a `sorry` would
@@ -115,6 +119,21 @@ for f in "$@"; do
   # a truncated file whose `_refines_fast` theorem never existed.
   ax_lines="$(grep -c "depends on axioms\|does not depend on any axioms" "$log" || true)"
   ax_sorry="$(grep -c "sorryAx" "$log" || true)"
+
+  # The REAL audit.  Counting report lines is not one: it never compares theorem
+  # NAMES, so `#print axioms foo` satisfies a count of one; it never inspects the
+  # axioms themselves, so any custom axiom not spelled `sorryAx` passes; and it
+  # reads single lines, while Lean WRAPS long axiom lists so the tail lands on a
+  # continuation line and is never seen.  axiom_audit.py checks exact qualified
+  # obligation identity, parses wrapped lists, allowlists the axioms, and
+  # requires `_step_legacy_correct` to actually cite the separately proved
+  # `_clock_bounds` native fact (the R13.1 guard).
+  if python3 -I "$ROOT/pass/lean/scripts/axiom_audit.py" "$log" "$name" \
+       >> "$log" 2>&1; then
+    ax_audit=ok
+  else
+    ax_audit=FAIL
+  fi
   # Expected audit count comes from the FILE, not from a scraped external log: the
   # emitter writes exactly one `#print axioms` per top-level theorem it produced, so
   # this cannot drift.  (Deriving it from static_gates.log would fail lenient -- a
@@ -128,8 +147,10 @@ for f in "$@"; do
   ax_note="${ax_lines}/${ax_want}"
   [[ "$ax_sorry" != "0" ]] && ax_note="${ax_note},sorryAx"
 
+  [[ "$ax_audit" == "ok" ]] || ax_note="${ax_note},audit-fail"
   if [[ "$rc" -eq 0 && "$errs" -eq 0 && "$ax_sorry" == "0" \
-        && "$ax_want" -gt 0 && "$ax_lines" -ge "$ax_want" ]]; then
+        && "$ax_want" -gt 0 && "$ax_lines" -ge "$ax_want" \
+        && "$ax_audit" == "ok" ]]; then
     verdict=PROVEN
   elif [[ "$rc" -eq 0 && "$errs" -eq 0 ]]; then
     # typechecked but the audit is missing or dirty -- do NOT call this proven

@@ -189,43 +189,23 @@ if [[ "$LEAN_MODE" == "verified_compiler" ]]; then
   # LEGACY shape (`nodes_of_list` / `BT.nd` trees, per-node fast bodies); a
   # verified_compiler file has none of that, so they report 0 nodes and fail.
   #
-  # What IS worth gating here is cheap and specific:
-  {
-    echo "== shape =="
-    n_src="$(grep -c 'SourceDesc\.' "$generated" || true)"
-    n_nod="$(grep -c 'origin :=' "$generated" || true)"
-    echo "sources=$n_src nodes=$n_nod"
-    [[ "$n_nod" -gt 0 ]] || { echo "FAIL: no nodes emitted"; gate_status=1; }
-
-    echo "== required declarations =="
-    for d in _designCert _step _compiles _step_correct; do
-      grep -q "${TOP}${d}" "$generated" || { echo "FAIL: missing ${TOP}${d}"; gate_status=1; }
-    done
-
-    echo "== recursion/heartbeat options =="
-    # Without these the thousands-element literal exhausts maxRecDepth while
-    # ELABORATING, `<Top>_designCert` becomes noncomputable, and every later
-    # declaration fails in a way that reads like a proof failure.
-    grep -q 'set_option maxRecDepth' "$generated" || { echo "FAIL: no maxRecDepth"; gate_status=1; }
-    grep -q 'set_option maxHeartbeats' "$generated" || { echo "FAIL: no maxHeartbeats"; gate_status=1; }
-
-    echo "== no ResidualProgram in a theorem statement =="
-    # THE expensive mistake, catchable in milliseconds.  A theorem naming a
-    # ResidualProgram makes the kernel reduce `compileDesign`, and Array.push is
-    # `<toList ++ [a]>`, so N bindings cost O(N^2) kernel terms.  Measured on
-    # SingleCycleCPU: OOM at 27 min / 27 GB under a 40 GB cap, 120 GB uncapped.
-    if grep -nE '^theorem .*_residual' "$generated"; then
-      echo "FAIL: a theorem statement names a ResidualProgram (kernel-defeq blowup)"
-      gate_status=1
-    fi
-
-    echo "== sorry / TODO =="
-    n_sorry="$(grep -cw sorry "$generated" || true)"
-    echo "sorry=$n_sorry"
-    [[ "$n_sorry" == "0" ]] || gate_status=1
-
-    echo "gate_status=$gate_status"
-  } > "$LOG_DIR/static_gates.log" 2>&1
+  # DO NOT reimplement these inline.  This block used to be a hand-rolled copy of
+  # pass/lean/scripts/vc_gates.py, and the copy went stale in both directions:
+  #   * it refused any certificate with zero NODES, which is wrong -- a design
+  #     whose outputs are all constant-driven is valid and provable.  That gate
+  #     alone blocked `null_vpu` and `minion_dcache_texsend`, both of which had
+  #     emitted complete four-theorem certificates.
+  #   * it was MISSING the const-width and ROM-entry gates, so the CORE-ET sweep
+  #     ran weaker checks than the CVA6 sweep against the same emitter.  Four
+  #     modules reached a green PROVEN carrying constants too narrow to hold
+  #     their value; `native_decide` proves such a certificate faithfully
+  #     against a model that is itself wrong, so the proof is sound and the
+  #     MODEL is not.  That is the one failure this pipeline cannot detect
+  #     downstream, and it is exactly what the gate exists for.
+  # One implementation, called from both drivers.
+  python3 -I "$LIVEHD_ROOT/pass/lean/scripts/vc_gates.py" "$generated" "$TOP" \
+    > "$LOG_DIR/static_gates.log" 2>&1 || gate_status=1
+  echo "gate_status=$gate_status" >> "$LOG_DIR/static_gates.log"
 else
 {
   echo "== op census =="
