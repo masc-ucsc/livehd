@@ -47,14 +47,44 @@ timeit() {  # writes "<cpu> <status>" to stdout; args: <file> <rowdir>
   echo "${cpu:-NA} $st"
 }
 
-read -r BT BS < <(cat > probes/d3_base.lean <<'B'
+# THE BASELINE IS A ROW LIKE ANY OTHER.
+#
+# It was `read -r BT BS < <(cat > file <<'B' ... B
+# timeit file)` -- which, once `timeit` grew its row-directory argument, called
+# it with `$2` unset. Under `set -u` that is an unbound-variable abort INSIDE
+# the command substitution: the baseline child never ran, `BT`/`BS` came back
+# empty, and the script emitted a five-field blank row beneath a six-field
+# header and exited 0. A zero subtracted from every measurement, with nothing
+# to show it was never taken.
+#
+# Now it has its own evidence directory, writes a fresh artifact, records its
+# hash, and emits a complete row through the same path as every other.
+baseline() {
+  local f rowdir res bsha
+  f="probes/d3_base.lean"
+  rowdir="$SCRATCH/baseline"
+  rm -rf "$rowdir"; mkdir -p "$rowdir"
+  rm -f "$f"
+  cat > "$f" <<'B'
 import LeanSemanticPrimitives.Compiler.CompileDesign
 set_option maxRecDepth 1000000
 set_option maxHeartbeats 0
 B
-timeit probes/d3_base.lean)
-printf 'baseline\t-\t0\t%s\t%s\n' "$BT" "$BS" >> "$OUT"
-echo "baseline ${BT}s $BS"
+  local wr=$?
+  printf '%s\n' "$wr" > "$rowdir/gen.exit"
+  if [ "$wr" -ne 0 ] || [ ! -s "$f" ]; then
+    printf 'baseline\t-\t0\tNA\tGEN_FAIL(rc=%s)\t-\n' "$wr" >> "$OUT"
+    echo "baseline -> GEN_FAIL(rc=$wr)"
+    return
+  fi
+  bsha=$(sha256sum < "$f" | cut -d' ' -f1)
+  printf '%s\n' "$bsha" > "$rowdir/artifact.sha256"
+  res=$(timeit "$f" "$rowdir")
+  printf 'baseline\t-\t0\t%s\t%s\t%s\n' \
+    "$(echo "$res" | cut -d' ' -f1)" "$(echo "$res" | cut -d' ' -f2-)" "$bsha" >> "$OUT"
+  echo "baseline -> $res"
+}
+baseline
 
 # GENERATION IS PART OF THE MEASUREMENT.
 #

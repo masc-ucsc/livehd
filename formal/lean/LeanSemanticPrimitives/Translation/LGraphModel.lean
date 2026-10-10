@@ -108,11 +108,20 @@ shifts `x` at ITS OWN width and only then widens -- `sra_bridge` truncates with
 `w` instead would keep shifting for amounts in `[x.width, w)` whenever `w > wa`
 and disagree with both bridges.
 
-The guard is not a semantic change: `BitVec.sshiftRight` is already total and
-saturating, so for `k ≥ x.width` the answer IS all sign bits.  What it avoids is
-`2 ^ k` for a `k` that is a VALUE rather than a width -- the three CORE-ET
-designs that fail without it carry 33-bit amount operands, so `k` reaches ~8.6e9
-and the power is unconstructible while the mathematical answer is immediate. -/
+WHAT IS ESTABLISHED, AND WHAT IS NOT.  `BitVec.sshiftRight` is already total
+and saturating, so for `k ≥ x.width` the answer IS all sign bits, and the
+guard agrees with the bridge it has to match.  What it avoids is `2 ^ k` for a
+`k` that is a VALUE rather than a width -- the three CORE-ET designs that fail
+without it carry 33-bit amount operands, so `k` reaches ~8.6e9 and the power is
+unconstructible while the mathematical answer is immediate.
+
+This comment used to say "the guard is not a semantic change".  That is a
+claim of EQUIVALENCE to the unguarded formula on every input, and nothing here
+proves it -- the unguarded formula does not even evaluate at the amounts that
+motivated the guard.  Treat it as: the guard matches the bridge, and whether
+the two agree everywhere else is open.  See PORT_LEDGER_D3_D4_FP.md §27.2 for
+19 CORE-ET digests that changed across a run whose binary, library and emitter
+all changed too, with the cause unresolved. -/
 def bv_sra (w : Nat) (x shamt : BV) : BV :=
   let k := (bv_uint shamt).toNat
   if k ≥ x.width then
@@ -201,7 +210,9 @@ def denote_op : LGraphOp → Nat → List BV → BV
     -- Saturates at the RESULT width: `shl_bridge` shifts `(zext a : BitVec w)`,
     -- and `_ <<< k = 0` for `k ≥ w`.  (SRA saturates at the SOURCE width
     -- instead -- see `bv_sra`.)  Per fold term, since each operand carries its
-    -- own amount.
+    -- own amount.  The bound is the BRIDGE's; it is NOT claimed equal to the
+    -- unguarded `2 ^ k` formula on every input, which does not evaluate at the
+    -- amounts that motivated it.
     bs.foldl (fun acc b =>
       bv_bitwise w (fun x y => xor x y) acc
         (mk_bv w (if (bv_uint b).toNat ≥ w then 0
@@ -271,7 +282,9 @@ def eval_op : LGraphOp → Nat → List BV → BV
     -- Saturates at the RESULT width: `shl_bridge` shifts `(zext a : BitVec w)`,
     -- and `_ <<< k = 0` for `k ≥ w`.  (SRA saturates at the SOURCE width
     -- instead -- see `bv_sra`.)  Per fold term, since each operand carries its
-    -- own amount.
+    -- own amount.  The bound is the BRIDGE's; it is NOT claimed equal to the
+    -- unguarded `2 ^ k` formula on every input, which does not evaluate at the
+    -- amounts that motivated it.
     bs.foldl (fun acc b =>
       bv_bitwise w (fun x y => xor x y) acc
         (mk_bv w (if (bv_uint b).toNat ≥ w then 0

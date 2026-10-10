@@ -104,5 +104,62 @@ else
   bad "d3_gen.py was left modified"
 fi
 
+# ---------------------------------------------------------------------------
+# THE BASELINE ROW, in d3_bench.sh.
+#
+# `timeit` grew a row-directory argument and the baseline call did not, so
+# under `set -u` the substitution aborted with "$2: unbound variable" -- the
+# baseline child never ran, and the script emitted a five-field blank row
+# beneath a six-field header and exited 0. A zero subtracted from every
+# measurement with nothing to show it was never taken.
+#
+# Three legs: the success path, a nonzero child, and a timeout. The sweep
+# points are set to the SMALLEST generated case so the baseline is reached
+# quickly; the published defaults are untouched in the script.
+# ---------------------------------------------------------------------------
+BENCH1="$ROOT/pass/lean/scripts/d3_bench.sh"
+b1=(D3_ROOT="$ROOT" SCRATCH="$W/b1scratch" TMO=600
+    N_NAIVE_CHAIN=4 N_COMPOSED_CHAIN=4 N_COMPOSED_FAR=4)
+
+baseline_row() { awk -F'\t' '$1=="baseline"{print; exit}' "$1"; }
+
+env "${b1[@]}" OUT="$W/b1ok.tsv" nice -n19 ionice -c3 timeout 2400 bash "$BENCH1" \
+  > "$W/b1ok.log" 2>&1
+row="$(baseline_row "$W/b1ok.tsv")"
+nf="$(awk -F'\t' '{print NF}' <<<"$row")"
+st="$(cut -f5 <<<"$row")"; cpu="$(cut -f4 <<<"$row")"; bsh="$(cut -f6 <<<"$row")"
+hdr_nf="$(head -1 "$W/b1ok.tsv" | awk -F'\t' '{print NF}')"
+if [[ "$nf" == "$hdr_nf" && "$st" == "OK" && "$cpu" != "" && "$bsh" =~ ^[0-9a-f]{64}$ ]]; then
+  ok "the baseline row is complete ($nf fields, status $st, cpu $cpu, artifact recorded)"
+else
+  bad "baseline row: $nf field(s) under a $hdr_nf-field header, status='$st', cpu='$cpu', artifact='$bsh'"
+fi
+[[ -s "$W/b1scratch/baseline/lean.exit" && -s "$W/b1scratch/baseline/lean.time" ]] \
+  && ok "the baseline has its own retained evidence directory" \
+  || bad "the baseline left no retained evidence"
+
+# A nonzero baseline child: `lake` is resolved through ELAN_HOME, so a stub
+# there fails the baseline exactly as it would fail any other row.
+mkdir -p "$W/elan_fail/bin"
+printf '#!/usr/bin/env bash\nexit 17\n' > "$W/elan_fail/bin/lake"
+chmod +x "$W/elan_fail/bin/lake"
+env "${b1[@]}" ELAN_HOME="$W/elan_fail" OUT="$W/b1fail.tsv" \
+  nice -n19 ionice -c3 timeout 600 bash "$BENCH1" > "$W/b1fail.log" 2>&1
+st="$(cut -f5 <<<"$(baseline_row "$W/b1fail.tsv")")"
+[[ "$st" == "FAIL(rc=17)" ]] \
+  && ok "a baseline child that exits 17 is recorded as FAIL(rc=17)" \
+  || bad "baseline nonzero leg: status='$st'"
+
+# A baseline child that outlives the limit.
+mkdir -p "$W/elan_slow/bin"
+printf '#!/usr/bin/env bash\nsleep 30\n' > "$W/elan_slow/bin/lake"
+chmod +x "$W/elan_slow/bin/lake"
+env "${b1[@]}" ELAN_HOME="$W/elan_slow" TMO=2 OUT="$W/b1tmo.tsv" \
+  nice -n19 ionice -c3 timeout 600 bash "$BENCH1" > "$W/b1tmo.log" 2>&1
+st="$(cut -f5 <<<"$(baseline_row "$W/b1tmo.tsv")")"
+[[ "$st" == "TIMEOUT" ]] \
+  && ok "a baseline child that outlives the limit is recorded as TIMEOUT" \
+  || bad "baseline timeout leg: status='$st'"
+
 if [[ $fails -eq 0 ]]; then echo "D3-GENERATION CONTROLS OK"; else echo "D3-GENERATION CONTROLS FAILED ($fails)"; fi
 exit $fails

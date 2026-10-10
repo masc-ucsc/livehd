@@ -1947,10 +1947,10 @@ every one of the 46; none is promoted. Their diagnostics classify as:
 **Fixed-certificate replay: 76/76 PRESERVED**, `runtime_complete=YES`, nothing
 changed, nothing rejected, nothing re-emitted.
 
-### 27.2 Fresh against the retained historical rows
+### 27.2 Fresh against the retained historical rows — UNRESOLVED
 
-The historical `coreet_122_r2_rows.tsv` is **provenance, not credit**, and the
-two runs differ in ways worth stating rather than averaging away:
+The historical `coreet_122_r2_rows.tsv` is **provenance, not credit**. The two
+runs differ, and the differences are **reproducible and unexplained**:
 
 | | fresh | historical r2 |
 |---|---:|---:|
@@ -1960,23 +1960,47 @@ two runs differ in ways worth stating rather than averaging away:
 | ran in both, with a digest | — | 74 |
 | **identical digest** | — | **55 of 74** |
 
-**The 19 digest differences are exactly the designs whose semantics I
-changed.** Every one contains an `Op_SHL` (18) or `Op_Sext` (1) node — the two
-operators that gained guards in `3ffa4415e`. Not a partial correlation: 19 of
-19. And 39 designs containing `Op_SHL` have *identical* digests, which is what
-one expects, since only a shift amount that actually reaches the width can move
-an answer.
+**A correction to what I first wrote here.** I reported that all 19 changed
+digests were designs containing `Op_SHL` (18) or `Op_Sext` (1), and presented
+that as the cause. Both halves were wrong.
 
-That direction is the deliberate one. The unguarded `Op_SHL` evaluated
-`(2 : Int) ^ k` before taking the modulus, and Lean's `Nat.pow` guard panicked
-on the three real CORE-ET exponents; the guard is `shl_bridge`'s own bound.
-What this does **not** say is that the new digests are right and the old ones
-wrong in any sense beyond that: it says the difference is confined to the
-operators whose definitions changed, and nowhere else.
+*The count was wrong.* I classified a certificate by taking the first
+whitespace token of every line and testing it for `19`/`23` — but the first
+token is numeric in every section, so source tags, output slots and flop
+widths were counted as operators. Walking the sections by their declared
+counts and reading only the NODE section gives:
+
+| | n | with `Op_SHL` | with `Op_Sext` | with neither |
+|---|---:|---:|---:|---:|
+| changed | 19 | **17** | 15 | 0 |
+| identical | 55 | 39 | 29 | 12 |
+
+*And the inference was wrong anyway.* 39 designs containing `Op_SHL` have
+IDENTICAL digests. Presence of an operator in a certificate does not show that
+the operator caused a difference, and it certainly does not show that
+everything else was preserved. The fresh run differs from the historical one
+in its `lhd` binary, its Lean library and its emitter all at once; attributing
+the digests to one definition change picked the explanation I already had in
+mind.
+
+**These 19 are recorded as unresolved observations.** Settling them needs a
+controlled comparison — the SAME certificate and the SAME stimulus through the
+old and new semantics, one variable at a time — which has not been run. Until
+then nothing is claimed about which answer is right, no semantics are changed
+to make digests agree, and the historical inputs and rows stay exactly as they
+are.
+
+The guard comments in `LGraphModel.lean` have been qualified to match: one of
+them said "the guard is not a semantic change", which is a claim of
+equivalence to the unguarded formula on every input that nothing here proves
+— the unguarded formula does not even evaluate at the amounts that motivated
+the guard. They now say the bound is the bridge's, and that agreement
+elsewhere is open.
 
 Of the 19 that ran historically and do not now, 14 are rc=7, 4 are rc=3 (static
 gates), 1 is rc=1 (`Concat lane 0 (of 8, MSB-first) driver 'mux_19104' occupies
 2 bits but its declared window is 1`). Two that failed historically now run.
+These are dispositions, not explanations either.
 
 ### 27.3 CVA6: foundation, pilot, frozen 30
 
