@@ -11,7 +11,7 @@ LAKE=lake
 cd "$R/formal/lean"
 OUT="${OUT:-$R/pass/lean/d3_scaling.tsv}"
 TMO="${TMO:-5400}"
-printf 'variant\tshape\tn\tcpu_s\tstatus\n' > "$OUT"
+printf 'variant\tshape\tn\tcpu_s\tstatus\tartifact_sha256\n' > "$OUT"
 
 # SCRATCH IS PROJECT-LOCAL, AND THE STATUS COMES FROM THE EXIT CODE.
 #
@@ -29,13 +29,13 @@ printf 'variant\tshape\tn\tcpu_s\tstatus\n' > "$OUT"
 SCRATCH="${SCRATCH:-$R/generated/d3_bench_scratch}"
 mkdir -p "$SCRATCH" || { echo "cannot create $SCRATCH" >&2; exit 2; }
 
-timeit() {  # writes CPU seconds to stdout; args: file
-  local tf; tf=$(mktemp "$SCRATCH/d3t.XXXXXX")
-  local lf; lf=$(mktemp "$SCRATCH/d3l.XXXXXX")
-  /usr/bin/time -f "%U %S" -o "$tf" timeout "$TMO" "$LAKE" env lean "$1" > "$lf" 2>&1
-  local rc=$?
-  local cpu; cpu=$(tail -1 "$tf" | awk '{printf "%.2f", $1+$2}' 2>/dev/null)
-  local st
+timeit() {  # writes "<cpu> <status>" to stdout; args: <file> <rowdir>
+  local f="$1" rowdir="$2" tf lf cpu st rc
+  tf="$rowdir/lean.time"; lf="$rowdir/lean.log"
+  /usr/bin/time -f "%U %S" -o "$tf" timeout "$TMO" "$LAKE" env lean "$f" > "$lf" 2>&1
+  rc=$?
+  printf '%s\n' "$rc" > "$rowdir/lean.exit"
+  cpu=$(tail -1 "$tf" | awk '{printf "%.2f", $1+$2}' 2>/dev/null)
   if [ "$rc" -eq 0 ]; then
     st=OK
     grep -qE "error" "$lf" && st=FAIL
@@ -45,7 +45,6 @@ timeit() {  # writes CPU seconds to stdout; args: file
     st="FAIL(rc=$rc)"
   fi
   echo "${cpu:-NA} $st"
-  rm -f "$tf" "$lf"
 }
 
 read -r BT BS < <(cat > probes/d3_base.lean <<'B'
@@ -57,13 +56,44 @@ timeit probes/d3_base.lean)
 printf 'baseline\t-\t0\t%s\t%s\n' "$BT" "$BS" >> "$OUT"
 echo "baseline ${BT}s $BS"
 
+# GENERATION IS PART OF THE MEASUREMENT.
+#
+# The generator's exit status was discarded and its output never checked, so a
+# STALE artifact from an earlier run was measured whenever generation failed --
+# and the row came back OK, because the stale file still typechecks. Measured
+# against this CLI with a generator forced to exit 17.
+#
+# Now: the artifact is removed first so nothing stale can survive, the
+# generator must exit 0, a non-empty file must exist afterwards, and its hash
+# is recorded. Per row the scratch directory retains gen.log, gen.exit,
+# lean.log, lean.exit, lean.time and artifact.sha256.
+#
+# The TSV gains `artifact_sha256`: a timing with no record of what was timed
+# is not a measurement. A failed generation takes the `status` column as
+# `GEN_FAIL(rc=N)` with `cpu_s` NA, so it can never be read as a slow pass; the
+# generator's exit also sits in `gen.exit` beside its log.
 run() {
-  local v sh n f res
+  local v sh n f res rowdir gen_rc asha
   v="$1"; sh="$2"; n="$3"
   f="probes/d3b_${v}_${sh}_${n}.lean"
-  python3 "$R/pass/lean/scripts/d3_gen.py" "$n" --variant "$v" --shape "$sh" --out "$f" >/dev/null
-  res=$(timeit "$f")
-  printf '%s\t%s\t%s\t%s\n' "$v" "$sh" "$n" "$(echo "$res" | tr ' ' '\t')" >> "$OUT"
+  rowdir="$SCRATCH/${v}_${sh}_${n}"
+  rm -rf "$rowdir"; mkdir -p "$rowdir"
+  rm -f "$f"
+  python3 "$R/pass/lean/scripts/d3_gen.py" "$n" --variant "$v" --shape "$sh" --out "$f" \
+    > "$rowdir/gen.log" 2>&1
+  gen_rc=$?
+  printf '%s\n' "$gen_rc" > "$rowdir/gen.exit"
+  if [ "$gen_rc" -ne 0 ] || [ ! -s "$f" ]; then
+    res="NA GEN_FAIL(rc=$gen_rc)"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$v" "$sh" "$n" NA "GEN_FAIL(rc=$gen_rc)" - >> "$OUT"
+    echo "$v/$sh n=$n -> $res"
+    return
+  fi
+  asha=$(sha256sum < "$f" | cut -d' ' -f1)
+  printf '%s\n' "$asha" > "$rowdir/artifact.sha256"
+  res=$(timeit "$f" "$rowdir")
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$v" "$sh" "$n" \
+    "$(echo "$res" | cut -d' ' -f1)" "$(echo "$res" | cut -d' ' -f2-)" "$asha" >> "$OUT"
   echo "$v/$sh n=$n -> $res"
 }
 

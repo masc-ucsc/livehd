@@ -1811,28 +1811,20 @@ that — emitter OK, no certificate, nothing run — which is the correct
 disposition and not a pass. The optimized binary is being rebuilt with the
 serializer; **no runtime coverage is claimed from this pilot.**
 
-### 25.6 CVA6 foundation: an unresolved prerequisite, not a workaround
+### 25.6 CVA6 foundation — my survey was wrong
 
-`build_cva6_foundation.sh` requires `CVA6_ROOT` to be a git checkout with **no
-tracked modifications**, and records the revision so a sweep can verify it is
-looking at the same source STATE and not merely the same path. All three CVA6
-checkouts on this machine are at `aa4f5a54` with the **same three tracked
-modifications**:
+I reported that no clean CVA6 checkout existed and that the frozen-30
+procedure was blocked. **That was my error.**
+`/mada/users/czeng14/projects/cva6-blockfinding` is clean at
+`6cb200105fb9441d170e45786125a737fab98e91` — exactly the revision
+`verify_d4_run.sh` expects, and already the default `CVA6_ROOT` in
+`build_cva6_foundation.sh`. It was in my `ls cva6*` output and I simply did not
+include it in the loop I then checked, so I concluded "all three are dirty"
+from a list of three I had written by hand. The three I did check are indeed
+dirty, and nobody's RTL experiment needs reverting.
 
-```
-core/Flist.cva6      | 8 +-------
-core/cva6.sv         | 6 +++++-
-core/frontend/bht.sv | 3 ++-
-```
-
-`bht.sv` comments out a prediction assignment and replaces it with one gated on
-`bht_update_i.pc[0]` — a deliberate RTL experiment belonging to someone else's
-work. Reverting it would change that experiment; passing a flag to skip the
-check would weaken exactly the binding this step exists to preserve. So the
-CVA6 foundation is recorded as an **unresolved prerequisite** and the frozen-30
-procedure is not started against a dirty checkout. The CVA6 *replay* path
-(`run_cva6_module_lean_stress.sh` with the static filelist) is unaffected and
-is what the accepted ALU replay used.
+Rechecked: `tracked-dirty 0`, and the
+`cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv` the target needs is present.
 
 ## 26. A real CORE-ET pilot, end to end
 
@@ -1956,9 +1948,13 @@ Fixing that exposed two more, both only reachable on the `far` shape:
 
 | | chain | far |
 |---|---|---|
-| naive | n=2, n=4 | n=4 |
+| naive | n=2, n=4, **n=8** (0:13.97) | n=4, **n=8** (0:14.53) |
 | composed | n=4, **n=8** (0:17.52) | n=4, **n=8** (0:19.72) |
 | pruned | n=4, **n=8** (0:23.04) | n=4, **n=8** (0:18.54) |
+
+An earlier version of this table said "all six through n=8" while only four
+n=8 runs were retained. The two missing ones — naive × chain and naive × far
+— have since been run; the claim and the retained files now agree.
 
 ### 20.2 `d3_bench.sh` / `d3_bench2.sh`
 
@@ -1976,6 +1972,24 @@ Fixing that exposed two more, both only reachable on the `far` shape:
   without paying for a full sweep — which is how the defect above survived.
   The published points remain the defaults; an overridden sweep is a harness
   run, not a measurement.
+- **Generation is part of the measurement.** `run()` discarded the generator's
+  exit status and never checked that it had produced anything, so when
+  generation failed the harness measured whatever `probes/<name>.lean` was
+  left from an earlier run — and reported `OK`, because a stale artifact still
+  typechecks. A scaling number attached to the wrong `n` is worse than a
+  missing one. The artifact is now removed first, the generator must exit 0, a
+  non-empty file must exist afterwards, and its hash goes in the row;
+  `gen.log`, `gen.exit`, `lean.log`, `lean.exit`, `lean.time` and
+  `artifact.sha256` are retained per row. A failed generation takes the status
+  column as `GEN_FAIL(rc=N)` with `cpu_s` `NA`, so it can never read as a slow
+  pass.
+
+`d3_bench_generation_controls.sh` drives the actual CLI over six legs,
+including a stale artifact pre-seeded at the exact path the row would use.
+**Non-vacuity measured**: the committed bench fails 5 of 6 — the stale leg
+reports `OK`, which is the defect — and the repaired one passes 6 of 6. The
+controls swap a failing stub in for `d3_gen.py` and restore it from a `trap`,
+and the last leg checks the generator is byte-identical afterwards.
 
 Smoke run at n=4, three points, all `OK`, **zero files left in `/tmp`**.
 **Non-vacuity measured**: with `ELAN_HOME` pointed at a stub `lake` that exits
