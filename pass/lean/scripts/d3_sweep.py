@@ -1984,6 +1984,17 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             # `module_cgroup_peak_kb` therefore belongs to the composition, not
             # to this row's `cgroup_peak_kb`.
             mdir = log_dir / f"{m}.moduleproof"
+            # A `result.json` already sitting there is from an EARLIER attempt
+            # and must not be mistaken for this one's. Removed before the
+            # worker runs, so the only file that can be read afterwards is the
+            # one this invocation produced.
+            stale = mdir / "result.json"
+            had_stale = stale.exists()
+            if had_stale:
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
             nb = _pre.get("bindings") or row.get("bindings") or 0
             mp = subprocess.run(
                 [sys.executable, str(SCRIPTS / "d3_module_proof.py"),
@@ -2003,7 +2014,44 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             # rc 0, allowed axioms, and no olean drift. Anything else is 0 and
             # UNDECIDED -- it never raises `verdict`, which stays whatever the
             # executable gates earned.
-            row["module_proof"] = 1 if res.get("status") == "proved" else 0
+            # ADMISSION, SEPARATE FROM THE DRIVER'S VERDICT.
+            #
+            # This read `1 if res.get("status") == "proved" else 0` and nothing
+            # else, so three different wrong results were credited, each
+            # reproduced against this CLI:
+            #
+            #   * a worker that printed a proved result and then exited 17;
+            #   * a STALE `result.json` from an earlier attempt, with the
+            #     worker producing nothing this time;
+            #   * a result naming a DIFFERENT certificate -- the row carried
+            #     the correct `cert_sha256` beside an all-zero
+            #     `module_cert_sha256` and still said `module_proof=1`.
+            #
+            # The driver's own checks (gate line, rc, allowed axioms, olean
+            # drift) are kept and are still what `status == "proved"` means.
+            # What is added here is the boundary around them: the worker must
+            # have SUCCEEDED, and the result must be THIS run's, about THIS
+            # certificate.
+            want_cert = sha256_of(cert)
+            refusals = []
+            if mp.returncode != 0:
+                refusals.append(f"worker exit {mp.returncode}")
+            if not res:
+                refusals.append("no result.json from this run"
+                                + (" (a stale one was removed)" if had_stale else ""))
+            else:
+                got_cert = res.get("cert_sha256", "")
+                if got_cert != want_cert:
+                    refusals.append(f"result names certificate {got_cert[:16] or '<absent>'}, "
+                                    f"this target is {want_cert[:16]}")
+                if res.get("status") != "proved":
+                    refusals.append(f"driver status {res.get('status') or '<absent>'!s}")
+            row["module_proof"] = 0 if refusals else 1
+            # The admission decision, recorded whether it accepted or refused.
+            # `ok` is not the same statement as `module_proof_status=proved`:
+            # one says the result may be credited, the other says what the
+            # driver concluded.
+            row["module_admit"] = "ok" if not refusals else "refused: " + "; ".join(refusals)
             # Carried through verbatim so a reviewer can tell a gate that was
             # evaluated and disagreed from one that was never reached. All of
             # them give module_proof=0, so none overclaims, but "timeout" and
@@ -2522,7 +2570,11 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
     # MODULE-PROOF BACKEND, kept apart from `proof_*` and from `agree`.
     # A sampled agreement and a kernel proof are different claims; collapsing
     # them into one column is how a sampled row starts being read as proved.
-    "module_proof", "module_proof_status", "module_proof_rss_kb",
+    # `module_proof_status` is the DRIVER's verdict about the proof;
+    # `module_admit` is this runner's decision about whether that verdict may
+    # be credited at all. They are different questions -- a worker can print
+    # `proved` and then exit nonzero -- so they are different columns.
+    "module_proof", "module_admit", "module_proof_status", "module_proof_rss_kb",
     "module_proof_wall_s",
     "module_cgroup_peak_kb", "module_groups", "module_chunk_size",
     "module_chunks", "module_cert_sha256", "module_runner_digest",
