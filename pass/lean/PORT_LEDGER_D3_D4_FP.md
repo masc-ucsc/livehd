@@ -2386,6 +2386,35 @@ that asserts the guard ACTS could find it. My first guess at the cause was a
 race between a fast probe and the sampler; the test's own `STUB_DELAY=3` ruled
 that out, which is why it was worth reproducing rather than assuming.
 
+### 29.7 Everything re-run against the repairs
+
+`txfma_f4`'s module composition, re-run after the status fix: **`rss_killed`**,
+`module_admit = "refused: worker exit 1; driver status rss_killed"`, cgroup
+peak exactly 14,000,000 KiB again, 316.5 s. Reproducible, and now labelled as
+the resource stop it is rather than as a disproof.
+
+With nothing else building, every suite touched in this port:
+
+| suite | result |
+|---|---|
+| `d3_sweep_parser_test` | OK |
+| `d3_sweep_cancel_test` | OK |
+| `d3_runner_test` | OK |
+| `d3_cgroup_test` | OK (14 skipped) |
+| `d3_proof_test` | OK |
+| `d3_scheduler_test` | OK |
+| `d3_module_admit_controls.sh` | OK (9 legs) |
+| `d3_resume_controls.sh` | OK (5 legs) |
+| `d3_bench_generation_controls.sh` | OK (10 legs) |
+| `//pass/lean:lean_export_tests` | 4/4 PASSED |
+| `exit_status_controls.sh` | OK (11 legs) |
+| `verify_binding_controls.sh` | OK (12 legs) |
+| `wrapper_deps_controls.sh` | OK |
+
+The `d3_scheduler_test` row is the one that matters: it was the failing check
+that exposed §29.5's defect, and it passes now with `killed` non-empty, so the
+two neighbours that had been vacuous are doing work.
+
 ### 29.6 The aggregate limit counts memory it cannot terminate
 
 Observed on the `txfma_f4` module run, and verified rather than inferred:
