@@ -1470,6 +1470,95 @@ historical rows. The pinned FP contribution, the D3 scaling/CLI/backend
 obligations and final integrated validation under final fingerprints all
 remain.
 
+## 22. The `Compiler.CertIO` collision, resolved without dropping either side
+
+§11.6 recorded that D4 and FP both define `Compiler.CertIO` and that neither
+may be dropped. Both now exist, built and probed.
+
+### 22.1 What the two actually are
+
+They are not two spellings of one thing:
+
+| | FP | D4 |
+|---|---|---|
+| format | **DCERT1** — 8-number flop record, 3-number memory record, no clocks section | **DCERT2** — adds `clocks`, `FlopDesc.clock`, `asyncReset`, `MemoryDesc.clock` |
+| runtime | none | `runChecked`, `runAdmitted`, `runChecked_correct`, `loadAndRun`, `runCycles` |
+| admission | `asyncOK`, a **transport** constraint | `certWfError`, a **design** predicate |
+
+FP's `asyncOK` exists *because* DCERT1 cannot carry the commit-side async flag:
+a file whose `flopQAsync` sources disagree with the flops it parses to is
+describing a different design from the one its exporter meant.
+
+### 22.2 The resolution
+
+- **`Compiler.CertIO.V1`** (`CertIOV1.lean`) holds FP's codec **verbatim**
+  apart from the namespace, compiled against master's clock-aware record. 519
+  lines, exit 0.
+- **`Compiler.CertIO`** keeps the unqualified name and is the DCERT2 codec,
+  because DCERT2 is what the C++ pass now emits.
+- **`Compiler.CertIOFacade`** imports both, routes on the magic, and calls each
+  side's own admission. It defines **no third policy**: `admitV2` *is*
+  `readCertChecked`; `admitV1` *is* parse-then-`asyncOK` and deliberately does
+  **not** also run `certWfError`, which would impose on a DCERT1 file a check
+  FP never ran, about fields the format never carried.
+
+Two theorems make the routing safe rather than merely plausible, both on
+standard axioms:
+
+```
+magics_are_exclusive : ∀ (b : ByteArray), ¬(hasMagic b ∧ V1.hasMagic b)
+parseAny_renderCert  : ∀ (D : DesignCert), parseAny (renderCert D) = .ok (Format.v2, D)
+```
+
+`parseAny` returns the FORMAT alongside the design, because a DCERT1 file
+parses to a certificate indistinguishable from a genuinely one-clock DCERT2
+one — and they do not mean the same thing.
+
+### 22.3 The loss is proved, not asserted
+
+Over the clock-aware record FP's renderer is **not injective** — `clock`,
+`asyncReset` and `clocks` have no bytes to go to:
+
+```
+V1.flopBody_ignores_clock_metadata : ∀ (f : FlopDesc) (c : Nat) (a : Bool),
+  flopBody { f with clock := c, asyncReset := a } = flopBody f
+V1.renderCert_not_injective : ∃ A B : DesignCert, A ≠ B ∧ renderCert A = renderCert B
+```
+
+(`[propext, Quot.sound]` — not even choice.) So no theorem of the shape
+`parseCert (renderCert D) = .ok D` can hold for V1 over every `D`. That is
+precisely why the version was bumped rather than extended in place, and why
+`Compiler.CertIO.parseCert` refuses a DCERT1 stream by name instead of reading
+it as a one-clock design. It is now a proof where it was a design note.
+
+### 22.4 Probed, not just compiled
+
+`facade_probe.lean`, exit 0, `FACADE OK`, eight checks: DCERT2 routes to v2
+with the clock table, ordinal and `asyncReset` intact; DCERT1 routes to v1 and
+the metadata it cannot carry is **absent** rather than invented; an unknown
+magic is refused; `admitV1` still refuses an async design carried over DCERT1
+and still accepts a synchronous one; `admitV1` does **not** apply
+`certWfError` while `admitV2` still does, on the same out-of-range output; and
+the two codecs produce different bytes for one design.
+
+### 22.5 The obligation this does NOT discharge
+
+Any FP call site that `open`s `Compiler.CertIO` and calls
+`parseCert`/`renderCert`/`loadCert` must be repointed at
+`Compiler.CertIO.V1`, or it silently acquires the DCERT2 contract. That is a
+migration obligation on the 38 `Projection` modules and is **not** done.
+
+| file | sha256 |
+|---|---|
+| `CertIOV1.lean` | `56320c6cb6f7af9cbdcb838a331ed9ca9772cab1adb03cdc0de7896338c8e015` |
+| `CertIOV1.olean` | `c74e7de0570f61eacfce652495e4051ab92c78bb566ef48644d23d9a70bf7d1f` |
+| `CertIOFacade.lean` | `de9355d71f47ee63ffc1bbadfd2b3180dd211fee2ab28eb187520ecfc604b056` |
+| `CertIOFacade.olean` | `4e122ba3aeae26c3fe3a41e181bf33bfa27df4f489e91d724f4d47cd0fdfd428` |
+| `facade_probe.lean` | `aa96cca8e2910c91b282b094335b12735fb551362c52272f8d0ed1b30d517910` |
+| `facade_probe.log` | `f15d69fc011bb59119d2ca85d9b4f2082d7773722bb6a09977ab8db4c552189f` |
+
+CertIOV1 0:02.30 / 513,708 KiB; CertIOFacade 0:20.72 / 6,722,312 KiB.
+
 ## 20. D3 replay backlog (recorded, not yet repaired)
 
 Two gaps in restored D3 procedures, kept visible so they are not mistaken for
