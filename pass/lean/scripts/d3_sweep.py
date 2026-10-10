@@ -2683,12 +2683,12 @@ def main() -> int:
                     help="DIAGNOSTIC: run ONLY this component of report, alone "
                          "in a fresh process, with timing markers and NO report "
                          "call -- so no D3GATE line is printed and the row "
-                         "cannot be credited. Requires --reifier named.")
+                         "cannot be credited. Requires --reifier named or shared.")
     ap.add_argument("--phase-split", action="store_true",
                     help="DIAGNOSTIC: in the sim probe, run report's public "
                          "components one at a time with a phase marker after "
                          "each, then call report unchanged. Roughly doubles the "
-                         "executable stage; requires --reifier named.")
+                         "executable stage; requires --reifier named or shared.")
     ap.add_argument("--proof-segment-size", type=int, default=0, metavar="N",
                     help="emit the incremental walk in segments of at most N "
                          "bindings (0 = one monolithic walk, the default). Sets "
@@ -3045,8 +3045,9 @@ def main() -> int:
     PROVE = bool(a.prove)
     REIFIER = a.reifier
     if a.phase_split and a.reifier not in ("named", "shared"):
-        print("REFUSING: --phase-split requires --reifier named. The legacy probe "
-              "has no phase markers, so the option would do nothing.", file=sys.stderr)
+        print("REFUSING: --phase-split requires --reifier named or shared. The "
+              "legacy and chunked probes have no phase markers, so the option "
+              "would do nothing.", file=sys.stderr)
         return 2
     PHASE_SPLIT_ON = bool(a.phase_split)
     if a.prove and a.reifier == "shared":
@@ -3054,7 +3055,7 @@ def main() -> int:
               "would credit a model that no theorem covers.", file=sys.stderr)
         return 2
     if a.phase_only and a.reifier not in ("named", "shared"):
-        print("REFUSING: --phase-only requires --reifier named.", file=sys.stderr)
+        print("REFUSING: --phase-only requires --reifier named or shared.", file=sys.stderr)
         return 2
     if a.phase_only and a.phase_split:
         print("REFUSING: --phase-only and --phase-split are different "
