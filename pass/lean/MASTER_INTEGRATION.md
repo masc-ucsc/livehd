@@ -2836,50 +2836,110 @@ timings: any timed replay must fingerprint the actual binary and build mode
 rather than trusting the `bazel-bin` symlink name, and record it alongside the
 pinned Lean/Mathlib environment.
 
-### R16.5 Measured coverage, and where the reference construction breaks
+### R16.5 The result handling could be told a lie
 
-Seven real CORE-ET modules through the restored gate
-([SWEEP_lec_sample.tsv](SWEEP_lec_sample.tsv)):
+Before any coverage number, the gate's *result handling* had to be fixed. It
+dispatched on a grepped `verdict` while capturing the process exit, printing it,
+and never reading it again. Two controlled responses walked straight through:
 
-| Module | Exit | Outcome |
-| --- | ---: | --- |
-| `intpipe_alu` | 0 | **PROVEN** equivalent to the RTL |
-| `intpipe_imm` | 0 | **PROVEN** |
-| `intpipe_inst_bits_stage` | 0 | **PROVEN** |
-| `debug_breakpoint` | 0 | **PROVEN** |
-| `intpipe_csr_file_fl_barrier` | 0 | **PROVEN** |
-| `txfma_f1` | 5 | reference did not elaborate |
-| `txfma_f4` | 5 | reference did not elaborate |
+```
+process exit 7  + verdict=proven  ->  runner exited 0, printed PROVEN
+status="fail"   + verdict=proven  ->  runner exited 0, printed PROVEN
+```
 
-Five genuine RTL equivalence results, where this corpus previously had none.
+A `verdict` is a claim made by a run that may itself have failed. It means
+nothing unless that run succeeded and the rest of the record agrees with it.
 
-The two failures are **not** undecided solver results, and the first version of
-this gate reported them as such — `exit 6`, "did not prove equivalence", which
-reads like a verification limit. They are input failures, and the runner now
-says so.
+`scripts/lec_result_check.py` now validates the record structurally: process
+exit 0, parseable JSON object, `command=lec`, `status=pass`, `exit_code=0`
+**agreeing with the observed process exit**, and `lec.verdict=proven`. Every
+disagreement is a rejection with the reason named, and the outcome class
+(usage/infrastructure, REFUTED, undecided, inconsistent) is reported so a caller
+can tell a fixable input problem from a real refutation.
 
-The cause is the reference construction. `--ref` takes a **single path**:
-`yosys.filelist_file` does not reach the ref read, and passing the filelist
-through the raw args (`-- -F list.f`) is not honoured by `inou.slang` here — it
-reports `NoTopModules`, having read only the anchor. So the reference is every
-source concatenated into one `.sv`, which breaks on two things:
+Rewriting it caught a second error immediately: **the verdict is nested at
+`lec.verdict`, not at the top level.** The first validator looked top-level and
+rejected a genuinely proven module — the right direction to fail in, and a
+reminder that it would have *accepted* a malformed record that happened to put
+the field where I expected it. That is now a control.
 
-- **`` `include `` directives** — the merged file no longer carries the search
-  path, so `txfma_f1`/`txfma_f4` fail `CouldNotOpenIncludeFile` on the
-  `intpipe_csr_*.svh` set even with `-I` supplied;
-- **cross-file declaration order** — each source is its own compilation unit
-  until concatenation merges them, which is where the `TypoIdentifier` errors
-  come from.
+`scripts/lec_admission_controls.sh`: ten rejections — exit 7 with proven,
+`status=fail` with proven, refuted, undecided, no `lec` object, verdict at the
+top level, a usage rejection, malformed JSON, a missing file, and a recorded
+`exit_code` disagreeing with the process exit — plus one genuine record
+accepted. The last matters: a checker that rejects everything is not a checker.
 
-Both scale with the module: the five that prove pull in few enough sources to
-survive the merge, and the two that fail come from
-`hw/ip/minion/dv/Makefile:RTL_SRCS`, the whole-IP list. **This is a reference-
-construction limit, not a solver limit**, and it is the thing to fix before a
-broad LEC replay. Doing it properly needs a reference route that preserves the
-benchmark's filelist, include and define contract rather than flattening it.
+This is the third time in this file the same mistake appears — **grep one field
+instead of validating the structure**. The axiom audit was a line count, the
+resume key omitted the obligations, and this dispatched on one string. Worth
+naming as a pattern rather than fixing a third time in isolation.
 
-`minion_dcache_tensor_fifo` is not a result at all — I picked a module name that
-has no filelist. Recorded as such rather than quietly dropped.
+### R16.6 The reference could not read the benchmark's filelist
+
+`lhd lec` cannot see the filelist. `load_side_graphs`
+(`lhd/lhd_kernel_formal.cpp:157`) forwards `compile.slang` settings to the
+reference read but **not `opts.raw_args`**, so every `-- -I …` / `-- -F …`
+passed to `lhd lec` was silently dropped. That is why supplying the include
+directory by hand changed nothing, and it is the real reason the earlier
+concatenation workaround existed at all.
+
+`lhd compile` *does* honour raw args, so the reference is built there and `lhd
+lec` compares two pre-built graphs:
+
+```
+lhd compile --reader slang --top TOP --emit-dir lg:REF -- -F FILELIST --relax-enum-conversions
+lhd lec --impl lg:LG_NORM --ref lg:REF --top TOP
+```
+
+The filelist keeps its order, includes and defines. **The two sides come from
+different front ends by construction** — the reference through direct Slang, the
+implementation through `inou.yosys.tolg` (yosys-slang) — so this is a real
+comparison, not a graph copy.
+
+One asymmetry is recorded rather than papered over: `--ignore-assertions` is a
+yosys-slang flag that direct Slang **rejects**, so it is not passed to the
+reference, and the reference therefore does not share the implementation's
+assertion handling. A module whose semantics depend on assertion lowering needs
+that benchmark contract settled before its result means anything.
+
+### R16.7 Measured coverage
+
+Seven CORE-ET modules ([SWEEP_lec_sample.tsv](SWEEP_lec_sample.tsv)), on the
+adapted route:
+
+| Module | Runner exit | Native `exit_code` | `lec.verdict` |
+| --- | ---: | ---: | --- |
+| `intpipe_alu` | 0 | 0 | **proven** |
+| `intpipe_imm` | 0 | 0 | **proven** |
+| `intpipe_inst_bits_stage` | 0 | 0 | **proven** |
+| `debug_breakpoint` | 0 | 0 | **proven** |
+| `intpipe_csr_file_fl_barrier` | 0 | 0 | **proven** |
+| `txfma_f4` | 0 | 0 | **proven** |
+| `txfma_f1` | 6 | 7 | unknown |
+
+**Six genuine RTL equivalence results**, where this corpus previously had none,
+and **no input failures left**. `txfma_f4` moves from "the reference would not
+elaborate" to PROVEN purely by fixing how the reference is built.
+
+The two exit columns are deliberately separate. An earlier version of this table
+printed the runner's classification as though it were the observed process exit
+— a predicted mapping presented as a measurement. On the concatenated route
+`txfma_f1`/`txfma_f4` were **native 6 / runner 5**; on this route `txfma_f1` is
+**native 7 / runner 6**.
+
+`txfma_f1`'s UNKNOWN is a real solver limit with a precise cause:
+
+```
+phase schedule refused: the phase schedule needs a total order between
+5 unrelated clock roots {111, ctrl_f0_clk, ctrl_f1_clk,
+multype_f0_clk, multype_f1_clk}; v1 orders ONE root clock
+```
+
+**Note the disagreement.** Native LEC counts **5** clock roots here; the Lean
+scanner resolved **4** domains for the same module (R15.9). The two analyses do
+not agree on what the roots are, and `111` does not look like a clock name. That
+is an open question, not evidence that either is wrong, and it should be settled
+before the four-domain certificate is leaned on.
 
 Native LEC, the frontend and `single_edge` are untouched: this was a runner/CLI
 problem throughout. **Export-only rows remain useful and are not RTL equivalence

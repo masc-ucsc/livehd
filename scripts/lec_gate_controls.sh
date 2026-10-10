@@ -2,11 +2,15 @@
 set -uo pipefail
 # Positive and negative controls for the RTL equivalence gate.
 #
-# The gate in run_coreet_module_lean.sh spent its whole life exiting 2 with
-# {"command":"usage","status":"fail"} while the runner called that
-# "inconclusive" and continued -- 162 recorded gate logs, not one of them an
-# equivalence result. The lesson is not "fix the flags": it is that a gate
-# nobody has watched REFUTE something is a gate nobody knows can fail.
+# Every gate log recorded against CURRENT master -- 162 of them -- is
+# {"command":"usage","status":"fail"}, because `lhd lec` rejects the yosys
+# reader the runner asked for, and the runner called that "inconclusive" and
+# continued. Those 162 are the measured scope of the problem; they say nothing
+# about whether the gate worked on an earlier branch, and an earlier draft of
+# this comment claimed more than that.
+#
+# The lesson is not "fix the flags": a gate nobody has watched REFUTE something
+# is a gate nobody knows can fail.
 #
 # So this proves both directions on the binary in hand before any sweep trusts
 # it: identical RTL must come back `proven`, and a one-bit mutation must come

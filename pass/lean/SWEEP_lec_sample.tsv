@@ -1,9 +1,8 @@
-module	exit	verdict	note
-intpipe_alu	0	proven	PROVEN equivalent to the RTL
-intpipe_imm	0	proven	PROVEN equivalent to the RTL
-intpipe_inst_bits_stage	0	proven	PROVEN equivalent to the RTL
-debug_breakpoint	0	proven	PROVEN equivalent to the RTL
-intpipe_csr_file_fl_barrier	0	proven	PROVEN equivalent to the RTL
-minion_dcache_tensor_fifo	2	-	no filelist for this module name (sample error, not a result)
-txfma_f1	5	-	reference did not elaborate (include path / concatenation order)
-txfma_f4	5	-	reference did not elaborate (include path / concatenation order)
+module	route	runner_exit	native_exit_code	lec_verdict	note
+intpipe_alu	concat->independent	0	0	proven	PROVEN both routes
+intpipe_imm	concat->independent	0	0	proven	PROVEN both routes
+intpipe_inst_bits_stage	concat->independent	0	0	proven	PROVEN both routes
+debug_breakpoint	concat->independent	0	0	proven	PROVEN both routes
+intpipe_csr_file_fl_barrier	concat->independent	0	0	proven	PROVEN both routes
+txfma_f4	independent	0	0	proven	PROVEN on the independent route; concatenated reference would not elaborate (native 6 / runner 5)
+txfma_f1	independent	6	7	unknown	genuine UNKNOWN: phase schedule v1 orders ONE root clock, design has 5 unrelated roots

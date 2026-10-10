@@ -155,73 +155,93 @@ if [[ "$RUN_LEC_GATE" == "true" ]]; then
   # "verdict":"proven"; mutating `y` to `(a+b)^1` gives exit 10
   # "verdict":"refuted" with `counterexample: diff y(ref=1 impl=0) @ a=0, b=0`.
   #
-  # ref side: the raw RTL, all modules CONCATENATED into one .sv and elaborated
-  # independently. `--ref` takes a single path and `compile.yosys.filelist_file`
-  # does not reach the ref read, so the filelist's include path has to be
-  # re-supplied by hand (intpipe_csr_file's .svh set needs it).
-  mapfile -t ref_srcs < <(grep '\.sv$' "$FILELIST")
-  REF_SV="$GEN_DIR/raw_${TOP}.sv"
-  cat "${ref_srcs[@]}" > "$REF_SV"
-  declare -a ref_slang=(--ignore-assertions --relax-enum-conversions)
-  if grep -q '+incdir+' "$FILELIST"; then
-    ref_slang+=(-I "$(grep -m1 '^+incdir+' "$FILELIST" | sed 's/^+incdir+//')")
+  # REFERENCE: an INDEPENDENTLY COMPILED LGraph, not a concatenated source.
+  #
+  # `lhd lec` cannot read the benchmark's filelist. `load_side_graphs`
+  # (lhd/lhd_kernel_formal.cpp:157) forwards `compile.slang` settings to the
+  # reference read but NOT `opts.raw_args`, so every `-- -I …` / `-- -F …` this
+  # script passed to `lhd lec` was silently dropped. That is why supplying the
+  # include directory by hand changed nothing.
+  #
+  # The previous attempt worked around it by concatenating every source into one
+  # .sv, which breaks on exactly the inputs a benchmark has: `\`include`
+  # directives lose their search path, and merging compilation units changes
+  # cross-file declaration order. txfma_f1/txfma_f4 failed on both counts.
+  #
+  # `lhd compile` DOES honour raw args, so the reference is built there -- from
+  # the filelist itself, preserving its order, includes and defines -- and `lhd
+  # lec` then compares two pre-built graphs.
+  #
+  # THE TWO SIDES COME FROM DIFFERENT FRONT ENDS BY CONSTRUCTION: the reference
+  # through direct Slang, the implementation through `inou.yosys.tolg`
+  # (yosys-slang). Neither is a copy of the other, so this is a real comparison
+  # rather than a graph-copy self-comparison.
+  #
+  # `--ignore-assertions` is a yosys-slang flag that direct Slang REJECTS. It is
+  # therefore not passed here, which means the reference does not share the
+  # implementation's assertion handling. That difference is recorded rather than
+  # papered over: a module whose semantics depend on assertion lowering needs the
+  # benchmark contract settled before its result means anything.
+  REF_LG="$GEN_DIR/lg_ref_${TOP}"
+  rm -rf "$REF_LG"
+  "$LHD" compile --reader slang --top "$TOP" \
+    --emit-dir lg:"$REF_LG" --workdir "$WORK_DIR/ref" \
+    --result-json "$LOG_DIR/lec_ref_compile.json" \
+    -- -F "$FILELIST" --relax-enum-conversions \
+    > "$LOG_DIR/lec_ref_compile.log" 2>&1
+  ref_status=$?
+  if [[ "$ref_status" -ne 0 ]]; then
+    echo "FATAL: the independent Slang REFERENCE did not compile (exit $ref_status)." >&2
+    echo "       This is an input/infrastructure failure, not an equivalence outcome." >&2
+    grep -oE '"code":"[^"]*"' "$LOG_DIR/lec_ref_compile.log" 2>/dev/null | sort -u | head -4 >&2
+    exit 5
   fi
   rm -f "$LOG_DIR/lec_gate.json"
-  "$LHD" lec --impl lg:"$LG_NORM" --ref verilog:"$REF_SV" --top "$TOP" \
+  "$LHD" lec --impl lg:"$LG_NORM" --ref lg:"$REF_LG" --top "$TOP" \
     --workdir "$WORK_DIR/lec" \
     --set formal.engine=auto --set formal.lec.hier=true \
     --set formal.lec.semdiff=structural \
     --result-json "$LOG_DIR/lec_gate.json" \
-    -- "${ref_slang[@]}" \
     > "$LOG_DIR/lec_gate.log" 2>&1
   lec_status=$?
-  lec_verdict="$(grep -oP '"verdict":"\K[^"]*' "$LOG_DIR/lec_gate.json" 2>/dev/null | tail -1)"
-  echo "lec gate exit=$lec_status verdict=${lec_verdict:-<none>}"
 
-  # FOUR OUTCOMES, and only one of them is a pass. Collapsing them is how 162
-  # usage errors came to sit beside rows that looked validated.
-  if [[ ! -s "$LOG_DIR/lec_gate.json" ]]; then
-    echo "FATAL: LEC produced no result JSON -- the gate did not run (usage or" >&2
-    echo "       infrastructure failure, NOT an equivalence outcome). See" >&2
-    echo "       $LOG_DIR/lec_gate.log" >&2
-    exit 5
-  fi
-  case "$lec_verdict" in
-    proven)
-      echo "  LEC: PROVEN equivalent to the RTL" ;;
-    refuted)
+  # STRUCTURAL validation, not a grep for one field.
+  #
+  # The previous version captured the process exit, printed it, and dispatched
+  # on `verdict` alone. Two controlled responses walked straight through it:
+  # process exit 7 with verdict=proven, and status="fail" with verdict=proven --
+  # both printed PROVEN and returned 0. A verdict is a claim made by a run that
+  # may itself have failed; it means nothing unless that run succeeded and the
+  # rest of the record agrees with it.
+  lec_check="$(python3 -I "$LIVEHD_ROOT/scripts/lec_result_check.py" \
+                 "$LOG_DIR/lec_gate.json" "$lec_status" 2>&1)"
+  lec_ok=$?
+  echo "lec gate exit=$lec_status"
+  echo "$lec_check" | sed 's/^/  /'
+  if [[ "$lec_ok" -ne 0 ]]; then
+    # The reason matters: an input failure is fixable, a REFUTED is a defect in
+    # the graph, and an undecided gate is neither.
+    if echo "$lec_check" | grep -q 'CLASS: REFUTED'; then
       echo "FATAL: LEC REFUTED -- the LGraph does not match the RTL; do NOT generate" >&2
       grep -m1 'counterexample' "$LOG_DIR/lec_gate.log" >&2 || true
-      exit 4 ;;
-    *)
-      # A REFERENCE that would not PARSE is not an undecided solver result, and
+      exit 4
+    fi
+    if echo "$lec_check" | grep -q 'CLASS: usage/infrastructure' \
+       || { grep -q '"pass":"inou.slang"' "$LOG_DIR/lec_gate.log" 2>/dev/null \
+            && grep -q '"severity":"error"' "$LOG_DIR/lec_gate.log" 2>/dev/null; }; then
+      # A reference that would not PARSE is not an undecided solver result, and
       # reporting it as one hides a fixable input problem behind a word that
       # sounds like a hard verification limit.
-      #
-      # The reference is ONE concatenated .sv, because `--ref` takes a single
-      # path: `yosys.filelist_file` does not reach the ref read, and passing the
-      # filelist through the raw args (`-- -F list.f`) is not honoured by
-      # `inou.slang` here -- it reports `NoTopModules`, having read only the
-      # anchor. Concatenation then breaks on exactly two things: `\`include`
-      # directives, whose search path the single file no longer carries, and
-      # cross-file declaration order, since each source is its own compilation
-      # unit until they are merged.
-      #
-      # Measured: that is why `txfma_f4` fails (CouldNotOpenIncludeFile on the
-      # intpipe_csr .svh set, then TypoIdentifier from the merged order), while
-      # seven smaller modules read and prove.
-      if grep -q '"pass":"inou.slang"' "$LOG_DIR/lec_gate.log" 2>/dev/null \
-         && grep -q '"severity":"error"' "$LOG_DIR/lec_gate.log" 2>/dev/null; then
-        echo "FATAL: the LEC REFERENCE did not elaborate -- this is an input/" >&2
-        echo "       infrastructure failure, NOT an equivalence outcome." >&2
-        grep -oE '"code":"[^"]*"' "$LOG_DIR/lec_gate.log" | sort -u | head -4 >&2
-        exit 5
-      fi
-      # Native UNKNOWN already exits nonzero on its own; do not soften it.
-      echo "FATAL: LEC did not prove equivalence (verdict='${lec_verdict:-<none>}'," >&2
-      echo "       exit $lec_status). An undecided gate is not a passed gate." >&2
-      exit 6 ;;
-  esac
+      echo "FATAL: the LEC gate did not run (input/infrastructure failure), so" >&2
+      echo "       there is no equivalence outcome either way." >&2
+      grep -oE '"code":"[^"]*"' "$LOG_DIR/lec_gate.log" 2>/dev/null | sort -u | head -4 >&2
+      exit 5
+    fi
+    echo "FATAL: LEC did not prove equivalence. An undecided gate is not a" >&2
+    echo "       passed gate." >&2
+    exit 6
+  fi
+  echo "  LEC: PROVEN equivalent to the RTL"
 fi
 [[ "$STOP_AFTER" == "lec" ]] && exit 0
 
