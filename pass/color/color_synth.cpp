@@ -208,9 +208,67 @@ void Color_synth::preserve_arith_cuts() {
   std::sort(cuts.begin(), cuts.end(), [](const auto& a, const auto& b) {
     return a.get_class_index().value < b.get_class_index().value;
   });
+  // Zero-cost wiring that shapes a runtime shifter's AMOUNT (a constant left
+  // shift or constant mask, e.g. `select << 5` whose five low bits are known
+  // zero) travels with the shifter. Left in another region it becomes an opaque
+  // input port, the barrel keeps its low stages, and the demand pruning that
+  // relies on those bits is lost (br_mux_bin: 913 cells as one region, 5627 when
+  // the shift-amount wiring is split off). Only a producer whose every consumer
+  // is the chain toward this cut moves; shared wiring stays where it is.
+  const auto pull_amount_wiring = [&](hhds::Node_class cut, int cut_id) {
+    const auto op = type_op_of(cut);
+    if (op != Ntype_op::SHL && op != Ntype_op::SRA) {
+      return;
+    }
+    hhds::Node_class consumer = cut;
+    auto             driver   = livehd::graph_util::get_driver_of_sink_name(cut, "b");
+    for (int depth = 0; depth < 4 && !driver.is_invalid() && !driver.is_const(); ++depth) {
+      auto producer = driver.get_master_node();
+      if (!flat_node2id.contains(producer) || is_seeded(producer) || is_arith_boundary(producer) || producer.is_loop_break()) {
+        return;
+      }
+      const auto pop = type_op_of(producer);
+      bool       wiring = false;
+      hhds::Pin_class next_driver;
+      if (pop == Ntype_op::Sum) {
+        // `x + constant` on a narrow amount (a base offset into the shifted bus):
+        // one live operand, the rest constants, so it only adds known bits.
+        int live = 0;
+        for (const auto& in : producer.inp_sorted_pins()) {
+          const auto d = in.get_driver_pin();
+          if (!d.is_const()) {
+            ++live;
+            next_driver = d;
+          }
+        }
+        wiring = live == 1 && livehd::graph_util::bits_of(producer.get_driver_pin(0)) <= 16;
+      } else if (pop == Ntype_op::Get_mask) {
+        wiring = livehd::graph_util::bit_range(producer).has_value();
+      } else if (pop == Ntype_op::SHL || pop == Ntype_op::SRA) {
+        const auto amount = livehd::graph_util::get_driver_of_sink_name(producer, "b");
+        wiring            = !amount.is_invalid() && amount.is_const();
+      }
+      if (!wiring) {
+        return;
+      }
+      bool exclusive = true;  // every consumer of the producer is `consumer`
+      for (const auto& dpin : producer.out_sorted_pins()) {
+        for (const auto& e : dpin.out_edges()) {
+          exclusive = exclusive && e.sink.get_master_node() == consumer;
+        }
+      }
+      if (!exclusive) {
+        return;
+      }
+      flat_node2id[producer] = cut_id;
+      consumer               = producer;
+      driver = pop == Ntype_op::Sum ? next_driver : livehd::graph_util::get_driver_of_sink_name(producer, "a");
+    }
+  };
   for (auto n : cuts) {
     const int cut_id = ++id;
     flat_node2id[n]  = cut_id;
+    pull_amount_wiring(n, cut_id);
     // Keep constant output slicing with its producer so ABC can see the
     // demanded width when lowering a wide barrel shifter.
     for (const auto& dpin : n.out_sorted_pins()) {

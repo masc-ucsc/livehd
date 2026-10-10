@@ -142,6 +142,37 @@ proof, _ = run("lec", "--impl", "lg:" + str(work / "looped-net"), "--ref", loope
                "--workdir", work / "looped-proof", "--set", "formal.timeout=10")
 assert proof["lec"]["verdict"] == "proven", proof
 
+# A runtime shift keeps its amount-shaping wiring (`select << 5`, a constant add)
+# in the shifter's region, so the known-zero low bits prune the barrel. Without it
+# an unrelated policy attribute inflated this 512-bit mux ~6x.
+def total_gates(doc):
+    return sum(r["gates"] for r in doc["qor"]["abc"]["regions"])
+
+mux_plain = work / "mux_plain.prp"
+mux_plain.write_text('''pub comb mux_plain::[timecheck=false](a:U512,s:U4)->(o:U32) { o=(a >> (s*32))#[0..<32] }''')
+mux_pin = work / "mux_pin.prp"
+mux_pin.write_text('''pub comb mux_pin::[timecheck=false,synth.multiplier="sn"](a:U512,s:U4)->(o:U32) { o=(a >> (s*32))#[0..<32] }''')
+plain_doc, _ = synth("mux_plain", mux_plain)
+pin_doc, _ = synth("mux_pin", mux_pin)
+assert total_gates(pin_doc) == total_gates(plain_doc), (total_gates(pin_doc), total_gates(plain_doc))
+
+# A constant factor is strength-reduced ahead of the multiplier architecture.
+cmul = work / "cmul.prp"
+cmul.write_text('''pub comb cmul::[timecheck=false](a:U16)->(x:U32,y:U32) { x=a*10
+ y=a*129 }''')
+gates = {}
+for m in ("array", "sn", "csa", "tree"):
+    src = work / f"cmul_{m}.prp"
+    src.write_text(f'''pub comb cmul_{m}::[timecheck=false](a:U16)->(x:U32,y:U32) {{ x=a*10
+ y=a*129 }}''')
+    gates[m] = total_gates(synth(f"cmul_{m}", src, "synth.multiplier=" + m)[0])
+assert len(set(gates.values())) == 1, gates
+synth("cmul", cmul)
+proof, _ = run("lec", "--impl", "lg:" + str(work / "cmul-net"), "--ref", cmul,
+               "--lib", "lg:" + str(work / "models"), "--top", "cmul.cmul",
+               "--workdir", work / "cmul-proof", "--set", "formal.timeout=10")
+assert proof["lec"]["verdict"] == "proven", proof
+
 inline = work / "inline.prp"
 inline.write_text('''comb lane::[synth.color="inside"](a:U8,b:U8)->(y:U8) { y=(a+b)#[0..=7] }
 pub comb inline::[timecheck=false](a:U8,b:U8,c:U8)->(x:U8,y:U8) {

@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <bit>
+
 // The combinational cell translation shared by region mapping and satopt.
 // The caller owns boundaries, scheduling, bit storage and failure policy.
 #include <algorithm>
@@ -986,12 +988,52 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       }
       return v;
     };
+    // One constant factor: the product mod 2^out_w is a sum of shifted copies of
+    // the other factor, one per set bit (a power of two is pure wiring). Doing it
+    // here, ahead of the architecture dispatch, keeps every multiplier choice
+    // (array/tree/csa/sn) and both mappers from building a generic compressor
+    // network around constant partial-product rows.
+    std::optional<std::vector<Bit>> constant_product;
+    if (ds.size() == 2 && out_w > 0 && out_w <= 63) {
+      const int ck = ds[0].is_const() ? 0 : (ds[1].is_const() ? 1 : -1);
+      if (ck >= 0 && !ds[1 - ck].is_const()) {
+        const auto& cv = gu::const_of(ds[ck]);
+        if (!cv.has_unknowns() && cv.is_just_i64()) {
+          const uint64_t mask = (uint64_t{1} << out_w) - 1;
+          const uint64_t m    = static_cast<uint64_t>(cv.to_just_i64()) & mask;
+          if (std::popcount(m) <= 4) {
+            const auto                           other = extend(ds[1 - ck]);
+            std::vector<arith::Sum_operand<Bit>> terms;
+            for (int j = 0; j < out_w; ++j) {
+              if (((m >> j) & 1) == 0) {
+                continue;
+              }
+              arith::Sum_operand<Bit> term;
+              term.bits.assign(out_w, abc_const_bit(false));
+              for (int i = 0; i + j < out_w; ++i) {
+                term.bits[i + j] = other[i];
+              }
+              terms.push_back(std::move(term));
+            }
+            if (terms.empty()) {
+              constant_product = std::vector<Bit>(out_w, abc_const_bit(false));
+            } else if (terms.size() == 1) {
+              constant_product = std::move(terms[0].bits);
+            } else {
+              constant_product = arith::build_sum(opts_.multiplier_adder.value_or(opts_.adder), bs, ops, terms, out_w);
+            }
+          }
+        }
+      }
+    }
     std::vector<Bit> acc;
     if (ds.empty()) {
       acc.assign(out_w, abc_const_bit(false));
       if (out_w > 0) {
         acc[0] = abc_const_bit(true);  // empty product == 1
       }
+    } else if (constant_product) {
+      acc = std::move(*constant_product);
     } else {
       if (opts_.multiplier == arith::Mult_kind::sn && ds.size() > 1) {
         const auto signed_operand
