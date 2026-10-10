@@ -1,11 +1,28 @@
 #!/usr/bin/env python3
 # PORTED FROM D3 (direction-3-translation-validation,
-# 78a3e0d8c10c3e1ce1627d8d54fa898ee4416d43). The only adaptation is to its
-# private absolute defaults: the D3 acceptance packet records that these
-# scripts and manifests "include historical private absolute
-# defaults/provenance" and asks for explicit configurable / project-relative
-# ones. The logical provenance is retained in the comments; only the paths a
-# fresh checkout cannot resolve are made relative or environment-driven.
+# 78a3e0d8c10c3e1ce1627d8d54fa898ee4416d43).
+#
+# TWO adaptations, not one. The header here used to claim only the first.
+#
+#  1. PRIVATE ABSOLUTE DEFAULTS. The D3 acceptance packet records that these
+#     scripts and manifests "include historical private absolute
+#     defaults/provenance" and asks for configurable / project-relative ones.
+#     Only paths a fresh checkout cannot resolve are changed; the logical
+#     provenance stays in the comments.
+#
+#  2. CLOCK-AWARE CALLERS. The probes this emits called the generated model as
+#     a TWO-argument function. It now takes an explicit `ClockEdges`, so every
+#     `D3.report` / `D3.agree` / `distinctObservables` callback and every
+#     direct `fast1` / `fast2` / phase-split application passes
+#     `Compiler.allEdges <cert>` EXPLICITLY -- the historical procedure, which
+#     fired every clock on every step, written out at the call.
+#
+#     Nothing else moves: `D3Harness` keeps its two-argument `fast` contract,
+#     the generated functions keep their edge arguments, and the generated
+#     correctness theorems stay universally quantified over `ClockEdges`
+#     rather than being specialised to `allEdges`. Samples, observables,
+#     mutation controls, the scheduler and the provenance contracts are
+#     untouched.
 """Direction 3 sweep: per-module gates from DesignCert to a checked fast simulator.
 
 The point of this script is that "supported" is not one bit.  A module can
@@ -873,7 +890,7 @@ import LeanSemanticPrimitives.Compiler.D3Harness
 # that prints D3GATE lines. So a split run costs roughly double, and the gates
 # it credits still come from the real `report` rather than from an inlined copy
 # that could drift from it.
-PHASE_SPLIT = """  let r0 := d3_fast (Compiler.D3.stimIn {m}_designCert 1) (Compiler.D3.stimSt {m}_designCert 1)
+PHASE_SPLIT = """  let r0 := d3_fast (Compiler.allEdges {m}_designCert) (Compiler.D3.stimIn {m}_designCert 1) (Compiler.D3.stimSt {m}_designCert 1)
   let o0 := Compiler.D3.obs r0
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"sim_one_result obs={{o0}}"
@@ -885,12 +902,12 @@ PHASE_SPLIT = """  let r0 := d3_fast (Compiler.D3.stimIn {m}_designCert 1) (Comp
     h.putStrLn s!"selftest_result base={{b0}}"
   let t2 ← IO.monoMsNow
   IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"selftest_done t={{t2}}"
-  let ag0 := Compiler.D3.agree {m}_designCert d3_fast R {samples}
+  let ag0 := Compiler.D3.agree {m}_designCert (d3_fast (Compiler.allEdges {m}_designCert)) R {samples}
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"agree_result {{ag0}}"
   let t3 ← IO.monoMsNow
   IO.FS.withFile {phase} IO.FS.Mode.append fun h => h.putStrLn s!"agree_done t={{t3}}"
-  let dd0 := Compiler.D3.distinctObservables {m}_designCert d3_fast {samples}
+  let dd0 := Compiler.D3.distinctObservables {m}_designCert (d3_fast (Compiler.allEdges {m}_designCert)) {samples}
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"distinct_result {{dd0}}"
   let t4 ← IO.monoMsNow
@@ -921,7 +938,7 @@ PHASE_ONLY_BODY = {
     "agree": """  let ts ← IO.monoMsNow
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"component_start agree t={{ts}}"
-  let v0 := Compiler.D3.agree {m}_designCert d3_fast R {samples}
+  let v0 := Compiler.D3.agree {m}_designCert (d3_fast (Compiler.allEdges {m}_designCert)) R {samples}
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"component_result agree={{v0}} samples={samples}"
   let t9 ← IO.monoMsNow
@@ -931,7 +948,7 @@ PHASE_ONLY_BODY = {
     "fast1": """  let ts ← IO.monoMsNow
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"component_start fast1 t={{ts}}"
-  let v0 := Compiler.D3.obs (d3_fast (Compiler.D3.stimIn {m}_designCert 1)
+  let v0 := Compiler.D3.obs (d3_fast (Compiler.allEdges {m}_designCert) (Compiler.D3.stimIn {m}_designCert 1)
                                      (Compiler.D3.stimSt {m}_designCert 1))
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"component_result fast1 obs={{v0}}"
@@ -942,9 +959,9 @@ PHASE_ONLY_BODY = {
     "fast2": """  let ts ← IO.monoMsNow
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"component_start fast2 t={{ts}}"
-  let v0 := Compiler.D3.obs (d3_fast (Compiler.D3.stimIn {m}_designCert 1)
+  let v0 := Compiler.D3.obs (d3_fast (Compiler.allEdges {m}_designCert) (Compiler.D3.stimIn {m}_designCert 1)
                                      (Compiler.D3.stimSt {m}_designCert 1))
-             + Compiler.D3.obs (d3_fast (Compiler.D3.stimIn {m}_designCert 2)
+             + Compiler.D3.obs (d3_fast (Compiler.allEdges {m}_designCert) (Compiler.D3.stimIn {m}_designCert 2)
                                         (Compiler.D3.stimSt {m}_designCert 2))
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"component_result fast2 obs={{v0}}"
@@ -955,7 +972,7 @@ PHASE_ONLY_BODY = {
     "distinct": """  let ts ← IO.monoMsNow
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"component_start distinct t={{ts}}"
-  let v0 := Compiler.D3.distinctObservables {m}_designCert d3_fast {samples}
+  let v0 := Compiler.D3.distinctObservables {m}_designCert (d3_fast (Compiler.allEdges {m}_designCert)) {samples}
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"component_result distinct={{v0}} samples={samples}"
   let t9 ← IO.monoMsNow
@@ -978,7 +995,7 @@ def d3_residual : ResidualProgram :=
   | .ok R    => R
   | .error _ => default
 
-#eval Compiler.D3.report "{m}" {m}_designCert d3_fast d3_residual {samples}
+#eval Compiler.D3.report "{m}" {m}_designCert (d3_fast (Compiler.allEdges {m}_designCert)) d3_residual {samples}
 """
 
 # `--prove` only.  Imports `ReifyProof`, which imports the Mathlib-bearing
@@ -1043,7 +1060,7 @@ def d3_residual : ResidualProgram :=
   let tr ← IO.monoMsNow
   IO.FS.withFile {phase} IO.FS.Mode.append fun h =>
     h.putStrLn s!"residual_ready t={{tr}}"
-{split}  Compiler.D3.report "{m}" {m}_designCert d3_fast R {samples}
+{split}  Compiler.D3.report "{m}" {m}_designCert (d3_fast (Compiler.allEdges {m}_designCert)) R {samples}
 
 -- The CLOSING bracket for `report_started`. Without it the marker sequence of
 -- a HEALTHY run ends at `residual_ready`, because `D3.report` emits nothing of

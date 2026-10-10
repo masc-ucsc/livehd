@@ -961,3 +961,97 @@ deliberately **out of step**, and that is recorded rather than glossed:
   errors and four `dependsOnNoncomputable` — where the record's
   `lean_errors: 3` is the driver's restricted parser count. Verdict, cause,
   wall and RSS were right; the count was partial.
+
+## 17. The runner emitted clockless callers, and the module backend was missing
+
+§16 called the D3 contribution installed. Two things were wrong with that.
+
+### 17.1 `d3_sweep.py` emitted callers at the old arity
+
+The runner was installed with only its private paths adapted, and its header
+said so. But the probes it **emits** called the generated model as a
+two-argument function, while it now takes an explicit `ClockEdges`. Every
+reifier failed at `D3.report`.
+
+**Ten sites** now pass `Compiler.allEdges <cert>` explicitly — the historical
+procedure, in which every clock fires on every step, written out at the call:
+the `D3.report`, `D3.agree` and `distinctObservables` callbacks, and the direct
+`fast1` / `fast2` / phase-split applications.
+
+Nothing else moved. `D3Harness` keeps its two-argument `fast` contract, the
+generated functions keep their edge arguments, and the generated correctness
+theorems stay **universally quantified** over `ClockEdges` rather than
+specialised to `allEdges`. Samples, observables, mutation controls, the
+scheduler and the provenance contracts are untouched. The header's claim that
+paths were the only adaptation is corrected in place.
+
+Rendered from the installed runner's own `make_probe` and typechecked against
+the repaired prefix:
+
+| reifier | exit | errors | report |
+| --- | ---: | ---: | --- |
+| legacy | 0 | 0 | `sim_exec=1 obs=255`, `mut_out=rejected`, `agree=1 samples=4 distinct_obs=4` |
+| named | 0 | 0 | `agree=1 samples=4 distinct_obs=4` |
+| shared | 0 | 0 | `agree=1 samples=4 distinct_obs=4` |
+| chunked | 0 | 0 | `agree=1 samples=4 distinct_obs=4` |
+
+### 17.2 The module backend's dependency closure was absent
+
+`--proof-backend module` invokes `d3_module_proof.py`, which was not in master,
+nor were its dependencies `d3_gen_modules.py` and `d3_guarded_build.py`. All
+three are now installed at their pinned hashes (`4862fa9aeb8ce9a5`,
+`eda1ff3531da2d9d`, `8446d0fb07246efc`), along with the manifests that carry
+the configured obligations — `coreet_122.tsv`, `cva6_30.tsv`,
+`coreet_stages_80.lock.tsv`, `cva6_corpus.tsv`, `cva6_no_certificate.tsv`,
+`PROVENANCE.tsv` — and the runner's companions (`d3_gen`, `d3_join`,
+`d3_merge`, `d3_cgroup_test`, `d3_manifest_test`, `d3_merge_test`, `d3_bench`,
+`d3_bench2`). No private path survives in any of them.
+
+### 17.3 A build-isolation hazard, found before it was run
+
+`d3_module_proof.py` derived its Lean root from its own tracked location:
+
+```python
+LEAN = ROOT / "formal/lean"
+...
+cmd = [..., "lake", "build", f"LeanSemanticPrimitives.Gen.{ns}.{m}"]
+run(cmd, ..., cwd=LEAN)
+```
+
+It generates `Gen.*` modules **under the live tree** and runs `lake build`
+there. With the newly installed D3 sources now newer than the baseline
+artifacts, that build would not stop at the generated modules: it would rebuild
+`LeanSemanticPrimitives` itself, replacing the oleans a running baseline queue
+depends on. Neither `LEAN_PATH` nor the artifact-hash seam prevents it —
+`lake build` writes where its workspace is — and `d3_sweep`'s `LAKE` variable
+does not reach these calls.
+
+The root is now the seam: `D3_LEAN_ROOT` points the driver at a complete
+isolated project, with its own sources and its own `.lake`, and the writes land
+there. The default is unchanged, so no existing invocation behaves differently.
+
+**The module backend has NOT been run, and is not credited.** It needs a
+complete isolated project root — not merely an olean prefix — and building one
+while the baseline queue is draining would contend for the same machine. It is
+deferred until the queue is quiescent, with the guards, cgroup enforcement,
+imported final-theorem axiom gate and stale-module checks all preserved. A
+deferred stage is uncredited, not assumed.
+
+### 17.4 Still not installed from the D3 branch
+
+Recorded rather than glossed as "the D3 contribution is installed":
+
+| file | disposition |
+| --- | --- |
+| `pass/lean/design_cert_export.hpp` | superseded by master's `certificate_ir.{hpp,cpp}` refactor |
+| `pass/lean/d3_scaling*.tsv` (3) | D3's own measurement outputs, not inputs |
+| D3's `*.md` records | its branch narrative; this ledger carries the ported content |
+
+### 17.5 Obligations still open
+
+The original **122 CORE-ET** and **frozen 30 CVA6** D3 procedure and
+configuration obligations stand, and are not discharged by the control probes
+above. So does the full CLI validation: positive and changed-model/malformed
+controls for all four reifiers, the phase-only and phase-split paths, `--prove`
+on **both** the in-process and module backends, with retained logs, exact final
+theorem names and axioms, source and library fingerprints, and wall/RSS.

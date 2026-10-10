@@ -1,0 +1,126 @@
+# CORE-ET target manifest: 122 rows, one per module the sweep attempted.
+# cert_available=0 rows have NO certificate and therefore no D3 gate can apply;
+# blocked_cause records why emission failed, upstream of pass.lean.
+module	cert_available	certificate	sha256	emit_verdict	nodes	flops	mems	blocked_cause
+intpipe_csr_file_fl_barrier	1	intpipe_csr_file_fl_barrier_Lgraph.lean	2cafe4fcb9ce88c5e974fdd185e7fa95674b619102ae1e5700451f6d00aa372f	PROVEN	65	5	0	
+intpipe_csr_pmu_read_interface	1	intpipe_csr_pmu_read_interface_Lgraph.lean	eed964d41915a18a657fb002c303b3c8aa77f672783891e6f89b158cf7349d17	PROVEN	185	6	0	
+debug_breakpoint	1	debug_breakpoint_Lgraph.lean	5f604abf7f10768cbf840b4cd1482418d210f31bc257ff66bdc9b7d1d33c4a6a	PROVEN	165	0	0	
+intpipe_csr_file_conv	1	intpipe_csr_file_conv_Lgraph.lean	fa334fb20101de485f27d890ca22fc3f9f3ac357d127c8113a4d8c8ed5168e84	PROVEN	464	7	0	
+intpipe_fp_scoreboard	1	intpipe_fp_scoreboard_Lgraph.lean	685518ea3cfc8220853b5b43a28b046a8192bd584213749f088e3dbc8e50152c	PROVEN	1427	0	0	
+intpipe_csr_replay	1	intpipe_csr_replay_Lgraph.lean	c8eb2563ba64be50888f4aa37f11cb15860884c1d4b84de204642d7e411b958f	PROVEN	1133	6	0	
+intpipe_imm	1	intpipe_imm_Lgraph.lean	df21a5f34c84607c3c4006dd4a9080fa512715aef56e0829005aeb6c7ea35897	PROVEN	242	0	0	
+intpipe_inst_bits_stage	1	intpipe_inst_bits_stage_Lgraph.lean	c7dd9f9d6c388b81d15e9ec9dd8d056d49ac6d44479d01c5527593c05c722248	PROVEN	176	32	0	
+minion_dcache_128x64_1r1w_lram	0			NO_EMIT(compile)				NO_EMIT(compile)
+intpipe_int_scoreboard	1	intpipe_int_scoreboard_Lgraph.lean	0b54600b3951f847e4683b19e6ed34e078fd05641a8c4b2fce460e28932d1802	PROVEN	1095	0	0	
+intpipe_mask_scoreboard	1	intpipe_mask_scoreboard_Lgraph.lean	18df35954a43065f41de87befea43553f92753697c3f0385ccfe6aa68245f72a	PROVEN	953	0	0	
+minion_dcache_128x72_1r1w_lram	0			NO_EMIT(compile)				NO_EMIT(compile)
+minion_dcache_buffer_array	0			NO_EMIT(compile)				NO_EMIT(compile)
+minion_dcache_atomic_alu_unit	1	minion_dcache_atomic_alu_unit_Lgraph.lean	9ba99629a9d90ac4452b01e387c6e1a6fb096f7a55ac849c372d2d28cc0031de	PROVEN	919	0	0	
+intpipe_csr_msgs	1	intpipe_csr_msgs_Lgraph.lean	5ec58cb094dc4216143043007899fcdd0ae1ad3c85d8172c6df41cb98db1c85d	PROVEN	7447	53	1	
+minion_dcache_cache_op_unit_l2	1	minion_dcache_cache_op_unit_l2_Lgraph.lean	11b6f316b21afb4104b74eb8a9475f2f536e2842ff0cd1184d8e6b1698bc9368	PROVEN	1426	36	0	
+intpipe_alu	1	intpipe_alu_Lgraph.lean	c99adf4475933781505d7efbf82798a68d2d38743a826e953c3907f2dabce38c	PROVEN	5118	0	0	
+minion_dcache_data_array	0			NO_EMIT(compile)				NO_EMIT(compile)
+minion_dcache_lru_array	1	minion_dcache_lru_array_Lgraph.lean	e8229defa582711ec95d12e971c2116900c0351f9778dfa38091a76cc4b51b82	PROVEN	286	16	0	
+minion_dcache_metadata_array	0			NO_EMIT(compile)				NO_EMIT(compile)
+minion_dcache_cache_op_unit	1	minion_dcache_cache_op_unit_Lgraph.lean	c50b16c517b6d23c1c855cc24f0f32af648bd9f0ba0670fa8061b03ba83085fc	PROVEN	4248	73	0	
+minion_dcache_pma_unit	1	minion_dcache_pma_unit_Lgraph.lean	6ac0e23c6a136677ca9cef530aba33662ceb12f3692f5fe68cf067f02fcfcbc0	PROVEN	532	0	0	
+intpipe_decode	1	intpipe_decode_Lgraph.lean	28c2baa53a72fd6fa211acee8a41db9c7c1af8bd4f5bc90d396b170982faf68e	PROVEN	6659	0	0	
+minion_dcache_scratchpad_ctrl	1	minion_dcache_scratchpad_ctrl_Lgraph.lean	8e4c58968bb770aaac4b05d7d77360757a21fa026e0a52453e71098466c97601	PROVEN	165	3	0	
+minion_dcache_miss_handler	1	minion_dcache_miss_handler_Lgraph.lean	d7f7dc3ef0b4064e3c52731daeedca1d48ea3a411cafaa718c011896d9ebcadb	PROVEN	1663	24	0	
+minion_dcache_texsend	1	minion_dcache_texsend_Lgraph.lean	c9a87162dbf10319df5d193798118c9910fe07489f2f867809938d44c29fda22	PROVEN	0	0	0	
+minion_dcache_store_merge_unit	1	minion_dcache_store_merge_unit_Lgraph.lean	f23938b0a10b3320ec08e8dae0afb1464d672408789546a5a7e47ac82bdb1e0e	PROVEN	3152	0	0	
+minion_dcache_reduce	1	minion_dcache_reduce_Lgraph.lean	c32b879636e78056c4acbe0d73bc4820bc2a558293363b58a59210544717315e	PROVEN	2945	64	4	
+minion_dcache_tlb_array	0			NO_EMIT(compile)				NO_EMIT(compile)
+minion_dcache_writeback_unit	1	minion_dcache_writeback_unit_Lgraph.lean	56ee9a8ed76a9fe51d2fae3535513028fe9aa101c6d3d28b7aba8813b8394da6	PROVEN	357	15	0	
+minion_dcache_miss_handler_unit	1	minion_dcache_miss_handler_unit_Lgraph.lean	fbbf1cc32a50e98a5d53827c8f64c610d657c16d3c08b99935b0fad401ca056a	PROVEN	3556	55	0	
+minion_frontend_rvc_expander	1	minion_frontend_rvc_expander_Lgraph.lean	cb685b53ced5fccd3b774f7bd7149b6d4541336a1ddbcbdf9e6d840177fc0c1b	PROVEN	1829	0	0	
+minion_debug_apb_slv	1	minion_debug_apb_slv_Lgraph.lean	a0e88b2bc72046f276c71cad0e7e67dda7ec26b876b3c9885ec9b9fac93e9584	PROVEN	695	8	0	
+minion_frontend_thread_sched	1	minion_frontend_thread_sched_Lgraph.lean	2c186117756c2f310c9d83759e41efecb5e8fcb3aa8836c26ff78574b4b48513	PROVEN	36	2	0	
+minion_tlb	0			NO_EMIT(compile)				NO_EMIT(compile)
+intpipe_mul_div_top	0			NO_EMIT(compile)				NO_EMIT(compile)
+minion_frontend_thread_buffer	0			NO_EMIT(compile)				NO_EMIT(compile)
+minion_dcache_replay_queue	0			NO_EMIT(compile)				NO_EMIT(compile)
+tima_adder	1	tima_adder_Lgraph.lean	3f10b823da1ddd30a869f34bf9651588bbddb7eb2dc318cf725b59a67fc15d4e	PROVEN	4	0	0	
+null_vpu	1	null_vpu_Lgraph.lean	c88bfe81e06a71193c2027c1ecd4c55f6881ab5900bbea46e3bcb23a6595a9e3	PROVEN	0	0	0	
+trans_exp_rom_case_c0	1	trans_exp_rom_case_c0_Lgraph.lean	e850162f368d89a5949cc464863bab75a96261063758ffa8e93e8e3365efbb8a	PROVEN	11	0	0	
+tima_top	1	tima_top_Lgraph.lean	5d698d07a284dd180a01a6d3848183788605825ec55a75bca79062e5148aca0a	PROVEN	706	7	0	
+trans_exp_rom_case_c1c2	1	trans_exp_rom_case_c1c2_Lgraph.lean	749bb8e1f9bbc8355831744bac9c6b8b956b51b54d2a3a626bebb8b83344d479	PROVEN	20	0	0	
+trans_log_rom_case_c1c2	1	trans_log_rom_case_c1c2_Lgraph.lean	b33aafc3940bcb220c36aa7680076212157f8548d276bd88aa6fa393decce8aa	PROVEN	20	0	0	
+trans_log_rom_case_c0	1	trans_log_rom_case_c0_Lgraph.lean	c4f2620d7589e226f33c155b5bcb17b240b86e6515bbd614675063f2f0d9d9bc	PROVEN	11	0	0	
+trans_rcp_rom_case_c0	1	trans_rcp_rom_case_c0_Lgraph.lean	3ccf461c2ff8ea5b9cfcdf2f51c979e8d50b0b6bed6b2942b8ea18872542bfeb	PROVEN	7	0	0	
+trans_rcp_rom_case_c1c2	1	trans_rcp_rom_case_c1c2_Lgraph.lean	d2dcf7e13f3c1665f2570646f77f57b8da6bc69ed22c3c67ef0f0670b7ff809e	PROVEN	20	0	0	
+trans_rsqrt_rom_case_c0	1	trans_rsqrt_rom_case_c0_Lgraph.lean	9297ffd34e31060f4e728508e0cc93789849cfa5e20721e7421ad3cfe2cc06f9	PROVEN	6	0	0	
+trans_rsqrt_rom_case_c1c2	1	trans_rsqrt_rom_case_c1c2_Lgraph.lean	e4dd4ca43bcd6dd71b161e2f125bc9f7f839dd2bf1a2b197319ec8c41bd45999	PROVEN	19	0	0	
+trans_sin_rom_case_c0	1	trans_sin_rom_case_c0_Lgraph.lean	a5413926ac897a0f24e735b90d456f0c2ace660e21f135a2220d50cd55d5e74e	PROVEN	23	0	0	
+trans_sin_rom_case_c1c2	1	trans_sin_rom_case_c1c2_Lgraph.lean	7a965675fdfe9ca6658a8c47885e2a82579d44fac07989e05786e00cae5c8889	PROVEN	28	0	0	
+txfma_4_2_compressor	1	txfma_4_2_compressor_Lgraph.lean	895a0909f1162ccf9e13573c115137c578e7f3fffbf9e4cb189da1a70fff973d	PROVEN	42	0	0	
+txfma_adder	0			NO_EMIT(filelist)				NO_EMIT(filelist)
+txfma_align_shf	1	txfma_align_shf_Lgraph.lean	569c67d499695d981f828b5afd57d9d17d9c4ae47171f6ef638d346845d8498c	PROVEN	3	0	0	
+trans_top	1	trans_top_Lgraph.lean	123308e7df1361e62ffa67d1e37b1ac106c5ebdf4deaf39e35557c470bf8e784	PROVEN	753	96	0	
+txfma_booth_ppg_32r4_msb	1	txfma_booth_ppg_32r4_msb_Lgraph.lean	4fac35fb5c2d36100eacd7ca48a9d6691021f70ef6eefc58e551b69a8e2a8ebe	PROVEN	11	0	0	
+txfma_booth_ppg_32r4	1	txfma_booth_ppg_32r4_Lgraph.lean	d90a611d0bae0be4ac77fb5ddfac665db38cfba5cfe78756fa60cfd84cb8fbe3	PROVEN	2092	0	0	
+txfma_booth_ppg_32r4_norm	1	txfma_booth_ppg_32r4_norm_Lgraph.lean	a48c50afb4f09e24d2906f3204cdb7725e6cdcc5f06ca2e172595df4bf703120	PROVEN	45	0	0	
+minion_dcache_tensor_load	1	minion_dcache_tensor_load_Lgraph.lean	57a07f691f6d7e9df6a601658e96ce5cec5140d415f414e0a9a41f3523e5714b	PROVEN	11424	112	0	
+txfma_c1	1	txfma_c1_Lgraph.lean	fa8a7c39be1b1ae97b422e631ec9acceca1a8b5034281580dbc968f005ab2741	PROVEN	178	0	0	
+txfma_c0	1	txfma_c0_Lgraph.lean	fcc7091ee4b1573535086b571c463717b6a2bc5435d8d4b84fa3f51d3681d4bc	PROVEN	2902	11	0	
+txfma_4_2_compressor_array	1	txfma_4_2_compressor_array_Lgraph.lean	3116cea8c9d0185f03a0e2f1f71dd924d558c11ef617b33ac23178f01218c2a2	PROVEN	4048	0	0	
+txfma_c2	1	txfma_c2_Lgraph.lean	eb8c2db5fb369b4394f3a385faab87b9fd204786f219a68b70719f9ff6434dd8	PROVEN	1785	0	0	
+txfma_c3	1	txfma_c3_Lgraph.lean	1518575721439e6982b5be9c9146d255d5b242854e65da9ebea983d6e006de78	PROVEN	2030	0	0	
+txfma_csa	1	txfma_csa_Lgraph.lean	e3ec4fefbdaa7cd0e71f9977e028c70a84c6d08c20691f4deb746b5a5b3885eb	PROVEN	21	0	0	
+txfma_c4	1	txfma_c4_Lgraph.lean	badbfb0eefcaa66dd5a3079bf33ae70a80be76f2f4abe31b1a081d15dbb01629	PROVEN	303	0	0	
+txfma_c5	1	txfma_c5_Lgraph.lean	395473f612e3f658216b683f99e71ed0676d0e9e460029487214859b7fd20da2	PROVEN	601	0	0	
+txfma_c6	1	txfma_c6_Lgraph.lean	3f1e0695501d1fb30fe75269d63b07a77fb90110d7c2e846efdece8cc5c76222	PROVEN	1320	0	0	
+intpipe_csr_file	0			NO_EMIT(compile)				NO_EMIT(compile)
+txfmactl_top	1	txfmactl_top_Lgraph.lean	215c171bba16b03997c8d0fcbe2ba0ef028ecb62f80dad195856a3c5e040c8ff	PROVEN	10045	289	0	
+txfma_e4	1	txfma_e4_Lgraph.lean	00c85a30d2f190c35689fbff266fd9360d52c4d722c7743e0ec18726f7eda0fd	PROVEN	3	0	0	
+txfma_e1	1	txfma_e1_Lgraph.lean	17cb5bc9dbe04757d86f820ed0dbe097c8d8ffbc264bb9a9b968840995397c2d	PROVEN	489	0	0	
+txfma_e6	1	txfma_e6_Lgraph.lean	d004e652b0b9edbb207709bbfac44dbc194b1ae409ac15f84ff719e76e223351	PROVEN	133	0	0	
+txfma_exp_special_detect	1	txfma_exp_special_detect_Lgraph.lean	6b378c527395338dc1a97cfd18d7e9167d1d4b55b3cb753285ba99a05c0c2107	PROVEN	360	0	0	
+txfma_e2	1	txfma_e2_Lgraph.lean	826fd413ac9e3cdf54f11845f349629f209596dce94199bd9593ccd39a01c722	PROVEN	2161	0	0	
+txfma_ediff_opdorder_logic	1	txfma_ediff_opdorder_logic_Lgraph.lean	b99a287934273e58b07f2b677d8dc1b2818ebdfda44912828487fee3ba3b969a	PROVEN	1445	0	0	
+minion_frontend	0			NO_EMIT(compile)				NO_EMIT(compile)
+intpipe_rf	1	intpipe_rf_Lgraph.lean	b74f947703486cc5fdc7ac960471ea8f49d5f8ef32a2eec67a14b48efd0f4488	PROVEN	1618	65	0	
+txfma_f4	1	txfma_f4_Lgraph.lean	30a5eb61fa7b18841dc345141ee1bde31ae19a92dda30e38f96962fe7ec95238	PROVEN	4028	6	0	
+txfma_f1	1	txfma_f1_Lgraph.lean	d978a1970860a01f3f615cc56914308d9aaffe02aa3faf020d56dc0a3f847cf3	PROVEN	13840	31	0	
+minion_dcache_top	0			NO_EMIT(compile)				NO_EMIT(compile)
+intpipe_top	0			NO_EMIT(compile)				NO_EMIT(compile)
+txfma_frac_zero_detect	1	txfma_frac_zero_detect_Lgraph.lean	2e13bee3434b607d05ea8dee2a685b051326964765599b2b10b5c337a41525c6	PROVEN	4	0	0	
+txfma_lxd	1	txfma_lxd_Lgraph.lean	8c8e2defeee63e882b802d3ddbe9083fcdac1615f8136c407c0d66be512a0aca	PROVEN	2659	0	0	
+txfma_norm_shf	1	txfma_norm_shf_Lgraph.lean	334d1a2956858b6e574d45e8343acb9be2f12e19c5a319df1d694ff2a995efb2	PROVEN	19	0	0	
+txfma_rnd_adder	1	txfma_rnd_adder_Lgraph.lean	6797bb66e27c2e656dd18742f2bd8126f0dc3e44fbece1d5aa51cda73aaed43d	PROVEN	35	0	0	
+core_top	0			NO_EMIT(compile)				NO_EMIT(compile)
+txfma_top_fake	0			NO_EMIT(filelist)				NO_EMIT(filelist)
+txfma_trz	1	txfma_trz_Lgraph.lean	72108f183529f5b7c7d9e1586a966999debc1051025dc0b6d037a2132dcc6738	PROVEN	167	0	0	
+txfma_trz2	1	txfma_trz2_Lgraph.lean	12852d9b8692730b2b78c4fd61d87e43ce1c608d8b5af40e55f1e8db00db9c11	PROVEN	1189	0	0	
+txfma_wallace1	1	txfma_wallace1_Lgraph.lean	9fcd3c76aa99bc2819d7f234b01dae07f2ce158092ede19b240f2b1456be50e8	PROVEN	11043	0	0	
+txfma_wallace2	1	txfma_wallace2_Lgraph.lean	7b3b096bae1fdf12c5aeeff8e405811866196dee1d961f800262af354b240bbf	PROVEN	6515	0	0	
+vpu_bypass	1	vpu_bypass_Lgraph.lean	0675526b38e1563e34d8d1637a06e56ea1336453da59e65f298c1d33351bbb5f	PROVEN	554	10	0	
+vpu_ctrl	0			NO_EMIT(compile)				NO_EMIT(compile)
+vpu_decoder	1	vpu_decoder_Lgraph.lean	f84daaaa88caf19a3d334128fb1943394571ded597b7cc121781a764182eabcd	PROVEN	4844	0	0	
+vpu_lane	0			NO_EMIT(compile)				NO_EMIT(compile)
+vpu_lane_tima	0			NO_EMIT(compile)				NO_EMIT(compile)
+vpu_mask	1	vpu_mask_Lgraph.lean	891ba684bf515b0cb82e4d51d4d8990d3ef01ccc29d33a33e417e475445c86e7	PROVEN	14860	60	0	
+vpu_ml	1	vpu_ml_Lgraph.lean	016b79005c389b3610ca0558a329e6df14b17d8e98be5ba2e86fe30c75bce85c	PROVEN	5046	170	0	
+vpu_rf	0			NO_EMIT(compile)				NO_EMIT(compile)
+vpu_sh_sw	1	vpu_sh_sw_Lgraph.lean	94f068d295736c3e90267a5e168958554375d845b4be2a68afa3282472a82464	PROVEN	3224	10	0	
+vpu_tensora_rf	0			NO_EMIT(compile)				NO_EMIT(compile)
+vpu_tensorb_rf	0			NO_EMIT(compile)				NO_EMIT(compile)
+vpu_tensorc_rf	0			NO_EMIT(compile)				NO_EMIT(compile)
+vpu_tensorfma	1	vpu_tensorfma_Lgraph.lean	28742eae6ded1ce8fd144e51daf6b1caadd87517e59c7d527de75e55e9e5c8da	PROVEN	2971	123	0	
+vpu_tensorquant	1	vpu_tensorquant_Lgraph.lean	6e4a88ba0f332ba139d4ff75cea2920fba56909c16b8825263b157925a59618f	PROVEN	1436	34	0	
+vpu_tensorreduce	1	vpu_tensorreduce_Lgraph.lean	1ce41f2632f7ce73eaf5b5e59a91e939efdf4b551e29c30b3bd0055cd18f4bf2	PROVEN	546	12	0	
+vpu_tensortmp_rf	0			NO_EMIT(compile)				NO_EMIT(compile)
+minion_top	0			NO_EMIT(timeout)				NO_EMIT(timeout)
+vpu_trans	1	vpu_trans_Lgraph.lean	d99d6fbe803176748a405f2999fc3453e64929d617596df5bbbf38a22b416d21	PROVEN	4152	114	0	
+txfmaexp_top	0			NO_EMIT(timeout)				NO_EMIT(timeout)
+vpu_uinst_decoder	1	vpu_uinst_decoder_Lgraph.lean	deb8f2dbb58aac86d14fce8b4f2515de3d9b25ae23b0d82de6bf31dd724ae4ea	PROVEN	572	0	0	
+txfma_f3	0			NO_EMIT(timeout)				NO_EMIT(timeout)
+txfmafrac_top	0			NO_EMIT(timeout)				NO_EMIT(timeout)
+txfma_top	0			NO_EMIT(timeout)				NO_EMIT(timeout)
+vpu_txfma_trans_top	0			NO_EMIT(compile)				NO_EMIT(compile)
+vpu_top	0			NO_EMIT(timeout)				NO_EMIT(timeout)
+txfma_e5	0			NO_EMIT(timeout)				NO_EMIT(timeout)
+txfma_f5	0			NO_EMIT(timeout)				NO_EMIT(timeout)
+txfma_f2	0			NO_EMIT(timeout)				NO_EMIT(timeout)
+txfma_f6	0			NO_EMIT(timeout)				NO_EMIT(timeout)
+txfma_f0	0			NO_EMIT(timeout)				NO_EMIT(timeout)

@@ -1,0 +1,9 @@
+# Source lock for the three archived CORE-ET stages (80 rows).
+# The digests are TRANSCRIBED from each stage's ARCHIVE.txt, which was written
+# when that stage completed -- they are not recomputed from the files here.
+# Required by d3_merge.py because those sidecars predate `results_sha256`.
+# Verified against the archived files at the time this lock was created.
+file	results_sha256	sidecar_sha256
+stage_tiny.tsv	e46d2c3e1f9ba4334253ff00820666af5a1923bddf5ac704ece31b23a418c160	96728d96530c6a8d9fd4caea2f16327e04032bbd45a1a04ea025bade6904fb35
+stage_small.tsv	b62cf1e266e5834498af003ff418b194efae87691ebd84a4b3afb2b4377fd672	d156ac6c12fbf7161aac5aff55acf85a32c517c3fd9bf11210c1d33ac348ffe9
+stage_mid5.tsv	185f16d5120a2800fc8930f13fd93fa46f8588611595746b57fcdec75163612a	31c98e048da808cb3bc7d1424c087cf0492f1e8cbb2ae607af238c537f8effd4
