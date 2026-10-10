@@ -1,0 +1,15 @@
+module	verdict	counters_readable	terminal_snapshot	oom_kill	oom_group_kill	memory_peak_bytes	emit_peak_rss_kb	systemd_result	emit_rc	cleanup
+minion_dcache_128x64_1r1w_lram	OK	1	1	0	0	43462656	90048	success	0	clean
+minion_dcache_128x72_1r1w_lram	OK	1	1	0	0	44490752	89540	success	0	clean
+minion_dcache_data_array	OK	1	1	0	0	27951104	93132	success	0	clean
+#
+# records                       3
+# duplicate module identities   0
+# blocks with NO record         0
+# unsupported verdict states    0
+# malformed kill counters        0
+# OK verdicts lacking readable terminal counters or carrying a kill   0
+# LIMIT_HIT verdicts without a positive kernel counter   0
+# LIMIT_HIT verdicts whose runtime row is not a non-running resource-limit   0
+# non-integer emit_rc           0
+# non-clean scope teardown      0

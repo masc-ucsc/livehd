@@ -1,0 +1,14 @@
+# Gates over the focused CORE-ET memory pilot (pass.single_edge P=2 memory slots).
+# cert_differential uses cgen Verilog regenerated from each block's own lgdb_norm.
+# lhd_sha256 = a608cbd5b8b18f4b   gate_sha256 = 5cd6c638fdd7d6f0
+# gated_at   = 2026-10-03T10:20:56Z
+module	emit_status	runtime_status	vc_gates	cert_invariant	cert_differential	cert_sha256	verilog_sha256	first_failure
+vpu_tensortmp_rf	EMITTED	RAN	PASS	PASS	PASS	2d93997e3e81c59a	e44f703562b41205	-
+vpu_rf	EMIT_FAILED	NOT_RUN	-	-	-	-	-	not emitted/ran: nothing to gate
+minion_tlb	EMITTED	RAN	PASS	PASS	PASS	8cdb4456b7cb87f8	e2240c5b1e063753	-
+minion_dcache_metadata_array	EMITTED	RAN	PASS	PASS	PASS	8c0b3cd531fac9bd	8660ca94362484a6	-
+minion_dcache_replay_queue	EMITTED	RAN	PASS	PASS	PASS	f10234f228d65955	d014ee5c88b3aff8	-
+#
+# blocks that RAN            4
+# all three gates PASS       4
+# gate failures              0

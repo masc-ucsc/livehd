@@ -1,0 +1,64 @@
+# schema            = d4-cert-delta/2
+# measures          = certificate/graph churn for ONE adjacent RTL edit
+# not_a_claim       = this does NOT make Option A or the loader incremental,
+# not_a_claim       = does NOT establish a population distribution, and does
+# not_a_claim       = NOT turn empirical validation into a proof
+# module            = csr_regfile (emitted as csr_regfile_gate)
+# cva6_a_rev        = 288a27cf46b8d5d19f2efbff35aa88c18446666f
+# cva6_b_rev        = 6ee41edb289f9480282493388ae39693df69f76d
+# cva6_b_parent     = 288a27cf46b8d5d19f2efbff35aa88c18446666f   (== A)
+# cva6_a_root_clean = yes (at 288a27cf46b8d5d19f2efbff35aa88c18446666f)
+# cva6_b_root_clean = yes (at 6ee41edb289f9480282493388ae39693df69f76d)
+# cva6_target       = cv64a6_imafdc_sv39_hpdcache_wb
+# rtl_files_changed = core/csr_regfile.sv
+# rtl_diffstat      = 1 file changed, 2 insertions(+), 2 deletions(-)
+# rtl_diff_sha256   = 388f6123b98e8295d9fc6ad3d32e12a97b1c2e5d1577a4190fe21719fe341e8e
+# lhd_sha256        = 9942dc1dcf9ead04bf5deee471a125b9b62da840ee1faa9906a9a7c600f324d4   (equal on both sides, ENFORCED)
+# wrappers_sha256   = 5165fd0a8a7ec82cc7645af4735cc5240c7af811d8c750ea535242c1404b670c   (equal on both sides, ENFORCED)
+# config_pkg_sha256 = b11bec410b84f01aec8fb17fe17e01cb7a989f01bfe605066e38c25db29072f2   (equal on both sides, ENFORCED)
+# filelist_norm_sha = 45c6ff2a2f0e7b9638df76ac4aed00187d94ca7c3e25bda769bb02628efa519b   (equal after normalizing each side's root, ENFORCED)
+# module_list_sha   = fabebdf99a63afd8f9350ae1c111b616efccfefc3e5379dba20eb750722555a4
+# wrapper_gen_sha   = 354f570d1d407899ccf3ba5312c54b301e4ddf127b2a29ff15daff8aa266edb6   (equal on both sides, ENFORCED)
+# gate_tool_sha256  = 0f967bb8986b59d704895153105ef22055c2135b9f0b0cdcd6ba23c0ac446072   (equal on both sides, ENFORCED)
+# a_gates           = temp/dg/A/gates3.tsv
+# b_gates           = temp/dg/B/gates3.tsv
+# limits            = stack 8192 KB, emit 3600s, run 1800s, ceiling 8388608 KB, jobs 1
+# a_run             = /mada/users/czeng14/projects/livehd-d4-incremental/temp/dg/A/out2
+# b_run             = /mada/users/czeng14/projects/livehd-d4-incremental/temp/dg/B/out2
+# a_cert_sha256     = 56d22bb5fb3ce5b49c4fe478497bd70a4e089a7709140f96de1f6482b46e5d35
+# b_cert_sha256     = 210cd4ac7bfc940d4b8b6510be2623e94932f5df7a83e72d4d7cec002a6fe589
+# a_digest          = 7303403973398102700
+# b_digest          = 7303403973398102700
+# tool_sha256       = 8812ee3af2fa8887701e362d2c1b85b93726d4eb34d563e3757233aa2e49671d
+# producer_sha256   = 359e46ed62ac22f12c57f8e43820f787fde2fae212fcb52cced12b71f9c31310
+# generated_by      = pass/lean/tests/d4/cva6_csr_regfile_dg.sh
+metric	a	b	delta
+bytes	1354019	1354058	39
+sources	32852	32853	1
+nodes	34896	34897	1
+outputs	68	68	0
+flops	136	136	0
+memories	0	0	0
+records	67952	67954	2
+signatures	67952	67954	2
+ordinal_common_record_prefix	-	-	11991
+ordinal_common_record_suffix	-	-	0
+ordinal_same_slot_changed	-	-	55641
+ordinal_inserted	-	-	2
+ordinal_deleted	-	-	0
+ordinal_churn	-	-	55643
+ordinal_churn_pct_of_max	-	-	81.8833
+structural_only_in_a	-	-	8
+structural_only_in_b	-	-	10
+structural_churn	-	-	18
+structural_churn_pct_of_max	-	-	0.0265
+section_src	32852	32853	+1
+section_src_same_slot_changed	-	-	20541
+section_node	34896	34897	+1
+section_node_same_slot_changed	-	-	33894
+section_out	68	68	+0
+section_out_same_slot_changed	-	-	54
+section_flop	136	136	+0
+section_flop_same_slot_changed	-	-	136
+section_mem	0	0	+0
+section_mem_same_slot_changed	-	-	0

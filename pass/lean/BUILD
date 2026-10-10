@@ -161,7 +161,7 @@ cc_test(
     # and is not the configured runtime area.
     local_defines = ['LIVEHD_TEST_RUNTIME_DIR=\\"generated/pass_lean_runtime_tmp\\"'],
     copts = COPTS,
-    deps = [":lean_graph_scan", ":lean_emitters", ":lean_legacy_emitter", "//graph", "@googletest//:gtest_main"],
+    deps = [":lean_graph_scan", ":lean_dcert", ":lean_emitters", ":lean_legacy_emitter", "//graph", "@googletest//:gtest_main"],
 )
 
 cc_test(

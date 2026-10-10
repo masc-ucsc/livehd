@@ -12,6 +12,7 @@
 
 #include "certificate_ir.hpp"
 #include "design_io_meta.hpp"
+#include "emit_dcert.hpp"
 #include "emit_design_cert.hpp"
 #include "lean_format.hpp"
 #include "legacy_model.hpp"
@@ -1170,6 +1171,25 @@ TEST(DesignScanClocks, OpaqueComputedClockIsRefused) {
 // own input. Four edge vectors cover the whole table -- neither fires, only A,
 // only B, both -- which is what distinguishes a real domain from an ordinal
 // that is carried but never consulted.
+// Scanner-produced DCERT2, written beside the Lean oracle so the two describe
+// the SAME `CertificateIR`.
+//
+// WHY. Every production certificate the parity and runtime gates had was
+// single-domain: `clocks` of size one, every `FlopDesc.clock` and
+// `MemoryDesc.clock` zero. Those runs cannot distinguish "the ordinal was
+// carried" from "the field defaulted", so they do not cover the metadata
+// DCERT2 exists for. These two oracles are the only places on master where the
+// REAL scanner resolves more than one domain, so this is where a multi-domain
+// certificate comes from -- not from a hand-built fixture, which would prove
+// something about my typing rather than about the scanner.
+void write_scanner_dcert(const char* var, const CertificateIR& cert) {
+  const char* path = std::getenv(var);
+  if (path == nullptr) {
+    return;  // absent is "not requested"; it is never a silent failure
+  }
+  write_dcert(cert, path);
+}
+
 TEST(DesignScanClocks, TwoDomainValueOracle) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_clk_value_oracle");
   auto  io  = lib.create_io("clk_value_oracle");
@@ -1208,6 +1228,7 @@ TEST(DesignScanClocks, TwoDomainValueOracle) {
   }
   std::ofstream out(path);
   emit_design_cert(design, cert, out);
+  write_scanner_dcert("D4_CLOCK_DCERT", cert);
 
   // Input ordinals are the index in design.inputs, which is scanned order, not
   // declaration order -- build the argument vector from the scan.
@@ -1575,7 +1596,12 @@ TEST(DesignScanClocks, QuietClockResetValueOracle) {
 // synchronous read port, plus a synchronous ROM on `clk_b`, all from the real
 // scanner.
 std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_port_clocked,
-                                              int64_t wensize = 1, int64_t fwd = 0) {
+                                              int64_t wensize = 1, int64_t fwd = 0,
+                                              // Which input drives the RAM. The default keeps every
+                                              // existing caller on `clk_a`; `swap_mem_clock` puts the
+                                              // RAM on `clk_b` and the ROM on `clk_a`, which is the
+                                              // only way to get a MemoryDesc off ordinal 0.
+                                              bool swap_mem_clock = false) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string(lgdb));
   auto  io  = lib.create_io("memfix");
   uint32_t pid = 1;
@@ -1625,13 +1651,15 @@ std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_
   g->get_input_pin("we").connect_sink(rsink("enable", 0));
   g->get_input_pin("raddr").connect_sink(rsink("addr", 1));
   g->get_input_pin("re").connect_sink(rsink("enable", 1));
-  g->get_input_pin("clk_a").connect_sink(rsink("clock_pin", 0));
+  const char* ram_clk = swap_mem_clock ? "clk_b" : "clk_a";
+  const char* rom_clk = swap_mem_clock ? "clk_a" : "clk_b";
+  g->get_input_pin(ram_clk).connect_sink(rsink("clock_pin", 0));
   if (read_port_clocked) {
-    g->get_input_pin("clk_a").connect_sink(rsink("clock_pin", 1));
+    g->get_input_pin(ram_clk).connect_sink(rsink("clock_pin", 1));
   }
   ram.create_driver_pin(1).connect_sink(g->get_output_pin("rdata"));
 
-  // -- the ROM on clk_b -----------------------------------------------------
+  // -- the ROM on the OTHER domain -----------------------------------------
   auto rom = create_typed_node(*g, Ntype_op::Memory);
   set_bits(rom.create_driver_pin(0), 8);
   auto osink = [&](std::string_view n) { return rom.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n)); };
@@ -1645,7 +1673,7 @@ std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_
   oconst("initial", 0x030201);
   g->get_input_pin("romaddr").connect_sink(osink("addr"));
   g->get_input_pin("re").connect_sink(osink("enable"));
-  g->get_input_pin("clk_b").connect_sink(osink("clock_pin"));
+  g->get_input_pin(rom_clk).connect_sink(osink("clock_pin"));
   rom.create_driver_pin(0).connect_sink(g->get_output_pin("romdata"));
 
   return g;
@@ -1671,6 +1699,42 @@ TEST(DesignScanClocks, MixedDomainMemoryIsRefused) {
   }
 }
 
+// A scanner-resolved certificate whose MEMORY commits on a NON-DEFAULT domain.
+//
+// Every production certificate the runtime and parity gates had was
+// single-domain, and `MemoryQuietDomainValueOracle` -- the only multi-domain
+// memory case on master -- happens to land its `MemoryDesc` on ordinal 0. So
+// neither covers a carried memory domain: a reader that dropped
+// `MemoryDesc.clock` entirely would pass both. This builds the same fixture
+// with the RAM on the other clock and REQUIRES the ordinal to be non-zero, so
+// the coverage cannot be satisfied by a defaulted field.
+TEST(DesignScanClocks, MemoryNonDefaultDomainCertificate) {
+  auto g = build_mem_fixture("lgdb_clk_mem_nondefault", /*read_port_clocked=*/true,
+                             /*wensize=*/1, /*fwd=*/0, /*swap_mem_clock=*/true);
+  DesignScan design;
+  try {
+    design = scan_design(*g, {});
+  } catch (const std::exception& e) {
+    FAIL() << "fixture refused by the scanner: " << e.what();
+  }
+  const auto cert = build_certificate(design, {});
+  ASSERT_EQ(design.clocks.size(), 2u) << "the fixture must resolve two domains";
+  ASSERT_EQ(cert.memories.size(), 1u) << "the ROM carries no MemoryDesc";
+  EXPECT_NE(cert.memories[0].clock, 0u)
+      << "the memory landed on ordinal 0; this case exists to cover a NON-default "
+         "commit domain, and a defaulted field would satisfy it silently";
+  // The clock table the ordinal indexes into, so the row can be read.
+  ASSERT_LT(cert.memories[0].clock, cert.clocks.size());
+  write_scanner_dcert("D4_MEM_B_DCERT", cert);
+  // The Lean literal for the SAME certificate, so the parity gate can compare
+  // the two emitters on a multi-domain design rather than only on one-clock
+  // production artifacts.
+  if (const char* lit = std::getenv("D4_MEM_B_FIXTURE")) {
+    std::ofstream lout(lit);
+    emit_design_cert(design, cert, lout);
+  }
+}
+
 TEST(DesignScanClocks, MemoryQuietDomainValueOracle) {
   auto g = build_mem_fixture("lgdb_clk_mem_oracle", /*read_port_clocked=*/true);
   DesignScan design;
@@ -1688,6 +1752,7 @@ TEST(DesignScanClocks, MemoryQuietDomainValueOracle) {
   }
   std::ofstream out(path);
   emit_design_cert(design, cert, out);
+  write_scanner_dcert("D4_MEM_DCERT", cert);
   // Record what the scan actually resolved, so the oracle's assertions can be
   // read against it rather than against what the fixture intended.
   out << "\n-- scan: " << design.clocks.size() << " clock(s), " << design.memories.size()

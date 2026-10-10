@@ -1,0 +1,3 @@
+intpipe_alu
+intpipe_inst_bits_stage
+intpipe_csr_msgs

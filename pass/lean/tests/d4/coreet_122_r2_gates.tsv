@@ -1,0 +1,136 @@
+# Static + differential gates over a D4 CORE-ET runtime sweep.
+# cert_differential uses cgen Verilog regenerated from each block's own lgdb_norm.
+# cert_hash_matches_row recomputes the row's own cert_sha256 from the retained bytes.
+# hash columns are sha256, FIRST 16 HEX.
+# run        = temp/coreet_122_run_49cf
+# lhd_sha256 = a608cbd5b8b18f4b   gate_sha256 = 5cd6c638fdd7d6f0
+# gated_at   = 2026-10-03T12:02:14Z
+module	emit_status	runtime_status	vc_gates	cert_invariant	cert_differential	cert_sha256	verilog_sha256	lean_sha256	cert_hash_matches_row	first_failure
+core_top	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+debug_breakpoint	EMITTED	RAN	PASS	PASS	PASS	c5d1ac2fda9113b6	c68a749ad3b86480	5f604abf7f10768c	yes	-
+intpipe_alu	EMITTED	RAN	PASS	PASS	PASS	cc0aa8a747d81b3d	32e00a25493dc629	c99adf4475933781	yes	-
+intpipe_csr_file	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+intpipe_csr_file_conv	EMITTED	RAN	PASS	PASS	PASS	d5b59603b8db8729	fc02490db40bf766	fa334fb20101de48	yes	-
+intpipe_csr_file_fl_barrier	EMITTED	RAN	PASS	PASS	PASS	2a79c40f73697403	52be6b547987dee1	2cafe4fcb9ce88c5	yes	-
+intpipe_csr_msgs	EMITTED	RAN	PASS	PASS	PASS	9f4e00507a43e0d6	ad48584466ca5ff4	5ec58cb094dc4216	yes	-
+intpipe_csr_pmu_read_interface	EMITTED	RAN	PASS	PASS	PASS	464ab1e71d19945d	015558eae6a31298	eed964d41915a18a	yes	-
+intpipe_csr_replay	EMITTED	RAN	PASS	PASS	PASS	2c81cb58d486d1e5	982e423592741980	c8eb2563ba64be50	yes	-
+intpipe_decode	EMITTED	RAN	PASS	PASS	PASS	2d20c0258609f531	58719621bcdcbd11	28c2baa53a72fd6f	yes	-
+intpipe_fp_scoreboard	EMITTED	RAN	PASS	PASS	PASS	e1dbe56a99ecfc86	549110da32db0fc8	685518ea3cfc8220	yes	-
+intpipe_imm	EMITTED	RAN	PASS	PASS	PASS	18774831099ba7b4	6b491f99f288fdd8	df21a5f34c84607c	yes	-
+intpipe_inst_bits_stage	EMITTED	RAN	PASS	PASS	PASS	ab3027a2da60e98b	c5fe57be9daa7322	c7dd9f9d6c388b81	yes	-
+intpipe_int_scoreboard	EMITTED	RAN	PASS	PASS	PASS	96f81dfdf1d35b7b	d2184612b59d2848	0b54600b3951f847	yes	-
+intpipe_mask_scoreboard	EMITTED	RAN	PASS	PASS	PASS	3fa262e049d6b02f	fc6e91b7e67cce75	18df35954a43065f	yes	-
+intpipe_mul_div_top	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+intpipe_rf	EMITTED	RAN	PASS	PASS	PASS	880f05152433cd29	72b803d0c7e2bec5	b74f947703486cc5	yes	-
+intpipe_top	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+minion_dcache_128x64_1r1w_lram	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+minion_dcache_128x72_1r1w_lram	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+minion_dcache_atomic_alu_unit	EMITTED	RAN	PASS	PASS	PASS	92505dbcc1cc0805	6ccadc11a2e2116b	9ba99629a9d90ac4	yes	-
+minion_dcache_buffer_array	EMITTED	RAN	PASS	PASS	PASS	74a950fc4fbec7d0	33f69bc8ea5b54b1	3e53cdc98a88f5aa	yes	-
+minion_dcache_cache_op_unit	EMITTED	RAN	PASS	PASS	PASS	be38c1a8b3cdaa97	feb9e154f54bf498	c50b16c517b6d23c	yes	-
+minion_dcache_cache_op_unit_l2	EMITTED	RAN	PASS	PASS	PASS	4d3755f3e1664879	6ad088afc1f69943	11b6f316b21afb41	yes	-
+minion_dcache_data_array	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+minion_dcache_lru_array	EMITTED	RAN	PASS	PASS	PASS	af622e8be5bc0944	cb88df4167644bf1	e8229defa582711e	yes	-
+minion_dcache_metadata_array	EMITTED	RAN	PASS	PASS	PASS	8c0b3cd531fac9bd	8660ca94362484a6	f943002f0c98d2c1	yes	-
+minion_dcache_miss_handler	EMITTED	RAN	PASS	PASS	PASS	2b4cdb3f06a8e6ee	b3fcd1e90d374ace	d7f7dc3ef0b4064e	yes	-
+minion_dcache_miss_handler_unit	EMITTED	RAN	PASS	PASS	PASS	86d8cb653949042b	936071b90e0570b8	fbbf1cc32a50e98a	yes	-
+minion_dcache_pma_unit	EMITTED	RAN	PASS	PASS	PASS	68a388b5058dfe66	dd5116cfdedf9064	6ac0e23c6a136677	yes	-
+minion_dcache_reduce	EMITTED	RAN	PASS	PASS	PASS	c8c4b2be7863f577	13f52778eda8183f	c32b879636e78056	yes	-
+minion_dcache_replay_queue	EMITTED	RAN	PASS	PASS	PASS	f10234f228d65955	d014ee5c88b3aff8	35ed6bc544ee5f53	yes	-
+minion_dcache_scratchpad_ctrl	EMITTED	RAN	PASS	PASS	PASS	1b29e71c0aa56d4f	dc9bf40ec494b41b	8e4c58968bb770aa	yes	-
+minion_dcache_store_merge_unit	EMITTED	RAN	PASS	PASS	PASS	afc164676162b0de	421db2ee37ecb992	f23938b0a10b3320	yes	-
+minion_dcache_tensor_load	EMITTED	RAN	PASS	PASS	PASS	2445ae722ddc0efd	c5c4964453903010	57a07f691f6d7e9d	yes	-
+minion_dcache_texsend	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+minion_dcache_tlb_array	EMITTED	RAN	PASS	PASS	PASS	ca449945eefeb496	b60a4719ce61e369	f4fcde233f2764b6	yes	-
+minion_dcache_top	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+minion_dcache_writeback_unit	EMITTED	RAN	PASS	PASS	PASS	c3adc7c61a302490	ff4ce5ab117cfe52	56ee9a8ed76a9fe5	yes	-
+minion_debug_apb_slv	EMITTED	RAN	PASS	PASS	PASS	7534aac23f5d4a17	c1bd95932d93799e	a0e88b2bc72046f2	yes	-
+minion_frontend	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+minion_frontend_rvc_expander	EMITTED	RAN	PASS	PASS	PASS	0c6f71e8af39b82b	f681316d71b8bb3e	cb685b53ced5fccd	yes	-
+minion_frontend_thread_buffer	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+minion_frontend_thread_sched	EMITTED	RAN	PASS	PASS	PASS	beec1e472a818564	2e925640a32d1bab	2c186117756c2f31	yes	-
+minion_tlb	EMITTED	RAN	PASS	PASS	PASS	8cdb4456b7cb87f8	e2240c5b1e063753	01568e91b4af0afb	yes	-
+minion_top	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+null_vpu	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+tima_adder	EMITTED	RAN	PASS	PASS	PASS	e456ccc2d5375ae6	a3811fdbdc551633	3f10b823da1ddd30	yes	-
+tima_top	EMITTED	RAN	PASS	PASS	PASS	02c321be9da6fb8c	6055665925d31c1a	5d698d07a284dd18	yes	-
+trans_exp_rom_case_c0	EMITTED	RAN	PASS	PASS	PASS	1061bb3122e238a4	c1ab6bde0698b57f	e850162f368d89a5	yes	-
+trans_exp_rom_case_c1c2	EMITTED	RAN	PASS	PASS	PASS	48870bb6ae72af9b	3a188902e580d3b3	749bb8e1f9bbc835	yes	-
+trans_log_rom_case_c0	EMITTED	RAN	PASS	PASS	PASS	7f0bf8d07b30c883	5ace28c314b2b2d0	c4f2620d7589e226	yes	-
+trans_log_rom_case_c1c2	EMITTED	RAN	PASS	PASS	PASS	d4261a1e5600efc8	9da87cabe660a3b6	b33aafc3940bcb22	yes	-
+trans_rcp_rom_case_c0	EMITTED	RAN	PASS	PASS	PASS	6e6f66629143b5be	87e99e05a65f4478	3ccf461c2ff8ea5b	yes	-
+trans_rcp_rom_case_c1c2	EMITTED	RAN	PASS	PASS	PASS	cf29503276e27f83	b9a7cb7c153c5db0	d2dcf7e13f3c1665	yes	-
+trans_rsqrt_rom_case_c0	EMITTED	RAN	PASS	PASS	PASS	3b500bb6634cfc34	049ea7c890475cb1	9297ffd34e31060f	yes	-
+trans_rsqrt_rom_case_c1c2	EMITTED	RAN	PASS	PASS	PASS	0f1988dcc52496d6	152d5230362316a8	e4dd4ca43bcd6dd7	yes	-
+trans_sin_rom_case_c0	EMITTED	RAN	PASS	PASS	PASS	504494f86651c18b	f12f23fb8bab5d14	a5413926ac897a0f	yes	-
+trans_sin_rom_case_c1c2	EMITTED	RAN	PASS	PASS	PASS	d452fc356e246dfe	ae49f1c384ccf830	7a965675fdfe9ca6	yes	-
+trans_top	EMITTED	RAN	PASS	PASS	PASS	facfff32ad51bae1	6f4dca6c090e32dd	123308e7df1361e6	yes	-
+txfma_4_2_compressor	EMITTED	RAN	PASS	PASS	PASS	3995ce8f371a0937	51f452ff3421b42e	895a0909f1162ccf	yes	-
+txfma_4_2_compressor_array	EMITTED	RAN	PASS	PASS	PASS	667d146448bada7f	e1777509922c1a59	3116cea8c9d0185f	yes	-
+txfma_adder	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+txfma_align_shf	EMITTED	RAN	PASS	PASS	PASS	18cf99064d53f861	5ba366376f0658d6	569c67d499695d98	yes	-
+txfma_booth_ppg_32r4	EMITTED	RAN	PASS	PASS	PASS	d58b68f4936309a6	cc624bf4c383de10	d90a611d0bae0be4	yes	-
+txfma_booth_ppg_32r4_msb	EMITTED	RAN	PASS	PASS	PASS	a78129f06664cb5c	08069555a781aa68	4fac35fb5c2d3610	yes	-
+txfma_booth_ppg_32r4_norm	EMITTED	RAN	PASS	PASS	PASS	f980c4949c2c9803	a536758a05e30437	a48c50afb4f09e24	yes	-
+txfma_c0	EMITTED	RAN	PASS	PASS	PASS	bf3600b79cb18596	0f10c7faf0e44992	fcc7091ee4b15735	yes	-
+txfma_c1	EMITTED	RAN	PASS	PASS	PASS	9a52783cd2dee9d8	1d64acd39817589d	fa8a7c39be1b1ae9	yes	-
+txfma_c2	EMITTED	RAN	PASS	PASS	PASS	7d4d2d4bb71f81f6	2448b027902fa345	eb8c2db5fb369b43	yes	-
+txfma_c3	EMITTED	RAN	PASS	PASS	PASS	1bd010b1156f0689	504f20d6b291f8f2	1518575721439e69	yes	-
+txfma_c4	EMITTED	RAN	PASS	PASS	PASS	6b53b500dffbe924	d858475d71d0cd69	badbfb0eefcaa66d	yes	-
+txfma_c5	EMITTED	RAN	PASS	PASS	PASS	346c0cdf1cf25501	00ec8c7d3f0ad896	395473f612e3f658	yes	-
+txfma_c6	EMITTED	RAN	PASS	PASS	PASS	ad86cad67ff2b608	f6ae528213cc6b00	3f1e0695501d1fb3	yes	-
+txfma_csa	EMITTED	RAN	PASS	PASS	PASS	c6579384ca4e53f5	f06c1b3a5d8a61c2	e3ec4fefbdaa7cd0	yes	-
+txfmactl_top	EMITTED	RAN	PASS	PASS	PASS	8961a8fa877d4569	00a19ec8ce7f0504	215c171bba16b039	yes	-
+txfma_e1	EMITTED	RAN	PASS	PASS	PASS	4f17220c1e4d26d7	2269c5e9a1649779	17cb5bc9dbe04757	yes	-
+txfma_e2	EMITTED	RAN	PASS	PASS	PASS	0c15627da588f912	24bfcb3783bbdc76	826fd413ac9e3cdf	yes	-
+txfma_e4	EMITTED	RAN	PASS	PASS	PASS	7013eb1114c52cda	5ba428f2765233a9	00c85a30d2f190c3	yes	-
+txfma_e5	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+txfma_e6	EMITTED	RAN	PASS	PASS	PASS	9a84fca2e1220eee	db12f3c4ef80dc0f	d004e652b0b9edbb	yes	-
+txfma_ediff_opdorder_logic	EMITTED	RAN	PASS	PASS	PASS	f5da1762711bb17a	3df2958c16967dfa	b99a287934273e58	yes	-
+txfma_exp_special_detect	EMITTED	RAN	PASS	PASS	PASS	0f7a78dc3e95350b	0b4a3915170d5d2a	6b378c527395338d	yes	-
+txfmaexp_top	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+txfma_f0	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+txfma_f1	EMITTED	RAN	PASS	PASS	PASS	7a5d4a7ebd10fa33	db397d1862dccdfa	d978a1970860a01f	yes	-
+txfma_f2	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+txfma_f3	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+txfma_f4	EMITTED	RAN	PASS	PASS	PASS	7d110ab4e4165116	074212bb4e56ae40	30a5eb61fa7b1884	yes	-
+txfma_f5	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+txfma_f6	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+txfmafrac_top	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+txfma_frac_zero_detect	EMITTED	RAN	PASS	PASS	PASS	cf38299f77f01b10	8012200d07459506	2e13bee3434b607d	yes	-
+txfma_lxd	EMITTED	RAN	PASS	PASS	PASS	725b973c0e0928dc	87f673bec7cd38d9	8c8e2defeee63e88	yes	-
+txfma_norm_shf	EMITTED	RAN	PASS	PASS	PASS	c107456f3704d26b	ee8faa4182aca47c	334d1a2956858b6e	yes	-
+txfma_rnd_adder	EMITTED	RAN	PASS	PASS	PASS	7685039ae1d06aa5	70a8c6e7555f3595	6797bb66e27c2e65	yes	-
+txfma_top	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+txfma_top_fake	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+txfma_trz	EMITTED	RAN	PASS	PASS	PASS	eef025129016fc31	cddc928d29184e2a	72108f183529f5b7	yes	-
+txfma_trz2	EMITTED	RAN	PASS	PASS	PASS	b91e92da58c5d8b4	fd43a1cae578d50a	12852d9b8692730b	yes	-
+txfma_wallace1	EMITTED	RAN	PASS	PASS	PASS	b56d7fdcd967c9bc	94c7f92607e80275	9fcd3c76aa99bc28	yes	-
+txfma_wallace2	EMITTED	RAN	PASS	PASS	PASS	63bc4c59c3de5513	2f53120138a28971	7b3b096bae1fdf12	yes	-
+vpu_bypass	EMITTED	RAN	PASS	PASS	PASS	adb24d1a223b8288	9660cb807f314498	0675526b38e1563e	yes	-
+vpu_ctrl	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+vpu_decoder	EMITTED	RAN	PASS	PASS	PASS	59147ccd1c3131c7	a9f41ffe3e3d2e95	f84daaaa88caf19a	yes	-
+vpu_lane	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+vpu_lane_tima	EMITTED	RAN	PASS	PASS	PASS	eb6419f20694c37c	28ff80d9276fe84c	49d3e74f9d7cc6c2	yes	-
+vpu_mask	EMITTED	RAN	PASS	PASS	PASS	4cd25ac119bbd00f	3f07805663ee5d4d	891ba684bf515b0c	yes	-
+vpu_ml	EMITTED	RAN	PASS	PASS	PASS	bed5d9a41427284c	a10b5f78c518b948	016b79005c389b36	yes	-
+vpu_rf	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+vpu_sh_sw	EMITTED	RAN	PASS	PASS	PASS	4a370e016dce6b73	eb05a3c699ebe3e1	94f068d295736c3e	yes	-
+vpu_tensora_rf	EMITTED	RAN	PASS	PASS	PASS	9fa82c7b31a876e0	67ad45b0b1122b69	0bb7d627cc8002fd	yes	-
+vpu_tensorb_rf	EMITTED	RAN	PASS	PASS	PASS	1b725b88bb07c076	f7126d0b005a36a1	68bd5148751718ee	yes	-
+vpu_tensorc_rf	EMITTED	RAN	PASS	PASS	PASS	6a9f8a9b5d7a8351	d9c15dd07cfcb5b6	2546bbc653cc2b29	yes	-
+vpu_tensorfma	EMITTED	RAN	PASS	PASS	PASS	35e734fca3a7627e	78ecfc8c93990a5e	28742eae6ded1ce8	yes	-
+vpu_tensorquant	EMITTED	RAN	PASS	PASS	PASS	a72568bd6f6c2365	ffb606d1e401ff31	6e4a88ba0f332ba1	yes	-
+vpu_tensorreduce	EMITTED	RAN	PASS	PASS	PASS	8a76b49724bc122b	783f1bfb7b8f0c3d	1ce41f2632f7ce73	yes	-
+vpu_tensortmp_rf	EMITTED	RAN	PASS	PASS	PASS	2d93997e3e81c59a	e44f703562b41205	1cad44106806229c	yes	-
+vpu_top	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+vpu_trans	EMITTED	RAN	PASS	PASS	PASS	66378029718dc771	ec0b6bb1bf49fa73	d99d6fbe80317674	yes	-
+vpu_txfma_trans_top	EMIT_FAILED	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+vpu_uinst_decoder	EMITTED	RAN	PASS	PASS	PASS	c70590cd95ee227e	2f7a11d658460341	deb8f2dbb58aac86	yes	-
+#
+# declared rows                122
+# candidate RAN rows           93
+# ACCEPTED (row + hash + all three gates)   93
+# gate failures                0
+# certificate hash mismatches  0

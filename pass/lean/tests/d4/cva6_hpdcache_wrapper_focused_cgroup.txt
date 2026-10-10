@@ -1,0 +1,13 @@
+unit=d4emit-cva6_hpdcache_wrapper-3097184.scope
+counters_readable=1
+terminal_snapshot=1
+snapshot_sources=sampler:sample,in-scope:exit,in-scope:sample
+oom_kill=0
+oom_group_kill=0
+memory_peak_bytes=449896448
+memory_max_kb=8388608
+systemd_result=success
+emit_rc=0
+emit_peak_rss_kb=461484
+verdict=OK oom_kill=0 oom_group_kill=0 rc=0 Result=success
+cleanup=clean

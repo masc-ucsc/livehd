@@ -1559,6 +1559,122 @@ migration obligation on the 38 `Projection` modules and is **not** done.
 
 CertIOV1 0:02.30 / 513,708 KiB; CertIOFacade 0:20.72 / 6,722,312 KiB.
 
+## 23. The original D4 procedures, restored
+
+### 23.1 What came back
+
+From the pin `f6ad1fe29f8f15aeda045115864fd81a34c33aef`, **134 files**:
+
+| group | files |
+|---|---|
+| runtime + replay drivers | `run_d4_runtime_sweep.sh`, `replay_d4_certs.sh`, `verify_d4_run.sh`, `d4_scope_verdict.sh`, `classify_d4_rows.sh`, `d4_emit_in_scope.sh`, `lean_cert_to_dcert.py` |
+| probes | `d4_sweep_row`, `d4_loadone`, `d4_write_tiny_cert`, `d4_shl_regression` |
+| `pass/lean/tests/d4/` | 114 files — 34 control scripts, 5 Python tools, 37 TSV tables, 26 txt records, 9 module lists, 2 docs, 1 BUILD |
+
+Every file landed at its pinned hash first; the adaptations below are recorded
+per file in `generated/master_port/d4_restore_manifest.json`.
+
+Preserved exactly, because they are the procedure: the **18-column row
+contract and its order**, the fixed-certificate **SHA binding** with no
+re-emission during replay, the ordinary **8192 KiB stack**, resource-limit
+decisions **ahead of** accepting or digesting a surviving payload, canonical
+terminal cgroup evidence and cleanup, fail-closed unknown evidence, and the
+binary/library/config identities. The historical tables are restored as
+**historical provenance** — the read-only reconciliation controls consume them
+as input; none of their rows is fresh benchmark credit.
+
+### 23.2 Adaptations, each one named
+
+- **DCERT2, not DCERT1.** The probes and the Python reader walk the clock-aware
+  format. A historical DCERT1 file is **refused by magic**, never re-read as a
+  one-clock design — which would invent a domain the bytes do not state.
+- **`runCheckedAllEdges`, not `runChecked`.** These procedures predate clock
+  edges and mean every declared clock fires. Naming the contract keeps the
+  assumption at the call site instead of defaulting it underneath.
+- **`d4_loadone` takes a path.** The pinned version embedded the literal
+  `CERTDIR/<name>.pyconv`, a placeholder a caller had to `sed` before every
+  use. That is a template, not a runnable procedure, and a stale substitution
+  is invisible in the output. The directory now comes from `D4_CERT_DIR` or an
+  argument, and **the path actually read is printed on every row**.
+- **`dcert_delta.py` walks BYTE OFFSETS.** Its cursor tokenized on whitespace;
+  a clock name is taken by count and may contain a space or a newline, so a
+  tokenizer cannot see such a file at all. Whitespace is now skipped exactly
+  where `Compiler.CertIO.skipWs` skips it. Every refusal it had, it still has,
+  plus: a name that is not valid UTF-8, a separator that is not the single
+  space, a name shorter than its count, and a clock ordinal outside the table.
+- **The delta metrics are clock-sensitive.** A domain enters a signature
+  through its NAME, exactly as a slot enters through the signature of what it
+  references — so reordering the clock table is invisible and **moving a flop
+  to another domain is not**. Leaving the domain out, which the DCERT1 version
+  necessarily did, would report zero structural churn for a design whose flops
+  changed clock: the one direction that flatters the result.
+- **`dcert_mutate.py` gained five DCERT2 mutations** — `clock`, `mem-clock`,
+  `async`, `oor-clock`, `clock-name` — and its grammar-breaking edits moved
+  from the token stream to located byte edits, for the same reason as above.
+
+### 23.3 Run, not just restored
+
+```
+$ lean --run probes/d4_write_tiny_cert.lean tiny.dcert     -> DCERT2, 104 bytes
+$ lean --run probes/d4_sweep_row.lean tiny.dcert
+  4  2  1  0  PARSED  1  true  RAN  1  12152281778759549968  -
+$ D4_CERT_DIR=... lean --run probes/d4_loadone.lean tiny
+  RESULT tiny .../tiny.dcert 2 read=1 parse=1 compilesOk=0(true) run=1
+         digest=12152281778759549968
+```
+
+The two probes agree on the digest. All three typecheck with zero errors.
+`dcert_delta.py` reads production certificates and its **canonicality check**
+— re-rendering must reproduce the input byte for byte — passes on them, which
+is a third independent confirmation that the C++ serializer's output is exactly
+canonical.
+
+### 23.4 Multi-domain coverage, which the production corpus could not give
+
+All nine production parity cases to that point were **single-domain**: one
+clock, every ordinal zero. Such a run cannot tell "the ordinal was carried"
+from "the field defaulted". `design_scan_test.cpp` now writes scanner-produced
+DCERT2 beside the Lean oracle for the two multi-domain cases, and a new
+`MemoryNonDefaultDomainCertificate` builds the memory fixture with the RAM on
+the *other* clock and **requires** a non-zero memory ordinal:
+
+| certificate | clocks | flop ordinals | memory ordinal |
+|---|---:|---|---:|
+| `two_domain.dcert` | 2 (`clk_a`, `clk_b`) | 0 and **1** | — |
+| `mem_nondefault.dcert` | 2 | **1** and 0 | **1** |
+
+Both pass the full parity gate — byte parity with `renderCert`, reader
+acceptance, re-render idempotence, admission, and the sensitivity and refusal
+controls. These come from the REAL scanner, not a hand-built fixture, which
+would have proved something about my typing instead.
+
+## 24. Exit status was not admission
+
+Both restored drivers captured `$?` after a command substitution ending in
+`| tail -1` — which is `tail`'s status, always 0 — and then admitted a row on
+SHAPE alone. Independently reproduced against the actual CLIs: a child printing
+a correct 11-field `PARSED/true/RAN` row and exiting 17 was published **with
+its digest**, and `replay` reported `runtime_complete=YES`. The preflight had
+the same hole one step earlier.
+
+Repaired in both: the pipe is gone, stdout goes to a file, the status is the
+child's, and a nonzero or timed-out child cannot contribute an accepted runtime
+result however well-formed its row. The logs are retained, an 18-column failure
+row is emitted with **no accepted digest**, and a timeout is named as a timeout
+even when a complete row arrived first. The preflight now checks its exit AND
+that it reported `READ_ERROR` for a missing file. The sweep's own distinction
+is untouched: `reconciled=YES` is row shape and completeness, and may still
+accompany refused or failed modules. No checker, resource verdict or Lean
+semantics is involved.
+
+`pass/lean/tests/d4/exit_status_controls.sh` drives both actual CLIs with a
+stub `lake`, over eight legs: exit-0 success, a valid row behind exit 17, a
+failing preflight, a timeout after output, and the sweep's own two legs.
+
+**Non-vacuity, measured.** With the pinned drivers restored, the same controls
+fail **6 of 8** — `runtime_complete=YES` with a digest from a child that exited
+17, and a timed-out run recorded as `PRESERVED`. With the guards, 8 of 8 pass.
+
 ## 20. D3 replay backlog (recorded, not yet repaired)
 
 Two gaps in restored D3 procedures, kept visible so they are not mistaken for

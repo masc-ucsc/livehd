@@ -1,0 +1,57 @@
+CORE-ET 122 reconciliation
+==========================================================================
+declared modules   122
+rows              122  (unique 122)
+row order         EXACT declared order
+row fields        18 on every row
+reconciled        YES
+(reconciled = schema completeness, NOT coverage)
+
+OUTCOME, this run (last stage actually reached)
+--------------------------------------------------------------------------
+  ACCEPTED                93
+  front-end-failure       18
+  resource-limit           9
+  emission-timeout         2
+
+  ACCEPTED COVERAGE      93 of 122
+  (row says PARSED/true/RAN AND the certificate hash matches AND
+   vc_gates + invariant + the real --require-verilog differential all pass)
+
+TRANSITIONS vs the accepted baseline
+--------------------------------------------------------------------------
+  minion_dcache_buffer_array       front-end-failure    -> ACCEPTED
+  minion_dcache_metadata_array     front-end-failure    -> ACCEPTED
+  minion_dcache_replay_queue       front-end-failure    -> ACCEPTED
+  minion_dcache_tlb_array          front-end-failure    -> ACCEPTED
+  minion_tlb                       front-end-failure    -> ACCEPTED
+  vpu_lane_tima                    front-end-failure    -> ACCEPTED
+  vpu_tensora_rf                   front-end-failure    -> ACCEPTED
+  vpu_tensorb_rf                   front-end-failure    -> ACCEPTED
+  vpu_tensorc_rf                   front-end-failure    -> ACCEPTED
+  vpu_tensorquant                  gate-rejected        -> ACCEPTED
+  vpu_tensortmp_rf                 front-end-failure    -> ACCEPTED
+
+  blocks that moved      11
+  newly ACCEPTED         11
+  no longer ACCEPTED     0
+
+THE TEN FORMERLY FRONT-END-BLOCKED MEMORY DESIGNS
+--------------------------------------------------------------------------
+  minion_dcache_buffer_array       front-end-failure    -> ACCEPTED
+  minion_dcache_metadata_array     front-end-failure    -> ACCEPTED
+  minion_dcache_replay_queue       front-end-failure    -> ACCEPTED
+  minion_dcache_tlb_array          front-end-failure    -> ACCEPTED
+  minion_tlb                       front-end-failure    -> ACCEPTED
+  vpu_lane_tima                    front-end-failure    -> ACCEPTED
+  vpu_tensora_rf                   front-end-failure    -> ACCEPTED
+  vpu_tensorb_rf                   front-end-failure    -> ACCEPTED
+  vpu_tensorc_rf                   front-end-failure    -> ACCEPTED
+  vpu_tensortmp_rf                 front-end-failure    -> ACCEPTED
+
+  of the ten, ACCEPTED   10
+
+TRUST BOUNDARY: corpus authentication, hashes, cgroup counters, runtime
+rows and the static/differential gates are empirical translation
+validation, not a generic formal proof of the C++ LGraph-to-DCERT1
+transcription.

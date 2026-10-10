@@ -1,0 +1,27 @@
+# GENUINE differential gate for the re-emitted cva6_hpdcache_subsystem.
+# The cgen Verilog is generated from THE SAME retained LGraph the certificate
+# came from, so the two sides are independent extractions of one graph:
+#
+#   lhd compile lg:temp/hpd_fixed/blocks/cva6_hpdcache_subsystem/lgdb \
+#     --recipe O0 --emit verilog:temp/hpd_cgen/hpd.v
+#
+# lgdb graph : graph_742999817479 (cva6_hpdcache_subsystem_gate)
+# verilog    : sha256 1209b105f10f80e9872e1f48dcddd97c058922425b9eb948ff27eda2c30bb630
+# certificate: sha256 4fc22721bda98263be24c708bf063e70c4cc6abe266fb0842b6e71274f2a6c17
+# lgraph lean: sha256 9272c70a88202c7500caaac28978c164692a4113493e01122939942f188d8057
+#
+# Each EXEMPT line below is a constant whose EVERY slot is consumed only by
+# constant-folded Op_GetMask nodes, and whose folded results are present in
+# the Verilog.  One ordinary consumer, or one direct output/flop/memory use,
+# of ANY slot carrying the value disqualifies it permanently.
+
+consts checked: 97167
+ROM table: aw=4 dw=1 entries=16
+ROM table: aw=4 dw=4 entries=16
+ROM table: aw=4 dw=1 entries=16
+verilog consts: 718; cert consts absent from it: 3
+EXEMPT: 562949953421280 (49 bits) feeds only constant-folded Op_GetMask nodes; their folded results [0] ARE in the Verilog
+EXEMPT: 54043195528445952 (56 bits) feeds only constant-folded Op_GetMask nodes; their folded results [0] ARE in the Verilog
+EXEMPT: 71494644084506624 (56 bits) feeds only constant-folded Op_GetMask nodes; their folded results [0, 1] ARE in the Verilog
+PASS: cert/LGraph constant differential
+exit=0

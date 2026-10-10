@@ -1,0 +1,50 @@
+rows=122  unique=122  fields=18  rows_wrong_shape=0
+  stack_limit_kb=8192
+  emit_timeout_s=3600
+  run_timeout_s=1800
+  emit_max_rss_kb=8388608
+  emit_limit_kind=cgroup MemoryMax via systemd-run --user --scope, emission child only
+  jobs_requested=4
+  execution=bounded-concurrent-4
+  reconciled=YES
+
+OUTCOME                      COUNT
+RAN                          93
+EMIT_FAILED:nonzero-rc       18
+NO_CERT:resource-limit       9
+EMIT_FAILED:timeout          2
+
+RUNTIME COVERAGE: 93 of 122 declared blocks reached PARSED / compiles_ok=true / RAN
+
+NON-RAN ROWS (diagnostic column, truncated):
+  core_top                   EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  intpipe_csr_file           EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  intpipe_mul_div_top        EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  intpipe_top                EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  minion_dcache_128x64_1r1w_lram EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  minion_dcache_128x72_1r1w_lram EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  minion_dcache_data_array   EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  minion_dcache_texsend      EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=3 | certificate written and NOT run | FATAL: static gate
+  minion_dcache_top          EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  minion_frontend            EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  minion_frontend_thread_buffer EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  minion_top                 EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: emission timeout 3600s (rc=124)
+  null_vpu                   EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=3 | certificate written and NOT run | FATAL: static gate
+  txfma_adder                EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=1 | cmd:read_slang --top txfma_adder --no-proc --ignore-
+  txfma_e5                   NO_CERT    NOT_EMITTED  NOT_RUN   resource-limit: cgroup memory.events reports a kill (oom_kill=2 oom_group_kill=0 rc=143 Result=o
+  txfmaexp_top               NO_CERT    NOT_EMITTED  NOT_RUN   resource-limit: cgroup memory.events reports a kill (oom_kill=1 oom_group_kill=0 rc=143 Result=o
+  txfma_f0                   NO_CERT    NOT_EMITTED  NOT_RUN   resource-limit: cgroup memory.events reports a kill (oom_kill=2 oom_group_kill=0 rc=143 Result=o
+  txfma_f2                   NO_CERT    NOT_EMITTED  NOT_RUN   resource-limit: cgroup memory.events reports a kill (oom_kill=2 oom_group_kill=0 rc=143 Result=o
+  txfma_f3                   NO_CERT    NOT_EMITTED  NOT_RUN   resource-limit: cgroup memory.events reports a kill (oom_kill=1 oom_group_kill=0 rc=143 Result=o
+  txfma_f5                   NO_CERT    NOT_EMITTED  NOT_RUN   resource-limit: cgroup memory.events reports a kill (oom_kill=1 oom_group_kill=0 rc=143 Result=o
+  txfma_f6                   NO_CERT    NOT_EMITTED  NOT_RUN   resource-limit: cgroup memory.events reports a kill (oom_kill=1 oom_group_kill=0 rc=143 Result=o
+  txfmafrac_top              NO_CERT    NOT_EMITTED  NOT_RUN   resource-limit: cgroup memory.events reports a kill (oom_kill=2 oom_group_kill=0 rc=143 Result=o
+  txfma_top                  NO_CERT    NOT_EMITTED  NOT_RUN   resource-limit: cgroup memory.events reports a kill (oom_kill=1 oom_group_kill=0 rc=143 Result=o
+  txfma_top_fake             EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=1 | cmd:read_slang --top txfma_top_fake --no-proc --igno
+  vpu_ctrl                   EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  vpu_lane                   EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  vpu_rf                     EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+  vpu_top                    EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: emission timeout 3600s (rc=124)
+  vpu_txfma_trans_top        EMIT_FAILED NOT_EMITTED  NOT_RUN   emitter-failed: the emitter returned rc=7 | {"schema_version":1,"tool":"lhd","command":"pass","s
+
+CERTIFICATE HASHES RETAINED: 93 of 93 emitted

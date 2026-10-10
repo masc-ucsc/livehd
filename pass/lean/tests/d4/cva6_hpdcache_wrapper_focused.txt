@@ -1,0 +1,40 @@
+# Focused repair of cva6_hpdcache_wrapper -- the LAST canonical-30 blocker.
+#
+# The failure was NOT an opaque RTL problem.  gen_cva6_wrappers.py rebuilt a
+# nested packed typedef with its dimensions REVERSED:
+#
+#     typedef logic [63:0] [0:0] hpdcache_req_data_t__r;   (wrong)
+#     typedef logic [0:0] [63:0] hpdcache_req_data_t__r;   (correct)
+#
+# SystemVerilog reads packed dimensions OUTER FIRST, so the wrong form made
+# rdata[0] ONE BIT and slang correctly rejected [63:32] of it at
+# cva6_hpdcache_if_adapter.sv:332.  The total width was right either way,
+# which is why no width check ever saw it.
+#
+# lgdb graph : graph_602161350817 (cva6_hpdcache_wrapper_gate)
+# verilog    : sha256 5f79fb14b10b380b2e48d2faa63148aae16b5afc02b05342b55d69b1cb104b38
+# certificate: sha256 c58c3dd59935130866e30534e52d5c1b346d2ef48aa054f7884478f48aa73c36
+# lgraph lean: sha256 91b7812256f980e62f1556eb5ee6cb18f6e70e4fbf92fde252d39fc0fed41398
+
+## vc_gates.py
+sources=96438 nodes=107147
+sorry=0
+PASS: all verified_compiler static gates
+vc_gates exit=0
+
+## cert_lgraph_diff -- INVARIANT half only (no --verilog)
+ROM table: aw=4 dw=1 entries=16
+NOTE: no --verilog given; the differential half did NOT run
+PASS: cert/LGraph constant differential
+invariant exit=0
+
+## cert_lgraph_diff -- FULL DIFFERENTIAL (--verilog, --require-verilog)
+ROM table: aw=4 dw=1 entries=16
+ROM table: aw=4 dw=4 entries=16
+ROM table: aw=4 dw=1 entries=16
+verilog consts: 703; cert consts absent from it: 3
+EXEMPT: 562949953421280 (49 bits) feeds only constant-folded Op_GetMask nodes; their folded results [0] ARE in the Verilog
+EXEMPT: 54043195528445952 (56 bits) feeds only constant-folded Op_GetMask nodes; their folded results [0] ARE in the Verilog
+EXEMPT: 71494644084506624 (56 bits) feeds only constant-folded Op_GetMask nodes; their folded results [0, 1] ARE in the Verilog
+PASS: cert/LGraph constant differential
+differential exit=0

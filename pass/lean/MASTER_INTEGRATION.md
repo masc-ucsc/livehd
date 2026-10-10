@@ -4954,6 +4954,72 @@ toolchain, recorded as such with full provenance on each case. Not repaired:
 nesting the record, substituting `noncomputable`, upgrading the toolchain or
 any semantic workaround would each be a change the user has excluded.
 
+### R46 I disturbed the baseline library, and in doing so exposed a regression I had introduced
+
+Two things happened, and the first is mine.
+
+**A source-level regression, latent since 09:02 today.** My commit `3ffa4415e`
+("d3: install the validated contribution") added the shift guards to
+`eval_op` in `Translation/LGraphModel.lean` — `Op_SHL` saturating at the result
+width, `Op_Sext` taking a separate `n > a.width` branch — and did **not**
+update `Compiler/DirectCheck.lean`, whose `sem_shl` and `sem_sext` are `rfl`
+characterisations of exactly those equations. Since then the tracked sources
+have not been internally consistent:
+
+```
+DirectCheck.lean:969:0: Not a definitional equality: the left-hand side
+  eval_op LGraphOp.Op_SHL w [a, b]
+is not definitionally equal to the right-hand side
+  bv_bitwise w (fun x y => x ^^ y) (mk_bv w 0) (mk_bv w (bv_uint a * 2 ^ (bv_uint b).toNat))
+```
+
+Nothing caught it because nothing rebuilt. `lake env` sets environment
+variables and never builds — a fact this ledger has relied on, correctly, to
+install sources without disturbing a running queue — so every job since has
+loaded the **cached** `DirectCheck.olean`, built from the pre-guard source. The
+install-time check I ran ("25 files, 0 changed") was true and was not
+sufficient: it shows the objects did not move, not that the sources would
+reproduce them.
+
+**And then I rebuilt.** To make the restored D4 probes runnable I ran
+`lake build LeanSemanticPrimitives.Compiler.CertIOFacade` in the live tree, on
+the stated assumption — recorded in `3ffa4415e` — that it would elaborate only
+the new modules and reuse the cached dependencies. That assumption was wrong
+for this tree: Lake saw sources newer than their objects and rebuilt them.
+
+| | |
+|---|---|
+| **rebuilt** | `CompileDesign`, `CompileGraph`, `CompileOp`, `ResidualSemantics`, `LGraphModel` |
+| **lost** | `DirectCheck.olean` — its rebuild failed, so Lake removed it |
+| **added** | `CertIOV1`, `CompileDesignDefs`, `CompileGraphDefs`, `CompileOpDefs` |
+
+25 objects before, 28 after. The recorded baseline fingerprint in
+`generated/master_port/d2_runtime/library_fingerprint.txt` no longer describes
+the build on disk, and I cannot restore the previous objects — their bytes were
+not kept, only their digests.
+
+**What this does and does not invalidate.** No job was running: driver 116922
+and direct sweep 783769 were both terminal before the build, so nothing was
+disrupted in flight. Every accepted result — 197 refinement proof jobs, 128
+standalone typechecks, the 119-payload direct sweep — was produced against the
+**previous** objects and remains tied to them; this ledger has said throughout
+that those certify the old build and not a new one. What is gone is the ability
+to re-run against that exact build, so the final integrated validation must
+happen under a **fresh** fingerprint of a library rebuilt from the tracked
+sources, which was always the plan.
+
+**Repaired.** `sem_shl` and `sem_sext` now state the guarded equations, with
+the reason in the docstring. `DirectCheck` builds clean — exit 0, zero errors,
+0:02.85, 550,516 KiB — verified in the isolated root rather than by another
+write to the shared tree.
+
+**The lesson is narrower than "do not build".** Installing sources into a tree
+whose objects are cached makes the two silently diverge, and the divergence is
+invisible to a digest check of the objects. A source install needs a *build* of
+the installed modules to be worth anything, and that build belongs in an
+isolated root — where every other D3/D4 build in this port was done — not in
+the live one.
+
 ### R45 `legacy_cva6_alu_export`: a harness defect, not a design one
 
 The case failed in **both** configured modes, and the cause was upstream of

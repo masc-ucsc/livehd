@@ -1,0 +1,147 @@
+# schema          = d4-frontend-classification/1
+# source_commit   = 43e637c6a9a70fc9d5737b0b2de3d410f4c7791d
+# source_tree     = fad3ba4495822823fb8cf9f1b572072fa83012b3
+# source_clean    = yes (outside the evidence directory)
+# bazel_version   = bazel 9.2.0
+# bazel_config    = -c dbg --repo_env=CC=/usr/bin/gcc-15 --repo_env=CXX=/usr/bin/g++-15
+# compiler        = gcc-15 (Debian 15.3.0-3) 15.3.0
+# manifest        = /mada/users/czeng14/projects/livehd-d4-incremental/pass/lean/tests/d4/coreet_122.list
+# manifest_sha256 = 021bc79d1760c18be082daec5d07c6387839c9de9e0b383c49d1d4875c961f80
+# manifest_count  = 122
+# corpus_root     = /mada/users/czeng14/projects/livehd-d4-incremental/temp/coreet_122_auth/blocks
+# corpus_identity = 183ae0d978f829af413c2f9ba00b787c364f46aaea71f46249251da4a3c79fb2
+# B_source_commit = 43e637c6a9a70fc9d5737b0b2de3d410f4c7791d
+# B_binding       = /mada/users/czeng14/projects/livehd-d4-incremental/temp/d4_evidence_bin/43e637c6a9a70fc9d5737b0b2de3d410f4c7791d.binding
+# B_binding_sha256 = b32a2af00cbd45c519fe939245f1b2cf577caebe9d1df809067fd2dbee0b38ef
+# B_path          = /mada/users/czeng14/projects/livehd-d4-incremental/temp/d4_evidence_bin/fd63b6e689a8841dc2ec1f63a7471142774925d3df217f97bced9aeb0f554c42.lhd
+# B_sha256        = fd63b6e689a8841dc2ec1f63a7471142774925d3df217f97bced9aeb0f554c42
+# B_bytes         = 1263364016
+# B_mtime         = 2026-10-04 01:29:37.992967549 -0700
+# started        = 2026-10-04T08:34:29Z
+# finished       = 2026-10-04T08:36:25Z
+# rows           = 118
+# baseline_identity = 1b6bc602279692aab5d03a308da94c9c736c6b2db4061d5757de8c222f9b4eb5
+# skipped_count  = 0
+# skipped_no_diagnostic =
+# input_unusable_count = 4
+# input_unusable = minion_top txfma_adder txfma_top_fake vpu_top
+# totals         = baseline_refusals=24 cleared=14 unchanged=7 renamed=3 regressed=0 still-ok=94
+module	baseline_refused	baseline_code	now_rc	now_code	change
+core_top	yes	multi-clock-no-ratio	7	multi-clock-no-ratio	UNCHANGED
+debug_breakpoint	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_alu	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_csr_file	yes	multi-clock-no-ratio	7	multi-clock-no-ratio	UNCHANGED
+intpipe_csr_file_conv	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_csr_file_fl_barrier	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_csr_msgs	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_csr_pmu_read_interface	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_csr_replay	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_decode	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_fp_scoreboard	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_imm	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_inst_bits_stage	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_int_scoreboard	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_mask_scoreboard	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+intpipe_mul_div_top	yes	multi-clock-no-ratio	7	multi-clock-no-ratio	UNCHANGED
+intpipe_rf	no	single-edge-applied	0	single-edge-applied	STILL-OK
+intpipe_top	yes	multi-clock-no-ratio	7	multi-clock-no-ratio	UNCHANGED
+minion_dcache_128x64_1r1w_lram	yes	memory-unsupported	0	single-edge-applied	CLEARED
+minion_dcache_128x72_1r1w_lram	yes	memory-unsupported	0	single-edge-applied	CLEARED
+minion_dcache_atomic_alu_unit	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_dcache_buffer_array	yes	memory-unsupported	0	single-edge-applied	CLEARED
+minion_dcache_cache_op_unit	no	single-edge-applied	0	single-edge-applied	STILL-OK
+minion_dcache_cache_op_unit_l2	no	single-edge-applied	0	single-edge-applied	STILL-OK
+minion_dcache_data_array	yes	memory-unsupported	0	single-edge-applied	CLEARED
+minion_dcache_lru_array	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_dcache_metadata_array	yes	memory-unsupported	0	single-edge-applied	CLEARED
+minion_dcache_miss_handler	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_dcache_miss_handler_unit	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_dcache_pma_unit	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_dcache_reduce	no	single-edge-applied	0	single-edge-applied	STILL-OK
+minion_dcache_replay_queue	yes	memory-unsupported	0	single-edge-applied	CLEARED
+minion_dcache_scratchpad_ctrl	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_dcache_store_merge_unit	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_dcache_tensor_load	no	single-edge-applied	0	single-edge-applied	STILL-OK
+minion_dcache_texsend	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_dcache_tlb_array	yes	memory-unsupported	0	single-edge-applied	CLEARED
+minion_dcache_top	yes	memory-unsupported	0	single-edge-applied	CLEARED
+minion_dcache_writeback_unit	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_debug_apb_slv	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_frontend	yes	memory-unsupported	7	coincident-commit-edge	RENAMED
+minion_frontend_rvc_expander	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_frontend_thread_buffer	yes	memory-unsupported	7	coincident-commit-edge	RENAMED
+minion_frontend_thread_sched	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+minion_tlb	yes	memory-unsupported	0	single-edge-applied	CLEARED
+null_vpu	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+tima_adder	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+tima_top	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+trans_exp_rom_case_c0	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+trans_exp_rom_case_c1c2	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+trans_log_rom_case_c0	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+trans_log_rom_case_c1c2	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+trans_rcp_rom_case_c0	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+trans_rcp_rom_case_c1c2	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+trans_rsqrt_rom_case_c0	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+trans_rsqrt_rom_case_c1c2	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+trans_sin_rom_case_c0	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+trans_sin_rom_case_c1c2	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+trans_top	no	single-edge-applied	0	single-edge-applied	STILL-OK
+txfma_4_2_compressor	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_4_2_compressor_array	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_align_shf	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_booth_ppg_32r4	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_booth_ppg_32r4_msb	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_booth_ppg_32r4_norm	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_c0	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_c1	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_c2	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_c3	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_c4	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_c5	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_c6	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_csa	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfmactl_top	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_e1	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_e2	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_e4	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_e5	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_e6	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_ediff_opdorder_logic	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_exp_special_detect	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfmaexp_top	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_f0	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_f1	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_f2	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_f3	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_f4	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_f5	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_f6	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfmafrac_top	no	single-edge-applied	0	single-edge-applied	STILL-OK
+txfma_frac_zero_detect	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_lxd	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_norm_shf	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_rnd_adder	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_top	no	single-edge-applied	0	single-edge-applied	STILL-OK
+txfma_trz	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_trz2	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_wallace1	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+txfma_wallace2	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+vpu_bypass	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+vpu_ctrl	yes	multi-clock-no-ratio	7	multi-clock-no-ratio	UNCHANGED
+vpu_decoder	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+vpu_lane	yes	multi-clock-no-ratio	7	multi-clock-no-ratio	UNCHANGED
+vpu_lane_tima	yes	memory-unsupported	0	single-edge-applied	CLEARED
+vpu_mask	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+vpu_ml	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+vpu_rf	yes	memory-unsupported	7	memory-off-reference-clock	RENAMED
+vpu_sh_sw	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+vpu_tensora_rf	yes	memory-unsupported	0	single-edge-applied	CLEARED
+vpu_tensorb_rf	yes	memory-unsupported	0	single-edge-applied	CLEARED
+vpu_tensorc_rf	yes	memory-unsupported	0	single-edge-applied	CLEARED
+vpu_tensorfma	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+vpu_tensorquant	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+vpu_tensorreduce	no	single-edge-skipped	0	single-edge-skipped	STILL-OK
+vpu_tensortmp_rf	yes	memory-unsupported	0	single-edge-applied	CLEARED
+vpu_trans	no	single-edge-applied	0	single-edge-applied	STILL-OK
+vpu_txfma_trans_top	yes	multi-clock-no-ratio	7	multi-clock-no-ratio	UNCHANGED
+vpu_uinst_decoder	no	single-edge-skipped	0	single-edge-skipped	STILL-OK

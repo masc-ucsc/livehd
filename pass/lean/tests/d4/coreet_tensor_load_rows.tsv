@@ -1,0 +1,2 @@
+corpus	module	emit_status	cert_path	cert_sha256	sources	nodes	flops	memories	parse_status	parse_ms	compiles_ok	runtime_status	run_ms	digest	diagnostic	wall_s	peak_rss_kb
+coreet	minion_dcache_tensor_load	EMITTED	/mada/users/czeng14/projects/livehd-d4-incremental/temp/w4/out/blocks/minion_dcache_tensor_load/lean/minion_dcache_tensor_load.dcert	126b65af994d1c88754966b09e1b0c405b79b67195fd92c3ed3fddc856b26999	9335	11405	112	0	PARSED	517	true	RAN	708	9225711661718483716	-	24.451363616	6330192

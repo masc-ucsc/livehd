@@ -1,0 +1,148 @@
+# WHAT THE ENABLE-LATCH BYPASS FIX CHANGES, measured over every retained block
+# of the authenticated CORE-ET 122 corpus.
+#
+# A (before) = this worktree with the per-port MEMORY GATE FOLD present and the
+#              enable-latch bypass UNCHANGED (it tested the raw `And` operand
+#              for Ntype_op::Latch, so it never fired through the width wrapper
+#              both readers put between a latch output and the gate).
+# B (after)  = the same worktree with `strip_width_wrappers` +
+#              `latch_transparent_value` as committed.
+#
+# Each block: `lhd pass single_edge` on its RETAINED lgdb_raw, then cgen
+# Verilog from the result; the sha256 is of that Verilog. FRONT END ONLY -- no
+# certificate, no Lean, no corpus run, and nothing here rewrites a recorded
+# table. The emission was first checked to be DETERMINISTIC (same binary twice,
+# three blocks, identical hashes), so a hash difference is a real difference.
+#
+# RESULT: acceptance never changed and no refusal code changed. Eleven blocks'
+# normalized emission changed, every one in the same way -- a gated endpoint's
+# enable moved from the ICG latch's HELD Q to the value that latch passes
+# through at the sampling edge. Nine of those eleven are blocks the historical
+# tables already record as accepted; their recorded emissions predate this fix.
+#
+# lhd_before_sha256 = f9445c36a847bc6319c7196b7471e11908873f1a979803005a179c824f0f5d9e
+# lhd_after_sha256  = 884dfa409d05a70b6bcd41ccb276a8c5567da93dc90d7a3b5ceeca3cc4e39d22
+# probed_at         = 2026-10-03T16:50:15Z
+module	a_rc	b_rc	a_code	b_code	a_sha	b_sha	verdict
+core_top	7	7	multi-clock-no-ratio	multi-clock-no-ratio	-	-	BOTH-REFUSE-SAME
+debug_breakpoint	0	0	single-edge-skipped	single-edge-skipped	c68a749ad3b86480	c68a749ad3b86480	IDENTICAL
+intpipe_alu	0	0	single-edge-skipped	single-edge-skipped	32e00a25493dc629	32e00a25493dc629	IDENTICAL
+intpipe_csr_file	7	7	multi-clock-no-ratio	multi-clock-no-ratio	-	-	BOTH-REFUSE-SAME
+intpipe_csr_file_conv	0	0	single-edge-skipped	single-edge-skipped	fc02490db40bf766	fc02490db40bf766	IDENTICAL
+intpipe_csr_file_fl_barrier	0	0	single-edge-skipped	single-edge-skipped	52be6b547987dee1	52be6b547987dee1	IDENTICAL
+intpipe_csr_msgs	0	0	single-edge-skipped	single-edge-skipped	ad48584466ca5ff4	ad48584466ca5ff4	IDENTICAL
+intpipe_csr_pmu_read_interface	0	0	single-edge-skipped	single-edge-skipped	015558eae6a31298	015558eae6a31298	IDENTICAL
+intpipe_csr_replay	0	0	single-edge-skipped	single-edge-skipped	982e423592741980	982e423592741980	IDENTICAL
+intpipe_decode	0	0	single-edge-skipped	single-edge-skipped	58719621bcdcbd11	58719621bcdcbd11	IDENTICAL
+intpipe_fp_scoreboard	0	0	single-edge-skipped	single-edge-skipped	549110da32db0fc8	549110da32db0fc8	IDENTICAL
+intpipe_imm	0	0	single-edge-skipped	single-edge-skipped	6b491f99f288fdd8	6b491f99f288fdd8	IDENTICAL
+intpipe_inst_bits_stage	0	0	single-edge-skipped	single-edge-skipped	c5fe57be9daa7322	c5fe57be9daa7322	IDENTICAL
+intpipe_int_scoreboard	0	0	single-edge-skipped	single-edge-skipped	d2184612b59d2848	d2184612b59d2848	IDENTICAL
+intpipe_mask_scoreboard	0	0	single-edge-skipped	single-edge-skipped	fc6e91b7e67cce75	fc6e91b7e67cce75	IDENTICAL
+intpipe_mul_div_top	7	7	multi-clock-no-ratio	multi-clock-no-ratio	-	-	BOTH-REFUSE-SAME
+intpipe_rf	0	0	single-edge-applied	single-edge-applied	72b803d0c7e2bec5	72b803d0c7e2bec5	IDENTICAL
+intpipe_top	7	7	multi-clock-no-ratio	multi-clock-no-ratio	-	-	BOTH-REFUSE-SAME
+minion_dcache_128x64_1r1w_lram	0	0	single-edge-applied	single-edge-applied	e455e83ff762b7fd	e455e83ff762b7fd	IDENTICAL
+minion_dcache_128x72_1r1w_lram	0	0	single-edge-applied	single-edge-applied	9fcfb9d9f7694bf0	9fcfb9d9f7694bf0	IDENTICAL
+minion_dcache_atomic_alu_unit	0	0	single-edge-skipped	single-edge-skipped	6ccadc11a2e2116b	6ccadc11a2e2116b	IDENTICAL
+minion_dcache_buffer_array	0	0	single-edge-applied	single-edge-applied	33f69bc8ea5b54b1	33f69bc8ea5b54b1	IDENTICAL
+minion_dcache_cache_op_unit	0	0	single-edge-applied	single-edge-applied	feb9e154f54bf498	995d0d4dd6ab7b8e	EMISSION-CHANGED
+minion_dcache_cache_op_unit_l2	0	0	single-edge-applied	single-edge-applied	6ad088afc1f69943	a972bb89948ac2b8	EMISSION-CHANGED
+minion_dcache_data_array	0	0	single-edge-applied	single-edge-applied	a9b64f59072eca4f	a9b64f59072eca4f	IDENTICAL
+minion_dcache_lru_array	0	0	single-edge-skipped	single-edge-skipped	cb88df4167644bf1	cb88df4167644bf1	IDENTICAL
+minion_dcache_metadata_array	0	0	single-edge-applied	single-edge-applied	8660ca94362484a6	8660ca94362484a6	IDENTICAL
+minion_dcache_miss_handler	0	0	single-edge-skipped	single-edge-skipped	b3fcd1e90d374ace	b3fcd1e90d374ace	IDENTICAL
+minion_dcache_miss_handler_unit	0	0	single-edge-skipped	single-edge-skipped	936071b90e0570b8	936071b90e0570b8	IDENTICAL
+minion_dcache_pma_unit	0	0	single-edge-skipped	single-edge-skipped	dd5116cfdedf9064	dd5116cfdedf9064	IDENTICAL
+minion_dcache_reduce	0	0	single-edge-applied	single-edge-applied	13f52778eda8183f	fd6992310a1b8143	EMISSION-CHANGED
+minion_dcache_replay_queue	0	0	single-edge-applied	single-edge-applied	d014ee5c88b3aff8	d014ee5c88b3aff8	IDENTICAL
+minion_dcache_scratchpad_ctrl	0	0	single-edge-skipped	single-edge-skipped	dc9bf40ec494b41b	dc9bf40ec494b41b	IDENTICAL
+minion_dcache_store_merge_unit	0	0	single-edge-skipped	single-edge-skipped	421db2ee37ecb992	421db2ee37ecb992	IDENTICAL
+minion_dcache_tensor_load	0	0	single-edge-applied	single-edge-applied	c5c4964453903010	4ca172c7bf60a941	EMISSION-CHANGED
+minion_dcache_texsend	0	0	single-edge-skipped	single-edge-skipped	9f358b0be159c0f7	9f358b0be159c0f7	IDENTICAL
+minion_dcache_tlb_array	0	0	single-edge-applied	single-edge-applied	b60a4719ce61e369	b60a4719ce61e369	IDENTICAL
+minion_dcache_top	0	0	single-edge-applied	single-edge-applied	74fd9ec260f170af	770c5e386401c444	EMISSION-CHANGED
+minion_dcache_writeback_unit	0	0	single-edge-skipped	single-edge-skipped	ff4ce5ab117cfe52	ff4ce5ab117cfe52	IDENTICAL
+minion_debug_apb_slv	0	0	single-edge-skipped	single-edge-skipped	c1bd95932d93799e	c1bd95932d93799e	IDENTICAL
+minion_frontend	0	0	single-edge-applied	single-edge-applied	2922a73e29d99eca	4f2b216e36047813	EMISSION-CHANGED
+minion_frontend_rvc_expander	0	0	single-edge-skipped	single-edge-skipped	f681316d71b8bb3e	f681316d71b8bb3e	IDENTICAL
+minion_frontend_thread_buffer	0	0	single-edge-applied	single-edge-applied	2233faec758dad53	72f395226c760358	EMISSION-CHANGED
+minion_frontend_thread_sched	0	0	single-edge-skipped	single-edge-skipped	2e925640a32d1bab	2e925640a32d1bab	IDENTICAL
+minion_tlb	0	0	single-edge-applied	single-edge-applied	e2240c5b1e063753	e2240c5b1e063753	IDENTICAL
+minion_top	4	4	-	-	-	-	BOTH-REFUSE-SAME
+null_vpu	0	0	single-edge-skipped	single-edge-skipped	71f48c5a382254a5	71f48c5a382254a5	IDENTICAL
+tima_adder	0	0	single-edge-skipped	single-edge-skipped	a3811fdbdc551633	a3811fdbdc551633	IDENTICAL
+tima_top	0	0	single-edge-skipped	single-edge-skipped	6055665925d31c1a	6055665925d31c1a	IDENTICAL
+trans_exp_rom_case_c0	0	0	single-edge-skipped	single-edge-skipped	c1ab6bde0698b57f	c1ab6bde0698b57f	IDENTICAL
+trans_exp_rom_case_c1c2	0	0	single-edge-skipped	single-edge-skipped	3a188902e580d3b3	3a188902e580d3b3	IDENTICAL
+trans_log_rom_case_c0	0	0	single-edge-skipped	single-edge-skipped	5ace28c314b2b2d0	5ace28c314b2b2d0	IDENTICAL
+trans_log_rom_case_c1c2	0	0	single-edge-skipped	single-edge-skipped	9da87cabe660a3b6	9da87cabe660a3b6	IDENTICAL
+trans_rcp_rom_case_c0	0	0	single-edge-skipped	single-edge-skipped	87e99e05a65f4478	87e99e05a65f4478	IDENTICAL
+trans_rcp_rom_case_c1c2	0	0	single-edge-skipped	single-edge-skipped	b9a7cb7c153c5db0	b9a7cb7c153c5db0	IDENTICAL
+trans_rsqrt_rom_case_c0	0	0	single-edge-skipped	single-edge-skipped	049ea7c890475cb1	049ea7c890475cb1	IDENTICAL
+trans_rsqrt_rom_case_c1c2	0	0	single-edge-skipped	single-edge-skipped	152d5230362316a8	152d5230362316a8	IDENTICAL
+trans_sin_rom_case_c0	0	0	single-edge-skipped	single-edge-skipped	f12f23fb8bab5d14	f12f23fb8bab5d14	IDENTICAL
+trans_sin_rom_case_c1c2	0	0	single-edge-skipped	single-edge-skipped	ae49f1c384ccf830	ae49f1c384ccf830	IDENTICAL
+trans_top	0	0	single-edge-applied	single-edge-applied	6f4dca6c090e32dd	6f4dca6c090e32dd	IDENTICAL
+txfma_4_2_compressor	0	0	single-edge-skipped	single-edge-skipped	51f452ff3421b42e	51f452ff3421b42e	IDENTICAL
+txfma_4_2_compressor_array	0	0	single-edge-skipped	single-edge-skipped	e1777509922c1a59	e1777509922c1a59	IDENTICAL
+txfma_adder	4	4	-	-	-	-	BOTH-REFUSE-SAME
+txfma_align_shf	0	0	single-edge-skipped	single-edge-skipped	5ba366376f0658d6	5ba366376f0658d6	IDENTICAL
+txfma_booth_ppg_32r4	0	0	single-edge-skipped	single-edge-skipped	cc624bf4c383de10	cc624bf4c383de10	IDENTICAL
+txfma_booth_ppg_32r4_msb	0	0	single-edge-skipped	single-edge-skipped	08069555a781aa68	08069555a781aa68	IDENTICAL
+txfma_booth_ppg_32r4_norm	0	0	single-edge-skipped	single-edge-skipped	a536758a05e30437	a536758a05e30437	IDENTICAL
+txfma_c0	0	0	single-edge-skipped	single-edge-skipped	0f10c7faf0e44992	0f10c7faf0e44992	IDENTICAL
+txfma_c1	0	0	single-edge-skipped	single-edge-skipped	1d64acd39817589d	1d64acd39817589d	IDENTICAL
+txfma_c2	0	0	single-edge-skipped	single-edge-skipped	2448b027902fa345	2448b027902fa345	IDENTICAL
+txfma_c3	0	0	single-edge-skipped	single-edge-skipped	504f20d6b291f8f2	504f20d6b291f8f2	IDENTICAL
+txfma_c4	0	0	single-edge-skipped	single-edge-skipped	d858475d71d0cd69	d858475d71d0cd69	IDENTICAL
+txfma_c5	0	0	single-edge-skipped	single-edge-skipped	00ec8c7d3f0ad896	00ec8c7d3f0ad896	IDENTICAL
+txfma_c6	0	0	single-edge-skipped	single-edge-skipped	f6ae528213cc6b00	f6ae528213cc6b00	IDENTICAL
+txfma_csa	0	0	single-edge-skipped	single-edge-skipped	f06c1b3a5d8a61c2	f06c1b3a5d8a61c2	IDENTICAL
+txfmactl_top	0	0	single-edge-skipped	single-edge-skipped	00a19ec8ce7f0504	00a19ec8ce7f0504	IDENTICAL
+txfma_e1	0	0	single-edge-skipped	single-edge-skipped	2269c5e9a1649779	2269c5e9a1649779	IDENTICAL
+txfma_e2	0	0	single-edge-skipped	single-edge-skipped	24bfcb3783bbdc76	24bfcb3783bbdc76	IDENTICAL
+txfma_e4	0	0	single-edge-skipped	single-edge-skipped	5ba428f2765233a9	5ba428f2765233a9	IDENTICAL
+txfma_e5	0	0	single-edge-skipped	single-edge-skipped	4097adb24c300a91	4097adb24c300a91	IDENTICAL
+txfma_e6	0	0	single-edge-skipped	single-edge-skipped	db12f3c4ef80dc0f	db12f3c4ef80dc0f	IDENTICAL
+txfma_ediff_opdorder_logic	0	0	single-edge-skipped	single-edge-skipped	3df2958c16967dfa	3df2958c16967dfa	IDENTICAL
+txfma_exp_special_detect	0	0	single-edge-skipped	single-edge-skipped	0b4a3915170d5d2a	0b4a3915170d5d2a	IDENTICAL
+txfmaexp_top	0	0	single-edge-skipped	single-edge-skipped	d30c8b4f62c9de93	d30c8b4f62c9de93	IDENTICAL
+txfma_f0	0	0	single-edge-skipped	single-edge-skipped	64bd3a454e01abf4	64bd3a454e01abf4	IDENTICAL
+txfma_f1	0	0	single-edge-skipped	single-edge-skipped	db397d1862dccdfa	db397d1862dccdfa	IDENTICAL
+txfma_f2	0	0	single-edge-skipped	single-edge-skipped	98ac5763aa344fc2	98ac5763aa344fc2	IDENTICAL
+txfma_f3	0	0	single-edge-skipped	single-edge-skipped	8ddc1afe56a433c3	8ddc1afe56a433c3	IDENTICAL
+txfma_f4	0	0	single-edge-skipped	single-edge-skipped	074212bb4e56ae40	074212bb4e56ae40	IDENTICAL
+txfma_f5	0	0	single-edge-skipped	single-edge-skipped	70edf74fe56376cc	70edf74fe56376cc	IDENTICAL
+txfma_f6	0	0	single-edge-skipped	single-edge-skipped	e7f4bf7a05329268	e7f4bf7a05329268	IDENTICAL
+txfmafrac_top	0	0	single-edge-applied	single-edge-applied	250552c1849a8c62	ca34930729ba480a	EMISSION-CHANGED
+txfma_frac_zero_detect	0	0	single-edge-skipped	single-edge-skipped	8012200d07459506	8012200d07459506	IDENTICAL
+txfma_lxd	0	0	single-edge-skipped	single-edge-skipped	87f673bec7cd38d9	87f673bec7cd38d9	IDENTICAL
+txfma_norm_shf	0	0	single-edge-skipped	single-edge-skipped	ee8faa4182aca47c	ee8faa4182aca47c	IDENTICAL
+txfma_rnd_adder	0	0	single-edge-skipped	single-edge-skipped	70a8c6e7555f3595	70a8c6e7555f3595	IDENTICAL
+txfma_top	0	0	single-edge-applied	single-edge-applied	0accea1b1d67fc26	b5bd1836cd0a4aa3	EMISSION-CHANGED
+txfma_top_fake	4	4	-	-	-	-	BOTH-REFUSE-SAME
+txfma_trz	0	0	single-edge-skipped	single-edge-skipped	cddc928d29184e2a	cddc928d29184e2a	IDENTICAL
+txfma_trz2	0	0	single-edge-skipped	single-edge-skipped	fd43a1cae578d50a	fd43a1cae578d50a	IDENTICAL
+txfma_wallace1	0	0	single-edge-skipped	single-edge-skipped	94c7f92607e80275	94c7f92607e80275	IDENTICAL
+txfma_wallace2	0	0	single-edge-skipped	single-edge-skipped	2f53120138a28971	2f53120138a28971	IDENTICAL
+vpu_bypass	0	0	single-edge-skipped	single-edge-skipped	9660cb807f314498	9660cb807f314498	IDENTICAL
+vpu_ctrl	7	7	multi-clock-no-ratio	multi-clock-no-ratio	-	-	BOTH-REFUSE-SAME
+vpu_decoder	0	0	single-edge-skipped	single-edge-skipped	a9f41ffe3e3d2e95	a9f41ffe3e3d2e95	IDENTICAL
+vpu_lane	7	7	multi-clock-no-ratio	multi-clock-no-ratio	-	-	BOTH-REFUSE-SAME
+vpu_lane_tima	0	0	single-edge-applied	single-edge-applied	28ff80d9276fe84c	fb0b09b15e9770ae	EMISSION-CHANGED
+vpu_mask	0	0	single-edge-skipped	single-edge-skipped	3f07805663ee5d4d	3f07805663ee5d4d	IDENTICAL
+vpu_ml	0	0	single-edge-skipped	single-edge-skipped	a10b5f78c518b948	a10b5f78c518b948	IDENTICAL
+vpu_rf	7	7	memory-off-reference-clock	memory-off-reference-clock	-	-	BOTH-REFUSE-SAME
+vpu_sh_sw	0	0	single-edge-skipped	single-edge-skipped	eb05a3c699ebe3e1	eb05a3c699ebe3e1	IDENTICAL
+vpu_tensora_rf	0	0	single-edge-applied	single-edge-applied	67ad45b0b1122b69	67ad45b0b1122b69	IDENTICAL
+vpu_tensorb_rf	0	0	single-edge-applied	single-edge-applied	f7126d0b005a36a1	f7126d0b005a36a1	IDENTICAL
+vpu_tensorc_rf	0	0	single-edge-applied	single-edge-applied	d9c15dd07cfcb5b6	d9c15dd07cfcb5b6	IDENTICAL
+vpu_tensorfma	0	0	single-edge-skipped	single-edge-skipped	78ecfc8c93990a5e	78ecfc8c93990a5e	IDENTICAL
+vpu_tensorquant	0	0	single-edge-skipped	single-edge-skipped	ffb606d1e401ff31	ffb606d1e401ff31	IDENTICAL
+vpu_tensorreduce	0	0	single-edge-skipped	single-edge-skipped	783f1bfb7b8f0c3d	783f1bfb7b8f0c3d	IDENTICAL
+vpu_tensortmp_rf	0	0	single-edge-applied	single-edge-applied	e44f703562b41205	e44f703562b41205	IDENTICAL
+vpu_top	4	4	-	-	-	-	BOTH-REFUSE-SAME
+vpu_trans	0	0	single-edge-applied	single-edge-applied	ec0b6bb1bf49fa73	cf95fc88a5810bd1	EMISSION-CHANGED
+vpu_txfma_trans_top	7	7	multi-clock-no-ratio	multi-clock-no-ratio	-	-	BOTH-REFUSE-SAME
+vpu_uinst_decoder	0	0	single-edge-skipped	single-edge-skipped	2f7a11d658460341	2f7a11d658460341	IDENTICAL

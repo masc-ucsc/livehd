@@ -1,0 +1,17 @@
+# Static + differential gates over a D4 CORE-ET runtime sweep.
+# cert_differential uses cgen Verilog regenerated from each block's own lgdb_norm.
+# cert_hash_matches_row recomputes the row's own cert_sha256 from the retained bytes.
+# hash columns are sha256, FIRST 16 HEX.
+# run        = temp/gaterun/out
+# lhd_sha256 = 884dfa409d05a70b   gate_sha256 = 5cd6c638fdd7d6f0
+# gated_at   = 2026-10-03T17:03:07Z
+module	emit_status	runtime_status	vc_gates	cert_invariant	cert_differential	cert_sha256	verilog_sha256	lean_sha256	cert_hash_matches_row	first_failure
+minion_frontend	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+minion_frontend_thread_buffer	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+minion_dcache_top	NO_CERT	NOT_RUN	-	-	-	-	-	-	-	not a candidate RAN row
+#
+# declared rows                3
+# candidate RAN rows           0
+# ACCEPTED (row + hash + all three gates)   0
+# gate failures                0
+# certificate hash mismatches  0

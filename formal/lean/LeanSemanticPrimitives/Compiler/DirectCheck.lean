@@ -966,17 +966,35 @@ theorem sem_slt (a b : BV) :
 theorem sem_sgt (a b : BV) :
     eval_op .Op_SGT w [a, b] = mk_bv w (if bv_sint a > bv_sint b then 1 else 0) := rfl
 
+/-- `Op_SHL`, with the shift amount SATURATING AT THE RESULT WIDTH.
+
+The guard is `shl_bridge`'s: it shifts `(zext a : BitVec w)`, and `_ <<< k = 0`
+for `k ≥ w`. Without it the `Int` formula keeps growing for amounts past `w`
+and the two sides disagree exactly where a real shift has already shifted
+everything out. This statement tracked the UNGUARDED definition after the
+guards landed in `LGraphModel`; the cached `.olean` hid the mismatch, because
+`lake env` sets variables and never builds. -/
 theorem sem_shl (a b : BV) :
     eval_op .Op_SHL w [a, b] =
       bv_bitwise w (fun x y => xor x y) (mk_bv w 0)
-        (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat)) := rfl
+        (mk_bv w (if (bv_uint b).toNat ≥ w then 0
+                  else bv_uint a * (2 : Int) ^ (bv_uint b).toNat)) := rfl
 
 theorem sem_sra (a b : BV) : eval_op .Op_SRA w [a, b] = bv_sra w a b := rfl
 
+/-- `Op_Sext`, with the `n > a.width` case stated.
+
+For `n` strictly past the source width every bit of `a` is below the sign
+position, so the result is plain zero extension and the definition says so
+without constructing `2 ^ n` for an `n` that is a VALUE. The strictness is
+load-bearing: at `n = a.width` the sign bit can be set and sign extension still
+applies. Same provenance as `sem_shl` above -- the statement lagged the
+definition behind a cached object. -/
 theorem sem_sext (a amt : BV) :
     eval_op .Op_Sext w [a, amt] =
       (let n := (bv_uint amt).toNat
        if n = 0 then mk_bv w 0
+       else if n > a.width then mk_bv w (bv_uint a)
        else
          let u := bv_uint a % (2 ^ n : Int)
          if u < (2 ^ (n - 1) : Int) then mk_bv w u else mk_bv w (u - (2 ^ n : Int))) := rfl

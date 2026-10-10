@@ -1,0 +1,18 @@
+rows=30  unique=30  fields=18  rows_wrong_shape=0
+  stack_limit_kb=8192
+  emit_timeout_s=3600
+  run_timeout_s=1800
+  emit_max_rss_kb=8388608
+  emit_limit_kind=cgroup MemoryMax via systemd-run --user --scope, emission child only
+  jobs_requested=1
+  execution=serial
+  reconciled=YES
+
+OUTCOME                      COUNT
+RAN                          30
+
+RUNTIME COVERAGE: 30 of 30 declared blocks reached PARSED / compiles_ok=true / RAN
+
+NON-RAN ROWS (diagnostic column, truncated):
+
+CERTIFICATE HASHES RETAINED: 30 of 30 emitted

@@ -1,0 +1,41 @@
+# schema          = d4-emission-fanout/1
+# A_source_commit = ce5fdfc7a720177bc566d605c618871bdf6b62d4
+# A_sha256        = aa67170d01ab0445fd037c22ce4b13b7f159addc483bc5680da50d158cfd8acb
+# before_commit   = 391b1eb9017fa63ad8778419fe1e212a5fb30e94
+# before_sha256   = 7f8f4ee3348c0de900139aa1dad0080a9e9cf1da47b1c45b2242db15f4e32eac
+# after_commit    = 9710d0d141576e6389820a8d05e1d680da5ce1b8
+# after_sha256    = e72b32f9a5b2ea604ea602182d1cacc500ad231cd95d53627f447b7120d8ba38
+# tool_sha256     = 1a1d31768eb3750137cb2cae8e308fce68ee599a8f01dafc7cb79aaf80713f38
+# producer_sha256 = 91a73929e794e28067bfd25afea38681a4d6a6b5a50b4120ff19d08890527b09
+# module_list     = pass/lean/tests/d4/coreet_emission_fanout.list
+# modules         = 20
+# corpus_identity = e3bb1a6de4f8e6536ff0767a729c577066faa4ab4a84ff407e44439b87ac2299
+# generated_by    = pass/lean/tests/d4/coreet_emission_fanout.sh
+module	changed_before	fanout_before	changed_after	fanout_after
+intpipe_rf	1	STATE	1	STATE
+minion_dcache_128x64_1r1w_lram	5	DEAD,OUTPUT,STATE	5	DEAD,OUTPUT,STATE
+minion_dcache_128x72_1r1w_lram	5	DEAD,OUTPUT,STATE	5	DEAD,OUTPUT,STATE
+minion_dcache_buffer_array	1	STATE	1	STATE
+minion_dcache_cache_op_unit	1	DEAD	1	DEAD
+minion_dcache_cache_op_unit_l2	1	DEAD	1	DEAD
+minion_dcache_data_array	17	DEAD,OUTPUT	17	DEAD,OUTPUT
+minion_dcache_metadata_array	1	DEAD	1	DEAD
+minion_dcache_reduce	1	MEM-CLOCK	1	DEAD
+minion_dcache_replay_queue	2	STATE	2	STATE
+minion_dcache_tlb_array	1	STATE	1	STATE
+minion_tlb	1	STATE	1	STATE
+txfma_top	13	DEAD,MEM-CLOCK	29	DEAD,STATE
+txfmafrac_top	13	DEAD,MEM-CLOCK	29	DEAD,STATE
+vpu_lane_tima	3	DEAD,STATE	3	DEAD,STATE
+vpu_tensora_rf	1	STATE	1	STATE
+vpu_tensorb_rf	1	STATE	1	STATE
+vpu_tensorc_rf	1	STATE	1	STATE
+vpu_tensortmp_rf	1	STATE	1	STATE
+vpu_trans	1	DEAD	1	DEAD
+#
+# modules                       20
+# live BEFORE (not DEAD/NONE)   16
+# live AFTER                    15
+# rows                          20
+# memory CLOCK reached, BEFORE  3
+# memory CLOCK reached, AFTER   0
