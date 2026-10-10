@@ -134,6 +134,15 @@ llvm::Value* cast_integer(llvm::IRBuilder<>& builder, llvm::Value* value, unsign
   if (source_width > width) {
     return builder.CreateTrunc(value, type);
   }
+  // LLVM's DAGCombiner::CombineZExtLogicopShiftLoad rewrites zext(and/or(shift(load, c), k)) by
+  // reusing the narrow shift's amount operand, which is i8 on x86. A destination wider than 256
+  // bits needs a 9+ bit amount, so assertion-enabled LLVM (-c dbg) aborts with "Invalid use of
+  // small shift amount with oversized value". Freezing the non-constant operand hides the
+  // logic-op/shift/load shape from that combine; the value is a defined memory word, so freeze
+  // is an identity here.
+  if (width > 256 && !llvm::isa<llvm::Constant>(value)) {
+    value = builder.CreateFreeze(value);
+  }
   return source_unsigned ? builder.CreateZExt(value, type) : builder.CreateSExt(value, type);
 }
 

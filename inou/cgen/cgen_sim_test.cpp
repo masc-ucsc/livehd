@@ -77,8 +77,10 @@ TEST(CgenSim, LlvmObjectsSurviveInsertionAndLongModuleNames) {
   const std::string dir = "llvm_incremental_objects";
   const std::string name(200, 'x');
   std::filesystem::create_directories(dir);
-  const auto generate = [&](bool edited) {
-    auto& lib = livehd::Hhds_graph_library::instance(edited ? "lgdb_llvm_object_edit" : "lgdb_llvm_object_base");
+  unsigned   generation = 0;  // each call needs its own library: create_io rejects a repeated module name
+  const auto generate   = [&](bool edited) {
+    auto& lib = livehd::Hhds_graph_library::instance(std::string(edited ? "lgdb_llvm_object_edit" : "lgdb_llvm_object_base")
+                                                     + std::to_string(generation++));
     auto  io  = lib.create_io(name);
     for (unsigned i = 0; i < 9; ++i) {
       io->add_input("a" + std::to_string(i), i);
