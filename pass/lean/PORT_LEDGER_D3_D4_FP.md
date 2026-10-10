@@ -1999,7 +1999,22 @@ Verification re-derives **every** binding — foundation, filelist, config
 package and the declared wrapper corpus all recompute to their recorded hashes,
 and `cva6_root_rev` matches the pin. ACCEPTED COVERAGE 2 of 3, the third named.
 
-The **frozen 30 is running** under the same foundation.
+**The frozen 30 completed** under that foundation, same settings:
+
+| | |
+|---|---:|
+| EMITTED, PARSED, `compilesOk=true`, **RAN**, with a digest | **21** |
+| EMIT_FAILED | 7 — 4 at rc=3 (static gates), 3 at rc=6 |
+| NO_WRAPPER | 2 — the two the foundation could not generate |
+
+**ACCEPTED COVERAGE: 21 of 30**, every refusal named. Verification re-derives
+the foundation, filelist, config package and declared wrapper corpus to their
+recorded hashes. **Fixed-certificate replay: 21/21 PRESERVED**,
+`runtime_complete=YES`, nothing changed, nothing rejected.
+
+The two `NO_WRAPPER` modules are the foundation's own `wrappers_failed=2`
+carried forward rather than hidden: a module with no wrapper is an unresolved
+prerequisite and is recorded as one, not as a design that failed.
 
 ### 27.4 What none of this is
 
