@@ -365,17 +365,17 @@ TEST(PartitionColors, SharedNestedOccurrencesSurvivePersistenceAndRecoloring) {
     EXPECT_NE(color, 0) << name;
     distinct.insert(color);
   }
-  EXPECT_EQ(distinct.size(), 4);
+  EXPECT_EQ(distinct.size(), 1) << "a shared implementation is colored once";
   size_t occurrences = 0;
   for (auto node : top->occurrences().nodes()) {
     if (gu::type_op_of(node.base_node()) == Ntype_op::And) {
       ++occurrences;
-      EXPECT_TRUE(gu::has_hier_color(node));
+      EXPECT_FALSE(gu::has_hier_color(node));
       EXPECT_TRUE(distinct.contains(gu::node_color_of(node)));
     }
   }
   EXPECT_EQ(occurrences, 4);
-  EXPECT_EQ(gu::node_color_of(gate), 0) << "shared definitions have no arbitrary first-instance color";
+  EXPECT_TRUE(distinct.contains(gu::node_color_of(gate))) << "the definition owns the shared implementation color";
   // A preserved boundary has the Sub's call path, not just its parent's path.
   livehd::partition::Flat_origin_map opaque_origins;
   auto                               opaque

@@ -348,6 +348,40 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
 // Recursive hierarchy cannot be inlined. Compact loops remain opaque in the
 // virtual view, so their presence does not prevent ordinary module merging.
 // This visits each unique definition once.
+// Clock-control wrappers must be visible with their clock consumers: an
+// opaque module boundary hides the latch/AND shape needed by ICG mapping and
+// clock normalization. Ordinary repeated data implementations stay reusable.
+bool is_clock_gate_definition(hhds::Graph* graph) {
+  namespace gu   = livehd::graph_util;
+  bool has_latch = false;
+  for (auto node : graph->body().nodes()) {
+    const auto op = gu::type_op_of(node);
+    if (op == Ntype_op::Latch) {
+      has_latch = true;
+    } else if (gu::is_type_flop(node) || op == Ntype_op::Memory || op == Ntype_op::Sub) {
+      return false;
+    }
+  }
+  if (!has_latch || graph->get_io()->get_output_pin_decls().empty()) {
+    return false;
+  }
+  for (const auto& port : graph->get_io()->get_output_pin_decls()) {
+    auto driver = graph->get_output_pin(port.name).get_driver_pin();
+    for (unsigned depth = 0; depth < 64 && !driver.is_invalid(); ++depth) {
+      auto node = driver.get_master_node();
+      auto op   = gu::type_op_of(node);
+      if (op != Ntype_op::Get_mask && op != Ntype_op::Sext) {
+        break;
+      }
+      driver = gu::get_driver_of_sink_name(node, "a");
+    }
+    if (driver.is_invalid() || gu::real_width(driver) != 1 || gu::type_op_of(driver.get_master_node()) != Ntype_op::And) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool hierarchy_is_flattenable(hhds::Graph* top, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& gid2graph, std::string* why) {
   absl::flat_hash_set<hhds::Gid> done;
   absl::flat_hash_set<hhds::Gid> on_path;
@@ -712,7 +746,7 @@ void Pass_color::color(Eprp_var& var) {
   std::unordered_set<hhds::Gid> reused_bodies;
   if (alg == "synth") {
     for (const auto& [gid, count] : references) {
-      if (count > 1 && gid2graph.contains(gid) && !loop_bodies.contains(gid)) {
+      if (count > 1 && gid2graph.contains(gid) && !loop_bodies.contains(gid) && !is_clock_gate_definition(gid2graph.at(gid))) {
         reused_bodies.insert(gid);
       }
     }
@@ -723,7 +757,8 @@ void Pass_color::color(Eprp_var& var) {
           continue;
         }
         auto gid = node.get_subnode_gid();
-        if (gid2graph.contains(gid) && !loop_bodies.contains(gid) && reused_bodies.insert(gid).second) {
+        if (gid2graph.contains(gid) && !loop_bodies.contains(gid) && !is_clock_gate_definition(gid2graph.at(gid))
+            && reused_bodies.insert(gid).second) {
           todo.push_back(gid);
         }
       }

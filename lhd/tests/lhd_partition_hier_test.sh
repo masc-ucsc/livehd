@@ -72,7 +72,7 @@ for entry in "${DESIGNS[@]}"; do
     # color) region submodules under a wrapper. The single-region optimization --
     # no pointless `<def>__c<id>` wrapper whose only body is one region instance
     # -- is pinned below.
-    grep -q "__c" "$D/part.v" || fail "$FIX/$ALG: multi-region partition has no per-color submodules"
+    grep -qE "__(c[0-9]+|a_[0-9a-f]+)" "$D/part.v" || fail "$FIX/$ALG: multi-region partition has no per-color submodules"
     # 6. LEC: the partitioned hierarchical design must equal the original
     run lec --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
     # 7. The anonymous region wrappers are emitted with the reserved transparent
@@ -126,7 +126,7 @@ run pass color synth --top hier_comb.top --set color.hier=false --set color.synt
 run pass partition --top hier_comb.top lg:"$FD/lg" --emit-dir lg:"$FD/lg2" --workdir "$FD/w4"
 run compile lg:"$FD/lg2" --top hier_comb.top --emit verilog:"$FD/part.v" --workdir "$FD/w5"
 grep -q "^module adder" "$FD/part.v" || fail "pipe: child def 'adder' dropped (hierarchy lost)"
-grep -q "__c" "$FD/part.v" && fail "pipe: single-region defs must not get a __c wrapper"
+grep -qE "__(c[0-9]+|a_[0-9a-f]+)" "$FD/part.v" && fail "pipe: single-region defs must not get a __c wrapper"
 run lec --impl verilog:"$FD/part.v" --ref verilog:"$FD/ref.v" --top hier_comb.top --workdir "$FD/c"
 echo "PASS: single-region-per-def partition needs no __c wrapper and is LEC-equivalent"
 

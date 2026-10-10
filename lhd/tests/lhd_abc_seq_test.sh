@@ -284,14 +284,15 @@ if selected registers; then
   echo "PASS: register=true folds the synchronous reset into D and maps the registers to named DFF cells (abc_seq)"
 
   # hier_seq: six 8-bit registers (delayer.r x4, stage_unit.r x2) -> 48 DFFx1
-  # cells, each under its register's (hierarchical, `\a.d1.r[<bit>] `) name.
+  # physical cells; shared definitions are counted at each instance. Each
+  # register retains its (hierarchical, `\a.d1.r[<bit>] `) name.
   run_abc_lec hier_seq hier_seq.top true false
   ! has "$NETV" "posedge" || fail "hier_seq register=true: a synchronous-reset register stayed a native flop"
-  [ "$(grep -h '^DFFx1 ' "$NETV"/*.v | wc -l | tr -d ' ')" = 48 ] \
-    || fail "hier_seq register=true: expected 48 DFFx1 cells (6 registers x 8 bits), got $(grep -h '^DFFx1 ' "$NETV"/*.v | wc -l)"
+  [ "$(python3 lhd/tests/mapped_cells.py "$NETV" hier_seq.top DFFx1)" = 48 ] \
+    || fail "hier_seq register=true: expected 48 physical DFFx1 cells (6 registers x 8 bits)"
   grep -hqE "^DFFx1 \\\\([a-z0-9.]+\.)?r\\[[0-7]\\] \(" "$NETV"/*.v \
     || fail "hier_seq register=true: registers did not map to DFFx1 cells under their name: $(grep -h '^DFFx1 ' "$NETV"/*.v | head -8)"
-  [ "$MAPPER" = abc ] || usyn_report "$QOR" abc 48
+  [ "$MAPPER" = abc ] || usyn_report "$QOR" abc 16
   echo "PASS: register=true maps synchronous-reset registers to DFF cells across hierarchy (hier_seq)"
 
   # A synchronous reset expressed in the D cone does NOT specify power-on state.

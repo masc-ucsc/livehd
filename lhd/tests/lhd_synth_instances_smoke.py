@@ -173,11 +173,13 @@ assert mapped(edited) == mapped(fresh_value), (edited["qor"]["abc"], fresh_value
 evidence = ("edited", summary(edited_report), "cold", summary(cold_report), edited_report["cache"])
 reused = [row for row in edited_report["regions"] if row["cache_reused"]]
 if per_occurrence:
-    # Only the `left` occurrence was edited: a color whose name and frozen
-    # decision match the cold run must replay the cold cache entry.
-    untouched = [row for row in edited_report["regions"] if (row["module"], row["artifact"]["path"]) in decisions(cold_report)]
-    assert untouched, evidence
-    assert all(row["cache_reused"] and row["cache_key"] == keys(cold_report)[row["module"]] for row in untouched), evidence
+    # Only `left` changes. Elaboration may rename the unchanged shared
+    # definition when the new specialization appears; its semantic cache key
+    # must still replay the cold decision. The independent oracle and fresh
+    # synthesis above also check the reconstructed implementation.
+    cold_keys = set(keys(cold_report).values())
+    untouched = [row for row in edited_report["regions"] if row["cache_key"] in cold_keys]
+    assert untouched and all(row["cache_reused"] for row in untouched), evidence
 assert reused, evidence
 if per_definition:
     # The unedited FLIP=0 specialization is renamed once the FLIP=1 one

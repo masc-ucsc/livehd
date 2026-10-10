@@ -88,6 +88,7 @@ lhd_verilog(
 )
 
 _FLOW_DATA = [
+    "mapped_cells.py",
     "//lhd",
     "//inou/prp:equiv_tests",
     "//inou/yosys:scripts",
@@ -2171,18 +2172,19 @@ sh_test(
     env = {"ABC_TEST_THREADS": "2"},
 )
 
-# One target for all three pass.abc.memory modes: the synth/LEC/identity prefix
-# runs once, then native simulation runs once per distinct emitted netlist.
-sh_test(
-    name = "lhd_memory_hierarchy_test",
-    size = "large",
+# Keep cross-mode identity checks separate from the three simulation legs.
+# Each leg retains its mapped-netlist LEC while avoiding repeated synthesis.
+[sh_test(
+    name = "lhd_memory_hierarchy_test" + suffix,
+    size = "medium",
     srcs = ["lhd_memory_hierarchy_test.sh"],
+    env = {"NATIVE_MODE": mode},
     data = _FLOW_DATA + [
         "//tools:native_sim.py",
         "//inou/prp:abc_tests",
         "//ware:cgen_memory_rtl",
     ],
-)
+) for suffix, mode in [("", "default"), ("_native", "false"), ("_lowered", "true"), ("_identities", "identities")]]
 
 sh_test(
     name = "lhd_ware_options_smoke",

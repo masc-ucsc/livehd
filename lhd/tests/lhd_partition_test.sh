@@ -48,7 +48,7 @@ for ALG in acyclic synth; do
   # one region is emitted directly under its own name, with no pointless
   # `part_flat__c` wrapper -- is pinned on the UNCOLORED (one color-0 region)
   # design at the end of this file.
-  grep -q "part_flat__c" "$D/part.v" || fail "$ALG: multi-region partition has no per-color submodules"
+  grep -qE "part_flat__(c[0-9]+|a_[0-9a-f]+)" "$D/part.v" || fail "$ALG: multi-region partition has no per-color submodules"
   # 5. LEC: the partitioned design must equal the original
   run lec --impl verilog:"$D/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$D/c"
   echo "PASS: $ALG partition is LEC-equivalent to the original"
@@ -82,7 +82,7 @@ grep -q '"diagnostics_count":{"errors":0,"warnings":1}' "$CD/r.json" \
 # directly under the top's own name (no pointless __c0 wrapper).
 run compile lg:"$CD/lg2" --top "$TOP" --emit verilog:"$CD/part.v" --workdir "$CD/w5"
 grep -q "^module part_flat" "$CD/part.v" || fail "uncolored partition did not emit the top module"
-grep -q "part_flat__c" "$CD/part.v" && fail "uncolored single-region design must not get a __c wrapper"
+grep -qE "part_flat__(c[0-9]+|a_[0-9a-f]+)" "$CD/part.v" && fail "uncolored single-region design must not get a __c wrapper"
 # and it is still LEC-equivalent to the original
 run lec --impl verilog:"$CD/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$CD/c"
 echo "PASS: uncolored design -> partition warns once + color-0 region, LEC-equivalent"

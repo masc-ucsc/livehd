@@ -66,9 +66,11 @@ TEST(UsynMappedChoices, WinnerOwnsItsNativeArtifactsAndWarmTrialsRemainDetermini
   Eprp_var var;
   var.graphs.push_back(top);
   var.dict["tmap_trials"] = "2";
-  var.dict["library"]     = "mock.lib";
-  var.dict["qor"]         = root + "/qor.json";
-  var.dict["cache_dir"]   = root + "/cache";
+  // The provider is mocked, but tuning still fingerprints its library input.
+  std::ofstream(root + "/mock.lib") << "mock provider library\n";
+  var.dict["library"]   = root + "/mock.lib";
+  var.dict["qor"]       = root + "/qor.json";
+  var.dict["cache_dir"] = root + "/cache";
   for (unsigned run = 0; run < 4; ++run) {
     refuse_second               = run == 2;
     tie_cost                    = run == 3;

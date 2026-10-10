@@ -76,10 +76,10 @@ for entry in "${DESIGNS[@]}"; do
 
   # One module per color id, and none of the per-cloud `_r<k>` splits that a
   # missing "packed" flag would produce.
-  grep -qE "^module ${TOP//./_}__c[0-9]+ " "$D/post.v" \
-    || grep -qE "__c[0-9]+" "$D/post.v" \
+  grep -qE "^module ${TOP//./_}__(c[0-9]+|a_[0-9a-f]+) " "$D/post.v" \
+    || grep -qE "__(c[0-9]+|a_[0-9a-f]+)" "$D/post.v" \
     || fail "$FIX: partition emitted no <def>__c<id> region module"
-  grep -qE "__c[0-9]+_r[0-9]+" "$D/post.v" && fail "$FIX: packed color was split into per-cloud _r modules"
+  grep -qE "__(c[0-9]+|a_[0-9a-f]+)_r[0-9]+" "$D/post.v" && fail "$FIX: packed color was split into per-cloud _r modules"
 
   run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
   echo "PASS: $FIX cones -> partition -> LEC-equivalent"

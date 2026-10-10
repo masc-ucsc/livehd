@@ -247,10 +247,14 @@ if [ "$MAPPER" = usyn ]; then
   python3 - "$NATIVE" "$W/net0v" <<'PY' || fail "cold USYN mapping did not keep exactly the 48 source register bits"
 import glob, json, re, sys
 t = json.load(open(sys.argv[1]))["totals"]
-assert t["register_bits"] == 48 and t["eligible_endpoints"] == 48, t
+# The native report counts two reusable 8-bit register implementations.
+assert t["register_bits"] == 16 and t["eligible_endpoints"] == 16, t
 text = "".join(open(f).read() for f in glob.glob(sys.argv[2] + "/*.v"))
 flops = len(re.findall(r"^\s*DFFx1\s", text, re.M))
-assert flops == 48, flops
+assert flops == 16, flops
+sys.path.insert(0, "lhd/tests")
+from mapped_cells import count_cells
+assert count_cells(sys.argv[2], "hier_seq.top", "DFFx1") == 48
 assert "always_ff" not in text and not re.search(r"always\s*@\s*\(\s*(pos|neg)edge", text), "native flop in the mapped netlist"
 PY
 fi

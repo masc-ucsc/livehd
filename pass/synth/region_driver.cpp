@@ -942,7 +942,8 @@ std::string applied_operations(std::span<const hhds::Node_class> nodes, const Dr
   }
   return rows + "]";
 }
-std::string tune_key(const partition::Region_body& rb, const Driver_options& options, uint64_t salt) {
+std::string tune_key(const partition::Region_body& rb, const Driver_options& options, std::string_view flow, std::string_view load,
+                     uint64_t salt) {
   if (!rb.pre_body) {
     return {};
   }
@@ -970,6 +971,16 @@ std::string tune_key(const partition::Region_body& rb, const Driver_options& opt
                         options.auto_adder,
                         options.auto_multiplier,
                         options.auto_barrel);
+  // Equal arithmetic cones can belong to differently constrained regions.
+  // The ID alone is not semantic, but ware/flow/load are part of the policy:
+  // a selected implementation must never leak into a disabled sibling.
+  recipe += std::format("|ware={}/{}/{}/{}|flow={}|load={}",
+                        options.ware,
+                        options.ware_arith,
+                        options.ware_cmp,
+                        options.ware_shift,
+                        flow,
+                        load);
   for (const auto& hint : hints) {
     recipe += hint;
   }
@@ -1121,11 +1132,12 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     (void)apply_region_overrides(rb, overrides);
   }
   if (!ware_trial_) {
-    auto  key                         = tune_key(rb, opts_, opts_.tune_salt);
-    auto* owner                       = coordinator_ ? coordinator_ : this;
+    auto  key   = tune_key(rb, opts_, overrides.flow.value_or(""), overrides.load.value_or(""), opts_.tune_salt);
+    auto* owner = coordinator_ ? coordinator_ : this;
     owner->tune_keys_[rb.module_name] = key;
     bool replay                       = false;
-    if (opts_.tune_store && opts_.tune_profile == "auto" && !key.empty()) {  // `on` explores afresh from the defaults; `off` ignores the store
+    if (opts_.tune_store && opts_.tune_profile == "auto"
+        && !key.empty()) {  // `on` explores afresh from the defaults; `off` ignores the store
       const auto stored = opts_.tune_store->find(key);
       if (!stored.empty()) {
         replay_tune(opts_, stored);

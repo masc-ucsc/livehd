@@ -60,7 +60,7 @@ run pass color acyclic --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w4"
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w5"
 
-REGIONS=$(grep -oE '[A-Za-z0-9_.]+__c[0-9]+' "$W/re/library.txt" | sort -u)
+REGIONS=$(grep -oE '[A-Za-z0-9_.]+__(c[0-9]+|a_[0-9a-f]+)' "$W/re/library.txt" | sort -u)
 [ -n "$REGIONS" ] || fail "no __cN region modules in the partition twin: $(cat "$W/re/library.txt")"
 
 # Map every arithmetic region, including division.

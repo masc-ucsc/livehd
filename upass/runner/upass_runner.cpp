@@ -8132,7 +8132,21 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
 
-  if (!call_synth.empty()) {
+  // A module-scoped synthesis hint belongs to the callee, not the rest of
+  // the caller. Preserve the instance until graph inlining, which carries
+  // node policies without extending their lexical scope.
+  const auto has_synth_scope = [&](auto&& self, const auto& node) -> bool {
+    if (callee->get_name(node) == "__synth_scope") {
+      return true;
+    }
+    for (const auto& child : callee->children(node)) {
+      if (self(self, child)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (!call_synth.empty() || has_synth_scope(has_synth_scope, callee->get_root())) {
     stash_sub_instance_port_facts(dst_name, callee);
     return false;
   }

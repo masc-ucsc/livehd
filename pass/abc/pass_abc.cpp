@@ -208,7 +208,8 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("stats", "report one mapped QoR row per (definition, color); incremental rows include resynth=1|0", "false");
   m.add_label_optional(
       "adder",
-      "auto|rca|cska|cla|prefix|brent: auto uses the heuristic choice (smallest, or fastest for a timed region); it compares mapped area or critical-path timing, including inlined arithmetic, only under synth.tune.profile=on",
+      "auto|rca|cska|cla|prefix|brent: auto uses the heuristic choice (smallest, or fastest for a timed region); it compares "
+      "mapped area or critical-path timing, including inlined arithmetic, only under synth.tune.profile=on",
       "auto");
   m.add_label_optional("tune_profile", "internal synth.tune.profile", "auto");
   m.add_label_optional("tune_validate", "internal synth.tune.validate", "structural");
@@ -1261,7 +1262,8 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     final.add("tune_profile", "auto");
     final.add("tune_validate", "structural");
     final.add("tune_finalize", "true");
-    final.add("tune_dir", "");
+    final.add("tune_dir", out + "/tune_finalize");
+    final.add("tune_persist", "false");
     final.add("tune_file", selection);
     final.add("tune_export", "");
     final.add("qor", canonical_qor);

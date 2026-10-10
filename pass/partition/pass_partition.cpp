@@ -1,7 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_partition.hpp"
-#include "synth_policy.hpp"
 
 #include <rapidjson/document.h>
 
@@ -37,6 +36,7 @@
 #include "occurrence_materialize.hpp"
 #include "str_tools.hpp"
 #include "synth_groups.hpp"
+#include "synth_policy.hpp"
 
 using namespace livehd::graph_util;  // type_op_of, node_color_of, const_of, ...
 using livehd::color::is_partitionable;
@@ -1819,7 +1819,10 @@ void Partitioner::build_module(uint32_t r) {
       rapidjson::Document d;
       const std::string   json{info.get()};
       d.Parse(json.c_str());
-      legacy = d.IsObject() && d.HasMember("region_opts") && d["region_opts"].HasMember(std::to_string(color).c_str());
+      legacy = d.IsObject()
+               && ((d.HasMember("region_opts") && d["region_opts"].HasMember(std::to_string(color).c_str()))
+                   || (d.HasMember("seeded") && d["seeded"].IsTrue() && !d.HasMember("synth_groups"))
+                   || (d.HasMember("algorithm") && d["algorithm"] == "block-attr"));
     }
     if (legacy) {
       name = std::format("{}__c{}", top_, color);
@@ -2536,7 +2539,7 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                                          std::string_view top_in, bool debug_color, const livehd::partition::Body_builder& hook,
                                          livehd::partition::Flatten_mode flatten, bool want_pre_bodies,
                                          const livehd::partition::Body_batch_builder& batch_hook, size_t batch_size,
-                                         const std::unordered_set<hhds::Gid>&     preserved_defs,
+                                         const std::unordered_set<hhds::Gid>&     requested_preserved_defs,
                                          const std::function<void(hhds::Graph*)>& prepare_src,
                                          const livehd::partition::Admission&      admission) try {
   check_admission(admission, "begin", 0);
@@ -2550,6 +2553,17 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
     return false;
   }
 
+  auto preserved_defs = requested_preserved_defs;
+  if (flatten == livehd::partition::Flatten_mode::on && !requested_preserved_defs.contains(g->get_gid())) {
+    // Explicit whole-design flattening overrides ordinary shared-definition
+    // reuse. Compact loop implementations retain their separate semantics.
+    for (auto* def : order) {
+      auto policy = def->get_input_node().attr(livehd::attrs::synth_policy);
+      if (policy.has() && livehd::synth_attr::read(policy.get()).contains("_reuse_definition")) {
+        preserved_defs.erase(def->get_gid());
+      }
+    }
+  }
   if (flatten_resolved(g, flatten)) {
     for (auto* def : order) {
       check_admission(admission, "definition-step");
@@ -2627,7 +2641,7 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                   want_pre_bodies,
                   batch_hook,
                   batch_size,
-                  /*skip_single_pre=*/flatten_single_module(g, flatten),
+                  /*skip_single_pre=*/flatten_single_module(g, flatten) && !preserved_defs.contains(g->get_gid()),
                   admission);
     bool        ok = p.run();
     if (ok) {
