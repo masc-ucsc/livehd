@@ -2955,15 +2955,21 @@ read-only:
 | implementation (yosys-slang) | **4 clock nets** |
 | reference (independent Slang) | **4 clock nets** |
 
-Both sides agree with the Lean scanner's four resolved domains (R15.9). The
-fifth root exists only in the **miter-wide** schedule LEC builds across both
-sides at once — which is exactly what `net_key()`'s own comment says to expect:
-an internal key is "stable within a graph … the miter-wide rule is that BOTH
-sides normalize, not that internal keys match across sides."
+Both counts match the Lean scanner's four resolved domains (R15.9).
 
-So the earlier comparison was invalid on its face: it set a count taken from one
-graph against a count taken across two. **Compare root inventories per exact
-graph side before concluding two analyses disagree.**
+**Equal counts are not identical inventories, and this does not identify the
+anonymous root.** Three per-side 4s are consistent with the fifth root being a
+miter artifact — which is what `net_key()`'s own comment leads one to expect, an
+internal key being "stable within a graph … the miter-wide rule is that BOTH
+sides normalize, not that internal keys match across sides" — but a count is not
+a mapping. **Which state element, port or net `\x02111` corresponds to is an
+open question**, and settling it needs the per-side root *sets* compared
+element-by-element, not their sizes.
+
+What is established is narrower: the earlier comparison was invalid on its face,
+because it set a count taken from one graph against a count taken across two.
+**Compare root inventories per exact graph side before concluding that two
+analyses disagree** — and compare the inventories, not their cardinalities.
 
 The disposition: a known native scheduler refusal on a multi-root miter,
 recorded and not worked around. It does not block the Lean value gates, which
@@ -3000,12 +3006,58 @@ the hardest kind of difference to notice — nothing downstream contradicts
 itself, the design simply shows a value its own commit side has already
 discarded.
 
-**No current export is affected.** Across **171** emitted artifacts (125-module
-CORE-ET sweep, DINO, CVA6), the unenforced direction occurs **0** times and the
-enforced direction **0** times. The scanner writes both sides from one field
-(`Flop::asynchronous`), so it cannot produce the mismatch. This is a synthetic
-certificate exposing a **checker admission gap**, not evidence that anything
-emitted is wrong.
+### R17.1 Correction: the "171 artifacts, zero mismatches" claim was false
+
+That claim was wrong, and wrong because of how it was measured. The scan keyed
+FlopDescs on the field under test:
+
+```python
+re.findall(r'\{ width := \d+, din := \d+,[^}]*asyncReset := (true|false) \}', txt)
+```
+
+Every artifact emitted **before** `asyncReset` existed has no such field, so the
+match returned nothing, the loop body never ran, and those files silently
+contributed "zero mismatches". The right answer for them was not zero — it was
+*this method cannot see them*.
+
+Re-measured, parsing on a field that is always present (`resetActiveLow`) and
+treating an absent `asyncReset` as `false`, which is the Lean default:
+
+| Corpus | Files | Flops | No `asyncReset` field | `flopQAsync` on `asyncReset=false` | Files affected |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **fresh** CORE-ET (`step2_ff`) | 81 | 1,142 | 0 | **0** | 0 |
+| **fresh** DINO (`step2b_dino`) | 3 | 194 | 0 | **0** | 0 |
+| **historical** CVA6 (`cva6_vc`) | 87 | 2,056 | **2,056** | **2,043** | **51** |
+
+So: **84 fresh artifacts, zero mismatches in either direction** — that part
+holds, and it is the part that says the current scanner is sound. But **51 of
+the 87 historical CVA6 artifacts carry 2,043 `flopQAsync` sources on descriptors
+whose `asyncReset` defaults to false**, which is the *enforced* direction and is
+refused by `checkDesign` as `asyncFlagMismatch`.
+
+Confirmed on a real one rather than inferred: the historical
+`csr_regfile_gate_Lgraph.lean` (534 `flopQAsync` sources, 534 FlopDescs, none
+carrying the field) still **proves its two generic theorems**, and
+`checkDesign` **refuses it**. The certificate was not modified — only
+`DirectCheck` imported and guards appended.
+
+**This is the known re-emission requirement from R13, not a scanner
+regression.** Those artifacts predate clock provenance; they were never emitted
+with the commit-side flag. The lesson for the ledger is narrower and sharper:
+
+> **A compiler/`allEdges` typecheck does not imply runtime admission.** The two
+> theorems say the compiled model equals the interpreted one; they say nothing
+> about whether `checkDesign` would accept the certificate. Historical artifacts
+> must not be counted as runtime-accepted on the strength of an old proof.
+
+Fresh and historical corpora are kept separate from here on, and a claim about
+one is not evidence about the other.
+
+The unenforced direction (`asyncReset := true` read as plain `flopQ`) occurs
+**0** times anywhere — fresh or historical. The scanner writes both sides from
+one field (`Flop::asynchronous`), so it cannot produce it; the R17 fixture is
+synthetic and exposes a **checker admission gap** rather than a defect in
+anything emitted.
 
 **The disposition is a semantics decision and is left open.** Tightening
 `.flopQ` to refuse `asyncReset := true` would reject certificates the checker

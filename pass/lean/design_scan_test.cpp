@@ -1457,8 +1457,14 @@ TEST(DesignScanClocks, QuietClockResetValueOracle) {
   // Note rst=0 asserts flop 2's active-low async reset, which is why it is not
   // asserted on here.
 
-  // -- no clock fires and no reset: everything holds ------------------------
-  emit_case("no edge, no reset: every flop holds",
+  // -- no clock fires; the ACTIVE-HIGH resets are deasserted -----------------
+  //
+  // NOT "every flop holds". `rst=0` ASSERTS flop 2's active-LOW asynchronous
+  // reset, so this row says nothing about flop 2 -- and flop 1's async reset is
+  // active-high, so it is quiet here too. What is checked is the two flops whose
+  // reset is deasserted at rst=0: the synchronous ones, 0 and 3.
+  emit_case("no edge, active-high resets deasserted: the SYNC flops 0 and 3 hold "
+            "(flop 2's active-low async reset is ASSERTED at rst=0 and is covered above)",
             edges(false, false), inputs(0, 1, 5),
             {{0, 99}, {3, 99}},
             {{0, 99}, {3, 99}});
