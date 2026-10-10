@@ -14,6 +14,7 @@
 #include "design_io_meta.hpp"
 #include "emit_design_cert.hpp"
 #include "lean_format.hpp"
+#include "legacy_model.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
@@ -2103,9 +2104,15 @@ TEST(DesignIoMeta, ImplicitOnlyDesignNamesItsClock) {
   EXPECT_FALSE(meta.clocks[0].name.empty());
 }
 
-// Minimal JSON string reader: finds `"key": "..."` and DECODES the escapes.
-// Searching for the escape sequence only proves something was written; decoding
-// proves it reads back as the original byte, which is what a consumer does.
+// A FIELD/ESCAPE DECODER, not a JSON document parser.
+//
+// It finds `"key": "..."` by substring and decodes that one string's escapes. It
+// does not validate the document, does not understand nesting, and would not
+// notice a structural error elsewhere. That is enough for what it is for --
+// proving an escaped byte ROUND TRIPS, where searching for `\u0001` in the text
+// only proves something was written -- and the whole-document check is a
+// separate gate: `scripts/check_io_sidecar.py` parses a real emitted sidecar
+// with a real JSON parser.
 std::optional<std::string> json_string_field(std::string_view json, std::string_view key) {
   const std::string pat = "\"" + std::string(key) + "\": \"";
   const auto        at  = json.find(pat);
@@ -2348,6 +2355,104 @@ TEST(DesignIoMeta, EmissionAndMetadataOutliveTheGraph) {
   emit_design_cert(design, cert, out);
   EXPECT_NE(out.str().find("lifefix_designCert"), std::string::npos);
   EXPECT_FALSE(io_meta_json(meta).empty());
+}
+
+// RESTORATION FAILURE: the backup is the only remaining copy, so it must be
+// kept and reported -- not cleaned up.
+//
+// This cannot be provoked through `publish_pair`: the window between moving an
+// original aside and putting it back is entirely inside one call with no hook in
+// it. The decision logic is therefore a function, and this drives it directly.
+TEST(DesignIoMeta, FailedRestorationKeepsAndReportsTheBackup) {
+  const auto dir = pub_case_dir("restore_failure");
+  const auto a   = (dir / "cert.lean").string();
+  const auto b   = (dir / "io.json").string();
+  // The state after a failed publish that HAD moved both originals aside and
+  // published neither.
+  {
+    std::ofstream(a + ".bak") << "OLD-CERT";
+    std::ofstream(b + ".bak") << "OLD-JSON";
+  }
+  // Block A's restore with a NON-EMPTY directory: `rename` onto it fails, and
+  // `remove` cannot clear it either.
+  std::filesystem::create_directories(a);
+  { std::ofstream(std::filesystem::path(a) / "blocker") << "x"; }
+
+  const auto stranded = detail::rollback_pair(a, b, /*moved_a=*/true, /*moved_b=*/true,
+                                              /*put_a=*/false, /*put_b=*/false);
+  EXPECT_NE(stranded.find(a + ".bak"), std::string::npos)
+      << "a backup that could not be restored was not reported";
+  EXPECT_TRUE(std::filesystem::exists(a + ".bak"))
+      << "the ONLY remaining copy of the previous artifact was deleted";
+  {
+    std::ifstream      in(a + ".bak");
+    std::ostringstream o;
+    o << in.rdbuf();
+    EXPECT_EQ(o.str(), "OLD-CERT") << "the retained backup is not the original content";
+  }
+  // B's restore succeeded, so B is back and its backup is gone.
+  EXPECT_TRUE(std::filesystem::exists(b));
+  EXPECT_FALSE(std::filesystem::exists(b + ".bak"));
+  EXPECT_EQ(stranded.find(b + ".bak"), std::string::npos);
+}
+
+// A certificate whose reset ordinal is referenced ONLY through `flopQAsync`.
+//
+// This is built by hand: it is NOT claimed that the scanner emits one.
+// `build_certificate` sets `reset_pin` via `dep(*f.reset, 1)`, which also
+// creates an Input source, so a scanned certificate has both. The point is that
+// a certificate with only the `flopQAsync` reference is well formed, and an
+// arity computed from `.input` sources alone is too small for it.
+TEST(DesignIoMeta, ArityFromAResetOrdinalWithNoInputSource) {
+  DesignScan    design;
+  CertificateIR cert;
+  design.name = "resetonly";
+  design.inputs.push_back({"d", 0, 8, std::nullopt});
+  design.inputs.push_back({"rst", 1, 1, std::nullopt});
+  design.clocks.push_back({"\x01implicit", "clock", true, true});
+  // The ONLY source: a flop Q whose async reset names ordinal 1. No `.input`
+  // source mentions ordinal 1 at all.
+  Source q;
+  q.id          = 0;
+  q.kind        = SourceKind::Flop;
+  q.width       = 8;
+  q.ordinal     = 0;
+  q.async_reset = true;
+  q.reset_input = 1;
+  cert.sources.push_back(q);
+
+  const auto meta = build_io_meta(design, cert);
+  EXPECT_EQ(meta.runtime_input_arity, 2u)
+      << "arity ignored a reset ordinal reachable only through flopQAsync";
+  ASSERT_EQ(meta.inputs.size(), 2u);
+  EXPECT_TRUE(meta.inputs[1].used_by_model) << "the reset-only ordinal was reported as ignored";
+}
+
+// Graph-out-of-scope coverage for the LEGACY emitter as well. Both emitters are
+// wired to `publish_pair`, so both must hold the property.
+TEST(DesignIoMeta, LegacyEmissionAlsoOutlivesTheGraph) {
+  DesignScan    design;
+  CertificateIR cert;
+  {
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_io_meta_legacy_life");
+    auto  io  = lib.create_io("legacylife");
+    io->add_input("a", 1);
+    io->set_bits("a", 8);
+    io->add_output("z", 1);
+    io->set_bits("z", 8);
+    auto g  = io->create_graph();
+    auto op = create_typed_node(*g, Ntype_op::Or);
+    set_bits(op.create_driver_pin(0), 8);
+    g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+    op.create_driver_pin(0).connect_sink(g->get_output_pin("z"));
+    design = scan_design(*g, {});
+    cert   = build_certificate(design, {});
+  }
+  const LegacyEmitOptions options{};  // defaults: emit_cert, Skip WF
+  std::ostringstream      out;
+  emit_legacy_model(design, cert, options, out);
+  EXPECT_NE(out.str().find("legacylife"), std::string::npos);
+  EXPECT_FALSE(io_meta_json(build_io_meta(design, cert)).empty());
 }
 }  // namespace
 }  // namespace lean_export

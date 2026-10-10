@@ -25,8 +25,9 @@ struct IoPortMeta {
   std::string name;
   uint32_t    ordinal = 0;   // index into RuntimeInput / the output array
   uint32_t    width   = 0;
-  // Does the emitted model actually READ this port? An input the design ignores
-  // still occupies its ordinal -- dropping it would renumber every later port.
+  // Does the emitted model reference this ordinal -- as an `.input` source, or
+  // as a `flopQAsync` reset ordinal? An input the design ignores still occupies
+  // its ordinal; dropping it would renumber every later port.
   bool        used_by_model = false;
 };
 

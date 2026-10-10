@@ -3237,11 +3237,15 @@ caller driving a four-input design would have been handed ordinals in the
 billions. The test caught it; nothing else would have until a runtime tried to
 use the file.
 
-**Arity counts reset-only inputs.** A port that drives only a flop's reset pin
-is never an `.input` source — it is reached through `flopQAsync`'s reset input —
-so an arity computed from inputs alone is too small, and `checkRuntime` would
-then reject an array a caller had built correctly from the sidecar. This matches
-`Direct.inputArity`, which takes `max` over both.
+**Arity maxes over both source kinds**, matching `Direct.inputArity`: `.input`
+ordinals and `flopQAsync`'s reset ordinal. A certificate may reference a reset
+ordinal **only** through `flopQAsync` — that is well-formed — and an arity
+computed from `.input` alone would be too small for it, so `checkRuntime` would
+reject an array a caller had built correctly from the sidecar. (For a
+*scanner-produced* certificate the two agree: `build_certificate` sets
+`reset_pin` via `dep(*f.reset, 1)`, which also creates an Input source. An
+earlier draft claimed a reset port is *never* an `.input` source, which is
+wrong; the `max` is justified by the general case, not by that.)
 
 **Unused ports are listed, never compacted.** Ordinals are dense, so preserving
 "gaps" means keeping every declared port in the list: dropping an unused
@@ -3356,9 +3360,55 @@ takes a `max`, is that `Direct.inputArity` maxes over both — and a certificate
 referencing a reset ordinal **only** through `flopQAsync` is well-formed, so an
 arity from `.input` alone would be too small for it.
 
-### R19.7 Still open
+### R19.7 Closing the remaining gates
 
-Write-port **collision ordering** (one write port in the fixtures, so the `fwd`
-matrix is exercised only in its 1×1 case) and a **real multi-clock CORE-ET
-direct/compiled trace** remain required before D2 acceptance. The configured
-125 CORE-ET + 61 CVA6 + 3 DINO replay is untouched, and D3/D4/FP are not started.
+**Restoration failure is now covered.** It cannot be provoked through
+`publish_pair` — the window between moving an original aside and putting it back
+is entirely inside one call with no hook in it — so rather than add an injection
+seam to production code for one test, the rollback decision is a function,
+`detail::rollback_pair`, driven directly. With a non-empty directory blocking
+A's restore: the backup is **retained with its original content** and **named in
+the returned list**, while B restores normally and its backup is cleaned. The
+earlier code removed both backups unconditionally at that point, destroying the
+only remaining copy.
+
+**The contract in `lean_format.hpp` said too much.** "Every failure leaves
+whatever was there before" is false when the *unwind itself* fails. It now says:
+the previous artifact is not lost — it is in its `.bak`, and the exception names
+that path — but the targets are not promised to be back where they were.
+
+**A reset ordinal referenced only through `flopQAsync`** is now tested on a
+hand-built certificate, explicitly *not* claiming the scanner emits one.
+
+**Legacy emission after the graph's lifetime** is covered alongside the verified
+emitter; both are wired to `publish_pair`, so both must hold the property.
+
+**Scope of the in-test JSON reader, stated precisely.** `json_string_field` is a
+field/escape decoder: it finds one `"key": "..."` by substring and decodes that
+string. It proves a byte round trips and would not notice a structural error
+elsewhere. The whole-document gate is separate —
+`scripts/check_io_sidecar.py` parses an emitted sidecar with a real JSON parser
+and checks the contract: the discriminator, dense input ordinals matching list
+position, `runtime_input_arity` in range and past every used ordinal, dense
+output ordinals, and dense clock ordinals from 0.
+
+**Top override, pinned in production.** `--set formal.lean.top=renamed_top`
+emits `renamed_top_Lgraph.lean` **and** `renamed_top_io.json`, with the
+sidecar's `top` field reading `renamed_top` — both halves renamed together, and
+the metadata describing the artifact actually written. Verified sidecars from
+all three production runs (verified, legacy, override) pass
+`check_io_sidecar.py`.
+
+### R19.8 Still open
+
+Write-port **collision ordering** — a permanent *scanner-produced* two-write /
+two-read gate is still required. The independent control that covers 65,536
+cases bypasses the HHDS scanner, so it corroborates the lowering and is not real
+RTL acceptance.
+
+A **real multi-clock CORE-ET direct/compiled trace** (`txfma_f4` is already
+exported and suitable) remains the next real-design gate.
+
+The configured 125 CORE-ET + 61 CVA6 + 3 DINO replay is untouched, and
+D3/D4/FP are not started — their old clockless `CompileDesignDefs`/`Reify`
+interfaces must not overwrite the post-D2 clock/reset transport when they are.

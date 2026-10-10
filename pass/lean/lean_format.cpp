@@ -122,6 +122,47 @@ void stage(const std::string& path, const std::string& suffix,
 }
 }  // namespace
 
+namespace detail {
+std::string rollback_pair(const std::string& path_a, const std::string& path_b, bool moved_a, bool moved_b,
+                          bool put_a, bool put_b) {
+  std::error_code ec;
+  // Remove only what WE published. A target we never wrote is either the
+  // untouched original or absent, and deleting it is the loss this guards.
+  if (put_a) {
+    std::filesystem::remove(path_a, ec);
+  }
+  if (put_b) {
+    std::filesystem::remove(path_b, ec);
+  }
+  // Restore only from backups we actually made, and KEEP any backup whose
+  // restore fails: at that point it is the sole copy, and removing it to tidy up
+  // would destroy the artifact this whole path is protecting.
+  std::string stranded;
+  if (moved_a) {
+    std::error_code r;
+    std::filesystem::rename(path_a + ".bak", path_a, r);
+    if (r) {
+      stranded += " " + path_a + ".bak";
+    }
+  }
+  if (moved_b) {
+    std::error_code r;
+    std::filesystem::rename(path_b + ".bak", path_b, r);
+    if (r) {
+      stranded += " " + path_b + ".bak";
+    }
+  }
+  // Only a backup that WAS restored is cleaned up.
+  if (moved_a && stranded.find(path_a + ".bak") == std::string::npos) {
+    std::filesystem::remove(path_a + ".bak", ec);
+  }
+  if (moved_b && stranded.find(path_b + ".bak") == std::string::npos) {
+    std::filesystem::remove(path_b + ".bak", ec);
+  }
+  return stranded;
+}
+}  // namespace detail
+
 void publish_pair(const std::string& path_a, const std::function<void(std::ostream&)>& emit_a,
                   const std::string& path_b, const std::function<void(std::ostream&)>& emit_b) {
   const std::string ta = path_a + ".tmp", tb = path_b + ".tmp";
@@ -183,32 +224,7 @@ void publish_pair(const std::string& path_a, const std::function<void(std::ostre
     std::filesystem::rename(tb, path_b);
     put_b = true;
   } catch (...) {
-    // Remove only what WE published. A target we never wrote is either the
-    // untouched original or absent, and deleting it is the loss this guards.
-    if (put_a) {
-      std::filesystem::remove(path_a, ec);
-    }
-    if (put_b) {
-      std::filesystem::remove(path_b, ec);
-    }
-    // Restore only from backups we actually made, and KEEP any backup whose
-    // restore fails: at that point it is the sole copy, and removing it to tidy
-    // up would destroy the artifact this whole path is protecting.
-    std::string stranded;
-    if (moved_a) {
-      std::error_code r;
-      std::filesystem::rename(ba, path_a, r);
-      if (r) {
-        stranded += " " + ba;
-      }
-    }
-    if (moved_b) {
-      std::error_code r;
-      std::filesystem::rename(bb, path_b, r);
-      if (r) {
-        stranded += " " + bb;
-      }
-    }
+    const auto stranded = detail::rollback_pair(path_a, path_b, moved_a, moved_b, put_a, put_b);
     scrub_tmp();
     if (!stranded.empty()) {
       // Report rather than swallow: a persistent filesystem error can prevent
