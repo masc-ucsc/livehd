@@ -3472,3 +3472,60 @@ structure. Upstream `ware/rtl/cgen_memory_1rd_2wr.v` and
 `spec_memory_ww_last_wins` agree on per-lane higher-port priority. The existing
 refusals — undefined, whole-array, and unknown or over-62-bit forwarding
 policies — are unchanged.
+
+## R21. A real multi-clock design, traced
+
+Every gate so far used a fixture built to be testable. This drives
+**`txfma_f4`**, an actual CORE-ET export, and it reads the input and clock
+ordinals **from its sidecar** rather than hard-coding them — which is what the
+sidecar is for, and makes the run a test of that file too.
+
+`scripts/gen_multiclock_trace.py` refuses to emit a trace for a design with
+fewer than two clocks, so this cannot quietly degenerate into a single-domain
+run.
+
+| | |
+| --- | --- |
+| clocks | **2** — `0 = ctrl_f3_clk`, `1 = ctrl_f4_clk` |
+| inputs | 13, of which **11** are read; `runtime_input_arity` 13 |
+| outputs | 5 |
+| flops | 6 |
+
+**13 cases, all decided**, across all four edge vectors — all quiet, all firing,
+`ctrl_f3_clk` alone, `ctrl_f4_clk` alone:
+
+- `checkDesign` admits the artifact, and `checkRuntime` admits every vector;
+- `diffStep` agrees between the **checked direct interpreter** and the compiled
+  residual on each one;
+- `allEdges` is the all-firing vector, and the emitted step equals the preserved
+  interpreter;
+- a **quiet domain is not** that schedule, on this design.
+
+Two things the generator deliberately avoids. **All-zero inputs**: a design fed
+zeros can hold state for reasons unrelated to the clock, so a hold would prove
+nothing — every used input gets a distinct non-zero value derived from its
+ordinal and width. **Unforced probes**: asserting only `diffStep … = none` would
+pass if both implementations were equally wrong, so the trace also pins that a
+fully quiet step leaves the flop array **unchanged**, which the two
+implementations cannot agree on vacuously.
+
+Full report+source axiom audit passes: 2 obligations, 2 reports, 9 citations,
+standard axioms plus the two per-design `native_decide` witnesses.
+
+Provenance (`generated/master_port/txfma_trace/provenance.json`), sha256-16:
+
+```
+artifact  014b5c9983b32f70   sidecar   94a15e4687958035
+trace     1af6e52760791f56   filelist  b08e87a56b2be2a4
+lhd       414d5dcbf99b37fe   generator 2ef417b8c04829dc
+lean      4.31.0 (68218e876d2a38b1985b8590fff244a83c321783)
+git       1e33b49e443a
+```
+
+### R21.1 What this does and does not establish
+
+It is **one** real multi-clock design, on four edge vectors, from one state. It
+is not the configured replay, and it is not RTL acceptance — `txfma_f4`'s
+`lhd lec` comparison is a separate result (R16.7, PROVEN on the independent
+Slang route). What it does establish is that the clock-resolution work holds on
+an artifact nobody built for the purpose.
