@@ -60,8 +60,44 @@ head2 "2. RUN PROVENANCE"
 pf() { grep -m1 "^$1=" "$PROV" 2>/dev/null | cut -d= -f2-; }
 want() { local l="$1" g="$2" w="$3"; [[ "$g" == "$w" ]] && ok "RECORDED   $l = $g" || bad "RECORDED   $l = '${g:-<absent>}', expected '$w'"; }
 want "d4_tracked_dirty"   "$(pf d4_tracked_dirty)"   "no"
-want "cva6_tracked_clean" "$(pf cva6_tracked_clean)" "yes"
-want "cva6_root_rev"      "$(pf cva6_root_rev)"      "6cb200105fb9441d170e45786125a737fab98e91"
+
+# WHICH CORPUS THIS RUN DECLARES, AND ONLY ITS BINDINGS.
+#
+# These checks were written against a CVA6 run and applied unconditionally, so
+# a CORE-ET run failed four of them for having no `cva6_*` fields at all, and
+# -- worse -- a CVA6 run was the only thing whose corpus binding was ever
+# verified. The corpus comes from the run's own provenance; an absent or
+# unknown value is fatal, because a run that will not say what it measured
+# cannot have its inputs re-derived.
+CORPUS_RUN="$(pf corpus)"
+case "$CORPUS_RUN" in
+  coreet|cva6) ok "RECORDED   corpus = $CORPUS_RUN" ;;
+  selftest)    bad "RECORDED   corpus = selftest: these rows exercise the DRIVER and are not corpus evidence" ;;
+  "")          bad "RECORDED   corpus is absent; the run does not say what it measured" ;;
+  *)           bad "RECORDED   corpus = '$CORPUS_RUN' is not a corpus this verifier knows" ;;
+esac
+
+if [[ "$CORPUS_RUN" == "cva6" ]]; then
+  # The pinned revision stays the expectation. `D4_EXPECT_CVA6_REV` exists so a
+  # deliberately different source state can be verified, and the override is
+  # PRINTED, so a run checked against another revision says so in its own log.
+  EXPECT_CVA6_REV="${D4_EXPECT_CVA6_REV:-6cb200105fb9441d170e45786125a737fab98e91}"
+  [[ "$EXPECT_CVA6_REV" == "6cb200105fb9441d170e45786125a737fab98e91" ]] \
+    || printf '  NOTE  the expected CVA6 revision was overridden to %s\n' "$EXPECT_CVA6_REV"
+  want "cva6_tracked_clean" "$(pf cva6_tracked_clean)" "yes"
+  want "cva6_root_rev"      "$(pf cva6_root_rev)"      "$EXPECT_CVA6_REV"
+elif [[ "$CORPUS_RUN" == "coreet" ]]; then
+  # The CORE-ET binding, checked with the same force: the revision and tech the
+  # run names, the cleanliness of exactly the paths the filelist flow reads,
+  # and the derived sources -- which are RE-DERIVED below, not quoted.
+  want "coreet_relevant_inputs_clean" "$(pf coreet_relevant_inputs_clean)" "yes"
+  want "coreet_outside_scope_tracked" "$(pf coreet_outside_scope_tracked)" "0"
+  want "coreet_derived_count"         "$(pf coreet_derived_count)"         "4"
+  for k in coreet_root_canonical coreet_rev coreet_tech coreet_patch_script_sha256 \
+           coreet_derived_dir coreet_derived_map_sha256 coreet_derived_aggregate_sha256; do
+    v="$(pf "$k")"; [[ -n "$v" ]] && ok "RECORDED   $k = $v" || bad "RECORDED   $k is absent"
+  done
+fi
 want "jobs_requested"     "$(pf jobs_requested)"     "1"
 want "execution"          "$(pf execution)"          "serial"
 want "stack_limit_kb"     "$(pf stack_limit_kb)"     "8192"
@@ -87,15 +123,55 @@ rehash() {
   else bad "RECOMPUTED $l DIFFERS: recorded $rec, on disk $now"; fi
 }
 rehash "module list"     "$(pf module_list_sha256)"            "$LIST" fatal
-rehash "foundation"      "$(pf cva6_foundation_sha256)"        "$(pf cva6_foundation)" fatal
-rehash "filelist"        "$(pf cva6_filelist_sha256)"          "$(pf cva6_filelist)" fatal
-rehash "config package"  "$(pf cva6_config_pkg_sha256)"        "$(pf cva6_config_pkg)" fatal
+if [[ "$CORPUS_RUN" == "cva6" ]]; then
+  rehash "foundation"      "$(pf cva6_foundation_sha256)"        "$(pf cva6_foundation)" fatal
+  rehash "filelist"        "$(pf cva6_filelist_sha256)"          "$(pf cva6_filelist)" fatal
+  rehash "config package"  "$(pf cva6_config_pkg_sha256)"        "$(pf cva6_config_pkg)" fatal
+fi
 # The lhd binary is legitimately rebuilt between runs; a difference is reported
 # loudly but does not retroactively invalidate rows already produced.
 rehash "lhd binary"      "$(pf lhd_sha256)"                    "$(pf lhd)" note
 # The declared wrapper corpus hash is re-derived the way the sweep derives it.
 wrec="$(pf cva6_wrappers_declared_sha256)"; wdir="$(pf cva6_wrap_dir)"
-if [[ -n "$wrec" && -d "$wdir" ]]; then
+if [[ "$CORPUS_RUN" == "coreet" ]]; then
+  # THE DERIVED SOURCES, RE-DERIVED. The run recorded an aggregate over the
+  # four outputs; this regenerates them from the recorded CORE-ET root with
+  # the recorded generator, into fresh staging, and recomputes the aggregate
+  # the same way. Quoting the recorded value back would audit the run by its
+  # own arithmetic. Read-only: staging is a temporary directory and the
+  # consumed one is never written.
+  cdir="$(pf coreet_derived_dir)"; crec="$(pf coreet_derived_aggregate_sha256)"
+  croot="$(pf coreet_root_canonical)"; cpatch="$ROOT_REPO/scripts/coreet_patch_srcs.py"
+  if [[ -z "$crec" || -z "$croot" || ! -r "$cpatch" ]]; then
+    bad "RECOMPUTED derived CORE-ET sources: cannot re-derive (aggregate '${crec:-<absent>}', root '${croot:-<absent>}')"
+  elif [[ ! -d "$croot" ]]; then
+    bad "RECOMPUTED derived CORE-ET sources: the recorded root $croot is not present, so the aggregate cannot be checked"
+  else
+    cstage="$(mktemp -d "$ROOT_REPO/temp/d4verify.XXXXXX")"
+    if COREET_ROOT="$croot" COREET_PATCHED_OUTDIR="$cstage" python3 -B "$cpatch" >/dev/null 2>&1; then
+      cnow="$(for f in intpipe_mul_div_ctl.sv txfmactl_top.sv txfmaexp_top.sv vpu_defs_pkg.sv; do
+                printf '%s %s\n' "$f" "$(sha256sum < "$cstage/$f" | cut -d' ' -f1)"; done \
+              | sha256sum | cut -d' ' -f1)"
+      [[ "$cnow" == "$crec" ]] \
+        && ok "RECOMPUTED derived CORE-ET sources match $cnow" \
+        || bad "RECOMPUTED derived CORE-ET sources DIFFER: recorded $crec, re-derived $cnow"
+      # The directory the run CONSUMED must still hold those same bytes.
+      if [[ -d "$cdir" ]]; then
+        cdisk="$(for f in intpipe_mul_div_ctl.sv txfmactl_top.sv txfmaexp_top.sv vpu_defs_pkg.sv; do
+                   printf '%s %s\n' "$f" "$(sha256sum < "$cdir/$f" 2>/dev/null | cut -d' ' -f1)"; done \
+                 | sha256sum | cut -d' ' -f1)"
+        [[ "$cdisk" == "$crec" ]] \
+          && ok "RECOMPUTED consumed derived directory still matches $cdisk" \
+          || bad "RECOMPUTED consumed derived directory DIFFERS: recorded $crec, on disk $cdisk"
+      else
+        bad "RECOMPUTED consumed derived directory absent at '${cdir:-<absent>}'"
+      fi
+    else
+      bad "RECOMPUTED derived CORE-ET sources: the recorded generator failed against $croot"
+    fi
+    rm -rf "$cstage"
+  fi
+elif [[ -n "$wrec" && -d "$wdir" ]]; then
   wnow="$(for dm in "${DECLARED[@]}"; do
             f="$wdir/${dm}_gate.sv"
             if [[ -r "$f" ]]; then echo "$dm $(sha256sum < "$f" | cut -d' ' -f1)"; else echo "$dm -"; fi
