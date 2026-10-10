@@ -93,10 +93,40 @@ elif [[ "$CORPUS_RUN" == "coreet" ]]; then
   want "coreet_relevant_inputs_clean" "$(pf coreet_relevant_inputs_clean)" "yes"
   want "coreet_outside_scope_tracked" "$(pf coreet_outside_scope_tracked)" "0"
   want "coreet_derived_count"         "$(pf coreet_derived_count)"         "4"
-  for k in coreet_root_canonical coreet_rev coreet_tech coreet_patch_script_sha256 \
+  # THE CANONICAL TECH. `generic` and `xilinx` pick different `prim_clk_gate`
+  # sources and BOTH succeed, so nothing downstream notices the difference.
+  # A run on the other tech is a run on a different corpus and is refused
+  # here rather than recorded as an equivalent one.
+  want "coreet_tech"                  "$(pf coreet_tech)"                  "generic"
+  for k in coreet_root_canonical coreet_rev coreet_patch_script_sha256 \
            coreet_derived_dir coreet_derived_map_sha256 coreet_derived_aggregate_sha256; do
     v="$(pf "$k")"; [[ -n "$v" ]] && ok "RECORDED   $k = $v" || bad "RECORDED   $k is absent"
   done
+
+  # EVERY ONE OF THOSE IS RECOMPUTED BELOW.
+  #
+  # Presence was all this checked, so each field could carry any value and
+  # pass: a wrong `coreet_rev`, a wrong `coreet_patch_script_sha256` and a
+  # wrong `coreet_derived_map_sha256` each exited 0 and printed VERIFICATION
+  # PASSED. Measured against this CLI. A recorded identity that is never
+  # re-derived is a label, not a binding.
+  croot_v="$(pf coreet_root_canonical)"; crev_v="$(pf coreet_rev)"
+  if [[ -z "$croot_v" ]]; then
+    bad "RECOMPUTED CORE-ET revision: no root recorded"
+  elif [[ ! -d "$croot_v/.git" ]]; then
+    bad "RECOMPUTED CORE-ET revision: $croot_v is not a git checkout, so the recorded revision cannot be checked"
+  else
+    rnow="$(git -C "$croot_v" rev-parse HEAD 2>/dev/null)"
+    [[ "$rnow" == "$crev_v" ]] \
+      && ok "RECOMPUTED CORE-ET revision matches $rnow" \
+      || bad "RECOMPUTED CORE-ET revision DIFFERS: recorded '${crev_v:-<absent>}', checkout at '${rnow:-<unreadable>}'"
+    # The cleanliness the preflight asserted, re-asked of the SAME paths it
+    # scoped: `hw dv mk`, tracked AND untracked, and nothing outside them.
+    dirty="$(git -C "$croot_v" status --porcelain -- hw dv mk 2>/dev/null | wc -l)"
+    [[ "$dirty" == "0" ]] \
+      && ok "RECOMPUTED CORE-ET hw/dv/mk clean" \
+      || bad "RECOMPUTED CORE-ET hw/dv/mk has $dirty change(s); the recorded run claimed clean"
+  fi
 fi
 want "jobs_requested"     "$(pf jobs_requested)"     "1"
 want "execution"          "$(pf execution)"          "serial"
@@ -123,6 +153,15 @@ rehash() {
   else bad "RECOMPUTED $l DIFFERS: recorded $rec, on disk $now"; fi
 }
 rehash "module list"     "$(pf module_list_sha256)"            "$LIST" fatal
+# The patcher that produced the derived sources. Called HERE, not up in the
+# provenance block: `rehash` is defined below that point, and a function used
+# before its definition is a "command not found" that `set -uo pipefail`
+# prints and walks past -- so the check silently did nothing and a tampered
+# hash passed.
+if [[ "$CORPUS_RUN" == "coreet" ]]; then
+  rehash "CORE-ET patcher" "$(pf coreet_patch_script_sha256)" \
+         "$ROOT_REPO/scripts/coreet_patch_srcs.py" fatal
+fi
 if [[ "$CORPUS_RUN" == "cva6" ]]; then
   rehash "foundation"      "$(pf cva6_foundation_sha256)"        "$(pf cva6_foundation)" fatal
   rehash "filelist"        "$(pf cva6_filelist_sha256)"          "$(pf cva6_filelist)" fatal
@@ -155,6 +194,38 @@ if [[ "$CORPUS_RUN" == "coreet" ]]; then
       [[ "$cnow" == "$crec" ]] \
         && ok "RECOMPUTED derived CORE-ET sources match $cnow" \
         || bad "RECOMPUTED derived CORE-ET sources DIFFER: recorded $crec, re-derived $cnow"
+      # THE MAP, AND THE ASSOCIATIONS IN IT.
+      #
+      # The four-file aggregate says the OUTPUTS are this generator's. It says
+      # nothing about which SOURCE each came from -- that is `map.tsv`, and a
+      # recorded `coreet_derived_map_sha256` that is never re-derived is a
+      # label. Measured: a wrong one exited 0 and printed VERIFICATION PASSED.
+      # Column 2 is the ABSOLUTE output path, so a staging derivation's map
+      # can never be byte-equal to the consumed one. Two checks, each asking
+      # what it can actually answer:
+      #   * the recorded hash against the CONSUMED map -- has it changed since
+      #     the run;
+      #   * the ASSOCIATIONS, source path to output BASENAME, consumed against
+      #     freshly derived -- is each output still the one this generator
+      #     makes from that source.
+      mrec="$(pf coreet_derived_map_sha256)"
+      if [[ -z "$mrec" ]]; then
+        bad "RECOMPUTED derived map: no hash recorded"
+      elif [[ ! -r "$cdir/map.tsv" ]]; then
+        bad "RECOMPUTED consumed map absent at $cdir/map.tsv"
+      else
+        mdisk="$(sha256sum < "$cdir/map.tsv" | cut -d' ' -f1)"
+        [[ "$mdisk" == "$mrec" ]] \
+          && ok "RECOMPUTED consumed map matches $mdisk" \
+          || bad "RECOMPUTED consumed map DIFFERS: recorded $mrec, on disk $mdisk"
+        assoc() { awk -F'\t' '{n=split($2,a,"/"); print $1 "\t" a[n]}' "$1" | sort; }
+        if diff -q <(assoc "$cdir/map.tsv") <(assoc "$cstage/map.tsv") >/dev/null 2>&1; then
+          ok "RECOMPUTED source/output associations match a fresh derivation"
+        else
+          bad "RECOMPUTED source/output associations DIFFER from a fresh derivation: an output is not the one this generator makes from that source"
+          diff <(assoc "$cdir/map.tsv") <(assoc "$cstage/map.tsv") | head -6 | sed 's/^/        /'
+        fi
+      fi
       # The directory the run CONSUMED must still hold those same bytes.
       if [[ -d "$cdir" ]]; then
         cdisk="$(for f in intpipe_mul_div_ctl.sv txfmactl_top.sv txfmaexp_top.sv vpu_defs_pkg.sv; do
@@ -230,14 +301,36 @@ done < <(tail -n +2 "$ROWS")
 # ("Operation not permitted") the pipeline still printed 0 and the check
 # reported "no scopes left behind".  An unavailable query is UNKNOWN, which is a
 # verification failure -- it is not proof of zero leftovers.
+# ...AND IT MUST ASK ABOUT **THIS** RUN'S SCOPES.
+#
+# The pattern was every `d4emit-*` unit on the machine, so a DIFFERENT sweep
+# running concurrently made this fail -- reported as leftovers from the run
+# being verified, which is a false accusation about the wrong run. Each unit
+# name ends in the sweep's own pid, and every record names its unit, so the
+# question is asked about exactly those. A run whose records name no unit at
+# all is still refused: that is missing evidence, not a clean result.
+mapfile -t RUN_UNITS < <(grep -h '^unit=' "$RUN"/blocks/*/emit.cgroup 2>/dev/null \
+                         | cut -d= -f2- | sort -u)
 scope_out="$(systemctl --user list-units --all --no-legend 'd4emit-*' 2>&1)"
 scope_rc=$?
 if [[ "$scope_rc" -ne 0 ]]; then
   bad "live-scope query FAILED (rc=$scope_rc): $(head -1 <<<"$scope_out") -- cannot show that no scope was left behind"
-elif [[ -n "${scope_out//[[:space:]]/}" ]]; then
-  bad "d4emit scopes left behind: $(head -2 <<<"$scope_out" | tr '\n' ' ')"
+elif [[ "${#RUN_UNITS[@]}" -eq 0 ]]; then
+  bad "no emit.cgroup record names a scope unit, so this run's scopes cannot be asked about"
 else
-  ok "live-scope query succeeded and reports no d4emit scopes left behind"
+  mine=""
+  for u in "${RUN_UNITS[@]}"; do
+    line="$(grep -F -- "$u" <<<"$scope_out" | head -1)"
+    [[ -n "$line" ]] && mine+=" $line"
+  done
+  others="$(( $(grep -c . <<<"${scope_out//[[:space:]]/}") ))"
+  if [[ -n "${mine//[[:space:]]/}" ]]; then
+    bad "scopes from THIS run left behind:$(head -c 300 <<<"$mine")"
+  else
+    ok "live-scope query succeeded; none of this run's ${#RUN_UNITS[@]} scope unit(s) is still loaded"
+    [[ -n "${scope_out//[[:space:]]/}" ]] \
+      && printf '  NOTE  other d4emit scopes are live on this machine (another sweep); not this run\n'
+  fi
 fi
 
 # -------------------------------------- 4. certificates, hashes, outcomes
@@ -280,7 +373,14 @@ while IFS=$'\t' read -r _c m _e cert _sha _s _n _f _mm _p _pm _co rt _rm _dg _d 
     if ! [[ "$erc" =~ ^-?[0-9]+$ ]]; then
       bad "$m: emit_rc='$erc' is not an integer; malformed evidence is not accepted coverage"
       n_rc_bad=$((n_rc_bad+1)); REJECTED["$m"]="emit_rc=malformed"
-    elif [[ "$erc" -ne 0 ]]; then
+    # TEXTUAL ZERO, NOT ARITHMETIC ZERO.
+    #
+    # `[[ "$erc" -ne 0 ]]` evaluates in Bash arithmetic, which is 64-bit and
+    # WRAPS: `emit_rc=18446744073709551616` is 2^64, compares equal to 0, and
+    # was accepted as a clean emitter result. Measured against this CLI. The
+    # only string the writer ever emits for success is the one character `0`,
+    # so that is what is required -- no leading zeros, no sign, no width.
+    elif [[ "$erc" != "0" ]]; then
       bad "$m: emitter returned rc=$erc; runtime status is '$rt' -- a nonzero emitter result is never accepted coverage"
       n_rc_bad=$((n_rc_bad+1)); REJECTED["$m"]="emit_rc=$erc"
     fi
