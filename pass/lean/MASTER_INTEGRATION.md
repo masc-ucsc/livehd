@@ -4889,3 +4889,43 @@ end, its `/usr/bin/time` result, which is the figure to quote.
 The rule this leaves: when a process is wrapped — `lake env`, `/usr/bin/time`,
 `timeout`, `nice` — resolve to the process doing the work before reporting
 anything about it. The wrapper's numbers describe the wrapper.
+
+## R42. `csr_regfile` is terminal FAILED, and it is the flat-record limit again
+
+I reported this job as "legitimate, not stalled ... bounded by the job
+timeout", from a live process and an elapsed time. It had already failed.
+
+```
+export_state  EXPORTED
+proof_state   FAILED
+lean_exit     1        lean_errors 3
+wall_clock    1:03:57  peak_rss_kib 21,724,296
+```
+
+The 4.88 s the queue log shows against the case is **export** time; the
+typecheck is the hour. And the cause is not resources:
+
+```
+csr_regfile_gate_Lgraph.lean:641:15: error: failed to compile definition …
+csr_regfile_gate_Lgraph.lean:641:15: error(lean.dependsOnNoncomputable) …
+```
+
+`csr_regfile_gate_state.mk has too many fields` — **534 `st_` fields**, against
+`txfmactl_top`'s 289 (R29.2). The same Lean **code-generator constructor-arity
+limit**, twice now, and 534 is well clear of it.
+
+**This is a flat-record/toolchain limitation and is recorded as one.** Not
+repaired: nesting the record, marking definitions `noncomputable` to dodge code
+generation, or moving the toolchain pin would each be a change the user has
+excluded. The failure keeps its full provenance — run directory, retained log,
+timing file, digests — and stands as a measured limit of the current
+flat-record decision at 534 fields.
+
+**What I got wrong procedurally**: a process being alive is not evidence that
+it will succeed, and I said "bounded, not stalled" where the honest statement
+was "still running; outcome unknown". R41 said to resolve through the wrapper
+before reporting; this adds the other half — wait for the terminal result
+before characterising it at all.
+
+The queue was never at risk: it has advanced past this case on its own and is
+at 23/61.

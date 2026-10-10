@@ -111,11 +111,11 @@ importer is unaffected.
 | `Reify.lean` | 197 | 0 |
 | `ReifyGen.lean` | 664 | 0 |
 | `D3Harness.lean` | 390 | 0 |
-| **`ReifyProof.lean`** | 1,327 | **4** |
+| `ReifyProof.lean` | 1,327 | **0** — my count of 4 was comments; see §8 |
 
-`ReifyProof.lean`'s four `sorry`s are a **named incompleteness that travels
-with the port** and must not be absorbed silently: nothing depending on them
-may be reported as PROVEN.
+`ReifyProof.lean` has **no** holes (§8). What does travel with the port is the
+obligation that each **generated** theorem be audited: a failed emission rests
+on `sorryAx`, and `d3_proof_gate` / `auditOrThrow` reject it.
 
 **Why this matters here beyond D3.** The standing D3 sweep budget is ~20 GB
 aggregate RSS, and the DINO measurements in this ledger run 8.4–13.3 GB per
@@ -124,8 +124,8 @@ a probe that fits and one that does not. It is also the right carrier for the
 direct sweep (R35), whose probes import `DirectTrace` for exactly this reason.
 
 **Port order for D3:** the `Defs` split first (it is mechanical, `sorry`-free
-and independently valuable), `Reify`/`ReifyGen` next, `ReifyProof` last and
-with its four holes declared.
+and independently valuable), `Reify`/`ReifyGen` next, then `ReifyProof` with
+its three proof emitters and a per-generated-theorem axiom gate.
 
 ## 4. FP — the projection (this section was wrong and is corrected)
 
@@ -193,7 +193,7 @@ with the metadata omitted.
    round-trip and parser requirements, and FP's conditional support, runtime
    and edge contracts are distinct, and one branch's evidence does not
    discharge another's.
-4. **Declared holes stay declared** — `ReifyProof`'s four `sorry`s above all.
+4. **Every generated theorem is audited individually** — the module has no holes, but an emitted proof can still fail onto `sorryAx`, and the gate must reject it.
 5. Native LEC / `single_edge` / frontend contracts, the checker/evaluator
    policy, flat records and the pinned Lean/Mathlib environment are unchanged
    throughout.
@@ -284,11 +284,41 @@ Copying D3's own `*Defs.lean` would have been the mistake the packet names:
 construction lacks clocks. This is older schema, not an acceptable replacement
 of current post-D2 definitions."*
 
-## 8. Deferred, and explicitly outside any accepted theorem path
+## 8. A claim I made that was false: ReifyProof's "four holes"
 
-`ReifyProof.lean` carries **4 `sorry`s in 1,327 lines**. They travel with the
-port as a declared incompleteness: nothing depending on them may be reported as
-PROVEN, and no accepted obligation may route through them.
+This section said `ReifyProof.lean` carried **4 `sorry`s in 1,327 lines**, and
+that count was used to defer the whole module and two proof fixtures.
+
+**It is wrong.** Verified against the pinned blob
+(`e6e05b4f1d92f6bc5f7dda19a627105f2fc7c43bf94c28cea68fa4cb7b9b5537`): the four
+matches are **prose inside doc comments**, at lines 79, 225, 1281 and 1306 —
+three of them describing the gate that *rejects* `sorryAx`:
+
+```
+79:  /-- The axioms a D3 proof may depend on.  Anything else -- `sorryAx` from an
+225: theorem resting on `sorryAx`. The gate downstream caught it -- so nothing was
+1281:`#print axioms` only prints; a probe that merely printed `sorryAx` would still
+1306:`proof=1` for a theorem resting on `sorryAx`.  Here the print is in the same
+```
+
+Stripping comments and string literals leaves **zero** `sorry`, `admit`,
+`sorryAx`, `mkSorry`, `native_decide` and **zero** axiom declarations across
+161 lines of code.
+
+**Where it came from.** `grep -c 'sorry'` — a substring count over the whole
+file, comments included — reported as proof holes. The same lexical-for-semantic
+substitution this ledger keeps recording in other people's code, in mine, used
+to justify not porting a module.
+
+**The module builds unmodified**, exit 0, from the D3 pin. It is required branch
+content, not research-only, and the two fixtures that import it are not
+excused. The `BLOCKED` exception in `run_probes.sh` that rested on this count
+has been removed.
+
+What remains true, and is a different claim: a **generated** proof can still
+fail and introduce `sorryAx`, which is exactly what `d3_proof_gate` and
+`auditOrThrow` exist to reject. Per-generated-theorem axiom decisions are
+required and are not weakened.
 
 ## 9. Status
 
@@ -601,8 +631,9 @@ Mathlib.
 
 ### 12.6 Still open on D3
 
-- `ReifyProof.lean` (1,327 lines, **4 `sorry`**) is **not** ported. It stays
-  outside every accepted proof path, and nothing above depends on it.
+- `ReifyProof.lean` is ported and builds (§8 corrects the false hole count
+  that had deferred it). Generated-proof acceptance is a separate matter, and
+  each emitted theorem is audited individually.
 - The sweep/manifest scripts still carry D3's private absolute paths.
 - `agree` remains **sampled** evidence and `proof` remains **unattempted** —
   neither is upgraded by anything here.
@@ -766,13 +797,96 @@ The quiet and asynchronous arms those fixtures cannot reach are exercised by
 | `d3_shared_test` | ok — exit 0, 0 errors, `D3SHARED OK` |
 | `d3_shift_boundary_test` | ok — `BOUNDARY-MATRIX OK` |
 | `d3_stimulus_test` | ok — exit 0, 0 errors, `D3STIM OK` |
-| `d3_flop_gen_test` | **BLOCKED** — imports `ReifyProof` |
-| `d3_memory_gen_test` | **BLOCKED** — imports `ReifyProof` |
+| `d3_flop_gen_test` | superseded — see §15; `ReifyProof` is ported |
+| `d3_memory_gen_test` | superseded — see §15; `ReifyProof` is ported |
 
-**BLOCKED is not FAILED.** Those two import the one module deliberately not
-ported, the one carrying four inherited `sorry`. Calling them failures would
-read as a regression in the port; they are blocked on a declared deferral, and
-they stay outside every accepted proof path.
+**That classification was wrong**, and rested on a miscount: `ReifyProof` has
+no holes and builds unmodified (§8). Both fixtures are required, and §15 records
+their actual state.
 
 `agree` remains **sampled** evidence and `proof` remains **unattempted** —
 nothing here changes either.
+
+## 15. The proof emitters, and the metadata they were dropping
+
+With `ReifyProof` ported (§8), all three emitters needed the same two repairs.
+
+### 15.1 Edge quantification
+
+`prove_reified`, `prove_reified_chunked` and `prove_reified_incr` each emitted
+
+```
+∀ i st, F i st = compileAndRun D i st        and  … = interpretDesign D i st
+```
+
+which no longer typechecks. All three now emit `∀ e i st, F e i st = …`,
+**generically** — not specialised to `allEdges D`, so a per-design proof still
+says what it said before about every schedule rather than only the all-firing
+one.
+
+### 15.2 The generated facts were dropping clock metadata
+
+The real loss was elsewhere. Both the chunked and the incremental builders
+reconstruct `D_flops` and `D_mems` as record **literals**:
+
+```lean
+`({ width := …, din := …, enable := …, resetPin := …,
+    resetValue := …, resetActiveLow := … })          -- no clock, no asyncReset
+`({ aw := …, dw := …, nextImg := … })                -- no clock
+```
+
+`FlopDesc.clock` defaults to `0` and `asyncReset` to `false`, and
+`MemoryDesc.clock` to `0`. So a literal that omits them still **elaborates**,
+and the `theorem … : D.flops = <literal> := rfl` still **closes** — for any
+design whose flops happen to sit on ordinal 0 with a synchronous reset. On
+clock ordinal 1, or an async reset, the two records differ, the `rfl` fails,
+and the generated proof falls onto `sorryAx` — which `d3_proof_gate` then
+correctly rejects.
+
+**Four literals, in two builders, all repaired** by carrying `fu.clock`,
+`fu.asyncReset` and `mu.clock` from the residual updates, which already hold
+them. Nothing is defaulted to force the `rfl` and nothing is specialised to
+`allEdges`. `ReifyGen`, `Reify` and `D3Harness` were audited for the same
+omission and have no descriptor literals at all.
+
+### 15.3 Why the original fixtures could not catch it
+
+Every pinned D3 fixture sits on clock ordinal 0 with a synchronous reset —
+exactly the defaults. Caller adaptation alone would have left the loss in
+place and passing.
+
+`probes/d3_nondefault_metadata_test.lean` is the regression: a flop on **clock
+ordinal 1** with an **asynchronous, active-low** reset and a nonzero reset
+value; a second flop on ordinal 0, synchronous and active-high, so the domains
+are genuinely independent; a **writable memory on ordinal 1**; distinct source
+and output widths. It runs an emitter, puts the generated theorem through
+`d3_proof_gate`, compares the model against `denoteResidual` on quiet,
+independent and simultaneous edges, and pins the arms a defaulted
+`asyncReset := false` would lose — the async reset acting on a **quiet**
+domain, the synchronous flop holding on its own quiet domain, and the memory
+committing on its own domain only.
+
+### 15.4 Results
+
+All eleven probes: **exit 0, zero errors, 0 failed.**
+
+| probe | marker | peak RSS |
+| --- | --- | ---: |
+| `d3_flop_gen_test` | `D3FLOPGEN OK` | 6,843,936 kB |
+| `d3_flopnext_test` | `D3FLOPNEXT OK` | 471,456 kB |
+| `d3_generated_clock_test` | `GENERATED-CLOCK-REGRESSION OK` | 1,512,036 kB |
+| `d3_harness_test` | `D3HARNESS-TEST OK` | 480,680 kB |
+| `d3_memory_gen_test` | `D3MEMGEN OK` | 6,841,408 kB |
+| `d3_memory_semantics_test` | `D3MEMSEM OK` | 469,956 kB |
+| `d3_nondefault_metadata_test` | `D3-NONDEFAULT-METADATA OK` | 6,837,416 kB |
+| `d3_reify_test` | (no marker) | 6,840,032 kB |
+| `d3_shared_test` | `D3SHARED OK` | 1,514,424 kB |
+| `d3_shift_boundary_test` | `BOUNDARY-MATRIX OK` | 469,636 kB |
+| `d3_stimulus_test` | `D3STIM OK` | 476,024 kB |
+
+Two fixture mistakes of mine along the way, both recorded rather than papered
+over: the `eAll_<cert>` compatibility bindings were first inserted **after**
+their first use, and my new regression asserted the *other* flop's initial
+value (`3` where the stored value is `9`). Neither was a semantic failure, and
+neither implementation nor any original assertion was changed to accommodate
+them.
