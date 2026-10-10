@@ -2508,28 +2508,30 @@ that one of its seven new refusals fires on a design that previously exported.
 Measured, over the full authoritative CORE-ET manifest plus a CVA6 subset and
 all of DINO:
 
+Measured against the **corrected** resolver — design-wide join and the
+graph-input root requirement both in place:
+
 | Family | Covered | Exported | Clock refusals fired |
 | --- | ---: | ---: | ---: |
-| CORE-ET | 123 of 125 | 77 | **0** |
-| CVA6 subset | 6 committed wrappers | 5 | **0** |
+| CORE-ET | **125 of 125** | 77 | **0** |
+| CVA6 smoke subset | 6 committed wrappers | 5 | **0** |
 | DINO | 3 | 3 (all **PROVEN**) | **0** |
 
-**These CORE-ET figures are from the sweep run BEFORE the design-wide join and
-the opaque-root correction** (R15.2, R15.1). They are retained because they are
-what established "no clock refusal fires", which those two changes only make
-stricter in one direction (opaque roots) and more permissive in another (the
-join). A fresh 125-module sweep against the corrected resolver is in flight; its
-table will be committed separately rather than folded in here. DINO was re-run
-against the corrected resolver and still exports all three with a resolved
-`clock` domain.
+The CORE-ET sweep completed 125/125: **77 EXPORTED, 44 EXPORT_FAIL, 4
+GATE_FAIL**. The CVA6 figure is a **smoke subset**, not a sweep: the 124
+generated wrappers lived under `temp/` and are gone, so this used the 6 wrappers
+committed in `scripts/cva6_module_wrappers/`. It shows no clock refusal fires on
+CVA6's shape; it is not the 110-module result and must not be read as one.
+Regenerating those wrappers from the preserved configuration procedure is open
+work (R14.9).
 
 **Not one of the seven refusals fired anywhere.** Every `EXPORT_FAIL` is a
 pre-existing cause: `single_edge`, a combinational loop, the const-width gate,
 or a `read_slang` failure. `cva6_tlb`, the one CVA6 non-emit, is its usual
 combinational loop.
 
-Four modules changed disposition against the R14 baseline, and all four are the
-**mask-operand** cases of R14.4 — `intpipe_csr_msgs`, `trans_top`, `vpu_ml`,
+Exactly four modules changed disposition against the R14 baseline, and all four
+are the **mask-operand** cases of R14.4 — `intpipe_csr_msgs`, `trans_top`, `vpu_ml`,
 `vpu_tensorfma`. That is the gate de-duplication of R14.3 taking effect, not the
 clock work: the CORE-ET path now runs the same gates CVA6 always ran, so these
 four are refused before typecheck instead of reaching a green PROVEN with the
@@ -2549,7 +2551,44 @@ are gone, so this used the 6 wrappers committed in
 on CVA6's shape; it is not the 110-module sweep, and re-running that needs the
 wrappers regenerated.
 
-### R15.9 Scope: implemented, **not** accepted
+### R15.9 Two genuinely multi-domain designs, PROVEN
+
+The design-wide join of R15.2 changed what the corpus contains. The fresh
+125-module sweep resolves **three** multi-clock designs, not one — and two of
+them export, so unlike `intpipe_csr_msgs` they are not blocked by the mask gate:
+
+| Module | Domains | Flop distribution | Verdict |
+| --- | ---: | --- | --- |
+| `txfma_f1` | **4** — `ctrl_f0_clk`, `ctrl_f1_clk`, `multype_f0_clk`, `multype_f1_clk` | 4 / 2 / 2 / 7 across 15 flops | **PROVEN** 34.2 s |
+| `txfma_f4` | 2 — `ctrl_f3_clk`, `ctrl_f4_clk` | 3 / 3 across 6 flops | **PROVEN** 33.2 s |
+| `intpipe_csr_msgs` | 2 — `clk_i`, `clk_wr_i` | 51 / 2 plus the memory | refused by the mask gate |
+
+Both proofs went through the audited serial queue and the full report+source
+audit. `txfma_f1`'s structure is exactly what R13.1 demands:
+
+```
+'txfma_f1_step_correct'        depends on axioms:
+  [propext, Classical.choice, Quot.sound, txfma_f1_compiles._native…]
+'txfma_f1_step_legacy_correct' depends on axioms:
+  [propext, Classical.choice, Quot.sound,
+   txfma_f1_clock_bounds._native…, txfma_f1_compiles._native…]
+```
+
+and the obligation it discharges is over a **four**-entry table:
+
+```lean
+theorem txfma_f1_clock_bounds :
+    (∀ f ∈ txfma_f1_designCert.flops,    f.clock < txfma_f1_designCert.clocks.size) ∧
+    (∀ m ∈ txfma_f1_designCert.memories, m.clock < txfma_f1_designCert.clocks.size)
+```
+
+This is the first time a certificate with more than one resolved clock has been
+proven on master. Together with the value oracle (R15.9 below) it is what
+R15.6's "the gate should be extended with modules that actually reach
+`pass.lean`" was asking for — and `txfma_f1`/`txfma_f4` are better members than
+anything in `SWEEP_multiclock6`, because they get all the way through.
+
+### R15.10 Scope: implemented, **not** accepted
 
 Implemented: owned provenance through all four stages; the `asyncReset` commit
 flag (0 mismatches against `flopQAsync` over 81 artifacts); synthetic sync-read
@@ -2605,3 +2644,153 @@ sidecar is explicitly incomplete rather than deferred-by-silence.
 
 No upstream contract was touched. `pass.single_edge`, native LEC and the graph
 contracts are unchanged, and nothing was weakened to make an export pass.
+
+## R16. Two gates that were not gates
+
+Both were found by reconciling recorded results against the code that produced
+them, not by any test failing. Both had been reporting success for a long time.
+
+### R16.1 Legacy replay admitted `axiom … : False`
+
+`pass/lean/tests/replay_legacy_proofs.py` decided its verdict as
+
+```python
+ok = exit 0  and  no 'error:'  and  not sorryAx  and  no missing audits
+```
+
+None of those four looks at what a proof **depends on**. A pinned fixture
+carrying
+
+```lean
+axiom unauthorizedFalse : False
+theorem evil_comb_refines_fast : True := absurd unauthorizedFalse (by simp)
+```
+
+elaborates with exit 0, emits no `error:`, is not spelled `sorryAx`, and prints
+the correctly-qualified theorem name — so it satisfied every condition and was
+recorded **PROVEN**. Reproduced here directly; the log reads
+
+```
+'evil_Lgraph.evil_comb_refines_fast' depends on axioms: [propext, unauthorizedFalse]
+```
+
+`axiom_audit.py` rejects that same log on sight. The two checkers had drifted
+because there were two of them.
+
+**Fixed by routing legacy replay through the shared policy**, not by adding a
+third checker. Scope is preserved exactly: a typecheck-only row has no
+obligations and stays `TYPECHECKED` — it is not a proof and must not be labelled
+one; a bridge row requires `comb_refines_fast`, plus `next`/`step` when the
+design has state (`structure <Top>_state`), plus `graphCert_wf` when the
+certificate is chunked.
+
+### R16.2 …and `--resume` let a weaker request stand in for a stronger one
+
+The first repair recorded the auditor's hash in every result and compared it on
+resume, so a verdict produced before the policy existed could not be reused.
+That was necessary and **not sufficient**, and the comment written beside it
+claimed more than the code did: it said the obligation set was compared, and
+only the hash was.
+
+The consequence is exact. Take a bridge fixture with no WF theorem, record it
+`PROVEN`, then change **only** the inventory to `cert_wf=chunked` and re-run
+with `--resume`: it prints `REUSE … PROVEN`, and `graphCert_wf` is never
+required of it. The identical request without `--resume` correctly reports
+`MISSING_SOURCE_AUDIT: graphCert_wf`.
+
+The expected obligation set is now computed **before** the resume check and
+compared against the stored one, together with `scope`, `cert_wf`,
+`replay_mode`, the matching verdict kind (`PROVEN` vs `TYPECHECKED`) and the
+policy identity — and a stored row must actually have **passed** an audit when
+one was owed. Anything else re-runs.
+
+The general shape is worth naming, because it has now appeared twice in this
+file: **a cache key must cover what is being asked, not only what is being
+read.** Artifact hash and library hash describe the inputs; they say nothing
+about the obligations demanded of them.
+
+### R16.2.1 Validation
+
+`pass/lean/tests/replay_legacy_proofs.py` over the 23 tiny bridge artifacts plus
+the `axiom … : False` control, with the repaired policy:
+
+```
+VERDICTS: {'PROVEN': 23, 'FAILED': 1}
+  evil   FAILED   audit=FAIL
+    FAIL: `evil_Lgraph.evil_comb_refines_fast` depends on axiom
+          `unauthorizedFalse`, which is not in the measured standard set
+```
+
+All 23 genuine bridges prove — each is chunked, so `graphCert_wf` was required
+and audited — and the control is rejected for exactly the right reason.
+
+`pass/lean/tests/replay_resume_controls.sh`, four controls, none of which
+changes a byte of the artifact:
+
+| Control | Result |
+| --- | --- |
+| bridge → chunked-WF with `--resume` | re-ran (`PROVEN` → `PROVEN`) |
+| typecheck → bridge with `--resume` | re-ran (`TYPECHECKED` → `PROVEN`) |
+| a pre-policy entry (no auditor hash) | re-ran |
+| an **identical** request | still resumes |
+
+The last one is not a formality. A resume that never reuses anything is not a
+repair, it is a removal, and it would have passed the first three.
+
+One incidental finding: this run needed `env.json` to prepend the **pinned**
+toolchain's `bin`. The replay calls bare `lean`, which from the repository root
+resolves 4.34.1 while the `.olean` files are built with `formal/lean`'s pinned
+4.31.0 — every artifact failed in 0.24 s with `incompatible header`, which looks
+nothing like a toolchain mismatch until you read the first line of the log.
+
+### R16.3 The LEC gate has never run, on any module
+
+`lhd lec` on master **refuses a yosys reader**: `lhd/lhd_options.cpp:797`
+permits `--reader yosys-slang` for `lhd compile` only. The runner called the
+retired procedure anyway, so every invocation exited 2 with
+
+```json
+{"command":"usage","status":"fail","error":{"class":"usage",
+ "message":"Yosys readers are only supported by lhd compile; …"}}
+```
+
+**162 of 162** recorded `lec_gate.log` files are that usage error. No CORE-ET
+row has ever carried an RTL equivalence result.
+
+Two things kept this invisible. The shell treated a nonzero exit as
+"inconclusive; recorded, not fatal" and continued. And `LEC_STRICT=true` did not
+harden it: the flag is passed as `--set formal.strict=`, which the usage check
+rejects before any setting is read. So the one knob that looked like it would
+turn an inconclusive gate into a hard failure could not reach the code that
+would have honoured it.
+
+These outcomes are not the same thing and the runner now distinguishes them:
+
+| Outcome | Meaning |
+| --- | --- |
+| **API/infrastructure failure** | the gate did not run; nothing was compared |
+| **UNKNOWN** | the gate ran and the solver did not decide |
+| **REFUTED** | the gate ran and the graphs differ |
+| **proven equivalence** | the gate ran and decided them equal |
+
+Only the first ever occurred. The gate now **refuses with exit 5** and names the
+supported shape, which is the one the error message itself gives:
+
+```
+lhd compile --reader yosys SOURCE --emit-dir lg:DIR
+lhd lec --ref lg:DIR --impl lg:OTHER
+```
+
+— both sides pre-built LGraphs, with `lhd lec` reading no source.
+
+**It is deliberately not re-implemented here.** The reference side has to be
+built through a reader whose graph is genuinely independent of the
+implementation side's, or the comparison is a self-comparison and proves
+nothing; and it needs positive and negative equivalence controls before any
+claim of procedural parity. `RUN_LEC_GATE` now defaults to **false**, because
+defaulting it on is what produced 162 "gate logs" that read like evidence.
+
+Native LEC, the frontend and `single_edge` are untouched: this is a runner/CLI
+problem. **Export-only rows remain useful and are not RTL equivalence proofs**,
+and nothing in R14 or R15 ever claimed otherwise — but the `lec_gate.log` files
+sitting beside those rows did.

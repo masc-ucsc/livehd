@@ -1,0 +1,126 @@
+module	result	wall_s	rss_kb	sorryAx	detail
+core_top	EXPORT_FAIL	-	-	-	combinational loop in 'core_top': sra -> sext -> get_mask -> concat -> sra -> sext -> get_mask -> concat -> get_mask -> concat -> get_mask -> concat -> get_mask
+debug_breakpoint	EXPORTED	-	-	-	
+intpipe_alu	EXPORTED	-	-	-	
+intpipe_csr_file	EXPORT_FAIL	-	-	-	combinational loop in 'intpipe_csr_file': sext -> get_mask -> sra -> sext -> get_mask -> concat -> or -> sra -> sext -> get_mask -> concat -> or
+intpipe_csr_file_conv	EXPORTED	-	-	-	
+intpipe_csr_file_fl_barrier	EXPORTED	-	-	-	
+intpipe_csr_msgs	GATE_FAIL	-	-	-	static gate: const width 46 cannot hold value 1152886320234758144 (needs 60 bits) [8 total]
+intpipe_csr_pmu_read_interface	EXPORTED	-	-	-	
+intpipe_csr_replay	EXPORTED	-	-	-	
+intpipe_decode	EXPORTED	-	-	-	
+intpipe_fp_scoreboard	EXPORTED	-	-	-	
+intpipe_imm	EXPORTED	-	-	-	
+intpipe_inst_bits_stage	EXPORTED	-	-	-	
+intpipe_int_scoreboard	EXPORTED	-	-	-	
+intpipe_mask_scoreboard	EXPORTED	-	-	-	
+intpipe_mul_div_top	EXPORT_FAIL	-	-	-	intpipe_mul_div_top: state element `latch_3132:u_prim_mul_div.mul_div_ctl.u_mdctl_dw_pair.q_hi_reg` is clocked through a gate whose enable latch `latch_3732:u_p
+intpipe_rf	EXPORTED	-	-	-	
+intpipe_top	EXPORT_FAIL	-	-	-	combinational loop in 'intpipe_top': sext -> get_mask -> sra -> sext -> get_mask -> concat -> or -> sra -> sext -> get_mask -> concat -> or
+minion_dcache_128x64_1r1w_lram	EXPORT_FAIL	-	-	-	minion_dcache_128x64_1r1w_lram: memory `memory_356:u_rf_hi.rf_q` would commit on every sub-step under a phase divider
+minion_dcache_128x72_1r1w_lram	EXPORT_FAIL	-	-	-	minion_dcache_128x72_1r1w_lram: memory `memory_356:u_rf_hi.rf_q` would commit on every sub-step under a phase divider
+minion_dcache_atomic_alu_unit	EXPORTED	-	-	-	
+minion_dcache_buffer_array	EXPORT_FAIL	-	-	-	minion_dcache_buffer_array: memory `memory_1116:u_rf_buffer_array.rf_q` would commit on every sub-step under a phase divider
+minion_dcache_cache_op_unit	EXPORT_FAIL	-	-	-	minion_dcache_cache_op_unit: state element `flop_3280:abort_operation_q` is clocked through a gate whose enable latch `latch_1616:u_cgate.en_latch` is not trans
+minion_dcache_cache_op_unit_l2	EXPORT_FAIL	-	-	-	minion_dcache_cache_op_unit_l2: state element `flop_1512:cacheop_reprate_count_q` is clocked through a gate whose enable latch `latch_1036:u_clk_gate.en_latch` 
+minion_dcache_data_array	EXPORT_FAIL	-	-	-	minion_dcache_data_array: memory `memory_2764:gen_lram_block[0].u_lram.u_rf_hi.rf_q` would commit on every sub-step under a phase divider
+minion_dcache_lru_array	EXPORTED	-	-	-	
+minion_dcache_metadata_array	EXPORT_FAIL	-	-	-	minion_dcache_metadata_array: memory `memory_1788:gen_tag_way[0].u_mem_array.rf_q` would commit on every sub-step under a phase divider
+minion_dcache_miss_handler	EXPORTED	-	-	-	
+minion_dcache_miss_handler_unit	EXPORTED	-	-	-	
+minion_dcache_pma_unit	EXPORTED	-	-	-	
+minion_dcache_reduce	EXPORT_FAIL	-	-	-	minion_dcache_reduce: state element `flop_3568:addr_msb_err_q` is clocked through a gate whose enable latch `latch_2964:u_clk_gate.en_latch` is not transparent 
+minion_dcache_replay_queue	EXPORT_FAIL	-	-	-	minion_dcache_replay_queue: memory `memory_10848:u_replayq_push.rf_q` would commit on every sub-step under a phase divider
+minion_dcache_scratchpad_ctrl	EXPORTED	-	-	-	
+minion_dcache_store_merge_unit	EXPORTED	-	-	-	
+minion_dcache_tensor_load	EXPORT_FAIL	-	-	-	in definition 'minion_dcache_tensor_load', node concat_54600
+minion_dcache_texsend	EXPORTED	-	-	-	
+minion_dcache_tlb_array	EXPORT_FAIL	-	-	-	minion_dcache_tlb_array: memory `memory_2028:u_tlb.u_tlb_cache_rf.rf_q` would commit on every sub-step under a phase divider
+minion_dcache_top	EXPORT_FAIL	-	-	-	in definition 'minion_dcache_top', node concat_264964
+minion_dcache_writeback_unit	EXPORTED	-	-	-	
+minion_debug_apb_slv	EXPORTED	-	-	-	
+minion_frontend	EXPORT_FAIL	-	-	-	minion_frontend: state element `flop_63832:gen_thread_buf[0].u_tb.buffer_access_fault[0]` is clocked through a gate whose enable latch `latch_4388:gen_thread_bu
+minion_frontend_rvc_expander	EXPORTED	-	-	-	
+minion_frontend_thread_buffer	EXPORT_FAIL	-	-	-	minion_frontend_thread_buffer: state element `flop_16808:buffer_access_fault[0]` is clocked through a gate whose enable latch `latch_1072:u_clk_gate.en_latch` i
+minion_frontend_thread_sched	EXPORTED	-	-	-	
+minion_tlb	EXPORT_FAIL	-	-	-	minion_tlb: memory `memory_1660:u_tlb_cache_rf.rf_q` would commit on every sub-step under a phase divider
+minion_top	EXPORT_FAIL	-	-	-	combinational loop in 'minion_top': mux -> sext -> mux -> sext -> mux -> sext
+null_vpu	EXPORTED	-	-	-	
+prim_phase_pair_lo_hi	EXPORT_FAIL	-	-	-	prim_phase_pair_lo_hi: state element `latch_48:q_hi_reg` is clocked through a gate whose enable latch `latch_32:hi_en_1p` is not transparent exactly on the phas
+prim_write_commit_en	EXPORT_FAIL	-	-	-	prim_write_commit_en: state element `latch_20:q_o` is clocked through a gate whose enable latch `latch_24:en_1p` is not transparent exactly on the phase opposit
+prim_write_commit_rst_en	EXPORTED	-	-	-	
+tima_adder	EXPORTED	-	-	-	
+tima_top	EXPORTED	-	-	-	
+trans_exp_rom_case_c0	EXPORTED	-	-	-	
+trans_exp_rom_case_c1c2	EXPORTED	-	-	-	
+trans_log_rom_case_c0	EXPORTED	-	-	-	
+trans_log_rom_case_c1c2	EXPORTED	-	-	-	
+trans_rcp_rom_case_c0	EXPORTED	-	-	-	
+trans_rcp_rom_case_c1c2	EXPORTED	-	-	-	
+trans_rsqrt_rom_case_c0	EXPORTED	-	-	-	
+trans_rsqrt_rom_case_c1c2	EXPORTED	-	-	-	
+trans_sin_rom_case_c0	EXPORTED	-	-	-	
+trans_sin_rom_case_c1c2	EXPORTED	-	-	-	
+trans_top	GATE_FAIL	-	-	-	static gate: const width 1 cannot hold value 8192 (needs 14 bits) [31 total]
+txfma_4_2_compressor	EXPORTED	-	-	-	
+txfma_4_2_compressor_array	EXPORTED	-	-	-	
+txfma_adder	EXPORT_FAIL	-	-	-	cmd:read_slang --top txfma_adder --ignore-timing --no-proc --ignore-assertions --relax-enum-conversions livehd-pass-lean-master:gen
+txfma_align_shf	EXPORTED	-	-	-	
+txfma_booth_ppg_32r4	EXPORTED	-	-	-	
+txfma_booth_ppg_32r4_msb	EXPORTED	-	-	-	
+txfma_booth_ppg_32r4_norm	EXPORTED	-	-	-	
+txfma_c0	EXPORTED	-	-	-	
+txfma_c1	EXPORTED	-	-	-	
+txfma_c2	EXPORTED	-	-	-	
+txfma_c3	EXPORTED	-	-	-	
+txfma_c4	EXPORTED	-	-	-	
+txfma_c5	EXPORTED	-	-	-	
+txfma_c6	EXPORTED	-	-	-	
+txfma_csa	EXPORTED	-	-	-	
+txfmactl_top	EXPORTED	-	-	-	
+txfma_e1	EXPORTED	-	-	-	
+txfma_e2	EXPORTED	-	-	-	
+txfma_e4	EXPORTED	-	-	-	
+txfma_e5	EXPORT_FAIL	-	-	-	combinational loop in 'txfma_e5': mux -> mux -> sext
+txfma_e6	EXPORTED	-	-	-	
+txfma_ediff_opdorder_logic	EXPORTED	-	-	-	
+txfma_exp_special_detect	EXPORTED	-	-	-	
+txfmaexp_top	EXPORT_FAIL	-	-	-	combinational loop in 'txfmaexp_top': mux -> mux -> sext
+txfma_f0	EXPORT_FAIL	-	-	-	combinational loop in 'txfma_f0': mux -> mux
+txfma_f1	EXPORTED	-	-	-	
+txfma_f2	EXPORT_FAIL	-	-	-	combinational loop in 'txfma_f2': mux -> sext -> mux -> sext
+txfma_f3	EXPORT_FAIL	-	-	-	combinational loop in 'txfma_f3': get_mask -> sext -> mux -> mux
+txfma_f4	EXPORTED	-	-	-	
+txfma_f5	EXPORT_FAIL	-	-	-	combinational loop in 'txfma_f5': mux -> mux
+txfma_f6	EXPORT_FAIL	-	-	-	combinational loop in 'txfma_f6': mux -> mux -> sext -> get_mask -> sext
+txfmafrac_top	EXPORT_FAIL	-	-	-	combinational loop in 'txfmafrac_top': get_mask -> sext -> mux -> mux
+txfma_frac_zero_detect	EXPORTED	-	-	-	
+txfma_lxd	EXPORTED	-	-	-	
+txfma_norm_shf	EXPORTED	-	-	-	
+txfma_rnd_adder	EXPORTED	-	-	-	
+txfma_top	EXPORT_FAIL	-	-	-	combinational loop in 'txfma_top': mux -> sext -> mux -> sext -> mux -> sext
+txfma_top_fake	EXPORT_FAIL	-	-	-	cmd:read_slang --top txfma_top_fake --ignore-timing --no-proc --ignore-assertions --relax-enum-conversions livehd-pass-lean-master:
+txfma_trz	EXPORTED	-	-	-	
+txfma_trz2	EXPORTED	-	-	-	
+txfma_wallace1	EXPORTED	-	-	-	
+txfma_wallace2	EXPORTED	-	-	-	
+vpu_bypass	EXPORTED	-	-	-	
+vpu_ctrl	EXPORT_FAIL	-	-	-	vpu_ctrl: state element `flop_22232:trans.ex_state_q[24:20]` is clocked through a gate whose enable latch `latch_8732:trans.u_clk_gate.en_latch` is not transpar
+vpu_decoder	EXPORTED	-	-	-	
+vpu_lane	EXPORT_FAIL	-	-	-	combinational loop in 'vpu_lane': mux -> sext -> mux -> sext -> mux -> sext
+vpu_lane_tima	EXPORT_FAIL	-	-	-	vpu_lane_tima: state element `flop_1060:u_tima.f2_in1_q` is clocked through a gate whose enable latch `latch_916:u_cgate_tima.en_latch` is not transparent exact
+vpu_mask	EXPORTED	-	-	-	
+vpu_ml	GATE_FAIL	-	-	-	static gate: const width 29 cannot hold value 4160749568 (needs 32 bits) [1 total]
+vpu_rf	EXPORT_FAIL	-	-	-	vpu_rf: memory `memory_348:gen_latch.u_rf.rf_q` would commit on every sub-step under a phase divider
+vpu_sh_sw	EXPORTED	-	-	-	
+vpu_tensora_rf	EXPORT_FAIL	-	-	-	vpu_tensora_rf: memory `memory_152:u_rf.rf_q` would commit on every sub-step under a phase divider
+vpu_tensorb_rf	EXPORT_FAIL	-	-	-	vpu_tensorb_rf: memory `memory_144:u_rf.rf_q` would commit on every sub-step under a phase divider
+vpu_tensorc_rf	EXPORT_FAIL	-	-	-	vpu_tensorc_rf: memory `memory_144:u_rf.rf_q` would commit on every sub-step under a phase divider
+vpu_tensorfma	GATE_FAIL	-	-	-	static gate: const width 29 cannot hold value 4160749568 (needs 32 bits) [1 total]
+vpu_tensorquant	EXPORTED	-	-	-	
+vpu_tensorreduce	EXPORTED	-	-	-	
+vpu_tensortmp_rf	EXPORT_FAIL	-	-	-	vpu_tensortmp_rf: memory `memory_144:u_rf.rf_q` would commit on every sub-step under a phase divider
+vpu_top	EXPORT_FAIL	-	-	-	combinational loop in 'vpu_top': mux -> sext -> mux -> sext -> mux -> sext
+vpu_trans	EXPORT_FAIL	-	-	-	vpu_trans: state element `flop_1648:ex_state_q[24:20]` is clocked through a gate whose enable latch `latch_988:u_clk_gate.en_latch` is not transparent exactly o
+vpu_txfma_trans_top	EXPORT_FAIL	-	-	-	combinational loop in 'vpu_txfma_trans_top': mux -> sext -> mux -> sext -> mux -> sext
+vpu_uinst_decoder	EXPORTED	-	-	-	

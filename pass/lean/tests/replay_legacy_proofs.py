@@ -6,6 +6,18 @@ The inventory lists top, scope (bridge/typecheck), and replay_mode
 or RUNTIME/TOP/saved_artifact/TOP_Lgraph.lean respectively. Saved artifacts are
 library compatibility checks; they do not validate the current exporter.
 Build the support library first and supply its environment in ENV_JSON.
+
+THE VERDICT IS NOT DECIDED HERE.  It used to be, as
+`exit 0 and no 'error:' and not sorryAx and no missing audits`, which never
+inspected the axiom LISTS at all.  A pinned fixture carrying
+
+    axiom unauthorizedFalse : False
+
+is not spelled `sorryAx`, so it passed every one of those conditions and was
+recorded PROVEN in 0.72 s with the expected qualified theorem name present.
+Axiom content is now decided by pass/lean/scripts/axiom_audit.py -- the SAME
+policy run_lean_queue.sh uses -- so a repair to the policy reaches every
+consumer at once instead of one of them.
 """
 import argparse
 from datetime import datetime, timezone
@@ -15,6 +27,18 @@ import os
 from pathlib import Path
 import re
 import subprocess
+
+
+# The policy this run was judged by. Recorded in every result so a PROVEN row
+# from BEFORE a policy repair cannot be silently reused by --resume: the resume
+# check compares these, and a mismatch re-runs rather than trusting a verdict
+# that a weaker gate produced.
+AUDIT = Path(__file__).resolve().parents[1] / 'scripts' / 'axiom_audit.py'
+
+
+def policy_identity():
+    return {'auditor': str(AUDIT.relative_to(AUDIT.parents[3])) if len(AUDIT.parents) > 3 else AUDIT.name,
+            'auditor_sha256': digest(AUDIT) if AUDIT.exists() else None}
 
 
 def digest(path):
@@ -74,6 +98,7 @@ def main():
         out.mkdir(exist_ok=True)
         result_file = out / 'proof_result.json'
         result = {'top': top, 'scope': row['scope'], 'replay_mode': row['replay_mode'],
+                  'cert_wf': row.get('cert_wf'),
                   'file': str(file), 'library_context_sha256': context_sha,
                   'lean_version': version, 'workers': args.jobs, 'cpus': cpus}
         if row['replay_mode'] == 'regenerated' and row.get('export_status', 0) != 0:
@@ -83,18 +108,46 @@ def main():
         else:
             result['sha256'] = digest(file)
             previous = json.loads(result_file.read_text()) if result_file.exists() else {}
-            if (args.resume and previous.get('verdict') in ('PROVEN', 'TYPECHECKED')
-                    and previous.get('sha256') == result['sha256']
-                    and previous.get('library_context_sha256') == context_sha):
-                results.append(previous)
-                print('REUSE', top, previous['verdict'], flush=True)
-                continue
+            # The CURRENT expected obligation set, computed BEFORE the resume
+            # check so resume can be judged against what this run actually
+            # demands rather than against whatever the stored row demanded.
             source = file.read_text()
             wanted = ['comb_refines_fast'] if row['scope'] == 'bridge' else []
             if row['scope'] == 'bridge' and re.search(r'^structure ' + re.escape(top) + r'_state\b', source, re.M):
                 wanted += ['next_refines_fast', 'step_refines_fast']
             if row.get('cert_wf') == 'chunked':
                 wanted.insert(0, 'graphCert_wf')
+            required = ['_' + w for w in wanted]
+            # RESUME must not let a verdict stand in for a STRONGER request.
+            #
+            # Identical artifact and library are not enough, and neither is the
+            # auditor hash on its own -- an earlier version of this check
+            # compared only that, while its comment claimed the obligations were
+            # compared too. They were not, so a row proved as a plain bridge was
+            # REUSEd as PROVEN after its inventory was changed to
+            # cert_wf=chunked, and graphCert_wf was never required of it. The
+            # same artifact without --resume correctly reported
+            # MISSING_SOURCE_AUDIT.
+            #
+            # So compare everything that determines what is being ASKED -- scope,
+            # cert_wf, replay_mode and the obligation set itself -- plus the
+            # policy identity, and require that the stored row actually passed an
+            # audit when one was owed. Anything else re-runs.
+            policy = policy_identity()
+            audited_ok = (not wanted) or previous.get('axiom_audit') == 'ok'
+            want_verdict = 'PROVEN' if wanted else 'TYPECHECKED'
+            if (args.resume and previous.get('verdict') == want_verdict
+                    and previous.get('sha256') == result['sha256']
+                    and previous.get('library_context_sha256') == context_sha
+                    and previous.get('auditor_sha256') == policy['auditor_sha256']
+                    and previous.get('required_obligations') == required
+                    and previous.get('scope') == row['scope']
+                    and previous.get('cert_wf') == row.get('cert_wf')
+                    and previous.get('replay_mode') == row['replay_mode']
+                    and audited_ok):
+                results.append(previous)
+                print('REUSE', top, previous['verdict'], flush=True)
+                continue
             # Explicitly require every expected theorem AND its emitted audit.
             missing = [s for s in wanted if f'#print axioms {top}_{s}' not in source]
             if missing:
@@ -120,7 +173,30 @@ def main():
                                        ('peak_rss_kib', r'Maximum resident set size \(kbytes\): (\d+)')]:
                     match = re.search(pattern, timing)
                     result[field] = match[1] if match else None
-                ok = proc.returncode == 0 and not result['errors'] and not result['sorryAx'] and not missing
+                # THE AXIOM POLICY, shared with run_lean_queue.sh. The conditions
+                # above are necessary and nowhere near sufficient: they never look
+                # at what the proof DEPENDS on, so an `axiom foo : False` -- not
+                # spelled `sorryAx` -- satisfied every one of them.
+                #
+                # Scope is preserved exactly: a typecheck-only row has no
+                # obligations and stays TYPECHECKED, because it is not a proof and
+                # must not be labelled one; a bridge row carries comb, plus
+                # next/step when the design has state, plus graphCert_wf when the
+                # certificate is chunked.
+                axiom_ok = True
+                if wanted:
+                    audit = subprocess.run(
+                        ['python3', '-I', str(AUDIT), str(out / 'proof.log'), top,
+                         '--required', ','.join('_' + w for w in wanted),
+                         '--witnesses', 'auto', '--artifact', str(file)],
+                        capture_output=True, text=True)
+                    axiom_ok = audit.returncode == 0
+                    result['axiom_audit'] = 'ok' if axiom_ok else 'FAIL'
+                    result['axiom_audit_detail'] = (audit.stdout + audit.stderr).strip().splitlines()[:8]
+                result['required_obligations'] = required
+                result.update(policy_identity())
+                ok = (proc.returncode == 0 and not result['errors'] and not result['sorryAx']
+                      and not missing and axiom_ok)
                 result['verdict'] = ('PROVEN' if wanted else 'TYPECHECKED') if ok else 'FAILED'
         write_json(result_file, result)
         results.append(result)

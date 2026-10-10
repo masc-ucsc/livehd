@@ -28,7 +28,13 @@ LHD="${LHD:-$LIVEHD_ROOT/bazel-bin/lhd/lhd}"
 LAKE="${LAKE:-lake}"
 
 RUN_LEAN="${RUN_LEAN:-false}"
-RUN_LEC_GATE="${RUN_LEC_GATE:-true}"
+# DEFAULT OFF, because the gate cannot run (see the block below): its
+# procedure is retired and `lhd lec` rejects the reader it used. Defaulting
+# it ON produced 162 recorded "gate logs" that are API usage errors, which
+# read like evidence and are not. Off by default means an export is plainly
+# an export; asking for the gate explicitly gets an explanation instead of a
+# fake result.
+RUN_LEC_GATE="${RUN_LEC_GATE:-false}"
 LEC_STRICT="${LEC_STRICT:-false}"
 EMIT_CERT="${LEAN_EMIT_CERT:-true}"
 EMIT_FAST_BRIDGE="${LEAN_EMIT_FAST_BRIDGE:-true}"
@@ -126,32 +132,40 @@ fi
 #    catches the 2f-latch READERS bugs, which build a wrong graph silently.
 # ---------------------------------------------------------------------------
 if [[ "$RUN_LEC_GATE" == "true" ]]; then
-  # ref side: the raw RTL, all modules CONCATENATED into one .sv and elaborated
-  # independently -- the shape run_dino_lgraph_lec_gate.sh uses.  `--ref` takes a
-  # single path, and `compile.yosys.filelist_file` does not reach the ref read.
-  mapfile -t ref_srcs < <(grep '\.sv$' "$FILELIST")
-  REF_SV="$GEN_DIR/raw_${TOP}.sv"
-  cat "${ref_srcs[@]}" > "$REF_SV"
-  # Concatenation drops the incdir, so re-supply it for intpipe_csr_file's .svh set.
-  declare -a ref_slang=(--ignore-assertions --relax-enum-conversions)
-  if grep -q '+incdir+' "$FILELIST"; then
-    ref_slang+=(-I "$(grep -m1 '^+incdir+' "$FILELIST" | sed 's/^+incdir+//')")
-  fi
-  "$LHD" lec --impl lg:"$LG_NORM" --ref verilog:"$REF_SV" --top "$TOP" \
-    --reader yosys-slang --workdir "$WORK_DIR/lec" \
-    --set formal.engine=auto --set formal.lec.hier=true \
-    --set formal.lec.semdiff=structural --set formal.strict="$LEC_STRICT" \
-    --result-json "$LOG_DIR/lec_gate.json" \
-    -- "${ref_slang[@]}" \
-    > "$LOG_DIR/lec_gate.log" 2>&1
-  lec_status=$?
-  lec_verdict="$(grep -oP '"status":"\K[^"]*' "$LOG_DIR/lec_gate.json" 2>/dev/null | tail -1)"
-  echo "lec gate exit=$lec_status verdict=${lec_verdict:-unknown}"
-  if grep -qi 'REFUTED' "$LOG_DIR/lec_gate.log" 2>/dev/null; then
-    echo "FATAL: LEC gate REFUTED -- the LGraph does not match the RTL; do NOT generate" >&2
-    exit 4
-  fi
-  [[ "$lec_status" -eq 0 ]] || echo "  (LEC gate inconclusive; recorded, not fatal -- set LEC_STRICT=true to harden)"
+  # THIS GATE DOES NOT CURRENTLY RUN, and it used to hide that.
+  #
+  # `lhd lec` on master REFUSES a yosys reader: lhd/lhd_options.cpp:799 permits
+  # `--reader yosys-slang` only for `lhd compile`.  The invocation below was the
+  # retired procedure, so every single run exited 2 with
+  # {"command":"usage","status":"fail"} -- an API rejection, not a solver result.
+  # Measured: 162 of 162 recorded lec_gate.log files are that usage error, which
+  # means NO CORE-ET row has ever carried an RTL equivalence result.
+  #
+  # Worse, the shell treated it as "inconclusive, recorded, not fatal" and
+  # carried on, and LEC_STRICT did not help: it is passed as
+  # `--set formal.strict=`, which the usage check rejects before any setting is
+  # read.  A gate that cannot run must not look like a gate that ran and was
+  # unsure.
+  #
+  # The supported procedure is the one the error message itself names:
+  #   lhd compile --reader yosys SOURCE --emit-dir lg:DIR
+  #   lhd lec --ref lg:DIR --impl lg:OTHER
+  # i.e. BOTH sides are pre-built LGraphs and `lhd lec` reads no source.
+  # Adapting the runner to it is real work -- the reference side has to be built
+  # through a reader whose graph is independent of the implementation side's, or
+  # the comparison is a self-comparison and proves nothing -- and it is NOT done
+  # here.  Until it is, this refuses rather than producing another 162 usage
+  # errors that look like evidence.
+  #
+  # Native LEC, the frontend and single_edge are untouched; this is a runner/CLI
+  # problem only.
+  echo "FATAL: the LEC gate procedure is retired and this runner has not been adapted." >&2
+  echo "  lhd lec rejects --reader yosys-slang (lhd/lhd_options.cpp:799); it is compile-only." >&2
+  echo "  Supported shape: lhd compile --reader yosys SRC --emit-dir lg:DIR, then lhd lec --ref lg:DIR" >&2
+  echo "  Re-enabling it needs an INDEPENDENT reference graph plus positive and negative" >&2
+  echo "  equivalence controls; a self-comparison is not RTL validation." >&2
+  echo "  Run with RUN_LEC_GATE=false to export without it -- export is not an equivalence proof." >&2
+  exit 5
 fi
 [[ "$STOP_AFTER" == "lec" ]] && exit 0
 

@@ -51,7 +51,10 @@ one() {
   local m="$1"
   local mo="$OUT/$m"
   local row="$OUT/rows/$m.row"
+  # RUN_LEC_GATE is set EXPLICITLY, not left to a default: these rows are
+  # exports, and an export is not an RTL equivalence result.
   COREET_TOP="$m" OUT="$mo" LEAN_MODE=verified_compiler RUN_LEAN="$RUN_LEAN" \
+    RUN_LEC_GATE=false \
     timeout "${MODULE_TIMEOUT:-3600}" bash "$R/scripts/run_coreet_module_lean.sh" \
     > "$OUT/$m.exp.log" 2>&1
   local rc=$?
