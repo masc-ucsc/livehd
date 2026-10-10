@@ -2047,6 +2047,83 @@ passing pilot does not close full coverage, `rowparts` counts are progress and
 not accepted coverage, and no part of this is final integrated master
 acceptance.
 
+## 28. The D3 per-design pilot
+
+### 28.1 The designs, and why these
+
+Two real designs plus a memory addendum, staged with recorded input hashes in
+`generated/master_port/d3_pilot/certs/`:
+
+| design | role | shape | input sha256 |
+|---|---|---|---|
+| `intpipe_alu` | combinational | 1536 sources, 2133 nodes, 0 flops, 0 memories | `16703b19dca910d1…` |
+| `txfma_f4` | **stateful** | 750 sources, 1867 nodes, 6 flops, **2 clock domains** | `014b5c9983b32f70…` |
+| `tiny_sync_ram` | memory addendum | 6 sources, 8 nodes, 1 flop, **1 memory** | `861d069e45936b82…` |
+
+`txfma_f4` carries `ctrl_f3_clk` and `ctrl_f4_clk` with **three flops on each**
+— real post-D2 clock transport from the scanner, not a fixture. The memory
+addendum is there because **no design in either corpus that reached RAN carries
+a `MemoryDesc` at all**: `tiny_sync_ram` is the smallest real emitted design
+that does, and it is labelled as an addendum rather than counted as one of the
+two.
+
+The run needed `ReifyGen`, `ReifyProof`, `D3Harness` and `Reify` built in the
+tracked library first — 2:46.82, 7,140,328 KiB, exit 0. The first attempt
+failed every target at `cert` with *"object file … ReifyGen.olean does not
+exist"*, which is the correct refusal for an unbuilt dependency.
+
+### 28.2 `legacy` reifier: all three reach `agree`
+
+| design | verdict | selftest_base | mut_out | mut_flop | mut_mem | distinct obs | wall | peak RSS |
+|---|---|---|---|---|---|---:|---:|---:|
+| `intpipe_alu` | **agree** | 1 | **rejected** | na | na | 30 | 40.15 s | 2,129,808 KiB |
+| `txfma_f4` | **agree** | 1 | **rejected** | **rejected** | na | 32 | 20.22 s | 1,906,824 KiB |
+| `tiny_sync_ram` | **agree** | 1 | **rejected** | **rejected** | **rejected** | 32 | 3.26 s | 1,519,060 KiB |
+
+The mutation columns ARE the changed-executable-output and changed-state
+controls, and they are part of the original procedure rather than something
+added for this pilot. Every applicable mutation was **rejected** by the
+checker.
+
+An inapplicable one is distinguishable from a pass: `mut_mem=na` on
+`intpipe_alu` and `txfma_f4` is paired with `mutable_mem=0`, and `mut_flop=na`
+on `intpipe_alu` with `mutable_flop=0`. A design with no memory cannot have its
+memory mutated, and the row says so rather than scoring a success.
+
+`proof=na` throughout — `--prove` was not requested on this pass, and the
+column stays `na` wherever it was not attempted.
+
+### 28.3 Two defects the pilot exposed
+
+- **An exploratory row did not bind its input** (§20.3 below): every
+  `--certs` target was built with an empty `cert_sha256`, and `--resume`
+  compares that against the target's hash — both empty, so a **changed
+  certificate was silently reused**. Measured on the committed sweep:
+  `reused=1, rc=0`.
+- **The phase options' help named a narrower requirement than their guards.**
+  `--phase-only` and `--phase-split` both said "Requires `--reifier named`"
+  while the guards accept `named` **or** `shared`. Reading the help, I added a
+  check enforcing named-only — which would have removed a supported
+  combination on the strength of a doc string. Reverted; the guards are
+  untouched and five strings now say what the code does.
+
+Refusals measured on the actual CLI after that correction: `named` and
+`shared` accept both phase options; `legacy` and `chunked` refuse with exit 2
+naming the reason; `--phase-only --prove` refuses; `--proof-backend module`
+without `--reifier chunked` refuses; `--prove --reifier shared` refuses
+("no proof bridge yet, so --prove would credit a model that no theorem
+covers"). An unsupported combination is a **refusal with a reason**, never a
+row.
+
+### 28.4 In flight, and not yet credited
+
+`named` is still on `intpipe_alu` — 18 minutes, 2.17 GB, stalled after
+`residual_ready` inside `report`, against a 1800 s per-target bound, where
+`legacy` finished the same design in 40 s. `shared` and `chunked` rows are
+still the stale pre-build ones. Phase-only, phase-split and `--prove` on both
+backends have not run. **Nothing here closes the per-design D3 obligations for
+the 122 CORE-ET or frozen-30 CVA6 corpora**; this is three designs.
+
 ## 20. D3 replay backlog — repaired
 
 Both gaps are closed, and running them found two more.
