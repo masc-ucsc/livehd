@@ -1926,17 +1926,65 @@ modifications and all three CVA6 checkouts carry the same three local RTL edits
 (§25.6). A passing pilot does not close full coverage, and nothing here is
 final integrated acceptance.
 
-## 20. D3 replay backlog (recorded, not yet repaired)
+## 20. D3 replay backlog — repaired
 
-Two gaps in restored D3 procedures, kept visible so they are not mistaken for
-done:
+Both gaps are closed, and running them found two more.
 
-- **`d3_gen.py`** — the scaling generator still emits **old-arity**
-  `denoteResidual` calls. Its n=2 chain outputs for naive, composed and pruned
-  all fail typechecking against the repaired library. The original scaling
-  procedures are **not credited** until it is adapted and validated, preserving
-  the variants, shapes, sizes and proof obligations.
-- **`d3_bench.sh` / `d3_bench2.sh`** — they write timing and log files under
-  `/tmp`, against this workspace's project-local rule, and their status logic
-  can label a non-timeout non-zero exit `OK` when its narrow error-text pattern
-  misses. Neither has been executed here.
+### 20.1 `d3_gen.py`: the edge arity, and two defects behind it
+
+`denoteResidual` takes the clock edge vector first; the generator emitted the
+three-argument call, so **every** scaling output failed to typecheck. The
+synthetic program has no flops and no memories, so no edge vector can change
+its answer — which is why the emitted theorem now quantifies over **every**
+`e` rather than fixing one: the stronger statement is also the easier one
+here, and fixing an `e` would quietly narrow what the scaling numbers are
+about.
+
+Fixing that exposed two more, both only reachable on the `far` shape:
+
+- **A repeated operand slot.** `deps(1, "far")` is `(2, 2)`, so both operands
+  read the same binding. The proof emitted two `have`s for it and rewrote with
+  both; the first `rw` had already replaced every occurrence, so the second
+  died with *"Did not find an occurrence of the pattern `refBV E1 2`"*. One
+  `have` per DISTINCT slot now. `chain` never repeats a slot, which is why it
+  was never seen.
+- **`clear` of a name that was never introduced.** The pruned variant cleared
+  `rb{k}` unconditionally — an unknown-identifier error once `rb{k}` is only
+  emitted when the operands differ.
+
+**All six variant × shape combinations typecheck**, exit 0, zero errors:
+
+| | chain | far |
+|---|---|---|
+| naive | n=2, n=4 | n=4 |
+| composed | n=4, **n=8** (0:17.52) | n=4, **n=8** (0:19.72) |
+| pruned | n=4, **n=8** (0:23.04) | n=4, **n=8** (0:18.54) |
+
+### 20.2 `d3_bench.sh` / `d3_bench2.sh`
+
+- **Scratch is project-local.** `mktemp /tmp/…` is shared between parallel jobs
+  on this box, is not the configured runtime area, and does not survive a
+  rebuild. Now `$SCRATCH`, under `generated/`.
+- **The status comes from the exit code.** It was `OK` unless the exit was 124
+  or the log matched `^probes.*error`, so any other nonzero exit — a missing
+  module, a killed process, a Lake error not starting with `probes` — was
+  recorded as a PASSING measurement with whatever CPU figure the partial run
+  produced. Now 0 is OK (and still FAIL if the log carries an error), 124 is
+  TIMEOUT, anything else is `FAIL(rc=N)`.
+- **The sweep points and the output path are overridable.** A scaling script
+  whose only mode is a multi-hour run cannot have its own status logic checked
+  without paying for a full sweep — which is how the defect above survived.
+  The published points remain the defaults; an overridden sweep is a harness
+  run, not a measurement.
+
+Smoke run at n=4, three points, all `OK`, **zero files left in `/tmp`**.
+**Non-vacuity measured**: with `ELAN_HOME` pointed at a stub `lake` that exits
+17, every row comes back `FAIL(rc=17)` with `0.00` CPU — where the old logic
+would have recorded `OK`.
+
+### 20.3 Still open
+
+The **full scaling sweep** (n up to 4096 chain, 1024 far) has not been run —
+it is a multi-hour measurement and the 122-module CORE-ET procedure has the
+machine. The generator and harness are repaired and exercised; the published
+scaling NUMBERS are not yet reproduced.

@@ -3,7 +3,7 @@
 
 Emits, for a synthetic ResidualProgram of n bindings, a real Lean `def` as a
 straight-line let-chain plus a per-design proof that it equals
-`denoteResidual R` for an explicit literal `R`.
+`denoteResidual R e` for an explicit literal `R` and any edge vector `e`.
 
 Two proof variants, measured head to head:
 
@@ -110,8 +110,15 @@ def gen_fast(n, shape):
 
 
 def gen_naive(n):
-    return ("theorem fast_correct : ∀ i s, fast i s = denoteResidual R i s := by\n"
-            "  intro i s\n"
+    # `denoteResidual` takes the CLOCK EDGE VECTOR first.  The generator
+    # predates edges and emitted the three-argument call, so every scaling
+    # output failed to typecheck against the current library.  The synthetic
+    # program has no flops and no memories, so no edge vector can change its
+    # answer -- which is why the theorem quantifies over EVERY `e` rather than
+    # fixing one: the stronger statement is also the easier one here, and
+    # fixing an `e` would quietly narrow what the scaling numbers are about.
+    return ("theorem fast_correct : ∀ e i s, fast i s = denoteResidual R e i s := by\n"
+            "  intro e i s\n"
             "  simp [fast, denoteResidual, R, runBindings, sourceEnvArr, denoteExpr,\n"
             "    refBVs, refBV, denoteRef, sourceValue, CertVal.asBV]\n")
 
@@ -145,12 +152,12 @@ def gen_composed(n, shape, prune=False):
     """Walk the fold one binding at a time, keeping every environment opaque.
 
     Names for the node values are introduced with `set` BEFORE the walk, while
-    the goal is still `fast i s = denoteResidual R i s` and therefore O(1).
+    the goal is still `fast i s = denoteResidual R e i s` and therefore O(1).
     Zeta-reducing `fast` first would expand the chain and, for the `far` shape
     where a value has two consumers, duplicate shared subterms exponentially.
     """
-    L = ["theorem fast_correct : ∀ i s, fast i s = denoteResidual R i s := by",
-         "  intro i s"]
+    L = ["theorem fast_correct : ∀ e i s, fast i s = denoteResidual R e i s := by",
+         "  intro e i s"]
     for j in range(NSRC):
         L.append(f"  set s{j} : BV := bv_resize {W} (i[{j}]?.getD (mk_bv {W} 0)) with hsd{j}")
     for k in range(n):
@@ -168,13 +175,24 @@ def gen_composed(n, shape, prune=False):
     L.append("  have hag0 : ∀ j, j < E0.size → refBV E0 j = refBV E0 j := fun _ _ => rfl")
     for k in range(n):
         d = deps(k, shape)
+        # ONE `have` PER DISTINCT SLOT.
+        #
+        # The `far` shape repeats a slot: `deps(1, "far")` is `(2, 2)`, so both
+        # operands read the same binding. Emitting two `have`s for it and then
+        # rewriting with both failed -- the first `rw` already replaced EVERY
+        # occurrence, so the second found nothing and the proof died with
+        # "Did not find an occurrence of the pattern refBV E1 2". Measured at
+        # n=4 `far`, composed and pruned alike; `chain` never repeats a slot,
+        # which is why it was never seen.
         L += emit_read(k, d[0], f"ra{k}")
-        L += emit_read(k, d[1], f"rb{k}")
+        same = d[1] == d[0]
+        if not same:
+            L += emit_read(k, d[1], f"rb{k}")
         L.append(f"  have hv{k} : denoteExpr E{k} (ResidualExpr.rand {W} #[{d[0]}, {d[1]}])"
                  f" = CertVal.bv v{k} := by")
         L.append(f"    have hu : denoteExpr E{k} (ResidualExpr.rand {W} #[{d[0]}, {d[1]}])"
                  f" = CertVal.bv (randV {W} [refBV E{k} {d[0]}, refBV E{k} {d[1]}]) := rfl")
-        L.append(f"    rw [hu, ra{k}, rb{k}]")
+        L.append(f"    rw [hu, ra{k}]" if same else f"    rw [hu, ra{k}, rb{k}]")
         L.append(f"  rw [runBindings_step _ _ _ _ hv{k}]")
         L.append(f"  set E{k + 1} : SlotEnv := E{k}.push (CertVal.bv v{k}) with hE{k + 1}")
         L.append(f"  have hs{k + 1} : E{k + 1}.size = {NSRC + k + 1} := by"
@@ -186,7 +204,11 @@ def gen_composed(n, shape, prune=False):
             # tactic re-scans it, which is a second, independent source of
             # quadratic cost on top of term size.  These four are provably dead
             # once the step is over.
-            dead = [f"ra{k}", f"rb{k}", f"hv{k}", f"hag{k}"]
+            # `rb{k}` only exists when the two operands name DIFFERENT slots;
+            # clearing a name that was never introduced is an unknown-identifier
+            # error, which is how the `far` shape failed here after the
+            # duplicate-slot repair above.
+            dead = [f"ra{k}"] + ([] if same else [f"rb{k}"]) + [f"hv{k}", f"hag{k}"]
             L.append(f"  clear {' '.join(dead)}")
     L.append("  simp only [runBindings]")
     L += emit_read(n, NSRC + n - 1, "rout")

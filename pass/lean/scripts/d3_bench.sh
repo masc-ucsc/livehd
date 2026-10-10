@@ -13,15 +13,37 @@ OUT="${OUT:-$R/pass/lean/d3_scaling.tsv}"
 TMO="${TMO:-5400}"
 printf 'variant\tshape\tn\tcpu_s\tstatus\n' > "$OUT"
 
+# SCRATCH IS PROJECT-LOCAL, AND THE STATUS COMES FROM THE EXIT CODE.
+#
+# Two defects, both recorded in the D3 backlog before they were repaired:
+#
+#   * `mktemp /tmp/...` -- /tmp is shared between parallel jobs on this box and
+#     is not the configured runtime area; it also does not survive a rebuild.
+#   * `st=OK` unless the exit was 124 or the log matched `^probes.*error`. Any
+#     other nonzero exit -- a missing module, a killed process, a Lake error
+#     that does not start with `probes` -- was recorded as a PASSING
+#     measurement, with whatever CPU figure the partial run produced.
+#
+# The exit code now decides: 0 is OK, 124 is TIMEOUT, anything else is FAIL,
+# and a zero exit whose log still carries an error is FAIL too.
+SCRATCH="${SCRATCH:-$R/generated/d3_bench_scratch}"
+mkdir -p "$SCRATCH" || { echo "cannot create $SCRATCH" >&2; exit 2; }
+
 timeit() {  # writes CPU seconds to stdout; args: file
-  local tf; tf=$(mktemp /tmp/d3t.XXXXXX)
-  local lf; lf=$(mktemp /tmp/d3l.XXXXXX)
+  local tf; tf=$(mktemp "$SCRATCH/d3t.XXXXXX")
+  local lf; lf=$(mktemp "$SCRATCH/d3l.XXXXXX")
   /usr/bin/time -f "%U %S" -o "$tf" timeout "$TMO" "$LAKE" env lean "$1" > "$lf" 2>&1
   local rc=$?
   local cpu; cpu=$(tail -1 "$tf" | awk '{printf "%.2f", $1+$2}' 2>/dev/null)
-  local st=OK
-  if [ "$rc" -eq 124 ]; then st=TIMEOUT
-  elif grep -qE "^probes.*error" "$lf"; then st=FAIL; fi
+  local st
+  if [ "$rc" -eq 0 ]; then
+    st=OK
+    grep -qE "error" "$lf" && st=FAIL
+  elif [ "$rc" -eq 124 ]; then
+    st=TIMEOUT
+  else
+    st="FAIL(rc=$rc)"
+  fi
   echo "${cpu:-NA} $st"
   rm -f "$tf" "$lf"
 }
@@ -45,7 +67,18 @@ run() {
   echo "$v/$sh n=$n -> $res"
 }
 
-for n in 32 64 128 256 512;                    do run naive    chain "$n"; done
-for n in 32 64 128 256 512 1024 2048 4096;     do run composed chain "$n"; done
-for n in 32 64 128 256 512 1024;               do run composed far   "$n"; done
+# THE SWEEP POINTS ARE OVERRIDABLE.
+#
+# The published sweep is the default and is what the recorded numbers come
+# from. `N_*` exist so the harness can be EXERCISED at a small n -- a scaling
+# script whose only mode is a multi-hour run cannot have its own status logic
+# checked without paying for a full sweep, which is how the "any nonzero exit
+# is OK" defect survived. An overridden sweep is a harness run, not a
+# measurement, and its row set makes that obvious by its size.
+N_NAIVE_CHAIN="${N_NAIVE_CHAIN:-32 64 128 256 512}"
+N_COMPOSED_CHAIN="${N_COMPOSED_CHAIN:-32 64 128 256 512 1024 2048 4096}"
+N_COMPOSED_FAR="${N_COMPOSED_FAR:-32 64 128 256 512 1024}"
+for n in $N_NAIVE_CHAIN;    do run naive    chain "$n"; done
+for n in $N_COMPOSED_CHAIN; do run composed chain "$n"; done
+for n in $N_COMPOSED_FAR;   do run composed far   "$n"; done
 echo D3-BENCH-DONE
