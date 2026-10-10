@@ -28,6 +28,8 @@ def combo(job):
     args=['synth',src,'--top','top','--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
           '--set','synth.threads=1','--set',f'color.ware_{kind}={ware}','--set',f'color.synth.stop_{kind}={stop}',
           '--workdir',w/name,'--emit-dir',f'lg:{w}/{name}-net','--emit',f'verilog:{w}/{name}.v']
+    if stop=='false' and ware=='true':
+        args+=['--set','synth.tune.profile=on']  # candidate trials/cache run only on explicit request
     run(*args)
     net=(w/f'{name}.v').read_text()
     assert (f'__ware_{macro}_' in net)==(ware=='true'), (name,net)

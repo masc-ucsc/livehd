@@ -206,7 +206,7 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("stats", "report one mapped QoR row per (definition, color); incremental rows include resynth=1|0", "false");
   m.add_label_optional(
       "adder",
-      "auto|rca|cska|cla|prefix|brent: auto compares mapped area or critical-path timing, including inlined arithmetic",
+      "auto|rca|cska|cla|prefix|brent: auto uses the heuristic choice (smallest, or fastest for a timed region); it compares mapped area or critical-path timing, including inlined arithmetic, only under synth.tune.profile=on",
       "auto");
   m.add_label_optional("tune_profile","internal synth.tune.profile","auto");
   m.add_label_optional("tune_validate","internal synth.tune.validate","structural");

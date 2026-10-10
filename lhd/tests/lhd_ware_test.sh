@@ -14,6 +14,8 @@ def run(*args):
     assert p.returncode == 0, (args, p.stdout, p.stderr, result.read_text() if result.exists() else '')
     return json.loads(result.read_text())
 
+PROFILE = ('--set', 'synth.tune.profile=on')  # trials run only on explicit request
+
 def synth(name, src, *opts):
     j = run('synth', src, '--top', 'top', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false',
             '--workdir', w/name, '--emit', f'verilog:{w/name}_mapped.v', '--emit-dir', f'lg:{w/name}-net', *opts)
@@ -28,12 +30,14 @@ assign y=a<b; assign short_sum=c+d; assign passthrough=a;
 endmodule
 ''')
 base = synth('base', src, '--set', 'abc.adder=rca', '--set', 'abc.multiplier=array', '--set', 'abc.barrel=log')
-auto = synth('auto', src)
+default = synth('default', src)
+assert trials(default) == 0, default  # no exploration unless requested
+auto = synth('auto', src, *PROFILE)
 assert trials(auto) > 0, auto
 assert sum(r['area'] for r in auto) <= sum(r['area'] for r in base), (base, auto)
 assert any(r['ware_trials'] > 0 and r['input_ge'] < 16 for r in auto), auto # area search includes short add
 net = (w/'auto_mapped.v').read_bytes()
-warm = synth('auto', src)
+warm = synth('auto', src, *PROFILE)
 assert (w/'auto_mapped.v').read_bytes() == net, 'warm result changed'
 assert trials(warm) == trials(auto)
 fixed = synth('fixed', src, '--set', 'abc.adder=rca')
@@ -49,7 +53,7 @@ run('lec', '--impl', f'lg:{w}/auto-net', '--ref', src, '--lib', f'lg:{w}/models'
 # This loose target is already met: the worst timed path still gets trials.
 old_lib = lib
 lib = str(pathlib.Path('inou/prp/tests/abc/timing.lib').resolve())
-timed = synth('timed', src, '--set', 'abc.delay=100000')
+timed = synth('timed', src, '--set', 'abc.delay=100000', *PROFILE)
 assert trials(timed) > 0, timed
 assert any(r['ware_trials'] == 0 and r['input_ge'] < 16 for r in timed), timed
 logs = '\n'.join(p.read_text() for p in (w/'timed'/'logs').glob('*.log'))
@@ -62,7 +66,7 @@ lib = old_lib
 # Small adders stay inlined with surrounding logic, but still get trials.
 small=w/'small.v'
 small.write_text('module top(input [3:0] a,b, output [3:0] y); assign y=(a+b)^4\'hc; endmodule\n')
-rows=synth('small', small)
+rows=synth('small', small, *PROFILE)
 assert len(rows)==1 and trials(rows)>0, rows
 run('lec', '--impl', f'lg:{w}/small-net', '--ref', small, '--lib', f'lg:{w}/models', '--top','top','--workdir',w/'lec-small')
 
@@ -72,14 +76,14 @@ hier=w/'hier.v'
 hier.write_text('''module add(input [15:0] a,b, output [15:0] y); assign y=a+b; endmodule
 module top(input [15:0] a,b,c, output [15:0] y); wire [15:0] mid; add x(a,b,mid); add z(mid,c,y); endmodule
 ''')
-rows=synth('hier',hier,'--set','compile.upass.inline=false')
+rows=synth('hier',hier,'--set','compile.upass.inline=false',*PROFILE)
 assert trials(rows)>0, rows
 run('lec','--impl',f'lg:{w}/hier-net','--ref',hier,'--lib',f'lg:{w}/models','--top','top','--workdir',w/'lec-hier')
 
 # Time repeated occurrences and a feedback register. The timer must cross
 # both instances but cut the sequential loop instead of rejecting a cycle.
 lib = str(pathlib.Path('inou/prp/tests/abc/timing.lib').resolve())
-rows = synth('hier-timed', hier, '--set', 'compile.upass.inline=false', '--set', 'abc.delay=1')
+rows = synth('hier-timed', hier, '--set', 'compile.upass.inline=false', '--set', 'abc.delay=1', *PROFILE)
 assert trials(rows) > 0, rows
 logs = '\n'.join(p.read_text() for p in (w/'hier-timed'/'logs').glob('*.log'))
 assert 'objective=timing' in logs and 'missed (fastest measured retained)' in logs, logs
@@ -87,7 +91,7 @@ assert 'QoR unavailable' not in logs, logs
 run('lec', '--impl', f'lg:{w}/hier-timed-net', '--ref', hier, '--lib', f'lg:{w}/timed-models', '--top', 'top', '--workdir', w/'lec-hier-timed')
 seq = w/'seq.v'
 seq.write_text('module top(input clk, input [15:0] a, output reg [15:0] q); always @(posedge clk) q <= q+a; endmodule\n')
-rows = synth('seq-timed', seq, '--set', 'abc.delay=1')
+rows = synth('seq-timed', seq, '--set', 'abc.delay=1', *PROFILE)
 assert trials(rows) > 0, rows
 logs = '\n'.join(p.read_text() for p in (w/'seq-timed'/'logs').glob('*.log'))
 assert 'objective=timing' in logs and 'QoR unavailable' not in logs, logs
@@ -98,10 +102,10 @@ lib = old_lib
 # selectors suppress automatic trials of those blocks.
 for name, expr, knobs in [('mul','a*b',['abc.multiplier=tree']), ('shr','a>>b',['abc.barrel=reverse'])]:
     f=w/f'{name}.v'; f.write_text(f'module top(input [7:0] a, input [3:0] b, output [7:0] y); assign y={expr}; endmodule\n')
-    rows=synth(name,f)
+    rows=synth(name,f,*PROFILE)
     assert trials(rows)>0, rows
-    rows=synth(name+'-fixed',f,*[v for opt in knobs for v in ('--set',opt)])
+    rows=synth(name+'-fixed',f,*PROFILE,*[v for opt in knobs for v in ('--set',opt)])
     assert trials(rows)==0, rows
     run('lec','--impl',f'lg:{w}/{name}-fixed-net','--ref',f,'--lib',f'lg:{w}/models','--top','top','--workdir',w/f'lec-{name}')
-print('PASS: area and timed ware selection, off-path policy, explicit selectors, warm replay, inlining, hierarchy, and equivalence')
+print('PASS: default no-trial policy, explicit-profile area and timed ware selection, off-path policy, explicit selectors, warm replay, inlining, hierarchy, and equivalence')
 PY

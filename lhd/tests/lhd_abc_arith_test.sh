@@ -145,9 +145,12 @@ else
   echo "LEC PASS (lhd lec): usyn tmap=none logical output, no --lib"
   map_and_lec usyn rca --set pass.usyn.adder=rca
   map_and_lec usyn prefix --set adder=prefix
-  # The ABC block_size spelling remains absent from pass.usyn: a usage error
-  # (exit 2) naming the flag, with no netlist emitted.
-  for opt in block_size=4; do
+  # block_size is the shared registry spelling of adder_block: accepted, with an
+  # explicit carry-skip width mapped and proven equivalent.
+  map_and_lec usyn cska4 --set pass.usyn.adder=cska --set block_size=4
+  # A flag pass.usyn does not register stays a usage error (exit 2) naming the
+  # flag, with no netlist emitted.
+  for opt in not_a_usyn_flag=4; do
     rm -rf "$W/net_usyn_removed"
     rc=0
     "$LHD" pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_usyn_removed" --set synth.liberty="$LIB" \
