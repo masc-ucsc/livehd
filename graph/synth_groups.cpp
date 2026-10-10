@@ -32,7 +32,7 @@ void specialize_calls(std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
   for(size_t gi=0;gi<graphs.size();++gi) {
     const auto parent=graphs[gi];
     for(auto inst:parent->body().nodes()) {
-      if(!inst.is_subnode()) continue;
+      if(gu::type_op_of(inst)!=Ntype_op::Sub) continue;
       auto a=inst.attr(livehd::attrs::synth_policy);
       if(!a.has()) continue;
       auto call=read(a.get());
