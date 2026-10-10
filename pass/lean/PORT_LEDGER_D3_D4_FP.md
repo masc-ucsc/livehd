@@ -685,3 +685,23 @@ Fixing the emission exposed a second layer, both hygiene:
 - and it is not `Compiler.mk_bv` at all: `mk_bv` is at the **root**. The first
   correction swapped one unknown name for another, and only running the
   fixture again showed it.
+
+### 13.4 Full chain, re-verified with the repaired emitter
+
+Twelve modules, all exit 0, rebuilt after the emitter repair:
+`LGraphModel` 11.76 s / 659,056 kB · `ResidualSemantics` 1.49 s / 497,892 kB ·
+`OpBridge` 1:10.51 / 6,828,764 kB · the three `*Defs` 1.29–1.99 s /
+486,680–487,816 kB · the three wrappers 13.15–25.41 s / 6,726,456–6,779,632 kB ·
+`Reify` 1.01 s / 515,716 kB · `ReifyGen` 7.61 s / 1,619,564 kB ·
+`D3Harness` 1.10 s / 497,036 kB.
+
+| check | result |
+| --- | --- |
+| 45-theorem interface audit | **IDENTICAL to live** |
+| generated-model clock regression | **`GENERATED-CLOCK-REGRESSION OK`**, 3.19 s, 1,511,380 kB |
+| boundary matrix (32 `#guard`s) | **`BOUNDARY-MATRIX OK`**, 1.07 s, 472,552 kB |
+| live library after every isolated build | **25 checked, 0 changed** |
+
+The regression is now part of the staged build script, so the emitted terms are
+checked every time the generator is, rather than only when someone thinks to
+reify a design.
