@@ -3491,41 +3491,71 @@ run.
 | outputs | 5 |
 | flops | 6 |
 
-**13 cases, all decided**, across all four edge vectors — all quiet, all firing,
+**19 cases, all decided**, across all four edge vectors — all quiet, all firing,
 `ctrl_f3_clk` alone, `ctrl_f4_clk` alone:
 
 - `checkDesign` admits the artifact, and `checkRuntime` admits every vector;
 - `diffStep` agrees between the **checked direct interpreter** and the compiled
   residual on each one;
 - `allEdges` is the all-firing vector, and the emitted step equals the preserved
-  interpreter;
-- a **quiet domain is not** that schedule, on this design.
+  interpreter; a **quiet domain is not** that schedule;
+- a **4-tick `diffTrace`** carries state forward with varying inputs and edge
+  vectors, so a commit that should not have happened diverges later even when
+  the step it happened on looked fine alone.
 
-Two things the generator deliberately avoids. **All-zero inputs**: a design fed
-zeros can hold state for reasons unrelated to the clock, so a hold would prove
-nothing — every used input gets a distinct non-zero value derived from its
-ordinal and width. **Unforced probes**: asserting only `diffStep … = none` would
-pass if both implementations were equally wrong, so the trace also pins that a
-fully quiet step leaves the flop array **unchanged**, which the two
-implementations cannot agree on vacuously.
+### R21.1 The state widths were wrong, and the checker could not see it
 
-Full report+source axiom audit passes: 2 obligations, 2 reports, 9 citations,
-standard axioms plus the two per-design `native_decide` witnesses.
+The first generator built **every flop as `mk_bv 1`**, whatever the design
+declared — `txfma_f4`'s flops are **[1, 52, 1, 32, 1, 1]**. `checkRuntime`
+compares array **lengths**, not value widths, so it admitted that stimulus and
+the trace "passed" against state no hardware would produce.
 
-Provenance (`generated/master_port/txfma_trace/provenance.json`), sha256-16:
+The checker is **not** changed: its length rule is what it is. The generator now
+reads widths from the certificate's own descriptors, and the state reads
+`#[mk_bv 1 0, mk_bv 52 42, mk_bv 1 0, mk_bv 32 116, mk_bv 1 0, mk_bv 1 1]`.
+One-bit elements cannot all be distinct, so they alternate; wider ones get
+distinct values.
 
+It also **validates the sidecar against the artifact** — dense clock ordinals,
+input ordinals matching position, and no flop naming an undeclared domain —
+rather than trusting the file it reads.
+
+### R21.2 An oracle from the RTL, not from the model
+
+`txfma_f4.sv:54-58`:
+
+```systemverilog
+always_ff @(posedge ctrl_f4_clk) begin
+  int_minmax_res_f5a_h <= int_minmax_res_f4a_h;
 ```
-artifact  014b5c9983b32f70   sidecar   94a15e4687958035
-trace     1af6e52760791f56   filelist  b08e87a56b2be2a4
-lhd       414d5dcbf99b37fe   generator 2ef417b8c04829dc
-lean      4.31.0 (68218e876d2a38b1985b8590fff244a83c321783)
-git       1e33b49e443a
-```
 
-### R21.1 What this does and does not establish
+The sidecar maps input ordinal **8** = `int_minmax_res_f4a_h` and output
+ordinal **3** = `int_minmax_res_f5a_h`, both 32-bit; the certificate puts that
+flop at ordinal **3**, 32-bit, on domain **1** = `ctrl_f4_clk`. All three agree,
+and the expectation is **predicted from the source** rather than read off the
+model:
 
-It is **one** real multi-clock design, on four edge vectors, from one state. It
-is not the configured replay, and it is not RTL acceptance — `txfma_f4`'s
-`lhd lec` comparison is a separate result (R16.7, PROVEN on the independent
-Slang route). What it does establish is that the clock-resolution work holds on
-an artifact nobody built for the purpose.
+| | |
+| --- | --- |
+| `ctrl_f4_clk` fires | flop 3 **commits** input 8's value |
+| only `ctrl_f3_clk` fires | flop 3 **holds** |
+| nothing fires | flop 3 **holds** |
+| following tick's output 3 | shows the committed value |
+| **the commit tick's own** output 3 | still shows the **old** value |
+
+That last row matters: the output reads the flop's current value, so the commit
+is visible one tick later. The pre-state timing was not adjusted to make an
+expectation pass — the expectation was written to match it.
+
+Full report+source axiom audit passes. Provenance
+(`generated/master_port/txfma_trace/provenance.json`) records sha256-16 over the
+artifact, sidecar, trace, filelist, `lhd` binary and generator, plus the RTL
+oracle's file and line range, the Lean version and the commit.
+
+### R21.3 What this does and does not establish
+
+One real multi-clock design, four edge vectors, a 4-tick trace, with one
+flop's behaviour pinned against its RTL. It is not the configured replay and not
+RTL acceptance — `txfma_f4`'s `lhd lec` comparison is separate (R16.7). What it
+establishes is that the clock-resolution work holds on an artifact nobody built
+for the purpose, with stimulus at the widths the hardware declares.
