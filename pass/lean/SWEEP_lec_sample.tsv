@@ -5,4 +5,4 @@ intpipe_inst_bits_stage	concat->independent	0	0	proven	PROVEN both routes
 debug_breakpoint	concat->independent	0	0	proven	PROVEN both routes
 intpipe_csr_file_fl_barrier	concat->independent	0	0	proven	PROVEN both routes
 txfma_f4	independent	0	0	proven	PROVEN on the independent route; concatenated reference would not elaborate (native 6 / runner 5)
-txfma_f1	independent	6	7	unknown	genuine UNKNOWN: phase schedule v1 orders ONE root clock, design has 5 unrelated roots
+txfma_f1	independent	6	7	unknown	unsupported phase-schedule REFUSAL (nothing compared; not a timeout): miter-wide schedule needs a total order over 5 roots, v1 orders one. Each side alone reports 4 clock nets.

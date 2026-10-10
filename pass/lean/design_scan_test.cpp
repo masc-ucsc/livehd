@@ -1270,5 +1270,253 @@ TEST(DesignScanClocks, TwoDomainValueOracle) {
       << ").nextState.flops[" << fb << "]! = mk_bv 8 9 := by native_decide\n";
   ASSERT_TRUE(out.good());
 }
+
+// A flop with a chosen reset flavour, on a chosen clock, driven from `d`.
+struct ResetFlopSpec {
+  const char* clk;        // clock input name
+  bool        async;      // asynchronous reset
+  bool        active_low; // `negreset`
+  int64_t     init;       // reset VALUE -- deliberately non-zero in the fixture
+  bool        enable;     // wire an enable, to exercise reset/enable priority
+};
+
+// Build a design of reset flops, each with its own output, all reading `d`.
+std::shared_ptr<hhds::Graph> build_reset_flops(std::string_view lgdb,
+                                               const std::vector<ResetFlopSpec>& specs) {
+  auto&                 lib = livehd::Hhds_graph_library::instance(std::string(lgdb));
+  auto                  io  = lib.create_io("resetfix");
+  uint32_t              pid = 1;
+  std::set<std::string> added;
+  for (const auto& sp : specs) {
+    if (added.insert(sp.clk).second) {
+      io->add_input(sp.clk, pid++);
+      io->set_bits(sp.clk, 1);
+    }
+  }
+  io->add_input("rst", pid++);
+  io->set_bits("rst", 1);
+  io->add_input("en", pid++);
+  io->set_bits("en", 1);
+  io->add_input("d", pid++);
+  io->set_bits("d", 8);
+  for (size_t i = 0; i < specs.size(); ++i) {
+    io->add_output("q" + std::to_string(i), static_cast<uint32_t>(i + 1));
+    io->set_bits("q" + std::to_string(i), 8);
+  }
+  auto g = io->create_graph();
+  for (size_t i = 0; i < specs.size(); ++i) {
+    const auto& sp   = specs[i];
+    auto        flop = create_typed_node(*g, Ntype_op::Flop);
+    set_bits(flop.create_driver_pin(0), 8);
+    auto sink = [&](std::string_view n) {
+      return flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, n));
+    };
+    g->get_input_pin("d").connect_sink(sink("din"));
+    g->get_input_pin("rst").connect_sink(sink("reset_pin"));
+    g->get_input_pin(sp.clk).connect_sink(sink("clock_pin"));
+    if (sp.enable) {
+      g->get_input_pin("en").connect_sink(sink("enable"));
+    }
+    auto konst = [&](std::string_view n, int64_t v) {
+      livehd::graph_util::create_const(*g, *Dlop::create_integer(v)).connect_sink(sink(n));
+    };
+    konst("initial", sp.init);
+    konst("async", sp.async ? 1 : 0);
+    konst("negreset", sp.active_low ? 1 : 0);
+    flop.create_driver_pin(0).connect_sink(g->get_output_pin("q" + std::to_string(i)));
+  }
+  return g;
+}
+
+// RESET VALUE GATES.
+//
+// The whole point of resolving domains is that a QUIET clock changes what a
+// reset means, and the two reset flavours part company exactly there:
+//
+//   * a SYNCHRONOUS reset is sampled at the edge, like `din`. With its clock
+//     quiet the flop must HOLD -- it must not reset.
+//   * an ASYNCHRONOUS reset acts with no edge at all, on the visible Q AND on
+//     the committed state.
+//
+// In the one-clock model this distinction was invisible, because every clock
+// fired on every step. These are the cases that only exist once domains do.
+TEST(DesignScanClocks, QuietClockResetValueOracle) {
+  // Four flops, two domains, every combination that matters:
+  //   0: SYNC  reset, active high, reset value 7,  on clk_a
+  //   1: ASYNC reset, active high, reset value 7,  on clk_a
+  //   2: ASYNC reset, active LOW,  reset value 42, on clk_b
+  //   3: SYNC  reset with an ENABLE, value 7,      on clk_b  (priority)
+  const std::vector<ResetFlopSpec> specs{
+      {"clk_a", false, false, 7, false},
+      {"clk_a", true, false, 7, false},
+      {"clk_b", true, true, 42, false},
+      {"clk_b", false, false, 7, true},
+  };
+  auto       g      = build_reset_flops("lgdb_clk_reset_oracle", specs);
+  const auto design = scan_design(*g, {});
+  const auto cert   = build_certificate(design, {});
+  ASSERT_EQ(design.clocks.size(), 2u) << "fixture is not two-domain";
+  ASSERT_EQ(design.flops.size(), 4u);
+
+  // The scan must have kept the flavours apart; if it did not, every value
+  // assertion below would still "pass" against a uniformly wrong model.
+  int n_async = 0;
+  for (const auto& f : design.flops) {
+    n_async += f.asynchronous ? 1 : 0;
+  }
+  ASSERT_EQ(n_async, 2) << "the scan lost the sync/async distinction";
+
+  const char* path = std::getenv("LEAN_RESET_FIXTURE");
+  if (path == nullptr) {
+    GTEST_SKIP() << "set LEAN_RESET_FIXTURE to emit the Lean oracle";
+  }
+  std::ofstream out(path);
+  emit_design_cert(design, cert, out);
+
+  auto ordinal_of = [&](std::string_view name) -> size_t {
+    for (size_t i = 0; i < design.inputs.size(); ++i) {
+      if (design.inputs[i].name == name) {
+        return i;
+      }
+    }
+    ADD_FAILURE() << "no input " << name;
+    return 0;
+  };
+  const auto i_rst = ordinal_of("rst");
+  const auto i_en  = ordinal_of("en");
+  const auto i_d   = ordinal_of("d");
+  auto       inputs = [&](int rst, int en, int d) {
+    std::ostringstream o;
+    for (size_t k = 0; k < design.inputs.size(); ++k) {
+      const int v = k == i_rst ? rst : (k == i_en ? en : (k == i_d ? d : 0));
+      o << (k ? ", " : "") << "mk_bv " << (k == i_d ? 8 : 1) << " " << v;
+    }
+    return o.str();
+  };
+  // Which ordinal is clk_a? flop 0 is on it by construction.
+  const auto ord_a = design.flops[0].clock_ordinal;
+  auto       edges = [&](bool a, bool b) {
+    std::ostringstream o;
+    o << "#[";
+    for (size_t c = 0; c < design.clocks.size(); ++c) {
+      o << (c ? ", " : "") << ((c == ord_a ? a : b) ? "true" : "false");
+    }
+    o << "]";
+    return o.str();
+  };
+  // Pre-state: every flop holds 99, so a hold and a reset are distinguishable.
+  const char* st = "(⟨#[mk_bv 8 99, mk_bv 8 99, mk_bv 8 99, mk_bv 8 99], #[]⟩ : RuntimeState)";
+
+  auto emit_case = [&](const char* why, const std::string& e, const std::string& in,
+                       std::initializer_list<std::pair<int, int>> state_expect,
+                       std::initializer_list<std::pair<int, int>> out_expect) {
+    out << "\n-- " << why << "\n";
+    for (auto [idx, want] : state_expect) {
+      out << "example : ((compileAndRun resetfix_designCert " << e << " #[" << in << "] " << st
+          << ").nextState.flops[" << idx << "]!) = mk_bv 8 " << want << " := by native_decide\n";
+    }
+    for (auto [idx, want] : out_expect) {
+      out << "example : ((compileAndRun resetfix_designCert " << e << " #[" << in << "] " << st
+          << ").outputs[" << idx << "]!) = mk_bv 8 " << want << " := by native_decide\n";
+    }
+  };
+
+  // -- the headline: reset asserted, BOTH clocks quiet ----------------------
+  // sync flops HOLD 99 (the reset is sampled at an edge that never came);
+  // async flops reset, on the committed state AND on the visible Q.
+  emit_case("reset asserted, both clocks QUIET: sync holds, async resets",
+            edges(false, false), inputs(1, 1, 5),
+            {{0, 99}, {1, 7}, {2, 99}, {3, 99}},   // flop2 is active-LOW: rst=1 is INACTIVE
+            {{0, 99}, {1, 7}, {2, 99}, {3, 99}});
+
+  // active-LOW async with rst=0: now it is the one that resets, to 42.
+  emit_case("active-LOW async reset asserted (rst=0), clocks quiet",
+            edges(false, false), inputs(0, 1, 5),
+            {{1, 99}, {2, 42}},
+            {{1, 99}, {2, 42}});
+
+  // -- clk_a fires, reset asserted -----------------------------------------
+  // the sync flop on clk_a now sees its reset at an edge.
+  emit_case("clk_a fires with reset asserted: sync flop 0 resets at the edge",
+            edges(true, false), inputs(1, 1, 5),
+            {{0, 7}, {1, 7}, {3, 99}},
+            {});
+
+  // -- reset vs enable priority --------------------------------------------
+  // flop 3 is sync with an enable. Its clock fires, reset asserted, enable OFF:
+  // reset must win over a disabled enable.
+  emit_case("clk_b fires, reset asserted, enable OFF: reset outranks enable",
+            edges(false, true), inputs(1, 0, 5),
+            {{3, 7}},
+            {});
+  // ...and with reset deasserted and the enable off, it holds rather than loading d.
+  emit_case("clk_b fires, reset deasserted, enable OFF: holds, does not load d",
+            edges(false, true), inputs(0, 0, 5),
+            {{3, 99}},
+            {});
+  // Note rst=0 asserts flop 2's active-low async reset, which is why it is not
+  // asserted on here.
+
+  // -- no clock fires and no reset: everything holds ------------------------
+  emit_case("no edge, no reset: every flop holds",
+            edges(false, false), inputs(0, 1, 5),
+            {{0, 99}, {3, 99}},
+            {{0, 99}, {3, 99}});
+
+  // -- the CHECKED runtime API, on this same artifact -----------------------
+  //
+  // `fires` reads `e[c]?` and defaults a missing entry to false, so a short
+  // vector silently runs with domains quiet and an out-of-range ordinal silently
+  // never fires. That is the right FAIL-SAFE for the interpreter and the wrong
+  // thing to accept from a caller, which is what `checkRuntime` is for. These
+  // assert the REJECTION, not the fallback.
+  const std::string good_in = inputs(0, 1, 5);
+  out << "\n-- checkDesign accepts the scanner's own certificate.\n"
+      << "example : (checkDesign resetfix_designCert).isOk := by native_decide\n";
+  out << "\n-- checkRuntime accepts a well-formed call...\n"
+      << "example : (checkRuntime resetfix_designCert " << edges(true, true) << " #[" << good_in << "] " << st
+      << ").isOk := by native_decide\n";
+  out << "\n-- ...and REJECTS a SHORT edge vector, rather than running it quiet.\n"
+      << "example : (checkRuntime resetfix_designCert #[true] #[" << good_in << "] " << st
+      << ").isOk = false := by native_decide\n";
+  out << "\n-- ...and an EXTRA entry, which no declared clock could consume.\n"
+      << "example : (checkRuntime resetfix_designCert #[true, true, true] #[" << good_in << "] " << st
+      << ").isOk = false := by native_decide\n";
+  out << "\n-- ...and a state whose flop count disagrees with the design.\n"
+      << "example : (checkRuntime resetfix_designCert " << edges(true, true) << " #[" << good_in
+      << "] (⟨#[mk_bv 8 99], #[]⟩ : RuntimeState)).isOk = false := by native_decide\n";
+  out << "\n-- ...and an input array shorter than the declared arity.\n"
+      << "example : (checkRuntime resetfix_designCert " << edges(true, true) << " #[] " << st
+      << ").isOk = false := by native_decide\n";
+
+  // An out-of-range clock ORDINAL is a property of the certificate, so it is
+  // checkDesign's to refuse. Built by hand from the scanner's own cert.
+  out << "\n-- A flop on an undeclared clock ordinal is refused by checkDesign.\n"
+      << "def resetfix_badOrdinal : DesignCert :=\n"
+      << "  { resetfix_designCert with\n"
+      << "    flops := resetfix_designCert.flops.map (fun f => { f with clock := 99 }) }\n"
+      << "example : (checkDesign resetfix_badOrdinal).isOk = false := by native_decide\n"
+      << "example : (designErrors resetfix_badOrdinal).map SimError.tag"
+         " = some \"flopClockOutOfRange\" := by native_decide\n";
+
+  // -- allEdges versus the PRESERVED schedule, on this artifact -------------
+  //
+  // The compatibility claim is that the emitted two-argument step reproduces the
+  // old every-step interpreter. On a TWO-DOMAIN design that is a real statement:
+  // it says firing both domains together is what the clockless model did.
+  out << "\n-- allEdges IS every domain firing.\n"
+      << "example : allEdges resetfix_designCert = " << edges(true, true) << " := by native_decide\n";
+  out << "\n-- and the emitted step agrees with the preserved interpreter here.\n"
+      << "example : resetfix_step #[" << good_in << "] " << st
+      << " = interpretDesignLegacy resetfix_designCert #[" << good_in << "] " << st
+      << " := resetfix_step_legacy_correct _ _\n";
+  out << "\n-- A QUIET domain is NOT the legacy schedule -- the two differ, which is\n"
+      << "-- the whole content of resolving domains.\n"
+      << "example : (compileAndRun resetfix_designCert " << edges(true, false) << " #[" << inputs(1, 1, 5) << "] " << st
+      << ").nextState.flops[3]!\n"
+      << "        ≠ (interpretDesignLegacy resetfix_designCert #[" << inputs(1, 1, 5) << "] " << st
+      << ").nextState.flops[3]! := by native_decide\n";
+  ASSERT_TRUE(out.good());
+}
 }  // namespace
 }  // namespace lean_export

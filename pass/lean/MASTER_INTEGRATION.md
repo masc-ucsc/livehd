@@ -2927,21 +2927,99 @@ printed the runner's classification as though it were the observed process exit
 `txfma_f1`/`txfma_f4` were **native 6 / runner 5**; on this route `txfma_f1` is
 **native 7 / runner 6**.
 
-`txfma_f1`'s UNKNOWN is a real solver limit with a precise cause:
+`txfma_f1` is an **unsupported phase-schedule REFUSAL**, not a timeout and not
+ordinary solver inability:
 
 ```
 phase schedule refused: the phase schedule needs a total order between
-5 unrelated clock roots {111, ctrl_f0_clk, ctrl_f1_clk,
+5 unrelated clock roots {\x02111, ctrl_f0_clk, ctrl_f1_clk,
 multype_f0_clk, multype_f1_clk}; v1 orders ONE root clock
 ```
 
-**Note the disagreement.** Native LEC counts **5** clock roots here; the Lean
-scanner resolved **4** domains for the same module (R15.9). The two analyses do
-not agree on what the roots are, and `111` does not look like a clock name. That
-is an open question, not evidence that either is wrong, and it should be settled
-before the four-domain certificate is leaned on.
+The schedule *refused*; **nothing was compared**. Raising a timeout cannot help,
+and recording this as "the solver could not decide in time" would be wrong.
+
+An earlier draft of this section got the rest of it wrong too, in two ways.
+
+**`\x02111` is not a clock named `111`.** It is the anonymous internal-root key:
+`graph/latch_contract.cpp:551` and `pass/lec/phase_sched.cpp:387` both spell an
+internal root as `"\x02" + class_index`, reserving plain names for graph inputs.
+The log shows it JSON-escaped as `\u0002111`. I had read `net_key()` earlier in
+this work and still misread its output.
+
+**And there is no disagreement between the analyses.** Measured per side,
+read-only:
+
+| Graph | `pass.single_edge` reports |
+| --- | --- |
+| implementation (yosys-slang) | **4 clock nets** |
+| reference (independent Slang) | **4 clock nets** |
+
+Both sides agree with the Lean scanner's four resolved domains (R15.9). The
+fifth root exists only in the **miter-wide** schedule LEC builds across both
+sides at once — which is exactly what `net_key()`'s own comment says to expect:
+an internal key is "stable within a graph … the miter-wide rule is that BOTH
+sides normalize, not that internal keys match across sides."
+
+So the earlier comparison was invalid on its face: it set a count taken from one
+graph against a count taken across two. **Compare root inventories per exact
+graph side before concluding two analyses disagree.**
+
+The disposition: a known native scheduler refusal on a multi-root miter,
+recorded and not worked around. It does not block the Lean value gates, which
+are independent of it.
 
 Native LEC, the frontend and `single_edge` are untouched: this was a runner/CLI
 problem throughout. **Export-only rows remain useful and are not RTL equivalence
 proofs** — nothing in R14 or R15 claimed otherwise, but the `lec_gate.log` files
 sitting beside those rows did.
+
+## R17. The declared async read/commit contract is tied in one direction only
+
+`DesignCert.lean` states the contract plainly: `FlopDesc.asyncReset` is the
+commit side, "the READ side of the same fact is `SourceDesc.flopQAsync`, and the
+checker ties the two (`asyncFlagMismatch`)."
+
+It ties one direction. `checkSource`'s `.flopQAsync` branch enforces
+`flopQAsync → asyncReset`; its `.flopQ` branch checks **width and ordinal range
+only** and never consults `f.asyncReset`, so `asyncReset → flopQAsync` is not
+enforced.
+
+Exercised both ways on a pinned fixture
+(`generated/master_port/reset_contract/AsyncContract.lean`, elaborates clean):
+
+| Certificate | `checkDesign` | `checkRuntime` | Visible Q | Committed state |
+| --- | --- | --- | ---: | ---: |
+| `asyncReset := true`, read as plain `flopQ` | **admitted** | **admitted** | **99** | 7 |
+| same, read as `flopQAsync` | admitted | admitted | **7** | 7 |
+| `asyncReset := false`, read as `flopQAsync` | **refused** (`asyncFlagMismatch`) | — | — | — |
+
+Reset asserted, clock **quiet**, pre-state Q = 99. Both admitted certificates
+**commit the same next state**; they differ only in what they expose. That is
+the hardest kind of difference to notice — nothing downstream contradicts
+itself, the design simply shows a value its own commit side has already
+discarded.
+
+**No current export is affected.** Across **171** emitted artifacts (125-module
+CORE-ET sweep, DINO, CVA6), the unenforced direction occurs **0** times and the
+enforced direction **0** times. The scanner writes both sides from one field
+(`Flop::asynchronous`), so it cannot produce the mismatch. This is a synthetic
+certificate exposing a **checker admission gap**, not evidence that anything
+emitted is wrong.
+
+**The disposition is a semantics decision and is left open.** Tightening
+`.flopQ` to refuse `asyncReset := true` would reject certificates the checker
+accepts today, which is a change to the admission policy rather than a bug fix,
+and the standing rule is that semantic changes go to the user first. The two
+readings:
+
+- **admission-policy correction** — the comment says the two are "the same
+  fact", so a certificate asserting one and not the other is ill-formed and
+  should be refused;
+- **explicit checker limit** — plain `flopQ` on an async flop is a *coherent*
+  model (a Q that is not combinationally reset), and the checker deliberately
+  admits it, in which case the contract comment overstates and should be
+  narrowed instead.
+
+Interpreter and compiler equations are unchanged either way; this is entirely
+about what `checkDesign` admits.
