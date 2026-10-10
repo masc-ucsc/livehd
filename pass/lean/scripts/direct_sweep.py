@@ -307,7 +307,15 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0, entry=Non
     # status are written to project-local evidence under a name built from the
     # CONFIGURED IDENTITY and the digest of the bytes that ran, so two
     # configurations sharing a payload do not overwrite each other.
-    row["log_sha256"] = hashlib.sha256((out + err).encode(errors="replace")).hexdigest()
+    # HASH THE EXACT BYTES THAT ARE SAVED.
+    #
+    # The previous version hashed `out + err` and then wrote a file with a
+    # "--- stderr ---" separator in the middle, so the reported digest was of a
+    # string that exists nowhere. Measured on a real run: reported
+    # 794b9e87...4854 against a retained file hashing 887a3e49...d045.
+    #
+    # stdout and stderr are now saved SEPARATELY, each hashed over exactly the
+    # bytes written, so there is no concatenation to disagree about.
     if evidence_dir:
         tag = "__".join(x for x in (row.get("family") or "nofam", row.get("case") or name,
                                     row.get("mode") or "nomode",
@@ -315,26 +323,50 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0, entry=Non
         tag = re.sub(r"[^A-Za-z0-9_.-]", "_", tag)
         try:
             os.makedirs(evidence_dir, exist_ok=True)
-            lp = os.path.join(evidence_dir, tag + ".log")
-            with open(lp, "w", encoding="utf-8", errors="replace") as fh:
-                fh.write(out)
-                if err:
-                    fh.write("\n--- stderr ---\n" + err)
+            written = {}
+            for what, text in (("out", out), ("err", err)):
+                fp = os.path.join(evidence_dir, f"{tag}.{what}.log")
+                data = text.encode("utf-8", errors="replace")
+                with open(fp, "wb") as fh:
+                    fh.write(data)
+                written[what] = (os.path.basename(fp),
+                                 hashlib.sha256(data).hexdigest(), len(data))
+            # THE GENERATED PROBE IS RETAINED BESIDE ITS LOG. The workdir is
+            # removed at the end of the sweep unless --keep, so the recorded
+            # command named a file that no longer existed and probe_sha256
+            # could not be checked against anything.
+            probe_copy = ""
+            if os.path.exists(probe):
+                probe_copy = os.path.join(evidence_dir, f"{tag}.probe.lean")
+                with open(probe, "rb") as src_fh, open(probe_copy, "wb") as dst_fh:
+                    dst_fh.write(src_fh.read())
+                row["probe_sha256"] = file_sha(probe_copy)
+                probe_copy = os.path.basename(probe_copy)
+            row["log_sha256"] = written["out"][1]
             with open(os.path.join(evidence_dir, tag + ".json"), "w") as fh:
                 json.dump({"path": path, "family": row.get("family"), "case": row.get("case"),
-                           "mode": row.get("mode"), "command": cmd,
+                           "mode": row.get("mode"), "verdict": row.get("verdict"),
+                           "command": cmd, "command_probe": probe,
+                           "retained_probe": probe_copy,
                            "exit_code": exit_code, "timed_out": timed_out,
                            "wall_s": row["wall_s"],
                            "artifact_sha256": row.get("artifact_sha256"),
                            "ran_sha256": row.get("ran_sha256"),
                            "probe_sha256": row.get("probe_sha256"),
-                           "log_sha256": row["log_sha256"],
-                           "log_file": os.path.basename(lp),
+                           "stdout_file": written["out"][0],
+                           "stdout_sha256": written["out"][1],
+                           "stdout_bytes": written["out"][2],
+                           "stderr_file": written["err"][0],
+                           "stderr_sha256": written["err"][1],
+                           "stderr_bytes": written["err"][2],
                            "cycles_requested": cycles, "timeout_s": timeout}, fh, indent=1)
                 fh.write("\n")
-            row["evidence"] = os.path.basename(lp)
+            row["evidence"] = tag
         except OSError as e:
             row["evidence"] = f"(unwritable: {e})"
+    else:
+        row["log_sha256"] = hashlib.sha256(
+            (out + err).encode(errors="replace")).hexdigest()
     saw_rundirect_ok = False
     tail = err.strip().splitlines()
     if tail:

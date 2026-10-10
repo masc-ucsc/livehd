@@ -4777,3 +4777,92 @@ fixtures rather than the tool: the `investigate_only` manifest described only
 the `to_run` payload, so the identity check correctly rejected it; and the
 `not on disk` case began reporting the identity diagnosis once that check moved
 first. Both fixtures were wrong, and the tool was right.
+
+## R39. The retained evidence did not describe itself
+
+Two more defects in the R38 evidence block, both measured on a real run.
+
+**The digest was of a string that exists nowhere.** `log_sha256` hashed
+`out + err`, while the file written inserted a `--- stderr ---` separator
+between them. Reported `794b9e87…4854`; the retained file hashes
+`887a3e49…d045`. Now **stdout and stderr are saved separately**, each hashed
+over exactly the bytes written, with its own byte count — there is no
+concatenation left to disagree about.
+
+**The retained command named a file that had been deleted.** The sweep removes
+its work directory unless `--keep`, so the generated probe was gone by the time
+anyone read the evidence, and `probe_sha256` could not be checked against
+anything. The probe is now **copied beside its log** under the same
+identity+digest name, and its digest is recomputed from the copy.
+
+Both apply to every terminal outcome, timeouts included.
+
+### R39.1 Controls that read the files back
+
+The evidence controls now run the **real CLI** and then hash what is on disk:
+stdout and stderr exist, their digests match the recorded ones, their byte
+counts match, the probe exists and its digest matches, and the command and exit
+status are recorded.
+
+The timeout control first failed for its own reason: `--timeout 1` on the tiny
+`txfma_e4` certificate **completed in 0.9 s**, so nothing timed out and the
+control was asserting a timeout while testing a successful run. It now uses
+`intpipe_csr_msgs` (2,045 sources, 2,560 nodes) with a 3 s limit, which the
+limit reliably cuts short, and `timed_out` is asserted along with the retained
+evidence.
+
+## R40. Isolated elaboration — my claim was too broad
+
+The port ledger said elaboration "writes oleans into the live shared library
+context". That is true of `lake build`; it is **not** true of `lean` invoked
+directly, which writes only where `-o` points.
+
+The D3 split is therefore compiled in an isolated context while the queues run:
+its own source root (`--root`), its own output prefix, a `LEAN_PATH` composed
+by hand from the existing package directories (read-only, so nothing can
+trigger a live build), and the pinned 4.31.0 toolchain binary.
+
+**A partial prefix is not enough.** With only our three modules in the isolated
+prefix, `--root` resolved *every* import there and the build failed with
+`object file '…/ResidualSemantics.olean' … does not exist` — a setup error, not
+a source error. Copying the complete 25-module `LeanSemanticPrimitives` olean
+tree (21 MB) into the prefix fixed it.
+
+### R40.1 Result
+
+| module | exit | wall | peak RSS |
+| --- | ---: | ---: | ---: |
+| `CompileOpDefs` | **0** | 1.17 s | 489,628 kB |
+| `CompileGraphDefs` | **0** | 0.81 s | 483,056 kB |
+| `CompileDesignDefs` | **0** | 0.85 s | 483,544 kB |
+
+**~480 MB each.** D3's measured cost for `import Mathlib` was 6,027,948 kB per
+probe — so the split is worth about **12×** on master's own sources, which is
+the whole reason it is being carried.
+
+**The live library is untouched**: all 25 recorded files still match their
+16-hex digests and sizes after the isolated builds.
+
+### R40.2 The split did not parse at first, and the count did not catch it
+
+The generator treated `/-- … -/` blocks as scaffolding and appended them to
+both outputs, so a helper theorem's documentation was stranded before
+`end Residual` after the theorem moved away — `CompileOpDefs` failed at line
+110. **A zero leaked-theorem count cannot catch that, because the leak was a
+comment.**
+
+Two bugs, both now fixed and both caught by re-deriving rather than by reading:
+
+- a doc comment arriving while a declaration was still open was appended to
+  **that** declaration's body, so every doc attached to the declaration
+  *before* the one it documents and the module's last doc was left stranded.
+  A comment at **column 0** now ends the declaration before it; an indented one
+  stays inside the body where it belongs;
+- the leak check `^\s*(theorem|lemma)\b` matched **prose in the generator's own
+  header** ("theorem, so each existing importer … is unaffected") and reported
+  a leak in all three modules. It now requires a declaration shape and skips
+  the header.
+
+Current derivation: 11 + 6 + 11 = **28 doc/attribute blocks moved with their
+declarations**, 0 leaked theorems, 0 orphaned doc comments in either the
+definition modules or the proof wrappers.

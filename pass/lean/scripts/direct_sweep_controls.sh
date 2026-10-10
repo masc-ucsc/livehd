@@ -296,6 +296,97 @@ else
   echo "MISS: no context file beside the table"; rc=1
 fi
 
+# 22..25 RETAINED EVIDENCE IS READ BACK AND RE-HASHED, not merely present.
+#
+# The reported log_sha256 hashed `out + err` while the retained file was
+# written with a "--- stderr ---" separator, so the digest described a string
+# that existed nowhere: measured 794b9e87...4854 reported against a file
+# hashing 887a3e49...d045. And default cleanup removed the generated probe, so
+# the recorded command named a missing file and probe_sha256 could not be
+# checked against anything.
+#
+# These run the REAL CLI and then hash what is on disk.  They need Lean.
+ev_check() { # <tag> <json> <want-verdict>
+  python3 -I - "$2" "$3" <<'PYEOF'
+import hashlib, json, os, sys
+j, want = sys.argv[1], sys.argv[2]
+d = json.load(open(j))
+base = os.path.dirname(j)
+fails = []
+def ok(n, c, det=""):
+    print(f"{'ok' if c else 'MISS'}: {n}{(' -- ' + det) if det and not c else ''}")
+    if not c: fails.append(n)
+ok("ev_verdict_is_" + want, d.get("verdict") == want, str(d.get("verdict")))
+for which in ("stdout", "stderr"):
+    f = os.path.join(base, d[f"{which}_file"])
+    ok(f"ev_{which}_retained", os.path.exists(f), f)
+    if os.path.exists(f):
+        raw = open(f, "rb").read()
+        ok(f"ev_{which}_hash_matches_file",
+           hashlib.sha256(raw).hexdigest() == d[f"{which}_sha256"],
+           f"recorded {d[f'{which}_sha256'][:16]} vs actual "
+           f"{hashlib.sha256(raw).hexdigest()[:16]}")
+        ok(f"ev_{which}_bytes_match", len(raw) == d[f"{which}_bytes"])
+pr = d.get("retained_probe")
+ok("ev_probe_retained", bool(pr) and os.path.exists(os.path.join(base, pr)), str(pr))
+if pr and os.path.exists(os.path.join(base, pr)):
+    raw = open(os.path.join(base, pr), "rb").read()
+    ok("ev_probe_hash_matches_file",
+       hashlib.sha256(raw).hexdigest() == d["probe_sha256"])
+ok("ev_command_recorded", bool(d.get("command")) and d.get("exit_code") is not None)
+sys.exit(1 if fails else 0)
+PYEOF
+}
+
+python3 -I -c "
+import json, hashlib
+h = hashlib.sha256(open('$CERT','rb').read()).hexdigest()
+json.dump({'to_run': ['$CERT'],
+           'entries': [{'family':'CORE-ET','case':'txfma_e4','mode':'verified_compiler',
+                        'artifact':'$CERT','artifact_sha256': h}]},
+          open('$WORK/man_ev.json','w'))"
+
+echo "--- evidence from a SUCCESSFUL run (needs Lean) ---"
+(cd "$ROOT" && nice -n19 python3 -I pass/lean/scripts/direct_sweep.py --manifest "$WORK/man_ev.json" \
+   --out "$WORK/ev.tsv" --jobs 1 --cycles 2 --timeout 900 > "$WORK/ev.run.log" 2>&1)
+J=$(ls "$WORK"/ev.tsv.evidence/*.json 2>/dev/null | head -1)
+if [ -n "$J" ]; then
+  V=$(python3 -I -c "import json,sys;print(json.load(open(sys.argv[1])).get('verdict'))" "$J")
+  ev_check x "$J" "$V" || rc=1
+else
+  echo "MISS: a successful run retained no evidence json"; rc=1
+fi
+
+echo "--- evidence from a TIMEOUT ---"
+# A BIG certificate, so the limit is actually reached. The first version used
+# the tiny one with --timeout 1; it finished in 0.9s, so nothing timed out and
+# the control was testing a successful run while asserting a timeout.
+BIGCERT="$ROOT/generated/master_port/replay/jobs/CORE-ET/verified_compiler/intpipe_csr_msgs/lean/intpipe_csr_msgs_Lgraph.lean"
+if [ -f "$BIGCERT" ]; then
+  python3 -I -c "
+import json, hashlib
+h = hashlib.sha256(open('$BIGCERT','rb').read()).hexdigest()
+json.dump({'to_run': ['$BIGCERT'],
+           'entries': [{'family':'CORE-ET','case':'intpipe_csr_msgs','mode':'verified_compiler',
+                        'artifact':'$BIGCERT','artifact_sha256': h}]},
+          open('$WORK/man_to.json','w'))"
+  (cd "$ROOT" && nice -n19 python3 -I pass/lean/scripts/direct_sweep.py --manifest "$WORK/man_to.json" \
+     --out "$WORK/ev_to.tsv" --jobs 1 --cycles 2 --timeout 3 > "$WORK/ev_to.run.log" 2>&1)
+else
+  echo "SKIP: ev_timeout -- no large certificate available to exceed a limit"
+fi
+JT=$(ls "$WORK"/ev_to.tsv.evidence/*.json 2>/dev/null | head -1)
+if [ -n "$JT" ]; then
+  ev_check t "$JT" TIMEOUT || rc=1
+  python3 -I -c "
+import json,sys
+d=json.load(open(sys.argv[1]))
+sys.exit(0 if d.get('timed_out') else 1)" "$JT" \
+    && echo "ok: ev_timeout_flagged" || { echo "MISS: timeout not flagged"; rc=1; }
+else
+  echo "MISS: a timeout retained no evidence"; rc=1
+fi
+
 # 8. scratch is project-local, never /tmp -- by CALLING the resolver, not by
 #    grepping the source for a path.
 sd="$(cd "$ROOT" && python3 -I -c "
