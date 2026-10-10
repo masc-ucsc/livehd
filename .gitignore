@@ -73,3 +73,7 @@ generated/b1_refactor/
 # proof logs). Evidence is summarized in pass/lean/tests/*.json; the raw tree is
 # thousands of files and is not source.
 generated/master_port/
+# Generated per-design simulator launchers (pass/lean/scripts/make_sim_launcher.py).
+# A real design's certificate literal is megabytes of array elements; the
+# generator is tracked, its output is not.
+/formal/lean/Sims/
