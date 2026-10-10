@@ -83,3 +83,7 @@ generated/master_port/
 # commit and binary hashes is what belongs in the ledger; a built toolchain
 # does not belong in the repository.
 /generated/validation-tools/
+
+# Analysis staging for the D3/D4/Futamura ports (file inventories, diffs).
+# The LEDGER is tracked under pass/lean/; its working notes are not.
+/generated/port_staging/
