@@ -2836,6 +2836,51 @@ timings: any timed replay must fingerprint the actual binary and build mode
 rather than trusting the `bazel-bin` symlink name, and record it alongside the
 pinned Lean/Mathlib environment.
 
+### R16.5 Measured coverage, and where the reference construction breaks
+
+Seven real CORE-ET modules through the restored gate
+([SWEEP_lec_sample.tsv](SWEEP_lec_sample.tsv)):
+
+| Module | Exit | Outcome |
+| --- | ---: | --- |
+| `intpipe_alu` | 0 | **PROVEN** equivalent to the RTL |
+| `intpipe_imm` | 0 | **PROVEN** |
+| `intpipe_inst_bits_stage` | 0 | **PROVEN** |
+| `debug_breakpoint` | 0 | **PROVEN** |
+| `intpipe_csr_file_fl_barrier` | 0 | **PROVEN** |
+| `txfma_f1` | 5 | reference did not elaborate |
+| `txfma_f4` | 5 | reference did not elaborate |
+
+Five genuine RTL equivalence results, where this corpus previously had none.
+
+The two failures are **not** undecided solver results, and the first version of
+this gate reported them as such — `exit 6`, "did not prove equivalence", which
+reads like a verification limit. They are input failures, and the runner now
+says so.
+
+The cause is the reference construction. `--ref` takes a **single path**:
+`yosys.filelist_file` does not reach the ref read, and passing the filelist
+through the raw args (`-- -F list.f`) is not honoured by `inou.slang` here — it
+reports `NoTopModules`, having read only the anchor. So the reference is every
+source concatenated into one `.sv`, which breaks on two things:
+
+- **`` `include `` directives** — the merged file no longer carries the search
+  path, so `txfma_f1`/`txfma_f4` fail `CouldNotOpenIncludeFile` on the
+  `intpipe_csr_*.svh` set even with `-I` supplied;
+- **cross-file declaration order** — each source is its own compilation unit
+  until concatenation merges them, which is where the `TypoIdentifier` errors
+  come from.
+
+Both scale with the module: the five that prove pull in few enough sources to
+survive the merge, and the two that fail come from
+`hw/ip/minion/dv/Makefile:RTL_SRCS`, the whole-IP list. **This is a reference-
+construction limit, not a solver limit**, and it is the thing to fix before a
+broad LEC replay. Doing it properly needs a reference route that preserves the
+benchmark's filelist, include and define contract rather than flattening it.
+
+`minion_dcache_tensor_fifo` is not a result at all — I picked a module name that
+has no filelist. Recorded as such rather than quietly dropped.
+
 Native LEC, the frontend and `single_edge` are untouched: this was a runner/CLI
 problem throughout. **Export-only rows remain useful and are not RTL equivalence
 proofs** — nothing in R14 or R15 claimed otherwise, but the `lec_gate.log` files

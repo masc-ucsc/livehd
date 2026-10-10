@@ -1,0 +1,9 @@
+module	exit	verdict	note
+intpipe_alu	0	proven	PROVEN equivalent to the RTL
+intpipe_imm	0	proven	PROVEN equivalent to the RTL
+intpipe_inst_bits_stage	0	proven	PROVEN equivalent to the RTL
+debug_breakpoint	0	proven	PROVEN equivalent to the RTL
+intpipe_csr_file_fl_barrier	0	proven	PROVEN equivalent to the RTL
+minion_dcache_tensor_fifo	2	-	no filelist for this module name (sample error, not a result)
+txfma_f1	5	-	reference did not elaborate (include path / concatenation order)
+txfma_f4	5	-	reference did not elaborate (include path / concatenation order)

@@ -194,6 +194,29 @@ if [[ "$RUN_LEC_GATE" == "true" ]]; then
       grep -m1 'counterexample' "$LOG_DIR/lec_gate.log" >&2 || true
       exit 4 ;;
     *)
+      # A REFERENCE that would not PARSE is not an undecided solver result, and
+      # reporting it as one hides a fixable input problem behind a word that
+      # sounds like a hard verification limit.
+      #
+      # The reference is ONE concatenated .sv, because `--ref` takes a single
+      # path: `yosys.filelist_file` does not reach the ref read, and passing the
+      # filelist through the raw args (`-- -F list.f`) is not honoured by
+      # `inou.slang` here -- it reports `NoTopModules`, having read only the
+      # anchor. Concatenation then breaks on exactly two things: `\`include`
+      # directives, whose search path the single file no longer carries, and
+      # cross-file declaration order, since each source is its own compilation
+      # unit until they are merged.
+      #
+      # Measured: that is why `txfma_f4` fails (CouldNotOpenIncludeFile on the
+      # intpipe_csr .svh set, then TypoIdentifier from the merged order), while
+      # seven smaller modules read and prove.
+      if grep -q '"pass":"inou.slang"' "$LOG_DIR/lec_gate.log" 2>/dev/null \
+         && grep -q '"severity":"error"' "$LOG_DIR/lec_gate.log" 2>/dev/null; then
+        echo "FATAL: the LEC REFERENCE did not elaborate -- this is an input/" >&2
+        echo "       infrastructure failure, NOT an equivalence outcome." >&2
+        grep -oE '"code":"[^"]*"' "$LOG_DIR/lec_gate.log" | sort -u | head -4 >&2
+        exit 5
+      fi
       # Native UNKNOWN already exits nonzero on its own; do not soften it.
       echo "FATAL: LEC did not prove equivalence (verdict='${lec_verdict:-<none>}'," >&2
       echo "       exit $lec_status). An undecided gate is not a passed gate." >&2
