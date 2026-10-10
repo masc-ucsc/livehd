@@ -176,14 +176,23 @@ LEAN_LOCK = ROOT / "generated" / "pass_lean_runtime_tmp" / "lean_slot.lock"
 
 @contextlib.contextmanager
 def lean_slot():
-    """ONE Lean typecheck at a time, across every launcher on this machine.
+    """One Lean typecheck at a time AMONG PROCESSES THAT TAKE THIS LOCK.
 
-    `run_lean_queue.sh` serialises within one invocation; that is not a global
-    guard, and two orchestrator launches happily ran Lean concurrently --
-    observed with the CORE-ET queue and DINO both active. Each job here is
-    multi-GB, and on a shared NFS box concurrent ones starve its clients and can
-    OOM each other, where an OOM-killed run looks exactly like a proof failure.
-    An already-running legitimate job is WAITED FOR, never killed.
+    Scope, stated accurately: this serialises orchestrator runs that reach this
+    code. It does NOT serialise against `run_lean_queue.sh`, the oracle scripts,
+    a bare `lake env lean`, or any launcher started before this existed -- none
+    of them acquire it. Two queues launched earlier were still running Lean
+    concurrently after this was added, and that is expected, not a failure of
+    the lock.
+
+    Why serialise at all: each job is multi-GB, and on a shared NFS box
+    concurrent ones starve its clients and can OOM each other -- where an
+    OOM-killed run looks exactly like a proof failure. An already-running
+    legitimate job is WAITED FOR, never killed, so a long proof in flight is
+    never thrown away to acquire the slot.
+
+    To make it general, every proof launcher would have to take the same lock;
+    until then its scope is this file.
     """
     LEAN_LOCK.parent.mkdir(parents=True, exist_ok=True)
     with LEAN_LOCK.open("w") as fh:

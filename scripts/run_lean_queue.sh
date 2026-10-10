@@ -32,6 +32,13 @@ mkdir -p "$TMPDIR" "$(dirname "$SUMMARY")"
 # Match the lean BINARY (pgrep -x), not a command line containing "lean":
 # `pgrep -f bin/lean` also matches this script's own shell and would deadlock the
 # guard against itself.
+# Share the orchestrator's slot file, so the two launchers do not run Lean
+# concurrently. The pgrep guard below catches a bare `lake env lean` that takes
+# no lock; the lock catches an orchestrator that is between processes and so
+# invisible to pgrep. Neither alone is sufficient.
+LEAN_SLOT="$ROOT/generated/pass_lean_runtime_tmp/lean_slot.lock"
+mkdir -p "$(dirname "$LEAN_SLOT")"
+
 wait_for_free_slot() {
   local waited=0
   while pgrep -x lean >/dev/null 2>&1 || pgrep -x lake >/dev/null 2>&1; do
@@ -99,6 +106,7 @@ for f in "$@"; do
   echo "[queue] START $name  ($(date '+%H:%M:%S'))"
   : > "$log"
   ( cd "$ROOT/formal/lean" && \
+    flock "$LEAN_SLOT" \
     taskset -c "$CPUSET" nice -n 19 ionice -c 3 \
       /usr/bin/time -f "WALL=%e s PEAK_RSS=%M KB CPU=%U+%S" \
       stdbuf -oL lake env lean "$f" ) > "$log" 2>&1
