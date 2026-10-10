@@ -279,8 +279,49 @@ def main():
             print("i.e. it was emitted by a pass.lean predating the memory certificate.")
             print("Re-emit; memory designs now get a real graphCert over CertVal.")
             return 1
-        print("\nNO certificate nodes found -- was this emitted with formal.lean.emit_cert=true?")
-        return 1
+        # AN EMPTY CERTIFICATE IS NOT AN ABSENT ONE.
+        #
+        # This branch asked "was this emitted with emit_cert=true?" and then
+        # answered a different question: it refused on the NODE COUNT.
+        #
+        # Measured on CORE-ET minion_dcache_texsend. That graph folds entirely
+        # to constants -- 7 sources, 0 nodes, no state -- and its graphCert IS
+        # emitted, with `topo := []` and all seven output ordinals present in
+        # `sources`. The verified_compiler gate reports that same artifact as
+        # `sources=7 nodes=0 / PASS`, so the two gates disagreed about one file
+        # and the legacy queue recorded it FAILED.
+        #
+        # Ask what the message asks. With emit_cert=false, legacy_model.cpp
+        # writes `-- Certificate emission disabled by lean.emit_cert=false.`
+        # and no graphCert at all; that is the configuration mistake and it
+        # still fails here. A certificate that is PRESENT and empty is held to
+        # COVERAGE instead -- with no nodes, every ordinal read out of the
+        # environment has to be a source, or something is undefined.
+        if ("Certificate emission disabled" in text
+                or not re.search(r"^def %s_graphCert\b" % re.escape(top), text, re.M)):
+            print("\nNO certificate emitted -- was this emitted with formal.lean.emit_cert=true?")
+            return 1
+        read = sorted({int(x) for x in re.findall(r"\brho (\d+)", text)})
+        missing = [r for r in read if r not in sources]
+        mo = re.search(r"^structure %s_out where\n((?:  \w+ : .*\n)+)" % re.escape(top),
+                       text, re.M)
+        n_out = len(mo.group(1).strip().splitlines()) if mo else 0
+        print("\nempty certificate -- this design has no internal nodes.")
+        print("  graphCert emitted  : yes")
+        print("  ordinals read      : %d" % len(read))
+        print("  output fields      : %d" % n_out)
+        if n_out and not read:
+            print("\nFAIL: %d output field(s) but the certificate environment is never read;" % n_out)
+            print("      the outputs cannot be coming from this certificate.")
+            return 1
+        if missing:
+            print("\nFAIL: %d ordinal(s) are read but are neither a node nor a source: %s"
+                  % (len(missing), ", ".join(str(r) for r in missing[:8])))
+            print("      With an empty node set a source is the only thing that can define one.")
+            return 1
+        print("\nPASS: certificate present and empty, %d source(s) define all %d ordinal(s) read."
+              % (len(sources), len(read)))
+        return 0
 
     # -- (op, arity) histogram + dispatch status -----------------------------
     # Status is computed PER NODE, not per (op, arity): some conditions depend on

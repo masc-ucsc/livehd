@@ -3689,3 +3689,66 @@ run checked.
 Six instances in this harness, plus the axiom audit counting lines, `--resume`
 comparing inputs instead of the question asked, the LEC gate reading one field,
 and the sweep reading a filename instead of a run. Every one passed for a while.
+
+## R24. A seventh instance, in the static gate: an empty certificate is not an absent one
+
+R23.3's rule is not confined to the replay harness. The same shape was sitting
+in `op_census.py`, the static gate every emitted artifact passes through.
+
+**The check.** With no certificate nodes, the gate printed
+
+> `NO certificate nodes found -- was this emitted with formal.lean.emit_cert=true?`
+
+and returned 1. The message asks whether the certificate was *emitted*. The
+test was the **node count**.
+
+**What it cost.** Two CORE-ET modules compile to a certificate with zero nodes:
+
+| module | sources | nodes | state | recorded |
+| --- | ---: | ---: | ---: | --- |
+| `minion_dcache_texsend` | 7 | 0 | 0 | `export=FAILED` |
+| `null_vpu` | 10 | 0 | 0 | `export=FAILED` |
+
+Both are tie-off stubs **in the RTL**. `minion_dcache_texsend.sv` is 56 lines
+of `assign idle_o = 1'b1; assign tex_send_ready_o = 1'b1; assign l2_req_o =
+'0;` and an `_unused_inputs` reduction; `null_vpu.sv` is an `always_comb` that
+consumes the request boundary into `unused_inputs` and drives every output to a
+constant, commented as a "fail-closed constant illegal_rm response". The
+emitted Lean reproduces exactly those constants, so **the compile is faithful
+and the graph is genuinely node-free** — the refusal was the gate's, not the
+compiler's.
+
+The disagreement was visible in the artifacts the whole time: the
+`verified_compiler` gate reports the *identical* `minion_dcache_texsend`
+artifact as `sources=7 nodes=0 / PASS`, while the legacy gate reported
+`gate_status=1` on it. Two gates, one file, opposite verdicts. It also reached
+back: the earlier `generated/core-et/` sweep carries the same refusal for both
+modules.
+
+**The repair.** Ask what the message asks. `emit_cert=false` is directly
+observable — `legacy_model.cpp` writes `-- Certificate emission disabled by
+lean.emit_cert=false.` and no `graphCert` at all — and that case still fails. A
+certificate that is **present and empty** is held to coverage instead: with no
+nodes, every ordinal read out of the environment has to be a source, or
+something is undefined.
+
+**Nothing was weakened.** Seven controls in
+`pass/lean/scripts/empty_cert_gate_controls.sh`, all calling the gate itself on
+mutations of a real artifact:
+
+| control | wanted |
+| --- | --- |
+| unmodified | PASS |
+| `emit_cert=false` marker, `graphCert` removed | FAIL |
+| `graphCert` removed, no marker | FAIL |
+| an output reads an ordinal no source defines | FAIL |
+| outputs declared, environment never read | FAIL |
+| the pre-certificate `_memory_count` stub | FAIL |
+| a design **with** nodes | PASS, *and* via the per-node census |
+
+The last is a regression guard with a job to do: without it, deleting the
+entire per-node census would have scored 6/6.
+
+**Outstanding.** Both jobs still carry the old `FAILED` label and must be
+re-run under the repaired gate. They are the only two zero-node artifacts in
+the emitted set, so the correction is bounded at two.
