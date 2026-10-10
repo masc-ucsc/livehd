@@ -210,6 +210,24 @@ def typecheck(artifact: Path, top: str, out: Path, mode: str) -> dict:
             "typecheck_log_sha256": sha(log)}
 
 
+# Which environment variable each family's inputs come from. Set them in the
+# environment or pass --root; nothing here names a filesystem path.
+FAMILY_ROOT = {"CORE-ET": "COREET_ROOT", "CVA6": "CVA6_ROOT", "DINO": "HAGENT_BUILD"}
+
+
+def require_root(env: dict, fam: str) -> str:
+    """Empty when the family's input root is set and exists; else why not."""
+    var = FAMILY_ROOT.get(fam)
+    if var is None:
+        return f"no input root is defined for family {fam}"
+    val = env.get(var)
+    if not val:
+        return f"{var} is not set (pass --root {fam}=PATH or export {var})"
+    if not Path(val).exists():
+        return f"{var}={val} does not exist"
+    return ""
+
+
 def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
     top, mode, fam, case = j["top"], j["mode"], j["family"], j["case"]
     # A FRESH directory per invocation.
@@ -241,7 +259,16 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
 
     env = dict(os.environ)
     env.update(mode_env(mode))
-    env["COREET_ROOT"] = env.get("COREET_ROOT", "/mada/users/czeng14/projects/core-et")
+    # BENCHMARK ROOTS ARE SUPPLIED, NOT BAKED IN. A default pointing at one
+    # person's home directory is both a privacy leak in a committed file and a
+    # silent failure for anyone else: the job would "run" against a path that
+    # does not exist. Missing roots are an unresolved prerequisite, reported by
+    # name.
+    missing_root = require_root(env, fam)
+    if missing_root:
+        rec["export_state"] = "SKIPPED"
+        rec["detail"] = f"unresolved prerequisite: {missing_root}"
+        return rec
     env["LHD"] = str(lhd)
     env["OUT"] = str(out)
     env["RUN_LEAN"] = "false"        # the audited queue does the typecheck
@@ -270,7 +297,6 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
             rec["export_state"] = "SKIPPED"
             rec["detail"] = "no CVA6 filelist -- unresolved prerequisite"
             return rec
-        env["CVA6_ROOT"] = env.get("CVA6_ROOT", "/mada/users/czeng14/projects/cva6-clean/cva6")
         env["CVA6_TOP"] = top
         env["CVA6_FILELIST"] = str(fl)
         env["CVA6_WRAPPER_FILE"] = str(wrapper)
@@ -279,13 +305,7 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
         rec["filelist_sha256"] = sha(fl)
         cmd = ["bash", str(ROOT / "scripts" / "run_cva6_module_lean_stress.sh")]
     elif fam == "DINO":
-        hb = Path(env.get("HAGENT_BUILD",
-                          "/mada/users/czeng14/projects/hagent/.cache/"
-                          "setup_simplechisel_mcp_2025.11/build"))
-        if not hb.exists():
-            rec["export_state"] = "SKIPPED"
-            rec["detail"] = "no HAGENT_BUILD -- unresolved prerequisite"
-            return rec
+        hb = Path(env["HAGENT_BUILD"])  # presence already checked by require_root
         # The DINO driver exports all three designs in one invocation, selected
         # by SC_DIR/PIPE_DIR/DUAL_DIR. Pointing the other two at a nonexistent
         # path would be a silent skip, so instead each job runs the driver with
@@ -300,6 +320,15 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
         env[subdir[0]] = str(hb / subdir[1])
         env["RUN_LEC_GATE"] = "false"
         cmd = ["bash", str(ROOT / "scripts" / "run_dino_lgraph_lean.sh")]
+        # A SECOND STAGE for DINO, because its driver cannot express these modes.
+        #
+        # run_dino_lgraph_lean.sh passes only strict/emit_cert/mode/max_width --
+        # it has no cert_wf and no emit_fast_bridge option, so a chunked-WF or
+        # full-bridge request exported cleanly with none of the obligations it
+        # asked for. Rather than weaken the scope check, the driver is used for
+        # what it does well (building the LGraph from Chisel output) and `lhd`
+        # is then invoked directly with the full option set.
+        rec["two_stage"] = "driver builds the LGraph; lhd re-emits with the requested scope"
     else:
         rec["export_state"] = "SKIPPED"
         rec["detail"] = f"{fam} adapter not wired -- unresolved prerequisite"
@@ -309,6 +338,24 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
     with log.open("w") as fh:
         rc = subprocess.run(cmd, env=env, stdout=fh, stderr=subprocess.STDOUT,
                             cwd=str(ROOT), timeout=3600).returncode
+    if fam == "DINO" and rc == 0:
+        lg = out / "lgdb" / top
+        if not lg.exists():
+            rec["detail"] = f"DINO driver left no LGraph at {lg}"
+            return rec
+        want = mode_env(mode)
+        stage2 = [str(lhd), "compile", f"lg:{lg}", "--top", top,
+                  "--workdir", str(out / "w2"),
+                  "--emit-dir", f"lean:{out / 'lean'}",
+                  "--set", "formal.lean.mode=legacy",
+                  "--set", "formal.lean.emit_cert=true",
+                  "--set", f"formal.lean.emit_fast_bridge={want['LEAN_EMIT_FAST_BRIDGE']}",
+                  "--set", f"formal.lean.cert_wf={want['LEAN_CERT_WF']}",
+                  "--set", "formal.lean.strict=true"]
+        with (out / "stage2.log").open("w") as fh:
+            rc = subprocess.run(stage2, env=env, stdout=fh, stderr=subprocess.STDOUT,
+                                cwd=str(ROOT), timeout=3600).returncode
+        rec["stage2_log_sha256"] = sha(out / "stage2.log")
     rec["export_wall_s"] = round(time.time() - t0, 2)
     rec["export_log_sha256"] = sha(log)
     text = log.read_text(errors="replace")
@@ -393,7 +440,19 @@ def main() -> int:
     ap.add_argument("--limit", type=int)
     ap.add_argument("--export-only", action="store_true")
     ap.add_argument("--lhd", type=Path, default=ROOT / "bazel-bin" / "lhd" / "lhd")
+    ap.add_argument("--root", action="append", default=[],
+                    metavar="FAMILY=PATH",
+                    help="input root for a family, e.g. --root CORE-ET=/path/to/core-et. "
+                         "May be repeated; also readable from COREET_ROOT / CVA6_ROOT / "
+                         "HAGENT_BUILD.")
     a = ap.parse_args()
+    for spec in a.root:
+        fam, _, path = spec.partition("=")
+        var = FAMILY_ROOT.get(fam)
+        if var is None:
+            print(f"unknown family in --root: {fam}", file=sys.stderr)
+            return 2
+        os.environ[var] = path
     inv = json.loads(a.inventory.read_text())
     if a.command == "status":
         return status(inv)
