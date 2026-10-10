@@ -105,7 +105,7 @@ python3 -I -c "
 import json,sys
 p=sys.argv[1]; d=json.load(open(p)); d.pop('lean_exit',None)
 json.dump(d, open(p,'w'), indent=1)" "$d4/result.json"
-expect no_exit "$d4" FAILED
+expect no_exit "$d4" UNVERIFIABLE
 
 # 5..9 EVIDENCE-MUTATION controls. These reuse ONE successful retained run and
 # mutate its record, rather than recompiling a full artifact per negative: the
@@ -134,14 +134,14 @@ json.dump(rec, open(_rp, "w"), indent=1)
 
 # A null exit: `not in (0, None)` treated this as acceptable.
 mutate null_exit 'rec["lean_exit"] = None'
-expect null_exit "$T/null_exit" FAILED
+expect null_exit "$T/null_exit" UNVERIFIABLE
 
 # A deleted hash removed its own check, so the evidence went unverified.
 mutate no_art_hash 'rec.pop("artifact_sha256", None)'
-expect no_art_hash "$T/no_art_hash" FAILED
+expect no_art_hash "$T/no_art_hash" UNVERIFIABLE
 
 mutate no_log_hash 'rec.pop("typecheck_log_sha256", None)'
-expect no_log_hash "$T/no_log_hash" FAILED
+expect no_log_hash "$T/no_log_hash" UNVERIFIABLE
 
 # A vanished artifact left the old PROVEN standing and exited 0.
 mutate gone_artifact 'rec["artifact"] = str(d / "does_not_exist.lean")'
@@ -156,14 +156,14 @@ expect killed "$T/killed" FAILED
 # and only lines that happened to exist.
 
 mutate empty_art_hash 'rec["artifact_sha256"] = ""'
-expect empty_art_hash "$T/empty_art_hash" FAILED
+expect empty_art_hash "$T/empty_art_hash" UNVERIFIABLE
 
 mutate empty_timing 'open(d / "typecheck.time", "w").write("")'
-expect empty_timing "$T/empty_timing" FAILED
+expect empty_timing "$T/empty_timing" UNVERIFIABLE
 
 # The exit line REMOVED, not made nonzero: absence read as success.
 mutate no_exit_line 'tf = d / "typecheck.time"; tf.write_text("\n".join(l for l in tf.read_text().splitlines() if "Exit status" not in l))'
-expect no_exit_line "$T/no_exit_line" FAILED
+expect no_exit_line "$T/no_exit_line" UNVERIFIABLE
 
 # A timing file from a DIFFERENT run: plausible, successful, and not this one.
 mutate timing_substituted 'open(d / "typecheck.time", "w").write("\tCommand being timed: \"lake env lean /somewhere/else/Other_Lgraph.lean\"\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:01.00\n\tMaximum resident set size (kbytes): 1234\n\tExit status: 0\n")'
@@ -172,6 +172,34 @@ expect timing_substituted "$T/timing_substituted" FAILED
 # Recorded wall/RSS that the retained timing does not support.
 mutate timing_mismatch 'rec["peak_rss_kib"] = "999999999"'
 expect timing_mismatch "$T/timing_mismatch" FAILED
+
+# 10..13 THE PROMISED MEASUREMENTS MUST BE PRESENT AND PARSED.
+#
+# These three checks were written `if cmdline and ...` and `if line and ...`, so
+# DELETING a line skipped its own check. Measured externally on a real-Lean
+# validated fast model: removing `Command being timed`, `Elapsed (wall clock)`
+# or `Maximum resident set size` separately each still returned TYPECHECKED and
+# exit 0. Evidence:
+# automate_workspace/master_rebase/audits/timing_identity_18e0d31c0_20261010.
+drop_timing_line() {  # <name> <substring to delete>
+  mutate "$1" "tf = d / 'typecheck.time'; tf.write_text(''.join(l for l in tf.read_text().splitlines(True) if '$2' not in l))"
+}
+drop_timing_line no_command_line "Command being timed"
+expect no_command_line "$T/no_command_line" UNVERIFIABLE
+drop_timing_line no_wall_line "Elapsed (wall clock)"
+expect no_wall_line "$T/no_wall_line" UNVERIFIABLE
+drop_timing_line no_rss_line "Maximum resident set size"
+expect no_rss_line "$T/no_rss_line" UNVERIFIABLE
+
+# A line that is present but carries no value is equally unresolved: the shape
+# of the evidence is not the evidence.
+mutate blank_wall_value "tf = d / 'typecheck.time'; import re as _re; tf.write_text(_re.sub(r'(Elapsed \\(wall clock\\)[^:]*:).*', r'\\1 ', tf.read_text()))"
+expect blank_wall_value "$T/blank_wall_value" UNVERIFIABLE
+
+# And a record that never KEPT a measurement is unresolved rather than
+# retroactively measured from the file as it stands now.
+mutate no_recorded_rss 'rec.pop("peak_rss_kib", None)'
+expect no_recorded_rss "$T/no_recorded_rss" UNVERIFIABLE
 
 [[ $rc -eq 0 ]] && echo "PASS: a re-audit cannot promote a run that did not succeed"
 exit $rc

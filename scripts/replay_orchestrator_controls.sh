@@ -147,6 +147,29 @@ n=$(sel_count --case alpha --redo); [[ "$n" == "1" ]] \
   && echo "ok: --redo re-runs the recorded case" \
   || { echo "FAIL: --redo selected '${n:-none}', want 1"; rc=1; }
 
+# status must report on the tree it was POINTED AT.  The relocation used to sit
+# below the status dispatch, so `status --replay-dir X` described the default
+# tree while naming X.  This control needs the two trees to DISAGREE, or it
+# passes whatever the code does.
+echo "--- control: status reports on the relocated tree, not the default ---"
+STAT_A="$T/replay_stat_a"; STAT_B="$T/replay_stat_b"
+mkdir -p "$STAT_A/results" "$STAT_B/results"
+# A: both jobs recorded.  B: neither.  A default-tree read of either is wrong.
+for c in alpha beta; do
+  printf '{"family":"CTL","case":"%s","top":"%s","mode":"verified_compiler","export_state":"SKIPPED","proof_state":"NOT_RUN"}\n' \
+    "$c" "$TOP" > "$STAT_A/results/CTL__${c}__verified_compiler.json"
+done
+sa="$(cd "$R" && python3 -I "$ORCH" status "$INV2" --replay-dir "$STAT_A" 2>&1)"
+sb="$(cd "$R" && python3 -I "$ORCH" status "$INV2" --replay-dir "$STAT_B" 2>&1)"
+if [[ "$sa" == "$sb" ]]; then
+  echo "FAIL: status gave the same answer for a populated and an empty tree"
+  echo "      $(head -3 <<<"$sa" | tr '\n' ' ')"; rc=1
+elif grep -qi 'skipped' <<<"$sa"; then
+  echo "ok: status reads the relocated tree (populated != empty, and reports SKIPPED)"
+else
+  echo "FAIL: status on the populated tree did not report its records: $(head -3 <<<"$sa" | tr '\n' ' ')"; rc=1
+fi
+
 out="$(cd "$R" && python3 -I "$ORCH" run "$INV2" --replay-dir "$RES2" --redo 2>&1)"; e=$?
 [[ "$e" -eq 2 ]] \
   && echo "ok: --redo without --case is refused, not applied to everything" \

@@ -108,7 +108,15 @@ def main() -> int:
         # three bridge theorems were printed before the error and the axiom
         # report alone looked clean. An axiom audit describes what a proof
         # DEPENDS on; it does not establish that the file compiled.
+        # TWO CLASSES, NOT ONE.
+        #
+        # `blockers` means the evidence is PRESENT and says the run did not
+        # succeed -> FAILED. `missing` means the evidence needed to check is
+        # ABSENT -> UNVERIFIABLE, the same verdict this file already gives a
+        # vanished log or artifact. Collapsing them would report "this run
+        # failed" when the truth is "this cannot be checked".
         blockers = []
+        missing = []
         # EVERY REQUIRED FIELD MUST BE PRESENT AND GOOD. The first version wrote
         # `not in (0, None)`, which treats a null exit as acceptable, and tested
         # the hashes only `if rec.get(...)` -- so deleting a field removed its
@@ -120,11 +128,11 @@ def main() -> int:
         for field in ("artifact_sha256", "typecheck_log_sha256"):
             v = rec.get(field)
             if v is None:
-                blockers.append(f"no recorded {field} -- cannot confirm what the run checked")
+                missing.append(f"no recorded {field} -- cannot confirm what the run checked")
             elif not isinstance(v, str) or not re.fullmatch(r"[0-9a-f]{16}", v):
-                blockers.append(f"recorded {field} is {v!r}, not a digest")
+                missing.append(f"recorded {field} is {v!r}, not a digest")
         if rec.get("lean_exit") is None:
-            blockers.append("no recorded lean_exit -- cannot confirm the run succeeded")
+            missing.append("no recorded lean_exit -- cannot confirm the run succeeded")
         if rec.get("lean_exit") is not None and rec["lean_exit"] != 0:
             blockers.append(f"recorded lean_exit {rec['lean_exit']}")
         if rec.get("lean_errors"):
@@ -136,33 +144,56 @@ def main() -> int:
         # Lean log may look truncated-but-clean.
         tfile = Path(rec["out_dir"]) / "typecheck.time" if rec.get("out_dir") else None
         if tfile is None or not tfile.exists():
-            blockers.append("no retained timing file")
+            missing.append("no retained timing file")
         else:
             ttext = tfile.read_text(errors="replace")
+            tlines = ttext.splitlines()
             if not ttext.strip():
-                blockers.append("the retained timing file is empty")
+                missing.append("the retained timing file is empty")
             # A SUCCESSFUL TERMINAL RESULT MUST BE PRESENT, not merely
             # unobjectionable. Scanning for a bad line accepts a file whose exit
             # line has been REMOVED -- absence of evidence read as evidence.
-            exits = [l for l in ttext.splitlines() if "Exit status" in l]
+            exits = [l for l in tlines if "Exit status" in l]
             if not exits:
-                blockers.append("the timing file records no exit status")
+                missing.append("the timing file records no exit status")
             elif any(l.split(":")[-1].strip() != "0" for l in exits):
                 blockers.append(f"timing records {exits[0].strip()}")
-            if any("Command terminated by signal" in l for l in ttext.splitlines()):
+            if any("Command terminated by signal" in l for l in tlines):
                 blockers.append("timing records a termination by signal")
-            # IDENTITY: the timing must describe THIS artifact's run. A
-            # substituted file was accepted while naming a different command.
-            cmdline = next((l for l in ttext.splitlines() if "Command being timed" in l), "")
-            if cmdline and art.name not in cmdline and str(art) not in cmdline:
+
+            # PRESENT AND PARSED, NOT "CHECKED IF PRESENT".
+            #
+            # These three were guarded by `if cmdline and ...` and `if line and
+            # ...`, so DELETING a line skipped its own check. Measured
+            # externally on a real-Lean validated record: removing `Command
+            # being timed`, `Elapsed (wall clock)` or `Maximum resident set
+            # size` separately each still returned TYPECHECKED and exit 0.
+            # That is this file's own rule -- absent evidence is not clean
+            # evidence -- failing on the evidence it promises.
+            #
+            # The recorded value is never minted from the file as it stands
+            # now: a record that never carried a measurement is unresolved, not
+            # retroactively measured.
+            cmdline = next((l for l in tlines if "Command being timed" in l), None)
+            if cmdline is None:
+                missing.append("the timing file does not name the command it timed")
+            elif art.name not in cmdline and str(art) not in cmdline:
                 blockers.append(f"timing names a different command: {cmdline.strip()[:90]}")
-            # ...and the reported wall/RSS must be the ones recorded.
+
             for key, label in (("wall_clock", "Elapsed (wall clock)"),
                                ("peak_rss_kib", "Maximum resident set size")):
-                if rec.get(key):
-                    line = next((l for l in ttext.splitlines() if label in l), "")
-                    if line and str(rec[key]) not in line:
-                        blockers.append(f"recorded {key}={rec[key]} is not in the retained timing")
+                line = next((l for l in tlines if label in l), None)
+                if line is None:
+                    missing.append(f"the timing file records no {label}")
+                    continue
+                measured = line.split(":", 1)[1].strip() if ":" in line else ""
+                if not measured:
+                    missing.append(f"the timing file's {label} line carries no value")
+                    continue
+                if rec.get(key) in (None, ""):
+                    missing.append(f"no recorded {key} -- the run's {label} was never kept")
+                elif str(rec[key]) not in line:
+                    blockers.append(f"recorded {key}={rec[key]} is not in the retained timing")
         # The log is the evidence; read it rather than trusting the summary.
         log_text = log.read_text(errors="replace")
         n_err = log_text.count("error:")
@@ -177,14 +208,20 @@ def main() -> int:
         if rec.get("typecheck_log_sha256") and orch.sha(log) != rec["typecheck_log_sha256"]:
             blockers.append(f"typecheck log hash changed since the run")
 
-        if blockers:
-            rec["proof_state"] = "FAILED"
-            rec["reaudit"] = "refused promotion: " + "; ".join(blockers)
+        # A PRESENT-AND-BAD verdict outranks an absent one: if the run is known
+        # to have failed, say so, rather than calling it unresolved because a
+        # second piece of evidence is also missing.
+        if blockers or missing:
+            state = "FAILED" if blockers else "UNVERIFIABLE"
+            why = blockers + missing
+            rec["proof_state"] = state
+            rec["reaudit"] = ("refused promotion: " if blockers
+                              else "evidence missing: ") + "; ".join(why)
             rp.write_text(json.dumps(rec, indent=1) + "\n")
             if rec["proof_state"] != before:
                 changed += 1
-                print(f"  {j['family']}/{j['mode']}/{j['case']}: {before} -> FAILED "
-                      f"({blockers[0]})")
+                print(f"  {j['family']}/{j['mode']}/{j['case']}: {before} -> {state} "
+                      f"({why[0]})")
             continue
 
         cmd = ["python3", "-I", str(ROOT / "pass" / "lean" / "scripts" / "axiom_audit.py"),

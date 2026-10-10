@@ -26,7 +26,12 @@ fixture() {
   local nosims="${2:-}"
   local d="$WORK/$name"
   rm -rf "$d"; mkdir -p "$d/pass/lean/scripts" "$d/formal/lean"
-  ln "$GEN" "$d/pass/lean/scripts/make_sim_launcher.py"   # hard link: same inode
+  # Hard links: same inode, so a control can never run a stale copy. Both
+  # files, because the generator imports its sibling -- and the first run after
+  # that import was added failed here with ModuleNotFoundError, which is the
+  # fixture doing its job.
+  ln "$GEN" "$d/pass/lean/scripts/make_sim_launcher.py"
+  ln "$ROOT/pass/lean/scripts/cert_cut.py" "$d/pass/lean/scripts/cert_cut.py"
   if [ "$nosims" = "--no-sims" ]; then
     printf 'name = "x"\n\n[[lean_lib]]\nname = "LeanSemanticPrimitives"\n' > "$d/formal/lean/lakefile.toml"
   else

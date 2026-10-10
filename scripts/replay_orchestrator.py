@@ -565,15 +565,24 @@ def main() -> int:
             print(f"unknown family in --root: {fam}", file=sys.stderr)
             return 2
         os.environ[var] = path
-    inv = json.loads(a.inventory.read_text())
-    if a.command == "status":
-        return status(inv)
-
+    # RELOCATE BEFORE DISPATCH, NOT AFTER IT.
+    #
+    # This block sat below the `status` return, so `status --replay-dir X` read
+    # the DEFAULT results directory while reporting on X. Measured externally:
+    # a relocated tree holding two SKIPPED records was reported as two queued
+    # jobs, from the empty default tree. A relocation that only some commands
+    # honour is worse than none -- it reads as a report about the tree that was
+    # named.
     if a.replay_dir:
         global REPLAY, RESULTS, JOBS
         REPLAY = a.replay_dir.resolve()
         RESULTS = REPLAY / "results"
         JOBS = REPLAY / "jobs"
+
+    inv = json.loads(a.inventory.read_text())
+    if a.command == "status":
+        return status(inv)
+
     RESULTS.mkdir(parents=True, exist_ok=True)
 
     # A --case NAME THAT MATCHES NOTHING IS AN ERROR.

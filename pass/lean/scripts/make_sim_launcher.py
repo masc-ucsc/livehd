@@ -32,6 +32,12 @@ import os
 import re
 import sys
 
+# The residual-half cut is shared with direct_sweep.py: both tools redirect the
+# same import and cut at the same boundary, and both carried the same two
+# defects. A repair applied to one copy is a repair that drifts.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cert_cut
+
 LEAN_DIR = os.path.realpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "formal", "lean"))
 SIMS = os.path.join(LEAN_DIR, "Sims")
@@ -80,27 +86,6 @@ exeName = "lgraph-bench-{base}"
 """
 
 
-def _back_over_attached_comment(text, cut):
-    """Move a cut boundary back over a doc comment attached to the declaration.
-
-    Lean rejects a doc comment with nothing after it, so cutting AT the `def`
-    line leaves the module ending in `/-- ... -/` and it will not elaborate.
-    Measured: in every emitted certificate the `_step` definition carries a
-    two-line doc comment, so the `_step` fallback produced exactly that file --
-    and printed success.
-
-    Returns None when the comment's opening cannot be located unambiguously,
-    which the caller turns into a refusal rather than a guess.
-    """
-    j = len(text[:cut].rstrip())
-    if not text[:j].endswith("-/"):
-        return cut
-    k = text.rfind("/-", 0, j)
-    if k == -1 or text.find("-/", k, j - 2) != -1:
-        return None          # nested or unmatched -- do not guess
-    return k
-
-
 def make_one(path, keep_compiler, bench):
     text = open(path, encoding="utf-8", errors="replace").read()
     m = CERT_RE.search(text)
@@ -122,43 +107,16 @@ def make_one(path, keep_compiler, bench):
     if not keep_compiler:
         text = text.replace("import LeanSemanticPrimitives.Compiler.CompileDesign",
                             "import LeanSemanticPrimitives.Compiler.DirectTrace")
-        # A CUT THAT CANNOT FIND ITS BOUNDARY IS A REFUSAL, NOT A SUCCESS.
-        #
-        # The import above has already been redirected to DirectTrace, which
-        # does not provide the compiler entry points.  The original fell back
-        # to `cut = len(text)` -- keep everything -- and then PRINTED SUCCESS
-        # and exited 0, having written a module that cannot elaborate: the
-        # residual half is still there and the import it needs is gone.
-        #
-        # Measured on this tree: all 81 emitted verified_compiler certificates
-        # carry the `/-- Compile-and-run.` marker, so the fallback is not
-        # reached today.  It is repaired anyway, because what it does when it
-        # IS reached is report work it did not do.
-        cut = text.find("/-- Compile-and-run.")
-        if cut < 0:
-            m2 = re.search(r"^def\s+\w+_step\s*:", text, re.M)
-            if m2 is None:
-                print(f"{path}: cannot locate the residual half (no `/-- Compile-and-run.` "
-                      f"marker and no `_step` definition); refusing to emit a certificate "
-                      f"module whose CompileDesign import has been removed. Pass "
-                      f"--keep-compiler to take it verbatim.", file=sys.stderr)
-                return None
-            cut = _back_over_attached_comment(text, m2.start())
-            if cut is None:
-                print(f"{path}: the `_step` definition carries a comment whose opening "
-                      f"cannot be located unambiguously; refusing rather than emitting a "
-                      f"module that ends in a dangling comment.", file=sys.stderr)
-                return None
-        text = text[:cut]
-        # The cut must not have taken the certificate with it...
-        if not CERT_RE.search(text):
-            print(f"{path}: the cut removed `{base}_designCert` itself; refusing.",
-                  file=sys.stderr)
+        cut, why = cert_cut.residual_cut(text)
+        if cut is None:
+            print(f"{path}: {why}; refusing to emit a certificate module whose "
+                  f"CompileDesign import has been removed. Pass --keep-compiler to "
+                  f"take it verbatim.", file=sys.stderr)
             return None
-        # ...and must not have left a comment hanging open or unattached.
-        if text.rstrip().endswith("-/") or text.count("/-") != text.count("-/"):
-            print(f"{path}: the cut leaves an unbalanced or dangling comment; refusing.",
-                  file=sys.stderr)
+        text = text[:cut]
+        why = cert_cut.check_kept(text, CERT_RE)
+        if why:
+            print(f"{path}: {why}; refusing.", file=sys.stderr)
             return None
 
     os.makedirs(SIMS, exist_ok=True)

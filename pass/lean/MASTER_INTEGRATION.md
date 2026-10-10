@@ -3841,3 +3841,146 @@ Seven controls, through the real CLI: no `--case` selects both jobs; `--case
 alpha` selects one; a recorded case selects zero; `--redo` brings it back to
 one; `--case gamma` exits 2; `--redo` alone exits 2; and a known case excluded
 by `--mode` is not reported unknown.
+
+### R25.2 `status --replay-dir` reported on the wrong tree
+
+Caught externally, and correctly. The relocation block sat **below** the
+`status` dispatch:
+
+```
+    inv = json.loads(a.inventory.read_text())
+    if a.command == "status":
+        return status(inv)          # <- returns here
+
+    if a.replay_dir:                # <- relocation, never reached by `status`
+```
+
+So `status --replay-dir X` read the **default** results directory while naming
+X. Measured: a relocated tree holding two `SKIPPED` records was reported as two
+**queued** jobs, from the empty default tree. A relocation that only some
+commands honour is worse than none — it reads as a report about the tree that
+was named.
+
+Moved above the dispatch. The control needs the two trees to **disagree**, or
+it passes whatever the code does: it builds one tree with both records present
+and one empty, and requires that `status` give different answers and that the
+populated one report `SKIPPED`. Verified after the move — populated: 2 SKIPPED,
+0 queued; empty: 0 SKIPPED, 2 queued.
+
+## R26. The timing file's own evidence, present rather than merely unobjectionable
+
+Also caught externally. `reaudit_results.py` promised three things about the
+retained timing and checked none of them when the line was absent:
+
+```
+    cmdline = next((l for l in ttext.splitlines() if "Command being timed" in l), "")
+    if cmdline and art.name not in cmdline ...          # "" -> skipped
+        ...
+        if rec.get(key):
+            line = next((l for l in ttext.splitlines() if label in l), "")
+            if line and str(rec[key]) not in line:      # "" -> skipped
+```
+
+Measured on a real-Lean-validated fast model: **removing `Command being timed`,
+`Elapsed (wall clock)` or `Maximum resident set size` separately each still
+returned TYPECHECKED and exit 0.** This file's own rule — absent evidence is
+not clean evidence — failing on the evidence it promises. Evidence:
+`automate_workspace/master_rebase/audits/timing_identity_18e0d31c0_20261010`.
+
+### R26.1 Two refusals, not one
+
+The repair also splits what had been one bucket:
+
+| | meaning | verdict |
+| --- | --- | --- |
+| `blockers` | the evidence is **present** and says the run did not succeed | `FAILED` |
+| `missing` | the evidence needed to check is **absent** | `UNVERIFIABLE` |
+
+`UNVERIFIABLE` was already this file's verdict for a vanished log or artifact;
+it now covers an absent digest, an absent `lean_exit`, an absent or empty
+timing file, a missing exit line, a missing command/wall/RSS line, a line
+present but carrying no value, and a record that never kept a measurement. A
+present-and-bad verdict outranks an absent one, so a run known to have failed
+is not called unresolved merely because a second piece of evidence is also
+gone.
+
+**The recorded value is never minted from the file as it stands now.** A record
+that never carried a measurement is unresolved, not retroactively measured.
+
+**Admission is unchanged.** Both verdicts are refusals, both are counted in the
+`bad` total, and both exit non-zero. What changed is that the label now says
+which it is.
+
+### R26.2 Blast radius, measured before the live records were touched
+
+The repaired auditor was run against a **copy** of all 279 live records:
+
+```
+BEFORE: PROVEN 122  TYPECHECKED 69  NOT_RUN 87  FAILED 1
+AFTER : PROVEN 122  TYPECHECKED 69  NOT_RUN 87  FAILED 1
+re-audited 192 retained result(s); 0 verdict(s) changed
+```
+
+**Nothing is reclassified.** Every accepted record already carries a complete
+`/usr/bin/time -v` block with the command it timed and both measurements. The
+single `FAILED` is `CORE-ET/legacy/txfmactl_top`, which has `lean_exit 1` and
+three `error:` lines in its retained log — a real failure, correctly recorded
+before and after.
+
+Then replayed against the external fixture itself, on a copy so their evidence
+was not disturbed:
+
+| case | before | after |
+| --- | --- | --- |
+| `good` | TYPECHECKED, exit 0 | TYPECHECKED, exit 0 |
+| `missing_command` | TYPECHECKED, exit 0 | **UNVERIFIABLE**, exit 1 |
+| `missing_wall` | TYPECHECKED, exit 0 | **UNVERIFIABLE**, exit 1 |
+| `missing_rss` | TYPECHECKED, exit 0 | **UNVERIFIABLE**, exit 1 |
+
+Nineteen controls now pass, five of them new.
+
+## R27. Prerequisites, as actually provisioned
+
+Checked rather than assumed, because the P=1/P=2 source-RTL differential
+depends on them:
+
+| tool | state |
+| --- | --- |
+| `iverilog` | **not installed** — not on `PATH`, not on disk, no dpkg package |
+| `vvp` | **not installed** (same) |
+| `verilator` | `/bin/verilator`, 5.032 (Debian 5.032-1+b2) |
+
+`mem_lean_diffsim.py` drives **iverilog**, so the RTL differential **cannot be
+run here**. It already refuses honestly rather than passing: a missing tool
+prints `BEHAVIORAL_DIFF_SKIPPED no-iverilog`, and — deliberately — an
+*installed* iverilog that cannot elaborate the design is a `BEHAVIORAL_DIFF_FAIL`,
+not a skip. Only a missing tool may skip.
+
+This is recorded as a **missing prerequisite**, not as a result. A control
+suite exercising the admission rule, or a certificate-only probe, is not an RTL
+differential run and is not reported as one. (D2's `coreet_lowering_diffsim.py`
+uses verilator instead, for modules whose RTL the native gate cannot elaborate;
+porting it is a separate item, and it does not substitute for the iverilog
+fixtures.)
+
+Other roots in use: DINO `HAGENT_BUILD=/soe/czeng14/projects/hagent/.cache/setup_simplechisel_mcp_2025.11/build`
+(the only one carrying all three of `build_singlecyclecpu_d`, `build_pipelined_d`,
+`build_dualissue_d`); CVA6 `/mada/users/czeng14/projects/cva6`; CORE-ET
+`/mada/users/czeng14/projects/core-et`.
+
+## R28. The three standalone DINO fast-model procedures
+
+`inventory.json` holds 447 jobs and **stays at 447**. Its DINO entries are
+3 `legacy_chunked_wf` + 3 `legacy_full_bridge` — the six that are PROVEN.
+
+The three **standalone fast-model** procedures are a separately requested
+historical procedure and are not among them. `legacy_full_bridge` does also
+elaborate the fast model on its way to the bridge, but that **does not
+discharge** a separately requested run, and recording it as if it did would be
+the same substitution this ledger keeps catching.
+
+They are therefore carried in their own file,
+`generated/master_port/replay/inventory_dino_fast.json`, whose results land in
+the same `results/` tree keyed `DINO__<top>__legacy` — distinct from the
+`legacy_chunked_wf` and `legacy_full_bridge` records, so neither can be mistaken
+for the other.
