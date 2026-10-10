@@ -357,8 +357,21 @@ def main() -> int:
     # so neither overclaims, but collapsing them loses the only thing a
     # reviewer needs to know: whether the gate was evaluated and disagreed, or
     # was never reached. 143 is SIGTERM, i.e. killed from outside.
+    #
+    # 137 IS THE MEMORY GUARD, AND IT WAS LANDING IN `not_proved`.
+    #
+    # `d3_guarded_build.py` returns the command's status, or 137 when the
+    # CGROUP OOM-killed it -- so 137 here is not a guess about a signal, it is
+    # this run's own guard reporting that it stopped the composition. Measured
+    # on `txfma_f4`: all 16 group builds rc=0 under the 10,000,000 kB group
+    # cap, then the composition killed at a cgroup peak of exactly its
+    # 14,000,000 kB `final_max_kb`, with no gate line at all -- and the status
+    # read `not_proved`, which says the gate was evaluated and disagreed. It
+    # was never reached. That is an UNPROVEN-AFTER-A-RESOURCE-STOP, not a
+    # theorem that failed, and the two must not share a label.
     status = ("proved" if proved else
               "timeout" if rc == RC_TIMEOUT else
+              "rss_killed" if rc == 137 else
               "killed" if rc == 143 else
               "not_proved")
     res = {"status": status,

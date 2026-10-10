@@ -65,6 +65,8 @@ if mode == "wrong_cert":
     res["cert_sha256"] = "0" * 64
 if mode == "driver_timeout":
     res["status"] = "timeout"
+if mode == "rss_killed":
+    res["status"] = "rss_killed"
 if mode == "malformed":
     (d / "result.json").write_text("this is not json")
 elif mode in ("no_output", "stale"):
@@ -130,6 +132,12 @@ check malformed 0 "no result.json" "a malformed result is refused"
 
 mk_worker driver_timeout; run dtimeout  > /dev/null
 check dtimeout 0 "driver status timeout" "a driver timeout is refused and named, not failed"
+
+# A MEMORY STOP IS NOT A DISPROOF. `d3_guarded_build.py` returns 137 when the
+# cgroup OOM-killed the composition, and that used to land in `not_proved` --
+# which says the gate was evaluated and disagreed, when it was never reached.
+mk_worker rss_killed;     run rsskill   > /dev/null
+check rsskill 0 "driver status rss_killed" "a composition killed at its memory cap is named as a resource stop"
 
 cp -f "$W/worker_real.py" "$WORKER"
 if [[ "$(sha256sum < "$WORKER")" == "$(sha256sum < "$W/worker_real.py")" ]]; then
