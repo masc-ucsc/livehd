@@ -660,8 +660,24 @@ catch any of the above.
 The fixture carries, deliberately: two clock domains; a **synchronous**
 active-high reset and an **asynchronous** active-low one; a **nonzero** reset
 value (7); an **enable**, so the hold path is reached with the clock firing; a
-memory on the second domain, so commit-versus-hold is observable; and distinct
-source and output widths (8-bit sources, a 4-bit output).
+memory on the second domain; and distinct source and output widths (8-bit
+sources, a 4-bit output).
+
+**The memory claim in the first version of this fixture was not substantiated.**
+Its `nextImg` pointed straight at the memory's own `memImg` **source**, so the
+commit arm and the hold arm produced the *same function* — the comparison could
+not have told them apart, and the single whole-result non-vacuity guard was
+being satisfied by the flops alone. Corrected: an `Op_MemWrite`
+`[mem, addr, data, enable]` node now stands between them, and non-vacuity is
+stated **per observable** rather than globally:
+
+- the flops must differ between quiet and simultaneous edges;
+- the **memory** must differ at the written cell between a held and a committed
+  step;
+- the written cell takes the written value (200) when its domain fires and
+  holds the previous image (5) when it does not;
+- a **neighbour** cell is 5 either way;
+- with the write enable low, even a firing domain changes nothing.
 
 Four edge vectors — **quiet** `#[f,f]`, **independent** each way `#[t,f]` and
 `#[f,t]`, and **simultaneous** `#[t,t]` — crossed with five input cases
@@ -705,3 +721,58 @@ Twelve modules, all exit 0, rebuilt after the emitter repair:
 The regression is now part of the staged build script, so the emitted terms are
 checked every time the generator is, rather than only when someone thinks to
 reify a design.
+
+## 14. The historical D3 fixtures, and why two `denoteResidual` calls were not the migration
+
+§12.4 claimed the reifier migration on the strength of two `denoteResidual`
+call sites in `D3Harness`. That was not the migration. **`D3Harness.agree` and
+`distinctObservables` still take a two-argument `fast`**, while the generated
+models now take three — so every historical fixture that passes a generated
+model to them fails to elaborate.
+
+### 14.1 A gate marker is not acceptance
+
+Run as pinned, `d3_shared_test.lean` **prints `D3SHARED OK` and exits 1** with
+68 errors. So does `d3_flopnext_test` (`D3FLOPNEXT OK`, 59 errors) and
+`d3_stimulus_test` (`D3STIM OK`, 15 errors). The marker is printed by an
+`#eval` that runs regardless of whether the `#guard`s above it elaborated.
+
+The probe runner therefore requires **exit 0 AND zero error lines**, and
+reports which it was. Reading for the marker alone would have accepted three
+broken fixtures.
+
+### 14.2 Caller-only adaptations
+
+Every change is at a **call site**; no stimulus, assertion or expected value
+was altered.
+
+| fixture | adaptation |
+| --- | --- |
+| `d3_shared_test` | `eqOn` takes edge-aware models and applies `allEdges D` once, so all 20 `#guard`s stay byte-identical; 8 `D3.agree` calls wrap their **model argument** `(fun i s => m (allEdges D) i s)`, leaving `agree`'s own two-argument `fast` untouched |
+| `d3_flopnext_test` | 18 `flopNextV` applications gain `true false` — D3's clockless helper always committed, which is this helper with the domain **firing** and the reset **synchronous**, so each original case keeps its original meaning; its `ResidualFlopUpdate` literal gains `clock := 0, asyncReset := false`; 6 `flopNext` calls gain an explicit `eF : ClockEdges := #[true]` |
+| `d3_stimulus_test` | 4 `compileAndRun` / `distinctObservables` callers gain `allEdges zeroDetectCert` |
+
+The quiet and asynchronous arms those fixtures cannot reach are exercised by
+`d3_generated_clock_test` instead (§13.2).
+
+### 14.3 Results
+
+| probe | result |
+| --- | --- |
+| `d3_flopnext_test` | ok — exit 0, 0 errors, `D3FLOPNEXT OK` |
+| `d3_generated_clock_test` | ok — `GENERATED-CLOCK-REGRESSION OK` |
+| `d3_harness_test` | ok — unchanged from pinned, `D3HARNESS-TEST OK` |
+| `d3_memory_semantics_test` | ok — unchanged from pinned, `D3MEMSEM OK` |
+| `d3_shared_test` | ok — exit 0, 0 errors, `D3SHARED OK` |
+| `d3_shift_boundary_test` | ok — `BOUNDARY-MATRIX OK` |
+| `d3_stimulus_test` | ok — exit 0, 0 errors, `D3STIM OK` |
+| `d3_flop_gen_test` | **BLOCKED** — imports `ReifyProof` |
+| `d3_memory_gen_test` | **BLOCKED** — imports `ReifyProof` |
+
+**BLOCKED is not FAILED.** Those two import the one module deliberately not
+ported, the one carrying four inherited `sorry`. Calling them failures would
+read as a regression in the port; they are blocked on a declared deferral, and
+they stay outside every accepted proof path.
+
+`agree` remains **sampled** evidence and `proof` remains **unattempted** —
+nothing here changes either.
