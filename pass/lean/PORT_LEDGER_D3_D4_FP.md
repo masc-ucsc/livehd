@@ -1293,6 +1293,183 @@ the next deliverable (§21).
   into tracked paths from D4 yet.
 
 
+## 21. The C++ side: an owned DCERT2 serializer, and actual parity
+
+### 21.1 What was built
+
+`pass/lean/emit_dcert.{hpp,cpp}` (`//pass/lean:lean_dcert`) serialises a
+`CertificateIR` as DCERT2 — the format `Compiler.CertIO.parseCert` is proved to
+invert. It walks the SAME IR `emit_design_cert` walks, so the Lean literal and
+the byte stream describe one certificate, and it judges nothing: clock ordinals
+go out as they stand, admission stays `certWfError`/`readCertChecked`.
+
+Three deliberate decisions, each stated in the source:
+
+- **`canonical_decimal`.** The IR carries integers as decimal STRINGS. Lean
+  renders through `Nat.repr`: no leading zeros, no `+`, no `-` on zero. `007`
+  and `-0` are the same integer and different BYTES, so they are normalised
+  here — and anything that is not an optionally-signed digit run is a refusal,
+  never a guess.
+- **`dcert_opcode` is its own switch**, not a parse of `format_op`'s
+  constructor name. It is exhaustive over `Operation`; the five Lean codes the
+  LGraph front end never builds (Sub 2, Div 4, SDiv 6, LT 12, GT 13) are named
+  in a comment rather than written as dead cases.
+- **`dcert_oparg` preserves the inherited normalisation explicitly.** `Op_Sum`
+  and `Op_MemWriteBE` carry a `Nat` in the record's `Int` slot and Lean's
+  reader takes `Int.toNat`. The round trip survives because the payload is a
+  `uint32_t` and cannot be negative — NOT because that slot is canonical in
+  general, which is why the header says so.
+
+### 21.2 Production emission
+
+`pass.lean` in `verified_compiler` mode now publishes THREE artifacts in one
+transaction — the Lean literal, `<base>.dcert`, and the IO sidecar — through a
+new `publish_group`, of which `publish_pair` is the two-element case and keeps
+its documented contract unchanged. DCERT2 is emitted in `verified_compiler`
+mode only; the legacy branch's certificate is not a `DesignCert`.
+
+**Control: the other two artifacts are byte-unchanged.** The pass was built
+from `HEAD`'s `pass_lean.cpp` and from the new one, and all three DINO designs
+emitted with each:
+
+| artifact | SingleCycleCPU | PipelinedCPU | PipelinedDualIssueCPU |
+|---|---|---|---|
+| `_Lgraph.lean` | byte-identical | byte-identical | byte-identical |
+| `_io.json` | byte-identical | byte-identical | byte-identical |
+
+The sidecar still carries `inputs[].ordinal` (including the gaps), `width`,
+`used_by_model`, `runtime_input_arity` and `clocks`. Nothing in the async
+checker, the `single_edge` contract or any native gate was touched:
+`tiny_negedge` still refuses with *"flop n_16 is a NEGEDGE flop (`posclk` = 0).
+pass.single_edge must normalize it first"*, and publishes **nothing** — no
+artifact, no `.tmp`, no `.bak`.
+
+### 21.3 The write-failure defect, and its permanent control
+
+`Rec` emitted each record's terminating newline from its DESTRUCTOR.
+`publish_group` stages to streams with exceptions ENABLED, so a write failure
+part way through a record threw, the destructor then wrote during unwinding,
+and a second throw out of an implicitly `noexcept` destructor is
+`std::terminate` — the process died and `publish_group`'s catch, rollback and
+scrub never ran. Independently reproduced against a `streambuf` capped at 12
+bytes: **exit −6**, `terminate called after throwing an instance of
+'std::__ios_failure'`. At a 128-byte cap the same binary exits 0, which is why
+the green golden-byte fixture said nothing about it.
+
+Repaired by removing I/O from the destructor: a record is built in a
+`std::string` and handed to the stream by one `write` in ordinary control flow,
+so a failure propagates from the call site where it can be caught.
+
+`emit_dcert_test.cpp` keeps the control permanently —
+`DcertStreamFailure.MidRecordFailurePropagatesInsteadOfTerminating`, over caps
+0, 7, 12, 40 and 200. **Non-vacuity measured**: with the destructor put back,
+the test binary aborts with the identical `std::__ios_failure` terminate
+message; with the repair, it passes. Byte output is unchanged — all seven
+production `.dcert` files are identical before and after, so the repair is
+confined to the failure path.
+
+`design_scan_test.cpp` additionally runs the five publication-failure shapes
+over the production TRIPLE and over **every slot**, not just the first and last
+— a middle element is what a hand-unrolled pair gets wrong: blocked backup,
+final-rename failure, staging failure (existing and fresh targets), a duplicate
+path, success, and a serialiser that throws mid-stream. The pair controls are
+untouched and still pass.
+
+None of this claims crash atomicity. `publish_group` is N renames and says so;
+`pass_lean.cpp`'s coherence comment is scoped to publishes that succeed or are
+handled, and notes that a third artifact widens the non-atomic window rather
+than closing it.
+
+### 21.4 Cross-language parity — actual, on real designs
+
+`pass/lean/scripts/dcert_parity.py` elaborates the emitted literal, renders it
+with the library's own `renderCert`, and compares to the C++ bytes.
+
+Byte equality here is **stronger** than a hand-written field walk, and that is
+a theorem rather than a hope. `Compiler.CertIO.renderCert_injective`
+(`CertIOParity.lean`, standard axioms only):
+
+```
+@Compiler.CertIO.renderCert_injective : ∀ {A B : Compiler.DesignCert},
+  Compiler.CertIO.renderCert A = Compiler.CertIO.renderCert B → A = B
+```
+
+So equal bytes mean the C++ emitter and the Lean literal agree in EVERY field,
+including ones no comparison would have thought to check.
+
+Result — **7/7 designs, exit 0, every check**:
+
+| design | bytes | parsed |
+|---|---:|---|
+| `SingleCycleCPU` | 35,710 | 810 src, 1113 nodes, 9 out, 33 flops, 0 mem, 1 clk |
+| `PipelinedCPU` | 48,348 | 1007 src, 1533 nodes, 1 clk |
+| `PipelinedDualIssueCPU` | 109,395 | 2087 src, 3561 nodes, 1 clk |
+| `tiny_ram` | 227 | 1 memory |
+| `tiny_sync_ram` | 288 | 1 flop, 1 memory |
+| `tiny_byte_ram` | 227 | 1 memory |
+| `tiny_async` | 82 | 1 async flop |
+
+Each run checks, on the production bytes: byte parity with `renderCert`; the
+verified reader accepts them; re-rendering the parsed design reproduces them;
+semantic admission accepts; **sensitivity** to a flop width, a flop clock
+ordinal, `asyncReset` and the clock table (a comparison that cannot fail proves
+nothing); the codec/admission split on real data — a flop moved to clock
+ordinal 999 still PARSES and is REFUSED by `readCertChecked`; and the refusal
+controls — DCERT1 magic, truncation, trailing non-whitespace (refused),
+trailing whitespace (accepted, as the format intends), opcode 99, a clock
+separator that is not a space, a name shorter than its count, and a name
+containing both a space and a newline (accepted).
+
+The C++ unit test adds golden bytes for a fixture with every source kind,
+arbitrary-precision decimals, non-default flop and memory clocks, an async
+reset, and four clock names — empty, plain, one containing a space AND a
+newline, one multi-byte UTF-8 — plus an independently written reader compared
+field by field, and the decimal/id refusals.
+
+### 21.5 Corrections made here
+
+- `emit_dcert.cpp` and the staged `CertIO.lean` both claimed the first five
+  sections stay byte-identical to DCERT1 for a clockless design. **False**: the
+  flop record gained `clock` and `asyncReset` and the memory record gained
+  `clock`. Both now say the clocks section is last because it is the one this
+  version added, and nothing else is inherited.
+- `dcert_parity_test.cpp` violated the `_test.cpp` naming rule (no
+  `dcert_parity.cpp` exists). Renamed to `emit_dcert_test.cpp`, BUILD updated.
+- One control in the parity harness was itself wrong — I wrote a byte count of
+  11 for the 7-byte name `a b\nc d`, and the reader correctly refused it. The
+  count was fixed; the reader was right.
+
+### 21.6 Fingerprints
+
+The CertIO documentation correction in §19.4 rebuilt the staged modules. The
+adopted `CertIORoundTrip` **source and object are byte-identical** to the
+audited ones (`dd68516a…`, `6ed3d944…`) — the edit was to `CertIO`'s comments
+and does not reach the dependent object. Current set:
+
+| file | sha256 |
+|---|---|
+| `CertIO.lean` | `a7eefe528a6a337016c73d79d5350767401011433a0cc15165b3f93b7656f918` |
+| `CertIO.olean` | `27a0536f5e0858cee2ae6db21d98e7299a81d9747abce33d7a988c2d9b4fa8a4` |
+| `CertIORoundTrip.lean` | `dd68516a87a6a6c119f74c38f41577c8630e0d8ca4a16305b52e30d7a98f7227` |
+| `CertIORoundTrip.olean` | `6ed3d944cadd7b6c69b371cb5188769f44ebf63af220fdcacd3b9b97d652b1d0` |
+| `CertIOParity.lean` | `d4d206cadb4cb02cc5017ebea37fc53cf2fdc454f330f2fd8883ba80cfd4dd94` |
+| `CertIOParity.olean` | `7df06df0922c80971bb58f00a2de3b67a085df354bc9416e1d22733599d6d030` |
+
+CertIO 0:13.44 / 6,728,112 KiB; CertIORoundTrip 0:34.20 / 6,956,868 KiB;
+CertIOParity 0:18.96 / 6,705,184 KiB. All exit 0, zero errors. The live
+baseline library is **unchanged**: no `.olean` under
+`formal/lean/.lake/build/.../LeanSemanticPrimitives` has been written today.
+
+### 21.7 Still NOT credited
+
+The D4/FP `Compiler.CertIO` facade is unresolved, so **nothing from D4 is
+installed into tracked paths** — the Lean modules remain staged. The original
+D4 runtime-loading and fixed-certificate replay procedures are not yet
+restored, and a new certificate PRODUCER is not fixed-input replay of
+historical rows. The pinned FP contribution, the D3 scaling/CLI/backend
+obligations and final integrated validation under final fingerprints all
+remain.
+
 ## 20. D3 replay backlog (recorded, not yet repaired)
 
 Two gaps in restored D3 procedures, kept visible so they are not mistaken for

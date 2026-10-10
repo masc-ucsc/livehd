@@ -32,6 +32,16 @@ cc_library(
 )
 
 cc_library(
+    name = "lean_dcert",
+    srcs = ["emit_dcert.cpp"],
+    hdrs = ["emit_dcert.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [":lean_certificate_ir"],
+)
+
+cc_library(
     name = "lean_emitters",
     srcs = ["emit_design_cert.cpp"],
     hdrs = ["emit_design_cert.hpp"],
@@ -105,6 +115,7 @@ cc_library(
     deps = [
         ":lean_legacy_emitter",
         ":lean_graph_scan",
+        ":lean_dcert",
         ":lean_emitters",
         "//graph",
         "//pass/common:pass",
@@ -160,7 +171,19 @@ cc_test(
     deps = [":lean_legacy_emitter", ":lean_emitters", "@googletest//:gtest_main"],
 )
 
+cc_test(
+    name = "emit_dcert_test",
+    srcs = ["emit_dcert_test.cpp"],
+    copts = COPTS,
+    deps = [":lean_dcert", ":lean_emitters", "@googletest//:gtest_main"],
+)
+
 test_suite(
     name = "lean_export_tests",
-    tests = [":certificate_ir_test", ":design_scan_test", ":legacy_model_test"],
+    tests = [
+        ":certificate_ir_test",
+        ":emit_dcert_test",
+        ":design_scan_test",
+        ":legacy_model_test",
+    ],
 )

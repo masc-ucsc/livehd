@@ -123,51 +123,52 @@ void stage(const std::string& path, const std::string& suffix,
 }  // namespace
 
 namespace detail {
-std::string rollback_pair(const std::string& path_a, const std::string& path_b, bool moved_a, bool moved_b,
-                          bool put_a, bool put_b) {
+std::string rollback_group(const std::vector<std::string>& paths, const std::vector<bool>& moved,
+                           const std::vector<bool>& put) {
   std::error_code ec;
   // Remove only what WE published. A target we never wrote is either the
   // untouched original or absent, and deleting it is the loss this guards.
-  if (put_a) {
-    std::filesystem::remove(path_a, ec);
-  }
-  if (put_b) {
-    std::filesystem::remove(path_b, ec);
+  for (size_t i = 0; i < paths.size(); ++i) {
+    if (put[i]) {
+      std::filesystem::remove(paths[i], ec);
+    }
   }
   // Restore only from backups we actually made, and KEEP any backup whose
   // restore fails: at that point it is the sole copy, and removing it to tidy up
   // would destroy the artifact this whole path is protecting.
   std::string stranded;
-  if (moved_a) {
+  std::vector<bool> restored(paths.size(), false);
+  for (size_t i = 0; i < paths.size(); ++i) {
+    if (!moved[i]) {
+      continue;
+    }
     std::error_code r;
-    std::filesystem::rename(path_a + ".bak", path_a, r);
+    std::filesystem::rename(paths[i] + ".bak", paths[i], r);
     if (r) {
-      stranded += " " + path_a + ".bak";
+      stranded += " " + paths[i] + ".bak";
+    } else {
+      restored[i] = true;
     }
   }
-  if (moved_b) {
-    std::error_code r;
-    std::filesystem::rename(path_b + ".bak", path_b, r);
-    if (r) {
-      stranded += " " + path_b + ".bak";
+  // Only a backup that WAS restored is cleaned up. Tracked per artifact rather
+  // than by searching the message: two targets can share a path PREFIX, and a
+  // substring test would then clean up a backup that is still the sole copy.
+  for (size_t i = 0; i < paths.size(); ++i) {
+    if (moved[i] && restored[i]) {
+      std::filesystem::remove(paths[i] + ".bak", ec);
     }
-  }
-  // Only a backup that WAS restored is cleaned up.
-  if (moved_a && stranded.find(path_a + ".bak") == std::string::npos) {
-    std::filesystem::remove(path_a + ".bak", ec);
-  }
-  if (moved_b && stranded.find(path_b + ".bak") == std::string::npos) {
-    std::filesystem::remove(path_b + ".bak", ec);
   }
   return stranded;
 }
+
+std::string rollback_pair(const std::string& path_a, const std::string& path_b, bool moved_a, bool moved_b,
+                          bool put_a, bool put_b) {
+  return rollback_group({path_a, path_b}, {moved_a, moved_b}, {put_a, put_b});
+}
 }  // namespace detail
 
-void publish_pair(const std::string& path_a, const std::function<void(std::ostream&)>& emit_a,
-                  const std::string& path_b, const std::function<void(std::ostream&)>& emit_b) {
-  const std::string ta = path_a + ".tmp", tb = path_b + ".tmp";
-  const std::string ba = path_a + ".bak", bb = path_b + ".bak";
-  std::error_code   ec;
+void publish_group(const std::vector<PublishItem>& items) {
+  std::error_code ec;
 
   // EVERY UNDO IS CONDITIONED ON HAVING DONE THE THING.
   //
@@ -179,52 +180,72 @@ void publish_pair(const std::string& path_a, const std::function<void(std::ostre
   // place. Measured: original A lost and replaced by a directory, original B
   // deleted outright. The same shape with `io.json.bak` blocked lost B.
   //
-  // Losing the previous pair is precisely what this function exists to prevent,
-  // so the state is tracked rather than assumed.
-  bool moved_a = false, moved_b = false, put_a = false, put_b = false;
+  // Losing the previous artifacts is precisely what this function exists to
+  // prevent, so the state is tracked rather than assumed.
+  std::vector<std::string> paths;
+  paths.reserve(items.size());
+  for (const auto& it : items) {
+    paths.push_back(it.path);
+  }
+  std::vector<bool> moved(items.size(), false), put(items.size(), false);
 
   // REJECT A COLLISION BEFORE MUTATING ANYTHING. A pre-existing `.bak` is either
   // a leftover from an interrupted publish -- which may be the only copy of a
   // previous artifact -- or an unrelated file. Renaming over it destroys it, and
   // renaming ONTO a directory fails in the middle of the transaction. Refusing up
   // front means the targets are untouched when it happens.
-  if (std::filesystem::exists(ba, ec) || std::filesystem::exists(bb, ec)) {
-    throw std::runtime_error("lean publish: a backup path already exists (" + ba + " or " + bb
+  std::string collisions;
+  for (const auto& p : paths) {
+    if (std::filesystem::exists(p + ".bak", ec)) {
+      collisions += " " + p + ".bak";
+    }
+  }
+  if (!collisions.empty()) {
+    throw std::runtime_error("lean publish: a backup path already exists (" + collisions
                              + "); refusing to publish rather than overwrite it. Move or remove it "
                                "after checking whether it holds the only copy of a previous artifact.");
   }
 
+  // Two artifacts published to the SAME path would back up over each other and
+  // leave whichever ran second in place, silently. That is a caller defect, and
+  // it is refused here rather than resolved.
+  for (size_t i = 0; i < paths.size(); ++i) {
+    for (size_t j = i + 1; j < paths.size(); ++j) {
+      if (paths[i] == paths[j]) {
+        throw std::runtime_error("lean publish: the same path is published twice: " + paths[i]);
+      }
+    }
+  }
+
   auto scrub_tmp = [&] {
-    std::filesystem::remove(ta, ec);
-    std::filesystem::remove(tb, ec);
+    for (const auto& p : paths) {
+      std::filesystem::remove(p + ".tmp", ec);
+    }
   };
-  // Both files are written BEFORE either is published, so an emit that throws
-  // cannot leave one target replaced and the other not.
+  // Every file is written BEFORE any is published, so an emit that throws
+  // cannot leave one target replaced and another not.
   try {
-    stage(path_a, ".tmp", emit_a);
-    stage(path_b, ".tmp", emit_b);
+    for (const auto& it : items) {
+      stage(it.path, ".tmp", it.emit);
+    }
   } catch (...) {
     scrub_tmp();
     throw;
   }
 
-  const bool had_a = std::filesystem::exists(path_a, ec);
-  const bool had_b = std::filesystem::exists(path_b, ec);
   try {
-    if (had_a) {
-      std::filesystem::rename(path_a, ba);
-      moved_a = true;
+    for (size_t i = 0; i < paths.size(); ++i) {
+      if (std::filesystem::exists(paths[i], ec)) {
+        std::filesystem::rename(paths[i], paths[i] + ".bak");
+        moved[i] = true;
+      }
     }
-    if (had_b) {
-      std::filesystem::rename(path_b, bb);
-      moved_b = true;
+    for (size_t i = 0; i < paths.size(); ++i) {
+      std::filesystem::rename(paths[i] + ".tmp", paths[i]);
+      put[i] = true;
     }
-    std::filesystem::rename(ta, path_a);
-    put_a = true;
-    std::filesystem::rename(tb, path_b);
-    put_b = true;
   } catch (...) {
-    const auto stranded = detail::rollback_pair(path_a, path_b, moved_a, moved_b, put_a, put_b);
+    const auto stranded = detail::rollback_group(paths, moved, put);
     scrub_tmp();
     if (!stranded.empty()) {
       // Report rather than swallow: a persistent filesystem error can prevent
@@ -236,8 +257,14 @@ void publish_pair(const std::string& path_a, const std::function<void(std::ostre
     }
     throw;
   }
-  std::filesystem::remove(ba, ec);
-  std::filesystem::remove(bb, ec);
+  for (const auto& p : paths) {
+    std::filesystem::remove(p + ".bak", ec);
+  }
+}
+
+void publish_pair(const std::string& path_a, const std::function<void(std::ostream&)>& emit_a,
+                  const std::string& path_b, const std::function<void(std::ostream&)>& emit_b) {
+  publish_group({{path_a, emit_a}, {path_b, emit_b}});
 }
 
 std::string lit_bv(uint32_t w, std::string_view v) { return "(BitVec.ofInt " + std::to_string(w) + " (" + std::string(v) + "))"; }

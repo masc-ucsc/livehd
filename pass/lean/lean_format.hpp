@@ -56,6 +56,22 @@ void        write_atomic(const std::string& path, const std::function<void(std::
 void publish_pair(const std::string& path_a, const std::function<void(std::ostream&)>& emit_a,
                   const std::string& path_b, const std::function<void(std::ostream&)>& emit_b);
 
+// The same transaction over N artifacts.
+//
+// `publish_pair` is this with two elements and is kept as its own name because
+// its contract above is the documented one. Nothing in the guarantee changes
+// with the count: the unwind is still conditioned on what actually happened, a
+// pre-existing `.bak` is still refused before anything is mutated, a failed
+// restore still names the stranded backup, and it is still NOT crash atomic --
+// N renames cannot be, and a crash between them leaves some targets new and
+// some old. Adding a third artifact does not make it so; it makes the
+// non-atomic window wider.
+struct PublishItem {
+  std::string                            path;
+  std::function<void(std::ostream&)>     emit;
+};
+void publish_group(const std::vector<PublishItem>& items);
+
 namespace detail {
 // The rollback half of `publish_pair`, exposed so it can be tested directly.
 //
@@ -73,5 +89,10 @@ namespace detail {
 // clean.
 std::string rollback_pair(const std::string& path_a, const std::string& path_b, bool moved_a, bool moved_b,
                           bool put_a, bool put_b);
+
+// The N-artifact rollback `rollback_pair` delegates to. `moved[i]`/`put[i]`
+// have the same meaning per artifact.
+std::string rollback_group(const std::vector<std::string>& paths, const std::vector<bool>& moved,
+                           const std::vector<bool>& put);
 }  // namespace detail
 }  // namespace lean_export

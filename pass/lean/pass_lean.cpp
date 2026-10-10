@@ -7,6 +7,7 @@
 #include "design_scan.hpp"
 #include "diag.hpp"
 #include "design_io_meta.hpp"
+#include "emit_dcert.hpp"
 #include "emit_design_cert.hpp"
 #include "lean_format.hpp"
 #include "legacy_model.hpp"
@@ -65,10 +66,29 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   // guarantee.
   auto io_meta = lean_export::build_io_meta(design, certificate);
   io_meta.top  = base_name;
+  const auto dcert_path = output_dir + "/" + base_name + ".dcert";
   if (verified_compiler) {
-    lean_export::publish_pair(
-        lean_path, [&](std::ostream& out) { lean_export::emit_design_cert(base_name, certificate, out); },
-        io_path, [&](std::ostream& out) { out << lean_export::io_meta_json(io_meta); });
+    // THREE artifacts, one transaction. The DCERT2 file and the Lean literal
+    // describe the SAME `CertificateIR`, built once above and walked by both
+    // emitters.
+    //
+    // WHAT THE GROUP BUYS, PRECISELY. When a publish SUCCEEDS, or fails and
+    // unwinds, a reader sees three artifacts from one run or the previous
+    // three -- never a certificate from this run beside a byte stream from the
+    // last. What it does not buy is coherence across a CRASH: `publish_group`
+    // is N renames and says so, and a crash between them leaves some targets
+    // new and some old. Adding a third artifact widens that window rather than
+    // closing it. The sidecar is in the same group for the reason it always
+    // was.
+    //
+    // DCERT2 is emitted in `verified_compiler` mode only: the legacy branch
+    // emits a different model whose certificate is not a `DesignCert`, and a
+    // `.dcert` beside it would name a design the rest of that artifact does not
+    // describe.
+    lean_export::publish_group(
+        {{lean_path, [&](std::ostream& out) { lean_export::emit_design_cert(base_name, certificate, out); }},
+         {dcert_path, [&](std::ostream& out) { lean_export::render_dcert(certificate, out); }},
+         {io_path, [&](std::ostream& out) { out << lean_export::io_meta_json(io_meta); }}});
   } else {
     const lean_export::LegacyEmitOptions
         options{top, emit_cert, emit_fast_bridge, cert_wf, cert_wf_fallback, cert_chunk_size, cert_chunk_limit};
@@ -76,7 +96,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
         lean_path, [&](std::ostream& out) { lean_export::emit_legacy_model(design, certificate, options, out); },
         io_path, [&](std::ostream& out) { out << lean_export::io_meta_json(io_meta); });
   }
-  std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " + " << io_path << (verified_compiler ? " (verified_compiler: " : " (legacy: ")
+  std::cout << "pass.lean: " << raw_name << " -> " << lean_path << (verified_compiler ? " + " + dcert_path : "")
+            << " + " << io_path << (verified_compiler ? " (verified_compiler: " : " (legacy: ")
             << certificate.sources.size() << " sources, " << certificate.nodes.size() << " nodes, " << certificate.flops.size()
             << " flops, " << certificate.memories.size() << " memories)\n";
 }

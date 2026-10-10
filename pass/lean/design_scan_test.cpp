@@ -2326,6 +2326,147 @@ TEST(DesignIoMeta, StagingFailureAndFreshTargetsAndSuccess) {
   expect_no_litter(p);
 }
 
+// ---------------------------------------------------------------------------
+// The PRODUCTION TRIPLE.
+//
+// `verified_compiler` mode now publishes three artifacts -- the Lean literal,
+// the DCERT2 byte stream and the IO sidecar -- in one `publish_group`. The pair
+// controls above still cover `publish_pair`, which is the two-element case and
+// keeps its own contract; these run the same five failure shapes over three
+// artifacts, and over EVERY slot rather than only the first and last, because
+// a middle element is exactly what a hand-unrolled pair implementation gets
+// wrong.
+//
+// None of this is a claim of crash atomicity: `publish_group` is N renames and
+// documents that a crash between them leaves some targets new and some old.
+// What is checked is the handled paths -- refusal, staging failure, rename
+// failure, and success.
+// ---------------------------------------------------------------------------
+struct TriplePaths {
+  std::filesystem::path              dir;
+  std::vector<std::filesystem::path> files;
+};
+const char* const kOld3[] = {"OLD-CERT", "OLD-DCERT", "OLD-JSON"};
+const char* const kNew3[] = {"NEW-CERT", "NEW-DCERT", "NEW-JSON"};
+
+std::vector<PublishItem> triple_items(const TriplePaths& p, const char* const* text) {
+  std::vector<PublishItem> items;
+  for (size_t i = 0; i < p.files.size(); ++i) {
+    const char* t = text[i];
+    items.push_back({p.files[i].string(), [t](std::ostream& o) { o << t; }});
+  }
+  return items;
+}
+
+TriplePaths pub_with_existing_triple(std::string_view name) {
+  TriplePaths p;
+  p.dir   = pub_case_dir(name);
+  p.files = {p.dir / "cert.lean", p.dir / "design.dcert", p.dir / "io.json"};
+  publish_group(triple_items(p, kOld3));
+  return p;
+}
+void expect_old_triple_intact(const TriplePaths& p, const std::string& why) {
+  for (size_t i = 0; i < p.files.size(); ++i) {
+    EXPECT_EQ(slurp_or(p.files[i], "<MISSING>"), kOld3[i]) << why << ": " << p.files[i] << " was lost";
+  }
+}
+void expect_no_litter3(const TriplePaths& p) {
+  for (const auto& f : p.files) {
+    for (const char* suffix : {".tmp", ".bak"}) {
+      EXPECT_FALSE(std::filesystem::exists(f.string() + suffix)) << f.string() << suffix << " left behind";
+    }
+  }
+}
+
+TEST(DesignIoMeta, TripleBlockedBackupInAnySlotIsRefusedUntouched) {
+  for (size_t slot = 0; slot < 3; ++slot) {
+    auto p = pub_with_existing_triple("triple_blocked_" + std::to_string(slot));
+    std::filesystem::create_directories(p.files[slot].string() + ".bak");
+    EXPECT_THROW(publish_group(triple_items(p, kNew3)), std::exception) << "slot " << slot;
+    expect_old_triple_intact(p, "blocked backup slot " + std::to_string(slot));
+    // The collision is left alone: it may hold the only copy of something.
+    EXPECT_TRUE(std::filesystem::exists(p.files[slot].string() + ".bak"));
+  }
+}
+
+TEST(DesignIoMeta, TripleFinalRenameFailureInAnySlotRestoresTheTriple) {
+  for (size_t slot = 0; slot < 3; ++slot) {
+    auto p     = pub_with_existing_triple("triple_rename_" + std::to_string(slot));
+    auto items = triple_items(p, kNew3);
+    const std::string staged = p.files[slot].string() + ".tmp";
+    const char*       text   = kNew3[slot];
+    // Remove the staged file after writing it, so ITS publishing rename fails.
+    items[slot].emit = [staged, text](std::ostream& o) {
+      o << text;
+      std::error_code ec;
+      std::filesystem::remove(staged, ec);
+    };
+    EXPECT_THROW(publish_group(items), std::exception) << "slot " << slot;
+    expect_old_triple_intact(p, "final rename slot " + std::to_string(slot));
+    expect_no_litter3(p);
+  }
+}
+
+TEST(DesignIoMeta, TripleStagingFailureInAnySlotLeavesThePreviousTriple) {
+  for (size_t slot = 0; slot < 3; ++slot) {
+    auto p     = pub_with_existing_triple("triple_staging_" + std::to_string(slot));
+    auto items = triple_items(p, kNew3);
+    items[slot].emit = [](std::ostream&) { throw std::runtime_error("emit failed"); };
+    EXPECT_THROW(publish_group(items), std::exception) << "slot " << slot;
+    expect_old_triple_intact(p, "staging failure slot " + std::to_string(slot));
+    expect_no_litter3(p);
+
+    // The same failure against FRESH targets must leave nothing behind.
+    TriplePaths fresh;
+    fresh.dir   = p.dir;
+    fresh.files = {p.dir / ("f" + std::to_string(slot) + ".lean"), p.dir / ("f" + std::to_string(slot) + ".dcert"),
+                   p.dir / ("f" + std::to_string(slot) + ".json")};
+    auto fitems      = triple_items(fresh, kNew3);
+    fitems[slot].emit = [](std::ostream&) { throw std::runtime_error("emit failed"); };
+    EXPECT_THROW(publish_group(fitems), std::exception);
+    for (const auto& f : fresh.files) {
+      EXPECT_FALSE(std::filesystem::exists(f)) << "a partially published triple was left at " << f;
+    }
+    expect_no_litter3(fresh);
+  }
+}
+
+// Two artifacts published to the SAME path would back up over each other and
+// leave whichever ran second, silently. It is a caller defect and is refused.
+TEST(DesignIoMeta, TripleWithADuplicatePathIsRefused) {
+  auto p  = pub_with_existing_triple("triple_duplicate");
+  auto it = triple_items(p, kNew3);
+  it[1].path = it[0].path;
+  EXPECT_THROW(publish_group(it), std::exception);
+  expect_old_triple_intact(p, "duplicate path");
+  expect_no_litter3(p);
+}
+
+TEST(DesignIoMeta, TripleSuccessReplacesAllThreeAndCleansUp) {
+  auto p = pub_with_existing_triple("triple_success");
+  publish_group(triple_items(p, kNew3));
+  for (size_t i = 0; i < p.files.size(); ++i) {
+    EXPECT_EQ(slurp_or(p.files[i], "<MISSING>"), kNew3[i]);
+  }
+  expect_no_litter3(p);
+}
+
+// A serialiser that throws part way through is a STAGING failure like any
+// other: the previous triple stays, and nothing is left behind. This is the
+// production shape of the destructor defect -- `render_dcert` writing to an
+// exception-enabled staged stream.
+TEST(DesignIoMeta, TripleSurvivesASerialiserThatThrowsMidStream) {
+  auto p     = pub_with_existing_triple("triple_mid_stream");
+  auto items = triple_items(p, kNew3);
+  items[1].emit = [](std::ostream& o) {
+    o << "DCERT2\n0\n0\n";          // a plausible prefix, then a failure
+    throw std::ios_base::failure("write failed");
+  };
+  EXPECT_THROW(publish_group(items), std::exception);
+  expect_old_triple_intact(p, "serialiser threw mid stream");
+  expect_no_litter3(p);
+}
+
 // The emitter takes a DesignScan and a CertificateIR -- no graph. Both outlive
 // the graph by construction, which is what lets emission happen after the
 // graph's lifetime ends.
