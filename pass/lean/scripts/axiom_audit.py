@@ -120,8 +120,21 @@ def derive_scope(src, top):
     # HAS STATE, read from the design, not from which theorems exist.
     if re.search(rf"^structure {re.escape(top)}_state\b", src, re.M):
         req += ["_next_refines_fast", "_step_refines_fast"]
-    # A graph certificate carries a well-formedness obligation.
-    if re.search(rf"^def {re.escape(top)}_graphCert\b", src, re.M):
+    # WELL-FORMEDNESS IS A MODE PROPERTY, NOT A STRUCTURAL ONE.
+    #
+    # Deriving it from `def <Top>_graphCert` is wrong: a `cert_wf=skip` export
+    # defines the graph certificate and DELIBERATELY does not prove its
+    # well-formedness, so that rule failed a correct full-bridge artifact.
+    # (Measured: it turned a genuine SingleCycleCPU full-bridge proof into a
+    # FAILED on re-audit.)
+    #
+    # Contrast with STATE above, which is a property of the DESIGN: a model with
+    # `structure <Top>_state` owes next and step whatever mode emitted it.
+    #
+    # So the obligation is taken when the emitter actually produced it, and a
+    # caller that REQUESTED chunked WF adds it through `--min-required` -- which
+    # is what makes a chunked request against a skip export fail.
+    if re.search(rf"^theorem {re.escape(top)}_graphCert_wf\b", src, re.M):
         req += ["_graphCert_wf"]
     return ("legacy", req)
 
@@ -143,6 +156,8 @@ def main() -> int:
     for i, a in enumerate(args):
         if a == "--required" and i + 1 < len(args):
             required = tuple(x for x in args[i + 1].split(",") if x)
+        elif a == "--min-required" and i + 1 < len(args):
+            min_required = tuple(x for x in args[i + 1].split(",") if x)
         elif a == "--witnesses" and i + 1 < len(args):
             witnesses = tuple(x for x in args[i + 1].split(",") if x)
         elif a == "--artifact" and i + 1 < len(args):
