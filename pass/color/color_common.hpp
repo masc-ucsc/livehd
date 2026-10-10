@@ -2,6 +2,13 @@
 // details.
 #pragma once
 
+#include <optional>
+#include <string_view>
+
+#include "hhds/graph.hpp"
+#include "attrs.hpp"
+#include "synth_policy.hpp"
+
 // Shared helpers for the pass/color algorithms (the revived pass/label, 2c).
 //
 // The algorithms (acyclic, cgen, synth, path, mincut, flat) each compute a
@@ -21,6 +28,24 @@
 #include "synthesis_cost.hpp"
 
 namespace livehd::color {
+
+// A source attribute can switch one cut condition (`synth.stop_mux`,
+// `stop_arith`, `stop_cmp`, `stop_shift`) for the cells it covers. Returns the
+// node's own setting, or nullopt when the source says nothing: the global
+// pass.color.synth.stop_* value then applies. The most specific attribute wins
+// because the policy is stamped per cell with the source's own precedence.
+[[nodiscard]] inline std::optional<bool> stop_override(const hhds::Node_class& node, std::string_view key) {
+  const auto a = node.attr(livehd::attrs::synth_policy);
+  if (!a.has()) {
+    return std::nullopt;
+  }
+  const auto hints = livehd::synth_attr::read(a.get());
+  const auto it    = hints.find(std::string(key));
+  if (it == hints.end()) {
+    return std::nullopt;
+  }
+  return it->second.value == "true";
+}
 
 constexpr int32_t NO_COLOR = 0;
 

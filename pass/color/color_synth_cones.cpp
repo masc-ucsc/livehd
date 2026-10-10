@@ -124,6 +124,12 @@ struct Cones {
 
   bool                  ctrl_cones    = false;
   bool                  mux_in_data   = false;
+  // Per-cell overrides from `synth.stop_*` source attributes: -1 = the global
+  // option applies. ov_mux: 1 = mux stays in the data cone (stop_mux=false),
+  // 0 = mux is control-grouped (stop_mux=true). ov_arith: 1 = a wall, 0 = not.
+  std::vector<int8_t>   ov_mux;
+  std::vector<int8_t>   ov_arith;
+  bool                  any_mux_ctrl = false;  // some mux is control-grouped (global or per cell)
   bool                  stop_arith    = true;
   uint64_t              ctrl_max_gate = 0, ctrl_min_gate = 0;
   uint32_t              min_nodes  = 0;  // no emitted color below this many nodes (0: no floor)
@@ -144,8 +150,12 @@ struct Cones {
   bool     is_mux(uint32_t n) const {
     return n < op.size() && (static_cast<Ntype_op>(op[n]) == Ntype_op::Mux || static_cast<Ntype_op>(op[n]) == Ntype_op::Hotmux);
   }
+  [[nodiscard]] bool mux_data(uint32_t n) const {
+    return n < ov_mux.size() && ov_mux[n] >= 0 ? ov_mux[n] == 1 : mux_in_data;
+  }
   bool control_cut(uint32_t n) const {
-    if (!stop_arith) {
+    const bool stop = n < ov_arith.size() && ov_arith[n] >= 0 ? ov_arith[n] == 1 : stop_arith;
+    if (!stop) {
       return false;
     }
     const auto type = static_cast<Ntype_op>(op[n]);
@@ -414,7 +424,7 @@ void collect_control_roots(Cones& cn) {
     while (!cn.work.empty()) {
       const auto i = cn.work.back();
       cn.work.pop_back();
-      if (!cn.traversable(i) || (cn.flag[i] & kLoopBreak) || cn.control_cut(i) || (cn.mux_in_data && cn.is_mux(i))) {
+      if (!cn.traversable(i) || (cn.flag[i] & kLoopBreak) || cn.control_cut(i) || (cn.is_mux(i) && cn.mux_data(i))) {
         continue;
       }
       if (member[i]) {
@@ -452,7 +462,7 @@ void collect_control_roots(Cones& cn) {
     if (cn.flag[sink] & kDead) {
       continue;  // a dead mux or register-less cone controls nothing
     }
-    if (!cn.mux_in_data && cn.is_mux(sink) && cn.traversable(sink)) {
+    if (cn.is_mux(sink) && !cn.mux_data(sink) && cn.traversable(sink)) {
       ++cn.ctrl_roots;
       const auto c = static_cast<uint32_t>(parent.size());
       parent.push_back(c);
@@ -469,7 +479,7 @@ void collect_control_roots(Cones& cn) {
         }
       }
       walk(sink, c, false);
-    } else if (cn.mux_in_data || !cn.is_mux(sink)) {
+    } else if (!cn.is_mux(sink) || cn.mux_data(sink)) {
       for (uint32_t k = cn.fin_start[sink]; k < cn.fin_start[sink] + cn.fin_cnt[sink]; ++k) {
         const auto d = cn.fin_drv[k];
         if (!cn.control_pin(sink, cn.fin_pid[k]) || d >= enable_seen.size() || enable_seen[d]) {
@@ -477,7 +487,7 @@ void collect_control_roots(Cones& cn) {
         }
         enable_seen[d] = 1;
         ++cn.ctrl_roots;
-        if (!cn.traversable(d) || (cn.flag[d] & kLoopBreak) || cn.control_cut(d) || (cn.mux_in_data && cn.is_mux(d))) {
+        if (!cn.traversable(d) || (cn.flag[d] & kLoopBreak) || cn.control_cut(d) || (cn.is_mux(d) && cn.mux_data(d))) {
           ++cn.ctrl_empty;
           continue;
         }
@@ -487,7 +497,7 @@ void collect_control_roots(Cones& cn) {
       }
     }
   }
-  if (!cn.mux_in_data) {
+  if (cn.any_mux_ctrl) {
     // Preserve bit identities across a group's own wiring. Constant shifts
     // and bitwise constant masks between muxes only rewire, tie or invert
     // bits. Cutting them hides correlated bits from ABC (in particular,
@@ -1365,6 +1375,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
   cn.g             = g;
   cn.ctrl_cones    = opts.ctrl_cones;
   cn.mux_in_data   = opts.mux_in_data;
+  cn.any_mux_ctrl  = !opts.mux_in_data;
   cn.stop_arith    = opts.stop_arith;
   cn.ctrl_max_gate = opts.ctrl_max_gate;
   cn.ctrl_min_gate = opts.ctrl_min_gate;
@@ -1412,6 +1423,25 @@ void Color_synth::label_cones(hhds::Graph* g) {
       }
       const auto op = type_op_of(node);
       cn.op[i]      = static_cast<uint8_t>(op);
+      if (node.attr(livehd::attrs::synth_policy).has()) {
+        if (cn.ov_mux.empty()) {
+          cn.ov_mux.assign(n, -1);
+          cn.ov_arith.assign(n, -1);
+        }
+        if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
+          if (const auto v = stop_override(node, "stop_mux"); v.has_value()) {
+            cn.ov_mux[i] = *v ? 0 : 1;
+            cn.any_mux_ctrl = cn.any_mux_ctrl || *v;
+          }
+        } else if (const auto v = stop_override(
+                       node,
+                       (op == Ntype_op::LT || op == Ntype_op::GT)   ? "stop_cmp"
+                       : (op == Ntype_op::SHL || op == Ntype_op::SRA) ? "stop_shift"
+                                                                      : "stop_arith");
+                   v.has_value()) {
+          cn.ov_arith[i] = *v ? 1 : 0;
+        }
+      }
       if (op == Ntype_op::Get_mask && graph_util::bit_range(node).has_value()) {
         f |= kConstMaskGet;
       } else if (op == Ntype_op::SRA && graph_util::shift_mux_count(node) != 0) {

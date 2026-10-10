@@ -382,12 +382,19 @@ std::vector<std::shared_ptr<hhds::Graph>> build_ware_modules(const std::vector<s
             return it != hints.end() && !it->second.value.empty() && it->second.value != "auto";
           };
           bool pinned = has("color") || has("grow") || has("ware") || has("abc") || has("delay");
-          if (kind == "sum" || kind == "lt" || kind == "gt" || kind == "div") {
-            pinned = pinned || has("adder") || has("block_size");
+          // `synth.stop_*=false` says "do not cut here": extraction is the same cut.
+          const auto no_stop = [&](std::string_view key) {
+            const auto it = hints.find(std::string(key));
+            return it != hints.end() && it->second.value == "false";
+          };
+          if (kind == "sum" || kind == "div") {
+            pinned = pinned || has("adder") || has("block_size") || no_stop("stop_arith");
+          } else if (kind == "lt" || kind == "gt") {
+            pinned = pinned || has("adder") || has("block_size") || no_stop("stop_cmp");
           } else if (kind == "mult") {
-            pinned = pinned || has("multiplier") || has("adder") || has("block_size");
+            pinned = pinned || has("multiplier") || has("adder") || has("block_size") || no_stop("stop_arith");
           } else if (kind == "shl" || kind == "sra") {
-            pinned = pinned || has("barrel");
+            pinned = pinned || has("barrel") || no_stop("stop_shift");
           }
           if (pinned) {
             continue;

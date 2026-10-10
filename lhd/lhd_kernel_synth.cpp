@@ -436,10 +436,18 @@ void synth_command(Options& opts, Result& res) {
           groups += ",";
         }
         member_first  = false;
+        const auto sid = node.attr(hhds::attrs::srcid).has() ? node.attr(hhds::attrs::srcid).get() : 0;
         groups       += std::format("{{\"node\":{},\"color\":{},\"source_id\":{}",
                               node.get_debug_nid(),
                               livehd::graph_util::node_color_of(node),
-                              node.attr(hhds::attrs::srcid).has() ? node.attr(hhds::attrs::srcid).get() : 0);
+                              sid);
+        // The source locator turns the id into the file and line a person can open.
+        if (sid != 0) {
+          const auto span = graph->source_locator().resolve_spans(static_cast<hhds::SourceId>(sid)).primary;
+          if (!span.is_null()) {
+            groups += ",\"file\":" + livehd::synth_attr::quote(span.file) + ",\"line\":" + std::to_string(span.start_line.value_or(0));
+          }
+        }
         if (auto a = node.attr(livehd::attrs::synth_policy); a.has()) {
           groups += ",\"source_policy\":" + std::string(a.get());
         }

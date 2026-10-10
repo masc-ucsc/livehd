@@ -61,7 +61,7 @@ inline void validate(std::string_view key, std::string_view value) {
     }
     return;
   }
-  if (key == "grow" || key == "ware") {
+  if (key == "grow" || key == "ware" || key == "stop_mux" || key == "stop_arith" || key == "stop_cmp" || key == "stop_shift") {
     if (!d.IsBool()) {
       bad();
     }
@@ -94,6 +94,12 @@ inline void validate(std::string_view key, std::string_view value) {
     }
   } else if (key == "barrel") {
     if (s != "auto" && s != "log" && s != "reverse") {
+      bad();
+    }
+  } else if (key == "memory") {
+    // auto = the pass.abc.memory heuristic; flops = bit-blast to flops + decode;
+    // macro = keep the native memory instance.
+    if (s != "auto" && s != "flops" && s != "macro") {
       bad();
     }
   } else {
@@ -140,8 +146,24 @@ template <class Op>
   if (key == "multiplier") {
     return op == Op::Mult;
   }
+  // Cut conditions: each governs one operation family in the colorer.
+  if (key == "stop_arith") {
+    return op == Op::Sum || op == Op::Mult || op == Op::Div;
+  }
+  if (key == "stop_cmp") {
+    return op == Op::LT || op == Op::GT;
+  }
+  if (key == "stop_shift") {
+    return op == Op::SHL || op == Op::SRA;
+  }
+  if (key == "stop_mux") {
+    return op == Op::Mux || op == Op::Hotmux;
+  }
   if (key == "barrel") {
     return op == Op::SHL || op == Op::SRA;
+  }
+  if (key == "memory") {
+    return op == Op::Memory;
   }
   return true;
 }

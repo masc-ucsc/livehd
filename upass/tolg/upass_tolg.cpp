@@ -1227,6 +1227,8 @@ private:
     // override and restore, if/match arms inherit the enclosing color).
     const auto saved_color = cur_color_;
     const auto saved_synth = cur_synth_;
+    auto       saved_used  = std::move(used_synth_);
+    used_synth_.clear();
     for (auto c = lnast_->get_first_child(stmts); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       if (lnast_->is_dce_dead(c)) {
         continue;  // dce:mark (lg-only flows): a dead statement is skipped here
@@ -1237,6 +1239,34 @@ private:
       }
       lower_node(c);
     }
+    // A source attribute that introduced an operation-specific key in THIS scope
+    // and never reached a cell it governs is silently ignored by every later
+    // pass. Say so, at the attribute's own file:line.
+    for (const auto& [key, hint] : cur_synth_) {
+      if (key.starts_with("_") || key == "color" || key == "grow" || key == "ware" || key == "abc" || key == "delay") {
+        continue;
+      }
+      const auto before = saved_synth.find(key);
+      if ((before != saved_synth.end() && before->second.value == hint.value) || used_synth_.contains(key)) {
+        continue;
+      }
+      const auto where = synth_key_srcid_.find(key);
+      auto       d     = locate_srcid(where != synth_key_srcid_.end() ? where->second : std::string_view{},
+                              livehd::diag::Severity::warning,
+                              "synth-attr-unused",
+                              "unsupported",
+                              std::format("synth.{}={} has no effect: nothing in this scope is a {}", key, hint.value,
+                                          key == "multiplier"                               ? "multiplication"
+                                          : key == "barrel" || key == "stop_shift"          ? "runtime shift"
+                                          : key == "stop_mux"                               ? "mux"
+                                          : key == "stop_cmp"                               ? "wide comparison"
+                                                                                            : "wide add, subtract or compare"));
+      d.hint            = "put the attribute on the block, variable or module that contains the operation, or remove it";
+      livehd::diag::sink().emit(std::move(d));
+    }
+    // Keys used here count for the enclosing scope too (a nested block's cells
+    // are the outer scope's cells).
+    used_synth_.insert(saved_used.begin(), saved_used.end());
     cur_color_ = saved_color;
     cur_synth_ = saved_synth;
   }
@@ -1253,6 +1283,8 @@ private:
   // into a per-region mapping unit. region_abc_ collects the per-color ABC
   // flow payloads for the coloring_info "region_opts" member.
   livehd::synth_attr::Policy                            cur_synth_;
+  absl::flat_hash_set<std::string>                      used_synth_;      // keys stamped on a cell in the current scope
+  absl::flat_hash_map<std::string, std::string>         synth_key_srcid_;  // key -> SourceId text of the attribute that set it
   std::map<std::string, livehd::synth_attr::Policy>     synth_targets_;
   int32_t                                               cur_color_ = 0;
   std::map<int32_t, std::string>                        region_abc_;
@@ -1274,6 +1306,42 @@ private:
       const auto rs = g_->source_locator().resolve_spans(cur_srcid_);
       span          = rs.primary;
       notes         = livehd::diag::notes_from(rs, "reached via this site");
+    }
+    return livehd::diag::Diagnostic{
+        .severity = sev,
+        .code     = std::string(code),
+        .category = std::string(category),
+        .pass     = "upass.tolg",
+        .message  = std::move(msg),
+        .span     = std::move(span),
+        .notes    = std::move(notes),
+    };
+  }
+
+  // A diagnostic anchored at a stored SourceId (decimal text, as the synthesis
+  // anchors keep it) resolved through the graph's source locator to file:line,
+  // plus an optional second site as a note. A raw number tells nobody where the
+  // attribute is; the locator turns it into the source file and line.
+  [[nodiscard]] livehd::diag::Diagnostic locate_srcid(std::string_view srcid_text, livehd::diag::Severity sev, std::string_view code,
+                                                      std::string_view category, std::string msg,
+                                                      std::string_view other_srcid = {}, std::string_view other_note = {}) const {
+    const auto resolve = [&](std::string_view text) {
+      hhds::Source_locator::Resolved_spans rs;
+      uint64_t                             v = 0;
+      const auto [p, ec]                     = std::from_chars(text.data(), text.data() + text.size(), v);
+      if (g_ != nullptr && ec == std::errc{} && p == text.data() + text.size() && v != 0) {
+        rs = g_->source_locator().resolve_spans(static_cast<hhds::SourceId>(v));
+      }
+      return rs;
+    };
+    const auto                      rs = resolve(srcid_text);
+    livehd::diag::Span              span  = rs.primary;
+    std::vector<livehd::diag::Note> notes = livehd::diag::notes_from(rs, "reached via this site");
+    if (!other_srcid.empty()) {
+      const auto other = resolve(other_srcid);
+      if (!other.primary.is_null()) {
+        notes.push_back(livehd::diag::Note{std::string(other_note), other.primary});
+      }
     }
     return livehd::diag::Diagnostic{
         .severity = sev,
@@ -1335,6 +1403,7 @@ private:
       for (const auto& [key, hint] : cur_synth_) {
         if (livehd::synth_attr::key_applies(key, op)) {
           applicable.emplace(key, hint);
+          used_synth_.insert(key);
         }
       }
       if (!applicable.empty()) {
@@ -1779,7 +1848,11 @@ private:
     if (synth_key == "__synth_scope") {
       auto val = lnast_->get_sibling_next(key_n);
       if (!val.is_invalid()) {
-        livehd::synth_attr::overlay(cur_synth_, livehd::synth_attr::decode(lnast_->get_name(val)));
+        const auto scope = livehd::synth_attr::decode(lnast_->get_name(val));
+        for (const auto& [key, hint] : scope) {
+          synth_key_srcid_[key] = std::to_string(cur_srcid_);
+        }
+        livehd::synth_attr::overlay(cur_synth_, scope);
       }
       return;
     }
@@ -1950,6 +2023,32 @@ private:
   void apply_synth_targets() {
     std::map<std::string, std::vector<Pin>>            target_roots;
     absl::flat_hash_map<hhds::Node_class, std::string> anchor_owner;
+    // A declared memory has no output cone to walk: its pins are bound to the
+    // declaration's name, so a `reg q::[synth.memory=...]` pin lands on the
+    // Memory cell directly (the operation-aware filter keeps `memory` off
+    // everything else).
+    if (!synth_targets_.empty()) {
+      for (const auto node : g_->body().nodes()) {
+        if (livehd::graph_util::type_op_of(node) != Ntype_op::Memory || !livehd::graph_util::has_name(node)) {
+          continue;
+        }
+        const std::string base{node.get_name()};
+        for (const auto& [target, hints] : synth_targets_) {
+          if (canon_io_name(target.substr(0, target.find("___ssa_"))) != base) {
+            continue;
+          }
+          auto a      = node.attr(livehd::attrs::synth_policy);
+          auto policy = a.has() ? livehd::synth_attr::read(a.get()) : livehd::synth_attr::Policy{};
+          for (const auto& [key, hint] : hints) {
+            if (!key.starts_with("_") && livehd::synth_attr::key_applies(key, Ntype_op::Memory)) {
+              policy[key] = hint;
+              used_synth_.insert(key);
+            }
+          }
+          a.set(livehd::synth_attr::write(policy));
+        }
+      }
+    }
     // Establish every declaration anchor before walking any cone. Source-name
     // ordering must never decide whether a later explicit boundary survives.
     for (const auto& [target, hints] : synth_targets_) {
@@ -1976,13 +2075,15 @@ private:
             if (key.starts_with("_") || old == policy.end() || old->second.value == hint.value) {
               continue;
             }
-            error_at(Lnast_nid{},
-                     "indivisible synthesis anchors '{}' and '{}' conflict on synth.{} (SourceIds {} and {})",
-                     it->second,
-                     target,
-                     key,
-                     livehd::synth_attr::get(policy, "_anchor_srcid"),
-                     livehd::synth_attr::get(hints, "_anchor_srcid"));
+            auto msg = std::format("indivisible synthesis anchors '{}' and '{}' conflict on synth.{}", it->second, target, key);
+            livehd::diag::sink().stage(locate_srcid(livehd::synth_attr::get(hints, "_anchor_srcid"),
+                                                    livehd::diag::Severity::error,
+                                                    "tolg-error",
+                                                    "type",
+                                                    msg,
+                                                    livehd::synth_attr::get(policy, "_anchor_srcid"),
+                                                    "the other anchor"));
+            throw Eprp::parser_error(Pass::eprp, msg);
           }
         }
         anchor_owner[node] = target;
@@ -2009,14 +2110,14 @@ private:
         const auto old_path = livehd::synth_attr::path(policy), new_path = livehd::synth_attr::path(hints);
         if (i >= root_count) {
           if (!old_path.empty() && !new_path.empty() && old_path != new_path) {
-            warn_at(Lnast_nid{},
-                    {"synth-anchor-conflict", "unsupported"},
-                    "synthesis anchor '{}' stops at group {} (requested {}; SourceIds {} and {})",
-                    target,
-                    old_path,
-                    new_path,
-                    livehd::synth_attr::get(policy, "_anchor_srcid"),
-                    livehd::synth_attr::get(hints, "_anchor_srcid"));
+            livehd::diag::sink().emit(locate_srcid(livehd::synth_attr::get(hints, "_anchor_srcid"),
+                                                   livehd::diag::Severity::warning,
+                                                   "synth-anchor-conflict",
+                                                   "unsupported",
+                                                   std::format("synthesis anchor '{}' stops at group {} (requested {})", target, old_path,
+                                                               new_path),
+                                                   livehd::synth_attr::get(policy, "_anchor_srcid"),
+                                                   "the group it stops at"));
             continue;
           }
           // An upstream variable keeps its own implementation choices, even
@@ -2041,11 +2142,15 @@ private:
         }
       }
       if (!attributed && hints.contains("color")) {
-        warn_at(Lnast_nid{},
-                {"synth-empty-anchor", "unsupported"},
-                "synthesis anchor '{}' has no hardware to synthesize (SourceId {})",
-                target,
-                livehd::synth_attr::get(hints, "_anchor_srcid"));
+        {
+          auto d = locate_srcid(livehd::synth_attr::get(hints, "_anchor_srcid"),
+                                livehd::diag::Severity::warning,
+                                "synth-empty-anchor",
+                                "unsupported",
+                                std::format("synthesis anchor '{}' has no hardware to synthesize", target));
+          d.hint = "the annotated name never reaches a cell (constant, dead or folded away); drop the attribute or annotate the value that is used";
+          livehd::diag::sink().emit(std::move(d));
+        }
         auto a                      = g_->get_input_node().attr(livehd::attrs::synth_policy);
         auto policy                 = a.has() ? livehd::synth_attr::read(a.get()) : livehd::synth_attr::Policy{};
         policy["_elided_" + target] = {livehd::synth_attr::quote(livehd::synth_attr::write(hints)), 4};

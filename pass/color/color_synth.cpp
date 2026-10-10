@@ -88,6 +88,19 @@ bool Color_synth::is_arith_cut(const hhds::Node_class& node) {
 // barrel-shifter cut and produced MORE colors than leaving it on.
 bool Color_synth::is_arith_boundary(const hhds::Node_class& node) const {
   const auto op = type_op_of(node);
+  // A source `synth.stop_*` attribute on this cell beats the global option in
+  // both directions: false keeps it in its region, true cuts it even when the
+  // mapper profile would not (the size/width conditions of is_arith_cut still
+  // decide whether it is an operation worth a boundary at all).
+  const char* key = (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div) ? "stop_arith"
+                    : (op == Ntype_op::LT || op == Ntype_op::GT)                         ? "stop_cmp"
+                    : (op == Ntype_op::SHL || op == Ntype_op::SRA)                       ? "stop_shift"
+                                                                                         : nullptr;
+  if (key != nullptr) {
+    if (const auto forced = stop_override(node, key); forced.has_value()) {
+      return *forced && is_arith_cut(node);
+    }
+  }
   if (!opts.stop_arith && (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div)) {
     return false;
   }

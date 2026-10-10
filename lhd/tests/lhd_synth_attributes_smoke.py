@@ -197,6 +197,84 @@ bad_doc, bad_log = run("synth", work / "rank_full.prp", "--top", "rank_full", "-
                       "--set", "synth.tune.min_share=2", ok=False)
 assert "min_share" in (json.dumps(bad_doc) + bad_log), (bad_doc, bad_log)
 
+# Cut conditions are source attributes. The default profile extracts a wide add
+# (a ware module); `synth.stop_arith=false` on its variable keeps it inline while an
+# untouched add is still extracted, and under the coarse profile `stop_arith=true`
+# forces a cut the profile would not make.
+def sum_regions(tag, attr, *settings):
+    src = work / f"stop_{tag}.prp"
+    mark = f"::[{attr}]" if attr else ""
+    src.write_text(f'''pub comb stop_{tag}::[timecheck=false](a:U32,b:U32,c:U32)->(x:U32,y:U32) {{
+ mut s{mark} = (a+b)#[0..=31]
+ x = s ^ c
+ y = (a-c)#[0..=31]
+}}''')
+    doc, _ = synth(f"stop_{tag}", src, *settings)
+    regions = doc["qor"]["abc"]["regions"]
+    return len([r for r in regions if "__ware_sum" in r["module"]]), len(regions)
+
+default_sums, _ = sum_regions("d", "")
+assert default_sums == 2, default_sums
+kept_sums, _ = sum_regions("k", "synth.stop_arith=false")
+assert kept_sums == default_sums - 1, (kept_sums, default_sums)
+_, coarse_regions = sum_regions("c0", "", "synth.partition=coarse")
+_, coarse_cut = sum_regions("c1", "synth.stop_arith=true", "synth.partition=coarse")
+assert coarse_cut > coarse_regions, (coarse_cut, coarse_regions)
+for bad_attr, code in [("synth.stop_arith=1", "synth-value"), ("synth.stop_bogus=true", "synth-value")]:
+    bad = work / "bad_stop.prp"
+    bad.write_text('pub comb bad_stop::[timecheck=false](a:U8)->(y:U8) { {::[' + bad_attr + '] y=a+1 } }')
+    _, log = run("compile", bad, "--workdir", work / "bad_stop", ok=False)
+    assert code in log, log
+
+# A callee that carries a declaration attribute list is not inlined; a bare
+# positional actual must then fill the next input NOT bound by name, not slot 0.
+mixed = work / "mixed_args.prp"
+mixed.write_text('''comb mixed_sw::[synth.adder="cla"](amount:U5,arithmetic:Bool,v:U32)->(r:U32) { wrap r = v << amount }
+pub comb mixed_args::[timecheck=false](a:U32,b:U32,arithmetic:Bool)->(y:U32) {
+ y=mixed_sw(amount=b#[0..=4],arithmetic,v=a)
+}''')
+synth("mixed_args", mixed)
+
+# An attributed callee called from inside another inlined function: the call used
+# to keep the inline frame's tag (`undefined function 'inl1_f'`).
+nested = work / "nested_attr.prp"
+nested.write_text('''comb nested_sw::[synth.adder="cla"](amount:U5,v:U32)->(r:U32) { wrap r = v << amount }
+comb nested_mid(a:U32,b:U32)->(s:U32,t:U32) {
+ s=nested_sw(amount=b#[0..=4],v=a)
+ t=nested_sw(amount=b#[4..=8],v=a)
+}
+pub comb nested_attr::[timecheck=false](a:U32,b:U32)->(y:U32,z:U32) {
+ const p=nested_mid(a=a,b=b)
+ y=p.s
+ z=p.t
+}''')
+synth("nested_attr", nested)
+
+# Attribute diagnostics point at the attribute's own file and line.
+unused = work / "unused_attr.prp"
+unused.write_text('''pub comb unused_attr::[timecheck=false](a:U8,b:U8)->(y:U8,z:U8) {
+ {
+  ::[synth.multiplier="tdm"]
+  y=(a+b)#[0..=7]
+ }
+ mut k::[synth.color="dead"]=3
+ z=k
+}''')
+_, unused_log = synth("unused_attr", unused)
+located = {}
+for line in unused_log.splitlines():
+    try:
+        diag = json.loads(line)
+    except ValueError:
+        continue
+    if str(diag.get("code", "")).startswith("synth-"):
+        span = diag.get("span") or {}
+        located[diag["code"]] = (Path(span.get("file", "")).name, span.get("start_line"))
+assert located.get("synth-attr-unused") == ("unused_attr.prp", 3), located
+assert located.get("synth-empty-anchor") == ("unused_attr.prp", 6), located
+unused_groups = json.loads((work / "unused_attr/synth/synth_groups.json").read_text())["definitions"]
+assert any(m.get("file", "").endswith("unused_attr.prp") and m.get("line") for d in unused_groups for m in d["members"]), unused_groups
+
 inline = work / "inline.prp"
 inline.write_text('''comb lane::[synth.color="inside"](a:U8,b:U8)->(y:U8) { y=(a+b)#[0..=7] }
 pub comb inline::[timecheck=false](a:U8,b:U8,c:U8)->(x:U8,y:U8) {
@@ -206,4 +284,16 @@ pub comb inline::[timecheck=false](a:U8,b:U8,c:U8)->(x:U8,y:U8) {
 synth("inline", inline)
 inline_groups = json.loads((work / "inline/synth/synth_groups.json").read_text())
 assert any("color" not in n.get("source_policy", {}) for d in inline_groups["definitions"] for n in d["members"])
+# A per-declaration memory pin overrides the pass-wide fold mode: flops folds a
+# memory that memory_max_bits would keep native, macro keeps one memory=true folds.
+def memory_regions(pin, fold, *extra):
+    src = work / ("mem_" + pin + ".prp")
+    src.write_text('pub mod mem_' + pin + '::[timecheck=false](a:U3,d:U8,we:Bool,clk:Clock)->(o:U8@[0]) {\n'
+                   '  reg q:[8]U8:[clock_pin=clk' + (',synth.memory="' + pin + '"' if pin != "none" else "") + ']\n'
+                   '  if we { q[a] = d }\n  o = q[a]\n}')
+    doc, _ = synth("mem_" + pin, src, "pass.abc.memory=" + fold, *extra)
+    return {r["module"] for r in doc["qor"]["abc"]["regions"]}
+assert not any(m.endswith("_blasted") for m in memory_regions("none", "auto", "pass.abc.memory_max_bits=8"))
+assert any(m.endswith("_blasted") for m in memory_regions("flops", "auto", "pass.abc.memory_max_bits=8"))
+assert not any(m.endswith("_blasted") for m in memory_regions("macro", "true"))
 print("region contraction A -> B -> A and module-scope isolation passed")

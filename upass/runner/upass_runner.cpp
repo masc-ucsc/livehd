@@ -8147,6 +8147,28 @@ bool uPass_runner::try_inline_func_call() {
     return false;
   };
   if (!call_synth.empty() || has_synth_scope(has_synth_scope, callee->get_root())) {
+    // Same rule as the Sub-instance paths below: re-emit as NAMED actuals when
+    // the source used an unnamed one (tolg binds an unnamed actual to the next
+    // declared port, so `f(a=x, b)` bound `b` to `a`) or when this call sits in
+    // an inline frame (a plain decline copies the call through the frame rename,
+    // tagging the callee ref `inl1_f`, a function tolg cannot find).
+    const bool scoped_unnamed = std::any_of(actuals.begin(), actuals.end(), [](const Actual& a) { return !a.is_named; });
+    const bool scoped_ref     = std::any_of(actuals.begin(), actuals.end(), [](const Actual& a) { return a.is_ref_pass; });
+    if ((tuple_actual_expanded || (scoped_unnamed && !scoped_ref) || (lm->in_inline_frame() && !scoped_ref)) && !has_self) {
+      std::vector<std::pair<std::string, Lnast_node>> named;
+      named.reserve(nbind);
+      for (std::size_t i = 0; i < nbind; ++i) {
+        if (param_set[i]) {
+          named.emplace_back(io.inputs[i].name, param_val[i]);
+        }
+      }
+      named.insert(named.end(), minted_actuals.begin(), minted_actuals.end());
+      if (!call_synth.empty()) {
+        named.emplace_back("__synth_call", Lnast_node::create_const(call_synth));
+      }
+      emit_named_instance_call(dst_name, frame_portable_callee_name(callee_name, callee), call_inst_name, named);
+      return true;
+    }
     stash_sub_instance_port_facts(dst_name, callee);
     return false;
   }

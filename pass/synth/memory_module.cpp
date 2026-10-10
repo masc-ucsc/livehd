@@ -20,6 +20,7 @@
 #include "graph_library_singleton.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "synth_policy.hpp"
 
 namespace gu = livehd::graph_util;
 namespace fs = std::filesystem;
@@ -672,7 +673,7 @@ size_t write_clock_count(const hhds::Node_class& mem) {
 }  // namespace
 
 std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
-                                                               Memory_fold mode, uint64_t max_bits) {
+                                                               Memory_fold pass_mode, uint64_t max_bits) {
   std::vector<std::shared_ptr<hhds::Graph>> modules;
   std::unique_ptr<Scratch>                  scratch;
   fs::path                                  rtl;
@@ -740,6 +741,17 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
       // body with every read output undriven, rc=0. Keep the native
       // (cgen_memory_multiclock_*) instance instead, in every fold mode; a
       // forced memory=true is warned that it was overridden.
+      // A source `synth.memory` pin (flops|macro|auto) overrides the pass-wide
+      // fold mode for this one memory.
+      Memory_fold mode = pass_mode;
+      if (const auto a = mem.attr(attrs::synth_policy); a.has()) {
+        const auto pin = livehd::synth_attr::get(livehd::synth_attr::read(a.get()), "memory", "auto");
+        if (pin == "flops") {
+          mode = Memory_fold::Always;
+        } else if (pin == "macro") {
+          mode = Memory_fold::Never;
+        }
+      }
       const size_t wr_clocks = write_clock_count(mem);
       if (wr_clocks > 1) {
         if (mode != Memory_fold::Never) {
