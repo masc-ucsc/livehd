@@ -1038,7 +1038,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     } else if (constant_product) {
       acc = std::move(*constant_product);
     } else {
-      if (opts_.multiplier == arith::Mult_kind::sn && ds.size() > 1) {
+      if (opts_.multiplier == arith::Mult_kind::tdm && ds.size() > 1) {
         const auto signed_operand
             = [&](const hhds::Pin_class& d) { return d.is_const() ? gu::const_of(d).is_negative() : !gu::is_unsign(d); };
         const auto native_bits = [&](const hhds::Pin_class& d) {

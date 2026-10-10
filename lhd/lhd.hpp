@@ -742,7 +742,7 @@ inline constexpr Mapper kMappers[] = {
 
 inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"adder","auto",Synth_set_option::Kind::file,"shared default: auto|rca|cska|cla|prefix|brent; source pins override it"},
-    {"multiplier","auto",Synth_set_option::Kind::file,"shared default: auto|array|tree|csa|sn"},
+    {"multiplier","auto",Synth_set_option::Kind::file,"shared default: auto|array|tree|csa|tdm"},
     {"barrel","auto",Synth_set_option::Kind::file,"shared default: auto|log|reverse"},
     {"block_size","0",Synth_set_option::Kind::integer,"shared CSKA/CLA block width; 0 derives it from width"},
     {"tune.profile","auto",Synth_set_option::Kind::file,"auto replays compatible decisions; on explicitly explores; off ignores stored decisions"},

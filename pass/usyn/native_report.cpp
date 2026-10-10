@@ -32,7 +32,7 @@ const char* multiplier_name(synth::arith::Mult_kind kind) {
   switch (kind) {
     case synth::arith::Mult_kind::array: return "array";
     case synth::arith::Mult_kind::tree : return "tree";
-    case synth::arith::Mult_kind::sn   : return "sn";
+    case synth::arith::Mult_kind::tdm  : return "tdm";
     case synth::arith::Mult_kind::csa  : break;
   }
   return "csa";

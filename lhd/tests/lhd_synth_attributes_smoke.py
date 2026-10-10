@@ -151,7 +151,7 @@ def total_gates(doc):
 mux_plain = work / "mux_plain.prp"
 mux_plain.write_text('''pub comb mux_plain::[timecheck=false](a:U512,s:U4)->(o:U32) { o=(a >> (s*32))#[0..<32] }''')
 mux_pin = work / "mux_pin.prp"
-mux_pin.write_text('''pub comb mux_pin::[timecheck=false,synth.multiplier="sn"](a:U512,s:U4)->(o:U32) { o=(a >> (s*32))#[0..<32] }''')
+mux_pin.write_text('''pub comb mux_pin::[timecheck=false,synth.multiplier="tdm"](a:U512,s:U4)->(o:U32) { o=(a >> (s*32))#[0..<32] }''')
 plain_doc, _ = synth("mux_plain", mux_plain)
 pin_doc, _ = synth("mux_pin", mux_pin)
 assert total_gates(pin_doc) == total_gates(plain_doc), (total_gates(pin_doc), total_gates(plain_doc))
@@ -163,7 +163,7 @@ cmul.write_text('''pub comb cmul::[timecheck=false](a:U8)->(x:U16,y:U16,z:U16,w:
  z=a*127
  w=a*85 }''')
 gates = {}
-for m in ("array", "sn", "csa", "tree"):
+for m in ("array", "tdm", "csa", "tree"):
     src = work / f"cmul_{m}.prp"
     src.write_text(f'''pub comb cmul_{m}::[timecheck=false](a:U8)->(x:U16,y:U16,z:U16,w:U16) {{ x=a*10
  y=a*129

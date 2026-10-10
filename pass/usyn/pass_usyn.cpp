@@ -93,7 +93,7 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!multiplier) {
     livehd::diag::err("pass.usyn", "invalid-options", "syntax")
         .msg("invalid native USYN multiplier '{}'", multiplier_text)
-        .hint("multiplier=auto|csa|tree|array|sn")
+        .hint("multiplier=auto|csa|tree|array|tdm")
         .emit();
     return false;
   }
@@ -300,7 +300,7 @@ void Pass_usyn::setup() {
   m.add_label_optional("block_size", "Shared CSKA/CLA width (alias of adder_block)", "");
   m.add_label_optional("adder_block", "Native CSKA/CLA group width (0: derive from operating width)", "0");
   m.add_label_optional("multiplier",
-                       "Native partial-product summation: auto (csa by default; explored under synth.tune.profile=on), csa (carry-save), tree, array or sn (depth-ordered columns)",
+                       "Native partial-product summation: auto (csa by default; explored under synth.tune.profile=on), csa (carry-save), tree, array or tdm (three-greedy column compression)",
                        "auto");
   m.add_label_optional("mux_lowering",
                        "Indexed mux lowering: decode or experimental tree; predicates retain nonzero semantics",

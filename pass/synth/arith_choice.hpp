@@ -22,8 +22,8 @@ inline constexpr arith::Adder_kind kAdderKinds[] = {arith::Adder_kind::rca,
                                                     arith::Adder_kind::prefix,
                                                     arith::Adder_kind::brent};
 
-// sn first: it is the strongest default candidate for wide non-constant products.
-inline constexpr arith::Mult_kind kMultiplierKinds[] = {arith::Mult_kind::sn,
+// tdm first: it is the strongest default candidate for wide non-constant products.
+inline constexpr arith::Mult_kind kMultiplierKinds[] = {arith::Mult_kind::tdm,
                                                         arith::Mult_kind::csa,
                                                         arith::Mult_kind::tree,
                                                         arith::Mult_kind::array};
@@ -44,7 +44,7 @@ inline constexpr arith::Mult_kind kMultiplierKinds[] = {arith::Mult_kind::sn,
     case arith::Mult_kind::array: return "array";
     case arith::Mult_kind::tree: return "tree";
     case arith::Mult_kind::csa: return "csa";
-    case arith::Mult_kind::sn: return "sn";
+    case arith::Mult_kind::tdm: return "tdm";
   }
   return "array";
 }

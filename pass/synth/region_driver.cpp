@@ -241,7 +241,7 @@ bool parse_region_opts_entry(const rapidjson::Value& v, Region_opts& ro, std::st
       ro.reverse_barrel = std::string_view(val.GetString()) == "reverse";
     } else if (key == "multiplier") {
       if (!val.IsString()) {
-        return bad("'multiplier' must be a string (array|tree|csa|sn)");
+        return bad("'multiplier' must be a string (array|tree|csa|tdm)");
       }
       auto m = arith::parse_mult_kind({val.GetString(), val.GetStringLength()});
       if (!m.has_value()) {
@@ -249,7 +249,7 @@ bool parse_region_opts_entry(const rapidjson::Value& v, Region_opts& ro, std::st
         // explicit pick (leaving the key out is what keeps the search on), and
         // parse_mult_kind rejects the spelling -- advertising it made the
         // message name a value this very call refuses.
-        return bad(std::format("unknown multiplier '{}' (use array|tree|csa|sn)", val.GetString()));
+        return bad(std::format("unknown multiplier '{}' (use array|tree|csa|tdm)", val.GetString()));
       }
       ro.multiplier = m.value();
     } else if (key == "block_size") {
@@ -1865,7 +1865,7 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
     if (w.mult) {
       std::stable_sort(candidates.begin(), candidates.end(), [&](const auto& a, const auto& b) {
         const auto rank = [](arith::Mult_kind m) {
-          return m == arith::Mult_kind::sn ? 0 : m == arith::Mult_kind::csa ? 1 : m == arith::Mult_kind::tree ? 2 : 3;
+          return m == arith::Mult_kind::tdm ? 0 : m == arith::Mult_kind::csa ? 1 : m == arith::Mult_kind::tree ? 2 : 3;
         };
         const bool a_changes_adder = a.options.adder != w.options.adder;
         const bool b_changes_adder = b.options.adder != w.options.adder;
@@ -2024,7 +2024,7 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
           selected.multiplier == arith::Mult_kind::array  ? "array"
           : selected.multiplier == arith::Mult_kind::tree ? "tree"
           : selected.multiplier == arith::Mult_kind::csa  ? "csa"
-                                                          : "sn",
+                                                          : "tdm",
           selected.reverse_barrel ? "reverse" : "log");
     }
   }

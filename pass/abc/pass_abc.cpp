@@ -239,7 +239,7 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "false");
   m.add_label_optional(
       "multiplier",
-      "auto|array|tree|csa|sn: partial-product summation; auto trials a balanced tree on critical paths. An explicit "
+      "auto|array|tree|csa|tdm (alias sn): partial-product summation; auto trials a balanced tree on critical paths. An explicit "
       "multiplier locks its internal adder too",
       "auto");
   m.add_label_optional("qor",
@@ -741,7 +741,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   auto multiplier = livehd::synth::arith::parse_mult_kind(mult_s == "auto" ? "array" : mult_s);
   if (!multiplier.has_value()) {
     livehd::diag::err("pass.abc", "bad-multiplier", "io")
-        .msg("pass.abc: unknown multiplier '{}' (use auto|array|tree|csa|sn)", mult_s)
+        .msg("pass.abc: unknown multiplier '{}' (use auto|array|tree|csa|tdm)", mult_s)
         .fatal();
     return;
   }

@@ -89,7 +89,7 @@ inline void validate(std::string_view key, std::string_view value) {
       bad();
     }
   } else if (key == "multiplier") {
-    if (s != "auto" && s != "array" && s != "tree" && s != "csa" && s != "sn") {
+    if (s != "auto" && s != "array" && s != "tree" && s != "csa" && s != "tdm" && s != "sn") {
       bad();
     }
   } else if (key == "barrel") {

@@ -67,7 +67,8 @@ TEST(abc_arith, parse_and_default_block_size) {
 
   EXPECT_EQ(parse_mult_kind("array").value(), Mult_kind::array);
   EXPECT_EQ(parse_mult_kind("csa").value(), Mult_kind::csa);
-  EXPECT_EQ(parse_mult_kind("sn").value(), Mult_kind::sn);
+  EXPECT_EQ(parse_mult_kind("tdm").value(), Mult_kind::tdm);
+  EXPECT_EQ(parse_mult_kind("sn").value(), Mult_kind::tdm);  // deprecated alias
   EXPECT_FALSE(parse_mult_kind("wallace").has_value());
   EXPECT_FALSE(parse_mult_kind("").has_value());
 
@@ -241,7 +242,7 @@ TEST(abc_arith, carry_save_multiplier_depth) {
       }
       return result;
     };
-    const auto sn          = build_mul(Mult_kind::sn, Adder_kind::brent, 0, ops, inputs, inputs, w);
+    const auto sn          = build_mul(Mult_kind::tdm, Adder_kind::brent, 0, ops, inputs, inputs, w);
     const auto array_brent = build_mul(Mult_kind::array, Adder_kind::brent, 0, ops, inputs, inputs, w);
     EXPECT_LT(depth(sn), depth(array_brent));
     EXPECT_LT(depth(csa), depth(serial));
@@ -266,7 +267,7 @@ TEST(abc_arith, sn_squarer_matches_multiplier_and_is_smaller) {
           const int      out_w = 2 * w;
           const uint64_t av    = sgn && (a & (limit >> 1)) ? a | ~(limit - 1) : a;
           const auto     want  = (av * av) & ((uint64_t{1} << out_w) - 1);
-          EXPECT_EQ(from_bits(build_mul(Mult_kind::sn, adder, 3, ops, to_bits(a, w), to_bits(a, w), out_w, sgn, sgn, true)), want)
+          EXPECT_EQ(from_bits(build_mul(Mult_kind::tdm, adder, 3, ops, to_bits(a, w), to_bits(a, w), out_w, sgn, sgn, true)), want)
               << "w=" << w << " a=" << a << " signed=" << sgn;
         }
       }
@@ -277,7 +278,7 @@ TEST(abc_arith, sn_squarer_matches_multiplier_and_is_smaller) {
     for (int out_w : {3, w, w + 2}) {
       for (uint64_t a = 0; a < (uint64_t{1} << w); ++a) {
         const uint64_t mask = (uint64_t{1} << out_w) - 1;
-        EXPECT_EQ(from_bits(build_mul(Mult_kind::sn, Adder_kind::prefix, 0, ops, to_bits(a, w), to_bits(a, w), out_w, false, false, true)),
+        EXPECT_EQ(from_bits(build_mul(Mult_kind::tdm, Adder_kind::prefix, 0, ops, to_bits(a, w), to_bits(a, w), out_w, false, false, true)),
                   (a * a) & mask);
       }
     }
@@ -294,8 +295,8 @@ TEST(abc_arith, sn_squarer_matches_multiplier_and_is_smaller) {
   };
   CountOps full, sq;
   std::vector<int> in(12, 7);
-  (void)build_mul(Mult_kind::sn, Adder_kind::rca, 0, full, in, in, 24, false, false, false);
-  (void)build_mul(Mult_kind::sn, Adder_kind::rca, 0, sq, in, in, 24, false, false, true);
+  (void)build_mul(Mult_kind::tdm, Adder_kind::rca, 0, full, in, in, 24, false, false, false);
+  (void)build_mul(Mult_kind::tdm, Adder_kind::rca, 0, sq, in, in, 24, false, false, true);
   EXPECT_LT(sq.ands, full.ands * 7 / 10);
 }
 
@@ -641,7 +642,7 @@ TEST(abc_arith, sn_multiplier_signed_rectangular_and_output_widths) {
               for (int out_w : {1, std::max(aw, bw), aw + bw, aw + bw + 3}) {
                 const auto expected = static_cast<uint64_t>(value(a, aw, as) * value(b, bw, bs));
                 EXPECT_EQ(
-                    from_bits(build_mul(Mult_kind::sn, Adder_kind::brent, 0, ops, to_bits(a, aw), to_bits(b, bw), out_w, as, bs)),
+                    from_bits(build_mul(Mult_kind::tdm, Adder_kind::brent, 0, ops, to_bits(a, aw), to_bits(b, bw), out_w, as, bs)),
                     expected & ((uint64_t{1} << out_w) - 1));
               }
             }
@@ -650,8 +651,8 @@ TEST(abc_arith, sn_multiplier_signed_rectangular_and_output_widths) {
       }
     }
   }
-  EXPECT_TRUE(build_mul(Mult_kind::sn, Adder_kind::brent, 0, ops, to_bits(1, 1), to_bits(1, 1), 0).empty());
-  EXPECT_EQ(from_bits(build_mul(Mult_kind::sn, Adder_kind::brent, 0, ops, std::vector<B>{}, to_bits(1, 1), 8)), 0u);
+  EXPECT_TRUE(build_mul(Mult_kind::tdm, Adder_kind::brent, 0, ops, to_bits(1, 1), to_bits(1, 1), 0).empty());
+  EXPECT_EQ(from_bits(build_mul(Mult_kind::tdm, Adder_kind::brent, 0, ops, std::vector<B>{}, to_bits(1, 1), 8)), 0u);
 }
 
 TEST(abc_arith, sn_multiplier_random_wide_and_square) {
@@ -678,7 +679,7 @@ TEST(abc_arith, sn_multiplier_random_wide_and_square) {
           }
         }
         EXPECT_EQ(
-            from_bits(build_mul(Mult_kind::sn, Adder_kind::brent, 0, ops, to_bits(a, width), to_bits(b, width), 64, sign, sign)),
+            from_bits(build_mul(Mult_kind::tdm, Adder_kind::brent, 0, ops, to_bits(a, width), to_bits(b, width), 64, sign, sign)),
             a * b);
       }
     }

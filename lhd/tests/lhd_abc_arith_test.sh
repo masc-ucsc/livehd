@@ -225,7 +225,7 @@ mod sn_mul(a:S4, b:S5, c:U3) -> (s:S12@[0], u:U12@[0], m:S12@[0], q:S12@[0], k:S
 PRP
   run compile "$S/sn_mul.prp" --top sn_mul.sn_mul --emit-dir lg:"$S/lg" --workdir "$S/compile"
   run pass abc --top sn_mul.sn_mul lg:"$S/lg" --emit-dir lg:"$S/net" --set synth.liberty="$LIB" \
-    --set pass.abc.adder=brent --set pass.abc.multiplier=sn --set pass.abc.barrel=log --workdir "$S/map"
+    --set pass.abc.adder=brent --set pass.abc.multiplier=tdm --set pass.abc.barrel=log --workdir "$S/map"
   run pass partition --top sn_mul.sn_mul lg:"$S/lg" --emit-dir lg:"$S/re" --workdir "$S/partition"
   run lec --impl lg:"$S/net" --ref lg:"$S/re" --lib lg:"$W/models" --top sn_mul.sn_mul --workdir "$S/lec"
   python3 - "$S/map/qor.json" <<'JSON'

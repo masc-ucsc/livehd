@@ -52,9 +52,13 @@ inline std::optional<Adder_kind> parse_adder_kind(std::string_view s) {
 // Combinational multiplier architecture (mirrors Adder_kind). `array` is the
 // simple shift-and-add multiplier; `tree` sums partial products in balanced
 // pairs. `csa` compresses three rows to two without propagating carries until
-// the final addition. `sn` uses depth-ordered column compression and signed
-// Baugh-Wooley encoding at native operand widths. All reuse the selected adder for carry propagation.
-enum class Mult_kind { array, tree, csa, sn };
+// the final addition. `tdm` (three-greedy / three-dimensional method) compresses
+// the partial-product matrix column by column: each step full-adds the three
+// earliest-arriving signals of a column (sum +2 levels, carry +1) until two
+// remain, then one final addition. It uses signed Baugh-Wooley encoding at
+// native operand widths, which is why it also gives a squarer. All reuse the
+// selected adder for carry propagation.
+enum class Mult_kind { array, tree, csa, tdm };
 
 inline std::optional<Mult_kind> parse_mult_kind(std::string_view s) {
   if (s == "tree") {
@@ -66,8 +70,8 @@ inline std::optional<Mult_kind> parse_mult_kind(std::string_view s) {
   if (s == "csa") {
     return Mult_kind::csa;
   }
-  if (s == "sn") {
-    return Mult_kind::sn;
+  if (s == "tdm" || s == "sn") {  // `sn` is the deprecated spelling
+    return Mult_kind::tdm;
   }
   return std::nullopt;
 }
@@ -593,7 +597,7 @@ inline std::vector<Bit> build_affine_shr_prefix(Ops& ops, const std::vector<Bit>
 // retain their native widths; signed extension happens only after multiplication.
 // Mixed signedness is handled by adding a zero sign bit to the unsigned input.
 template <class Bit, class Ops>
-inline std::vector<Bit> sn_mul(Adder_kind adder, int block_size, Ops& ops, std::vector<Bit> a, std::vector<Bit> b, int out_w,
+inline std::vector<Bit> tdm_mul(Adder_kind adder, int block_size, Ops& ops, std::vector<Bit> a, std::vector<Bit> b, int out_w,
                                bool a_signed, bool b_signed, bool squared = false) {
   if (out_w <= 0) {
     return {};
@@ -701,8 +705,8 @@ template <class Bit, class Ops>
 inline std::vector<Bit> build_mul(Mult_kind kind, Adder_kind adder, int block_size, Ops& ops, const std::vector<Bit>& a,
                                   const std::vector<Bit>& b, int out_w, bool a_signed = false, bool b_signed = false,
                                   bool squared = false) {
-  if (kind == Mult_kind::sn) {
-    return sn_mul(adder, block_size, ops, a, b, out_w, a_signed, b_signed, squared && a.size() == b.size());
+  if (kind == Mult_kind::tdm) {
+    return tdm_mul(adder, block_size, ops, a, b, out_w, a_signed, b_signed, squared && a.size() == b.size());
   }
   std::vector<std::vector<Bit>> rows;
   int                           aw = static_cast<int>(a.size());
