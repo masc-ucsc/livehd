@@ -39,9 +39,10 @@ struct ClockMeta {
 struct DesignIoMeta {
   std::string             top;
   // `Direct.inputArity`: one past the highest ordinal any source references,
-  // INCLUDING a reset input reached only through `flopQAsync`. A reset-only port
-  // is never an `.input` source, so an arity computed from inputs alone is too
-  // small and `checkRuntime` then rejects a correctly built array.
+  // taking the max over `.input` sources AND `flopQAsync`'s reset ordinal --
+  // which is what Direct.inputArity itself does. A certificate may reference a
+  // reset ordinal only through `flopQAsync`; an arity computed from `.input`
+  // alone would be too small for it.
   uint32_t                runtime_input_arity = 0;
   std::vector<IoPortMeta> inputs;   // declaration order, ordinals and GAPS kept
   std::vector<IoPortMeta> outputs;  // emission order

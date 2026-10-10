@@ -146,6 +146,9 @@ cc_test(
 cc_test(
     name = "design_scan_test",
     srcs = ["design_scan_test.cpp"],
+    # Project-local scratch: /tmp is shared between parallel jobs on this box
+    # and is not the configured runtime area.
+    local_defines = ['LIVEHD_TEST_RUNTIME_DIR=\\"generated/pass_lean_runtime_tmp\\"'],
     copts = COPTS,
     deps = [":lean_graph_scan", ":lean_emitters", "//graph", "@googletest//:gtest_main"],
 )

@@ -23,10 +23,18 @@ DesignIoMeta build_io_meta(const DesignScan& design, const CertificateIR& cert) 
       used.insert(src.ordinal);
       arity = std::max(arity, src.ordinal + 1);
     }
-    // A RESET-ONLY port is reached through `flopQAsync`'s reset input and is
-    // never an `.input` source. Direct.inputArity counts it; an arity that does
-    // not would be too small, and `checkRuntime` would then reject an array the
-    // caller built correctly from this sidecar.
+    // `flopQAsync` carries its reset ordinal, and `Direct.inputArity` takes the
+    // max over BOTH that and `.input` sources -- so this does too.
+    //
+    // Whether the scanner ALSO emits an `.input` source for the same port is a
+    // separate question, and an earlier comment here asserted it does not.
+    // That was wrong: `build_certificate` sets `reset_pin` through
+    // `dep(*f.reset, 1)`, which creates an Input source. So for a scanner-
+    // produced certificate the two agree. The max is still what matters,
+    // because a certificate whose reset ordinal is referenced ONLY through
+    // `flopQAsync` is well-formed, and an arity computed from `.input` alone
+    // would be too small for it -- `checkRuntime` would then reject an array a
+    // caller had built correctly from this sidecar.
     if (src.kind == SourceKind::Flop && src.async_reset) {
       used.insert(src.reset_input);
       arity = std::max(arity, src.reset_input + 1);
@@ -104,6 +112,10 @@ std::string io_meta_json(const DesignIoMeta& meta) {
   std::ostringstream o;
   o << "{\n";
   o << "  \"schema_version\": 1,\n";
+  // The historical discriminator. A consumer that reads several sidecar kinds
+  // distinguishes them by this, not by filename, so dropping it would make the
+  // file unidentifiable to anything already written against the contract.
+  o << "  \"kind\": \"lean_design_io\",\n";
   o << "  \"top\": " << json_str(meta.top) << ",\n";
   o << "  \"runtime_input_arity\": " << meta.runtime_input_arity << ",\n";
   emit_ports(o, "inputs", meta.inputs);

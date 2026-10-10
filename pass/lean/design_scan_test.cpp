@@ -2103,70 +2103,220 @@ TEST(DesignIoMeta, ImplicitOnlyDesignNamesItsClock) {
   EXPECT_FALSE(meta.clocks[0].name.empty());
 }
 
+// Minimal JSON string reader: finds `"key": "..."` and DECODES the escapes.
+// Searching for the escape sequence only proves something was written; decoding
+// proves it reads back as the original byte, which is what a consumer does.
+std::optional<std::string> json_string_field(std::string_view json, std::string_view key) {
+  const std::string pat = "\"" + std::string(key) + "\": \"";
+  const auto        at  = json.find(pat);
+  if (at == std::string_view::npos) {
+    return std::nullopt;
+  }
+  std::string out;
+  for (size_t i = at + pat.size(); i < json.size(); ++i) {
+    const char c = json[i];
+    if (c == '"') {
+      return out;
+    }
+    if (c != '\\') {
+      out.push_back(c);
+      continue;
+    }
+    if (++i >= json.size()) {
+      return std::nullopt;  // truncated escape
+    }
+    switch (json[i]) {
+      case '"': out.push_back('"'); break;
+      case '\\': out.push_back('\\'); break;
+      case 'n': out.push_back('\n'); break;
+      case 'r': out.push_back('\r'); break;
+      case 't': out.push_back('\t'); break;
+      case 'u': {
+        if (i + 4 >= json.size()) {
+          return std::nullopt;
+        }
+        const auto hex = std::string(json.substr(i + 1, 4));
+        out.push_back(static_cast<char>(std::stoi(hex, nullptr, 16)));
+        i += 4;
+        break;
+      }
+      default: return std::nullopt;  // an escape no consumer would accept
+    }
+  }
+  return std::nullopt;  // unterminated string
+}
+
 // Control bytes and quotes reach this from RTL names and from `net_key()`'s
-// \x01/\x02 sentinels, so escaping is not theoretical.
-TEST(DesignIoMeta, JsonEscapesControlBytesAndQuotes) {
+// \x01/\x02 sentinels, so escaping is not theoretical. The round trip is what
+// matters: a consumer must read back the byte that went in.
+TEST(DesignIoMeta, JsonEscapesRoundTripThroughAParser) {
   DesignIoMeta meta;
-  meta.top = "a\"b\\c";
+  meta.top = "a\"b\\c\nd";
   meta.inputs.push_back({std::string("x\x01y"), 0, 1, true});
   meta.clocks.push_back({std::string("\x02""111"), 0, false});
   const auto json = io_meta_json(meta);
-  EXPECT_NE(json.find("\\\""), std::string::npos) << "a quote was not escaped";
-  EXPECT_NE(json.find("\\\\"), std::string::npos) << "a backslash was not escaped";
-  EXPECT_NE(json.find("\\u0001"), std::string::npos) << "a control byte was emitted raw";
-  EXPECT_NE(json.find("\\u0002"), std::string::npos);
-  EXPECT_EQ(json.find('\x01'), std::string::npos) << "a raw control byte survived into the JSON";
+
+  // No raw control byte survives into the file.
+  EXPECT_EQ(json.find('\x01'), std::string::npos);
+  EXPECT_EQ(json.find('\x02'), std::string::npos);
+  // ...and every value DECODES back to exactly what went in.
+  const auto top = json_string_field(json, "top");
+  ASSERT_TRUE(top.has_value()) << "`top` did not parse";
+  EXPECT_EQ(*top, meta.top) << "quote/backslash/newline did not round trip";
+  const auto kind = json_string_field(json, "kind");
+  ASSERT_TRUE(kind.has_value());
+  EXPECT_EQ(*kind, "lean_design_io") << "the schema discriminator is missing or wrong";
+  // The port and clock names are the first `"name"` fields in their arrays.
+  const auto pname = json_string_field(json, "name");
+  ASSERT_TRUE(pname.has_value());
+  EXPECT_EQ(*pname, std::string("x\x01y")) << "a control byte did not round trip";
+  const auto clocks_at = json.find("\"clocks\"");
+  ASSERT_NE(clocks_at, std::string::npos);
+  const auto cname = json_string_field(std::string_view(json).substr(clocks_at), "name");
+  ASSERT_TRUE(cname.has_value());
+  EXPECT_EQ(*cname, std::string("\x02""111")) << "the net_key sentinel did not round trip";
 }
 
-// PUBLICATION. The pair is only useful together, so a failure must leave the
-// PREVIOUS pair intact -- not delete it.
-TEST(DesignIoMeta, FailedPublicationKeepsThePreviousPair) {
-  const auto dir = std::filesystem::temp_directory_path() / "lean_pub_test";
-  std::filesystem::remove_all(dir);
-  std::filesystem::create_directories(dir);
-  const auto a = (dir / "cert.lean").string();
-  const auto b = (dir / "io.json").string();
+// PUBLICATION FAULTS.
+//
+// The pair is only useful together, so a failure must leave the PREVIOUS pair
+// intact. The first implementation's catch assumed both originals had been
+// backed up by the time anything threw, and deleted both targets on the way to
+// restoring them -- so a failure in the FIRST backup rename deleted an original
+// that had never been moved. Measured on the committed source: original A lost
+// and replaced by a directory, original B deleted outright.
+//
+// Every case below is a distinct point of failure, because the one failure the
+// earlier test exercised (a throw during STAGING) happens before any target is
+// touched and cannot catch this at all.
 
-  // A complete, coherent preexisting pair.
-  publish_pair(a, [](std::ostream& o) { o << "OLD-CERT"; },
-               b, [](std::ostream& o) { o << "OLD-JSON"; });
-  auto slurp = [](const std::string& p) {
-    std::ifstream in(p);
-    std::ostringstream o;
-    o << in.rdbuf();
-    return o.str();
-  };
-  ASSERT_EQ(slurp(a), "OLD-CERT");
-  ASSERT_EQ(slurp(b), "OLD-JSON");
+// Project-local, never `temp_directory_path()`: /tmp is shared between parallel
+// jobs here and is not the configured scratch area.
+std::filesystem::path pub_case_dir(std::string_view name) {
+  const auto dir = std::filesystem::path(LIVEHD_TEST_RUNTIME_DIR) / "publication" / name;
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+  std::filesystem::create_directories(dir, ec);
+  return dir;
+}
 
-  // The SECOND emit throws -- D2's helper removed the newly published
-  // certificate here and did not restore the old one, losing both.
-  EXPECT_THROW(publish_pair(a, [](std::ostream& o) { o << "NEW-CERT"; },
-                            b, [](std::ostream&) { throw std::runtime_error("sidecar failed"); }),
+std::string slurp_or(const std::filesystem::path& p, const char* missing) {
+  std::error_code ec;
+  if (!std::filesystem::exists(p, ec)) {
+    return missing;
+  }
+  if (!std::filesystem::is_regular_file(p, ec)) {
+    return "<NOT-A-FILE>";
+  }
+  std::ifstream      in(p);
+  std::ostringstream o;
+  o << in.rdbuf();
+  return o.str();
+}
+
+struct PubPaths {
+  std::filesystem::path dir, a, b;
+};
+PubPaths pub_with_existing_pair(std::string_view name) {
+  PubPaths p;
+  p.dir = pub_case_dir(name);
+  p.a   = p.dir / "cert.lean";
+  p.b   = p.dir / "io.json";
+  publish_pair(p.a.string(), [](std::ostream& o) { o << "OLD-CERT"; },
+               p.b.string(), [](std::ostream& o) { o << "OLD-JSON"; });
+  return p;
+}
+void expect_old_pair_intact(const PubPaths& p, const char* why) {
+  EXPECT_EQ(slurp_or(p.a, "<MISSING>"), "OLD-CERT") << why << ": the previous certificate was lost";
+  EXPECT_EQ(slurp_or(p.b, "<MISSING>"), "OLD-JSON") << why << ": the previous sidecar was lost";
+}
+void expect_no_litter(const PubPaths& p) {
+  for (const char* suffix : {".tmp", ".bak"}) {
+    EXPECT_FALSE(std::filesystem::exists(p.a.string() + suffix)) << p.a.string() << suffix << " left behind";
+    EXPECT_FALSE(std::filesystem::exists(p.b.string() + suffix)) << p.b.string() << suffix << " left behind";
+  }
+}
+
+// A BLOCKED BACKUP PATH is refused before anything is mutated, rather than
+// failing halfway. This is the case that lost both originals.
+TEST(DesignIoMeta, BlockedBackupAIsRefusedWithoutTouchingTheOriginals) {
+  auto p = pub_with_existing_pair("blocked_backup_a");
+  std::filesystem::create_directories(p.a.string() + ".bak");
+  EXPECT_THROW(publish_pair(p.a.string(), [](std::ostream& o) { o << "NEW-CERT"; },
+                            p.b.string(), [](std::ostream& o) { o << "NEW-JSON"; }),
                std::exception);
-  EXPECT_EQ(slurp(a), "OLD-CERT") << "the previous certificate was lost";
-  EXPECT_EQ(slurp(b), "OLD-JSON") << "the previous sidecar was lost";
-  // ...and nothing staged is left lying around.
-  EXPECT_FALSE(std::filesystem::exists(a + ".tmp"));
-  EXPECT_FALSE(std::filesystem::exists(b + ".tmp"));
-  EXPECT_FALSE(std::filesystem::exists(a + ".bak"));
-  EXPECT_FALSE(std::filesystem::exists(b + ".bak"));
+  expect_old_pair_intact(p, "blocked backup A");
+  // The collision itself is left alone: it may hold the only copy of something.
+  EXPECT_TRUE(std::filesystem::exists(p.a.string() + ".bak"));
+}
+
+TEST(DesignIoMeta, BlockedBackupBIsRefusedWithoutTouchingTheOriginals) {
+  auto p = pub_with_existing_pair("blocked_backup_b");
+  std::filesystem::create_directories(p.b.string() + ".bak");
+  EXPECT_THROW(publish_pair(p.a.string(), [](std::ostream& o) { o << "NEW-CERT"; },
+                            p.b.string(), [](std::ostream& o) { o << "NEW-JSON"; }),
+               std::exception);
+  expect_old_pair_intact(p, "blocked backup B");
+  EXPECT_TRUE(std::filesystem::exists(p.b.string() + ".bak"));
+}
+
+// A FINAL RENAME failure -- the staged file vanishes between staging and
+// publication -- must roll the pair back. This is the case that genuinely
+// exercises the restore path.
+TEST(DesignIoMeta, SecondFinalRenameFailureRestoresThePair) {
+  auto p = pub_with_existing_pair("final_rename_b");
+  EXPECT_THROW(publish_pair(p.a.string(), [](std::ostream& o) { o << "NEW-CERT"; },
+                            p.b.string(),
+                            [&](std::ostream& o) {
+                              o << "NEW-JSON";
+                              // Remove the staged file after writing it, so the
+                              // rename that publishes it fails.
+                              std::error_code ec;
+                              std::filesystem::remove(p.b.string() + ".tmp", ec);
+                            }),
+               std::exception);
+  expect_old_pair_intact(p, "second final rename");
+  expect_no_litter(p);
+}
+
+TEST(DesignIoMeta, FirstFinalRenameFailureRestoresThePair) {
+  auto p = pub_with_existing_pair("final_rename_a");
+  EXPECT_THROW(publish_pair(p.a.string(),
+                            [&](std::ostream& o) {
+                              o << "NEW-CERT";
+                              std::error_code ec;
+                              std::filesystem::remove(p.a.string() + ".tmp", ec);
+                            },
+                            p.b.string(), [](std::ostream& o) { o << "NEW-JSON"; }),
+               std::exception);
+  expect_old_pair_intact(p, "first final rename");
+  expect_no_litter(p);
+}
+
+// Staging failures, fresh targets, and the success path.
+TEST(DesignIoMeta, StagingFailureAndFreshTargetsAndSuccess) {
+  auto p = pub_with_existing_pair("staging_and_success");
+  EXPECT_THROW(publish_pair(p.a.string(), [](std::ostream& o) { o << "NEW-CERT"; },
+                            p.b.string(), [](std::ostream&) { throw std::runtime_error("sidecar failed"); }),
+               std::exception);
+  expect_old_pair_intact(p, "staging failure");
+  expect_no_litter(p);
 
   // The same failure against FRESH targets must leave neither file behind.
-  const auto c = (dir / "fresh.lean").string();
-  const auto d = (dir / "fresh.json").string();
+  const auto c = (p.dir / "fresh.lean").string();
+  const auto d = (p.dir / "fresh.json").string();
   EXPECT_THROW(publish_pair(c, [](std::ostream& o) { o << "C"; },
                             d, [](std::ostream&) { throw std::runtime_error("boom"); }),
                std::exception);
   EXPECT_FALSE(std::filesystem::exists(c)) << "a half-published pair was left on a fresh target";
   EXPECT_FALSE(std::filesystem::exists(d));
 
-  // And a SUCCESSFUL publish replaces both.
-  publish_pair(a, [](std::ostream& o) { o << "NEW-CERT"; },
-               b, [](std::ostream& o) { o << "NEW-JSON"; });
-  EXPECT_EQ(slurp(a), "NEW-CERT");
-  EXPECT_EQ(slurp(b), "NEW-JSON");
-  std::filesystem::remove_all(dir);
+  // ...and a successful publish replaces both and cleans up.
+  publish_pair(p.a.string(), [](std::ostream& o) { o << "NEW-CERT"; },
+               p.b.string(), [](std::ostream& o) { o << "NEW-JSON"; });
+  EXPECT_EQ(slurp_or(p.a, "<MISSING>"), "NEW-CERT");
+  EXPECT_EQ(slurp_or(p.b, "<MISSING>"), "NEW-JSON");
+  expect_no_litter(p);
 }
 
 // The emitter takes a DesignScan and a CertificateIR -- no graph. Both outlive

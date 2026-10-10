@@ -3262,35 +3262,103 @@ the certificate and the sidecar — so the property is demonstrated rather than
 asserted. Neither certificate nor model equations changed, and no import
 requirement widened.
 
-### R19.3 Publishing the pair: restore, do not delete
+### R19.3 Publishing the pair: the first rollback was wrong
 
 A certificate and its sidecar are only useful together, and publishing them is
 **two renames**. D2's helper, on a failed second rename, removed the newly
 published certificate and did **not** restore the preexisting one — losing
-*both*, so a caller ended with no certificate where it had had a working pair.
+*both*.
 
-`publish_pair` stages both files before publishing either, moves any existing
-pair aside rather than overwriting it, and on failure **restores** what was
-there instead of deleting the half-published result.
-`DesignIoMeta.FailedPublicationKeepsThePreviousPair` pins all of it: a complete
-preexisting pair survives a throwing second emit with both files unchanged, the
-same failure against *fresh* targets leaves neither file behind, staged `.tmp`
-and `.bak` artifacts are cleaned in both cases, and a successful publish still
-replaces both.
+**The first version here reproduced that loss by a different route.** Its catch
+assumed that, by the time anything threw, both originals had been backed up — so
+it deleted both targets on the way to restoring them. When the **first backup
+rename** failed (a directory at `cert.lean.bak` is enough), the original had
+never been moved, the catch deleted it anyway, and the restore then moved that
+directory into its place. Measured on the committed source:
 
-**The guarantee, stated rather than implied.** This is **exception- and
-command-failure-safe**: a throw from either emit, or a failed open, write, close
-or rename, unwinds to the previous state. It is **not crash atomic** — two
-renames cannot be, and a crash between them leaves the new first file beside the
-old second. It is **not concurrency-safe**: the backups are keyed on the target
-names, so a second publisher to the same targets would race them. Anything
-stronger needs a single-file container or a directory swap, neither of which is
-implemented.
+| Fault | Result before the fix |
+| --- | --- |
+| `cert.lean.bak` blocked | **A lost**, replaced by the directory; **B deleted** |
+| `io.json.bak` blocked | A restored; **B lost**, replaced by the directory |
 
-### R19.4 Still open
+It also removed both backups unconditionally at the end of the catch, including
+when a restore had just failed — destroying the only remaining copy.
+
+**What it does now.** Every undo is conditioned on having done the thing:
+`moved_a`, `moved_b`, `put_a`, `put_b` are tracked, and only targets this call
+actually published are removed. A pre-existing `.bak` is **refused before any
+mutation**, because it is either an interrupted publish's only copy of a
+previous artifact or an unrelated file, and renaming over it destroys it. A
+backup whose restore fails is **kept**, and the failure is reported by name
+rather than swallowed — at that point it is the sole copy.
+
+### R19.4 The fault tests
+
+The earlier test threw during **staging**, before any target was touched, so it
+never exercised rollback at all. Each case below is a distinct point of failure:
+
+| Case | Expected |
+| --- | --- |
+| blocked backup A | refused up front; old pair intact; the collision left alone |
+| blocked backup B | refused up front; old pair intact |
+| first final rename fails | old pair restored; no litter |
+| second final rename fails | old pair restored; no litter |
+| staging failure | old pair intact |
+| staging failure, **fresh** targets | neither file created |
+| success | both replaced; `.tmp`/`.bak` cleaned |
+
+All pass. Scratch directories are **project-local**
+(`generated/pass_lean_runtime_tmp/publication/<case>`), not
+`temp_directory_path()`: `/tmp` is shared between parallel jobs on this box.
+
+**The failure model, stated accurately.** Exception- and
+command-failure-safe. **Not crash atomic** — two renames cannot be, and a crash
+between them leaves the new first file beside the old second. **Not
+concurrency-safe** — backups are keyed on the target names, so a second
+publisher races them. And a **persistent filesystem error can prevent
+restoration**; the backup is then retained and named in the exception rather
+than cleaned up.
+
+### R19.5 Production integration
+
+`pass_lean.cpp` published only the certificate; `build_io_meta`/`io_meta_json`/
+`publish_pair` had no production caller at all. `Pass_lean::emit_for_graph` now
+publishes `<base>_Lgraph.lean` and `<base>_io.json` as a pair, from the **same**
+scan and certificate, for **both** emitters — `verified_compiler` and legacy,
+with their options and equations unchanged. The sidecar's `top` is the emitted
+`base_name`, so a `--top` override renames both halves together and the metadata
+describes the artifact actually written.
+
+Verified end to end on a real CORE-ET module, both modes:
+
+```
+verified: intpipe_imm_Lgraph.lean + intpipe_imm_io.json
+legacy:   intpipe_imm_Lgraph.lean + intpipe_imm_io.json
+```
+
+parsing as `{"schema_version": 1, "kind": "lean_design_io", "top": "intpipe_imm",
+"runtime_input_arity": 2, …}` with dense ordinals and one implicit clock.
+
+### R19.6 Two corrections to R19
+
+**The schema discriminator was missing.** `"kind": "lean_design_io"` is how a
+consumer that reads several sidecar kinds identifies this one — not the
+filename. Restored, and the JSON test now **parses and decodes** rather than
+searching for escape sequences: a round trip proves a consumer reads back the
+byte that went in, where finding `\u0001` in the text only proves something was
+written.
+
+**The "never an `.input` source" claim was wrong.** `build_certificate` sets
+`reset_pin` through `dep(*f.reset, 1)`, which *does* create an Input source, so
+for a scanner-produced certificate the two agree and the reset test does not
+demonstrate the omission it claimed. What remains true, and is why the code
+takes a `max`, is that `Direct.inputArity` maxes over both — and a certificate
+referencing a reset ordinal **only** through `flopQAsync` is well-formed, so an
+arity from `.input` alone would be too small for it.
+
+### R19.7 Still open
 
 Write-port **collision ordering** (one write port in the fixtures, so the `fwd`
 matrix is exercised only in its 1×1 case) and a **real multi-clock CORE-ET
 direct/compiled trace** remain required before D2 acceptance. The configured
-125 CORE-ET + 61 CVA6 + 3 DINO replay is untouched, and D3/D4/FP are not started
-— green fixtures are not a reason to begin them.
+125 CORE-ET + 61 CVA6 + 3 DINO replay is untouched, and D3/D4/FP are not started.

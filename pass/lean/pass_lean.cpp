@@ -6,6 +6,7 @@
 #include "certificate_ir.hpp"
 #include "design_scan.hpp"
 #include "diag.hpp"
+#include "design_io_meta.hpp"
 #include "emit_design_cert.hpp"
 #include "lean_format.hpp"
 #include "legacy_model.hpp"
@@ -52,15 +53,30 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   const auto base_name   = lean_export::sanitize_lean(raw_name);
   const auto output_dir  = (path == "/INVALID" || path.empty()) ? std::string(".") : path;
   const auto lean_path   = output_dir + "/" + base_name + "_Lgraph.lean";
+  const auto io_path     = output_dir + "/" + base_name + "_io.json";
+  // The sidecar describes the artifact actually emitted, so it is built from the
+  // SAME scan and certificate and named from the SAME `base_name` -- including a
+  // `--top` override, which renames both halves together.
+  //
+  // Published as a PAIR: a certificate names its inputs by ordinal only, so a
+  // caller needs the sidecar to drive it, and a new certificate beside a stale
+  // sidecar is worse than neither. `publish_pair` keeps the previous coherent
+  // pair when anything fails; see its contract for what that does and does not
+  // guarantee.
+  auto io_meta = lean_export::build_io_meta(design, certificate);
+  io_meta.top  = base_name;
   if (verified_compiler) {
-    lean_export::write_design_cert(base_name, certificate, lean_path);
+    lean_export::publish_pair(
+        lean_path, [&](std::ostream& out) { lean_export::emit_design_cert(base_name, certificate, out); },
+        io_path, [&](std::ostream& out) { out << lean_export::io_meta_json(io_meta); });
   } else {
     const lean_export::LegacyEmitOptions
         options{top, emit_cert, emit_fast_bridge, cert_wf, cert_wf_fallback, cert_chunk_size, cert_chunk_limit};
-    lean_export::write_atomic(lean_path,
-                              [&](std::ostream& out) { lean_export::emit_legacy_model(design, certificate, options, out); });
+    lean_export::publish_pair(
+        lean_path, [&](std::ostream& out) { lean_export::emit_legacy_model(design, certificate, options, out); },
+        io_path, [&](std::ostream& out) { out << lean_export::io_meta_json(io_meta); });
   }
-  std::cout << "pass.lean: " << raw_name << " -> " << lean_path << (verified_compiler ? " (verified_compiler: " : " (legacy: ")
+  std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " + " << io_path << (verified_compiler ? " (verified_compiler: " : " (legacy: ")
             << certificate.sources.size() << " sources, " << certificate.nodes.size() << " nodes, " << certificate.flops.size()
             << " flops, " << certificate.memories.size() << " memories)\n";
 }

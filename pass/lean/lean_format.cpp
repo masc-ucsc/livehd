@@ -127,50 +127,97 @@ void publish_pair(const std::string& path_a, const std::function<void(std::ostre
   const std::string ta = path_a + ".tmp", tb = path_b + ".tmp";
   const std::string ba = path_a + ".bak", bb = path_b + ".bak";
   std::error_code   ec;
-  // Both files are written BEFORE either is published, so an emit that throws
-  // cannot leave one target replaced and the other not.
-  auto scrub = [&] {
+
+  // EVERY UNDO IS CONDITIONED ON HAVING DONE THE THING.
+  //
+  // The first version of this function assumed that, by the time anything threw,
+  // both originals had been backed up -- so its catch deleted both targets and
+  // restored from both backups. When the FIRST backup rename failed (a directory
+  // sitting at `cert.lean.bak` is enough), the original had never been moved, the
+  // catch deleted it anyway, and the restore then moved that directory into its
+  // place. Measured: original A lost and replaced by a directory, original B
+  // deleted outright. The same shape with `io.json.bak` blocked lost B.
+  //
+  // Losing the previous pair is precisely what this function exists to prevent,
+  // so the state is tracked rather than assumed.
+  bool moved_a = false, moved_b = false, put_a = false, put_b = false;
+
+  // REJECT A COLLISION BEFORE MUTATING ANYTHING. A pre-existing `.bak` is either
+  // a leftover from an interrupted publish -- which may be the only copy of a
+  // previous artifact -- or an unrelated file. Renaming over it destroys it, and
+  // renaming ONTO a directory fails in the middle of the transaction. Refusing up
+  // front means the targets are untouched when it happens.
+  if (std::filesystem::exists(ba, ec) || std::filesystem::exists(bb, ec)) {
+    throw std::runtime_error("lean publish: a backup path already exists (" + ba + " or " + bb
+                             + "); refusing to publish rather than overwrite it. Move or remove it "
+                               "after checking whether it holds the only copy of a previous artifact.");
+  }
+
+  auto scrub_tmp = [&] {
     std::filesystem::remove(ta, ec);
     std::filesystem::remove(tb, ec);
   };
+  // Both files are written BEFORE either is published, so an emit that throws
+  // cannot leave one target replaced and the other not.
   try {
     stage(path_a, ".tmp", emit_a);
     stage(path_b, ".tmp", emit_b);
   } catch (...) {
-    scrub();
+    scrub_tmp();
     throw;
   }
 
   const bool had_a = std::filesystem::exists(path_a, ec);
   const bool had_b = std::filesystem::exists(path_b, ec);
-  // Move the existing pair aside rather than overwriting it, so there is
-  // something to put back. A rename over a backup that already exists would
-  // destroy it, so stale backups are cleared first.
-  std::filesystem::remove(ba, ec);
-  std::filesystem::remove(bb, ec);
   try {
     if (had_a) {
       std::filesystem::rename(path_a, ba);
+      moved_a = true;
     }
     if (had_b) {
       std::filesystem::rename(path_b, bb);
+      moved_b = true;
     }
     std::filesystem::rename(ta, path_a);
+    put_a = true;
     std::filesystem::rename(tb, path_b);
+    put_b = true;
   } catch (...) {
-    // RESTORE, do not merely delete. Deleting the half-published pair is what
-    // loses a working one.
-    std::filesystem::remove(path_a, ec);
-    std::filesystem::remove(path_b, ec);
-    if (had_a) {
-      std::filesystem::rename(ba, path_a, ec);
+    // Remove only what WE published. A target we never wrote is either the
+    // untouched original or absent, and deleting it is the loss this guards.
+    if (put_a) {
+      std::filesystem::remove(path_a, ec);
     }
-    if (had_b) {
-      std::filesystem::rename(bb, path_b, ec);
+    if (put_b) {
+      std::filesystem::remove(path_b, ec);
     }
-    scrub();
-    std::filesystem::remove(ba, ec);
-    std::filesystem::remove(bb, ec);
+    // Restore only from backups we actually made, and KEEP any backup whose
+    // restore fails: at that point it is the sole copy, and removing it to tidy
+    // up would destroy the artifact this whole path is protecting.
+    std::string stranded;
+    if (moved_a) {
+      std::error_code r;
+      std::filesystem::rename(ba, path_a, r);
+      if (r) {
+        stranded += " " + ba;
+      }
+    }
+    if (moved_b) {
+      std::error_code r;
+      std::filesystem::rename(bb, path_b, r);
+      if (r) {
+        stranded += " " + bb;
+      }
+    }
+    scrub_tmp();
+    if (!stranded.empty()) {
+      // Report rather than swallow: a persistent filesystem error can prevent
+      // restoration, and the caller needs to know the recovery data is still
+      // there under a different name.
+      throw std::runtime_error("lean publish: FAILED and could not restore the previous artifact(s). "
+                               "The only remaining copy is at:" + stranded
+                               + " -- do not delete it; rename it back by hand.");
+    }
     throw;
   }
   std::filesystem::remove(ba, ec);
