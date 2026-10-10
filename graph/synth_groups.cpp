@@ -189,15 +189,18 @@ bool seed_groups(hhds::Graph* g) {
   };
   for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     for (auto sink : node.inp_sorted_pins()) {
-      auto pin = sink.get_driver_pin();
-      if (pin.is_invalid() || pin.is_const() || gu::is_graph_input_pin(pin)) {
-        continue;
-      }
-      auto drv = pin.get_master_node();
-      fanin[node].push_back(drv);
-      fanout[drv].push_back(node);
-      if (node.is_loop_break() && sink.get_port_id() == 3) {
-        add_root(drv);
+      // PLURAL: a compact loop's carry-in sink holds two drivers (seed and the
+      // previous ordinal); get_driver_pin() asserts on that in dbg builds.
+      for (const auto& pin : sink.get_driver_pins()) {
+        if (pin.is_invalid() || pin.is_const() || gu::is_graph_input_pin(pin)) {
+          continue;
+        }
+        auto drv = pin.get_master_node();
+        fanin[node].push_back(drv);
+        fanout[drv].push_back(node);
+        if (node.is_loop_break() && sink.get_port_id() == 3) {
+          add_root(drv);
+        }
       }
     }
   }
@@ -251,9 +254,10 @@ bool seed_groups(hhds::Graph* g) {
           }
           for (auto sink : n.inp_sorted_pins()) {
             if (sink.get_port_id() == 3) {
-              auto pin = sink.get_driver_pin();
-              if (!pin.is_invalid() && !pin.is_const() && !gu::is_graph_input_pin(pin) && !pin.get_master_node().is_loop_break()) {
-                walk.push_back(pin.get_master_node());
+              for (const auto& pin : sink.get_driver_pins()) {
+                if (!pin.is_invalid() && !pin.is_const() && !gu::is_graph_input_pin(pin) && !pin.get_master_node().is_loop_break()) {
+                  walk.push_back(pin.get_master_node());
+                }
               }
             }
           }
