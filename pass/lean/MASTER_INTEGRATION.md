@@ -3075,3 +3075,74 @@ readings:
 
 Interpreter and compiler equations are unchanged either way; this is entirely
 about what `checkDesign` admits.
+
+## R18. Memory value gates across quiet and firing domains
+
+A memory commits on its own clock, and a synchronous read is a **register** that
+commits on its port's clock. Neither is observable while every clock fires: a
+write that commits and a write that is held look identical on the next read. So
+these are cases that only exist once domains are resolved.
+
+The fixture is built by the **real scanner**: a 4-entry RAM with a write port
+and a synchronous read port on `clk_a`, plus a synchronous ROM on `clk_b`.
+
+### R18.1 What the scan resolved
+
+| | |
+| --- | --- |
+| clocks | 2 — `clk_a`, `clk_b` |
+| `MemoryDesc`s | **1** — the RAM. The ROM carries none, as a `memConst` |
+| synthetic read registers | **2**, on **different** ordinals |
+
+The RAM's image and its read register agree on the domain; the ROM's register is
+on the other one. That is R15's "a synthetic sync-read flop inherits its
+**port's** domain", confirmed on a real fixture rather than asserted. The test
+checks all three facts **before** any value case runs — without that, every
+assertion below would still pass against a model that collapsed both registers
+onto one clock.
+
+### R18.2 The gates — 17 cases, all decided
+
+- **`clk_a` quiet: the write does not commit**, checked at **every one of the 4
+  addresses**, not only the one written.
+- **`clk_a` fires: the write lands at address 2 and nowhere else**, again
+  checked at all four.
+- **Read registers commit per port**: `clk_a` quiet with `clk_b` firing holds
+  the RAM register at 99; `clk_a` firing with `clk_b` quiet holds the ROM
+  register; both quiet moves neither.
+- **Enable off with the clock firing**: still no commit — the enable is not
+  being papered over by the edge.
+- **`checkRuntime` rejects a state whose memory count disagrees** with the
+  design.
+- **`checkDesign` refuses a memory on an undeclared ordinal**, with
+  `memClockOutOfRange`.
+- **`allEdges` is every domain firing**, and the emitted step matches the
+  preserved interpreter on a design *with memory*.
+
+### R18.3 The mixed-domain refusal, on a real fixture
+
+Building the same design with the read port's `clock_pin` left unconnected makes
+it resolve to the implicit domain while the write port is explicitly on `clk_a`.
+The scanner refuses it:
+
+```
+memory n_16 (`memory_16_1`) commits on more than one clock domain:
+port 0 on `clk_a` and port 1 on `clock`. A certificate carries ONE
+MemoryDesc.clock, so these cannot be represented without merging two
+time bases into one.
+```
+
+This is R15.2's join rule declining to guess. The design-wide join folds an
+implicit element into a **unique** explicit domain — but this design has two,
+`clk_a` and the ROM's `clk_b`, so there is nothing to join the implicit port to.
+`DesignScanClocks.MixedDomainMemoryIsRefused` pins both the refusal and its
+reason.
+
+### R18.4 Still open
+
+Not covered by this fixture: **byte-enables** (`wensize > 1`), **read-during-write
+forwarding** (`fwd` is 0 here, so reads see committed contents only), and
+**`directStep` versus `compileAndRun`** on the same artifacts. `allEdges`
+versus the preserved interpreter is covered; direct-versus-compiled is not, and
+needs the `Direct*` modules exercised on a real design for the first time
+(R14.2). The IO/clock sidecar and graph-closed publication remain untouched.

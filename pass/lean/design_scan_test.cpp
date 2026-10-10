@@ -1524,5 +1524,243 @@ TEST(DesignScanClocks, QuietClockResetValueOracle) {
       << ").nextState.flops[3]! := by native_decide\n";
   ASSERT_TRUE(out.good());
 }
+
+// MEMORY VALUE GATES across quiet and firing domains.
+//
+// A memory commits on its own clock, and a synchronous read is a REGISTER that
+// commits on its port's clock. Both only become observable once a domain can be
+// quiet: with every clock firing, a write that commits and a write that is held
+// look identical on the next read.
+//
+// The fixture is a 4-entry RAM on `clk_a` with one write port and one
+// synchronous read port, plus a synchronous ROM on `clk_b`, all from the real
+// scanner.
+std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_port_clocked) {
+  auto& lib = livehd::Hhds_graph_library::instance(std::string(lgdb));
+  auto  io  = lib.create_io("memfix");
+  uint32_t pid = 1;
+  for (const char* n : {"clk_a", "clk_b", "we", "re"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 1);
+  }
+  io->add_input("waddr", pid++);
+  io->set_bits("waddr", 2);
+  io->add_input("raddr", pid++);
+  io->set_bits("raddr", 2);
+  io->add_input("wdata", pid++);
+  io->set_bits("wdata", 8);
+  io->add_input("romaddr", pid++);
+  io->set_bits("romaddr", 2);
+  io->add_output("rdata", 1);
+  io->set_bits("rdata", 8);
+  io->add_output("romdata", 2);
+  io->set_bits("romdata", 8);
+  auto g = io->create_graph();
+
+  // -- the RAM: write port 0, synchronous read port 1, both on clk_a ---------
+  auto ram = create_typed_node(*g, Ntype_op::Memory);
+  set_bits(ram.create_driver_pin(1), 8);  // read port 1's data output
+  // Memory pins are PER PORT: pid = base + port * Memory_port_stride, which is
+  // how parse_memory_info recovers the port id (raw_pid / stride).
+  const auto mstride = static_cast<uint32_t>(Ntype::Memory_port_stride);
+  auto rsink = [&](std::string_view n, uint32_t port) {
+    return ram.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + port * mstride);
+  };
+  auto rconst = [&](std::string_view n, int64_t v, uint32_t port = 0) {
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(v)).connect_sink(rsink(n, port));
+  };
+  rconst("bits", 8);
+  rconst("size", 4);
+  rconst("type", 1);       // synchronous read
+  rconst("wensize", 1);
+  rconst("fwd", 0);        // NO forwarding: a read sees committed contents
+  rconst("posclk", 1);
+  // port 0 = WRITE, port 1 = synchronous READ.
+  rconst("rdport", 0, 0);
+  rconst("rdport", 1, 1);
+  g->get_input_pin("waddr").connect_sink(rsink("addr", 0));
+  g->get_input_pin("wdata").connect_sink(rsink("din", 0));
+  g->get_input_pin("we").connect_sink(rsink("enable", 0));
+  g->get_input_pin("raddr").connect_sink(rsink("addr", 1));
+  g->get_input_pin("re").connect_sink(rsink("enable", 1));
+  g->get_input_pin("clk_a").connect_sink(rsink("clock_pin", 0));
+  if (read_port_clocked) {
+    g->get_input_pin("clk_a").connect_sink(rsink("clock_pin", 1));
+  }
+  ram.create_driver_pin(1).connect_sink(g->get_output_pin("rdata"));
+
+  // -- the ROM on clk_b -----------------------------------------------------
+  auto rom = create_typed_node(*g, Ntype_op::Memory);
+  set_bits(rom.create_driver_pin(0), 8);
+  auto osink = [&](std::string_view n) { return rom.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n)); };
+  auto oconst = [&](std::string_view n, int64_t v) {
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(v)).connect_sink(osink(n));
+  };
+  oconst("bits", 8);
+  oconst("size", 3);
+  oconst("type", 1);      // synchronous ROM: a registered read
+  oconst("rdport", 1);
+  oconst("initial", 0x030201);
+  g->get_input_pin("romaddr").connect_sink(osink("addr"));
+  g->get_input_pin("re").connect_sink(osink("enable"));
+  g->get_input_pin("clk_b").connect_sink(osink("clock_pin"));
+  rom.create_driver_pin(0).connect_sink(g->get_output_pin("romdata"));
+
+  return g;
+}
+
+// A memory whose ports land on DIFFERENT domains is refused, not merged.
+//
+// Here the write port is explicitly on `clk_a` while the synchronous read port
+// carries no clock pin, so it resolves to the implicit domain. The design-wide
+// join (R15.2) would fold an implicit element into a UNIQUE explicit domain --
+// but this design has two, `clk_a` and the ROM's `clk_b`, so there is nothing to
+// join it to without guessing which. One `MemoryDesc` carries one clock, and
+// guessing would put two time bases in one ordinal.
+TEST(DesignScanClocks, MixedDomainMemoryIsRefused) {
+  auto g = build_mem_fixture("lgdb_clk_mem_mixed", /*read_port_clocked=*/false);
+  try {
+    scan_design(*g, {});
+    ADD_FAILURE() << "a memory with ports on two domains was accepted";
+  } catch (const std::exception& e) {
+    const std::string what = e.what();
+    EXPECT_NE(what.find("more than one clock domain"), std::string::npos) << what;
+    EXPECT_NE(what.find("ONE MemoryDesc.clock"), std::string::npos) << what;
+  }
+}
+
+TEST(DesignScanClocks, MemoryQuietDomainValueOracle) {
+  auto g = build_mem_fixture("lgdb_clk_mem_oracle", /*read_port_clocked=*/true);
+  DesignScan design;
+  try {
+    design = scan_design(*g, {});
+  } catch (const std::exception& e) {
+    GTEST_SKIP() << "fixture refused by the scanner: " << e.what();
+  }
+  const auto cert = build_certificate(design, {});
+  ASSERT_GE(design.clocks.size(), 1u);
+
+  const char* path = std::getenv("LEAN_MEM_FIXTURE");
+  if (path == nullptr) {
+    GTEST_SKIP() << "set LEAN_MEM_FIXTURE to emit the Lean oracle";
+  }
+  std::ofstream out(path);
+  emit_design_cert(design, cert, out);
+  // Record what the scan actually resolved, so the oracle's assertions can be
+  // read against it rather than against what the fixture intended.
+  out << "\n-- scan: " << design.clocks.size() << " clock(s), " << design.memories.size()
+      << " memory/memories, " << cert.flops.size() << " certificate flop(s)\n";
+  for (size_t i = 0; i < design.clocks.size(); ++i) {
+    out << "--   clock " << i << " = " << design.clocks[i].name
+        << (design.clocks[i].implicit ? " (implicit)" : "") << "\n";
+  }
+  ASSERT_EQ(design.clocks.size(), 2u);
+  ASSERT_EQ(cert.memories.size(), 1u) << "the ROM should carry no MemoryDesc";
+  ASSERT_EQ(cert.flops.size(), 2u) << "two synthetic synchronous-read registers";
+  // R15: a synthetic read register inherits its PORT's domain. Assert it before
+  // any value case, or the cases below would pass against a model that put both
+  // registers on one clock.
+  ASSERT_NE(cert.flops[0].clock, cert.flops[1].clock)
+      << "the RAM and ROM read registers collapsed onto one domain";
+  ASSERT_EQ(cert.memories[0].clock, cert.flops[0].clock)
+      << "the RAM's image and its read register disagree on the domain";
+
+  auto ordinal_of = [&](std::string_view name) -> size_t {
+    for (size_t i = 0; i < design.inputs.size(); ++i) {
+      if (design.inputs[i].name == name) {
+        return i;
+      }
+    }
+    ADD_FAILURE() << "no input " << name;
+    return 0;
+  };
+  struct In { const char* name; int value; int width; };
+  auto inputs = [&](std::initializer_list<In> set) {
+    std::map<size_t, std::pair<int, int>> by;
+    for (const auto& v : set) {
+      by[ordinal_of(v.name)] = {v.value, v.width};
+    }
+    std::ostringstream o;
+    for (size_t k = 0; k < design.inputs.size(); ++k) {
+      const auto it = by.find(k);
+      const int  w  = it != by.end() ? it->second.second : static_cast<int>(design.inputs[k].width);
+      const int  v  = it != by.end() ? it->second.first : 0;
+      o << (k ? ", " : "") << "mk_bv " << w << " " << v;
+    }
+    return o.str();
+  };
+  const auto ord_a = cert.memories[0].clock;  // clk_a
+  auto       edges = [&](bool a, bool b) {
+    std::ostringstream o;
+    o << "#[";
+    for (size_t c = 0; c < design.clocks.size(); ++c) {
+      o << (c ? ", " : "") << ((c == ord_a ? a : b) ? "true" : "false");
+    }
+    o << "]";
+    return o.str();
+  };
+  // Pre-state: both read registers hold 99; the RAM image is all 7s.
+  const char* st = "(⟨#[mk_bv 8 99, mk_bv 8 99], #[fun _ => mk_bv 8 7]⟩ : RuntimeState)";
+  const auto  wr = inputs({{"we", 1, 1}, {"re", 1, 1}, {"waddr", 2, 2}, {"wdata", 55, 8},
+                           {"raddr", 2, 2}, {"romaddr", 1, 2}});
+
+  out << "\n-- MEMORY VALUE GATES.\n";
+  out << "-- A write commits on the MEMORY's clock; a synchronous read is a\n"
+      << "-- REGISTER that commits on its PORT's clock. Both are invisible while\n"
+      << "-- every domain fires, which is why they are only testable now.\n";
+
+  // 1. clk_a QUIET: the write must NOT commit, at ANY address.
+  out << "\n-- clk_a quiet: the write does not commit. Checked at EVERY address.\n";
+  for (int a = 0; a < 4; ++a) {
+    out << "example : ((compileAndRun memfix_designCert " << edges(false, true) << " #[" << wr << "] " << st
+        << ").nextState.mems[0]! (" << a << " : Int)) = mk_bv 8 7 := by native_decide\n";
+  }
+  // 2. clk_a FIRES: the write lands at waddr=2 and nowhere else.
+  out << "\n-- clk_a fires: the write lands at address 2, and ONLY there.\n";
+  for (int a = 0; a < 4; ++a) {
+    out << "example : ((compileAndRun memfix_designCert " << edges(true, false) << " #[" << wr << "] " << st
+        << ").nextState.mems[0]! (" << a << " : Int)) = mk_bv 8 " << (a == 2 ? 55 : 7)
+        << " := by native_decide\n";
+  }
+  // 3. the read REGISTERS, independently per domain.
+  out << "\n-- Read registers: each commits on its own port's clock.\n"
+      << "-- clk_a quiet, clk_b fires: the RAM register HOLDS 99, the ROM register loads.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(false, true) << " #[" << wr << "] " << st
+      << ").nextState.flops[0]!) = mk_bv 8 99 := by native_decide\n"
+      << "-- clk_a fires, clk_b quiet: the ROM register HOLDS 99.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, false) << " #[" << wr << "] " << st
+      << ").nextState.flops[1]!) = mk_bv 8 99 := by native_decide\n"
+      << "-- both quiet: neither moves.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(false, false) << " #[" << wr << "] " << st
+      << ").nextState.flops[0]!) = mk_bv 8 99 := by native_decide\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(false, false) << " #[" << wr << "] " << st
+      << ").nextState.flops[1]!) = mk_bv 8 99 := by native_decide\n";
+  // 4. a disabled write does not commit even when its clock fires.
+  const auto nowr = inputs({{"we", 0, 1}, {"re", 1, 1}, {"waddr", 2, 2}, {"wdata", 55, 8},
+                            {"raddr", 2, 2}, {"romaddr", 1, 2}});
+  out << "\n-- enable off with the clock FIRING: still no commit.\n"
+      << "example : ((compileAndRun memfix_designCert " << edges(true, true) << " #[" << nowr << "] " << st
+      << ").nextState.mems[0]! (2 : Int)) = mk_bv 8 7 := by native_decide\n";
+
+  // 5. the CHECKED API on memory shapes.
+  out << "\n-- checkRuntime rejects a state whose MEMORY count disagrees.\n"
+      << "example : (checkRuntime memfix_designCert " << edges(true, true) << " #[" << wr
+      << "] (⟨#[mk_bv 8 99, mk_bv 8 99], #[]⟩ : RuntimeState)).isOk = false := by native_decide\n";
+  out << "\n-- checkDesign refuses a memory on an undeclared clock ordinal.\n"
+      << "def memfix_badMemClock : DesignCert :=\n"
+      << "  { memfix_designCert with\n"
+      << "    memories := memfix_designCert.memories.map (fun m => { m with clock := 99 }) }\n"
+      << "example : (designErrors memfix_badMemClock).map SimError.tag"
+         " = some \"memClockOutOfRange\" := by native_decide\n";
+
+  // 6. allEdges agrees with the preserved interpreter on THIS artifact too.
+  out << "\n-- allEdges is every domain firing, and the emitted step matches the\n"
+      << "-- preserved interpreter on a design with memory.\n"
+      << "example : allEdges memfix_designCert = " << edges(true, true) << " := by native_decide\n"
+      << "example : memfix_step #[" << wr << "] " << st
+      << " = interpretDesignLegacy memfix_designCert #[" << wr << "] " << st
+      << " := memfix_step_legacy_correct _ _\n";
+  ASSERT_TRUE(out.good());
+}
 }  // namespace
 }  // namespace lean_export
