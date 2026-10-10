@@ -166,7 +166,7 @@ http_archive(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-# The pinned archive (pin 98073908; parser and formatter share it) keeps
+# The pinned archive (pin c4fc67cf; parser and formatter share it) keeps
 # livehd self-contained: a fresh clone builds with no sibling checkout. For
 # parser co-development the http_archive is swapped for a new_local_repository
 # on the ../tree-sitter-pyrope working tree, and the build then depends on that
@@ -175,9 +175,9 @@ http_archive(
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-Opu+k+ImJOsqecwynHYDsNIN7F0Y5XCbbCBi60rAJnU=",
-    strip_prefix = "tree-sitter-pyrope-9807390890f3ec324f2ebdebd2c2bb585dbff411/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/9807390890f3ec324f2ebdebd2c2bb585dbff411.zip"],
+    integrity = "sha256-4DehB9y4VsXENIpbuj+IrM+9msAbTWSiVq0oOA9lD1w=",
+    strip_prefix = "tree-sitter-pyrope-c4fc67cf1e46f1680dcc9431511caab57499270d/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/c4fc67cf1e46f1680dcc9431511caab57499270d.zip"],
 )
 # Local co-development swap (replace the archive above):
 # new_local_repository(
@@ -216,9 +216,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-Opu+k+ImJOsqecwynHYDsNIN7F0Y5XCbbCBi60rAJnU=",
-    strip_prefix = "tree-sitter-pyrope-9807390890f3ec324f2ebdebd2c2bb585dbff411",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/9807390890f3ec324f2ebdebd2c2bb585dbff411.zip"],
+    integrity = "sha256-4DehB9y4VsXENIpbuj+IrM+9msAbTWSiVq0oOA9lD1w=",
+    strip_prefix = "tree-sitter-pyrope-c4fc67cf1e46f1680dcc9431511caab57499270d",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/c4fc67cf1e46f1680dcc9431511caab57499270d.zip"],
 )
 # Local co-development swap (replace the archive above):
 # new_local_repository(
