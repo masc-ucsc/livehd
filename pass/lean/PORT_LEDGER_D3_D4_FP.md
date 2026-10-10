@@ -1834,6 +1834,98 @@ procedure is not started against a dirty checkout. The CVA6 *replay* path
 (`run_cva6_module_lean_stress.sh` with the static filelist) is unaffected and
 is what the accepted ALU replay used.
 
+## 26. A real CORE-ET pilot, end to end
+
+### 26.1 The binary had to be rebuilt first
+
+The first pilot produced **no certificates at all**: two modules `NO_CERT` with
+the emitter reporting OK. That was a provenance result, not a runtime one — the
+optimized `lhd` was built at 03:23, before `emit_dcert.cpp` existed, so it
+emitted the Lean literal and the sidecar and no DCERT2. The sweep reported
+exactly that and ran nothing, which is the correct disposition.
+
+Rebuilt: `bazel build -c opt //lhd:lhd` → **`9cdba78e6b236e8c`, 203,557,336
+bytes, k8-opt**. The provenance now records `lhd_bytes` and `lhd_build_mode`
+beside the digest, so a row says which binary produced it.
+
+### 26.2 The run
+
+`EMIT_MAX_RSS_KB=8388608`, `EMIT_TIMEOUT=3600`, `RUN_TIMEOUT=1800`, serial,
+ordinary **8192 KiB** stack, 18-column rows:
+
+| module | emit | parse | compiles | runtime | digest |
+|---|---|---|---|---|---|
+| `intpipe_alu` | EMITTED | PARSED | true | **RAN** | `4681973968394006261` |
+| `intpipe_inst_bits_stage` | EMITTED | PARSED | true | **RAN** | `17698986674452852966` |
+| `intpipe_csr_msgs` | EMIT_FAILED (rc=3) | NOT_EMITTED | — | NOT_RUN | — |
+
+`intpipe_alu` is 1536 sources and 2133 nodes; `intpipe_inst_bits_stage` 163/163
+with 32 flops. The third is a genuine static-gate refusal —
+`const width 46 cannot hold value 1152886320234758144 (needs 60 bits)` and four
+more — and its row records *"certificate written and NOT run"*: a partial
+certificate surviving a failed emission does **not** become coverage.
+
+That is the whole D4 path on real inputs: **RTL → `lhd` → `.dcert` →
+`CertIO.loadCert` → `compilesOk` → `runCheckedAllEdges` → digest**, with no
+Lean file elaborated for any of it.
+
+### 26.3 Verification, and what it had to be taught
+
+`verify_d4_run.sh` was written against a CVA6 run and applied its bindings
+unconditionally. A CORE-ET run failed four checks for having no `cva6_*`
+fields — and, worse, **a CVA6 run was the only thing whose corpus binding was
+ever verified**. The corpus now comes from the run's own provenance; absent or
+unknown is fatal, and a `selftest` run is refused as driver evidence rather
+than corpus evidence. CVA6 keeps every check verbatim including the pinned
+revision, overridable only through `D4_EXPECT_CVA6_REV` with the override
+**printed**. CORE-ET gets the same force, and its derived sources are
+**re-derived**, not quoted:
+
+```
+OK  RECOMPUTED derived CORE-ET sources match ee945429d58898f9…
+OK  RECOMPUTED consumed derived directory still matches ee945429d58898f9…
+```
+
+Final verification of the pilot: **ACCEPTED COVERAGE 2 of 3**, the third
+rejected by name for its nonzero emitter rc, `reconciled=YES` alongside it —
+row shape and completeness, which is what that flag has always meant.
+
+### 26.4 Fixed-certificate replay
+
+`replay_d4_certs.sh` over the pilot's rows, certificates held fixed by SHA with
+nothing re-emitted: **exit 0, 2/2 parsed, compiled and ran, both digests
+PRESERVED, `runtime_complete=YES`.**
+
+One bug of mine surfaced here: the preflight runs its child in `formal/lean`,
+so a relative output directory resolved against *that* and the redirect failed
+with "No such file or directory" — which reads like a missing toolchain rather
+than a path bug. `OUTDIR` is made absolute as soon as it is created.
+
+### 26.5 The shift regression probe
+
+Two adaptations, both named in the file. `denoteResidual` takes the clock edge
+vector first now; the pinned call predates edges and means every clock fires,
+so it is given `allEdges` of the same certificate. And section 5 called a
+helper `bv_shl_bounded` that master does not define — the bound lives inside
+`eval_op`/`denote_op`, where `sem_shl` characterises it, and adding a
+definition so a probe could call it would be introducing library surface for a
+test's convenience. The boundary coverage is kept by driving the same guard the
+ordinary way: one below the width, at it, far past it with the exponent that
+used to panic, and zero width.
+
+**23 `#guard`s, exit 0, zero errors, 0:14.79, 6,662,984 KiB** — including the
+three real CORE-ET exponents (8589934576, 8589934368, 8589934496 at widths 66,
+258 and 258) whose unguarded `2 ^ k` once killed the whole run.
+
+### 26.6 State
+
+The full **122-module CORE-ET procedure is running** under the same settings,
+serial, into `generated/master_port/d4_coreet_122`. The frozen 30 CVA6 is
+**not** started: its foundation requires a checkout with no tracked
+modifications and all three CVA6 checkouts carry the same three local RTL edits
+(§25.6). A passing pilot does not close full coverage, and nothing here is
+final integrated acceptance.
+
 ## 20. D3 replay backlog (recorded, not yet repaired)
 
 Two gaps in restored D3 procedures, kept visible so they are not mistaken for
