@@ -124,11 +124,43 @@ LAKE_VERSION_PRELUDE="$(grep -v '^Lake version ' <<<"$LAKE_VERSION_RAW" | head -
 ROW_DRIVER="$ROOT/formal/lean/probes/d4_sweep_row.lean"
 [[ -r "$ROW_DRIVER" ]] || die "missing the row driver at $ROW_DRIVER"
 
+# THE PREFLIGHT'S DISPOSITION, PARSED -- NOT SEARCHED FOR.
+#
+# The row driver's eleven fields are
+#   1 sources  2 nodes  3 flops  4 memories  5 parse_status  6 parse_ms
+#   7 compiles_ok  8 runtime_status  9 run_ms  10 digest  11 diagnostic
+#
+# A missing file must come back as READ_ERROR / NOT_RUN with NO compile verdict
+# and NO digest. The previous check was `grep -q READ_ERROR` over the whole
+# row, which a perfectly successful `PARSED / true / RAN` row satisfies as soon
+# as the two words appear anywhere in its diagnostic PROSE -- so a preflight
+# that proved nothing passed, and the toolchain was never actually exercised on
+# the failure path it exists to test.
+preflight_fields_ok() { # <row>
+  awk -F'\t' 'NF==11 && $5=="READ_ERROR" && $7=="-" && $8=="NOT_RUN" && $10=="-" { ok = 1 }
+               END { exit ok ? 0 : 1 }' <<<"$1"
+}
+
 # PREFLIGHT: prove the toolchain actually runs the driver.  A tool that only
 # fails at row time has already cost the whole corpus's front-end work.
-PRE="$(cd "$ROOT/formal/lean" && "$LAKE" env lean --run "$ROW_DRIVER" /nonexistent.dcert 2>/dev/null | tail -1)"
+#
+# Its EXIT STATUS is required too. The status was being discarded entirely
+# here -- the substitution's value was checked and nothing else -- so a child
+# that printed a correct row and then failed blessed a toolchain that cannot
+# run. The logs are kept rather than sent to /dev/null, because a preflight
+# that refuses has to say why.
+mkdir -p "$ROOT/temp" || die "cannot create $ROOT/temp"
+PRE_DIR="$(mktemp -d "$ROOT/temp/d4preflight.XXXXXX")" \
+  || die "cannot create a preflight scratch dir under $ROOT/temp"
+( cd "$ROOT/formal/lean" && "$LAKE" env lean --run "$ROW_DRIVER" /nonexistent.dcert \
+    > "$PRE_DIR/preflight.out" 2> "$PRE_DIR/preflight.err" )
+PRE_RC=$?
+PRE="$(tail -1 "$PRE_DIR/preflight.out" 2>/dev/null)"
+[[ "$PRE_RC" -eq 0 ]] || die "row driver preflight exited $PRE_RC (see $PRE_DIR/preflight.err)"
 [[ -n "$PRE" ]] || die "$LAKE env lean cannot run the row driver (preflight produced no row)"
 [[ "$(awk -F'\t' '{print NF}' <<<"$PRE")" == "11" ]] || die "row driver preflight returned the wrong shape"
+preflight_fields_ok "$PRE" \
+  || die "row driver preflight did not report READ_ERROR/NOT_RUN with no compile verdict and no digest for a missing file (got: $PRE)"
 
 mapfile -t MODULES < <(grep -v '^[[:space:]]*$' "$LIST" | grep -v '^[[:space:]]*#' | sed 's/[[:space:]]*$//')
 N_DECLARED="${#MODULES[@]}"
@@ -615,14 +647,18 @@ one() {
   #
   # Two defects, both reproduced against the actual CLI:
   #
-  #  1. `out="$(... | tail -1)"; rc=$?` records the exit of `tail`, which is
-  #     always 0. The runtime child's status was never seen.
-  #  2. Even so, a row was admitted on SHAPE alone: a child printing a correct
+  #  1. The captured status was IGNORED. (It was not wrong: this script sets
+  #     `-o pipefail`, so `out="$(... | tail -1)"` does carry a failing `lake`
+  #     through. My first description said `tail` made the status always zero
+  #     -- false with pipefail set, and the status was there to be used.) The
+  #     acceptance test simply never consulted it.
+  #  2. So a row was admitted on SHAPE alone: a child printing a correct
   #     11-field PARSED/true/RAN row and then exiting 17 was published with its
   #     digest.
   #
-  # The pipe is gone -- stdout goes to a file and the status is the child's --
-  # and a nonzero or timed-out child cannot contribute an accepted runtime
+  # The acceptance test now requires the status; the pipe is gone anyway, so
+  # the guard does not depend on `pipefail` staying set. A nonzero or timed-out
+  # child cannot contribute an accepted runtime
   # result however well-formed its row. The logs stay, an 18-column failure row
   # is emitted with NO accepted digest.
   #

@@ -1650,15 +1650,22 @@ would have proved something about my typing instead.
 
 ## 24. Exit status was not admission
 
-Both restored drivers captured `$?` after a command substitution ending in
-`| tail -1` — which is `tail`'s status, always 0 — and then admitted a row on
-SHAPE alone. Independently reproduced against the actual CLIs: a child printing
+Both restored drivers captured the runtime child's status and then **ignored
+it**, admitting a row on SHAPE alone.
+
+*A correction to my own first account.* I wrote that `$?` after a substitution
+ending in `| tail -1` is `tail`'s status and therefore always zero. That is
+false where `-o pipefail` is set, and both scripts set it on their second line
+— the status was available and correct. The defect was narrower and entirely
+in the acceptance test, which never consulted it. Removing the pipe is still
+worth doing, because it stops the guard depending on `pipefail` remaining set,
+but it was not the repair. Independently reproduced against the actual CLIs: a child printing
 a correct 11-field `PARSED/true/RAN` row and exiting 17 was published **with
 its digest**, and `replay` reported `runtime_complete=YES`. The preflight had
 the same hole one step earlier.
 
-Repaired in both: the pipe is gone, stdout goes to a file, the status is the
-child's, and a nonzero or timed-out child cannot contribute an accepted runtime
+Repaired in both: the acceptance test now requires the status, and stdout goes
+to a file so the guard does not rest on `pipefail`. A nonzero or timed-out child cannot contribute an accepted runtime
 result however well-formed its row. The logs are retained, an 18-column failure
 row is emitted with **no accepted digest**, and a timeout is named as a timeout
 even when a complete row arrived first. The preflight now checks its exit AND

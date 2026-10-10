@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Controls for RUNTIME-CHILD EXIT ADMISSION in the two restored D4 drivers.
 #
-# WHAT THIS GUARDS. Both drivers captured `$?` after a command substitution
-# ending in `| tail -1`, which is `tail`'s status and is always 0 -- and both
-# then admitted a row on SHAPE alone. A child that printed a correct 11-field
+# WHAT THIS GUARDS. Both drivers captured the runtime child's status and then
+# IGNORED it, admitting a row on SHAPE alone. (The status was available: these
+# scripts set `-o pipefail`, so the `| tail -1` substitution does carry a
+# failing `lake` through. An earlier note here said `tail` forced it to zero;
+# that is wrong with pipefail set.) A child that printed a correct 11-field
 # `PARSED/true/RAN` row and exited 17 was published WITH ITS DIGEST, and
 # `replay` reported `runtime_complete=YES`. The preflight had the same hole one
 # step earlier: a correctly shaped `READ_ERROR` row followed by a nonzero exit
@@ -50,13 +52,13 @@ printf 'selftest\tm1\tEMITTED\t%s\t%s\t4\t2\t1\t0\tPARSED\t1\ttrue\tRAN\t1\t111\
 # shape the real driver would produce, under its own `pre_rc`, so a control
 # aimed at the runtime leg is not decided by the preflight. `--version` answers
 # the driver's binding check so nothing else has to be faked.
-mk_lake() { # mk_lake <path> <row> <rc> [delay] [pre_rc]
+mk_lake() { # mk_lake <path> <row> <rc> [delay] [pre_rc] [pre_row]
   cat > "$1" <<STUB
 #!/usr/bin/env bash
 if [[ "\${1:-}" == "--version" ]]; then echo "Lake version 5.0.0 (stub)"; exit 0; fi
 for a in "\$@"; do last="\$a"; done
 if [[ "\$last" == "/nonexistent.dcert" ]]; then
-  printf '%s\n' '$READ_ROW'
+  printf '%s\n' '${6:-$READ_ROW}'
   exit ${5:-0}
 fi
 printf '%s\n' '$2'
@@ -151,6 +153,49 @@ if grep -q 'exited 17 after printing a complete row' "$W/s17/rows.tsv" 2>/dev/nu
 else
   bad "the failure row does not say why the row was refused"
   grep -m1 'm1' "$W/s17/rows.tsv" 2>/dev/null | cut -c1-160
+fi
+
+# ---------------------------------------------------------------------------
+# PREFLIGHT ADMISSION, in BOTH drivers.
+#
+# Two legs the eight above do not reach:
+#
+#   6. the SWEEP's preflight ignored its child's status entirely, so a
+#      correctly shaped row followed by exit 17 blessed a toolchain that
+#      cannot run;
+#   7. BOTH drivers looked for the string `READ_ERROR` anywhere in the row. A
+#      perfectly successful `PARSED / true / RAN` row satisfies that as soon as
+#      the words appear in its diagnostic PROSE -- so the preflight passed
+#      without ever exercising the failure path it exists to test. The check is
+#      now on the parsed FIELDS: READ_ERROR, NOT_RUN, no compile verdict, no
+#      digest.
+# ---------------------------------------------------------------------------
+DECEPTIVE_PRE=$'4\t2\t1\t0\tPARSED\t1\ttrue\tRAN\t1\t111\tnote: a READ_ERROR row would be NOT_RUN'
+
+mk_lake "$W/lake_spre" "$GOOD_ROW" 0 0 17
+run_sweep spre "$W/lake_spre" > /dev/null
+if grep -q 'preflight exited 17' "$W/spre.log"; then
+  ok "sweep refuses a preflight that exits nonzero, and names the status"
+else
+  bad "sweep accepted a failing preflight"; sed -n '1,4p' "$W/spre.log"
+fi
+
+mk_lake "$W/lake_sdec" "$GOOD_ROW" 0 0 0 "$DECEPTIVE_PRE"
+run_sweep sdec "$W/lake_sdec" > /dev/null
+if grep -q 'did not report READ_ERROR/NOT_RUN' "$W/sdec.log"; then
+  ok "sweep refuses a PARSED/true/RAN preflight that only MENTIONS READ_ERROR"
+else
+  bad "sweep accepted a successful row as its missing-file preflight"
+  sed -n '1,4p' "$W/sdec.log"
+fi
+
+mk_lake "$W/lake_rdec" "$GOOD_ROW" 0 0 0 "$DECEPTIVE_PRE"
+rc="$(run_replay rdec "$W/lake_rdec")"
+if [[ "$rc" -ne 0 ]] && grep -q 'did not report READ_ERROR/NOT_RUN' "$W/rdec.log"; then
+  ok "replay refuses a PARSED/true/RAN preflight that only MENTIONS READ_ERROR"
+else
+  bad "replay accepted a successful row as its missing-file preflight (rc=$rc)"
+  sed -n '1,4p' "$W/rdec.log"
 fi
 
 if [[ $fails -eq 0 ]]; then echo "D4-EXIT-ADMISSION CONTROLS OK"; else echo "D4-EXIT-ADMISSION CONTROLS FAILED ($fails)"; fi

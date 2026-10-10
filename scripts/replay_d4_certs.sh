@@ -59,6 +59,23 @@ ROW_DRIVER="$ROOT/formal/lean/probes/d4_sweep_row.lean"
 
 mkdir -p "$OUTDIR" || die "cannot create $OUTDIR"
 
+# THE PREFLIGHT'S DISPOSITION, PARSED -- NOT SEARCHED FOR.
+#
+# The row driver's eleven fields are
+#   1 sources  2 nodes  3 flops  4 memories  5 parse_status  6 parse_ms
+#   7 compiles_ok  8 runtime_status  9 run_ms  10 digest  11 diagnostic
+#
+# A missing file must come back as READ_ERROR / NOT_RUN with NO compile verdict
+# and NO digest. The previous check was `grep -q READ_ERROR` over the whole
+# row, which a perfectly successful `PARSED / true / RAN` row satisfies as soon
+# as the two words appear anywhere in its diagnostic PROSE -- so a preflight
+# that proved nothing passed, and the toolchain was never actually exercised on
+# the failure path it exists to test.
+preflight_fields_ok() { # <row>
+  awk -F'\t' 'NF==11 && $5=="READ_ERROR" && $7=="-" && $8=="NOT_RUN" && $10=="-" { ok = 1 }
+               END { exit ok ? 0 : 1 }' <<<"$1"
+}
+
 # PREFLIGHT: both the disposition AND the exit status.
 #
 # The driver must answer a missing file with a correctly shaped READ_ERROR row
@@ -71,7 +88,8 @@ PRE_RC=$?
 PRE="$(tail -1 "$OUTDIR/preflight.out" 2>/dev/null)"
 [[ "$PRE_RC" -eq 0 ]] || die "row driver preflight exited $PRE_RC (see $OUTDIR/preflight.err)"
 [[ "$(awk -F'\t' '{print NF}' <<<"$PRE")" == "11" ]] || die "row driver preflight returned the wrong shape"
-grep -q 'READ_ERROR' <<<"$PRE" || die "row driver preflight did not report READ_ERROR for a missing file"
+preflight_fields_ok "$PRE" \
+  || die "row driver preflight did not report READ_ERROR/NOT_RUN with no compile verdict and no digest for a missing file (got: $PRE)"
 
 RUN_TIMEOUT="${RUN_TIMEOUT:-900}"
 STACK_KB="$(ulimit -s)"
@@ -142,13 +160,17 @@ for rec in "${CERTROWS[@]}"; do
 #
 # Two defects, both reproduced against the actual CLI:
 #
-#  1. `out="$(... | tail -1)"; rc=$?` records the exit of `tail`, which is
-#     always 0. The runtime child's status was never seen.
-#  2. Even so, a row was admitted on SHAPE alone. A child printing a correct
+#  1. The captured status was IGNORED. (It was not wrong: these scripts set
+#     `-o pipefail`, so `out="$(... | tail -1)"` does carry a failing `lake`
+#     through. My first description of this said `tail` made the status always
+#     zero -- that is false with pipefail set, and the status was there to be
+#     used.) The acceptance test simply never consulted it.
+#  2. So a row was admitted on SHAPE alone. A child printing a correct
 #     11-field PARSED/true/RAN row and then exiting 17 was accepted, digest and
 #     all; `runtime_complete` said YES.
 #
-# So the pipe is gone -- stdout goes to a file and the status is the child's --
+# The pipe is gone anyway -- stdout to a file, status straight from the child,
+# so the guard does not depend on `pipefail` staying set --
 # and a nonzero or timed-out child can no longer contribute an accepted runtime
 # result, however well-formed its row. The logs are kept, an 18-column FAILURE
 # row is emitted with NO accepted digest, and the run does not complete.
