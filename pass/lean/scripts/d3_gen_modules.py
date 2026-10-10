@@ -21,13 +21,29 @@ composition can refuse to mix them rather than silently proving something about
 a design that is no longer the one on disk.
 """
 import argparse, hashlib, importlib.util, pathlib, re, sys
+import os
 
 HERE = pathlib.Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("d3_sweep_mod", HERE / "d3_sweep.py")
 sweep = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sweep)
 
-GEN_ROOT = HERE.parent.parent.parent / "formal/lean/LeanSemanticPrimitives/Gen"
+# D3_LEAN_ROOT -- ONE ROOT, HONOURED EVERYWHERE.
+#
+# A seam that binds only *some* of the paths is not isolation. Measured with a
+# non-default root: the module driver's own `LEAN` moved, while the generated
+# modules still landed in the live `formal/lean/.../Gen`, and the artifact and
+# tool digests still hashed the live `.lake` -- so a changed file under the
+# isolated root did not change the snapshot, and a build would still have
+# written into the baseline queue's workspace.
+#
+# Every root-derived path in these scripts now comes from this one variable:
+# generation, source and provenance hashes, loaded compiler artifacts,
+# generated-module caches, the Lake workspace and the composition. The default
+# is the live tree, so nothing changes for an ordinary invocation.
+GEN_ROOT = pathlib.Path(os.environ.get(
+    "D3_LEAN_ROOT", str(HERE.parent.parent.parent / "formal/lean")
+)).resolve() / "LeanSemanticPrimitives" / "Gen"
 
 
 def cert_body(cert: pathlib.Path) -> str:

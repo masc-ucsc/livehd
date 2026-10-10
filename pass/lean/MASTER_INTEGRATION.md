@@ -4929,3 +4929,30 @@ before characterising it at all.
 
 The queue was never at risk: it has advanced past this case on its own and is
 at 23/61.
+
+## R43. A third flat-record failure, and what the three of them bound
+
+`CVA6/legacy/frontend` is terminal FAILED: `frontend_gate_state.mk has too many
+fields`, **409** `st_` fields, `lean_exit 1`, wall **34:43.45**, peak
+**11,943,416 kB**. Its full log carries **seven** diagnostics — three
+constructor-limit errors and four `dependsOnNoncomputable` — where the record's
+`lean_errors: 3` is again the driver's restricted parser count.
+
+Three measurements of the same Lean code-generator constructor-arity limit:
+
+| design | `st_` fields | outcome |
+| --- | ---: | --- |
+| `vpu_ml` | 170 | typechecks |
+| `txfmactl_top` | 289 | **fails** (R29.2) |
+| `frontend_gate` | 409 | **fails** |
+| `csr_regfile_gate` | 534 | **fails** (R42) |
+
+So the limit sits **between 171 and 289**, and everything above it fails the
+same way. This is a property of the flat-record decision under the pinned
+toolchain, recorded as such with full provenance on each case. Not repaired:
+nesting the record, substituting `noncomputable`, upgrading the toolchain or
+any semantic workaround would each be a change the user has excluded.
+
+CVA6 legacy now stands at **30/61 terminal — 21 accepted typechecks, 7 export
+refusals, 2 typecheck failures** (`csr_regfile`, `frontend`). The queue is
+running and is not restarted.

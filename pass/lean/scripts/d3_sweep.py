@@ -75,7 +75,21 @@ import threading
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-LEAN_DIR = ROOT / "formal" / "lean"
+# D3_LEAN_ROOT -- ONE ROOT, HONOURED EVERYWHERE.
+#
+# A seam that binds only *some* of the paths is not isolation. Measured with a
+# non-default root: the module driver's own `LEAN` moved, while the generated
+# modules still landed in the live `formal/lean/.../Gen`, and the artifact and
+# tool digests still hashed the live `.lake` -- so a changed file under the
+# isolated root did not change the snapshot, and a build would still have
+# written into the baseline queue's workspace.
+#
+# Every root-derived path in these scripts now comes from this one variable:
+# generation, source and provenance hashes, loaded compiler artifacts,
+# generated-module caches, the Lake workspace and the composition. The default
+# is the live tree, so nothing changes for an ordinary invocation.
+LEAN_DIR = pathlib.Path(
+    os.environ.get("D3_LEAN_ROOT", str(ROOT / "formal" / "lean"))).resolve()
 LAKE = os.environ.get("LAKE", "lake")
 # Filled by `main` from `resolve_lean()`.  Empty means "go through lake env",
 # which is what `--via-lake` selects and what a failed resolution falls back to.

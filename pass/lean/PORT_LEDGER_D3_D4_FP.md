@@ -1055,3 +1055,63 @@ above. So does the full CLI validation: positive and changed-model/malformed
 controls for all four reifiers, the phase-only and phase-split paths, `--prove`
 on **both** the in-process and module backends, with retained logs, exact final
 theorem names and axioms, source and library fingerprints, and wall/RSS.
+
+## 18. Binding the isolation root everywhere, not just in the driver
+
+§17.3 added `D3_LEAN_ROOT` to `d3_module_proof.py`. That was only part of it.
+With a non-default root, measured:
+
+- the driver's own `LEAN` moved — but
+- `d3_gen_modules.GEN_ROOT` still wrote into the **live**
+  `formal/lean/LeanSemanticPrimitives/Gen`;
+- the imported sweep's `LEAN_DIR` — and therefore `build_root()`,
+  `artifact_dir()`, `artifact_digest()`, `tool_digest()`, the Lake `cwd` and
+  the toolchain read — still pointed at the **live** `.lake`;
+- so a changed artifact under the isolated root did **not** move
+  `olean_snapshot`, and a build would still have written into the baseline
+  queue's workspace.
+
+A seam that binds some of the paths is not isolation. All three scripts now
+derive every root-dependent path from the one variable — generation, source and
+provenance hashes, loaded compiler artifacts, generated-module caches, the Lake
+workspace and the composition.
+
+**Verified with two distinct complete roots**, every path moving and none
+leaking to the live tree:
+
+| path | isoA | isoB |
+| --- | --- | --- |
+| `sweep.LEAN_DIR` | moved | moved |
+| `sweep.build_root()` | moved | moved |
+| `sweep.artifact_dir()` | moved | moved |
+| `gen.GEN_ROOT` | moved | moved |
+| `driver.LEAN` | moved | moved |
+
+**Drift rejection**, under the isolated root: changing one controlled
+`Runtime.olean` moved `artifact_digest()` from `3cc2752f82ef6521` to
+`0563344f9f4f8ec0`. **Default behaviour is unchanged** — with no variable set,
+`LEAN_DIR` is still `formal/lean`.
+
+The stale-module, cgroup and axiom-gate contracts are untouched.
+
+### 18.1 How the restored scripts should be described
+
+Not "byte-identical to the pin". `d3_module_proof.py`, `d3_sweep.py` and
+`d3_gen_modules.py` are **from the pinned source with listed adaptations**:
+
+| file | pinned | adaptations |
+| --- | --- | --- |
+| `d3_sweep.py` | `979fecc89a1c8dbe` | private paths made configurable; ten emitted callers given explicit `allEdges`; `LEAN_DIR` bound to `D3_LEAN_ROOT` |
+| `d3_module_proof.py` | `4862fa9aeb8ce9a5` | `LEAN` bound to `D3_LEAN_ROOT` |
+| `d3_gen_modules.py` | `eda1ff3531da2d9d` | `GEN_ROOT` bound to `D3_LEAN_ROOT` |
+| `d3_guarded_build.py` | `8446d0fb07246efc` | none — byte-identical |
+| `d3_manifest.py` | `22327f964c0ebb27` | private paths made configurable |
+| `cva6_30_frozen.tsv` | `70efe8d6c801f798` | private paths made configurable |
+
+### 18.2 Still uncredited
+
+The module backend has **not been run**. The root binding is now complete, but
+exercising it needs a complete isolated *project* — sources, lakefile and its
+own `.lake` — and standing one up while the baseline queue drains would contend
+for the same machine. Deferred, and uncredited until it runs correctly. That
+does not block the D4 and FP work, which is next.
