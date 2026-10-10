@@ -20,9 +20,18 @@ there.  Build with
 
     lake build Sim<Top>          ->  .lake/build/bin/lgraph-sim-<Top>
 
-or, to skip the native link, run it in the interpreter:
+or, to skip the native link, build the library once and run it in the
+interpreter:
 
-    lake env lean --run Sims/<Top>_Main.lean -- <args>
+    lake build Sims
+    lake env lean --run Sims/<Top>_Main.lean <args>
+
+Both steps matter, and neither is optional.  Without `lake build Sims` the
+launcher's own import fails -- `unknown module prefix 'Sims'` -- because
+`lake env` only puts BUILT libraries on LEAN_PATH.  And there is NO `--`
+separator: `lake env lean --run` hands everything after the file to the
+program, so a `--` arrives as an argument and the launcher rejects it with
+`unknown option '--'`.  Both were measured, in that order.
 
 Usage:  make_sim_launcher.py CERT.lean [CERT.lean ...] [--keep-compiler]
 """

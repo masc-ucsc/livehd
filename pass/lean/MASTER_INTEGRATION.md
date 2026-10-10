@@ -3984,3 +3984,76 @@ They are therefore carried in their own file,
 the same `results/` tree keyed `DINO__<top>__legacy` — distinct from the
 `legacy_chunked_wf` and `legacy_full_bridge` records, so neither can be mistaken
 for the other.
+
+## R29. CORE-ET legacy-fast, complete, with every disposition named
+
+After the R24 gate repair and the bounded rerun of exactly the two affected
+cases:
+
+| | count |
+| --- | ---: |
+| EXPORTED | 80 |
+| REFUSED | 41 |
+| FAILED | 4 |
+| — of the exported, TYPECHECKED | 79 |
+| — FAILED | 1 |
+
+`minion_dcache_texsend` and `null_vpu` were re-run with `--case ... --redo` and
+are now `EXPORTED / TYPECHECKED` (0.52 s and 2.77 s). Their prior failed-run
+evidence is retained: the earlier run directory, its `job.log`, its
+`static_gates.log` carrying the old refusal, and the artifact it produced are
+all still on disk beside the new run, which has its own timestamped directory.
+
+### R29.1 The four remaining export failures are upstream, and are named
+
+None is a `pass.lean` defect. Reading each job's own diagnostic:
+
+| case | code | pass | what it says |
+| --- | --- | --- | --- |
+| `minion_dcache_tensor_load` | `concat-lane-width` | `pass.bitwidth` | `internal`: Concat lane 0 of 8, driver `mux_19104` occupies **2 bits** in a declared window of **1** |
+| `minion_dcache_top` | `concat-lane-width` | `pass.bitwidth` | `internal`: Concat lane 0 of 2, driver `mux_94508`, same shape |
+| `txfma_adder` | `yosys-failed` | `inou.yosys` | `io`: `read_slang` — design elaboration failed |
+| `txfma_top_fake` | `yosys-failed` | `inou.yosys` | `io`: `read_slang` — design elaboration failed |
+
+The first two are one upstream bitwidth defect seen twice: a lane driver may
+only be *narrower* than its window (LGraph may narrow, never widen), and
+truncating it would shift every lane above it, so the pass refuses rather than
+emit a wrong concat. The other two never reach `pass.lean` at all — the
+frontend cannot elaborate the RTL. They are classified, not repaired: both
+areas are outside this work's contract.
+
+### R29.2 The one proof failure
+
+`CORE-ET/legacy/txfmactl_top`: `lean_exit 1`, three `error:` lines in its
+retained log, recorded `FAILED` and re-audited `FAILED`. A real failure,
+correctly labelled, and still open.
+
+## R30. The ported simulator, run
+
+The launcher port is no longer "generated but unexercised".
+
+`lake build Sims` builds `Sims.txfma_e4_Cert` and `Sims.txfma_e4_Main` from a
+**real emitted certificate**, and the launcher runs:
+
+```
+$ lake env lean --run Sims/txfma_e4_Main.lean --list
+txfma_e4 sources=2 nodes=1 outputs=1 flops=0 mems=0 clocks=1
+
+$ lake env lean --run Sims/txfma_e4_Main.lean txfma_e4 --cycles 2 --show-state
+# lgraph-sim txfma_e4 sources=2 nodes=1 outputs=1 flops=0 mems=0 inputs=2 clocks=1
+cycle 0 out 0
+...                                                                  exit 0
+
+$ lake env lean --run Sims/txfma_e4_Main.lean not_a_design
+lgraph-sim: no certificate named 'not_a_design' in this binary        exit 2
+```
+
+The reported shape matches the `DesignCert` exactly: 2 sources, 1 node, 1
+output, 1 clock.
+
+**Two invocation facts, both measured the hard way.** The first attempt failed
+with `unknown module prefix 'Sims'`: `lake env` puts only **built** libraries
+on `LEAN_PATH`, so `lake build Sims` is not optional. The second failed with
+`unknown option '--'`: `lake env lean --run` hands everything after the file to
+the program, so the `--` separator the D2 docstring showed arrives as an
+argument. The docstring carried that error into this tree and is corrected.
