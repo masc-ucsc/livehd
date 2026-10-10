@@ -33,11 +33,20 @@ def shlDesign (w kw : Nat) : DesignCert :=
     flops := #[], memories := #[] }
 
 /-- Compile, then run.  `none` means the certificate did not compile, which is a
-different failure from a wrong value and must not be confused with one. -/
+different failure from a wrong value and must not be confused with one.
+
+ADAPTED from the pin: `denoteResidual` now takes the CLOCK EDGE VECTOR first.
+The pinned call predates edges and means every declared clock fires, so it is
+given `allEdges` of the same certificate -- named at the call site rather than
+defaulted underneath, the same adaptation the restored probes and drivers
+make. This design has no flops, so the edges cannot change the answer; stating
+them keeps the contract visible anyway. -/
 def shlRun (w kw : Nat) (a k : Int) : Option Int :=
   match compileDesign (shlDesign w kw) with
   | .error _ => none
-  | .ok R    => ((denoteResidual R #[mk_bv w a, mk_bv kw k] noState).outputs[0]?).map bv_uint
+  | .ok R    =>
+    ((denoteResidual R (allEdges (shlDesign w kw)) #[mk_bv w a, mk_bv kw k]
+        noState).outputs[0]?).map bv_uint
 
 --------------------------------------------------------------------------------
 -- 1. The required cases: in range, exactly at the width, and a 33-bit exponent.
@@ -87,10 +96,30 @@ def shlRun (w kw : Nat) (a k : Int) : Option Int :=
 #guard bv_uint (rshlV             66 [mk_bv 66 1, mk_bv 40 8589934576]) == 0
 
 --------------------------------------------------------------------------------
--- 5. `bv_shl_bounded` itself, including the branch boundary.
+-- 5. The branch boundary itself.
+--
+-- RESTORED from pinned D4 f6ad1fe29f8f15aeda045115864fd81a34c33aef, with this
+-- section ADAPTED.  The pin called a named helper `bv_shl_bounded` directly.
+-- Master has no such definition: the bound lives INSIDE `eval_op`/`denote_op`
+-- as `if (bv_uint b).toNat >= w then 0 else ...`, which is where the guard
+-- belongs and where `sem_shl` characterises it.  Introducing a helper on
+-- master so a probe could call it would be adding a definition for the test's
+-- convenience.
+--
+-- The coverage is not lost: the boundary cases below go through the same
+-- guard by the ordinary route -- at the width, one past it, and far past it --
+-- and sections 1-4 already drive the three real CORE-ET exponents through it.
 --------------------------------------------------------------------------------
 
-#guard bv_uint (bv_shl_bounded 8 1 7) == 128
-#guard bv_uint (bv_shl_bounded 8 1 8) == 0
-#guard bv_uint (bv_shl_bounded 8 1 8589934576) == 0
-#guard bv_uint (bv_shl_bounded 0 1 0) == 0
+-- At the width minus one: the shift still lands.
+#guard bv_uint (eval_op   .Op_SHL 8 [mk_bv 8 1, mk_bv 8 7]) == 128
+#guard bv_uint (denote_op .Op_SHL 8 [mk_bv 8 1, mk_bv 8 7]) == 128
+-- AT the width: everything has shifted out.  This is the branch boundary, and
+-- it is the case an unguarded `2 ^ k` gets wrong rather than merely slowly.
+#guard bv_uint (eval_op   .Op_SHL 8 [mk_bv 8 1, mk_bv 8 8]) == 0
+#guard bv_uint (denote_op .Op_SHL 8 [mk_bv 8 1, mk_bv 8 8]) == 0
+-- Far past it, with the exponent that used to panic.
+#guard bv_uint (eval_op   .Op_SHL 8 [mk_bv 8 1, mk_bv 40 8589934576]) == 0
+#guard bv_uint (denote_op .Op_SHL 8 [mk_bv 8 1, mk_bv 40 8589934576]) == 0
+-- Zero width: no bits to hold anything.
+#guard bv_uint (eval_op   .Op_SHL 0 [mk_bv 0 1, mk_bv 8 0]) == 0
