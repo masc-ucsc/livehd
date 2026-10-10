@@ -1330,7 +1330,16 @@ private:
       n.attr(hhds::attrs::srcid).set(cur_srcid_);
     }
     if (!cur_synth_.empty()) {
-      n.attr(livehd::attrs::synth_policy).set(livehd::synth_attr::write(cur_synth_));
+      const auto                  op = livehd::graph_util::type_op_of(n);
+      livehd::synth_attr::Policy applicable;
+      for (const auto& [key, hint] : cur_synth_) {
+        if (livehd::synth_attr::key_applies(key, op)) {
+          applicable.emplace(key, hint);
+        }
+      }
+      if (!applicable.empty()) {
+        n.attr(livehd::attrs::synth_policy).set(livehd::synth_attr::write(applicable));
+      }
     }
     if (cur_color_ != 0) {
       livehd::graph_util::set_color(n, cur_color_);

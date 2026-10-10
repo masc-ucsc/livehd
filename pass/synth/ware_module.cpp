@@ -17,6 +17,7 @@
 #include "affine_amount.hpp"
 #include "attr_carry.hpp"
 #include "node_util.hpp"
+#include "synth_policy.hpp"
 #include "synthesis_cost.hpp"
 
 namespace livehd::synth {
@@ -367,12 +368,33 @@ std::vector<std::shared_ptr<hhds::Graph>> build_ware_modules(const std::vector<s
     for (const bool shifts : {true, false}) {
       std::vector<std::pair<hhds::Node_class, std::string>> nodes;
       for (auto node : graph->body().nodes()) {
+        auto kind = family(node, policy);
         // Keep source-selected operations in their region: sharing an extracted
         // implementation would erase per-operation pins and explicit membership.
-        if (node.attr(attrs::synth_policy).has()) {
+        // Only a policy that says something about THIS operation counts: a module
+        // default such as `synth.multiplier` is stamped on every node, and must
+        // not stop an unrelated shifter or comparator from being extracted
+        // (br_mux_bin: 913 cells plain, 5627 once any attribute was present).
+        if (const auto a = node.attr(attrs::synth_policy); a.has() && !kind.empty()) {
+          const auto hints = synth_attr::read(a.get());
+          const auto has   = [&](std::string_view key) {
+            const auto it = hints.find(std::string(key));
+            return it != hints.end() && !it->second.value.empty() && it->second.value != "auto";
+          };
+          bool pinned = has("color") || has("grow") || has("ware") || has("abc") || has("delay");
+          if (kind == "sum" || kind == "lt" || kind == "gt" || kind == "div") {
+            pinned = pinned || has("adder") || has("block_size");
+          } else if (kind == "mult") {
+            pinned = pinned || has("multiplier") || has("adder") || has("block_size");
+          } else if (kind == "shl" || kind == "sra") {
+            pinned = pinned || has("barrel");
+          }
+          if (pinned) {
+            continue;
+          }
+        } else if (kind.empty() && node.attr(attrs::synth_policy).has()) {
           continue;
         }
-        auto kind = family(node, policy);
         if (!kind.empty() && (kind == "shl" || kind == "sra") == shifts) {
           nodes.emplace_back(node, kind);
         }

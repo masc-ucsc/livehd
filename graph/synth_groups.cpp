@@ -57,6 +57,34 @@ void specialize_calls(std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
       if (!child) {
         continue;  // native memory / technology black box
       }
+      // A call-site policy that leaves every callee node's resolved policy as it
+      // already is (a module-level default repeated at each of its own callers)
+      // asks for nothing: copying the body per call would only fragment sharing
+      // and the region cache.
+      const bool changes_body = [&] {
+        const auto relevant = [](const std::string& key, Ntype_op op) {
+          return key.starts_with("_") || synth_attr::key_applies(key, op);
+        };
+        for (auto n : child->body().nodes()) {
+          auto na     = n.attr(livehd::attrs::synth_policy);
+          auto policy = na.has() ? read(na.get()) : Policy{};
+          const auto before = policy;
+          rescope(policy, call);
+          const auto op = gu::type_op_of(n);
+          for (const auto& [key, hint] : policy) {
+            const auto old = before.find(key);
+            if ((old == before.end() || old->second.value != hint.value) && relevant(key, op)) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }();
+      if (!changes_body) {
+        call["_specialized"] = {"true", 3};
+        a.set(write(call));
+        continue;
+      }
       const auto io    = child->get_io();
       auto*      lib   = io->get_library();
       const auto key   = std::string(io->get_name()) + write(call);

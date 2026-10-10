@@ -118,6 +118,34 @@ inline Policy read(std::string_view s) {
   }
   return p;
 }
+// Does the policy key say anything about an operation of this kind? Module and
+// block defaults are written once and apply to every cell they cover, but an
+// arithmetic pin has no meaning on a mux or an AND. Stamping it anyway makes the
+// cell look source-anchored to every later pass (it stops being merged or
+// extracted with its neighbours), so an unrelated attribute changed the result of
+// a design full of 1-bit mux gates. Membership keys (color, grow, ware, abc,
+// delay) apply everywhere; instances only take membership (see below). `Op` is Ntype_op; a template so core stays graph-independent.
+template <class Op>
+[[nodiscard]] inline bool key_applies(std::string_view key, Op op) {
+  if (op == Op::Sub) {
+    // An ambient default (module or block) covers the operations defined in its
+    // own body, not the callees: only group membership rides on an instance. An
+    // explicit call-site attribute is stamped on the instance separately and
+    // keeps every key.
+    return key == "color" || key == "grow";
+  }
+  if (key == "adder" || key == "block_size") {
+    return op == Op::Sum || op == Op::LT || op == Op::GT || op == Op::Mult || op == Op::Div;
+  }
+  if (key == "multiplier") {
+    return op == Op::Mult;
+  }
+  if (key == "barrel") {
+    return op == Op::SHL || op == Op::SRA;
+  }
+  return true;
+}
+
 inline std::string write(const Policy& p) {
   std::string s = "{";
   for (const auto& [key, h] : p) {

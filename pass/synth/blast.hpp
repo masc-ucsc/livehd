@@ -994,34 +994,37 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     // (array/tree/csa/sn) and both mappers from building a generic compressor
     // network around constant partial-product rows.
     std::optional<std::vector<Bit>> constant_product;
-    if (ds.size() == 2 && out_w > 0 && out_w <= 63) {
+    if (ds.size() == 2 && out_w > 0 && out_w <= 62) {
       const int ck = ds[0].is_const() ? 0 : (ds[1].is_const() ? 1 : -1);
       if (ck >= 0 && !ds[1 - ck].is_const()) {
         const auto& cv = gu::const_of(ds[ck]);
         if (!cv.has_unknowns() && cv.is_just_i64()) {
+          // Non-adjacent form of the factor mod 2^out_w: the fewest +/- shifted
+          // copies of the other operand (0x7F is 128 - 1, not seven rows).
           const uint64_t mask = (uint64_t{1} << out_w) - 1;
-          const uint64_t m    = static_cast<uint64_t>(cv.to_just_i64()) & mask;
-          if (std::popcount(m) <= 4) {
-            const auto                           other = extend(ds[1 - ck]);
-            std::vector<arith::Sum_operand<Bit>> terms;
-            for (int j = 0; j < out_w; ++j) {
-              if (((m >> j) & 1) == 0) {
-                continue;
-              }
-              arith::Sum_operand<Bit> term;
-              term.bits.assign(out_w, abc_const_bit(false));
-              for (int i = 0; i + j < out_w; ++i) {
-                term.bits[i + j] = other[i];
-              }
-              terms.push_back(std::move(term));
+          int64_t        v    = static_cast<int64_t>(static_cast<uint64_t>(cv.to_just_i64()) & mask);
+          const auto     other = extend(ds[1 - ck]);
+          std::vector<arith::Sum_operand<Bit>> terms;
+          for (int j = 0; v != 0 && j < out_w; ++j, v >>= 1) {
+            if ((v & 1) == 0) {
+              continue;
             }
-            if (terms.empty()) {
-              constant_product = std::vector<Bit>(out_w, abc_const_bit(false));
-            } else if (terms.size() == 1) {
-              constant_product = std::move(terms[0].bits);
-            } else {
-              constant_product = arith::build_sum(opts_.multiplier_adder.value_or(opts_.adder), bs, ops, terms, out_w);
+            const int digit = 2 - static_cast<int>(v & 3);  // +1 when ...01, -1 when ...11
+            v -= digit;
+            arith::Sum_operand<Bit> term;
+            term.subtract = digit < 0;
+            term.bits.assign(out_w, abc_const_bit(false));
+            for (int i = 0; i + j < out_w; ++i) {
+              term.bits[i + j] = other[i];
             }
+            terms.push_back(std::move(term));
+          }
+          if (terms.empty()) {
+            constant_product = std::vector<Bit>(out_w, abc_const_bit(false));
+          } else if (terms.size() == 1 && !terms[0].subtract) {
+            constant_product = std::move(terms[0].bits);
+          } else {
+            constant_product = arith::build_sum(opts_.multiplier_adder.value_or(opts_.adder), bs, ops, terms, out_w);
           }
         }
       }

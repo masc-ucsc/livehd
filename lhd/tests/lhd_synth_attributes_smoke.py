@@ -158,13 +158,17 @@ assert total_gates(pin_doc) == total_gates(plain_doc), (total_gates(pin_doc), to
 
 # A constant factor is strength-reduced ahead of the multiplier architecture.
 cmul = work / "cmul.prp"
-cmul.write_text('''pub comb cmul::[timecheck=false](a:U16)->(x:U32,y:U32) { x=a*10
- y=a*129 }''')
+cmul.write_text('''pub comb cmul::[timecheck=false](a:U8)->(x:U16,y:U16,z:U16,w:U16) { x=a*10
+ y=a*129
+ z=a*127
+ w=a*85 }''')
 gates = {}
 for m in ("array", "sn", "csa", "tree"):
     src = work / f"cmul_{m}.prp"
-    src.write_text(f'''pub comb cmul_{m}::[timecheck=false](a:U16)->(x:U32,y:U32) {{ x=a*10
- y=a*129 }}''')
+    src.write_text(f'''pub comb cmul_{m}::[timecheck=false](a:U8)->(x:U16,y:U16,z:U16,w:U16) {{ x=a*10
+ y=a*129
+ z=a*127
+ w=a*85 }}''')
     gates[m] = total_gates(synth(f"cmul_{m}", src, "synth.multiplier=" + m)[0])
 assert len(set(gates.values())) == 1, gates
 synth("cmul", cmul)
