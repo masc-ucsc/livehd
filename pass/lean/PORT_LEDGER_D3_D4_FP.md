@@ -1675,6 +1675,29 @@ failing preflight, a timeout after output, and the sweep's own two legs.
 fail **6 of 8** — `runtime_complete=YES` with a digest from a child that exited
 17, and a timed-out run recorded as `PRESERVED`. With the guards, 8 of 8 pass.
 
+### 24.1 The small fixed corpus, and what it did and did not establish
+
+Both CLIs were driven end to end on a fixed corpus — `tiny.dcert`, written by
+the restored `d4_write_tiny_cert` probe through the verified renderer:
+
+- **`replay_d4_certs.sh`** with a matching certificate and SHA: exit 0,
+  `runtime_complete=YES`, digest `PRESERVED`. With the SHA binding violated,
+  with the input missing (the preflight's `/nonexistent.dcert` leg), with a
+  well-formed row behind a nonzero exit, and with a timeout after output: all
+  refused, no digest published.
+- **`run_d4_runtime_sweep.sh selftest`**: a clean 18-column row with its
+  digest, and a refused row carrying the cause and no digest.
+- **`verify_d4_run.sh`**, read-only, on both runs: **refused**, 17 recomputed
+  problems each, naming `emit_rc=<absent>, no-lean`.
+
+That last result is the correct one and is worth stating plainly: the
+reconciliation recomputes everything and will not accept a run that lacks the
+emitter status, the Lean half and the certificate-to-LGraph evidence it
+requires — which a SYNTHETIC selftest fixture does not have. So the CLI is
+demonstrated runnable and fail-closed, and **a passing reconciliation still
+requires a real corpus run**. Full original-corpus coverage remains open; no
+row here is evidence about any design.
+
 ## 20. D3 replay backlog (recorded, not yet repaired)
 
 Two gaps in restored D3 procedures, kept visible so they are not mistaken for
