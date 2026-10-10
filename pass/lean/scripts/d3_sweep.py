@@ -2788,7 +2788,16 @@ def main() -> int:
         certs = []
         for d in a.certs:
             certs += sorted(pathlib.Path(d).glob("*_Lgraph.lean"))
-        targets, skipped = [Target(module_of(c), module_of(c), c, "", "") for c in certs], []
+        # THE CERTIFICATE IS HASHED HERE TOO.
+        #
+        # The exploratory path built every `Target` with an EMPTY `sha256`, so
+        # an exploratory row recorded no binding to the input it measured --
+        # and `--resume` compares `row["cert_sha256"] != target.sha256`, which
+        # with both empty is equal, so a resumed run reused rows for a
+        # certificate that had since changed. The manifest path has always
+        # hashed; there is no reason this one should not.
+        targets, skipped = [Target(module_of(c), module_of(c), c, sha256_of(c), "")
+                            for c in certs], []
 
     if a.only:
         rx = re.compile(a.only)
