@@ -738,7 +738,10 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
         .fatal();
     return;
   }
-  auto multiplier = livehd::synth::arith::parse_mult_kind(mult_s == "auto" ? "array" : mult_s);
+  // `auto` starts from the three-greedy column compressor: across the corpus it
+  // beat the serial array on every design with a real (non-constant) product,
+  // 0 losses, and a profile=on exploration still tries the others.
+  auto multiplier = livehd::synth::arith::parse_mult_kind(mult_s == "auto" ? "tdm" : mult_s);
   if (!multiplier.has_value()) {
     livehd::diag::err("pass.abc", "bad-multiplier", "io")
         .msg("pass.abc: unknown multiplier '{}' (use auto|array|tree|csa|tdm)", mult_s)

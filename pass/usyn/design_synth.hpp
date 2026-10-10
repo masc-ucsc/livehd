@@ -23,7 +23,7 @@ struct Design_options {
   synth::arith::Adder_kind                 adder          = synth::arith::Adder_kind::rca;
   bool                                     auto_sum_adder = true;
   int                                      adder_block    = 0;
-  synth::arith::Mult_kind                  multiplier     = synth::arith::Mult_kind::csa;
+  synth::arith::Mult_kind                  multiplier     = synth::arith::Mult_kind::tdm;
   bool                                     reverse_barrel = false;
   bool                                     mux_tree       = false;
   bool                                     sop_tree       = false;
