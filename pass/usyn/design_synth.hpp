@@ -15,6 +15,7 @@ struct Design_options {
   bool                                     auto_sum_adder = true;
   int                                      adder_block    = 0;
   synth::arith::Mult_kind                  multiplier     = synth::arith::Mult_kind::csa;
+  bool                                     reverse_barrel = false;
   bool                                     mux_tree       = false;
   bool                                     sop_tree       = false;
   bool                                     cmos_cleanup   = false;

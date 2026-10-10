@@ -38,6 +38,7 @@
 #include "lnast_ntype.hpp"
 #include "mask_eval.hpp"
 #include "node_util.hpp"
+#include "synth_policy.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "port_reach.hpp"
@@ -1004,6 +1005,7 @@ public:
     // Persist the block-attribute regions (2opt-freq B): the coloring_info
     // JSON's "region_opts" member is what pass.abc reads for per-region ABC
     // options; the node colors themselves were stamped by make_node.
+    apply_synth_targets();
     write_region_info();
   }
 
@@ -1224,6 +1226,7 @@ private:
     // the block; restoring here bounds the region to its block (nested blocks
     // override and restore, if/match arms inherit the enclosing color).
     const auto saved_color = cur_color_;
+    const auto saved_synth = cur_synth_;
     for (auto c = lnast_->get_first_child(stmts); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       if (lnast_->is_dce_dead(c)) {
         continue;  // dce:mark (lg-only flows): a dead statement is skipped here
@@ -1235,6 +1238,7 @@ private:
       lower_node(c);
     }
     cur_color_ = saved_color;
+    cur_synth_ = saved_synth;
   }
 
   // The current statement's SourceId, re-minted into the graph's
@@ -1248,6 +1252,8 @@ private:
   // non-zero gets livehd::attrs::color, which pass.partition/pass.abc turn
   // into a per-region mapping unit. region_abc_ collects the per-color ABC
   // flow payloads for the coloring_info "region_opts" member.
+  livehd::synth_attr::Policy cur_synth_;
+  std::map<std::string, livehd::synth_attr::Policy> synth_targets_;
   int32_t                                               cur_color_ = 0;
   std::map<int32_t, std::string>                        region_abc_;
   std::map<int32_t, std::map<std::string, std::string>> region_options_;
@@ -1323,6 +1329,7 @@ private:
     if (cur_srcid_ != hhds::SourceId_invalid) {
       n.attr(hhds::attrs::srcid).set(cur_srcid_);
     }
+    if (!cur_synth_.empty()) n.attr(livehd::attrs::synth_policy).set(livehd::synth_attr::write(cur_synth_));
     if (cur_color_ != 0) {
       livehd::graph_util::set_color(n, cur_color_);
       region_colors_stamped_.insert(cur_color_);
@@ -1757,6 +1764,21 @@ private:
     if (key_n.is_invalid()) {
       return;
     }
+    const auto synth_key = lnast_->get_name(key_n);
+    if (synth_key == "__synth_scope") {
+      auto val = lnast_->get_sibling_next(key_n);
+      if (!val.is_invalid()) livehd::synth_attr::overlay(cur_synth_,livehd::synth_attr::decode(lnast_->get_name(val)));
+      return;
+    }
+    if (synth_key.starts_with("synth.")) {
+      const auto val = lnast_->get_sibling_next(key_n);
+      if (val.is_invalid()) error_at(nid,"synthesis attribute needs a value");
+      const std::string key{synth_key.substr(6)};
+      const auto value = livehd::synth_attr::literal(lnast_->get_name(val));
+      livehd::synth_attr::validate(key,value);
+      synth_targets_[std::string(lnast_->get_name(tgt))][key] = {value,4};
+      return;
+    }
     if (lnast_->get_name(key_n) == "__region" || lnast_->get_name(key_n) == "__region_ware"
         || lnast_->get_name(key_n) == "__region_delay") {
       // Synthesis-region marker (2opt-freq B): attr_set(%__region_<id>,
@@ -1909,6 +1931,40 @@ private:
   // ids above them), and "region_opts" carries each region's abc= flow string
   // for pass.abc. Emitted only when at least one annotated block exists, so
   // ordinary compiles keep no coloring_info.
+  void apply_synth_targets() {
+    for (const auto& [target, hints] : synth_targets_) {
+      std::vector<Pin> roots;
+      auto base = target.substr(0,target.find("___ssa_"));
+      for (const auto& [name,pin] : pin_map_) {
+        if (name == target || name.substr(0,name.find("___ssa_")) == base) roots.push_back(pin);
+      }
+      if (auto it=logical_last_.find(base);it!=logical_last_.end()) roots.push_back(it->second.first);
+      absl::flat_hash_set<hhds::Node_class> seen;
+      for (size_t i=0;i<roots.size();++i) {
+        auto pin=roots[i];
+        if (pin.is_invalid() || pin.is_const() || livehd::graph_util::is_graph_input_pin(pin)) continue;
+        auto node=pin.get_master_node();
+        if (!seen.insert(node).second) continue;
+        auto a=node.attr(livehd::attrs::synth_policy);
+        auto policy=a.has()?livehd::synth_attr::read(a.get()):livehd::synth_attr::Policy{};
+        const auto old_path=livehd::synth_attr::path(policy), new_path=livehd::synth_attr::path(hints);
+        if (!old_path.empty() && !new_path.empty() && old_path!=new_path && policy.at("color").rank>=4) {
+          warn_at(Lnast_nid{}, {"synth-anchor-conflict","unsupported"}, "synthesis anchor '{}' meets another explicit group; preserving the existing boundary",target);
+          continue;
+        }
+        livehd::synth_attr::overlay(policy,hints);
+        node.attr(livehd::attrs::synth_policy).set(livehd::synth_attr::write(policy));
+        // Follow D, never Q's consumers. Clock/reset/stall remain separate.
+        for (auto sink:node.inp_sorted_pins()) {
+          if (node.is_loop_break() && sink.get_port_id()!=3) continue;
+          auto drv=sink.get_driver_pin();
+          if (!drv.is_invalid() && !drv.is_const() && drv.get_master_node().is_loop_break()) continue;
+          roots.push_back(drv);
+        }
+      }
+    }
+  }
+
   void write_region_info() {
     if (region_colors_marked_.empty()) {
       return;
@@ -8231,6 +8287,10 @@ private:
           continue;
         }
         const auto key = lnast_->get_name(an);
+        if (key == "__synth_call") {
+          if (auto v=lnast_->get_sibling_next(an);!v.is_invalid()) sub.attr(livehd::attrs::synth_policy).set(livehd::synth_attr::write(livehd::synth_attr::decode(lnast_->get_name(v))));
+          continue;
+        }
         if (key != "__inst_name" && key != "__inst_suffix") {
           continue;
         }
@@ -8317,7 +8377,7 @@ private:
         // Reserved call-site instance name / loop-iteration suffix — already
         // consumed for sub.set_name above; never a callee port (don't bind,
         // don't count toward arity).
-        if (pname == "__inst_name" || pname == "__inst_suffix") {
+        if (pname == "__inst_name" || pname == "__inst_suffix" || pname == "__synth_call") {
           continue;
         }
         // An explicit generic binding (`f<W=8>(…)`) is consumed by the runner

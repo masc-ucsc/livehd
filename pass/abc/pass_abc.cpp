@@ -208,6 +208,14 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
       "adder",
       "auto|rca|cska|cla|prefix|brent: auto compares mapped area or critical-path timing, including inlined arithmetic",
       "auto");
+  m.add_label_optional("tune_profile","internal synth.tune.profile","auto");
+  m.add_label_optional("tune_validate","internal synth.tune.validate","structural");
+  m.add_label_optional("tune_file","internal synth.tune.file","");
+  m.add_label_optional("tune_export","internal synth.tune.export","");
+  m.add_label_optional("tune_dir","internal workdir synthesis tune root","");
+  m.add_label_optional("tune_persist","internal lhd.incremental gate","true");
+  m.add_label_optional("tune_attempts","internal synth.tune.attempts","24");
+  m.add_label_optional("tune_time_ms","internal synth.tune.time_ms","60000");
   m.add_label_optional("barrel", "auto|log|reverse: barrel mux stage order; explicit selection disables trials", "auto");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   m.add_label_optional("threads",
@@ -932,6 +940,12 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   opts.verbose           = verbose;
   opts.adder             = adder.value();
   opts.auto_adder        = adder_s == "auto" && block_size == 0;
+  opts.tune_profile = std::string(var.get("tune_profile","auto"));
+  opts.tune_validate = std::string(var.get("tune_validate","structural"));
+  opts.ware_trials = opts.tune_profile == "on";
+  opts.tune_attempts = static_cast<uint32_t>(std::stoul(std::string(var.get("tune_attempts","24"))));
+  opts.tune_time_ms = std::stoull(std::string(var.get("tune_time_ms","60000")));
+  opts.tune_store = std::make_shared<livehd::synth::Tune_store>(std::string(var.get("tune_dir","")),std::string(var.get("tune_file","")),std::string(var.get("tune_export","")),var.get("tune_persist","true") != "false",opts.tune_profile!="off");
   opts.auto_multiplier   = mult_s == "auto";
   auto barrel            = std::string{var.get("barrel", "auto")};
   if (barrel != "auto" && barrel != "log" && barrel != "reverse") {
@@ -1210,6 +1224,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     // refine_boundaries refreshed their rows' area/delay to match.
     incr->save();
   }
+  mapper.save_tuning();
   if (opts.ware_trials && mapper.admission_refusal() == nullptr && mapper.time_refusal() == nullptr) {
     mapper.optimize_ware(outlib, top);
   }

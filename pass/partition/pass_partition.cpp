@@ -33,6 +33,7 @@
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "str_tools.hpp"
+#include "synth_groups.hpp"
 
 using namespace livehd::graph_util;  // type_op_of, node_color_of, const_of, ...
 using livehd::color::is_partitionable;
@@ -1799,7 +1800,8 @@ hhds::Graph* Partitioner::build_pre_body_into(uint32_t r, hhds::GraphLibrary& ds
 void Partitioner::build_module(uint32_t r) {
   admit("build_module", 0);
   int         color = region_color_[r];
-  std::string name  = std::format("{}__c{}", top_, color);
+  auto group=livehd::synth_attr::group_name(g_,color);
+  std::string name = group.empty()?std::format("{}__c{}",top_,color):std::format("{}__g_{}",top_,group);
   // Disambiguate if this color has multiple regions.
   if (outlib_->find_io(name)) {
     int         suffix = 1;

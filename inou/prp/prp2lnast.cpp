@@ -26,6 +26,7 @@
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "prp_builtins.hpp"
+#include "synth_policy.hpp"
 #include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
 #include "prpparse/prp_diag.hpp"
@@ -2788,6 +2789,16 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
     return;
   }
 
+  bool legacy_scope = false;
+  for (TSNode item : ts_node_named_children(attrs)) {
+    auto lv = child_by_field(item,"lvalue");
+    if (!ts_node_is_null(lv)) { auto k=trim(get_text(lv)); legacy_scope |= k != "synth" && !k.starts_with("synth."); }
+  }
+  if (!legacy_scope) {
+    auto idx = builder.add_child(Lnast_ntype::create_stmts());
+    attach_loc(idx,n); builder.push_stmts(idx); emit_synth_scope(attrs,2);
+    walk_statement_block(n); builder.pop_stmts(); return;
+  }
   // 2opt-freq B: `{ ::[abc="…", color=…] stmts }` — the annotated block is its
   // own synthesis partition region. Lower to a NESTED stmts (tolg recurses
   // plain stmts transparently) whose first statement is one compiler-minted
@@ -2831,6 +2842,7 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
     lnast->add_child(idx, Lnast_node::create_const("__region_" + key));
     lnast->add_child(idx, expr_to_node(value));
   }
+  emit_synth_scope(attrs,2);
   walk_statement_block(n);
   builder.pop_stmts();
 }
@@ -2869,6 +2881,7 @@ bool Prp2lnast::parse_scope_attributes(TSNode attr_list_node, int& region_id, TS
       return t.size() >= 2 && ((t.front() == '\'' && t.back() == '\'') || (t.front() == '"' && t.back() == '"'));
     };
     auto key = trim(get_text(lv));
+    if (key == "synth" || key.starts_with("synth.")) continue;
     if (key == "abc") {
       auto txt = value_txt(rv);
       if (!is_quoted(txt) || (txt.front() == '"' && txt.find('{') != std::string_view::npos)) {
@@ -6968,6 +6981,11 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   std::optional<Inflight_suspend> suspended_inflight(std::in_place, inflight_name_scopes_);
   auto body_idx = lnast->add_child(stream_lambda ? lnast->get_root() : fd_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
+  if (!ts_node_is_null(fdef)) {
+    for (TSNode pc : ts_node_named_children(fdef)) {
+      if (std::string_view(ts_node_type(pc)) == "attribute_sq") emit_synth_scope(pc,1);
+    }
+  }
   if (stream_lambda) {
     // Captures are emitted before the first user statement (see
     // capture_frames_). File-scope imports come first: the import map is an
@@ -10822,7 +10840,8 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
               continue;
             }
             std::string val_txt = ts_node_is_null(rv) ? std::string{} : std::string(trim(get_text(rv)));
-            reject_common_mistakes_attr_name(lv, key_txt, !ts_node_is_null(rv));
+            if (key_txt == "synth" || key_txt.starts_with("synth.")) continue;
+        reject_common_mistakes_attr_name(lv, key_txt, !ts_node_is_null(rv));
             attrs_out->push_back({std::string(get_text(id)), std::string(key_txt), std::move(val_txt)});
           } else if (it == "identifier" || it == "ref_identifier") {
             auto kt = trim(get_text(item));
@@ -11162,6 +11181,49 @@ void Prp2lnast::check_attribute_value(TSNode item, std::string_view key, TSNode 
   }
 }
 
+std::vector<std::pair<std::string, TSNode>> Prp2lnast::synth_attribute_items(TSNode attrs) {
+  std::vector<std::pair<std::string, TSNode>> out;
+  auto add = [&](std::string key, TSNode value) {
+    if (std::any_of(out.begin(), out.end(), [&](const auto& x) { return x.first == key; })) {
+      report_error(value, "synth-duplicate", "syntax", "duplicate synthesis attribute synth." + key, "specify each key once");
+      return;
+    }
+    try { livehd::synth_attr::validate(key, livehd::synth_attr::literal(trim(get_text(value)))); }
+    catch (const std::exception& e) { report_error(value, "synth-value", "syntax", e.what(), "see syntha.md for the synthesis vocabulary"); return; }
+    out.emplace_back(std::move(key), value);
+  };
+  for (TSNode item : ts_node_named_children(attrs)) {
+    TSNode lv = child_by_field(item, "lvalue"), rv = child_by_field(item, "rvalue");
+    if (ts_node_is_null(lv)) continue;
+    auto key = trim(get_text(lv));
+    if (key.starts_with("synth.")) { add(std::string(key.substr(6)), rv); }
+    else if (key == "synth") {
+      if (ts_node_is_null(rv) || trim(get_text(rv)).front() != '(') {
+        report_error(item, "synth-tuple", "syntax", "synth= requires a named tuple", "synth=(color=\"crit\", adder=\"cla\")");
+        continue;
+      }
+      for (TSNode field : ts_node_named_children(rv)) {
+        TSNode fl = child_by_field(field, "lvalue"), fr = child_by_field(field, "rvalue");
+        if (ts_node_is_null(fl)) { fl = child_by_field(field,"identifier"); fr = child_by_field(field,"definition"); }
+        if (ts_node_is_null(fl) || ts_node_is_null(fr)) { report_error(field,"synth-tuple","syntax","synth tuple fields require key=value", ""); continue; }
+        add(std::string(trim(get_text(fl))), fr);
+      }
+    }
+  }
+  return out;
+}
+
+void Prp2lnast::emit_synth_scope(TSNode attrs, int rank) {
+  livehd::synth_attr::Policy p;
+  for (const auto& [key, value] : synth_attribute_items(attrs)) p[key] = {livehd::synth_attr::literal(trim(get_text(value))), rank};
+  if (p.empty()) return;
+  auto idx = builder.add_child(Lnast_ntype::create_attr_set());
+  lnast->add_child(idx, Lnast_node::create_ref(std::format("%__synth_scope_{}",region_marker_seq_++)));
+  lnast->add_child(idx, Lnast_node::create_const("__synth_scope"));
+  lnast->add_child(idx, Lnast_node::create_const("'" + livehd::synth_attr::encode(p) + "'"));
+  attach_loc(idx, attrs);
+}
+
 void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_node) {
   // Two shapes feed this function:
   //   1. (legacy / read-side) `attribute_list` node: `[name (= value)?, ...]`.
@@ -11170,6 +11232,13 @@ void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_n
   //   2. (new write-side) `tuple_sq` node holding `[key=value, ...]`. Each
   //      item is a named child — either `assignment` (key=value) or a bare
   //      identifier (flag-only, value defaults to `true`).
+  for (const auto& [key, value] : synth_attribute_items(attr_list_node)) {
+    auto idx = builder.add_child(Lnast_ntype::create_attr_set());
+    lnast->add_child(idx, target);
+    lnast->add_child(idx, Lnast_node::create_const("synth." + key));
+    lnast->add_child(idx, expr_to_node(value));
+    attach_loc(idx, value);
+  }
   std::string_view nt(ts_node_type(attr_list_node));
   // `tuple_sq` (legacy) and `attribute_sq` (current grammar, commit 93ca079+)
   // share the same item layout — only the item-node type names differ.
@@ -12888,12 +12957,14 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   // hierarchical prefix for the inlined regs/mems, or by tolg as the Sub
   // instance name for a non-inlined pipe/mod. Only `name` is supported today.
   std::string_view callsite_inst_name;
+  livehd::synth_attr::Policy callsite_synth;
   if (!ts_node_is_null(func) && std::string_view(ts_node_type(func)) == "attribute_set") {
     for (TSNode sq : ts_node_named_children(func)) {
       std::string_view sqt(ts_node_type(sq));
       if (sqt != "attribute_sq" && sqt != "tuple_sq") {
         continue;  // the `argument` child (the callee) — handled below
       }
+      for (const auto& [key,value] : synth_attribute_items(sq)) callsite_synth[key] = {livehd::synth_attr::literal(trim(get_text(value))),3};
       for (TSNode item : ts_node_named_children(sq)) {
         std::string_view it(ts_node_type(item));
         if (it != "assignment" && it != "attribute_assignment") {
@@ -12906,6 +12977,7 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
         TSNode           lv  = child_by_field(item, "lvalue");
         TSNode           rv  = child_by_field(item, "rvalue");
         std::string_view key = ts_node_is_null(lv) ? std::string_view{} : trim(get_text(lv));
+        if (key == "synth" || key.starts_with("synth.")) continue;
         if (key != "name") {
           report_error(item,
                        "callsite-attribute",
@@ -13156,6 +13228,11 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
     lnast->add_child(idx, Lnast_node::create_const("fields"));
     attach_loc(idx, n);
     return ref;
+  }
+  if (!callsite_synth.empty()) {
+    Call_arg ia; ia.is_assign=true; ia.assign_key="__synth_call";
+    ia.value=Lnast_node::create_const("'" + livehd::synth_attr::encode(callsite_synth) + "'");
+    call_args.push_back(std::move(ia));
   }
   if (!callsite_inst_name.empty()) {
     // Reserved actual: `store(__inst_name, const "X")`. Position-independent

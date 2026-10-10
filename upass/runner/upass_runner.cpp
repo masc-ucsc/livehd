@@ -7983,6 +7983,7 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
   lm->restore_cursor(saved);                               // back on the func_call node (gather left it on the callee ref)
+  const std::string call_synth = gathered_synth_call_;
   const std::string call_inst_name = gathered_inst_name_;  // call-site name= (if any); stable past later gathers
 
   const auto& io = callee->io_meta();
@@ -8121,10 +8122,13 @@ bool uPass_runner::try_inline_func_call() {
         }
       }
       named.insert(named.end(), minted_actuals.begin(), minted_actuals.end());
+      if(!call_synth.empty()) named.emplace_back("__synth_call",Lnast_node::create_const(call_synth));
       emit_named_instance_call(dst_name, frame_portable_callee_name(callee_name, callee), call_inst_name, named);
       return true;
     }
   }
+
+  if(!call_synth.empty()) { stash_sub_instance_port_facts(dst_name,callee);return false; }
 
   // A `pipe` callee (any output carries a stages annotation) is
   // never comb-inlined: its outputs are flopped, and a call site must consume
@@ -8300,6 +8304,7 @@ bool uPass_runner::try_inline_func_call() {
         }
       }
       named.insert(named.end(), minted_actuals.begin(), minted_actuals.end());
+      if(!call_synth.empty()) named.emplace_back("__synth_call",Lnast_node::create_const(call_synth));
       emit_named_instance_call(dst_name, frame_portable_callee_name(callee_name, callee), call_inst_name, named);
       return true;
     }
@@ -14181,6 +14186,7 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
   // are its following siblings. The cursor is saved/restored here so this can
   // be called twice (overload probe + real bind) without disturbing the caller.
   const auto entry = lm->save_cursor();
+  gathered_synth_call_.clear();
   gathered_inst_name_.clear();  // reset; set below if `__inst_name` is present
 
   // A ref actual whose raw name is itself a registry function is a higher-order
@@ -14273,6 +14279,10 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
       // Loop-iteration tag stamped by a previous unroll (emit_op_with_fold).
       // Consumed like `__inst_name` — it is a naming marker, never an actual —
       // and re-added by the emitter, so it need not be carried here.
+      if(a.key == "__synth_call") {
+        if(lm->move_to_sibling()) gathered_synth_call_=std::string(lm->current_raw_text());
+        lm->restore_cursor(here);continue;
+      }
       if (a.key == call_inst_suffix_marker) {
         lm->restore_cursor(here);
         continue;
@@ -15887,7 +15897,7 @@ bool dce_is_keepalive_attr_set(const Lnast& staging, const Lnast_nid& node) {
   // opens a block-scoped partition region for tolg. Its %-target never has
   // readers by construction, so without this exemption DCE would silently
   // delete the user's block annotation.
-  if (staging.get_name(key) == "__region" || staging.get_name(key) == "__region_ware"
+  if (staging.get_name(key) == "__synth_scope" || staging.get_name(key).starts_with("synth.") || staging.get_name(key) == "__region" || staging.get_name(key) == "__region_ware"
       || staging.get_name(key) == "__region_delay") {
     return true;
   }

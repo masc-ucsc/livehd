@@ -187,6 +187,10 @@ std::string preserve_seeded_info(hhds::Graph* g, std::string fresh_json) {
   // Mark the rebuild as still carrying source-seeded regions, and carry the
   // block-attribute ABC options through (pass.abc reads "region_opts").
   nd.AddMember("seeded", true, nd.GetAllocator());
+  if (auto sg=od.FindMember("synth_groups");sg!=od.MemberEnd()) {
+    rapidjson::Value copy(sg->value,nd.GetAllocator());nd.AddMember("synth_groups",copy,nd.GetAllocator());
+    if (!nd.HasMember("packed")) nd.AddMember("packed",true,nd.GetAllocator());
+  }
   if (auto ro = od.FindMember("region_opts"); ro != od.MemberEnd()) {
     rapidjson::Value copy(ro->value, nd.GetAllocator());
     nd.AddMember("region_opts", copy, nd.GetAllocator());

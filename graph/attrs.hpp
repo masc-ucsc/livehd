@@ -25,6 +25,10 @@
 #include "hhds/attr.hpp"
 
 namespace livehd::attrs {
+// Resolved source hints, retained independently of temporary numeric colors.
+struct synth_policy_t { using value_type = std::string; using storage = hhds::flat_storage; };
+inline constexpr synth_policy_t synth_policy{};
+
 
 // Where an attribute legitimately lives — used by the graph_util pin setters to
 // assert (and, for `node`, statically reject) the wrong pin role at the call
@@ -369,6 +373,8 @@ inline constexpr Attr_kind attr_kind<time_range_t> = Attr_kind::any_pin;
 template <>
 inline constexpr Attr_kind attr_kind<pending_time_t> = Attr_kind::any_pin;
 template <>
+inline constexpr Attr_kind attr_kind<synth_policy_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<color_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<ctrl_members_t> = Attr_kind::node;
@@ -431,6 +437,7 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
   X(pin_delay)                      \
   X(pin_signed)                     \
   X(color)                          \
+  X(synth_policy)                   \
   X(ctrl_members)                   \
   X(ctrl_stats)                     \
   X(synth_region)                   \

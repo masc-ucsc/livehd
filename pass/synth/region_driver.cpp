@@ -33,6 +33,8 @@
 #include "region_cache.hpp"
 #include "synthesis_cost.hpp"
 #include "worker_pool.hpp"
+#include "semdiff.hpp"
+#include "hash_util.hpp"
 
 namespace livehd::synth {
 namespace gu = livehd::graph_util;
@@ -354,6 +356,11 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
     if (ro.load.has_value()) {
       overrides.load = *ro.load;
     }
+    if (src == "--set region_opts") {
+      if(ro.adder) opts_.source_adder=false;
+      if(ro.multiplier) opts_.source_multiplier=false;
+      if(ro.reverse_barrel) opts_.source_barrel=false;
+    }
     if (ro.adder.has_value()) {
       opts_.adder      = *ro.adder;
       opts_.auto_adder = false;
@@ -374,6 +381,20 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
     std::print("[pass.abc] region '{}': color {} options override applied ({})\n", rb.module_name, rb.color, src);
   };
 
+  // Non-arithmetic source options affect this region. Arithmetic choices stay
+  // on individual nodes, so mixed architectures never force a partition cut.
+  livehd::synth_attr::Policy source;
+  for (const auto& node:rb.nodes) if(auto a=node.attr(livehd::attrs::synth_policy);a.has()) {
+    for(const auto& [key,h]:livehd::synth_attr::read(a.get())) if(key=="delay"||key=="ware"||key=="abc") {
+      auto it=source.find(key);
+      if(it!=source.end()&&it->second.rank==h.rank&&it->second.value!=h.value)
+        livehd::diag::err("pass.abc","synth-region-conflict","syntax").msg("region '{}' has conflicting synth.{} values",rb.module_name,key).fatal();
+      if(it==source.end()||it->second.rank<=h.rank) source[key]=h;
+    }
+  }
+  if(source.contains("delay")) opts_.delay=livehd::synth_attr::get(source,"delay")=="0"?"":livehd::synth_attr::get(source,"delay");
+  if(source.contains("ware")) opts_.ware=livehd::synth_attr::get(source,"ware")=="true";
+  if(source.contains("abc")) {overrides.flow=livehd::synth_attr::get(source,"abc");flow_overridden=true;}
   // Graph-embedded overrides first (the block-attribute channel writes a
   // "region_opts" member into coloring_info), CLI second so --set wins.
   auto git = graph_region_opts_.find(rb.src);
@@ -789,6 +810,33 @@ void Region_driver::map_regions(std::span<const livehd::partition::Region_body> 
   }
 }
 
+namespace {
+std::string tune_options(const Driver_options& o) {
+  const char* adder=o.adder==arith::Adder_kind::rca?"rca":o.adder==arith::Adder_kind::cla?"cla":o.adder==arith::Adder_kind::cska?"cska":o.adder==arith::Adder_kind::prefix?"prefix":"brent";
+  const char* mult=o.multiplier==arith::Mult_kind::array?"array":o.multiplier==arith::Mult_kind::tree?"tree":o.multiplier==arith::Mult_kind::csa?"csa":"sn";
+  return std::format("{{\"adder\":\"{}\",\"multiplier\":\"{}\",\"barrel\":\"{}\",\"block_size\":{}}}",adder,mult,o.reverse_barrel?"reverse":"log",o.block_size);
+}
+std::string tune_key(const partition::Region_body& rb,const Driver_options& options,uint64_t salt) {
+  if(!rb.pre_body) return {};
+  const auto digest=semdiff::canonical_digest(rb.pre_body,{},semdiff::Sub_fold::interface,false);
+  if(!digest.valid) return {};
+  std::vector<std::string> hints;
+  for(const auto& node:rb.nodes) if(auto a=node.attr(attrs::synth_policy);a.has()) hints.emplace_back(a.get());
+  std::sort(hints.begin(),hints.end());
+  std::string recipe=tune_options(options)+options.delay+options.region_hook_recipe;
+  for(const auto& hint:hints) recipe+=hint;
+  return std::format("{:016x}{:016x}-{:016x}-{:016x}",digest.h0,digest.h1,salt,hash_util::fnv1a64(recipe));
+}
+void replay_tune(Driver_options& o,std::string_view row) {
+  rapidjson::Document d;d.Parse(row.data(),row.size());
+  if(!d.IsObject()||!d.HasMember("options")) return;
+  const auto& p=d["options"];
+  if(o.auto_adder) o.adder=*arith::parse_adder_kind(p["adder"].GetString());
+  if(o.auto_multiplier) o.multiplier=*arith::parse_mult_kind(p["multiplier"].GetString());
+  if(o.auto_barrel) o.reverse_barrel=std::string_view(p["barrel"].GetString())=="reverse";
+}
+}
+
 void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   std::unique_lock graph_lock(coordinator_ ? coordinator_->graph_mutex_ : graph_mutex_);
   if (!coordinator_) {
@@ -915,6 +963,17 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   if (!ware_trial_) {
     (void)apply_region_overrides(rb, overrides);
   }
+  if (!ware_trial_) {
+    auto key=tune_key(rb,opts_,incr_?incr_->salt():0);
+    auto* owner=coordinator_?coordinator_:this;
+    owner->tune_keys_[rb.module_name]=key;
+    bool replay=false;
+    if(opts_.tune_store&&opts_.tune_profile!="off"&&!key.empty()) {
+      const auto stored=opts_.tune_store->find(key);
+      if(!stored.empty()) { replay_tune(opts_,stored); replay=true; }
+    }
+    if(opts_.tune_store) opts_.tune_store->applied(rb.module_name,std::format("{{\"key\":{},\"options\":{},\"origin\":\"{}\"}}",synth_attr::quote(key),tune_options(opts_),replay?"stored":"source/default"));
+  }
   region_delay_targets_[rb.module_name] = ware_delay_target(opts_.delay);
   // The region's delay BUDGET: the target minus the register margin when the
   // region holds flops (mapped or native -- a native flop is mapped to the
@@ -991,7 +1050,11 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // carries them: nothing fact-specific reaches the blaster or the cache key.
   // The backend's recipe for this region, and the hook's, verbatim in the
   // cache key.
-  const std::string recipe = opts_.region_hook ? std::format("{}|hook={}", plan.recipe, opts_.region_hook_recipe) : plan.recipe;
+  std::string recipe = opts_.region_hook ? std::format("{}|hook={}", plan.recipe, opts_.region_hook_recipe) : plan.recipe;
+  std::vector<std::string> local_hints;
+  for(const auto& node:rb.nodes) if(auto a=node.attr(attrs::synth_policy);a.has()) local_hints.emplace_back(a.get());
+  std::sort(local_hints.begin(),local_hints.end());
+  for(const auto& hint:local_hints) recipe+="|source="+hint;
   hhds::Graph*      pre_g  = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
   // EXPERIMENTAL (ABC_INCR_COMPARE_ONLY): exercise compare/store with NO ABC -- a
   // fast diagnostic for why a region misses on a comment edit.
@@ -1122,6 +1185,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // The region's logic, translated onto a backend-neutral RAW Lnet.
   Blast_options blast_options;
   blast_options.capture_state  = static_cast<bool>(opts_.region_hook);
+  blast_options.source_adder=opts_.source_adder;
+  blast_options.source_multiplier=opts_.source_multiplier;
+  blast_options.source_barrel=opts_.source_barrel;
   blast_options.adder          = opts_.adder;
   blast_options.block_size     = opts_.block_size;
   blast_options.multiplier     = opts_.multiplier;
@@ -1406,7 +1472,7 @@ void Region_driver::report_completion(const Region_qor& q) {
 // coordinator -- pass them explicitly rather than swapping a shared member.
 void Region_driver::remember_ware(const livehd::partition::Region_body& rb, const Driver_options& options,
                                   const Backend_overrides& overrides) {
-  if (!options.ware || rb.nodes.empty()) {
+  if (!options.ware_trials || !options.ware || rb.nodes.empty()) {
     return;
   }
   Ware_region w;
@@ -1414,10 +1480,13 @@ void Region_driver::remember_ware(const livehd::partition::Region_body& rb, cons
   for (auto n : rb.nodes) {
     ge      += gu::synthesis_ge_weight(n);
     auto op  = gu::type_op_of(n);
-    w.add   |= options.auto_adder
+    auto a=n.attr(attrs::synth_policy);
+    auto hints=a.has()?synth_attr::read(a.get()):synth_attr::Policy{};
+    const auto pinned=[&](std::string_view key) {const auto v=synth_attr::get(hints,key);return !v.empty()&&v!="auto";};
+    w.add   |= options.auto_adder && !pinned("adder")
              && ((options.ware_arith && op == Ntype_op::Sum) || (options.ware_cmp && (op == Ntype_op::LT || op == Ntype_op::GT)));
-    w.mult   |= options.ware_arith && options.auto_multiplier && op == Ntype_op::Mult;
-    w.barrel |= options.ware_shift && options.auto_barrel && (op == Ntype_op::SHL || op == Ntype_op::SRA);
+    w.mult   |= options.ware_arith && options.auto_multiplier && !pinned("multiplier") && op == Ntype_op::Mult;
+    w.barrel |= options.ware_shift && options.auto_barrel && !pinned("barrel") && (op == Ntype_op::SHL || op == Ntype_op::SRA);
   }
   if ((!w.add && !w.mult && !w.barrel) || (options.large_ge && ge >= options.large_ge)) {
     return;
@@ -1563,10 +1632,10 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
         {w.options, ""}
     };
     if (w.add || (w.mult && w.options.auto_adder)) {
-      for (auto kind : {arith::Adder_kind::cla, arith::Adder_kind::cska}) {
+      for (auto kind : {arith::Adder_kind::cla, arith::Adder_kind::cska, arith::Adder_kind::prefix, arith::Adder_kind::brent}) {
         auto o  = w.options;
         o.adder = kind;
-        candidates.push_back({o, kind == arith::Adder_kind::cla ? "adder=cla" : "adder=cska"});
+        candidates.push_back({o, "adder="+synth_attr::text(synth_attr::quote(kind==arith::Adder_kind::cla?"cla":kind==arith::Adder_kind::cska?"cska":kind==arith::Adder_kind::prefix?"prefix":"brent"))});
       }
     }
     const auto append = [](std::string label, std::string_view selector) {
@@ -1579,9 +1648,10 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
     if (w.mult) {
       const auto count = candidates.size();
       for (size_t i = 0; i < count; ++i) {
-        auto o       = candidates[i].options;
-        o.multiplier = arith::Mult_kind::tree;
-        candidates.push_back({o, append(candidates[i].label, "multiplier=tree")});
+        for(auto kind:{arith::Mult_kind::tree,arith::Mult_kind::csa,arith::Mult_kind::sn}) {
+          auto o=candidates[i].options;o.multiplier=kind;
+          candidates.push_back({o,append(candidates[i].label,kind==arith::Mult_kind::tree?"multiplier=tree":kind==arith::Mult_kind::csa?"multiplier=csa":"multiplier=sn")});
+        }
       }
     }
     if (w.barrel) {
@@ -1593,7 +1663,11 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
       }
     }
     candidates.erase(candidates.begin());  // baseline already measured
+    auto selected=w.options;
+    const auto tune_start=std::chrono::steady_clock::now();
+    uint32_t attempts=0;
     for (const auto& candidate : candidates) {
+      if(attempts++>=startup_opts_.tune_attempts || (startup_opts_.tune_time_ms&&std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-tune_start).count()>=static_cast<int64_t>(startup_opts_.tune_time_ms))) break;
       hhds::GraphLibrary backup;
       if (!backup.copy_from(outlib, name)) {
         break;
@@ -1684,7 +1758,9 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
       if (incr_) {
         std::print("[pass.abc] ware candidate cache {}\n", candidate_hit ? "hit" : "miss");
       }
+      if(startup_opts_.tune_store) startup_opts_.tune_store->history(std::format("{{\"region\":{},\"candidate\":{},\"kept\":{},\"cells\":{},\"delay_ps\":{},\"time_ms\":{},\"validation\":\"structural\"}}",synth_attr::quote(name),tune_options(candidate.options),keep,trial_q.gates,trial_q.delay,trial_ms));
       if (keep) {
+        selected=candidate.options;
         score = std::move(trial_score);
       }
       incr_ = nullptr;  // candidate_cache releases its libraries at the end of this iteration
@@ -1695,7 +1771,14 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
         break;
       }
     }
+    if(startup_opts_.tune_store && !tune_keys_[name].empty()) {
+      const auto record=std::format("{{\"options\":{},\"validation\":\"structural\",\"cells\":{},\"delay_ps\":{},\"region\":{}}}",tune_options(selected),qor_[row].gates,qor_[row].delay,synth_attr::quote(name));
+      startup_opts_.tune_store->put(tune_keys_[name],record);
+      startup_opts_.tune_store->applied(name,record);
+      std::print("[synth.tune] region={} selected={} validation=structural; source pin hint: ::[synth.adder=\"{}\", synth.multiplier=\"{}\", synth.barrel=\"{}\"]\n",name,tune_options(selected),selected.adder==arith::Adder_kind::rca?"rca":selected.adder==arith::Adder_kind::cla?"cla":selected.adder==arith::Adder_kind::cska?"cska":selected.adder==arith::Adder_kind::prefix?"prefix":"brent",selected.multiplier==arith::Mult_kind::array?"array":selected.multiplier==arith::Mult_kind::tree?"tree":selected.multiplier==arith::Mult_kind::csa?"csa":"sn",selected.reverse_barrel?"reverse":"log");
+    }
   }
+  if(startup_opts_.tune_store) startup_opts_.tune_store->save();
   if (global_target > 0 && !score.delays.empty()) {
     std::print("[pass.abc] ware: selected stitched delay={:.3f} ps target={:.3f} ps {}\n",
                score.delays.front(),

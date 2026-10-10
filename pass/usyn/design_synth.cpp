@@ -178,6 +178,8 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       return;
     }
     synth::Blast_options blast_options;
+    blast_options.usyn       = true;
+    blast_options.reverse_barrel = options.reverse_barrel;
     blast_options.adder      = options.adder;
     blast_options.block_size = options.adder_block;
     blast_options.multiplier = options.multiplier;

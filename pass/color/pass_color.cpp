@@ -22,6 +22,7 @@
 #include "color_reduce.hpp"
 #include "color_stats.hpp"
 #include "color_synth.hpp"
+#include "synth_groups.hpp"
 #include "diag.hpp"
 #include "flatten.hpp"
 #include "node_util.hpp"
@@ -412,6 +413,7 @@ void run_one(std::string_view alg, hhds::Graph* g, const Color_opts& opts, const
 void Pass_color::color(Eprp_var& var) {
   auto alg = std::string{var.get("alg", "acyclic")};
   auto top = std::string{var.get("top", "")};
+  if(alg=="synth") livehd::synth_attr::specialize_calls(var.graphs);
 
   if (alg == "clear") {
     for (const auto& g : var.graphs) {

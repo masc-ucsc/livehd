@@ -20,6 +20,7 @@ cc_library(
     name = "graph",
     srcs = [
         "cell.cpp",
+        "synth_groups.cpp",
         "latch_contract.cpp",
         "graph_library_singleton.cpp",
         "inline_sub.cpp",
@@ -34,6 +35,7 @@ cc_library(
         "attr_carry.hpp",
         "attrs.hpp",
         "cell.hpp",
+        "synth_groups.hpp",
         "graph_library_singleton.hpp",
         "latch_contract.hpp",
         "inline_sub.hpp",

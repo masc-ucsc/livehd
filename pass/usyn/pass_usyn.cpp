@@ -75,7 +75,7 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!adder) {
     livehd::diag::err("pass.usyn", "invalid-options", "syntax")
         .msg("invalid native USYN adder '{}'", adder_text)
-        .hint("adder=auto|rca|cska|cla|prefix")
+        .hint("adder=auto|rca|cska|cla|prefix|brent")
         .emit();
     return false;
   }
@@ -88,15 +88,21 @@ bool read_options(const Eprp_var& var, Options& options) {
   }
   options.design.adder       = *adder;
   const auto multiplier_text = var.get_stage("multiplier", "csa");
-  const auto multiplier      = livehd::synth::arith::parse_mult_kind(multiplier_text);
+  const auto multiplier      = livehd::synth::arith::parse_mult_kind(multiplier_text == "auto" ? "csa" : multiplier_text);
   if (!multiplier) {
     livehd::diag::err("pass.usyn", "invalid-options", "syntax")
         .msg("invalid native USYN multiplier '{}'", multiplier_text)
-        .hint("multiplier=csa|tree|array|sn")
+        .hint("multiplier=auto|csa|tree|array|sn")
         .emit();
     return false;
   }
   options.design.multiplier = *multiplier;
+  const auto barrel=var.get_stage("barrel","auto");
+  if (barrel!="auto" && barrel!="log" && barrel!="reverse") {
+    livehd::diag::err("pass.usyn","invalid-options","syntax").msg("barrel must be auto|log|reverse").emit();return false;
+  }
+  options.design.reverse_barrel=barrel=="reverse";
+  if (!var.get_stage("block_size","").empty() && (!parse(var.get_stage("block_size",""),options.design.adder_block)||options.design.adder_block<0)) return false;
   const auto mux_lowering   = var.get_stage("mux_lowering", "decode");
   if (mux_lowering != "decode" && mux_lowering != "tree") {
     livehd::diag::err("pass.usyn", "invalid-options", "syntax")
@@ -268,6 +274,16 @@ void Pass_usyn::setup() {
   m.add_label_optional("adder",
                        "Native arithmetic: auto (prefix wide sums, comparisons and multiplier carry), rca, cska, cla or prefix",
                        "auto");
+  m.add_label_optional("tune_profile","internal synth.tune.profile","auto");
+  m.add_label_optional("tune_validate","internal synth.tune.validate","structural");
+  m.add_label_optional("tune_file","internal synth.tune.file","");
+  m.add_label_optional("tune_export","internal synth.tune.export","");
+  m.add_label_optional("tune_dir","internal workdir synthesis tune root","");
+  m.add_label_optional("tune_persist","internal lhd.incremental gate","true");
+  m.add_label_optional("tune_attempts","internal synth.tune.attempts","24");
+  m.add_label_optional("tune_time_ms","internal synth.tune.time_ms","60000");
+  m.add_label_optional("barrel","auto|log|reverse shared barrel architecture","auto");
+  m.add_label_optional("block_size","Shared CSKA/CLA width (alias of adder_block)","");
   m.add_label_optional("adder_block", "Native CSKA/CLA group width (0: derive from operating width)", "0");
   m.add_label_optional("multiplier",
                        "Native partial-product summation: csa (carry-save), tree, array or sn (depth-ordered columns)",

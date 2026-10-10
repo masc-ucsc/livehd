@@ -69,6 +69,7 @@ cc_library(
         "@abseil-cpp//absl/strings",
         "@abseil-cpp//absl/types:span",
         "@iassert",
+        "@rapidjson",
     ] + select({
         ":use_profiling": [
             "@com_google_perfetto//:perfetto",

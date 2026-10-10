@@ -15,6 +15,7 @@
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
+#include "synth_policy.hpp"
 
 namespace gu = livehd::graph_util;
 
@@ -263,6 +264,11 @@ hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const
 
 void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const hhds::Node_class& neo) {
   admit("flatten-carry_node_attrs");
+  auto policy=orig.attr(livehd::attrs::synth_policy).has()?livehd::synth_attr::read(orig.attr(livehd::attrs::synth_policy).get()):livehd::synth_attr::Policy{};
+  for (auto* scope=ctx;scope!=nullptr;scope=scope->parent) {
+    if (!scope->inst.is_invalid()) if(auto a=scope->inst.attr(livehd::attrs::synth_policy);a.has()) {auto call=livehd::synth_attr::read(a.get());if(!call.contains("_specialized")) livehd::synth_attr::rescope(policy,call);}
+  }
+  if (!policy.empty()) neo.attr(livehd::attrs::synth_policy).set(livehd::synth_attr::write(policy));
   if (gu::has_name(orig)) {
     auto nm = std::string{gu::node_name_of(orig)};
     // fproperty/lgassert marker Subs pack "<kind>\x1f<loc>\x1f<msg>" into the

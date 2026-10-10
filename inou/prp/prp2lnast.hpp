@@ -673,6 +673,8 @@ protected:
   void                 emit_tuple_type_field_specs(std::string_view path, TSNode tuple_node);
   // The inner `tuple` node when `type_cast_node`'s type is a tuple SHAPE.
   TSNode               tuple_type_inner(TSNode type_cast_node) const;
+  std::vector<std::pair<std::string, TSNode>> synth_attribute_items(TSNode attrs);
+  void emit_synth_scope(TSNode attrs, int rank);
   void                 emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
   // Rulings on one attribute's value: `sync` is deprecated, a runtime `*_pin`
   // value needs `ref`. `rv` is null for a flag-only attribute.

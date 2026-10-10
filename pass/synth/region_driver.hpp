@@ -55,6 +55,7 @@ public:
   // flattening: the scorer keeps distinct occurrence contexts across modules.
   void optimize_ware(hhds::GraphLibrary& outlib, std::string_view top);
 
+  void save_tuning() { if (opts_.tune_store) opts_.tune_store->save(); }
   void set_outlib(hhds::GraphLibrary* l) { outlib_ = l; }
 
   // Whole-design flatten: the run maps ONE region and the emitted netlist is
@@ -135,6 +136,7 @@ private:
   Ware_score score_ware(hhds::GraphLibrary& outlib, std::string_view top);
   Design_ctx design_ctx();
   void remember_ware(const livehd::partition::Region_body& rb, const Driver_options& options, const Backend_overrides& overrides);
+  std::map<std::string,std::string> tune_keys_;
   std::vector<Ware_region> ware_regions_;
   hhds::GraphLibrary       ware_shells_, ware_sources_, ware_pre_;
   // Nodes of INLINED regions whose pre-map snapshot ware_pre_ retains for trial

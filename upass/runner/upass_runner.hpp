@@ -1642,6 +1642,7 @@ protected:
   // Set by gather_actuals when a call carries the reserved `__inst_name` actual
   // (`alu::[name=X](…)`); consumed by try_inline as the hier-prefix level.
   std::string                                   gathered_inst_name_;
+  std::string gathered_synth_call_;
   // compile.upass.inline (default true). When false, a DIRECT by-name call to a
   // fully-typed pure-dataflow `comb` is NOT spliced — it is left as a func_call
   // so tolg lowers it to a Sub module instance (preserving the comb boundary for

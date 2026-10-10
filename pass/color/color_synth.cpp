@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "color_synth.hpp"
+#include "synth_groups.hpp"
 
 #include <print>
 
@@ -271,6 +272,7 @@ void Color_synth::keep_clock_gates_whole(hhds::Graph* g) {
 }
 
 void Color_synth::label(hhds::Graph* g) {
+  if (livehd::synth_attr::seed_groups(g)) { opts.ctrl_cones=false; opts.boundary_wiring=false; }
   last_free_id = 1;
   flat_node2id.clear();
   uf     = Int_union_find{};

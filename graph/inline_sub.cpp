@@ -17,6 +17,7 @@
 #include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
 #include "sim_program.hpp"
+#include "synth_policy.hpp"
 
 namespace livehd::graph_util {
 
@@ -83,6 +84,9 @@ private:
 
 void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo) {
   const auto op = type_op_of(orig);
+  auto policy = orig.attr(livehd::attrs::synth_policy).has() ? synth_attr::read(orig.attr(livehd::attrs::synth_policy).get()) : synth_attr::Policy{};
+  if (auto a = inst_.attr(livehd::attrs::synth_policy); a.has()) {auto call=synth_attr::read(a.get()); if(!call.contains("_specialized")) synth_attr::rescope(policy,call);}
+  if (!policy.empty()) neo.attr(livehd::attrs::synth_policy).set(synth_attr::write(policy));
   if (state_name_.has_value() && (is_type_flop(orig) || op == Ntype_op::Latch)) {
     if (!state_name_->empty()) {
       neo.attr(hhds::attrs::name).set(prefix_ + *state_name_);

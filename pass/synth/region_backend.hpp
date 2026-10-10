@@ -22,6 +22,7 @@
 #include "pass_partition.hpp"
 #include "region_blast.hpp"
 #include "region_qor.hpp"
+#include "tune_store.hpp"
 
 namespace livehd::synth {
 
@@ -62,7 +63,12 @@ struct Driver_options {
 
   // Re-map each arithmetic/shifter ware region under the alternative adder,
   // multiplier and barrel lowerings and keep the best stitched result.
-  bool                                  ware_trials = true;
+  bool                                  ware_trials = false;
+  std::string tune_profile="auto", tune_validate="structural";
+  uint32_t tune_attempts=24;
+  uint64_t tune_time_ms=60000;
+  std::shared_ptr<Tune_store> tune_store;
+
   std::string                           library;  // Liberty .lib
   // Sequential technology-mapping knobs (independent because their cost differs:
   // a register is one DFF cell per bit, a memory bit-blasts into a whole DFF
@@ -101,6 +107,7 @@ struct Driver_options {
   bool                                  ware_arith       = true;
   bool                                  ware_cmp         = true;
   bool                                  ware_shift       = true;
+  bool source_adder=true, source_multiplier=true, source_barrel=true;
   bool                                  auto_adder       = true;
   bool                                  auto_multiplier  = true;
   bool                                  auto_barrel      = true;

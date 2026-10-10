@@ -760,7 +760,24 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
     // the shared spelling; the pass's own namespace is merged last and wins.
     merge_sets(opts, "pass.abc", labels);
   }
+  // Canonical synthesis defaults are below mapper-local legacy spellings.
+  for (const auto key : {"adder","multiplier","barrel","block_size"}) {
+    const auto full=std::string("synth.")+key;
+    for (const auto& [k,v]:opts.sets) if (k==full) labels[key]=v;
+  }
   merge_sets(opts, method, labels);
+  const auto profile=synth_set(opts,"tune.profile","auto");
+  const auto validate=synth_set(opts,"tune.validate","structural");
+  if (profile!="auto" && profile!="on" && profile!="off") throw Lhd_error{"usage","synth.tune.profile expects auto|on|off",""};
+  if (validate!="structural" && validate!="region" && validate!="design") throw Lhd_error{"usage","synth.tune.validate expects structural|region|design",""};
+  labels["tune_profile"]=profile;
+  labels["tune_validate"]=validate;
+  labels["tune_file"]=synth_set(opts,"tune.file","");
+  labels["tune_export"]=synth_set(opts,"tune.export","");
+  labels["tune_attempts"]=synth_set(opts,"tune.attempts","24");
+  labels["tune_time_ms"]=synth_set(opts,"tune.time_ms","60000");
+  if (!opts.workdir.empty() && !opts.workdir_scratch) labels["tune_dir"]=(fs::path(opts.workdir)/"synth_tune").string();
+  labels["tune_persist"] = opts.incremental ? "true":"false";
   // No satopt labels: satopt runs only in the compile graph pipeline, and a
   // mapper maps what compile produced.
 }
@@ -873,6 +890,7 @@ void check_known_set_passes(const Options& opts) {
     // The sim.* command namespace owns DOTTED flags (sim.tune.dirty): route every
     // `sim.`-prefixed key whole, never split at its last dot into a pass
     // `sim.tune` that does not exist.
+    if (key.starts_with("synth.")) { pass="synth"; flag=key.substr(6); }
     if (key.starts_with("sim.")) {
       pass = "sim";
       flag = key.substr(4);

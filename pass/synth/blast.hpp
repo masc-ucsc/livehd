@@ -20,6 +20,7 @@
 #include "node_util.hpp"
 #include "pass_partition.hpp"
 #include "source_state.hpp"
+#include "synth_policy.hpp"
 
 namespace livehd::synth {
 namespace blast_gu = livehd::graph_util;
@@ -82,6 +83,10 @@ struct Blast_options {
       {false, false, false}
   };
   bool verbose = false;
+  // Targeted CLI choices beat source hints; global defaults do not.
+  bool source_adder = true, source_multiplier = true, source_barrel = true;
+  bool usyn = false;
+
 
   // Snapshot source semantics independently of mapping. Expanded memories use
   // their structural memory_module attribute; other special scopes are explicit.
@@ -184,9 +189,24 @@ public:
 };
 
 template <class Ops, class ReadBit, class Slots, class Refuse, class RefuseShift>
-void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops, const ReadBit& abc_bit, const Blast_options& opts_,
+void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops, const ReadBit& abc_bit, const Blast_options& defaults,
                 const livehd::partition::Region_body& rb, const absl::flat_hash_set<hhds::Node_class>& region, const Refuse& refuse,
                 const RefuseShift& refuse_shift_amount) {
+  auto opts_ = defaults;
+  if (auto a=n.attr(livehd::attrs::synth_policy);a.has()) {
+    const auto p=livehd::synth_attr::read(a.get());
+    const auto adder=livehd::synth_attr::get(p,"adder");
+    if (opts_.source_adder && !adder.empty() && adder!="auto") {
+      opts_.adder=*arith::parse_adder_kind(adder);
+      opts_.sum_adder.reset();opts_.comparator_adder.reset();opts_.multiplier_adder.reset();
+    }
+    const auto mult=livehd::synth_attr::get(p,"multiplier");
+    if (opts_.source_multiplier && !mult.empty() && mult!="auto") opts_.multiplier=*arith::parse_mult_kind(mult);
+    const auto barrel=livehd::synth_attr::get(p,"barrel");
+    if (opts_.source_barrel && !barrel.empty() && barrel!="auto") opts_.reverse_barrel=barrel=="reverse";
+    if (auto b=p.find("block_size");b!=p.end()) opts_.block_size=std::stoi(b->second.value);
+    if (opts_.usyn && p.contains("abc")) refuse(n,"synth-abc-usyn","unsupported","synth.abc cannot be honored by USYN","remove synth.abc or select the ABC mapper",hhds::Pin_class{},std::string_view{});
+  }
   namespace gu             = livehd::graph_util;
   using Bit                = decltype(ops.zero());
   const auto op            = gu::type_op_of(n);
@@ -556,7 +576,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       operands.push_back(std::move(operand));
     }
     const int  bs   = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(out_bits);
-    const auto kind = opts_.sum_adder && out_bits >= opts_.sum_adder_min_width ? *opts_.sum_adder : opts_.adder;
+    const auto kind = out_bits >= opts_.sum_adder_min_width ? opts_.sum_adder.value_or(opts_.adder) : opts_.adder;
     auto       acc  = arith::build_sum(kind, bs, ops, operands, out_bits);
     for (int b = 0; b < out_bits; ++b) {
       slots[b] = acc[b];
@@ -590,7 +610,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
           av[i] = abc_eff_bit(a, i);
           bv[i] = abc_eff_bit(b, i);
         }
-        const auto kind = opts_.comparator_adder && w >= opts_.comparator_adder_min_width ? *opts_.comparator_adder : opts_.adder;
+        const auto kind = w >= opts_.comparator_adder_min_width ? opts_.comparator_adder.value_or(opts_.adder) : opts_.adder;
         auto pair = op == Ntype_op::LT ? arith::build_lt(kind, bs, ops, av, bv, uns) : arith::build_lt(kind, bs, ops, bv, av, uns);
         result    = ops.and_(result, pair);
       }
