@@ -486,7 +486,11 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       }
       const auto start    = std::chrono::steady_clock::now();
       uint32_t   attempts = 0;
+      uint32_t   rejects  = 0;  // consecutive non-improving candidates
       for (const auto& candidate : candidates) {
+        if (options.tune_patience != 0 && rejects >= options.tune_patience) {
+          break;
+        }
         if (attempts++ >= options.tune_attempts
             || (options.tune_time_ms
                 && std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count()
@@ -509,6 +513,7 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
         const auto used        = trial_work.consumed;
         work.absorb(trial_work);
         const bool keep = trial.region && trial.report.after.total() < selected.report.after.total();
+        rejects         = keep ? 0 : rejects + 1;
         options.tune_store->history(std::format(
             "{{\"region\":{},\"candidate\":{},\"kept\":{},\"native_logic\":{},\"validation\":\"structural\",\"time_ms\":{}}}",
             synth_attr::quote(rb.module_name),

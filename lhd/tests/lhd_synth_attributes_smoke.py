@@ -177,6 +177,26 @@ proof, _ = run("lec", "--impl", "lg:" + str(work / "cmul-net"), "--ref", cmul,
                "--workdir", work / "cmul-proof", "--set", "formal.timeout=10")
 assert proof["lec"]["verdict"] == "proven", proof
 
+# Exploration ranks regions and stops early: a big adder and a small one. With the
+# area objective every alternative loses to rca, so patience=1 must stop after the
+# first reject, and a high share floor must skip the small region entirely.
+def explore(tag, *settings):
+    src = work / f"rank_{tag}.prp"
+    src.write_text(f'''pub comb rank_{tag}::[timecheck=false](a:U64,b:U64,c:U9,d:U9)->(x:U64,y:U9) {{
+ x=(a+b)#[0..=63]
+ y=(c+d)#[0..=8]
+}}''')
+    doc, _ = synth(f"rank_{tag}", src, "synth.tune.profile=on", *settings)
+    return sum(r["ware_trials"] for r in doc["qor"]["abc"]["regions"])
+
+full = explore("full", "synth.tune.patience=0", "synth.tune.min_share=0")
+assert full > 2, full
+assert explore("patient", "synth.tune.patience=1", "synth.tune.min_share=0") < full
+assert explore("share", "synth.tune.patience=0", "synth.tune.min_share=0.5") < full
+bad_doc, bad_log = run("synth", work / "rank_full.prp", "--top", "rank_full", "--set", "synth.liberty=" + lib,
+                      "--set", "synth.tune.min_share=2", ok=False)
+assert "min_share" in (json.dumps(bad_doc) + bad_log), (bad_doc, bad_log)
+
 inline = work / "inline.prp"
 inline.write_text('''comb lane::[synth.color="inside"](a:U8,b:U8)->(y:U8) { y=(a+b)#[0..=7] }
 pub comb inline::[timecheck=false](a:U8,b:U8,c:U8)->(x:U8,y:U8) {

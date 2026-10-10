@@ -745,12 +745,18 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"multiplier","auto",Synth_set_option::Kind::file,"shared default: auto|array|tree|csa|tdm"},
     {"barrel","auto",Synth_set_option::Kind::file,"shared default: auto|log|reverse"},
     {"block_size","0",Synth_set_option::Kind::integer,"shared CSKA/CLA block width; 0 derives it from width"},
+    {"partition","auto",Synth_set_option::Kind::file,
+     "auto|fine|coarse: region granularity, independent of the mapper. fine cuts at wide arithmetic/shifters/compares/muxes "
+     "and extracts ware modules (small ABC regions); coarse keeps register-to-register cones and extracts nothing. "
+     "auto = the mapper's own profile (abc: fine, usyn: coarse). Explicit color.* settings still win"},
     {"tune.profile","auto",Synth_set_option::Kind::file,"auto replays compatible decisions; on explicitly explores; off ignores stored decisions"},
     {"tune.validate","structural",Synth_set_option::Kind::file,"structural|region|design: validation required before storing a tuned choice"},
     {"tune.file","",Synth_set_option::Kind::file,"portable synthesis decision JSON to replay"},
     {"tune.export","",Synth_set_option::Kind::file,"export compatible synthesis decisions as versioned JSON"},
     {"tune.attempts","24",Synth_set_option::Kind::integer,"maximum arithmetic candidates per region during explicit profiling"},
     {"tune.time_ms","60000",Synth_set_option::Kind::integer,"soft profiling time budget per region"},
+    {"tune.patience","3",Synth_set_option::Kind::integer,"stop exploring a region after this many consecutive non-improving candidates (0 = never)"},
+    {"tune.min_share","0.02",Synth_set_option::Kind::file,"skip regions below this fraction of the mapped area (area objective); regions are explored most-critical / largest first"},
     {    "mapper",
      "abc",  Synth_set_option::Kind::mapper,
      "abc|usyn: ABC synthesis (pass.abc), or unate synthesis (pass.usyn: a domino-gate LUT cover of every region, "

@@ -1791,22 +1791,63 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
     }
   } restore{*this, saved_options, saved_cache};
   absl::flat_hash_set<std::string> visited;
+  // Explore the regions that can move the result first: with a timing target a
+  // region's weight is its stitched path delay over the worst path; with an area
+  // objective it is its share of the mapped gates. A region under the area
+  // share floor is not worth a trial (each trial re-times the whole design).
+  double total_gates = 0;
+  for (const auto& q : qor_) {
+    total_gates += std::max(q.gates, 0);
+  }
+  const auto gates_of = [&](std::string_view module) {
+    for (const auto& q : qor_) {
+      if (q.module == module) {
+        return static_cast<double>(std::max(q.gates, 0));
+      }
+    }
+    return 0.0;
+  };
+  size_t explored = 0, skipped_share = 0, stopped_patience = 0, trials_total = 0;
   while (true) {
-    auto next = std::find_if(ware_regions_.begin(), ware_regions_.end(), [&](const auto& w) {
-      if (visited.contains(w.rb.module_name)) {
-        return false;
+    auto   next      = ware_regions_.end();
+    double best_rank = -1.0;
+    for (auto it = ware_regions_.begin(); it != ware_regions_.end(); ++it) {
+      const auto& cand = *it;
+      if (visited.contains(cand.rb.module_name)) {
+        continue;
       }
-      const float target = ware_delay_target(w.options.delay);
-      if (target <= 0) {
-        return true;
+      const float target = ware_delay_target(cand.options.delay);
+      double      rank   = 0.0;
+      if (target > 0) {
+        const auto pd = score.region_path_delay.find(cand.rb.module_name);
+        if (pd == score.region_path_delay.end() || score.delays.empty()
+            || pd->second < std::min(target, score.delays.front()) - 0.001f) {
+          continue;  // off the critical path: nothing to gain
+        }
+        rank = static_cast<double>(pd->second) / std::max(1e-9, static_cast<double>(score.delays.front()));
+      } else {
+        const double share = total_gates > 0 ? gates_of(cand.rb.module_name) / total_gates : 1.0;
+        if (startup_opts_.tune_min_share > 0 && share < startup_opts_.tune_min_share) {
+          visited.insert(cand.rb.module_name);  // counted once, never revisited
+          ++skipped_share;
+          std::print("[pass.abc] ware region='{}' skipped: {:.2f}% of mapped area < min_share {:.2f}%\n",
+                     cand.rb.module_name,
+                     100.0 * share,
+                     100.0 * startup_opts_.tune_min_share);
+          continue;
+        }
+        rank = share;
       }
-      const auto it = score.region_path_delay.find(w.rb.module_name);
-      return it != score.region_path_delay.end() && !score.delays.empty()
-             && it->second >= std::min(target, score.delays.front()) - 0.001f;
-    });
+      if (rank > best_rank + 1e-12 || (std::abs(rank - best_rank) <= 1e-12 && next != ware_regions_.end()
+                                       && cand.rb.module_name < next->rb.module_name)) {
+        best_rank = rank;
+        next      = it;
+      }
+    }
     if (next == ware_regions_.end()) {
       break;
     }
+    ++explored;
     auto&       w      = *next;
     const auto& name   = w.rb.module_name;
     const float target = ware_delay_target(w.options.delay);
@@ -1880,7 +1921,13 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
     auto       selected   = w.options;
     const auto tune_start = std::chrono::steady_clock::now();
     uint32_t   attempts   = 0;
+    uint32_t   rejects    = 0;  // consecutive non-improving candidates
     for (const auto& candidate : candidates) {
+      if (startup_opts_.tune_patience != 0 && rejects >= startup_opts_.tune_patience) {
+        ++stopped_patience;
+        std::print("[pass.abc] ware region='{}' stopped: {} consecutive candidates did not improve\n", name, rejects);
+        break;
+      }
       if (attempts++ >= startup_opts_.tune_attempts
           || (startup_opts_.tune_time_ms
               && std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - tune_start).count()
@@ -1988,6 +2035,8 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
                         trial_q.delay,
                         trial_ms));
       }
+      ++trials_total;
+      rejects = keep ? 0 : rejects + 1;
       if (keep) {
         selected = candidate.options;
         score    = std::move(trial_score);
@@ -2028,6 +2077,12 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
           selected.reverse_barrel ? "reverse" : "log");
     }
   }
+  std::print("[pass.abc] ware explore: {} region(s) ranked, {} explored, {} below min_share, {} stopped by patience, {} trial(s)\n",
+             ware_regions_.size(),
+             explored,
+             skipped_share,
+             stopped_patience,
+             trials_total);
   if (startup_opts_.tune_store) {
     startup_opts_.tune_store->save();
   }

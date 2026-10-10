@@ -15,6 +15,7 @@ struct Design_options {
   std::shared_ptr<synth::Tune_store> tune_store;
   std::string                        tune_profile = "auto", tune_validate = "structural";
   uint32_t                           tune_attempts   = 24;
+  uint32_t                           tune_patience   = 3;  // consecutive rejects before a region stops (0 = never)
   uint64_t                           tune_time_ms    = 60000;
   bool                               auto_multiplier = false, auto_barrel = true;
   std::string                        tune_context;

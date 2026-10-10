@@ -67,6 +67,8 @@ struct Driver_options {
   std::string                 tune_profile = "auto", tune_validate = "structural";
   uint32_t                    tune_attempts = 24;
   uint64_t                    tune_time_ms  = 60000;
+  uint32_t                    tune_patience = 3;      // consecutive rejects before a region stops (0 = never)
+  double                      tune_min_share = 0.02;  // skip regions under this share of the mapped area
   std::shared_ptr<Tune_store> tune_store;
 
   std::string                           library;  // Liberty .lib

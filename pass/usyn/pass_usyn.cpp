@@ -295,6 +295,7 @@ void Pass_usyn::setup() {
   m.add_label_optional("tune_dir", "internal workdir synthesis tune root", "");
   m.add_label_optional("tune_persist", "internal lhd.incremental gate", "true");
   m.add_label_optional("tune_attempts", "internal synth.tune.attempts", "24");
+  m.add_label_optional("tune_patience", "internal synth.tune.patience", "3");
   m.add_label_optional("tune_time_ms", "internal synth.tune.time_ms", "60000");
   m.add_label_optional("barrel", "auto|log|reverse shared barrel architecture", "auto");
   m.add_label_optional("block_size", "Shared CSKA/CLA width (alias of adder_block)", "");
@@ -451,6 +452,7 @@ void Pass_usyn::work(Eprp_var& var) {
   options.design.tune_profile  = std::string(var.get_stage("tune_profile", "auto"));
   options.design.tune_validate = std::string(var.get_stage("tune_validate", "structural"));
   options.design.tune_attempts = static_cast<uint32_t>(std::stoul(std::string(var.get_stage("tune_attempts", "24"))));
+  options.design.tune_patience = static_cast<uint32_t>(std::stoul(std::string(var.get_stage("tune_patience", "3"))));
   options.design.tune_time_ms  = std::stoull(std::string(var.get_stage("tune_time_ms", "60000")));
   options.design.tune_store    = std::make_shared<livehd::synth::Tune_store>(std::string(var.get_stage("tune_dir", "")),
                                                                           std::string(var.get_stage("tune_file", "")),

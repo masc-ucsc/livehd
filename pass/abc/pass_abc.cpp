@@ -220,6 +220,8 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("tune_persist", "internal lhd.incremental gate", "true");
   m.add_label_optional("tune_attempts", "internal synth.tune.attempts", "24");
   m.add_label_optional("tune_time_ms", "internal synth.tune.time_ms", "60000");
+  m.add_label_optional("tune_patience", "internal synth.tune.patience", "3");
+  m.add_label_optional("tune_min_share", "internal synth.tune.min_share", "0.02");
   m.add_label_optional("barrel", "auto|log|reverse: barrel mux stage order; explicit selection disables trials", "auto");
   m.add_label_optional("block_size", "CSKA skip-block / CLA lookahead-group width (0 => auto: W/4|W/2|W)", "0");
   m.add_label_optional("threads",
@@ -953,6 +955,8 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   opts.ware_trials       = opts.tune_profile == "on";
   opts.tune_attempts     = static_cast<uint32_t>(std::stoul(std::string(var.get("tune_attempts", "24"))));
   opts.tune_time_ms      = std::stoull(std::string(var.get("tune_time_ms", "60000")));
+  opts.tune_patience     = static_cast<uint32_t>(std::stoul(std::string(var.get("tune_patience", "3"))));
+  opts.tune_min_share    = std::stod(std::string(var.get("tune_min_share", "0.02")));
   opts.tune_store        = std::make_shared<livehd::synth::Tune_store>(std::string(var.get("tune_dir", "")),
                                                                 std::string(var.get("tune_file", "")),
                                                                 std::string(var.get("tune_export", "")),

@@ -353,7 +353,13 @@ void synth_command(Options& opts, Result& res) {
     // The coloring profile follows the mapper: ABC wants the stop_* cuts (small
     // regions), the unate/domino mapper wants register-to-register colors.
     // Merged BEFORE the user's sets so an explicit pass.color.synth.* wins.
-    labels["mapper"] = std::string{mapper->color_profile};
+    // synth.partition decouples the region granularity from the mapper: the same
+    // coloring profile can be requested for abc and usyn, so a QoR difference is
+    // attributable to the mapper and not to a different partition.
+    const auto partition = synth_set(opts, "partition", "auto");
+    labels["mapper"]     = partition == "coarse" ? std::string{"usyn"}
+                           : partition == "fine" ? std::string{"abc"}
+                                                 : std::string{mapper->color_profile};
     merge_color_sets(opts, labels);
     if (labels["alg"] != "synth") {
       throw Lhd_error{"usage",

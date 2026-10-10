@@ -784,6 +784,16 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
   labels["tune_export"]   = synth_set(opts, "tune.export", "");
   labels["tune_attempts"] = synth_set(opts, "tune.attempts", "24");
   labels["tune_time_ms"]  = synth_set(opts, "tune.time_ms", "60000");
+  labels["tune_patience"] = synth_set(opts, "tune.patience", "3");
+  {
+    const auto share = synth_set(opts, "tune.min_share", "0.02");
+    char*      end   = nullptr;
+    const auto v     = std::strtod(share.c_str(), &end);
+    if (end == share.c_str() || *end != '\0' || v < 0.0 || v > 1.0) {
+      throw Lhd_error{"usage", std::format("synth.tune.min_share expects a fraction in [0,1], got '{}'", share), ""};
+    }
+    labels["tune_min_share"] = share;
+  }
   if (!opts.workdir.empty() && !opts.workdir_scratch) {
     labels["tune_dir"] = (fs::path(opts.workdir) / "synth_tune").string();
   }
@@ -1019,6 +1029,10 @@ void check_known_set_passes(const Options& opts) {
         throw Lhd_error{"usage",
                         std::format("synth.mapper expects abc|usyn, got '{}'", value),
                         value == "synth" ? "the unate-synthesis mapper was renamed: use --set synth.mapper=usyn" : ""};
+      }
+      if (flag == "partition" && value != "auto" && value != "fine" && value != "coarse") {
+        throw Lhd_error{"usage", std::format("synth.partition expects auto|fine|coarse, got '{}'", value),
+                        "fine = the abc profile, coarse = the usyn profile; auto follows synth.mapper"};
       }
       if (opt->kind == Synth_set_option::Kind::integer) {
         unsigned parsed      = 0;
