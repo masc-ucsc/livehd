@@ -307,6 +307,65 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0, entry=Non
     # status are written to project-local evidence under a name built from the
     # CONFIGURED IDENTITY and the digest of the bytes that ran, so two
     # configurations sharing a payload do not overwrite each other.
+    saw_rundirect_ok = False
+    tail = err.strip().splitlines()
+    if tail:
+        m = re.match(r"^([\d.]+)\s+(\d+)$", tail[-1])
+        if m:
+            row["rss_kb"] = m.group(2)
+            tail = tail[:-1]
+    for line in out.splitlines():
+        if line.startswith("SHAPE "):
+            for kv in line[6:].split():
+                k, _, v = kv.partition("=")
+                if k in row:
+                    row[k] = v
+        elif line.startswith("VERDICT\t"):
+            parts = line.split("\t")
+            row["verdict"] = parts[1].strip('"')
+            if len(parts) > 2:
+                row["reason"] = parts[2] + (": " + parts[3].rstrip('"') if len(parts) > 3 else "")
+        elif line.startswith("CHECK_MS "):
+            row["check_ms"] = line.split()[1]
+        elif line.startswith("STEP1_MS "):
+            row["step1_ms"] = line.split()[1]
+        elif line.startswith("RUN_MS "):
+            row["run_ms"] = line.split()[1]
+        elif line.startswith("RUNDIRECT\t"):
+            parts = line.split("\t")
+            if parts[1] != "OK":
+                row["verdict"] = "RUN_REFUSED"
+                row["reason"] = parts[2] if len(parts) > 2 else ""
+            else:
+                saw_rundirect_ok = True
+                row["cycles"] = parts[2] if len(parts) > 2 else ""
+    # A VERDICT line is printed before execution finishes, so an ACCEPTED that
+    # is followed by a crash, a truncated run, or a missing RUNDIRECT would
+    # otherwise survive into the TSV as a pass. Require the process to have
+    # exited 0 AND every execution marker to be present with the requested
+    # cycle count.
+    if row["verdict"] == "ACCEPTED":
+        missing = [k for k in ("check_ms", "step1_ms", "run_ms") if not row[k]]
+        if exit_code != 0:
+            row["verdict"] = "LEAN_ERROR"
+            row["reason"] = (f"probe exited {exit_code} after printing ACCEPTED"
+                             + (" | " + " | ".join(t[:120] for t in tail[:2]) if tail else ""))
+        elif missing or not saw_rundirect_ok:
+            row["verdict"] = "SIM_INCOMPLETE"
+            row["reason"] = ("missing " + ",".join(missing + ([] if saw_rundirect_ok else ["RUNDIRECT/OK"])))
+        elif str(row["cycles"]) != str(cycles):
+            row["verdict"] = "SIM_INCOMPLETE"
+            row["reason"] = f"ran {row['cycles']} cycle(s), expected {cycles}"
+    if row["verdict"] == "NO_CERT" and tail:
+        row["verdict"] = "LEAN_ERROR"
+        row["reason"] = " | ".join(t[:200] for t in tail[:3])
+    # WRITTEN AFTER THE OUTPUT IS PARSED.
+    #
+    # This block sat immediately after `run_timed`, so the verdict it recorded
+    # was whatever `row` held before the probe's output had been read --
+    # measured: a run whose TSV row says ACCEPTED left an evidence file saying
+    # NO_CERT. Evidence that contradicts the row it describes is worse than no
+    # evidence.
     # HASH THE EXACT BYTES THAT ARE SAVED.
     #
     # The previous version hashed `out + err` and then wrote a file with a
@@ -367,58 +426,6 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0, entry=Non
     else:
         row["log_sha256"] = hashlib.sha256(
             (out + err).encode(errors="replace")).hexdigest()
-    saw_rundirect_ok = False
-    tail = err.strip().splitlines()
-    if tail:
-        m = re.match(r"^([\d.]+)\s+(\d+)$", tail[-1])
-        if m:
-            row["rss_kb"] = m.group(2)
-            tail = tail[:-1]
-    for line in out.splitlines():
-        if line.startswith("SHAPE "):
-            for kv in line[6:].split():
-                k, _, v = kv.partition("=")
-                if k in row:
-                    row[k] = v
-        elif line.startswith("VERDICT\t"):
-            parts = line.split("\t")
-            row["verdict"] = parts[1].strip('"')
-            if len(parts) > 2:
-                row["reason"] = parts[2] + (": " + parts[3].rstrip('"') if len(parts) > 3 else "")
-        elif line.startswith("CHECK_MS "):
-            row["check_ms"] = line.split()[1]
-        elif line.startswith("STEP1_MS "):
-            row["step1_ms"] = line.split()[1]
-        elif line.startswith("RUN_MS "):
-            row["run_ms"] = line.split()[1]
-        elif line.startswith("RUNDIRECT\t"):
-            parts = line.split("\t")
-            if parts[1] != "OK":
-                row["verdict"] = "RUN_REFUSED"
-                row["reason"] = parts[2] if len(parts) > 2 else ""
-            else:
-                saw_rundirect_ok = True
-                row["cycles"] = parts[2] if len(parts) > 2 else ""
-    # A VERDICT line is printed before execution finishes, so an ACCEPTED that
-    # is followed by a crash, a truncated run, or a missing RUNDIRECT would
-    # otherwise survive into the TSV as a pass. Require the process to have
-    # exited 0 AND every execution marker to be present with the requested
-    # cycle count.
-    if row["verdict"] == "ACCEPTED":
-        missing = [k for k in ("check_ms", "step1_ms", "run_ms") if not row[k]]
-        if exit_code != 0:
-            row["verdict"] = "LEAN_ERROR"
-            row["reason"] = (f"probe exited {exit_code} after printing ACCEPTED"
-                             + (" | " + " | ".join(t[:120] for t in tail[:2]) if tail else ""))
-        elif missing or not saw_rundirect_ok:
-            row["verdict"] = "SIM_INCOMPLETE"
-            row["reason"] = ("missing " + ",".join(missing + ([] if saw_rundirect_ok else ["RUNDIRECT/OK"])))
-        elif str(row["cycles"]) != str(cycles):
-            row["verdict"] = "SIM_INCOMPLETE"
-            row["reason"] = f"ran {row['cycles']} cycle(s), expected {cycles}"
-    if row["verdict"] == "NO_CERT" and tail:
-        row["verdict"] = "LEAN_ERROR"
-        row["reason"] = " | ".join(t[:200] for t in tail[:3])
     return row
 
 

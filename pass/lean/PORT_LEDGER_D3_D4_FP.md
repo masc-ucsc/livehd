@@ -304,3 +304,60 @@ PROVEN, and no accepted obligation may route through them.
 | D3 `Defs` split | **derived from master's sources, staged** (§7) |
 | anything elaborated or installed | **no — the live library is untouched** |
 | activation | waits for the queue handles to be terminal, with final fingerprints preserved |
+
+## 10. D3 `Defs` split: built and audited in isolation
+
+The split is no longer "staged, unverified". All six modules compile under the
+pinned 4.31.0 toolchain in an isolated prefix, and the public interface is
+proved unchanged.
+
+### 10.1 The build
+
+| module | exit | wall | peak RSS |
+| --- | ---: | ---: | ---: |
+| `CompileOpDefs` | 0 | 1.17 s | 489,628 kB |
+| `CompileGraphDefs` | 0 | 0.81 s | 483,056 kB |
+| `CompileDesignDefs` | 0 | 0.85 s | 483,544 kB |
+| `CompileOp` (wrapper) | 0 | 20.81 s | 6,773,196 kB |
+| `CompileGraph` (wrapper) | 0 | 19.42 s | 6,726,636 kB |
+| `CompileDesign` (wrapper) | 0 | 12.93 s | 6,757,984 kB |
+
+One warning, `This simp argument is unused: hc` in `CompileDesign` at 283:26 —
+present in the source and not introduced by the split.
+
+**~480 MB without Mathlib against ~6.75 GB with it: 14×.** D3's own measurement
+was 6,027,948 kB per probe; this reproduces it on master's clock-aware sources,
+which is the entire reason the split is being carried. Against the standing
+~20 GB aggregate sweep budget, that is the difference between a probe that fits
+and one that does not.
+
+### 10.2 The interface is unchanged — audited, not asserted
+
+A generated probe `#check @…` and `#print axioms …` for **all 45 public
+theorems** of the three modules, run twice: once against the isolated split,
+once against the live modules. The two outputs are **byte-identical**.
+
+| axiom set | theorems |
+| --- | ---: |
+| `[propext]` | 19 |
+| `[propext, Quot.sound]` | 15 |
+| `[propext, Classical.choice, Quot.sound]` | 10 |
+
+Standard axioms only. **No `sorryAx`, no `native_decide`.** The first probe
+guessed that every theorem lived in `Compiler.*` and five names did not
+resolve — the probe was wrong, not the split; it now tracks `namespace`/`end`
+and finds them in `Compiler` and `Compiler.Residual`.
+
+### 10.3 The live library is untouched
+
+All **25** recorded `LeanSemanticPrimitives` oleans still match their 16-hex
+digests and sizes after every isolated build. `lean` invoked directly writes
+only where `-o` points; it is `lake build` that would write the live tree.
+
+### 10.4 What this does not establish
+
+The split is a **memory and layering** change: the same definitions, the same
+theorems, the same axioms. It is not new proof content, it does not touch the
+clock/reset schema it was derived from, and it has not been installed into the
+live tree — activation waits for the replay queues to be terminal and
+fingerprinted.

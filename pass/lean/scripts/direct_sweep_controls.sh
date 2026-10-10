@@ -316,7 +316,23 @@ fails = []
 def ok(n, c, det=""):
     print(f"{'ok' if c else 'MISS'}: {n}{(' -- ' + det) if det and not c else ''}")
     if not c: fails.append(n)
+# THE EVIDENCE MUST AGREE WITH THE ROW IT DESCRIBES. Comparing the json's
+# verdict against itself -- which the first version did, by reading `want` out
+# of the same file -- is a tautology, and it passed while the evidence said
+# NO_CERT for a row that said ACCEPTED.
+tsv = os.path.join(os.path.dirname(os.path.dirname(j)),
+                   os.path.basename(os.path.dirname(j))[:-len(".evidence")])
+rows = [l.rstrip("\n").split("\t") for l in open(tsv)] if os.path.exists(tsv) else []
+hdr = rows[0] if rows else []
+row = next((dict(zip(hdr, r)) for r in rows[1:]
+            if dict(zip(hdr, r)).get("case") == d.get("case")), {})
+ok("ev_tsv_row_found", bool(row), tsv)
+ok("ev_verdict_matches_row", bool(row) and d.get("verdict") == row.get("verdict"),
+   f"evidence {d.get('verdict')} vs row {row.get('verdict')}")
 ok("ev_verdict_is_" + want, d.get("verdict") == want, str(d.get("verdict")))
+for k in ("ran_sha256", "probe_sha256"):
+    ok(f"ev_{k}_matches_row", bool(row) and d.get(k) == row.get(k),
+       f"evidence {str(d.get(k))[:16]} vs row {str(row.get(k))[:16]}")
 for which in ("stdout", "stderr"):
     f = os.path.join(base, d[f"{which}_file"])
     ok(f"ev_{which}_retained", os.path.exists(f), f)
@@ -351,7 +367,7 @@ echo "--- evidence from a SUCCESSFUL run (needs Lean) ---"
    --out "$WORK/ev.tsv" --jobs 1 --cycles 2 --timeout 900 > "$WORK/ev.run.log" 2>&1)
 J=$(ls "$WORK"/ev.tsv.evidence/*.json 2>/dev/null | head -1)
 if [ -n "$J" ]; then
-  V=$(python3 -I -c "import json,sys;print(json.load(open(sys.argv[1])).get('verdict'))" "$J")
+  V=$(awk -F'\t' 'NR==1{for(i=1;i<=NF;i++) if($i=="verdict") c=i} NR==2{print $c}' "$WORK/ev.tsv")
   ev_check x "$J" "$V" || rc=1
 else
   echo "MISS: a successful run retained no evidence json"; rc=1
