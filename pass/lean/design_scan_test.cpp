@@ -2454,5 +2454,177 @@ TEST(DesignIoMeta, LegacyEmissionAlsoOutlivesTheGraph) {
   EXPECT_NE(out.str().find("legacylife"), std::string::npos);
   EXPECT_FALSE(io_meta_json(build_io_meta(design, cert)).empty());
 }
+
+// WRITE-PORT COLLISION ORDERING, from the real scanner.
+//
+// Every memory fixture so far has ONE write port, so the `fwd` matrix -- whose
+// bit (r * n_writes + w) says "read r sees write w's new data" -- was only ever
+// exercised in its 1x1 case. Two writes and two reads is the smallest shape
+// where two things become observable:
+//
+//   * what happens when both writes hit the SAME address in one step. The
+//     chain applies writes in ordinal order, so the LATER port wins;
+//   * that each read has its OWN forwarding row, so two reads of the same
+//     address can legitimately disagree.
+//
+// `fwd = 0b0110` is chosen to make the second one visible: read 0 is forwarded
+// write 1 only, read 1 is forwarded write 0 only.
+TEST(DesignScanClocks, TwoWriteTwoReadCollisionValueOracle) {
+  auto&    lib = livehd::Hhds_graph_library::instance("lgdb_clk_mem_collide");
+  auto     io  = lib.create_io("colfix");
+  uint32_t pid = 1;
+  for (const char* n : {"clk", "we0", "we1", "re0", "re1"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 1);
+  }
+  for (const char* n : {"wa0", "wa1", "ra0", "ra1"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 2);
+  }
+  for (const char* n : {"wd0", "wd1"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 8);
+  }
+  io->add_output("rd0", 1);
+  io->set_bits("rd0", 8);
+  io->add_output("rd1", 2);
+  io->set_bits("rd1", 8);
+  auto       g       = io->create_graph();
+  auto       mem     = create_typed_node(*g, Ntype_op::Memory);
+  const auto mstride = static_cast<uint32_t>(Ntype::Memory_port_stride);
+  auto       sink    = [&](std::string_view n, uint32_t port) {
+    return mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + port * mstride);
+  };
+  auto konst = [&](std::string_view n, int64_t v, uint32_t port = 0) {
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(v)).connect_sink(sink(n, port));
+  };
+  konst("bits", 8);
+  konst("size", 4);
+  konst("type", 1);     // synchronous reads
+  konst("wensize", 1);
+  konst("posclk", 1);
+  // fwd bit (r * n_writes + w): read 0 <- write 1, read 1 <- write 0.
+  konst("fwd", 0b0110);
+  // ports 0,1 = writes; ports 2,3 = synchronous reads.
+  konst("rdport", 0, 0);
+  konst("rdport", 0, 1);
+  konst("rdport", 1, 2);
+  konst("rdport", 1, 3);
+  const char* waddr[] = {"wa0", "wa1"};
+  const char* wdata[] = {"wd0", "wd1"};
+  const char* wen[]   = {"we0", "we1"};
+  for (uint32_t w = 0; w < 2; ++w) {
+    g->get_input_pin(waddr[w]).connect_sink(sink("addr", w));
+    g->get_input_pin(wdata[w]).connect_sink(sink("din", w));
+    g->get_input_pin(wen[w]).connect_sink(sink("enable", w));
+    g->get_input_pin("clk").connect_sink(sink("clock_pin", w));
+  }
+  const char* raddr[] = {"ra0", "ra1"};
+  const char* ren[]   = {"re0", "re1"};
+  for (uint32_t r = 0; r < 2; ++r) {
+    g->get_input_pin(raddr[r]).connect_sink(sink("addr", 2 + r));
+    g->get_input_pin(ren[r]).connect_sink(sink("enable", 2 + r));
+    g->get_input_pin("clk").connect_sink(sink("clock_pin", 2 + r));
+    mem.create_driver_pin(2 + r).connect_sink(g->get_output_pin(r == 0 ? "rd0" : "rd1"));
+    set_bits(mem.create_driver_pin(2 + r), 8);
+  }
+
+  DesignScan design;
+  try {
+    design = scan_design(*g, {});
+  } catch (const std::exception& e) {
+    GTEST_SKIP() << "fixture refused by the scanner: " << e.what();
+  }
+  const auto cert = build_certificate(design, {});
+  ASSERT_EQ(cert.memories.size(), 1u);
+  // TWO synthetic read registers. If the scan produced one, the per-read
+  // forwarding rows below would be testing a single shared value.
+  ASSERT_EQ(cert.flops.size(), 2u) << "expected one read register per synchronous read port";
+
+  const char* path = std::getenv("LEAN_COLLIDE_FIXTURE");
+  if (path == nullptr) {
+    GTEST_SKIP() << "set LEAN_COLLIDE_FIXTURE to emit the Lean oracle";
+  }
+  std::ofstream out(path);
+  emit_design_cert(design, cert, out);
+
+  auto ordinal_of = [&](std::string_view name) -> size_t {
+    for (size_t i = 0; i < design.inputs.size(); ++i) {
+      if (design.inputs[i].name == name) {
+        return i;
+      }
+    }
+    ADD_FAILURE() << "no input " << name;
+    return 0;
+  };
+  struct In { const char* name; int value; };
+  auto inputs = [&](std::initializer_list<In> set) {
+    std::map<size_t, int> by;
+    for (const auto& v : set) {
+      by[ordinal_of(v.name)] = v.value;
+    }
+    std::ostringstream o;
+    for (size_t k = 0; k < design.inputs.size(); ++k) {
+      const auto it = by.find(k);
+      o << (k ? ", " : "") << "mk_bv " << design.inputs[k].width << " " << (it != by.end() ? it->second : 0);
+    }
+    return o.str();
+  };
+  const std::string fire  = "#[true]";
+  const std::string quiet = "#[false]";
+  // Distinguishable cells, so a read from the wrong address shows.
+  const char* st = "(⟨#[mk_bv 8 99, mk_bv 8 99], "
+                   "#[fun a => if a = 0 then mk_bv 8 11 else if a = 1 then mk_bv 8 22 "
+                   "else if a = 2 then mk_bv 8 33 else mk_bv 8 44]⟩ : RuntimeState)";
+
+  out << "\n-- COLLISION: both writes target address 1 in one step.\n"
+      << "-- The chain applies writes in ORDINAL order, so write 1 (the later\n"
+      << "-- port) wins. If ordering were reversed the cell would read 55.\n";
+  const auto both = inputs({{"we0", 1}, {"we1", 1}, {"wa0", 1}, {"wa1", 1},
+                            {"wd0", 55}, {"wd1", 77}, {"re0", 1}, {"re1", 1},
+                            {"ra0", 1}, {"ra1", 1}});
+  out << "example : ((compileAndRun colfix_designCert " << fire << " #[" << both << "] " << st
+      << ").nextState.mems[0]! (1 : Int)) = mk_bv 8 77 := by native_decide\n";
+  out << "-- only the LOWER-priority write enabled: its value stands.\n";
+  const auto only0 = inputs({{"we0", 1}, {"we1", 0}, {"wa0", 1}, {"wa1", 1},
+                             {"wd0", 55}, {"wd1", 77}, {"re0", 1}, {"re1", 1},
+                             {"ra0", 1}, {"ra1", 1}});
+  out << "example : ((compileAndRun colfix_designCert " << fire << " #[" << only0 << "] " << st
+      << ").nextState.mems[0]! (1 : Int)) = mk_bv 8 55 := by native_decide\n";
+  out << "-- DIFFERENT addresses: both land, neither overwrites the other.\n";
+  const auto split = inputs({{"we0", 1}, {"we1", 1}, {"wa0", 0}, {"wa1", 2},
+                             {"wd0", 55}, {"wd1", 77}, {"re0", 1}, {"re1", 1},
+                             {"ra0", 0}, {"ra1", 2}});
+  for (int a = 0; a < 4; ++a) {
+    const int want = a == 0 ? 55 : (a == 2 ? 77 : (a == 1 ? 22 : 44));
+    out << "example : ((compileAndRun colfix_designCert " << fire << " #[" << split << "] " << st
+        << ").nextState.mems[0]! (" << a << " : Int)) = mk_bv 8 " << want << " := by native_decide\n";
+  }
+
+  out << "\n-- PER-READ FORWARDING ROWS. fwd = 0b0110: read 0 sees write 1 only,\n"
+      << "-- read 1 sees write 0 only. Both read address 1, where both writes\n"
+      << "-- land -- so the two reads must DISAGREE, and a single shared row\n"
+      << "-- would make them equal.\n"
+      << "example : ((compileAndRun colfix_designCert " << fire << " #[" << both << "] " << st
+      << ").nextState.flops[0]!) = mk_bv 8 77 := by native_decide\n"
+      << "example : ((compileAndRun colfix_designCert " << fire << " #[" << both << "] " << st
+      << ").nextState.flops[1]!) = mk_bv 8 55 := by native_decide\n";
+
+  out << "\n-- A QUIET clock commits nothing, whichever writes are enabled.\n";
+  for (int a = 0; a < 4; ++a) {
+    const int want = a == 0 ? 11 : (a == 1 ? 22 : (a == 2 ? 33 : 44));
+    out << "example : ((compileAndRun colfix_designCert " << quiet << " #[" << both << "] " << st
+        << ").nextState.mems[0]! (" << a << " : Int)) = mk_bv 8 " << want << " := by native_decide\n";
+  }
+
+  out << "\n-- direct vs compiled over the collision cases, every tiny address.\n";
+  for (const auto& in : {both, only0, split}) {
+    for (const auto& e : {fire, quiet}) {
+      out << "example : diffStep colfix_designCert colfix_residual " << e << " #[" << in << "] " << st
+          << " [0,1,2,3] = none := by native_decide\n";
+    }
+  }
+  ASSERT_TRUE(out.good());
+}
 }  // namespace
 }  // namespace lean_export

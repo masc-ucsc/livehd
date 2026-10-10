@@ -3423,10 +3423,7 @@ all three production runs (verified, legacy, override) pass
 
 ### R19.8 Still open
 
-Write-port **collision ordering** — a permanent *scanner-produced* two-write /
-two-read gate is still required. The independent control that covers 65,536
-cases bypasses the HHDS scanner, so it corroborates the lowering and is not real
-RTL acceptance.
+**Write-port collision ordering is covered** (R20).
 
 A **real multi-clock CORE-ET direct/compiled trace** (`txfma_f4` is already
 exported and suitable) remains the next real-design gate.
@@ -3434,3 +3431,44 @@ exported and suitable) remains the next real-design gate.
 The configured 125 CORE-ET + 61 CVA6 + 3 DINO replay is untouched, and
 D3/D4/FP are not started — their old clockless `CompileDesignDefs`/`Reify`
 interfaces must not overwrite the post-D2 clock/reset transport when they are.
+
+
+## R20. Write-port collision ordering, from the scanner
+
+Every memory fixture before this had **one** write port, so the `fwd` matrix —
+whose bit `(r * n_writes + w)` means "read *r* sees write *w*'s new data" — was
+only ever exercised in its 1×1 case. Two writes and two reads is the smallest
+shape where two things become observable.
+
+The fixture is scanner-produced: a 4-entry memory with write ports 0 and 1 and
+synchronous read ports 2 and 3, all on one clock, `fwd = 0b0110` — read 0
+forwarded write 1 only, read 1 forwarded write 0 only. The test asserts **two**
+read registers exist before any value case runs; with one, the per-read rows
+would be a single shared value and the disagreement they exist to show could not
+appear. `collide_oracle.sh` repeats that guard.
+
+18 cases, all decided:
+
+| Case | Result |
+| --- | --- |
+| both writes → address 1, data 55 and 77 | **77** — the later port wins |
+| only the lower-priority write enabled | **55** — so the ordering is not just "the last value seen" |
+| different addresses (0 and 2) | both land; all four addresses checked |
+| **read 0 vs read 1**, both reading address 1 | **77 vs 55** — the two reads *disagree* |
+| quiet clock | nothing commits, all four addresses |
+
+The disagreeing reads are the point. A single shared forwarding row would make
+them equal, and every other assertion here would still pass.
+
+`diffStep` covers all three input patterns across firing and quiet clocks,
+sampling every tiny address.
+
+**Corroboration, not acceptance.** An independent control exercises 65,536 cases
+over forwarding matrices 0/6/9/15, all 16 masks per writer, same and different
+addresses, four edge vectors and four read-enable vectors — but it builds its
+certificates directly, bypassing the HHDS scanner. It confirms the *lowering*;
+this gate is what confirms the scanner produces a certificate with that
+structure. Upstream `ware/rtl/cgen_memory_1rd_2wr.v` and
+`spec_memory_ww_last_wins` agree on per-lane higher-port priority. The existing
+refusals — undefined, whole-array, and unknown or over-62-bit forwarding
+policies — are unchanged.
