@@ -2386,6 +2386,40 @@ that asserts the guard ACTS could find it. My first guess at the cause was a
 race between a fast probe and the sampler; the test's own `STUB_DELAY=3` ruled
 that out, which is why it was worth reproducing rather than assuming.
 
+### 29.6 The aggregate limit counts memory it cannot terminate
+
+Observed on the `txfma_f4` module run, and verified rather than inferred:
+
+```
+d3_sweep: AGGREGATE RSS 16387340 kB reached the HARD limit 16000000 kB --
+          terminating the running probe(s).
+```
+
+— while `d3_module_proof.py` went on running for another 30 minutes.
+
+The two halves disagree because they look at different sets. `_marked_pids()`
+counts every process whose command line carries `_MARK`, this run's directory,
+and the module worker's `--out-dir` is inside it, so its memory **is** in the
+aggregate (checked directly against `/proc/<pid>/cmdline`). `_reap_all()`
+terminates `_GROUPS`, which only `run_group()` populates — and the module
+worker is launched by a plain `subprocess.run`, deliberately outside the
+probe's process group and cgroup, because it is many processes with different
+budgets. It is never in `_GROUPS`, so it can never be reaped.
+
+So the aggregate limit **trips on memory it does not own**. That memory is not
+unguarded: `d3_guarded_build` enforces `group_max_kb` per group and
+`final_max_kb` on the composition, and those demonstrably act — §29.3's
+composition was killed at exactly its 14,000,000 kB cap. But the aggregate
+monitor's announcement was wrong about what it had done.
+
+The §29.5 repair makes this honest rather than silent: with nothing in
+`_GROUPS` to reap, the run now logs *"already over the HARD limit … with NO
+probe running — nothing to terminate yet"* and keeps sampling, instead of
+claiming a termination and exiting. **Giving the aggregate limit authority over
+the module worker is a policy change and is NOT made here**; what is recorded
+is that the two caps govern different things, and which one acts on the
+composition.
+
 ## 20. D3 replay backlog — repaired
 
 Both gaps are closed, and running them found two more.
