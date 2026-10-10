@@ -3559,3 +3559,54 @@ flop's behaviour pinned against its RTL. It is not the configured replay and not
 RTL acceptance — `txfma_f4`'s `lhd lec` comparison is separate (R16.7). What it
 establishes is that the clock-resolution work holds on an artifact nobody built
 for the purpose, with stimulus at the widths the hardware declares.
+
+## R22. Destination ledger: two harness defects to carry forward
+
+Neither is a model or semantic defect. Both are **validation harnesses that
+report success without having checked what they claim**, and both are recorded
+here so the repair travels with the thing being restored.
+
+### R22.1 `mem_lean_diffsim.py` accepts mismatched trace lengths
+
+The historical D2 runtime tool compares an RTL trace against a Lean one over
+`min(rtl_rows, lean_rows)` rows. Measured on the actual script with controlled
+subprocess outcomes:
+
+| RTL rows | Lean rows | Expected | Verdict |
+| ---: | ---: | ---: | --- |
+| 13 | 12 | 12 | **PASS** |
+| 12 | 13 | 12 | **PASS** |
+| 12 | 12 | 12 | PASS (correct) |
+| 11 | 12 | 12 | FAIL (correct) |
+
+An **extra** row on either side is truncated away silently; only a trace short
+on *both* sides is caught. A simulator that emitted one period too many — or one
+too few on the side that happens to be longer — passes.
+
+**When that tool is restored**, it must require **exact** trace counts and
+output-column shape, while preserving the behaviour that is correct: `P=1`
+before-first-edge and `P=2` after-first-edge sampling, the named sidecar
+mapping, and state initialization. This is an inherited admission defect, not a
+semantic change, so the comparison itself stays as it is.
+
+Generic simulator launchers and the actual D2 benchmark procedures also remain
+to be restored before D2 acceptance.
+
+### R22.2 `coreet_full_flow.sh` called a stale row a finished run
+
+Fixed, and recorded because the shape recurs. Completion was "a non-empty row
+file exists for every requested module", which says nothing about **who wrote
+it**. With a previous run's rows present and the current launcher failing
+outright, the sweep printed `COMPLETE` and exited 0 having run **zero** workers.
+The launcher's exit status was never checked at all.
+
+Rows now live in a directory named for the invocation, completion reads only
+that directory, and the launcher's status is propagated. Previous evidence is
+preserved rather than cleaned up — it is still evidence, of a different run.
+`scripts/coreet_sweep_freshness_controls.sh` pins all four cases.
+
+**The general rule, since this is now the fourth instance in this file:** a
+check must be keyed to the thing it claims. The axiom audit counted lines
+instead of comparing names; `--resume` compared inputs instead of the question
+asked; the LEC gate read one field instead of validating the record; this read a
+filename instead of a run. Each passed for a long time.
