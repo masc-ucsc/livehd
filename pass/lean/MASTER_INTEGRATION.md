@@ -4388,32 +4388,81 @@ convention or the testbench's sampling convention is an open question for
 whoever owns that pass. The lec legs pass and the ICG differential passes, so
 neither the harness nor the tool is the obvious culprit.
 
-### R34.4 Two historical fixtures that cannot run on master
+### R34.4 Five historical fixtures, and two named capability gaps
 
-Both named D2 procedures were ported, and both are blocked by a **named**
-upstream difference. Neither was worked around.
+All five historical source-RTL procedures were ported — `single_edge_memory_slot_test.sh`,
+`single_edge_multi_clock_test.sh`, `mem_mixed_lean_diff_test.sh`,
+`mem_feedback_lean_diff_test.sh` and their RTL (`mem_mixed_rdclk_diff.v`,
+`mem_async_read_feedback.v`, `mem_sync_read_feedback.v`) — and run. **Four are
+blocked, by exactly two upstream capability gaps.** Neither was worked around.
 
-| fixture | blocked by |
-| --- | --- |
-| `single_edge_memory_slot_test.sh` | master's `pass.single_edge` refuses: `memory-unsupported: memory \`memory_24:m\` would commit on every sub-step under a phase divider`, with the hint `slot enables are not wired into the Memory cell yet` |
-| `single_edge_multi_clock_test.sh` | master's `pass.single_edge` has **no `multi_clock` option** (9 uses in the fixture) |
+**Gap 1 — there is no `multi_clock` option.**
 
-The first is exactly the **pre-fix behaviour** the D2 fixture's own header
-describes; the memory-slot gating is a D2 capability master does not carry. The
-second is deliberate upstream: master's comment says a design with two clock
-nets "is already handled honestly downstream — pass/lec's detected-edge branch
-REFUTES two-clock-vs-one-clock today — so declining it here would turn a
-correct verdict into an unsupported exit."
+```
+--set/--config references unknown flag 'multi_clock' of pass 'pass.single_edge'
+```
 
-Changing either would mean changing native `single_edge`, which is out of
-scope. The fixtures are retained in `lhd/tests/` so the procedures are not
-lost, and the multi-clock procedure stays **separate** from the single-clock
-one.
+This is what all three `mem_*_lean_diff` fixtures hit first. It is deliberate
+upstream: master's comment reads *"a design that merely has two clock nets is
+already handled honestly downstream — pass/lec's detected-edge branch REFUTES
+two-clock-vs-one-clock today — so declining it here would turn a correct
+verdict into an unsupported exit."*
 
-**One adaptation was made, to the fixture's own Pyrope source only**: the
-frontend renamed the built-in type spellings (`core/str_tools.hpp`
-`renamed_type_spelling`: `u<N>`→`U<N>`, `s<N>`/`i<N>`→`S<N>`, `bool`→`Bool`,
-`unsigned`→`Unsigned`, `signed`→`Signed`, `string`→`String`). Nine spellings in
-`memslot.prp`. Nothing about the period count, the sampling phase, the
-stimulus, the initialization or the comparison was touched — and the fixture
+**Gap 2 — the memory-slot gating is absent**, and it is the binding one. The
+flag is passed uniformly by these fixtures, so to find out whether it was
+load-bearing the pass was re-run on the already-built `mem_mixed_rdclk_diff`
+LGraph **without** it:
+
+```
+pass.single_edge refused 'mem_mixed_rdclk_diff':
+  memory `memory_44:mem` would commit on every sub-step under a phase divider
+```
+
+Same for `single_edge_memory_slot_test`'s own fixture, with the hint *"slot
+enables are not wired into the Memory cell yet"*. That is precisely the
+**pre-fix behaviour** the D2 fixture's header describes — the memory-slot
+gating is a D2 capability master does not carry. So dropping the unknown flag
+from the invocation would not have rescued these procedures; it only moves the
+refusal one step later, which is why the experiment was run rather than
+assumed.
+
+Closing either gap means changing native `pass.single_edge`, which is out of
+scope. The fixtures stay in `lhd/tests/` so the procedures are not lost, the
+single-clock and multi-clock procedures stay separate, and none is wired into
+`lhd/tests/BUILD` — they would fail the suite for a reason that is not a
+regression.
+
+**One adaptation, to fixture source only**: the frontend renamed the built-in
+type spellings (`core/str_tools.hpp` `renamed_type_spelling`: `u<N>`→`U<N>`,
+`s<N>`/`i<N>`→`S<N>`, `bool`→`Bool`, `unsigned`→`Unsigned`, `signed`→`Signed`,
+`string`→`String`). Nine spellings in `memslot.prp`. No period count, sampling
+phase, stimulus, initialization or comparison was touched — and the fixture
 still reaches, and is refused by, the pass.
+
+### R34.5 What the differential evidence actually covers
+
+| procedure | on master | result |
+| --- | --- | --- |
+| `single_edge_icg_test` (iverilog leg) | runs | **agrees over 29 cycles** |
+| `single_edge_four_classes_test` (iverilog leg) | runs | **`SINGLE_EDGE_DIFF_FAIL errs=78`**, uniform one-period offset (R34.3) |
+| `single_edge_memory_slot_test` | blocked | gap 2 |
+| `single_edge_multi_clock_test` | blocked | gap 1 |
+| `mem_mixed_lean_diff_test` | blocked | gap 1, then gap 2 |
+| `mem_feedback_lean_diff_test` (2 cases) | blocked | gap 1 |
+
+So **one** source-RTL differential passes on master today, **one** disagrees
+with a characterized offset, and **four** cannot run for two named reasons.
+`mem_lean_diffsim.py`'s own P=1/P=2 procedure is preserved and controlled, but
+its fixtures are among the blocked four, so it remains unexercised end to end.
+
+A further limitation of that tool, found while attempting it on a real design
+and worth recording rather than discovering twice: **`build_tb` treats only a
+port literally named `clk` as the clock.** The original fixtures all use `clk`,
+so the historical procedure is unaffected; but a design whose clock is `clk_i`
+would have its clock driven as stimulus data while an unconnected `clk`
+toggled. The sidecar already names the clocks (`clocks: [{name, ordinal,
+implicit}]`), so the fix is to drive the clock the sidecar names and refuse
+when it declares more than one — the Lean side uses `allEdges`, so a two-domain
+comparison is not expressible in this procedure at all. Recorded as open; not
+changed here, because changing it without a runnable fixture would be changing
+event semantics with nothing to check them against.
