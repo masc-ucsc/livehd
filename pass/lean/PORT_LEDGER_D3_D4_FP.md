@@ -2231,6 +2231,124 @@ I ran it without `--kill-over-rss-kb`, which defaults to **0** — no hard limit
 and does not terminate a running probe. Nothing was going to stop it. The guard
 existed and I did not arm it.
 
+## 29. Module-proof admission, the guarded route, and the original tests
+
+### 29.1 Admission: three wrong results were being credited
+
+`row["module_proof"]` was `1 if res.get("status") == "proved" else 0` and
+nothing else, so each of these was credited, all reproduced against this CLI:
+
+- a worker that printed a proved result and then **exited 17**;
+- a **stale** `result.json` from an earlier attempt, this run producing none;
+- a result naming a **different certificate** — the row carried the correct
+  `cert_sha256` beside an all-zero `module_cert_sha256` and still said
+  `module_proof=1`.
+
+The driver's own checks (gate line, rc, allowed axioms, olean drift) are
+untouched and are still what `status == "proved"` means. What is added is the
+boundary around them: any pre-existing `result.json` is removed before the
+worker runs, the worker must exit 0, and the result must name **this**
+certificate. A new **`module_admit`** column carries that decision, separate
+from `module_proof_status`: one says whether the verdict may be credited, the
+other what the driver concluded.
+
+`d3_module_admit_controls.sh`, nine legs, all passing; **against the committed
+sweep 7 of 8 fail**. Every refused leg also checks the earned `cert..agree` is
+preserved — a refused proof must not retract an agreement.
+
+### 29.2 The guarded route — correcting §28.6
+
+I wrote that the module backend "cannot run on this host". **It runs**, under
+
+```
+systemd-run --user --scope --quiet --property=Delegate=yes
+```
+
+The RAM fixture, through the original chunked procedure with its guard and
+caps intact:
+
+```
+prove_reified_chunked: d3_fast.correct proved over 8 binding(s) in 1 chunk(s) of at most 8
+D3GATE proof=1 thm=d3_fast.correct axioms=[propext, Classical.choice, Quot.sound]
+```
+
+`module_proof=1`, `module_admit=ok`, `gate_axioms_within_allowed=True`,
+`olean_drift=False`, 23.33 s, 6,834,076 KiB, cgroup peak 779,332 KiB, caps
+`group_max_kb=10,000,000` and `final_max_kb=14,000,000`.
+
+**`txfma_f4` is not proved by any backend.** In-process it reached 84 GiB and
+I stopped it (§28.7). Through the module backend, **all 16 group builds
+succeeded** (rc=0, max group RSS 8,749,720 KiB under the group cap, 59 chunks
+of 32) and then the **composition was killed at a cgroup peak of exactly its
+14,000,000 KiB `final_max_kb`**, `rc=137`, no gate line emitted. Both failures
+are **resource stops, not semantic results**, and the design remains unproven
+rather than disproved.
+
+An earlier attempt at the same run failed differently — 7,090 Mathlib
+`.olean.server` replay errors — because **I ran the restored tests
+concurrently against the same Lake workspace**. Two Lake builds in one
+workspace. The files were all present afterwards.
+
+### 29.3 A memory stop was labelled as a disproof
+
+`d3_module_proof.py` separated `timeout` and SIGTERM-`killed` from
+`not_proved`, with its own comment giving the reason: a reviewer needs to know
+"whether the gate was evaluated and disagreed, or was never reached". It did
+not separate **rc 137**, and `d3_guarded_build.py` returns exactly 137 when the
+**cgroup OOM-killed** the command — so that status is this run's own guard
+reporting a stop, not a signal to be guessed at.
+
+`txfma_f4`'s composition therefore came back `not_proved`, which says the gate
+disagreed. It was never reached. The status is now **`rss_killed`**, with a
+ninth control leg requiring it to be refused AND named as a resource stop. Both
+always gave `module_proof=0`, so nothing was overclaimed — the defect was the
+label, and the label is what gets read.
+
+### 29.4 The five missing original tests
+
+At the pinned D3 revision `78a3e0d8c10c3e1ce1627d8d54fa898ee4416d43`,
+`d3_proof_test.py`, `d3_runner_test.py`, `d3_scheduler_test.py`,
+`d3_sweep_cancel_test.py` and `d3_sweep_parser_test.py` exist; **all five were
+absent from master**, and the installed `d3_cgroup_test.py` exited 1 before
+testing because it imports the runner test. Restored at their pinned hashes.
+
+| test | result |
+|---|---|
+| `d3_sweep_parser_test` | **OK** |
+| `d3_sweep_cancel_test` | **OK** |
+| `d3_runner_test` | **OK** |
+| `d3_cgroup_test` | **OK (14 skipped)** — previously exited 1 before testing |
+| `d3_proof_test` | **OK** after three adaptations |
+| `d3_scheduler_test` | **one check failing** |
+
+`d3_proof_test`'s adaptations, each preserving the assertion: its fixture
+certificate was a hardcoded path into another checkout AND pre-clock —
+master's reifier emits `d3_fast` with the edge vector first, which is exactly
+the arity mismatch it hit — so the path, module name and reifier are inputs
+now with project-local defaults, and the real-Lean legs **skip, reported as
+skips rather than passes**, when the certificate is absent; the end-to-end leg
+uses the reifier that proves a stateful fixture, since `legacy` leaves
+`sorryAx` on a `flopNextV` goal; and `residual_bound_once_before_report`
+matched the literal `d3_fast R 32` where master's call is clock-aware, so it
+now matches the report call and still requires `R` to be the argument after the
+model — both halves, neither relaxed.
+
+### 29.5 The open failure, stated without a cause
+
+`d3_scheduler_test`'s **`hard_kill_terminates_running`** fails: `killed` is
+empty. What is established — the hard limit fires and is reported
+(`hard_kill_reported` passes), the queue defers correctly behind it
+(`hard_kill_queued_deferred_not_killed` passes, 4 targets), the probe is a
+stub with `STUB_DELAY=3` against a 0.05 s sampler, and the sampled-kill row
+requires `_RSS_KILL.is_set() and rc != 0` while the probe came back `rc == 0`
+with `verdict=agree`.
+
+What is **not** established is why the reap left it at `rc == 0`. I first
+assumed a race between a fast probe and the sampler; the 3-second stub delay
+rules that out. **No cause is recorded**, and two neighbouring checks
+(`hard_kill_launched_not_failed`, `hard_kill_resumable`) pass **vacuously**
+over the empty set, so this is worse than one failing check.
+
 ## 20. D3 replay backlog — repaired
 
 Both gaps are closed, and running them found two more.
