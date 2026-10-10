@@ -1125,7 +1125,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     auto* owner                       = coordinator_ ? coordinator_ : this;
     owner->tune_keys_[rb.module_name] = key;
     bool replay                       = false;
-    if (opts_.tune_store && opts_.tune_profile != "off" && !key.empty()) {
+    if (opts_.tune_store && opts_.tune_profile == "auto" && !key.empty()) {  // `on` explores afresh from the defaults; `off` ignores the store
       const auto stored = opts_.tune_store->find(key);
       if (!stored.empty()) {
         replay_tune(opts_, stored);

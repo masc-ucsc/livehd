@@ -102,12 +102,13 @@ def run(*args):
     assert p.returncode == 0, (args, p.stdout, p.stderr, result.read_text())
     return json.loads(result.read_text())
 
-def synth(name, attrs, *opts):
+def synth(name, attrs, *opts, explore=True):
     d = w/name; d.mkdir(exist_ok=True)
     source = d/'abc_ware_attr.prp'
     source.write_text(fixture.replace('color=2, ware=true, delay=500',attrs))
-    j = run('synth',source,'--top',top,'--set',f'synth.liberty={lib}','--set','synth.opentimer=false','--set','synth.tune.profile=on',
-            '--workdir',d/'work','--emit-dir',f'lg:{d}/net', '--emit',f'verilog:{d}/mapped.v',*opts)
+    j = run('synth',source,'--top',top,'--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
+            '--workdir',d/'work','--emit-dir',f'lg:{d}/net', '--emit',f'verilog:{d}/mapped.v',
+            *(('--set','synth.tune.profile=on') if explore else ()),*opts)
     rows = j['qor']['abc']['regions']
     assert len(rows)==2 and all(r['color']==2 for r in rows), rows
     rows=[r for r in rows if r['module'].startswith('__ware_lt_')]
@@ -125,6 +126,10 @@ for enabled in ('true','false'):
         assert a[key] == b[key], (key,a,b)
 assert cases['attr_false'][0]['ware_trials']==0
 assert cases['attr_true'][0]['ware_trials']>0
+# Without synth.tune.profile=on the source ware=true hint still pins the region
+# but no trial runs: exploration is explicit.
+dflt, _ = synth('attr_default', 'color=2, ware=true, delay=500', explore=False)
+assert dflt['ware_trials']==0, dflt
 assert cases['attr_true'][0]['delay'] < cases['attr_false'][0]['delay']
 assert cases['attr_true'][0]['delay'] <= 500 < cases['attr_false'][0]['delay']
 assert 'objective=timing' in cases['attr_true'][1]

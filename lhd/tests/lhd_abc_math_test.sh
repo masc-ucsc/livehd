@@ -31,7 +31,7 @@ set -u
 # twin from this same file. The mapped-hierarchy equivalence, the mapped divider
 # and the no---lib control hold for both. The USYN leg proves its logical
 # tmap=none output with native CSKA lowering (no Liberty, no cells) equivalent
-# without --lib and checks that the ABC block_size spelling is refused.
+# without --lib and checks that an unregistered flag is refused.
 MAPPER="${MAPPER:-abc}"
 case "$MAPPER" in
   abc | usyn) ;;
@@ -101,12 +101,13 @@ else
   run lec --impl lg:"$W/net_none" --ref lg:"$W/re" --top "$TOP" --workdir "$W/wlec_none"
   grep -q '"verdict":"proven"' "$W/r.json" \
     || fail "usyn tmap=none LEC did not prove the logical hierarchy: $(cat "$W/r.json")"
-  # The ABC block_size spelling is absent from pass.usyn: a usage error (exit 2).
+  # A flag pass.usyn does not register is a usage error (exit 2). block_size is
+  # the shared registry spelling of adder_block and is accepted.
   rc=0
-  "$LHD" pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_bad" --set synth.liberty="$LIB" --set block_size=4 \
+  "$LHD" pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_bad" --set synth.liberty="$LIB" --set not_a_usyn_flag=4 \
     --workdir "$W/w7" -q --result-json "$W/rr.json" 2>/dev/null || rc=$?
-  [ "$rc" = 2 ] || fail "usyn: ABC option --set block_size=4 exited $rc (expected usage error 2)"
-  grep -q "unknown flag 'block_size'" "$W/rr.json" || fail "usyn: --set block_size=4: no unknown-flag diagnostic: $(cat "$W/rr.json")"
+  [ "$rc" = 2 ] || fail "usyn: unknown option --set not_a_usyn_flag=4 exited $rc (expected usage error 2)"
+  grep -q "unknown flag 'not_a_usyn_flag'" "$W/rr.json" || fail "usyn: --set not_a_usyn_flag=4: no unknown-flag diagnostic: $(cat "$W/rr.json")"
 fi
 
 # Negative control: the cell models are load-bearing. Without --lib the netlist's
