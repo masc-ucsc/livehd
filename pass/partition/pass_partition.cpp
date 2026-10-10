@@ -2020,11 +2020,12 @@ void Partitioner::build_module_as_top(uint32_t r) {
     // Incremental pre-body (see build_module). Explicit whole-design flattening
     // skips the potentially huge comparison copy. A single virtual-flat color
     // is still an incremental region and must retain its comparison body.
-    // A ware specialization
-    // is a reusable primitive even when flattened internally. `pre_lib` must outlive
-    // the synchronous hook_.
+    // Ware and lowered-memory modules are reusable primitives even when
+    // flattened internally. `pre_lib` must outlive the synchronous hook_.
     hhds::GraphLibrary pre_lib;
-    if (build_pre_ && (!skip_single_pre_ || g_->get_input_node().attr(livehd::attrs::ware_module).has()) && rb.reuse_eligible) {
+    const bool         primitive = g_->get_input_node().attr(livehd::attrs::ware_module).has()
+                           || g_->get_input_node().attr(livehd::attrs::memory_module).has();
+    if (build_pre_ && (!skip_single_pre_ || primitive) && rb.reuse_eligible) {
       rb.pre_name = "p_" + top_;
       rb.pre_body = build_pre_body_as_top(r, pre_lib, rb.pre_name, rnodes);
       rb.pre_lib  = &pre_lib;

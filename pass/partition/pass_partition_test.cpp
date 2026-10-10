@@ -199,6 +199,41 @@ TEST(PartitionReuse, SingleVirtualFlatColorRetainsPreBodyButExplicitFlatDoesNot)
   }
 }
 
+TEST(PartitionReuse, LoweredMemoryRetainsComparisonBodyWhenFlattenedInternally) {
+  namespace gu = livehd::graph_util;
+  hhds::GraphLibrary input, output;
+  auto               io = input.create_io("memory_primitive");
+  io->add_input("a", 1);
+  io->add_output("y", 2);
+  io->set_bits("a", 1);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto node  = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+  gu::set_color(node, 1);
+  graph->get_input_pin("a").connect_sink(node.create_sink_pin(0));
+  node.create_driver_pin(0).connect_sink(graph->get_output_pin("y"));
+  graph->get_input_node().attr(livehd::attrs::memory_module).set(1);
+  unsigned calls = 0;
+  ASSERT_TRUE(Pass_partition::build_decomposition(
+      {graph},
+      &output,
+      "memory_primitive",
+      false,
+      [&](const livehd::partition::Region_body& region) {
+        ++calls;
+        ASSERT_TRUE(region.reuse_eligible);
+        ASSERT_NE(region.pre_body, nullptr);
+        ASSERT_NE(region.pre_lib, nullptr);
+        auto driver = region.pre_body->get_output_pin("y").get_driver_pin();
+        ASSERT_FALSE(driver.is_invalid());
+        EXPECT_EQ(gu::type_op_of(driver.get_master_node()), Ntype_op::Not);
+        EXPECT_EQ(driver.get_master_node().get_sink_pin(0).get_driver_pin(), region.pre_body->get_input_pin("a"));
+      },
+      livehd::partition::Flatten_mode::on,
+      true));
+  EXPECT_EQ(calls, 1U);
+}
+
 // A depth cutoff must not turn shared fan-in into an exponential tree walk.
 // Two allocations of the same anonymous graph must also name boundaries alike.
 TEST(PartitionNames, DeepReconvergentProducerCones) {

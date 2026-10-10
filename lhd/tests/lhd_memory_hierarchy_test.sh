@@ -34,15 +34,32 @@ for mode in "${modes[@]}"; do
   run lec --impl lg:"$W/$mode-lg" --ref lg:"$W/source" --lib lg:"$W/models" --top memory_hierarchy \
     --set formal.bound=3 --set formal.timeout=60 \
     --workdir "$W/$mode-lec" --result-json "$W/$mode-lec.json"
+  if [ "${NATIVE_MODE:-default}" = identities ] && [ "$mode" = true ]; then
+    run synth lg:"$W/source" --top memory_hierarchy --set synth.liberty="$LIB" --set synth.opentimer=false \
+      --set pass.abc.flatten=true --set synth.threads=1 --set pass.abc.memory=true \
+      --emit-dir lg:"$W/warm-lg" --emit verilog:"$W/warm.v" --workdir "$W/$mode-work" --result-json "$W/warm.json"
+    run lec --impl lg:"$W/warm-lg" --ref lg:"$W/source" --lib lg:"$W/models" --top memory_hierarchy \
+      --set formal.bound=3 --set formal.timeout=60 \
+      --workdir "$W/warm-lec" --result-json "$W/warm-lec.json"
+    python3 - "$W/warm.json" "$W/warm-lec.json" <<'PYW'
+import json, sys
+regions = json.load(open(sys.argv[1]))['qor']['abc']['regions']
+memories = [r for r in regions if r['module'].startswith('cgen_memory_')]
+assert memories and sum(r.get('instances', 1) for r in memories) == 2, memories
+assert all(r['cache'] == 'hit' for r in memories), memories
+assert json.load(open(sys.argv[2]))['lec']['verdict'] == 'proven'
+print('PASS: both lowered-memory implementations reuse their mapped bodies')
+PYW
+  fi
 done
 if [ "${NATIVE_MODE:-default}" = identities ]; then
 python3 - "$W" <<'PY'
 import json, re, sys
 from pathlib import Path
 w=Path(sys.argv[1])
-texts={m:(w/f'{m}.v').read_text() for m in ('default','false','true')}
+texts={m:(w/f'{m}.v').read_text() for m in ('default','false','true','warm')}
 ids={m:set(re.findall(r'^cgen_memory_[^\n]*\s__lhdmem_h([0-9a-f]+)_e\(',t,re.M)) for m,t in texts.items()}
-assert ids['default']==ids['false']==ids['true'],ids
+assert ids['default']==ids['false']==ids['true']==ids['warm'],ids
 assert len(ids['true'])==2,ids
 names=[bytes.fromhex(s).decode() for s in ids['true']]
 assert any('left' in s for s in names) and any('right' in s for s in names),names
@@ -50,7 +67,7 @@ assert 'cgen_memory_1rd_1wr #' in texts['false']
 assert '_blasted' not in texts['false']
 # `default` is memory=auto: each bank is 2 x 4 = 8 bits over 2 ports, well
 # within memory_max_bits, so it folds exactly like memory=true.
-for m in ('default','true'):
+for m in ('default','true','warm'):
     assert re.search(r'module cgen_memory_.*_blasted',texts[m]),m
     assert not re.search(r'`include.*cgen_memory',texts[m]),m
     assert 'DFFx1 ' in texts[m] or 'always @(posedge' in texts[m],m
