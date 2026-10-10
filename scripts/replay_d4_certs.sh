@@ -58,6 +58,11 @@ ROW_DRIVER="$ROOT/formal/lean/probes/d4_sweep_row.lean"
 [[ -d "$ROOT/formal/lean/.lake/build" ]] || die "no local Lean build at $ROOT/formal/lean/.lake/build"
 
 mkdir -p "$OUTDIR" || die "cannot create $OUTDIR"
+# ABSOLUTE from here on. The preflight runs its child in `formal/lean`, so a
+# relative output directory would resolve against THAT, and the redirect would
+# fail with "No such file or directory" -- which reads like a missing
+# toolchain rather than a path bug.
+OUTDIR="$(cd "$OUTDIR" && pwd)"
 
 # THE PREFLIGHT'S DISPOSITION, PARSED -- NOT SEARCHED FOR.
 #
