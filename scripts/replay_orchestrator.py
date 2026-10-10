@@ -426,7 +426,16 @@ def run_one(j: dict, lhd: Path, export_only: bool) -> dict:
         stage2 = [str(lhd), "compile", f"lg:{lg}", "--top", top,
                   "--workdir", str(out / "w2"),
                   "--emit-dir", f"lean:{out / 'lean'}",
-                  "--set", "formal.lean.mode=legacy",
+                  # THE REQUESTED MODE, not a hardcoded one.
+                  #
+                  # This read `formal.lean.mode=legacy` unconditionally, so a
+                  # DINO verified_compiler request re-emitted a legacy
+                  # GraphCert and was then correctly SKIPPED by the scope check
+                  # for having no DesignCert -- i.e. the family could not
+                  # produce a verified certificate at all through this path.
+                  # For every legacy_* mode `mode_env` returns LEAN_MODE=legacy,
+                  # so the command below is unchanged for them.
+                  "--set", f"formal.lean.mode={want['LEAN_MODE']}",
                   "--set", "formal.lean.emit_cert=true",
                   "--set", f"formal.lean.emit_fast_bridge={want['LEAN_EMIT_FAST_BRIDGE']}",
                   "--set", f"formal.lean.cert_wf={want['LEAN_CERT_WF']}",

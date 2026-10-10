@@ -94,6 +94,50 @@ else
   echo "MISS: filter_matches_module_name: $(head -2 <<<"$out" | tr '\n' ' ')"; rc=1
 fi
 
+# 9..12 THE MANIFEST DECIDES THE INPUT, NOT A DIRECTORY WALK.
+#
+# Pointed at replay/jobs, the sweep found 124 DesignCert files, eight of them
+# candidates the static gate REFUSED, and ZERO DINO ones -- the replay's DINO
+# jobs emit a legacy GraphCert.  A walk cannot tell an accepted export from a
+# refused candidate, and silently omits every configured case with nothing to
+# sweep.
+cat > "$WORK/man.json" <<EOF
+{"to_run": ["$CERT"],
+ "investigate_only": ["$ROOT/generated/master_port/replay/jobs/CORE-ET/verified_compiler/tima_adder/lean/tima_adder_Lgraph.lean"],
+ "entries": [{"family":"CORE-ET","case":"txfma_e4","mode":"verified_compiler",
+              "artifact":"$CERT","artifact_sha256":"deadbeef","aliases":["CORE-ET/legacy/txfma_e4"]}]}
+EOF
+sel() { (cd "$ROOT" && python3 -I pass/lean/scripts/direct_sweep.py --manifest "$1" \
+          ${2:+--manifest-set "$2"} --out "$WORK/sel.tsv" --limit 1 --jobs 1 --timeout 1 2>&1) \
+        | sed -n 's/^# \([0-9]*\) unique certificates/\1/p' | head -1; }
+
+n=$(sel "$WORK/man.json"); [ "$n" = "1" ] \
+  && echo "ok: manifest_to_run -> 1 payload" \
+  || { echo "MISS: manifest_to_run selected '${n:-none}'"; rc=1; }
+
+n=$(sel "$WORK/man.json" investigate_only); [ "$n" = "1" ] \
+  && echo "ok: manifest_investigate_only -> its own, separate set" \
+  || { echo "MISS: manifest_investigate_only selected '${n:-none}'"; rc=1; }
+
+# The two sets must not be the same payload, or the control proves nothing.
+a=$(python3 -I -c "import json;m=json.load(open('$WORK/man.json'));print(m['to_run'][0])")
+b=$(python3 -I -c "import json;m=json.load(open('$WORK/man.json'));print(m['investigate_only'][0])")
+[ "$a" != "$b" ] && echo "ok: the two manifest sets are distinct payloads" \
+                 || { echo "MISS: the control's two sets are the same file"; rc=1; }
+
+python3 -I -c "
+import json
+m = json.load(open('$WORK/man.json')); m['to_run'] = ['generated/not_here_Lgraph.lean']
+json.dump(m, open('$WORK/man_missing.json','w'))"
+out="$(cd "$ROOT" && python3 -I pass/lean/scripts/direct_sweep.py --manifest "$WORK/man_missing.json" \
+        --out "$WORK/x.tsv" 2>&1)"; e=$?
+if [ "$e" -eq 2 ] && grep -q 'not on disk' <<<"$out"; then
+  echo "ok: a manifest payload that is not on disk exits 2"
+else
+  echo "MISS: missing manifest payload -> exit $e"; rc=1
+fi
+[ -e "$WORK/x.tsv" ] && { echo "MISS: a refused manifest sweep still wrote its table"; rc=1; }
+
 # 8. scratch is project-local, never /tmp -- by CALLING the resolver, not by
 #    grepping the source for a path.
 sd="$(cd "$ROOT" && python3 -I -c "

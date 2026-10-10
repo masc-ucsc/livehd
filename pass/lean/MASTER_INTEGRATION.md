@@ -4349,44 +4349,75 @@ Source, build tree, prefix and `TMPDIR` are all under the project. The
 `-dirty` suffix is `autoconf.sh` regenerating build files in the checkout; the
 commit is the pinned tag's.
 
-### R34.2 Two differentials ran; one agrees, one does not
+### R34.2 Two differentials ran — and BOTH scripts exit 1
 
-With `LHD_EXTERNAL_SIM=1` and the provisioned tools on `PATH`. **These legs had
-never run on this machine** — there was no `iverilog` for them to use, and they
-skip by default.
+With `LHD_EXTERNAL_SIM=1` and the provisioned tools on `PATH`. These legs had
+never run on this machine: there was no `iverilog` for them, and they skip by
+default. **Both scripts exit 1**, and the earlier table here, which recorded
+`single_edge_icg_test` simply as "pass", was wrong to collapse that.
 
-| test | lec legs | iverilog leg |
-| --- | --- | --- |
-| `single_edge_icg_test` | pass | **"source ICG and normalized flop-with-enable agree over 29 cycles under iverilog"** |
-| `single_edge_four_classes_test` | pass | **`SINGLE_EDGE_DIFF_FAIL errs=78`** |
+**`single_edge_icg_test` — the positive subtest and the discrimination gate are
+separate results.**
 
-So a real source-RTL differential now runs, and one of them passes.
+| subtest | outcome |
+| --- | --- |
+| the ICG pattern is recognized and folded into a flop enable at P=1 | ok |
+| the normalized netlist has a plain posedge flop with an enable | ok |
+| `lec` PROVES an ICG design against itself | ok |
+| `lec` REFUTES a real difference inside an ICG design | ok |
+| **source ICG vs normalized flop-with-enable under iverilog, 29 cycles** | **agree** |
+| the **L1 negative control** | **did not apply** — "the normalized netlist does not spell its enable as expected" |
 
-### R34.3 The four-classes disagreement, characterized
+So the positive comparison holds over 29 cycles, **and the discrimination gate
+that would show the comparison can fail did not run**. Everything after it in
+that script is unreached. A positive without its negative is weaker evidence,
+and it is recorded as two findings rather than one.
 
-Every observed mismatch is the **same shape** — the normalized side exactly one
-source period behind:
+### R34.3 The four-class mismatch is an epoch/phase conflict, not a native defect
 
-```
-MISMATCH ql @38000 source=37 normalized=0
-MISMATCH ql @58000 source=48 normalized=37     <- source's 38000 value
-MISMATCH ql @78000 source=85 normalized=48     <- source's 58000 value
-```
+78 mismatches, resolved by independent reproduction into **39 `ql` + 39 `qp`**
+discrepancies, each equal to the preceding source value.
 
-`normalized(t) == source(t - 20000)` for every mismatch after the first, and
-the first is the initial condition under the same offset. This is a **uniform
-one-period offset**, not corrupted values — the alignment class that the
-testbench's own comments are about (`HALF=5` gives two posedges per source
-period, reset released at `t=27` so "the phase divider starts period 1 at slot
-0").
+**The source of the offset is upstream and deliberate.** The emitted divider is
+`create_const(0)` on its `initial` pin with **no reset connected**, and
+`pass_single_edge.cpp:1067-1072` says why — `git blame`: **a8625fa07c, Jose
+Renau, 2026-10-02**:
 
-**Not repaired, and not explained away.** It is in native `single_edge` and its
-contract test, both outside this work's change scope. Stated as what it is: a
-previously unexercised leg, exercised for the first time, showing a reproducible
-one-period offset under Icarus 13.0 — whether that is master's divider
-convention or the testbench's sampling convention is an open question for
-whoever owns that pass. The lec legs pass and the ICG differential passes, so
-neither the harness nor the tool is the obvious culprit.
+> This divider describes the time base, independently of the design's resets.
+> Copying one state element's reset here changes the phase when that reset is
+> folded into mapped latch logic on the other side of LEC. The encoder
+> preserves this synthetic key's concrete initial value
+> (`graph_util::is_single_edge_phase_key`), including during `after_reset`, so
+> both designs advance through the same slots throughout the prologue.
+
+The testbench assumes the opposite: it releases reset at `t=27` and expects the
+phase divider to start period 1 at slot 0. With the normalized clock starting
+at `t=0` the posedges land at 5, 15, 25, 35 — so at 35 the phase is 1, and the
+slot-0 update is delayed past the sample at 38. The fixture's own comment
+expects normalized slot 0 at `15+20p`, i.e. a first posedge at 15, not 5.
+
+**The diagnostic confirms it.** An explicitly labelled event-schedule variant
+that starts the normalized clock toggling after 10 ns — first posedge at 15 —
+**agrees over 39 periods** (`SINGLE_EDGE_DIFF_OK`), and its deliberately wrong
+P=1 negative **still fails 116 comparisons**, so the shift does not buy
+agreement by destroying the discrimination.
+
+**What this does and does not establish.** It establishes a conflict between
+the harness's initial-epoch assumption and a divider whose time base is
+reset-independent by upstream design. It does **not** establish a native
+semantic defect, and the diagnostic variant does **not** replace the original
+acceptance — the original fixture remains FAILED, as it should. Native code and
+the repository's contract expectations are unchanged.
+
+And it must not be argued the other way either: the fact that the separate ICG
+positive passes is **not** evidence that the harness cannot be the cause. They
+are different fixtures with different time bases, and here the harness *is* the
+more likely cause.
+
+Evidence: `automate_workspace/master_rebase/audits/native_runtime_reproduction_20261010/`
+(`result.json`, `four_class_full_trace_audit.json`, `four_class_offset_diagnostic.json`).
+No Lean emitter is invoked in any of those native runs; the `lhd` used is the
+accepted optimized build, `54eb7f2b38b10512`.
 
 ### R34.4 Five historical fixtures, and two named capability gaps
 
@@ -4443,15 +4474,17 @@ still reaches, and is refused by, the pass.
 
 | procedure | on master | result |
 | --- | --- | --- |
-| `single_edge_icg_test` (iverilog leg) | runs | **agrees over 29 cycles** |
-| `single_edge_four_classes_test` (iverilog leg) | runs | **`SINGLE_EDGE_DIFF_FAIL errs=78`**, uniform one-period offset (R34.3) |
+| `single_edge_icg_test` | script exits 1 | iverilog positive **agrees over 29 cycles**; the L1 **negative control did not apply**, and the rest is unreached (R34.2) |
+| `single_edge_four_classes_test` | script exits 1 | **`SINGLE_EDGE_DIFF_FAIL errs=78`** = 39 `ql` + 39 `qp`; an epoch/phase conflict with a reset-independent divider, not a native defect (R34.3) |
 | `single_edge_memory_slot_test` | blocked | gap 2 |
 | `single_edge_multi_clock_test` | blocked | gap 1 |
 | `mem_mixed_lean_diff_test` | blocked | gap 1, then gap 2 |
 | `mem_feedback_lean_diff_test` (2 cases) | blocked | gap 1 |
 
-So **one** source-RTL differential passes on master today, **one** disagrees
-with a characterized offset, and **four** cannot run for two named reasons.
+So **one** source-RTL positive comparison holds on master today — without its
+discrimination gate — **one** disagrees for a characterized reason that is not
+a native defect, and **four** cannot run at all for two named reasons. No
+script in that set exits 0.
 `mem_lean_diffsim.py`'s own P=1/P=2 procedure is preserved and controlled, but
 its fixtures are among the blocked four, so it remains unexercised end to end.
 
@@ -4466,3 +4499,74 @@ when it declares more than one — the Lean side uses `allEdges`, so a two-domai
 comparison is not expressible in this procedure at all. Recorded as open; not
 changed here, because changing it without a runnable fixture would be changing
 event semantics with nothing to check them against.
+
+## R35. The sweep's input is a manifest, not a directory walk
+
+`post_stage3.sh` pointed `direct_sweep.py` at `replay/jobs` and told it to
+walk. Measured, that is the wrong input in three independent ways:
+
+- it finds **124 `DesignCert` files and ZERO DINO ones** — the replay's DINO
+  jobs are `legacy_chunked_wf`/`legacy_full_bridge`, which emit a legacy
+  `GraphCert`, so the three clock-aware DINO certificates are not discoverable
+  there at all;
+- **eight of the 124 are candidates the static gate REFUSED.** A walk cannot
+  tell them from accepted exports, so a direct checker accepting their payload
+  would read as if the candidate had been admitted;
+- a walk keyed on paths **silently drops every configured case with no usable
+  `DesignCert`**, so "ACCEPTED n/n" is computed over whatever is on disk rather
+  than over what was configured.
+
+### R35.1 The manifest
+
+`scripts/sweep_manifest.py` builds the input from the **inventory**, and
+classifies every configured case — 125 CORE-ET + 61 CVA6 + 3 DINO:
+
+| classification | n | meaning |
+| --- | ---: | --- |
+| `sweepable` | 119 | an EXPORTED artifact carrying a `DesignCert` |
+| `gate_refused` | **8** | a `DesignCert` was emitted and the gate refused the candidate |
+| `legacy_only` | 143 | the artifact is a legacy `GraphCert`; nothing for the direct checker to read |
+| `no_artifact` | 183 | queued, skipped or failed — carried, not dropped |
+
+Each entry records family/case/top/mode, the artifact and sidecar paths with
+their **sha256**, the export and proof states, and the reason when there is
+nothing to sweep. The library provenance (R31.3) is embedded in the manifest.
+Identical payloads are deduplicated so the sweep runs each once, but **every
+configured case stays listed**, the duplicates as named `aliases` of the entry
+that runs. `direct_sweep.py` gained `--manifest`, and its output now carries
+`family`, `case`, `mode`, `artifact_sha256` and `aliases` columns — a sweep
+keyed only on a module name cannot say which configuration it ran.
+
+### R35.2 A classifier that read the field instead of the state
+
+The first version of the manifest called a record `sweepable` when its path sat
+in `artifact` and `gate_refused` when it sat in
+`artifact_produced_then_refused`. But the four records migrated from the
+pre-rewrite run store a **refused** candidate's path in `artifact` — they
+predate the second field — so `intpipe_csr_msgs`, `trans_top`, `vpu_ml` and
+`vpu_tensorfma` came through as **sweepable**. Four gate-refused candidates
+would have entered the accepted sweep: exactly the promotion this manifest
+exists to prevent. Classification is now on `export_state`, and the count went
+from 4 to the correct 8.
+
+### R35.3 The refused eight stay separate
+
+They are run, but as `--manifest-set investigate_only` into a **separate**
+table, `direct_sweep_gate_refused.tsv`, and the driver says so in the log: a
+result there describes the payload only. It does not promote the export, and it
+does not bear on RTL alignment or on the open mask/raw-provenance gate.
+
+### R35.4 DINO is exported fresh, not reused
+
+The DINO adapter's second stage read `--set formal.lean.mode=legacy`
+**unconditionally**, so a `verified_compiler` request re-emitted a legacy
+`GraphCert` and was then correctly SKIPPED for having no `DesignCert` — the
+family could not produce a verified certificate through that path at all. It
+now passes the requested mode; for every `legacy_*` mode `mode_env` returns
+`LEAN_MODE=legacy`, so their command is byte-identical to before.
+
+Stage 3 therefore exports the three DINO `verified_compiler` certificates
+**fresh** before building the manifest, rather than consuming the retained
+`step2b_dino/lean` run as a current output. Those retained artifacts are passed
+as a fallback so that DINO cannot silently vanish from the sweep, and if they
+are used they carry their own provenance note saying exactly what they are.

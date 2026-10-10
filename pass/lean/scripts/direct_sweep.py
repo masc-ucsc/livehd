@@ -289,7 +289,15 @@ def scratch_dir():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("roots", nargs="+")
+    ap.add_argument("roots", nargs="*")
+    ap.add_argument("--manifest", type=str, default="",
+                    help="a sweep_manifest.py manifest. The sweep then runs EXACTLY the "
+                         "payloads it names, with their configured family/case/mode in the "
+                         "output -- not whatever a directory walk happens to find.")
+    ap.add_argument("--manifest-set", default="to_run", choices=["to_run", "investigate_only"],
+                    help="which manifest set to run. `investigate_only` is the gate-REFUSED "
+                         "candidates: a result there describes their payload and may NOT "
+                         "promote the export or any RTL-alignment disposition.")
     ap.add_argument("--out", required=True)
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--cycles", type=int, default=4)
@@ -305,7 +313,26 @@ def main():
 
     pat = re.compile(args.filter) if args.filter else None
     seen, files = set(), []
-    for root in args.roots:
+    ident = {}        # path -> configured identity, when a manifest supplied it
+
+    if args.manifest:
+        import json as _json
+        man = _json.loads(open(args.manifest).read())
+        want = set(man.get(args.manifest_set, []))
+        for e in man.get("entries", []):
+            a = e.get("artifact")
+            if a in want and a not in ident:
+                ident[a] = e
+        missing = [a for a in sorted(want) if not os.path.exists(a)]
+        if missing:
+            print(f"direct_sweep: {len(missing)} manifest payload(s) are not on disk, "
+                  f"e.g. {missing[0]}", file=sys.stderr)
+            return 2
+        files = sorted(want, key=lambda q: os.path.getsize(q))
+        if args.roots:
+            print("direct_sweep: --manifest given, so the positional roots are ignored",
+                  file=sys.stderr)
+    for root in args.roots if not args.manifest else []:
         for dirpath, _dirs, names in os.walk(root):
             for n in sorted(names):
                 if not n.endswith("_Lgraph.lean"):
@@ -360,9 +387,9 @@ def main():
     scratch = scratch_dir()
     os.makedirs(scratch, exist_ok=True)
     workdir = tempfile.mkdtemp(prefix="d2sweep_", dir=scratch)
-    cols = ["module", "verdict", "reason", "sources", "nodes", "outputs", "flops",
-            "mems", "inputs", "check_ms", "step1_ms", "run_ms", "cycles", "wall_s",
-            "rss_kb", "path"]
+    cols = ["family", "case", "mode", "module", "verdict", "reason", "sources", "nodes",
+            "outputs", "flops", "mems", "inputs", "check_ms", "step1_ms", "run_ms",
+            "cycles", "wall_s", "rss_kb", "artifact_sha256", "aliases", "path"]
     rows = []
     # EVERY FINISHED ROW IS WRITTEN AS IT FINISHES, to `<out>.partial`.
     #
@@ -393,6 +420,15 @@ def main():
                 # coincide, which is why this was not visible.)
                 for i, f in enumerate(as_completed(futs)):
                     r = f.result()
+                    # The CONFIGURED identity travels with the row. A sweep keyed
+                    # only on a module name cannot say which configuration it ran,
+                    # and two configurations can share a payload.
+                    e = ident.get(r.get("path"), {})
+                    r["family"] = e.get("family", "")
+                    r["case"] = e.get("case", "")
+                    r["mode"] = e.get("mode", "")
+                    r["artifact_sha256"] = e.get("artifact_sha256", "")
+                    r["aliases"] = ",".join(e.get("aliases", []))
                     rows.append(r)
                     pf.write("\t".join(str(r.get(c, "")) for c in cols) + "\n")
                     pf.flush()
@@ -406,7 +442,8 @@ def main():
         else:
             print(f"# probes kept in {workdir}", file=sys.stderr)
 
-    rows.sort(key=lambda r: (r["verdict"] != "ACCEPTED", r["module"]))
+    rows.sort(key=lambda r: (r["verdict"] != "ACCEPTED", r.get("family", ""),
+                             r.get("mode", ""), r["module"]))
     # ATOMIC PUBLISH.  Writing `args.out` in place means an interruption during
     # the final write leaves a TRUNCATED file that every consumer reads as a
     # complete sweep -- the same failure the `.partial` split exists to avoid,
