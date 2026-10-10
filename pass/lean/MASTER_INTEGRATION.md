@@ -4057,3 +4057,134 @@ on `LEAN_PATH`, so `lake build Sims` is not optional. The second failed with
 `unknown option '--'`: `lake env lean --run` hands everything after the file to
 the program, so the `--` separator the D2 docstring showed arrives as an
 argument. The docstring carried that error into this tree and is corrected.
+
+## R31. D2 runtime acceptance: the generic registry, measured
+
+`Main.lean` carries `Examples.registry ++ Examples.rejectRegistry` — ten
+well-formed certificates and fourteen deliberately malformed ones — so the
+binary itself demonstrates that a refusal exits non-zero. Every one was run,
+`--cycles 1`, under `/usr/bin/time -v`:
+
+| group | n | exit | wall | peak RSS |
+| --- | ---: | --- | --- | --- |
+| accepted | 10 | all **0** | 2.52–4.98 s | 793–797 MiB |
+| malformed | 14 | all **1** | 2.34–2.90 s | 786–798 MiB |
+
+The accepted set covers combinational masking, an enabled counter, an
+async-reset counter, a ROM, a read/write memory, **two clock domains**, an
+async reset **off its domain**, a memory off its domain, and two scaling cases
+— `chain-1k` (1,000 nodes) and `chain-200k` (**200,000 nodes**, 4.98 s, 797
+MiB, the only positive above 3.5 s).
+
+Each refusal names its own cause, and they are fourteen *different* causes —
+not one message repeated:
+
+```
+bad-arity-not          node 4: operator LGraphOp.Op_Not ...
+bad-kind-mem-read      node 3: operand 0 (slot 1) has the wrong kind
+bad-dep-order          node 3: dependency on slot 4, which ...
+bad-zero-width         slot 3: width 0 is not a legal bit width
+bad-unsupported-op     node 3: operator LGraphOp.Op_SDiv ...
+bad-predicate-width    node 3: operator LGraphOp.Op_EQ ...
+bad-flop-ordinal       source slot 0: flop ordinal 7 is ...
+bad-output-kind        slot 0 holds a memory image where ...
+bad-async-reset-value  source slot 1: reset value disagrees ...
+bad-rom-size           source slot 0: ROM has more entries ...
+bad-flop-clock         flop 0: clock ordinal 1 is not declared
+bad-mem-clock          memory 0: clock ordinal 3 is not declared
+bad-no-clocks          the certificate declares no clocks
+bad-async-flag         source slot 1: async flop 0 is not ...
+```
+
+Four of those — `bad-flop-clock`, `bad-mem-clock`, `bad-no-clocks`,
+`bad-async-flag`, plus `bad-async-reset-value` — are **clock and reset**
+refusals, which is the D2 schema this port exists to carry.
+
+### R31.1 DirectBench: the two implementations compared
+
+`benchMain` runs the direct interpreter and the **verified compiler's**
+residual on the same inputs and the same initial state, then `diffTrace`
+compares them cycle by cycle and exits non-zero on any disagreement.
+
+On `txfma_e4`, 20 cycles:
+
+```
+verdict ACCEPTED        check_ms 1
+direct_step1_ms 0       direct_run_ms 2     (outsum 0)
+compile_bindings 1      compile_ms 0
+residual_run_ms 2                            (outsum 0)
+diff_result OK          diff_ms 6 cycles 20            exit 0
+14.11 s wall, 6,655,316 KiB peak
+```
+
+The RSS jump from ~796 MiB (simulator alone) to 6.5 GiB is the point of the
+split: the launcher does **not** need the verified compiler or Mathlib, and the
+bench does.
+
+### R31.2 What this is not
+
+This is the **certificate-level** runtime acceptance. It is not an RTL
+differential: see R27 — `iverilog` is not installed, so the P=1/P=2 source-RTL
+fixtures cannot run here, and a registry sweep is not a substitute for them.
+
+### R31.3 The live replay's library context, fingerprinted
+
+Recorded in `generated/master_port/d2_runtime/library_fingerprint.txt` before
+any shared-support rebuild: toolchain `leanprover/lean4:v4.31.0`, `lhd`
+`54eb7f2b38b10512` (203,522,288 bytes), and a digest and size for each of the
+25 `LeanSemanticPrimitives` `.olean` files.
+
+Checked after `lake build Sims`: **no `.olean` under
+`LeanSemanticPrimitives` was rebuilt**, and the CORE-ET `legacy_bridge` queue
+running concurrently continued to report PROVEN. Building the `Sims` library
+elaborates only the new modules and reuses the cached dependencies, so the live
+replay's context was not disturbed.
+
+## R32. Destination ledger: what is still open
+
+Recorded so none of it is lost to a checkpoint.
+
+### R32.1 Not started
+
+| item | what it needs |
+| --- | --- |
+| **D3 port** | must not overwrite post-D2 clock/reset metadata with the older clockless modules |
+| **D4 port** | same |
+| **actual Futamura port** | the goal there is a SIMULATOR (`SIMULATOR_PLAN.md`); it shares `DesignCert`/`interpretDesign` with livehd-new at a pinned rev, and those copies are never edited |
+
+Each carries its own historical acceptance requirements, which travel with the
+port and are not discharged by this branch's.
+
+### R32.2 Blocked on a prerequisite
+
+The **P=1/P=2 source-RTL differential** with its phase, initialization, named
+IO/clock sidecar ordinal and value-negative procedures. `iverilog` is not
+installed (R27). `mem_lean_diffsim.py` and its seven controls are ported and
+the admission rule is proven; the run is not possible here, and nothing else
+is reported in its place.
+
+### R32.3 Open questions, not defects
+
+- The **async read/commit admission contract** is a decision pending with the
+  user. It is not to be inferred from elapsed time or from a monitoring
+  message.
+- The **mask/raw-provenance investigation**: 18 modules, all flagged on
+  operand 1 of `Op_GetMask` with mask width ≥ data width. Characterized as a
+  mask-semantics question, explicitly **not** a constant-width defect. No
+  value is widened.
+- `CORE-ET/legacy/txfmactl_top`: a real proof failure, three `error:` lines,
+  still open (R29.2).
+
+### R32.4 Ported but not yet swept
+
+`direct_sweep.py` classifies every emitted `DesignCert` with the direct
+simulator's own `checkDesign` and runs it for a few cycles. Its thirteen
+non-Lean controls pass; the sweep itself wants the proof slot, which the
+CORE-ET `legacy_bridge` and CVA6 queues hold. Queued behind them rather than
+run concurrently.
+
+### R32.5 Unchanged by decision, not by omission
+
+Native LEC, `single_edge` and frontend contracts; checker/evaluator policy;
+the flat record layout; the pinned toolchain. No guard was weakened, no record
+nested, no value widened, and no semantic policy changed.
