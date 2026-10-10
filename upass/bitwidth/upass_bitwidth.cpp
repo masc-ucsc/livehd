@@ -947,8 +947,10 @@ void uPass_bitwidth::check_index_nonneg(const Lnast_range& idx, std::string_view
 // loop's ordinal under a guard), keep the runtime bounds assert instead. Verilog-origin code keeps
 // SystemVerilog's X read / ignored write, and a constant index is judged
 // elsewhere.
-void uPass_bitwidth::check_index_in_size(std::string_view array_name, const Lnast_range& idx) {
-  if (runner_st == nullptr || idx.is_unbounded() || idx.is_constant()) {
+void uPass_bitwidth::check_index_in_size(std::string_view array_name, const Lnast_range& idx, bool literal) {
+  // A LITERAL index is constprop's to judge; a computed one whose range is a
+  // single value (`(wa >> 2) + 3`, always 3) is still checked here.
+  if (runner_st == nullptr || idx.is_unbounded() || literal) {
     return;
   }
   if (const auto& ln = lm->get_lnast(); !ln || ln->is_template() || ln->is_verilog_origin()) {
@@ -1044,7 +1046,7 @@ upass::Vote uPass_bitwidth::process_store(std::string_view dst_name, Bundle& dst
     check_index_nonneg(range_of_operand(src[i]), src[i].name);
   }
   if (src.size() >= 2 && is_array_name(dst_name)) {
-    check_index_in_size(dst_name, range_of_operand(src.front()));
+    check_index_in_size(dst_name, range_of_operand(src.front()), src.front().name.empty());
   }
   // (Never on an array: lane 0 of `r:[2]s8` is an element, judged above, not
   // the packed port.)
@@ -1554,7 +1556,7 @@ void uPass_bitwidth::process_tuple_get() {
   }
   move_to_parent();
   if (first_index) {
-    check_index_in_size(src, range_of_operand(*first_index));
+    check_index_in_size(src, range_of_operand(*first_index), first_index->name.empty());
   }
   for (size_t i = 0, n = 0; i < idx.size(); ++i) {
     if (idx[i].bundle == nullptr) {  // a ref: bind it now that idx_names is stable

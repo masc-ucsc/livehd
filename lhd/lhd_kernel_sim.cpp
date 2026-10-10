@@ -1981,6 +1981,11 @@ void sim_command(Options& opts, Result& res) {
                                        || driver_source.find(".dump_state(") != std::string::npos;
     const bool observation_requested = !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
     observation_baked                = baked_vcd || baked_observation;
+    if (!warn_undefined.empty() && driver_source.find("sim.warn_undefined") == std::string::npos) {
+      // An older drv.bin has no such run-time key (its --set parser dies on
+      // it): drop the setting, it only ever controls warnings.
+      warn_undefined.clear();
+    }
     if (init_zero && driver_source.find("--init-zero") == std::string::npos) {
       res.status        = "fail";
       res.error_class   = "usage";

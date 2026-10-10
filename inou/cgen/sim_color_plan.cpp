@@ -1864,11 +1864,17 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       const auto gate   = lc::control_root(enable);
       // With multiple input clocks the slot alone does not determine this
       // net's level; its secondary-clock protocol must retain the held read.
-      // NO flop clock (a latch-only design: Design_clocks counts flops) with a
-      // gate that is a clock input is the single-clock case too -- the held
-      // read there published a clock-low latch's rise value after the fall,
-      // while the same latch spelled as a data enable read through.
+      // The gate must be the clock the simulator DRIVES: the flop clock input,
+      // or -- with no flop at all (a latch-only design) -- the input literally
+      // named `clock` (Cgen_sim::clock_input_of's rule). is_clock alone takes
+      // any clock-looking name, and a `clk` the testbench pokes as data read
+      // through then made the latch transparent at every level.
+      const auto driven_clock = [&](const auto& net) {
+        const auto name = gu::pin_name_of(net);
+        return clocks.n_clock_inputs() == 0 ? name == "clock" : clocks.is_flop_clock_input(name);
+      };
       if (!held_read && clocks.n_clock_inputs() <= 1 && !gate.net.is_invalid() && gu::is_graph_input_pin(gate.net)
+          && driven_clock(gate.net)
           && clocks.is_clock(gate.net) && gate.inverted == (version != State_version::post_rise)) {
         role = Version_role::data;
       }
@@ -3409,9 +3415,18 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     if (!by_name && !by_marker) {
       continue;
     }
+    // A WRITE commits at the edge: sample its cond there only. After the fall
+    // the cond mixes the new state with the old inputs, a combination the
+    // write never executes (it reported a write the design never made). A
+    // read is combinational and observed at the end of the cycle as well.
+    const bool write_marker = gu::node_name_of(marker.node.base_node()).find("write outside") != std::string_view::npos;
+    std::vector<State_version> samples{State_version::pre_rise};
+    if (!write_marker) {
+      samples.push_back(State_version::post_fall);
+    }
     for (const auto& sink : marker.node.inp_sorted_pins()) {
       for (const auto& driver : sink.get_driver_pins()) {
-        for (const auto version : {State_version::pre_rise, State_version::post_fall}) {
+        for (const auto version : samples) {
           Output_use use{static_cast<hhds::Port_id>(sink.get_port_id()), i, false, Color_plan::invalid_index, driver.get_port_id(),
                          version, 1, true, {}, true};
           if (driver.is_const()) {

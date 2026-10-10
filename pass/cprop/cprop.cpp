@@ -1764,6 +1764,18 @@ void Cprop::scalar_sext(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
 
   auto wire_dpin = inp_edges_ordered[0].get_driver_pin();
 
+  // Sext(X,1) maps boolean 1 to -1. It preserves truthiness only, so bypass
+  // it on a selector with a proven boolean input, never on a Mux data arm.
+  if (self_pos == 1 && is_bool01(wire_dpin)) {
+    for (auto sink : consumer_sinks(node)) {
+      if (type_op_of(sink.get_master_node()) == Ntype_op::Mux && sink.get_port_id() == 0) {
+        sink.del_sink();
+        sink.connect_driver(wire_dpin);
+      }
+    }
+  }
+
+  // After the selector bypass above (it wants the 0/1 mask, not y):
   // Sext(Get_mask(y, [0,w)), b) == Sext(y, b) for b <= w: Sext keeps b bits
   // (sign at b-1), all inside the low window, so they are y's. Width-free (the
   // operands are unlimited signed integers), so it holds whatever the stamps.
@@ -1781,17 +1793,6 @@ void Cprop::scalar_sext(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
         }
         inp_edges_ordered = ordered_inp_edges(node);
         wire_dpin         = y;
-      }
-    }
-  }
-
-  // Sext(X,1) maps boolean 1 to -1. It preserves truthiness only, so bypass
-  // it on a selector with a proven boolean input, never on a Mux data arm.
-  if (self_pos == 1 && is_bool01(wire_dpin)) {
-    for (auto sink : consumer_sinks(node)) {
-      if (type_op_of(sink.get_master_node()) == Ntype_op::Mux && sink.get_port_id() == 0) {
-        sink.del_sink();
-        sink.connect_driver(wire_dpin);
       }
     }
   }

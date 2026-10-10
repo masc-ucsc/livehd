@@ -93,6 +93,10 @@ public:
   [[nodiscard]] bool   is_clock(const hhds::Pin_class& root) const;
   [[nodiscard]] bool   is_clock(const hhds::Occurrence_pin& root) const;
   [[nodiscard]] size_t n_clock_inputs() const { return input_names_.size(); }
+  // A graph input some flop clocks on (no name heuristic): with no flop at all
+  // this is never true, which is when only an input literally named `clock`
+  // is the simulator's clock (Cgen_sim::clock_input_of, the color planner).
+  [[nodiscard]] bool is_flop_clock_input(std::string_view name) const { return input_names_.contains(std::string(name)); }
   [[nodiscard]] bool   has_implicit_clock() const { return implicit_clock_; }
 
   // Conventional clock spelling, token-wise (`clk`, `clock`, `core_clk`,

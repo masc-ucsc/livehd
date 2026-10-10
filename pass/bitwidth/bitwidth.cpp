@@ -614,9 +614,13 @@ void Bitwidth::process_sra(hhds::Node_class& node, Inp_pins& inp_edges) {
     if (bits <= 0) {
       // No carrier to preserve (an unstamped cell, or one pass.bitfuzz just
       // stripped). `bits_of` is the attribute THIS pass writes, so waiting for
-      // it here never converges -- fall back to the operand's own range, the
-      // bound an unresolved shift cannot exceed in magnitude.
-      adjust_bw(output, a_bw);
+      // it here never converges -- fall back to the operand's own range plus
+      // the 0 / -1 a shift can reach (below). The bare operand range is a
+      // singleton for a constant `a`, which folded the whole shift to `a`
+      // (`8'd5 >> s` read 5 after bitfuzz stripped the carrier).
+      Bitwidth_range envelope = a_bw;
+      envelope.set_wider_range(*Dlop::create_integer(a_bw.get_min().is_negative() ? -1 : 0), *Dlop::create_integer(0));
+      adjust_bw(output, envelope);
       return;
     }
     Bitwidth_range fallback;

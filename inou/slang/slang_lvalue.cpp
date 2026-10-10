@@ -1221,10 +1221,12 @@ void Slang_context::emit_leaf_split_rmw(const Packed_lv& lv, const std::string& 
     return;
   }
 
-  int64_t lo = lv.const_off;
+  // A slice partly below bit 0 writes only its in-range bits: each field
+  // intersects [lo, hi] itself and shifts the value by `ov_lo - lo`, so no
+  // clamp (clamping lo to 0 wrote the slice one position too low).
+  const int64_t lo = lv.const_off;
   if (lo < 0) {
     emit_warning(sr, "select-out-of-range", "bitwidth", "constant select is out of the declared range");
-    lo = 0;
   }
   const int64_t hi = lo + lv.width - 1;
   note_write(sym, current_assign_nonblocking_, sr.start());
@@ -1459,7 +1461,11 @@ void Slang_context::note_out_of_range(const Unpacked_address& addr, std::string_
   }
   set_pending_loc(addr.range);
   auto idx = builder_.add_child(Lnast_ntype::create_cassert());
-  builder_.add_value_child_pub(idx, addr.in_range);  // already a Bool (the range compares), or `false`
+  if (addr.in_range == "false") {
+    builder_.add_child(idx, Lnast_node::create_const("false"));  // a constant out-of-range access
+  } else {
+    builder_.add_value_child_pub(idx, addr.in_range);  // a Bool: the range compares
+  }
   builder_.add_child(idx, Lnast_node::create_const("__fkind__undefined"));
   builder_.add_child(idx, Lnast_node::create_const(absl::StrCat("'", what, "'")));
   clear_pending_loc();
@@ -1592,7 +1598,11 @@ std::string Slang_context::lower_unpacked_read(const slang::ast::Expression& exp
   // none of them addresses past the memory.
   auto result = fresh_local("array_value");
   builder_.create_declare_stmts(result, "mut", mask_text(static_cast<int>(count * mi.elem_bits)), "0", "0sb?");
-  emit_if_in_range(addr, [&]() { builder_.create_assign_stmts(result, gather_value()); });
+  note_out_of_range(addr, "memory read outside the array");
+  if (addr.in_range != "false") {
+    If_in_range guard(builder_, addr.in_range);
+    builder_.create_assign_stmts(result, gather_value());
+  }
   return result;
 }
 
@@ -1965,6 +1975,7 @@ bool Slang_context::lower_mem_element_splice_write(const slang::ast::Expression&
   };
 
   note_write(*mem_sym, current_assign_nonblocking_, lhs.sourceRange.start());
+  note_out_of_range(addr, "memory write outside the array");
   if (addr.in_range == "false") {
     return true;  // Verilog drops an out-of-range write
   }
@@ -2045,8 +2056,10 @@ std::string Slang_context::flat_port_read(const slang::ast::ElementSelectExpress
   if (auto ci = try_eval_int(es.selector())) {
     int64_t lo_bit = (mi.descending ? *ci - mi.lower : mi.upper - *ci) * mi.elem_bits;
     if (lo_bit < 0 || lo_bit + mi.elem_bits > flat_bits) {
-      emit_warning(es.sourceRange, "select-out-of-range", "bitwidth", "constant array-port select is out of range");
-      lo_bit = std::max<int64_t>(lo_bit, 0);
+      // An element outside the array reads X (0 is a refinement), never a
+      // neighbouring element.
+      emit_warning(es.sourceRange, "select-out-of-range", "bitwidth", "constant array-port select is out of range: reads X");
+      return "0";
     }
     auto r = extract_field(p, lo_bit, mi.elem_bits);
     return mi.elem_signed ? builder_.create_sext_stmts(r, std::to_string(mi.elem_bits - 1)) : r;
@@ -2087,8 +2100,9 @@ void Slang_context::flat_port_write(const slang::ast::ElementSelectExpression& e
   if (auto ci = try_eval_int(es.selector())) {
     int64_t lo_bit = (mi.descending ? *ci - mi.lower : mi.upper - *ci) * mi.elem_bits;
     if (lo_bit < 0 || lo_bit + mi.elem_bits > flat_bits) {
-      emit_warning(es.sourceRange, "select-out-of-range", "bitwidth", "constant array-port select is out of range");
-      lo_bit = std::max<int64_t>(lo_bit, 0);
+      // Verilog ignores a write to an element outside the array.
+      emit_warning(es.sourceRange, "select-out-of-range", "bitwidth", "constant array-port select is out of range: write ignored");
+      return;
     }
     note_write(*base_sym, current_assign_nonblocking_, es.sourceRange.start());
     builder_.create_set_mask_stmts(base_name, val, std::to_string(lo_bit), std::to_string(lo_bit + mi.elem_bits));
@@ -2411,26 +2425,46 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
   // through lname_of and already see the composite, which is the whole point.
   auto base_name = write_target_of(*lv.base);
 
+  const auto bi = tinfo(lv.base->getType());
+  // The clip and re-sign below measure the slice against the root's own packed
+  // width: only meaningful for a packed (integral) root. An unpacked array
+  // lowered to a flat bus keeps its offsets in that bus, which tinfo does not
+  // describe (clipping against it dropped in-range element writes).
+  const bool packed_root = lv.base->getType().isIntegral() && bi.bits > 0;
+  // A signed target whose write reaches its declared sign bit must re-sign:
+  // LNAST values are unbounded, so a set_mask cannot change the sign extension
+  // above the declared width (`t[1] = 1` on `reg signed [1:0] t = 1` reads -1,
+  // not 3). A flop target is excluded -- its declared range already wraps the
+  // stored value -- but a blocking local, a latch, and a combinational
+  // nonblocking target are not (random Verilog fuzz + review).
+  const bool resign_target = packed_root && bi.is_signed && !flat_port_syms_.contains(lv.base)
+                             && (!reg_syms_.contains(lv.base) || latch_syms_.contains(lv.base));
+  const auto resign        = [&]() { builder_.create_assign_stmts(base_name, fit_wrap(base_name, bi.bits, true)); };
+
   if (lv.dyn_off.empty()) {
+    // Only the part of the slice inside [0, bits) is written (IEEE 1800
+    // 11.5.1: the rest is ignored); a slice entirely outside writes nothing.
     int64_t lo_bit = lv.const_off;
-    if (lo_bit < 0) {
-      emit_warning(sr, "select-out-of-range", "bitwidth", "constant select is out of the declared range");
-      lo_bit = 0;
+    int64_t hi_bit = lv.const_off + lv.width;  // exclusive
+    if (packed_root && (lo_bit < 0 || hi_bit > bi.bits)) {
+      emit_warning(sr, "select-out-of-range", "bitwidth", "constant select is out of the declared range: the bits outside are not written");
+      const int64_t in_lo = std::max<int64_t>(lo_bit, 0);
+      const int64_t in_hi = std::min<int64_t>(hi_bit, bi.bits);
+      if (in_lo >= in_hi) {
+        return;
+      }
+      if (in_lo > lo_bit) {
+        val = to_int_value(builder_.create_sra_stmts(val, std::to_string(in_lo - lo_bit)));
+      }
+      val    = trunc_to(val, static_cast<int>(in_hi - in_lo));
+      lo_bit = in_lo;
+      hi_bit = in_hi;
     }
     note_write(*lv.base, current_assign_nonblocking_, sr.start());
-    const auto bi = tinfo(lv.base->getType());
-    if (!current_assign_nonblocking_ && bi.is_signed && !flat_port_syms_.contains(lv.base)) {
-      // As the runtime-position write below: a signed local declares no range,
-      // so a set_mask on its unbounded value cannot reach its sign bit --
-      // `t[1] = 1` on `reg signed [1:0] t = 1` must read -1, not 3 (random
-      // Verilog fuzz). Splice the bit pattern and store it sign-extended.
-      auto cur_p = to_pattern(read_symbol(*lv.base, sr), bi.bits, true);
-      builder_.create_assign_stmts(
-          base_name,
-          fit_wrap(splice_range(cur_p, std::to_string(lo_bit), std::to_string(lo_bit + lv.width - 1), val), bi.bits, true));
-      return;
+    builder_.create_set_mask_stmts(base_name, val, std::to_string(lo_bit), std::to_string(hi_bit));
+    if (resign_target && hi_bit >= bi.bits) {
+      resign();
     }
-    builder_.create_set_mask_stmts(base_name, val, std::to_string(lo_bit), std::to_string(lo_bit + lv.width));
     return;
   }
 
@@ -2438,7 +2472,6 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
   // writes supply the untouched bits, and RHS/index reads still observe Q.
   const auto dr = dynamic_write_range(lv, val);
   note_write(*lv.base, current_assign_nonblocking_, sr.start());
-  const auto bi = tinfo(lv.base->getType());
   if (!current_assign_nonblocking_ && bi.is_signed && !flat_port_syms_.contains(lv.base)) {
     // A signed local declares no range (declare_value_symbol) and every store
     // to it is fit_wrap'd, so the write splices a copy of its bit pattern and
@@ -2450,6 +2483,17 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
   }
   If_in_range lands(builder_, dr.in_range);
   emit_dynamic_slice_write(base_name, dr.lo, dr.hi, dr.piece);
+  // The runtime slice may reach past the top of the container: only the bits
+  // inside it are written. Re-fit the target (a non-flop's value is otherwise
+  // left wider than its declared type: `t[i +: 2] = 2'b11` at i=3 on a 4-bit
+  // t read 5 bits).
+  if (packed_root && !flat_port_syms_.contains(lv.base) && (!reg_syms_.contains(lv.base) || latch_syms_.contains(lv.base))) {
+    if (bi.is_signed) {
+      resign();
+    } else {
+      builder_.create_assign_stmts(base_name, builder_.create_get_mask_stmts(base_name, "0", std::to_string(bi.bits)));
+    }
+  }
 }
 
 std::string Slang_context::splice_range(const std::string& src, const std::string& lo, const std::string& hi,

@@ -1028,7 +1028,8 @@ public:
     for (const auto& [var, m] : inst_of_var) {
       includes_out.insert(duts_.at(m).hpp);
       o << "  auto _dut_storage_" << var << " = std::make_unique<" << duts_.at(m).cls << ">(); auto& " << var << " = *_dut_storage_"
-        << var << "; __lhd_sim_initializing = true; " << var << ".reset_cycle(_init_zero); __lhd_sim_initializing = false;\n";
+        << var << "; __lhd_sim_initializing = true; try { " << var
+        << ".reset_cycle(_init_zero); } catch (...) { __lhd_sim_initializing = false; throw; } __lhd_sim_initializing = false;\n";
       if (!vcd_dir_.empty()) {
         // one VCD per test: <vcd_dir>/<test>.vcd (suffixed by instance when >1).
         // Stash the path; set it immediately for a whole-run trace, but for a

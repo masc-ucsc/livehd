@@ -32,8 +32,8 @@ std::optional<Mapped_cost> mapped_cost(const Mapped_design& design, const std::f
       if (++visits > 2000000 || (admission && visits % 1024 == 0 && !admission())) {
         return {};
       }
-      if (graph_util::type_op_of(node) != Ntype_op::Sub) {
-        continue;
+      if (graph_util::type_op_of(node) != Ntype_op::Sub || graph_util::is_property_marker(node)) {
+        continue;  // a marker (fproperty/lgassert/lgundef) has no hardware cost
       }
       auto io = node.get_subnode_io();
       if (!io) {

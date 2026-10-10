@@ -3547,7 +3547,12 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
       const auto enable = get_driver_of_sink_name(node, "enable");
       auto       cone   = livehd::latch_contract::clock_op_of(enable, clocks);
       if (cone && !cone->clock.is_invalid() && livehd::graph_util::is_graph_input_pin(cone->clock)) {
-        candidates.insert(std::string{pin_name_of(cone->clock)});
+        // With no flop, clock_op_of's clock is only a NAME guess (`clk`,
+        // `core_clk` look like clocks): the literal `clock` rule below applies
+        // to it too, or a `clk` the testbench pokes would stop being data.
+        if (pin_name_of(cone->clock) == "clock") {
+          candidates.insert("clock");
+        }
         continue;
       }
       // `always_latch if (clock && r) .. else if (clock && e) ..` enables on
@@ -13324,7 +13329,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         };
         // sim.warn_undefined: a site the kernel flags (Cgen_llvm::undefined_if),
         // polled right after the call (the kernel itself cannot report).
-        const auto undefined_resource = [&](std::string site) {
+        // A native-loop body module has no resource array (the rolled loop ABI
+        // passes none, and any resource disables the loop): its divisions are
+        // not instrumented rather than giving the loop up (review: a `/` in a
+        // loop body cost the native loop).
+        const auto undefined_resource = [&](std::string site) -> size_t {
+          if (native_loop && shared_gen_ && shared_gen_->native_loops.contains(g) && shared_gen_->native_loops.at(g).has_value()) {
+            return Cgen_llvm::no_site;
+          }
           const auto before_count = resources.size();
           const auto index        = resource(site);
           if (resources.size() != before_count) {
@@ -14161,10 +14173,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                                      llvm_kernel.constant(operands[1].width, 0, operands[1].unsign),
                                                      1,
                                                      true);
-                if (!llvm_kernel.undefined_if(
-                        zero,
-                        undefined_resource(undefined_site_ptr(
-                            node, type_op_of(node) == Ntype_op::Div ? "division by zero" : "remainder by zero")))) {
+                if (const auto site = undefined_resource(
+                        undefined_site_ptr(node, type_op_of(node) == Ntype_op::Div ? "division by zero" : "remainder by zero"));
+                    site != Cgen_llvm::no_site && !llvm_kernel.undefined_if(zero, site)) {
                   return reject("division-by-zero warning construction failed");
                 }
                 const auto divisor = llvm_kernel.mux(zero,
@@ -17170,8 +17181,10 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 if (sub_u && !direct_slot_is_u[slot_index]) {
                   source_expr = absl::StrCat("Slop<", slot.width, ">{", source_expr, "}");
                 } else if (!sub_u && slop_u_ && direct_slot_is_u[slot_index]) {
-                  // from_proven takes the W+1-bit signed carrier of a W-bit value.
-                  source_expr = absl::StrCat("Slop_u<", slot.width, ">::from_proven(Slop<", slot.width + 1, ">{", source_expr, "})");
+                  // The slot's unsigned view of a SIGNED child output is its bit
+                  // pattern: the masking conversion. from_proven assumed a
+                  // non-negative value and stored a negative one as is.
+                  source_expr = absl::StrCat("Slop_u<", slot.width, ">{", source_expr, "}");
                 }
                 break;
               }

@@ -528,11 +528,13 @@ template <typename Node_like>
   }
   // No subnode binding left. A marker still identifies itself by the payload
   // it packs into its NAME attr -- "<kind>\x1f<loc>\x1f<msg>" for fproperty,
-  // "<loc>\x1f<node>" for lgassert -- which is the same signature
+  // lgundef_name_prefix + "<what>\x1f<loc>" for lgundef -- which is the same signature
   // Sub_inliner/Flattener use to know they must not prefix that name. \x1f is
   // not a legal identifier character, so a genuine body-less black box (external
   // IP, a Liberty cell) can never collide with it, and such a box must keep
   // reaching whatever refusal its consumer has.
+  // (tolg names an lgassert with its plain message, no \x1f: a detached
+  // lgassert is NOT recognized here.)
   return node_name_of(n).find('\x1f') != std::string_view::npos;
 }
 

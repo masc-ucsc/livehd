@@ -991,7 +991,7 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
       // multiplication in the result's context width (x ** 0 is 1, also 0 ** 0).
       if (auto e = try_eval_int(re); e && *e >= 0 && *e <= 64) {
         if (*e == 0) {
-          return "1";
+          return fit_wrap("1", ti.bits, ti.is_signed);  // 1 in a 1-bit signed context is -1, as Icarus prints it
         }
         auto acc = lhs;
         for (int64_t i = 1; i < *e; ++i) {
@@ -1805,8 +1805,20 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   if (const_low) {
     int64_t lo_bit = *const_low * stride;
     if (lo_bit < 0 || lo_bit + sel_bits > bi.bits) {
-      emit_warning(expr.sourceRange, "select-out-of-range", "bitwidth", "constant select is out of the declared range");
-      lo_bit = std::max<int64_t>(lo_bit, 0);
+      // The bits outside the vector read X (0 here, a refinement); the bits
+      // inside keep their positions in the result -- clamping lo to 0 used to
+      // shift them.
+      emit_warning(expr.sourceRange, "select-out-of-range", "bitwidth", "constant select is out of the declared range: those bits read X");
+      const int64_t in_lo = std::max<int64_t>(lo_bit, 0);
+      const int64_t in_hi = std::min<int64_t>(lo_bit + sel_bits, bi.bits);
+      if (in_lo >= in_hi) {
+        return absl::StrCat("0ub", std::string(static_cast<size_t>(sel_bits), '?'));
+      }
+      auto r = extract_field(p, in_lo, static_cast<int>(in_hi - in_lo));
+      if (in_lo > lo_bit) {
+        r = builder_.create_shl_stmts(r, std::to_string(in_lo - lo_bit));
+      }
+      return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;
     }
     auto r = extract_field(p, lo_bit, sel_bits);
     return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;
@@ -2038,11 +2050,19 @@ std::string Slang_context::inline_call(const slang::ast::CallExpression& expr, c
   if (sub.returnValVar != nullptr) {
     rebind(*sub.returnValVar);
   }
-  for (const auto& member : sub.members()) {
-    if (member.kind == slang::ast::SymbolKind::Variable) {
-      rebind(member);
+  // Locals of nested `begin ... end` blocks are members of StatementBlock
+  // scopes, not of the subroutine itself: walk them too (never into a nested
+  // subroutine, whose own calls rebind their own variables).
+  std::function<void(const slang::ast::Scope&)> rebind_scope = [&](const slang::ast::Scope& scope) {
+    for (const auto& member : scope.members()) {
+      if (member.kind == slang::ast::SymbolKind::Variable) {
+        rebind(member);
+      } else if (member.kind == slang::ast::SymbolKind::StatementBlock) {
+        rebind_scope(member.as<slang::ast::StatementBlockSymbol>());
+      }
     }
-  }
+  };
+  rebind_scope(sub);
   for (size_t i = 0; i < formals.size(); ++i) {
     const auto& fa = *formals[i];
     if (fa.direction != slang::ast::ArgumentDirection::In) {

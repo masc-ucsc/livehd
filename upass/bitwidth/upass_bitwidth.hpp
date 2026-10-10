@@ -321,7 +321,7 @@ private:
   // An array index must be >= 0; a bw_min < 0 index is a compile error. The
   // runner has rebased an index-range array's index (`idx_name` is its temp).
   void check_index_nonneg(const Lnast_range& idx, std::string_view idx_name);
-  void check_index_in_size(std::string_view array_name, const Lnast_range& idx);
+  void check_index_in_size(std::string_view array_name, const Lnast_range& idx, bool literal);
 
   // ── Inferred array shape (08-memories.md) ─────────────────────────────────
   // `reg mem:[] = 0` / `mut a:[] = nil` take their extent from the indices

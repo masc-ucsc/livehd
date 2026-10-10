@@ -11915,10 +11915,10 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     if (graph_util::type_op_of(node) != Ntype_op::Sub || node.get_subnode_graph() != nullptr) {
       continue;
     }
-    auto sio = node.get_subnode_io();
-    if (sio != nullptr
-        && graph_util::is_marker_module_name(sio->get_name())) {
-      continue;  // property primitives, not real boxes
+    // Property primitives are not real boxes -- also when a loaded `lg:` lost
+    // the body-less primitive's binding (is_property_marker reads the name).
+    if (graph_util::is_property_marker(node)) {
+      continue;
     }
     bool flattenable = false;
     if (sub_lib != nullptr) {
