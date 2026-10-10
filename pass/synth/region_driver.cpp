@@ -23,6 +23,7 @@
 #endif
 
 #include "absl/container/btree_map.h"
+#include "arith_choice.hpp"
 #include "cell.hpp"
 #include "diag.hpp"
 #include "hash_util.hpp"
@@ -858,22 +859,7 @@ void Region_driver::map_regions(std::span<const livehd::partition::Region_body> 
 }
 
 namespace {
-std::string tune_options(const Driver_options& o) {
-  const char* adder = o.adder == arith::Adder_kind::rca      ? "rca"
-                      : o.adder == arith::Adder_kind::cla    ? "cla"
-                      : o.adder == arith::Adder_kind::cska   ? "cska"
-                      : o.adder == arith::Adder_kind::prefix ? "prefix"
-                                                             : "brent";
-  const char* mult  = o.multiplier == arith::Mult_kind::array  ? "array"
-                      : o.multiplier == arith::Mult_kind::tree ? "tree"
-                      : o.multiplier == arith::Mult_kind::csa  ? "csa"
-                                                               : "sn";
-  return std::format("{{\"adder\":\"{}\",\"multiplier\":\"{}\",\"barrel\":\"{}\",\"block_size\":{}}}",
-                     adder,
-                     mult,
-                     o.reverse_barrel ? "reverse" : "log",
-                     o.block_size);
-}
+std::string tune_options(const Driver_options& o) { return arith_choice_json(o); }
 std::string applied_operations(std::span<const hhds::Node_class> nodes, const Driver_options& options, std::string_view origin) {
   std::string         rows = "[";
   rapidjson::Document defaults;
@@ -1842,20 +1828,10 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
         {w.options, ""}
     };
     if (w.add || (w.mult && w.options.auto_adder)) {
-      for (auto kind : {arith::Adder_kind::rca,
-                        arith::Adder_kind::cla,
-                        arith::Adder_kind::cska,
-                        arith::Adder_kind::prefix,
-                        arith::Adder_kind::brent}) {
+      for (auto kind : kAdderKinds) {
         auto o  = w.options;
         o.adder = kind;
-        candidates.push_back({o,
-                              "adder="
-                                  + synth_attr::text(synth_attr::quote(kind == arith::Adder_kind::rca      ? "rca"
-                                                                       : kind == arith::Adder_kind::cla    ? "cla"
-                                                                       : kind == arith::Adder_kind::cska   ? "cska"
-                                                                       : kind == arith::Adder_kind::prefix ? "prefix"
-                                                                                                           : "brent"))});
+        candidates.push_back({o, "adder=" + synth_attr::text(synth_attr::quote(adder_name(kind)))});
       }
     }
     const auto append = [](std::string label, std::string_view selector) {
@@ -1868,15 +1844,10 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
     if (w.mult) {
       const auto count = candidates.size();
       for (size_t i = 0; i < count; ++i) {
-        for (auto kind : {arith::Mult_kind::array, arith::Mult_kind::tree, arith::Mult_kind::csa, arith::Mult_kind::sn}) {
+        for (auto kind : kMultiplierKinds) {
           auto o       = candidates[i].options;
           o.multiplier = kind;
-          candidates.push_back({o,
-                                append(candidates[i].label,
-                                       kind == arith::Mult_kind::array  ? "multiplier=array"
-                                       : kind == arith::Mult_kind::tree ? "multiplier=tree"
-                                       : kind == arith::Mult_kind::csa  ? "multiplier=csa"
-                                                                        : "multiplier=sn")});
+          candidates.push_back({o, append(candidates[i].label, "multiplier=" + std::string(multiplier_name(kind)))});
         }
       }
     }

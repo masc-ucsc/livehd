@@ -9,6 +9,7 @@
 #include <print>
 #include <unordered_map>
 
+#include "arith_choice.hpp"
 #include "design_prepare.hpp"
 #include "diag.hpp"
 #include "hash_util.hpp"
@@ -282,21 +283,8 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     blast_options.state_target      = synth::State_target::cmos;
     blast_options.logical_max_nodes = options.logical.max_nodes;
     const auto encoded              = [](const synth::Blast_options& o) {
-      const char* adder = o.adder == synth::arith::Adder_kind::rca      ? "rca"
-                                       : o.adder == synth::arith::Adder_kind::cla    ? "cla"
-                                       : o.adder == synth::arith::Adder_kind::cska   ? "cska"
-                                       : o.adder == synth::arith::Adder_kind::prefix ? "prefix"
-                                                                                     : "brent";
-      const char* mult  = o.multiplier == synth::arith::Mult_kind::array  ? "array"
-                                       : o.multiplier == synth::arith::Mult_kind::tree ? "tree"
-                                       : o.multiplier == synth::arith::Mult_kind::csa  ? "csa"
-                                                                                       : "sn";
-      return std::format("{{\"adder\":\"{}\",\"multiplier\":\"{}\",\"barrel\":\"{}\",\"block_size\":{},\"heuristic\":{}}}",
-                         adder,
-                         mult,
-                         o.reverse_barrel ? "reverse" : "log",
-                         o.block_size,
-                         o.sum_adder_min_width > 0 || o.comparator_adder_min_width > 0);
+      return synth::arith_choice_json(
+          o, std::format(",\"heuristic\":{}", o.sum_adder_min_width > 0 || o.comparator_adder_min_width > 0));
     };
     synth::Blast_hooks hooks;
     hooks.over_budget = [&](uint64_t, size_t, size_t, size_t) {
@@ -476,21 +464,14 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       }
       std::vector<synth::Blast_options> candidates;
       if (mult) {
-        for (auto kind : {synth::arith::Mult_kind::sn,
-                          synth::arith::Mult_kind::csa,
-                          synth::arith::Mult_kind::tree,
-                          synth::arith::Mult_kind::array}) {
+        for (auto kind : synth::kMultiplierKinds) {
           auto o       = blast_options;
           o.multiplier = kind;
           candidates.push_back(o);
         }
       }
       if (add) {
-        for (auto kind : {synth::arith::Adder_kind::rca,
-                          synth::arith::Adder_kind::cska,
-                          synth::arith::Adder_kind::cla,
-                          synth::arith::Adder_kind::prefix,
-                          synth::arith::Adder_kind::brent}) {
+        for (auto kind : synth::kAdderKinds) {
           auto o      = blast_options;
           o.adder     = kind;
           o.sum_adder = o.multiplier_adder = o.comparator_adder = kind;
