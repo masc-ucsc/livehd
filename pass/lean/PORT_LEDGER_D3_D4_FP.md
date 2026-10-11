@@ -5567,3 +5567,116 @@ isolated bazel output roots, real paths, explicit options, project-local
 `issue_read_operands` (capped twice, undecided), `scoreboard`, `frontend`,
 `issue_stage`, `csr_regfile` -- stay explicit in the queue. A cap stop or a run
 of agreeing partial seeds does not close a block.
+
+## 55. Generation latency as its own metric, and a candidate regression
+
+The priority changed: **simulator generation latency is a standalone metric,
+ahead of reference validation.** `total_probe` and its admission contract are
+untouched; a second, generation-only driver sits beside it.
+
+### 55.1 The driver
+
+`gen_probe` stops after load, support, specialize and fragment-check, and
+measures end-to-end generation as exactly those four. It never runs reference
+stimuli, the trace or the control interpreter, and its success is
+**`GENERATION OK`** -- weaker than a benchmark pass and never entered as one.
+Full procedure, proof accounting and build details:
+`pass/lean/tests/fp/fp_generation_only.md`.
+
+The artifact is an **in-memory `Program`**: nothing is serialized, no source is
+written, and it is not raw native-emitter source.
+
+### 55.2 Every historical "specialize" number includes a szOf traversal
+
+`total_probe` times its stages with `Projection.Runner.stage`, which calls its
+digest function **inside** the timed region:
+
+```lean
+let t0 ← IO.monoMsNow
+let v ← IO.lazyPure thunk
+let d ← IO.lazyPure (fun _ => digest v)   -- szOf: a full traversal
+let t1 ← IO.monoMsNow
+```
+
+So every `specialize` and `specialize_and_check` figure in the manifests --
+including master's 18.917 s and 19.423 s for ALU -- includes a complete `szOf`
+walk of the residual. `gen_probe` moves that traversal **after** the measured
+interval and reports it separately. That alone may account for a large part of
+the gap against a remembered sub-10-second generation, and it is measured
+rather than assumed.
+
+### 55.3 The matched-ALU history, with the residual held constant
+
+Same certificate `d731ee22a85e77ba…`, same runner, same fuel 200000/2000, same
+`Projection.mixDriver`:
+
+| revision | stage | spec+check ms | residual terms | bound |
+|---|---|---|---|---|
+| `ecf59cf7d` | pre-S1 | 61,267,341 | 89,996 | 28,899 |
+| `8d7e9225a` | S1 | 162,634 | 89,996 | 28,899 |
+| `3c175a4da` | **S2** | **14,397** | 89,996 | 28,899 |
+| `8d220f3fd` | **master replay** | **19,423** | 89,996 | 28,899 |
+
+and `alu_wrapper` (`209e122f54ef…`) independently: S2 **14,139** ms, master
+**19,118** ms, residual 89,961 terms in both.
+
+**The residual is identical at every revision** -- same term count, same checker
+bound. So the +34.9% on `alu` and +35.2% on `alu_wrapper` cannot be explained by
+residual size, and the two designs agree to within 0.3 percentage points, which
+is not noise. That is a **candidate reproducible regression**, and it is only a
+candidate: `3c175a4da` is **S2**, not the FP pin. The controlled comparison is
+the pin `9bb41a09d` (S3) against master, which is what the matched build will
+decide. Master's five specializer files are byte-identical to that pin, so if
+the pin also measures ~19.4 s the cost is inherited rather than introduced; if
+it measures ~14.4 s the port introduced it despite identical specializer bytes.
+
+The user's remembered sub-10-second generation is not matched by any retained
+row: S2's 14.397 s is the fastest ALU figure in either manifest, and it includes
+the `szOf` traversal of 55.2. Nothing here is claimed to satisfy that
+expectation; the hypothesis to test is that generation without the traversal is
+materially below the recorded figure.
+
+### 55.4 Rows frozen before running
+
+33 rows, frozen to `generated/master_port/fp/genprobe/frozen_rows.json` **before
+any generation run** and not to be repicked: **all 30** CVA6-30 frozen names,
+support or no support, plus the three `rt_*` designs of FP's original CVA6
+evidence. Every one resolves to a certificate (29 in `cva6_30_auth`, 1 in
+`cva6_30_auth2`, 3 in `livehd-d4-incremental/temp`), each pinned by full
+sha256. `alu`'s is `d731ee22a85e77ba…`, the certificate of the historical row.
+
+Unsupported operator/memory cases, admission refusals, fuel stops and generation
+failures are recorded **as rows**, not dropped from the denominator.
+`pmp_data_if`'s historical DCERT1 generation stays distinct from its fresh
+`EMIT_FAILED rc=6`. CORE-ET and DINO are execution-applicability work and are
+not borrowed as FP coverage, and no D3 or D4 coverage is substituted for FP.
+
+### 55.5 Where generation is genuinely slow
+
+Independently of any reference validation, the rebased generation stage already
+measured, before fragment checking:
+
+| block | specialize ms |
+|---|---|
+| `issue_read_operands` | 21,323 |
+| `bht` | 35,118 |
+| `scoreboard` | 52,139 |
+| `frontend` | 113,527 |
+| `issue_stage` | 135,352 |
+| **`csr_regfile`** | **722,358** |
+
+Twelve minutes for `csr_regfile` is a generation cost, not a validation cost.
+These six are the profiling targets, and the rule is that a cause must be
+demonstrated rather than inferred from residual size, and that a demonstrated
+regression gets a bounded repair with a retained before/after reproducer --
+not a raised timeout.
+
+### 55.6 Order of work
+
+`bht`'s reference-validation run owns the machine and is being left to finish;
+its evidence is preserved, and its measured phases stay separate metrics --
+specialize 35.118 s, check 0.229 s, six reference stimuli 3,235.428 s, six
+residual steps 12.819 s, with the trace and control uninstrumented and still
+pending. None of that elapsed time is generation latency. Builds and the serial
+matched timing follow on a quiet machine. No second long reference-validation
+job is launched ahead of this.
