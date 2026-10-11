@@ -2929,57 +2929,57 @@ its literal is 2.5x the bytes of `decoder_gate`'s and elaborates in half the
 time. Any proposal that starts "the certificate literal is too big" has to
 explain that row first.
 
-### 32.3 What the component measurements already say
+### 32.3 What the component measurements say, and what they do not
 
-Running `report`'s components one at a time on `decoder_gate`, back to back
-under the same conditions (seconds, against a ~71 s baseline that is everything
-up to the `#eval`):
+Raw rows -- probe sha256, whole-process wall, peak RSS, process exit, printed
+output, and what each leg actually FORCES -- are retained in
+`pass/lean/tests/d3/scoreboard_cost_ladder.tsv`. Everything below that is
+called a per-pass cost is a SUBTRACTION against the matching `e1_struct`
+baseline, not a measurement, and the baseline moves with machine load. That
+distinction decides which of these claims survives.
 
-| component | passes | wall | marginal |
+Measured, whole process (seconds / peak RSS):
+
+| leg | what it forces | `decoder_gate` | `scoreboard_gate` |
 | --- | --- | ---: | ---: |
-| structural line only | 0 | 70.6 s | -- |
-| one `fast` evaluation | 1 fast | 66.8 s | ~0 |
-| `distinctObservables` | 32 fast | 71.3 s | **~0** |
-| `checkerSelfTest` | 1 `denoteResidual` | 75.6 s | ~5 s |
-| `agree` | 32 fast + 32 `denoteResidual` | **173.0 s** | **~102 s** |
+| `e1_struct` | sizes only; no evaluation | 70.6 / 2.67 GB | 290.3 / 5.89 GB |
+| `e2_sim1` | ONE `d3_fast` pass | 66.8 / 2.67 GB | 317.9 / 5.90 GB |
+| `e5_distinct` | 32 `d3_fast` passes | 71.3 / 2.66 GB | 1,574.7 / 5.89 GB |
+| `e3_selftest` | ONE `denoteResidual` + `sameResult r r` | 75.6 / 2.65 GB | 302.3 / 5.90 GB |
+| `e4_agree` | 32 `d3_fast` + 32 `denoteResidual` | 173.0 / 2.65 GB | pending |
 
-So on a design with no wide operations, **thirty-two evaluations of the
-compiled reified model cost nothing measurable, and thirty-two of the residual
-INTERPRETER cost about a hundred seconds.** The two sides of the D3 comparison
-are three orders of magnitude apart in cost, and it is the interpreter that is
-slow. That is a separate finding from §31's wide-bitvector cost, and it points
-at a different piece of code.
+**The noise floor comes first.** On `decoder_gate` the four `e*` baselines span
+66.8-75.6 s, and in the earlier prefix ladder `s1_cert` (66.7 s) ran SLOWER
+than `s2_step` (37.6 s), which is a strict superset of it. So on that design
+nothing below about 10 s is resolvable, and the `e2`, `e5` and `e3` marginals
+are all inside it. `scoreboard_gate` baselines are steadier (290.3 / 302.3 /
+317.9) but a 290 s baseline still carries tens of seconds of wander.
 
-The same ladder on `scoreboard_gate`, against its own ~290 s baseline:
+**What survives.**
 
-| component | passes | wall | marginal | per pass |
-| --- | --- | ---: | ---: | ---: |
-| structural line only | 0 | 290.3 s | -- | -- |
-| one `fast` evaluation | 1 fast | 317.9 s | 27.6 s | **27.6 s** |
-| `distinctObservables` | 32 fast | 1,574.7 s | 1,284.5 s | **40.1 s** |
-| `checkerSelfTest` | 1 `denoteResidual` | 302.3 s | 12.1 s | **12.1 s** |
+* 32 `d3_fast` passes on `decoder_gate` cost at most the noise floor:
+  `e5 - e1` is 0.7 s, so **under 0.2 s per pass**, against 40.1 s per pass on
+  `scoreboard_gate` (`e5 - e1` = 1,284.5 s over 32, far above any wander).
+  A factor of at least 250, tracking the wide-operation count, and the single
+  most solid number in this table.
+* `agree` on `decoder_gate` costs about 102 s marginal, and since its 32 `fast`
+  passes are bounded under 5 s in total, essentially all of it is 32
+  `denoteResidual` passes -- roughly 3 s each.
 
-**And here the two sides swap places.** On `decoder_gate` the compiled model is
-free and the interpreter costs ~3 s a pass; on `scoreboard_gate` the compiled
-model costs 28-40 s a pass and the interpreter 12. The reason is worth chasing
-in this phase rather than guessing at: `runBindings` pushes `denoteExpr env
-b.rhs` into a `SlotEnv`, and if `CertVal` construction is lazy then a binding
-no sampled output or flop depends on is never forced, while `reify_design`'s
-straight-line `let` chain materialises every one. If that is what is happening,
-the interpreter is not merely different from the fast model -- it is doing
-STRICTLY LESS WORK, and the comparison the D3 gate rests on is between an
-eager evaluation and a demand-driven one. That does not weaken the gate (both
-sides still have to produce the same observable) but it does mean the two
-columns are not measuring the same quantity of work, and any optimisation
-claim here has to say which.
+**What does NOT survive, and I stated it too strongly before.** I wrote that
+"the two sides swap places": that `scoreboard_gate`'s interpreter is cheaper
+than its compiled model. That rests on its `e3` marginal of 12.1 s, which is
+inside the wander of a 290 s baseline and is **not resolvable**. The honest
+position is that one `denoteResidual` pass on `scoreboard_gate` is somewhere
+under about 30 s and nothing finer is established. `e4_agree` is the leg that
+would settle it -- with `e5` known, subtracting isolates the interpreter -- and
+it had not returned when this was written.
 
-Multiplying out: 65 fast passes at 28-40 s plus 33 interpreter passes at ~12 s
-is 2,200-3,000 s, against the `>= 3,332 s` the prefix ladder leaves for
-`#eval report`. The cost is accounted for.
-
-(`agree` -- 32 fast and 32 `denoteResidual` in one leg -- was still running when
-this was written; it is the sum of the two rows above and is confirmatory, not
-load-bearing.)
+**And the selftest leg observes less than its name.** The probe prints
+`.base`, which forces one `denoteResidual` and `sameResult r r`. Whether the
+three mutation judgements inside `checkerSelfTest` are evaluated at all is not
+established, so that row is a lower bound on the component, not a measure of
+it.
 
 ### 32.4 The candidates, each with the measurement that settles it
 
