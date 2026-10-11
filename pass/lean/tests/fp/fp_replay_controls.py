@@ -50,9 +50,9 @@ def stage(tmp, block="pmp"):
     return d
 
 
-def run(d):
+def run(d, extra=()):
     r = subprocess.run([sys.executable, "-I", str(CLI), "--plan", str(d / "plan.json"),
-                        "--out", str(d / "join.tsv"), "--admit-only"],
+                        "--out", str(d / "join.tsv"), "--admit-only", *extra],
                        capture_output=True, text=True)
     status, refus = "", ""
     lines = [l for l in (d / "join.tsv").read_text().splitlines() if not l.startswith("#")]
@@ -103,6 +103,14 @@ def main():
          "not scoped to attempt", tmp)
     case("missing_capture", lambda d: R(d, "capture.json").unlink(), "refused",
          "no pre-launch capture", tmp)
+    # The SAME fixture with --allow-missing-capture may be kept as an
+    # observation, and must still never be credited.
+    d = stage(tmp); R(d, "capture.json").unlink()
+    rc, st, refus, _ = run(d, extra=["--allow-missing-capture"])
+    if st == "observed_evidence_limited" and "no pre-launch capture" in refus:
+        ok("allow_missing_capture_never_passes", "capped at evidence-limited")
+    else:
+        bad("allow_missing_capture_never_passes", f"status {st!r}")
     case("malformed_capture", lambda d: R(d, "capture.json").write_text("{nope"),
          "refused", "capture does not parse", tmp)
     case("capture_after_launch",
@@ -116,14 +124,58 @@ def main():
             re.search(r"[0-9a-f]{64}", json.dumps(c)).group(0), "f" * 64)
         R(d, "capture.json").write_text(s)
     case("wrong_capture_binary", wrong_cap_binary, "refused",
-         "capture does not name this", tmp)
+         "capture binary_sha256 is", tmp)
 
-    case("wrong_launch_command",
-         lambda d: R(d, "cmd").write_text("/some/other/binary --file-ab /x.dcert 1 2\n"),
-         "refused", "does not name this binary", tmp)
-    case("command_missing_fuel",
-         lambda d: R(d, "cmd").write_text(R(d, "cmd").read_text().replace("200000", "999")),
-         "refused", "does not name this step fuel", tmp)
+    def cap_hash_in_notes(d):
+        # The expected hashes appear in a NOTE field while the schema fields are
+        # wrong. Searching the JSON text accepted this.
+        c = json.loads(R(d, "capture.json").read_text())
+        good_b, good_c = c["binary_sha256"], c["cert_sha256"]
+        c["binary_sha256"] = "a" * 64
+        c["cert_sha256"] = "b" * 64
+        c["note"] = f"expected {good_b} and {good_c}"
+        R(d, "capture.json").write_text(json.dumps(c))
+    case("capture_hash_only_in_notes", cap_hash_in_notes, "refused",
+         "capture binary_sha256 is", tmp)
+
+    def cap_wrong_evidence(d):
+        c = json.loads(R(d, "capture.json").read_text())
+        c["evidence"] = "reconstructed"
+        R(d, "capture.json").write_text(json.dumps(c))
+    case("capture_not_prelaunch_strength", cap_wrong_evidence, "refused",
+         "not 'captured-pre-launch'", tmp)
+
+    def wrong_argv(d):
+        a = json.loads(R(d, "argv.json").read_text())
+        a["runner_argv"] = ["/some/other/binary", "--file-ab", "/x.dcert", "1", "2"]
+        R(d, "argv.json").write_text(json.dumps(a))
+    case("wrong_launch_command", wrong_argv, "refused", "is not this row's", tmp)
+
+    def fuel_substring(d):
+        # 12000000 CONTAINS 200000. A substring test accepted it.
+        a = json.loads(R(d, "argv.json").read_text())
+        a["runner_argv"] = [x if x != "200000" else "12000000" for x in a["runner_argv"]]
+        R(d, "argv.json").write_text(json.dumps(a))
+        c = R(d, "cmd").read_text().replace("200000", "12000000")
+        R(d, "cmd").write_text(c)
+    case("fuel_substring_rejected", fuel_substring, "refused", "is not this row's", tmp)
+
+    case("missing_argv",
+         lambda d: R(d, "argv.json").unlink(), "refused",
+         "the invocation was never recorded as tokens", tmp)
+
+    case("blank_attempt",
+         lambda d: [f.write_text("\n") for f in
+                    [R(d, "attempt")] + [R(d, s2) for s2 in
+                     ("exit.attempt", "wall.attempt", "time.attempt",
+                      "log.attempt", "cmd.attempt", "argv.json.attempt")]],
+         "refused", "malformed attempt id", tmp)
+
+    case("malformed_wall", lambda d: R(d, "wall").write_text("not-a-number\n"),
+         "refused", "malformed .wall duration", tmp)
+    case("negative_wall", lambda d: R(d, "wall").write_text("-5\n"),
+         "refused", "malformed .wall duration", tmp)
+
 
     def wrong_input(d):
         p = json.loads((d / "plan.json").read_text())
@@ -140,7 +192,7 @@ def main():
         p = json.loads((d / "plan.json").read_text())
         p["binary"] = str(b)
         (d / "plan.json").write_text(json.dumps(p))
-    case("wrong_binary", wrong_binary, "refused", "does not name this binary", tmp)
+    case("wrong_binary", wrong_binary, "refused", "is not this row's", tmp)
 
     case("stale_log",
          lambda d: os.utime(R(d, "cmd"), (R(d, "log").stat().st_mtime + 10,) * 2),

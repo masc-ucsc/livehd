@@ -72,7 +72,15 @@ CONTRACTS = {
 
 
 def capture(plan, binary, cert, outdir, name, attempt):
-    """Genuine pre-launch capture, or a refusal.  Returns (ok, detail)."""
+    """Genuine pre-launch capture, or a refusal.  Returns (ok, detail).
+
+    The output directory is created HERE. It used to be created inside
+    `launch`, which runs afterwards, so against a fresh outdir the recorder had
+    nowhere to write and every capture failed -- and because capture failure
+    fails closed, a whole batch refused instead of running uncaptured. The
+    guard did its job; the ordering was the bug.
+    """
+    outdir.mkdir(parents=True, exist_ok=True)
     rec = pathlib.Path(plan["recorder"]).resolve()
     argv = " ".join([str(binary)] + ([plan["mode"]] if plan.get("mode") else [])
                     + [str(cert), str(plan["fuel_step"]), str(plan["fuel_work"])])
@@ -89,7 +97,8 @@ def capture(plan, binary, cert, outdir, name, attempt):
 
 def launch(binary, cert, plan, outdir, name, timeout_s, attempt):
     outdir.mkdir(parents=True, exist_ok=True)
-    for suf in ("log", "time", "exit", "signal", "wall", "cmd", "guard.json", "attempt"):
+    for suf in ("log", "time", "exit", "signal", "wall", "cmd", "guard.json",
+                "argv.json", "attempt"):
         f = outdir / f"{name}.{suf}"
         if f.exists():
             f.unlink()
@@ -104,6 +113,14 @@ def launch(binary, cert, plan, outdir, name, timeout_s, attempt):
     full = guard + timed + argv
     (outdir / f"{name}.attempt").write_text(attempt + "\n")
     (outdir / f"{name}.cmd").write_text(" ".join(full) + "\n")
+    # STRUCTURED argv. The wrapper command contains a literal newline inside the
+    # /usr/bin/time format, so splitting the `.cmd` string on whitespace does not
+    # recover the tokens -- and substring tests on it accept `12000000` as
+    # `200000`. The runner argv is recorded as a list and checked token by token.
+    (outdir / f"{name}.argv.json").write_text(json.dumps({
+        "attempt": attempt, "wrapper_argv": full, "runner_argv": argv,
+        "binary": str(binary), "mode": plan.get("mode"), "cert": str(cert),
+        "fuel_step": plan["fuel_step"], "fuel_work": plan["fuel_work"]}, indent=1))
     (outdir / f"{name}.guard.json").write_text(json.dumps({
         "attempt": attempt,
         "requested": {"MemoryMax": memmax, "wall_timeout_s": timeout_s,
@@ -120,7 +137,7 @@ def launch(binary, cert, plan, outdir, name, timeout_s, attempt):
     (outdir / f"{name}.wall").write_text(f"{wall:.2f}\n")
     if sig:
         (outdir / f"{name}.signal").write_text(f"{sig}\n")
-    for suf in ("exit", "wall", "signal", "time", "log", "cmd"):
+    for suf in ("exit", "wall", "signal", "time", "log", "cmd", "argv.json"):
         a = outdir / f"{name}.{suf}.attempt"
         if (outdir / f"{name}.{suf}").is_file():
             a.write_text(attempt + "\n")
@@ -138,17 +155,25 @@ def admit(outdir, name, cert, binary, plan, want_cert_sha, allow_missing_capture
     refus, f = [], {"mode": mode or "(positional)"}
     P = lambda suf: outdir / f"{name}.{suf}"
 
+    ATTEMPT_RE = re.compile(r"^\d{8}T\d{6}-[0-9a-f]{8}$")
     attempt = ""
     if not P("attempt").is_file():
         refus.append("no .attempt id: this evidence is not scoped to a run")
     else:
         attempt = P("attempt").read_text().strip()
         f["attempt"] = attempt
+        # A BLANK id matched every sidecar that was also blank, so unscoped
+        # evidence compared equal to itself and passed.
+        if not ATTEMPT_RE.fullmatch(attempt):
+            refus.append(f"malformed attempt id {attempt!r}")
+            attempt = ""
     for suf in ("exit", "wall", "time", "log", "cmd"):
         ap = P(f"{suf}.attempt")
         if not P(suf).is_file():
             refus.append(f"missing evidence file: .{suf}")
-        elif attempt and (not ap.is_file() or ap.read_text().strip() != attempt):
+        elif attempt and (not ap.is_file()
+                          or ap.read_text().strip() != attempt
+                          or not ap.read_text().strip()):
             refus.append(f".{suf} is not scoped to attempt {attempt}: it may be an "
                          f"earlier run's file")
     # Only a MISSING log or status stops the parse. An authentication failure
@@ -170,7 +195,16 @@ def admit(outdir, name, cert, binary, plan, want_cert_sha, allow_missing_capture
     # collected, so the run's comparison survives without a status being
     # invented for it.
     f["signal"] = P("signal").read_text().strip() if P("signal").is_file() else ""
-    f["wall_s"] = P("wall").read_text().strip() if P("wall").is_file() else ""
+    f["wall_s"] = ""
+    if P("wall").is_file():
+        raw_w = P("wall").read_text().strip()
+        try:
+            wv = float(raw_w)
+            if wv < 0 or wv != wv or wv in (float("inf"), float("-inf")):
+                raise ValueError(raw_w)
+            f["wall_s"] = raw_w
+        except ValueError:
+            refus.append(f"malformed .wall duration {raw_w!r}")
     f["exit_evidence"] = f"derived from {P('exit')}"
 
     tt = P("time").read_text(errors="replace") if P("time").is_file() else ""
@@ -196,24 +230,42 @@ def admit(outdir, name, cert, binary, plan, want_cert_sha, allow_missing_capture
     # missing -- which the evidence refusal above already states.
     cmd = cp.read_text() if cp.is_file() else ""
     f["cmd"] = cmd.strip()
-    if cp.is_file():
-        for needle, what in ((str(binary), "binary"), (str(cert), "certificate"),
-                             (str(plan["fuel_step"]), "step fuel"),
-                             (str(plan["fuel_work"]), "work fuel")):
-            if needle not in cmd:
-                refus.append(f"the recorded command does not name this {what}")
-        if mode and mode not in cmd:
-            refus.append(f"the recorded command does not name mode {mode}")
-        if not mode and "--" in cmd.split(str(binary))[-1]:
-            refus.append("the recorded command carries a mode flag this row does not use")
+    avp = P("argv.json")
+    if not avp.is_file():
+        refus.append("no .argv.json: the invocation was never recorded as tokens")
+    else:
+        try:
+            av = json.loads(avp.read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            av = None
+            refus.append(f"the recorded argv does not parse: {e}")
+        if av is not None:
+            aap = P("argv.json.attempt")
+            if attempt and (not aap.is_file() or aap.read_text().strip() != attempt):
+                refus.append("the recorded argv is not scoped to this attempt")
+            want = [str(binary)] + ([mode] if mode else []) \
+                + [str(cert), str(plan["fuel_step"]), str(plan["fuel_work"])]
+            got = [str(x) for x in (av.get("runner_argv") or [])]
+            f["runner_argv"] = " ".join(got)
+            # TOKEN BY TOKEN, and in position. A substring test accepted a step
+            # fuel of 12000000 as 200000 because the digits appear inside it.
+            if got != want:
+                refus.append(f"recorded argv {got} is not this row's {want}")
 
     capf = P("capture.json")
     f["capture_file"] = str(capf) if capf.is_file() else ""
     if not capf.is_file():
+        # Even when explicitly allowed, an absent capture caps the row at
+        # evidence-limited: nothing pins the executed code. The flag chooses
+        # between "refused" and "kept as an observation", never "credited".
+        f["capture_state"] = "ABSENT"
+        refus.append("no pre-launch capture"
+                     + (" (allowed: row is capped at evidence-limited)"
+                        if allow_missing_capture else ""))
+        # Only the EXPLICIT flag turns an absent capture into a retained
+        # observation. Without it, a missing capture refuses.
         if allow_missing_capture:
-            f["capture_state"] = "absent (explicitly allowed)"
-        else:
-            refus.append("no pre-launch capture")
+            f["capture_absent"] = "1"
     else:
         capa = P("capture.attempt")
         try:
@@ -227,12 +279,20 @@ def admit(outdir, name, cert, binary, plan, want_cert_sha, allow_missing_capture
             if cp.is_file() and capf.stat().st_mtime > cp.stat().st_mtime:
                 refus.append("the capture is NEWER than the launch marker: it does "
                              "not describe what ran")
-            blob = json.dumps(cap)
-            if sha(binary) not in blob:
-                refus.append("the capture does not name this binary's sha256")
-            if sha(cert) not in blob:
-                refus.append("the capture does not name this certificate's sha256")
-            f["capture_state"] = "pre-launch, validated"
+            # EXPLICIT FIELDS. Searching the JSON text accepted a capture whose
+            # binary_sha256 and cert_sha256 were wrong but whose notes happened
+            # to mention the expected hashes.
+            cb, cc = cap.get("binary_sha256"), cap.get("cert_sha256")
+            if cb != sha(binary):
+                refus.append(f"capture binary_sha256 is {cb!r}, this binary is "
+                             f"{sha(binary)}")
+            if cc != sha(cert):
+                refus.append(f"capture cert_sha256 is {cc!r}, this certificate is "
+                             f"{sha(cert)}")
+            if cap.get("evidence") != "captured-pre-launch":
+                refus.append(f"capture evidence is {cap.get('evidence')!r}, not "
+                             f"'captured-pre-launch'")
+            f["capture_state"] = "pre-launch, fields validated"
 
     f["cert_sha256"], f["binary_sha256"] = sha(cert), sha(binary)
     if want_cert_sha and f["cert_sha256"] != want_cert_sha:
@@ -340,7 +400,9 @@ def admit(outdir, name, cert, binary, plan, want_cert_sha, allow_missing_capture
 
 EVIDENCE_MARKERS = (".attempt id", "not scoped to", "missing evidence file",
                     "pre-launch capture", "capture does not", "capture is NEWER",
-                    "uniquely parsed", "malformed outer status")
+                    "uniquely parsed", "malformed outer status", "malformed attempt id",
+                    ".argv.json", "recorded argv", "capture binary_sha256",
+                    "capture cert_sha256", "capture evidence", "malformed .wall")
 
 
 COLS = ["record_id", "block", "mode", "status", "attempt", "outer_exit", "worker_exit",
@@ -348,7 +410,8 @@ COLS = ["record_id", "block", "mode", "status", "attempt", "outer_exit", "worker
         "trace_cycles", "trace_agrees", "support_all", "control", "residual_terms",
         "checker_bound", "cert_sha256", "binary_sha256", "cert_path", "capture_state",
         "guard_requested", "guard_observed", "cmd", "cmd_file", "log_file", "time_file",
-        "exit_file", "wall_file", "guard_file", "capture_file", "exit_evidence",
+        "exit_file", "wall_file", "guard_file", "capture_file", "argv_file",
+        "runner_argv", "exit_evidence",
         "evidence_class_refusals", "observable_class_refusals", "refusals"]
 
 
@@ -397,7 +460,7 @@ def main():
                    r.get("timeout_s", plan["timeout_s"]), attempt)
         st, f, refus = admit(outdir, name, cert, binary, plan, r.get("cert_sha256", ""),
                              a.allow_missing_capture)
-        if (st == "refused" and a.observed_only
+        if (st == "refused" and (a.observed_only or f.get("capture_absent"))
                 and not f.get("observable_class_refusals")):
             st = "observed_evidence_limited"
         rows.append(base | {k: v for k, v in f.items() if k in COLS} | {
@@ -406,7 +469,8 @@ def main():
             "time_file": str(outdir / f"{name}.time"),
             "exit_file": str(outdir / f"{name}.exit"),
             "wall_file": str(outdir / f"{name}.wall"),
-            "guard_file": str(outdir / f"{name}.guard.json")})
+            "guard_file": str(outdir / f"{name}.guard.json"),
+            "argv_file": str(outdir / f"{name}.argv.json")})
         print(f"{st:<10} exit={f.get('outer_exit','')} seeds={f.get('seeds','')} "
               f"{('REFUSED: ' + refus[0][:70]) if refus else ''}")
     out = pathlib.Path(a.out)

@@ -4233,3 +4233,104 @@ honest one. Nothing observed has been retracted -- the comparisons are retained
 in the joins with their evidence paths -- but a row is credited only when the
 evidence can be tied to the run that produced it.
 
+## 44. FP checkpoint 7: row 4 and the eight S2 configurations
+
+### 44.1 Five more binding defects, closed
+
+Retained CLI controls against `fp_replay.py` at
+`0d4d0dc574b2d2b85021bec1a365deb97f51ef0b3dee262e5e29b8b8183d6248` showed it
+admitting rows with a **blank attempt id**, a **step fuel of 12,000,000
+accepted as 200,000 by substring**, a capture whose `binary_sha256` and
+`cert_sha256` were wrong but whose NOTES mentioned the right hashes,
+`--allow-missing-capture` yielding a full `pass`, and a **malformed `.wall`**.
+
+Each is now bound properly:
+
+* attempt ids must match `\d{8}T\d{6}-[0-9a-f]{8}` and be nonempty -- a blank id
+  compared equal to every blank sidecar, so unscoped evidence matched itself;
+* the invocation is recorded STRUCTURALLY in `.argv.json` and checked **token
+  by token in position**, because the wrapper command embeds a newline inside
+  the `/usr/bin/time` format and cannot be recovered by splitting on
+  whitespace -- which is also how `12000000` passed as `200000`;
+* the capture is bound to its SCHEMA FIELDS -- `binary_sha256`, `cert_sha256`,
+  `evidence == "captured-pre-launch"` -- never to a text search;
+* an absent capture caps the row at evidence-limited **even when explicitly
+  allowed**; the flag chooses between refusing and keeping an observation,
+  never crediting;
+* `.wall` must parse as a finite non-negative duration.
+
+Nine narrowly targeted controls were added for exactly these, and the existing
+suite is retained: **39 controls, all passing**, each asserting its own refusal
+reason.
+
+### 44.2 A latent bug the fail-closed guard surfaced
+
+The first S2 attempt refused all eight rows with `CAPTURE_FAILED` and launched
+nothing. The cause was ordering: the output directory was created inside
+`launch`, which runs AFTER the capture, so against a fresh directory the
+recorder had nowhere to write. The guard did exactly what it was built for --
+a batch refused instead of eight runs proceeding uncaptured.
+
+### 44.3 Which implementation carries which configuration
+
+Master builds from the pinned FP head, which is **S3** ("deferred shifting
+removes the shift quadratic"). The recorded binaries are different in every
+case:
+
+| rows | stage | recorded binary |
+| --- | --- | --- |
+| 15-22 | S1, `mixDriver` carrying `PRes.val` | `acc023ee...` |
+| 23-30 | S2, the `nthD` lookup summary integrated | `1b5531a6...` |
+| 4 | no S-stage; CVA6 `alu.sv` as `cva6_alu_export` | `9168c836...` |
+| master | **S3** | neither |
+
+So each replay is **this row's CONFIGURATION under master's S3 transport**, and
+no replay is a recreation of an old binary. A run is counted toward its own
+row only: the S1 rows and the S2 rows are the same eight inputs and are
+attempted separately, because matching input names is not a shared result.
+
+### 44.4 Results
+
+Eight S2 rows, 1800 s each, and row 4 at 3600 s -- one finite attempt per
+configuration, serial, under an 8 GiB observed guard, into fresh output
+directories so no prior run was overwritten.
+
+| row | block | status | wall | peak RSS | seeds | trace | control | checker bound |
+| ---: | --- | --- | ---: | ---: | --- | --- | --- | ---: |
+| 23 | instr_scan | pass | 9.82 s | 12,048 kB | 0,1,2,3,4,7 | 4c true | true | 5,711 |
+| 24 | commit_stage | pass | 37.23 s | 11,968 kB | 0,1,2,3,4,7 | 4c true | true | 5,448 |
+| 25 | compressed_decoder | pass | 9.28 s | 14,688 kB | 0,1,2,3,4,7 | 4c true | true | 8,962 |
+| 26 | pmp | pass | 12.69 s | 15,440 kB | 0,1,2,3,4,7 | 4c true | true | 14,277 |
+| 27 | pmp_data_if | pass | 34.81 s | 20,436 kB | 0,1,2,3,4,7 | 4c true | true | 19,743 |
+| 28 | alu_wrapper | pass | 70.32 s | 23,128 kB | 0,1,2,3,4,7 | 4c true | true | 28,889 |
+| 29 | alu | pass | 70.76 s | 23,828 kB | 0,1,2,3,4,7 | 4c true | true | 28,899 |
+| 30 | decoder | pass | 133.19 s | 29,532 kB | 0,1,2,3,4,7 | 4c true | true | 38,754 |
+| **4** | **rt_alu** | **pass** | **72.52 s** | 23,136 kB | 0,1,2,3,4,7 | 4c true | true | 28,899 |
+
+**Row 4 is the one worth pausing on.** Its recorded run took **61,330.78 s** --
+about seventeen hours -- and I budgeted 3600 s expecting a resource stop. It
+finished in **72.52 s**. That is the S3 transport against a binary from before
+the shift quadratic was removed, and it is a difference in the implementation
+carrying the configuration, not evidence about the old run.
+
+All nine carry a genuine pre-launch capture, attempt-scoped raw output, status,
+timing and structured argv, and all nine are recorded through the original
+`record_experiment.py` with the unchanged exit trailer. The master manifest now
+holds **19 records**, every one at `"the code that ran"` strength.
+
+### 44.5 Coverage
+
+**Of the 26 old passes: 10 admitted, 16 observed-but-evidence-limited, 0
+unattempted.** Rows 1 and 5 remain `exit 3` and rows 13 and 14 remain
+exit-unknown -- preserved dispositions, not obligations to turn into passes.
+
+The 16 are the earlier file-ab and S1 batches: observables intact, but recorded
+before attempt scoping existed, so they cannot be authenticated to a run. They
+were NOT re-run to relabel them.
+
+Still required and open: the original runner, trace, scaling, DCERT, census and
+fixture procedures; the CORE-ET/CVA6/DINO benchmark discovery; and fresh DCERT2
+FP transport, which stays separate from the historical DCERT1 replay these rows
+exercise. `pmp_data_if` passes historically under both runners and its fresh
+export is still `EMIT_FAILED rc=6`, in the denominator.
+
