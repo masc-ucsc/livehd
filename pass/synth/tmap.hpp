@@ -27,6 +27,10 @@ struct Tmap_options {
   int                                   boundary_rounds  = 1;       // exact re-size rounds, 1..64
   std::string                           reg_margin       = "auto";  // `auto` or non-negative ps
   uint32_t                              area_relax_pct   = 200;     // slack-to-area `&nf -R` remap cap; 0 disables
+  // Structural choices (`&dch -f`) computed on the handed-over network before
+  // the mapper, so `&nf` can pick among equivalent structures. It adds no new
+  // logic of its own and leaves the Boolean function (and the region cut) alone.
+  bool                                  choices          = true;
   int                                   memory_budget_mb = 16384;   // per-region growth; process ceiling is shared
   uint64_t                              time_budget_ms   = 0;
   std::string                           cache_directory;  // internal; empty disables mapped reuse

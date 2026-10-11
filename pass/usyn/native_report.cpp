@@ -548,6 +548,7 @@ std::string mapping_report(const synth::Mapped_design& design, std::string_view 
   w.Key("reg_margin");
   text(w, options.reg_margin);
   number(w, "area_relax", options.area_relax_pct);
+  flag(w, "tmap_choices", options.choices);
   w.EndObject();
   w.Key("scope");
   text(w, "definition-regions");

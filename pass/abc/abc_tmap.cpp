@@ -70,11 +70,12 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
   options.boundary_rounds  = request.boundary_rounds;
   options.reg_margin       = request.reg_margin;
   options.area_relax_pct   = request.area_relax_pct;
+  options.tmap_choices     = request.choices;
   // Every effective physical option is spelled here: the recipe (and thus each
   // region key) and the cache salt below both carry it verbatim.
   const auto physical      = std::format(
       "max_fanout={}|boundary={}|boundary_buffer={}|boundary_drive={}|io_load={}|"
-      "boundary_rounds={}|reg_margin={}|area_relax={}",
+      "boundary_rounds={}|reg_margin={}|area_relax={}|choices={}",
       request.max_fanout,
       request.boundary,
       request.boundary_buffer,
@@ -82,7 +83,8 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
       request.io_load,
       request.boundary_rounds,
       request.reg_margin,
-      request.area_relax_pct);
+      request.area_relax_pct,
+      request.choices);
   options.region_hook_recipe = "logical-tmap-v2/sharing-" + std::to_string(request.sharing_fanout) + "/" + physical;
   // Every region, including output-only logic, takes the existing mapping-only
   // branch. No failed candidate or embedded region flow can select ABC synthesis.

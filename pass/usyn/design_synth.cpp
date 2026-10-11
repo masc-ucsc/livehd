@@ -239,10 +239,15 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       // The native mapper has no subsequent Boolean restructuring to remove
       // a ripple carry chain. Keep narrow sums and divider internals compact;
       // wide sums and the final multiplier addition use logarithmic carries.
-      blast_options.sum_adder                  = synth::arith::Adder_kind::prefix;
+      // Brent-Kung, not Kogge-Stone: measured on picorv32 / dino / matched_filter
+      // (coarse partition) it is smaller AND at least as fast as the full prefix
+      // tree here (picorv32 6840 vs 7727 cells, 1050 vs 1092 ps; dino 19345 vs
+      // 19878, 1594 vs 1671 ps), because the mapper cannot recover the area of
+      // the redundant prefix cells.
+      blast_options.sum_adder                  = synth::arith::Adder_kind::brent;
       blast_options.sum_adder_min_width        = 16;
-      blast_options.multiplier_adder           = synth::arith::Adder_kind::prefix;
-      blast_options.comparator_adder           = synth::arith::Adder_kind::prefix;
+      blast_options.multiplier_adder           = synth::arith::Adder_kind::brent;
+      blast_options.comparator_adder           = synth::arith::Adder_kind::brent;
       blast_options.comparator_adder_min_width = 8;
     }
     if (auto it = options.region_opts.find(rb.color); it != options.region_opts.end()) {
