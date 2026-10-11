@@ -2744,3 +2744,122 @@ The **full scaling sweep** (n up to 4096 chain, 1024 far) has not been run —
 it is a multi-hour measurement and the 122-module CORE-ET procedure has the
 machine. The generator and harness are repaired and exercised; the published
 scaling NUMBERS are not yet reproduced.
+
+## 31. Why `scoreboard_gate` timed out: `bv_bitwise` costs 3.5 microseconds per bit
+
+The frozen-30 master sweep returned 20 `agree` and one `timeout`. The timeout
+is `scoreboard_gate`, at the 3,600 s bound. It is NOT a hang, a loop or a wrong
+answer -- the row is `timeout`, which is undecided -- but it is also not just
+"a big design", and chasing it found two real defects.
+
+### 31.1 Where the time goes, measured by cutting the probe down
+
+The probe was split into a ladder and each prefix elaborated on its own, with
+`decoder_gate` as the control (same corpus, same toolchain, no wide
+operations). Seconds, and peak RSS:
+
+| prefix | scoreboard_gate | decoder_gate |
+| --- | ---: | ---: |
+| certificate literal only | 31.9 s / 2.31 GB | 66.7 s / 1.97 GB |
+| + `_step` | 32.0 s / 2.37 GB | 37.6 s / 2.01 GB |
+| + `reify_design` | 260.7 s / 5.90 GB | 84.5 s / 2.64 GB |
+| + `d3_residual` | 270.8 s / 5.89 GB | 73.8 s / 2.65 GB |
+| + `#eval report` (whole probe) | **3603.1 s, killed** | 80.1 s / 2.65 GB |
+
+So `#eval report` is at least **3,332 s of the 3,603** -- 92 % -- while the same
+step costs the control about 6 s. The certificate literal is NOT the problem:
+scoreboard's is 2.5x the bytes of decoder's and elaborates in half the time.
+(The decoder column wanders by 2x between prefixes that are strict subsets of
+one another; those runs shared the machine with the sweep. The scoreboard
+column is internally consistent and the 92 % figure does not depend on the
+noise.)
+
+### 31.2 `report` evaluates the whole design 98 times
+
+Per `D3Harness.report`: one `fast` for `sim_exec`, 32 `fast` + 32
+`denoteResidual` for `agree`, 32 `fast` for `distinctObservables`, and one
+`denoteResidual` for `checkerSelfTest`. That is **65 `fast` and 33
+`denoteResidual` passes**, by design -- sampled differential evidence is what
+the gate is.
+
+### 31.3 The cost of one pass is set by BIT WIDTH, not by node count
+
+A width census over the 21 master CVA6 certificates, against the measured wall
+time:
+
+| block | nodes | ops >= 1000 bits | max width | total declared width | wall |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `scoreboard_gate` | 5,170 | **2,537** | 3,868 | **8,804,743** | timeout |
+| `bht_gate` | 4,832 | 0 | 385 | 791,184 | 614.9 s |
+| `btb_gate` | **1,037** | 346 | 2,080 | 741,138 | 328.5 s |
+| `store_unit_gate` | 1,346 | 0 | 561 | 185,738 | 86.7 s |
+| `decoder_gate` | 3,714 | 0 | 439 | 55,097 | 88.5 s |
+| `aes_gate` | 3,569 | 0 | 65 | 31,793 | 68.9 s |
+
+`btb_gate` is the clean refutation of node count: a THIRD the nodes of
+`decoder_gate` and four times the wall time, because it carries 346 operations
+of 2,080 bits. `scoreboard_gate` is eleven times the next design on total
+width, and its widest operations are 3,868-bit `Op_SHL`.
+
+### 31.4 The primitive: 13.55 ms for one 3,868-bit xor
+
+`bv_bitwise` is bit-at-a-time (`Translation/LGraphModel.lean`):
+
+```lean
+def bv_bit (x : BV) (i : Nat) : Bool := ((bv_uint x).toNat >>> i) % 2 = 1
+def bits_to_int (w : Nat) (f : Nat -> Bool) : Int :=
+  ((List.range w).filterMap fun i => if f i then some (2 ^ i : Int) else none).sum
+def bv_bitwise (w : Nat) (f : Bool -> Bool -> Bool) (a b : BV) : BV :=
+  mk_bv w (bits_to_int w fun i => f (bv_bit a i) (bv_bit b i))
+```
+
+Each bit allocates: a `bv_uint` big-integer modulo per operand, a shift, a
+`2 ^ i`, a list cell, and a term in the sum. Measured, 20 iterations each:
+
+| width | per operation |
+| ---: | ---: |
+| 64 | 550 us |
+| 256 | 1,300 us |
+| 1,024 | 3,250 us |
+| 2,080 | 7,000 us |
+| 3,868 | **13,550 us** |
+
+About 3.5 us per bit, roughly linear in width with an enormous constant. One
+3,868-bit xor costs 13.55 ms; `rshlV` calls `bv_bitwise` once per extra
+dependency, so scoreboard's 2,537 wide operations put a single evaluation pass
+at order 25 s, and 98 passes at 2,400-3,300 s. That is the measured
+`>= 3,332 s`, from the primitive, with nothing else needed to explain it.
+
+At 64 bits it is already about 8.6 us per bit, against `Nat.xor`/`Nat.land`/
+`Nat.lor`, which are native and O(w/64).
+
+### 31.5 Two defects, and what they are not
+
+**Not** a correctness defect, not a hang, and not a resource cap: nothing was
+killed by memory, the peak was 5.83 GiB against a 20,000,000 kB cap, and the
+disposition `timeout` already says undecided.
+
+1. **`bv_bitwise`, `bv_not` and `bits_to_int` are the wrong shape.** The
+   obvious repair -- `Nat.xor`/`land`/`lor` on the underlying value -- is NOT a
+   drop-in: these are semantic primitives and every proof that unfolds them
+   would have to follow, and an `@[implemented_by]` fast path would put an
+   unverified implementation on BOTH sides of the D3 comparison, where a wrong
+   one makes the two sides agree wrongly. The honest repair is a proved
+   equality (`Nat.testBit` lemmas) and then the swap. Recorded, not taken: this
+   is an evaluator change and it needs its own acceptance.
+2. **The sweep sizes targets by node count.** `--tier` and the per-target
+   `--timeout` both derive from `nodes`, which mispredicts by 4x in the wrong
+   direction on `btb_gate`. Total declared bit-width is the predictor; a
+   width-aware tier would have scheduled and bounded `scoreboard_gate`
+   correctly instead of giving it the same 3,600 s as a 55-kbit design.
+
+### 31.6 Nothing else is near the cliff
+
+One timeout in 21, and the two nearest designs on the width axis both finished:
+`bht_gate` at 614.9 s and `btb_gate` at 328.5 s. Every other CVA6 target is at
+most 185,738 bits and 86.7 s. In the 76-target CORE-ET master corpus the
+slowest was `vpu_mask` at 242.1 s, and no target there carries a single
+operation of 1,000 bits or more. The two CVA6 blocks that would be worst --
+`cva6_hpdcache_subsystem` and `cva6_hpdcache_wrapper`, at ~108,000 nodes -- have
+no certificate at all, so they never reach this harness.
+
