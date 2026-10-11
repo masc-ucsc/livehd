@@ -4829,3 +4829,97 @@ into the repository. They are untracked again and both directories are now
 ignored; the files stay on disk and nothing tracked reads them. The blobs
 remain in those three commits, and dropping them from history would need a
 rewrite, which is not done here.
+
+## 48. FP checkpoint 11: the thirteen uncredited prototype modes
+
+Checkpoint 9 ran five `proto_probe` modes and explicitly refused to credit the
+other thirteen. They are run here: **19 further guarded invocations, every one
+exit 0**, which takes the mode ledger to **20 of 20 dispatch forms executed**
+and `fp_entrypoint_inventory.tsv` to **18 of 18 entrypoints**.
+
+### 48.1 Decidable equality, on a real design and on a sequential one
+
+`--file` does not compare digests. Its `identical` field is `R == F` --
+decidable equality on `Program`. On `instr_scan_gate.dcert`:
+
+```
+ref size 2335903  fast size 2335903  identical true  same-result true
+```
+
+so `Hw.projectDesign` and `ProtoFast.mixDriver` produce **the same residual**,
+term for term, on a real 1235-source, 1264-node CVA6 design, and one run of
+each agrees. That is the strongest identity evidence anywhere in the FP set --
+everything in section 47 rests on a 64-bit digest.
+
+The bare shape form extends it to **11 synthetic cases**, all
+`identical true  same-result true  ref-ran true  fast-ran true`: chain at
+273/513/993/1953, fan at 288/544/1056/2080, and **flop at 433/1217/3937**.
+`flop` is a sequential fixture, so this is decidable-equality identity on
+sequential designs -- built by hand, and therefore free of the imported
+corpus's reset-polarity opposition from section 46.
+
+### 48.2 The interpreter, not the specializer, decides the residual size
+
+Four runs on the same certificate, same fuel, pin this down:
+
+| specializer | interpreter | residual |
+|---|---|---|
+| `Hw.projectDesign` (`--file-ref`) | `Hw.hwAP` | 2,335,903 terms |
+| `ProtoFast.mixDriver` (`--file-fast`, stock 20000/200) | `Hw.hwAP` | 2,335,903 terms |
+| `mixDriver` (`--host-var`) | `hwAPVar` | 48,439 terms |
+| `mixDriver` (`--host-var-total`) | `hwAPVarT` | 48,439 terms |
+
+A **48x** difference, decided by the interpreter alone. `--file-fuel` at ten
+times the fuel returns the same 2,335,903, so the stock budget was not binding
+on this input. `--host-var` and `--host-var-total` agree on every figure --
+terms, `checkResidual` bound 5711, prim histogram, and seeds 0/1/4 each
+matching `interpretDesign` -- which is evidence that the `partial` and total
+variants agree here, not a transfer of theorems between them. Both modes print
+their own scope: three seeds, no trace, no control, **feasibility evidence and
+not the six-stimulus acceptance**.
+
+### 48.3 Two measurements that close documented gaps
+
+**`cert_shape.py`'s predictor, checked outside its validated mix.** The
+predictor's own docstring says it was fitted on `rt_intpipe_alu` to 0.015% and
+that it is "NOT established for ops this predictor has never been checked
+against". For `instr_scan` it predicts **761,995** residual `tl`;
+`--file-profile` measures **772,376** in the 2,335,903-term residual. The
+predictor lands **1.36% low** on a design outside its validated set. Both sides
+are `Hw.hwAP`, so the comparison is like for like -- the variant interpreter's
+48,439-term residual (`tl` 10,381) is a different regime the predictor does not
+model.
+
+One observation is recorded without an explanation: the shortfall is
+`772,376 - 761,995 = 10,381`, which is **exactly** the variant interpreter's
+`tl` count on the same certificate. Equality to the digit is unlikely to be
+chance and suggests the two quantities decompose the same chain, but nothing
+here establishes that, and it is left as a question rather than a claim.
+
+**`--node-depth`'s negative result, reproduced.** Across `midD` at
+nnode = 64, 128, 256, 512, 1024 the node-portion read-depth sum grows from
+2,016 to **523,776** while the residual's `tl` count stays at **exactly 1** at
+every point. Deps that target node results cost nothing in the residual, which
+is the measurement `cert_shape.py` cites for its chain (B).
+
+### 48.4 `--depth-grid`: dynamism beats depth at scale
+
+21 points, three families, `nnode` held at 64 throughout so node count cannot
+explain anything:
+
+| nsrc | `cstD` constant, deep | `shalD` shallow | `srcD` dynamic, deep |
+|---|---|---|---|
+| 16 | 3,806 / 961 | **1,203 / 121** | 4,205 / 1,080 |
+| 128 | 37,854 / 12,161 | **26,011 / 8,129** | 62,613 / 20,288 |
+| 256 | 87,518 / 28,545 | 100,443 / 32,641 | 186,197 / 61,184 |
+| 1024 | **385,502 / 126,849** | 1,579,227 / 523,777 | 1,959,893 / 650,624 |
+
+(terms / `tl`.) Shallow reads are the **cheapest** family up to nsrc = 128 and
+the second most expensive by nsrc = 1024, crossing `cstD` between 128 and 256.
+Making the sources static is worth more than making the reads shallow once the
+source count is large: at nsrc = 1024 `cstD` is 4.1x smaller than `shalD` and
+5.1x smaller than `srcD`. `--grid` adds 11 `srcD` points on the orthogonal
+(nsrc, nnode) ladder, largest 58,229 terms at 64/256.
+
+All three of these modes produce profiles only -- no reference comparison and
+no execution of the residual -- and are recorded as such.

@@ -39,24 +39,23 @@ mode	dispatch_line	status	run	invocation_tail	exit	exit_meaning	wall_s	peak_rss_
 --env0-ab	816	executed	env0-ab	--env0-ab	0	full agreement	2.51	24260	STRICT acceptance: rewrite applies (found/selfRef 0/useInNext 1/useLater 0/nextStrict/beforeTotal/applied all as intended); variant resolves, bta, wfA, erase-ok; 8 designs x 6 stimuli all agree; an out-of-range dep yields typeError on BOTH sides (same-kind, neither a success); 5 traces over 6 cycles agree with states-reached 4/4/2/1/1 (flopD 8, flopD 32, toggle, hold, reset-only); 7 projection A/B rows agree with tl collapsing 4033->1, 28545->1, 61313->1, 126849->1 on cstD and 61184->32640 on srcD.	Same fork specializer on both sides -- this is interpreter-vs-interpreter agreement, not a bridge to the proved backend.
 --file-ab	931	executed	(checkpoint 5)	--file-ab <cert> 200000 2000	0	per-run	-	-	Nine canonical/configured inputs; recorded in fp_fileab_canonical_join.tsv and fp_fileab_configured_join.tsv and in fp_master_experiments.jsonl.	-
 --rewrite-agree	662	executed	(checkpoint 5)	--rewrite-agree	0	agreement	-	-	Recorded in the checkpoint-5 evidence.	-
---grid	522	NOT EXECUTED	-	--grid	-	-	-	-	-	Scaling grid over 11 (nsrc, nnode) points; not run on master. No credit taken.
---host-var-total	708	NOT EXECUTED	-	--host-var-total <cert> <sf> <wf>	-	-	-	-	-	Not run on master. No credit taken.
---host-var	749	NOT EXECUTED	-	--host-var <cert> <sf> <wf>	-	-	-	-	-	Not run on master. No credit taken.
---node-depth	902	NOT EXECUTED	-	--node-depth	-	-	-	-	-	Not run on master. No credit taken.
---depth-grid	912	NOT EXECUTED	-	--depth-grid	-	-	-	-	-	Not run on master. No credit taken.
---file-profile	1018	NOT EXECUTED	-	--file-profile <cert> <sf> <wf>	-	-	-	-	-	Not run on master. No credit taken.
---file-fuel	1024	NOT EXECUTED	-	--file-fuel <cert> <sf> <wf>	-	-	-	-	-	Not run on master. No credit taken.
---file	1026	NOT EXECUTED	-	--file <cert>	-	-	-	-	-	Not run on master. No credit taken.
---file-ref	1027	NOT EXECUTED	-	--file-ref <cert>	-	-	-	-	-	Not run on master. No credit taken.
---file-fast	1028	NOT EXECUTED	-	--file-fast <cert>	-	-	-	-	-	Not run on master. No credit taken.
---ref	1029	NOT EXECUTED	-	--ref <shape> <n>	-	-	-	-	-	Not run on master. No credit taken.
---fast	1030	NOT EXECUTED	-	--fast <shape> <n>	-	-	-	-	-	Not run on master. No credit taken.
-(bare shape)	61-63	NOT EXECUTED	-	chain|fan|flop <n>	-	-	-	-	-	Synthetic shape constructors reachable through --ref/--fast/--grid; not run directly on master.
-#
-# TALLY: 20 dispatch forms.  EXECUTED 7 (--reset-probe, --trace-ref, --support,
-# --inline-negative, --env0-ab this checkpoint; --file-ab and --rewrite-agree earlier).
-# NOT EXECUTED 13.  The grid, profile, depth, host-var and remaining file modes are
-# explicitly NOT credited.
+--grid	522	executed	grid	--grid	0	all 11 points specialized	2.71	31352	The srcD scaling ladder: 11 (nsrc, nnode) points from (2,64) to (512,64) and (64,256), each with a full residual profile (terms, node-kind histogram, prim histogram).  Largest point srcD 64/256: 58,229 terms, tl 18,144.	A PROFILE of the fork at stock fuel with Hw.hwAP.  No reference comparison and no execution of the residual in this mode.
+--node-depth	902	executed	node-depth	--node-depth	0	all 5 points specialized	2.30	9148	THE NEGATIVE RESULT, reproduced on master: across midD nnode = 64, 128, 256, 512, 1024 the node-portion read-depth sum grows 2,016 -> 523,776 while the residual's `tl` count stays at exactly 1 at every point.  Deps that target NODE results cost nothing in the residual.	It bounds `tl`, not specialization work: each unfold is a .ucall .dyn whether or not it leaves a `tl` (cert_shape.py's scope note 5).
+--depth-grid	912	executed	depth-grid	--depth-grid	0	all 21 points specialized	8.09	106024	The discriminator, nnode held at 64 so node count cannot explain anything.  At nsrc=1024: cstD (constant, deep) 385,502 terms / 126,849 tl; shalD (shallow) 1,579,227 / 523,777; srcD (dynamic, deep) 1,959,893 / 650,624.  Shallow reads are CHEAPEST up to nsrc=128 and the most expensive family by nsrc=512, so source DYNAMISM, not read depth, dominates at scale.	Profiles only; no residual execution, no reference comparison.
+--host-var	749	executed	host-var	--host-var instr_scan 200000 2000	0	all seeds matched	3.06	11972	PROVED mixDriver + hwAPVar (fork variant): 48,439 terms, checkResidual ACCEPTED at bound 5711, seeds 0/1/4 each `residual ok  matches interpretDesign true`, specialize 768 ms.	The mode prints its own scope: 3 seeds, no trace, no control -- FEASIBILITY evidence at this budget, NOT the 6-stimulus acceptance --file-ab runs.
+--host-var-total	708	executed	host-var-total	--host-var-total instr_scan 200000 2000	0	all seeds matched	3.06	12028	PROVED mixDriver + hwAPVarT, the TOTAL variant and the proof target: identical figures -- 48,439 terms, bound 5711, seeds 0/1/4 all matching, specialize 762 ms -- and an identical prim histogram to --host-var.	Same 3-seed feasibility scope.  hwAPVar and hwAPVarT are different programs; agreeing here is evidence, not a transfer of theorems.
+--file-ref	1027	executed	file-ref	--file-ref instr_scan	0	reference projected	8.92	96172	Hw.projectDesign on a real 1235-source, 1264-node design: residual 2,335,903 terms.	Size only; no comparison and no execution in this mode.
+--file-fast	1028	executed	file-fast	--file-fast instr_scan	0	fork projected	5.54	96012	ProtoFast.mixDriver at STOCK fuel 20000/200 with Hw.hwAP: residual 2,335,903 terms -- the same size as the reference.	Size only.
+--file-fuel	1024	executed	file-fuel	--file-fuel instr_scan 200000 2000	0	fork projected	5.51	96016	The same 2,335,903 terms at 10x the fuel, so the stock budget was not binding on this input.	Size only.
+--file-profile	1018	executed	file-profile	--file-profile instr_scan 200000 2000	0	fork projected and profiled	6.27	96072	Full profile of the 2,335,903-term residual: lit 3,491, var 778,357, letIn 775,603, ite 22, prim 778,427, and tl 772,376.  cert_shape.py PREDICTS 761,995 tl for this certificate, so the predictor lands 1.36% low on a design outside the rt_intpipe_alu mix it was validated against.	The predictor models Hw.hwAP only.  The variant interpreter's residual on the same input is a different regime entirely (48,439 terms, tl 10,381) and is not predicted by it.
+--file	1026	executed	file-cmp	--file instr_scan	0	identical and same-result	14.71	182168	The STRONGEST identity evidence in the FP set: `identical true` here is DECIDABLE EQUALITY on Program (R == F), not a digest.  Hw.projectDesign and ProtoFast.mixDriver produce the same 2,335,903-term residual on a real CVA6 design, and one run of each agrees (`same-result true`, both ran).	One stimulus, not the six-seed acceptance; and it is an agreement between two specializers under the SAME interpreter, not an RTL claim.
+--ref	1029	executed	ref-chain-256 / ref-fan-256 / ref-flop-64	--ref chain 256 | --ref fan 256 | --ref flop 64	0	reference projected	0.18 / 0.30 / 0.06	9212 / 9148 / 9232	Reference sizes 3,873 (chain), 4,128 (fan), 13,985 (flop).	Size only.
+--fast	1030	executed	fast-chain-256 / fast-fan-256 / fast-flop-64	--fast chain 256 | --fast fan 256 | --fast flop 64	0	fork projected	0.15 / 0.24 / 0.06	9160 / 9176 / 9140	Fork sizes 3,873 / 4,128 / 13,985 -- equal to the reference at every shape.	Size only; the bare shape form below is what actually compares them.
+(bare shape)	1031	executed	shape-chain / shape-fan / shape-flop	chain 16 32 64 128 | fan 16 32 64 128 | flop 8 16 32	0	every case identical and same-result	0.14 / 0.20 / 0.06	9216 / 9184 / 9168	11 cases, every one `identical true  same-result true  ref-ran true  fast-ran true` under decidable equality.  chain 273/513/993/1953; fan 288/544/1056/2080; flop 433/1217/3937.  `flop` is a SEQUENTIAL fixture, so this is decidable-equality identity on sequential designs -- built by hand, free of the imported corpus's reset-polarity opposition.	One stimulus per case; synthetic shapes.
+# TALLY: 20 dispatch forms, ALL 20 EXECUTED.  Checkpoint 9 ran --reset-probe,
+# --trace-ref, --support, --inline-negative and --env0-ab; --file-ab and
+# --rewrite-agree were earlier; this checkpoint ran the remaining thirteen.
+# 19 further guarded runs, every one exit 0.
 #
 # TWO LIMITATIONS OBSERVED, not repaired (proto_probe.lean is pinned prototype source):
 #  1. --reset-probe's conflict scan is a SAME-INDEX polarity test over pin sets; a
@@ -65,3 +64,8 @@ mode	dispatch_line	status	run	invocation_tail	exit	exit_meaning	wall_s	peak_rss_
 #     carrying the raw-port opposition, 'de-asserted' for the read side is 'asserted'
 #     for the commit side, which is why ariane_regfile and serdiv report a constant
 #     post-release state -- the probe cannot release both paths at once.
+#
+# THE INTERPRETER, NOT THE SPECIALIZER, SETS THE RESIDUAL SIZE.  On instr_scan,
+# with the same design and the same fuel: Hw.hwAP gives 2,335,903 terms through
+# BOTH Hw.projectDesign and ProtoFast.mixDriver, while hwAPVar and hwAPVarT both
+# give 48,439 -- a 48x difference decided by the interpreter alone.
