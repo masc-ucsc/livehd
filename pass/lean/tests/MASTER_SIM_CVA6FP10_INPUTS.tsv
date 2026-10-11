@@ -1,0 +1,115 @@
+# PER-BLOCK FROZEN INPUTS for the FP ten (CVA6 native pass.lean route).
+# Nothing has been emitted from this.  The sample was frozen at an earlier
+# checkpoint and is unchanged; emission applicability stays UNTESTED until a run
+# establishes it.
+#
+# PIN           cva6-clean/cva6 @ bc510437 (v5.3.0-167-gbc510437), tracked tree CLEAN
+# TARGET        cv64a6_imafdc_sv39_hpdcache_wb
+# CONFIG PKG    core/include/cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv
+#               sha256 409f3b2c4a69bdc1bb5f44f546af353a583c3dac8e28586a7da5285322888367  7026 bytes
+# FILELIST      (cd $CVA6_ROOT && bender script flist-plus -t $TARGET --top $BENDER_TOP --trim-incdirs auto) > $FILELIST
+#               bender 0.32.0 at /soe/czeng14/.local/bin/bender
+# DEPENDENCY LOCK  Bender.lock (UNTRACKED, gitignored) sha256 2e26726993e63ac921f59f2bbb01f14076d1854e65c82b5e2a47ff4a09fdbd52
+#                  Bender.yml  (tracked)              sha256 26d6cc70a2167e4154e0469a8fbe6f4e61c737ce759b8d80f02b749536f0f85a
+#               Running the ten resolutions left Bender.lock byte-identical and the
+#               CVA6 checkout at 0 status entries -- no mutation of the user's tree.
+# ANCHOR        $GEN_DIR/livehd_filelist_anchor.sv, written by a heredoc of one
+#               comment line: 82 bytes, sha256 60d722902e8811e2208db8f20d2227d0e735878e08829d9ad2bb3f8a12aaf73d
+#               DERIVED DETERMINISTICALLY from the pinned recipe; identical for every
+#               block; no tool run was needed and none was performed.
+# WRAPPER       none -- CVA6_WRAPPER_FILE is unset by default, so nothing is appended.
+# SLANG FLAGS   --ignore-assertions   (CVA6_BLACKBOX_MODULES and
+#               CVA6_EXTRA_SLANG_FLAGS are unset by default)
+# NOTE          this route has NO LEC gate and NO REF_SV; those belong to the
+#               CORE-ET runner only.  It is also a ONE-step pipeline:
+#               `lhd compile verilog $DUMMY_SV --reader yosys-slang --top $TOP
+#                --emit-dir lg:$LG_DIR --emit-dir lean:$LEAN_DIR --set yosys.filelist_file=$FILELIST ...`
+#
+# 19 unique source files are consumed across the ten, every one verified readable
+# (0 missing); full sha256 set in generated/master_port/sim_inputs/cva6_fp10_inputs.json.
+#
+block	top	bender_top	filelist	filelist_sha256	filelist_bytes	n_src_files	defines	incdirs	missing_inputs
+alu	alu	alu	generated/master_port/sim_inputs/filelists_cva6/alu.f	d44ef7094c25d4541418862810acfad0feae4cb3079cc5c4fcb37e0d9cb0c2c3	893	8	2	1	0
+alu_wrapper	alu_wrapper	alu_wrapper	generated/master_port/sim_inputs/filelists_cva6/alu_wrapper.f	04e3ca829ce175c1cf3f4fce01750360e2e717ba4040fbeb54b8d84865544313	958	9	2	1	0
+ariane_regfile	ariane_regfile	ariane_regfile	generated/master_port/sim_inputs/filelists_cva6/ariane_regfile.f	d4b5d0874bb92cee166200b31ce3f5affa4c7f6b292f2e184717738ec687e149	211	2	2	0	0
+commit_stage	commit_stage	commit_stage	generated/master_port/sim_inputs/filelists_cva6/commit_stage.f	b5237a6543a5bec52cb6c83ee0413363f206cec4674d94141ab8347f87802288	452	5	2	0	0
+compressed_decoder	compressed_decoder	compressed_decoder	generated/master_port/sim_inputs/filelists_cva6/compressed_decoder.f	4f7bb73c335042a5b0d29b89cd9cc76b56f6cb7d29b057c4ecc5cf530c417437	386	4	2	0	0
+decoder	decoder	decoder	generated/master_port/sim_inputs/filelists_cva6/decoder.f	80bc6768a5d085f9f8cc68fcfdd3e0a5988d29437387d3cff45ace6e5889963d	535	6	2	0	0
+instr_scan	instr_scan	instr_scan	generated/master_port/sim_inputs/filelists_cva6/instr_scan.f	76b90c236b49f64fea4ddc3fbe78ea6509aa623038be9ef30b755c1696625a14	387	4	2	0	0
+pmp	pmp	pmp	generated/master_port/sim_inputs/filelists_cva6/pmp.f	5f1d856d45606e6945af68c231aac372ed0b001d8753552e89894e6c975c422f	859	8	2	1	0
+pmp_data_if	pmp_data_if	pmp_data_if	generated/master_port/sim_inputs/filelists_cva6/pmp_data_if.f	28229e3869a2860067077d76f0419425224d6df32212b3f9ed6b042cf45d703b	932	9	2	1	0
+serdiv	serdiv	serdiv	generated/master_port/sim_inputs/filelists_cva6/serdiv.f	92898234c684276bedc562c8fd878f4a19b9c6fbcb46df8f5d5b85be8fee7388	783	7	2	1	0
+#
+# Per-block consumed files, in filelist order, with full sha256:
+#   alu
+#     bbf0614771ceb9526356bb8e5234787324ef215884bc11b4aa27e91fc3cc8910  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/cf_math_pkg.sv
+#     0b47c30d0fe24704bebc7136606ba6a72dd3d6a4229ed5d13a707207d829baa1  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/popcount.sv
+#     f31989be4369ea7c4809c0c3d61df28581e9ac7666005fde6e476a975d1acd07  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/lzc.sv
+#     64f4838b10118dde144c957229f3c7987de7f36c3b1e8420ab81baae5562398d  core/include/config_pkg.sv
+#     409f3b2c4a69bdc1bb5f44f546af353a583c3dac8e28586a7da5285322888367  core/include/cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv
+#     ec71960e88f869f4045a1b5293cc87197e979fb2d4e5623ea4fcc1f9de6068cb  core/include/riscv_pkg.sv
+#     f492b1dda7044c4d202df1a1e4609a53fbecc94ad3f08b5d6d9a150b4569d2d7  core/include/ariane_pkg.sv
+#     4546dcce1a97de8a90646cab4d8150a6ad500bbcd10ac4c1c7ab66afc9a30ad5  core/alu.sv
+#   alu_wrapper
+#     bbf0614771ceb9526356bb8e5234787324ef215884bc11b4aa27e91fc3cc8910  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/cf_math_pkg.sv
+#     0b47c30d0fe24704bebc7136606ba6a72dd3d6a4229ed5d13a707207d829baa1  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/popcount.sv
+#     f31989be4369ea7c4809c0c3d61df28581e9ac7666005fde6e476a975d1acd07  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/lzc.sv
+#     64f4838b10118dde144c957229f3c7987de7f36c3b1e8420ab81baae5562398d  core/include/config_pkg.sv
+#     409f3b2c4a69bdc1bb5f44f546af353a583c3dac8e28586a7da5285322888367  core/include/cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv
+#     ec71960e88f869f4045a1b5293cc87197e979fb2d4e5623ea4fcc1f9de6068cb  core/include/riscv_pkg.sv
+#     f492b1dda7044c4d202df1a1e4609a53fbecc94ad3f08b5d6d9a150b4569d2d7  core/include/ariane_pkg.sv
+#     4546dcce1a97de8a90646cab4d8150a6ad500bbcd10ac4c1c7ab66afc9a30ad5  core/alu.sv
+#     b2de99f62b1d6bda465c4354ba9f88be9c6e0908d524fffb45ab5d8ccdc7a22c  core/alu_wrapper.sv
+#   ariane_regfile
+#     64f4838b10118dde144c957229f3c7987de7f36c3b1e8420ab81baae5562398d  core/include/config_pkg.sv
+#     e8b86693adf85bcdbfb40b650698fc38f675d840213be55eff1468bff273e95f  core/ariane_regfile_ff.sv
+#   commit_stage
+#     64f4838b10118dde144c957229f3c7987de7f36c3b1e8420ab81baae5562398d  core/include/config_pkg.sv
+#     409f3b2c4a69bdc1bb5f44f546af353a583c3dac8e28586a7da5285322888367  core/include/cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv
+#     ec71960e88f869f4045a1b5293cc87197e979fb2d4e5623ea4fcc1f9de6068cb  core/include/riscv_pkg.sv
+#     f492b1dda7044c4d202df1a1e4609a53fbecc94ad3f08b5d6d9a150b4569d2d7  core/include/ariane_pkg.sv
+#     892d048a7adfcf6568be958cbcf7f83c8261122f31b0f546973b801ac30bc58c  core/commit_stage.sv
+#   compressed_decoder
+#     64f4838b10118dde144c957229f3c7987de7f36c3b1e8420ab81baae5562398d  core/include/config_pkg.sv
+#     409f3b2c4a69bdc1bb5f44f546af353a583c3dac8e28586a7da5285322888367  core/include/cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv
+#     ec71960e88f869f4045a1b5293cc87197e979fb2d4e5623ea4fcc1f9de6068cb  core/include/riscv_pkg.sv
+#     8fcbc36f099de87018068fc788fc488712ba3db2fb7b7f6a9715bd46919c0c62  core/compressed_decoder.sv
+#   decoder
+#     64f4838b10118dde144c957229f3c7987de7f36c3b1e8420ab81baae5562398d  core/include/config_pkg.sv
+#     409f3b2c4a69bdc1bb5f44f546af353a583c3dac8e28586a7da5285322888367  core/include/cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv
+#     ec71960e88f869f4045a1b5293cc87197e979fb2d4e5623ea4fcc1f9de6068cb  core/include/riscv_pkg.sv
+#     f492b1dda7044c4d202df1a1e4609a53fbecc94ad3f08b5d6d9a150b4569d2d7  core/include/ariane_pkg.sv
+#     77aa80671e09f200b25c5dcc2e65b3da4e50c413e9e3f4d74f56d8acf875da70  core/cva6_accel_first_pass_decoder_stub.sv
+#     f8db23a23df80f6574069c5ba893a0c5e3f4ed9fb5db99fe23f447f219440b82  core/decoder.sv
+#   instr_scan
+#     64f4838b10118dde144c957229f3c7987de7f36c3b1e8420ab81baae5562398d  core/include/config_pkg.sv
+#     409f3b2c4a69bdc1bb5f44f546af353a583c3dac8e28586a7da5285322888367  core/include/cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv
+#     ec71960e88f869f4045a1b5293cc87197e979fb2d4e5623ea4fcc1f9de6068cb  core/include/riscv_pkg.sv
+#     ce69b0e5080ff5220f5b09296e4bcec5fb0d70a65821f31d1b399b42e8195f96  core/frontend/instr_scan.sv
+#   pmp
+#     bbf0614771ceb9526356bb8e5234787324ef215884bc11b4aa27e91fc3cc8910  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/cf_math_pkg.sv
+#     f31989be4369ea7c4809c0c3d61df28581e9ac7666005fde6e476a975d1acd07  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/lzc.sv
+#     64f4838b10118dde144c957229f3c7987de7f36c3b1e8420ab81baae5562398d  core/include/config_pkg.sv
+#     409f3b2c4a69bdc1bb5f44f546af353a583c3dac8e28586a7da5285322888367  core/include/cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv
+#     ec71960e88f869f4045a1b5293cc87197e979fb2d4e5623ea4fcc1f9de6068cb  core/include/riscv_pkg.sv
+#     f492b1dda7044c4d202df1a1e4609a53fbecc94ad3f08b5d6d9a150b4569d2d7  core/include/ariane_pkg.sv
+#     9c2dce5d4bd2390a617882c282080dbf191c54f016b36b5e719672382c15c7b6  core/pmp/src/pmp.sv
+#     28d5044ccc095cfd676a966020b4913bf8a74c8bb5e02f4ca2af801273a88a65  core/pmp/src/pmp_entry.sv
+#   pmp_data_if
+#     bbf0614771ceb9526356bb8e5234787324ef215884bc11b4aa27e91fc3cc8910  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/cf_math_pkg.sv
+#     f31989be4369ea7c4809c0c3d61df28581e9ac7666005fde6e476a975d1acd07  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/lzc.sv
+#     64f4838b10118dde144c957229f3c7987de7f36c3b1e8420ab81baae5562398d  core/include/config_pkg.sv
+#     409f3b2c4a69bdc1bb5f44f546af353a583c3dac8e28586a7da5285322888367  core/include/cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv
+#     ec71960e88f869f4045a1b5293cc87197e979fb2d4e5623ea4fcc1f9de6068cb  core/include/riscv_pkg.sv
+#     f492b1dda7044c4d202df1a1e4609a53fbecc94ad3f08b5d6d9a150b4569d2d7  core/include/ariane_pkg.sv
+#     9c2dce5d4bd2390a617882c282080dbf191c54f016b36b5e719672382c15c7b6  core/pmp/src/pmp.sv
+#     28d5044ccc095cfd676a966020b4913bf8a74c8bb5e02f4ca2af801273a88a65  core/pmp/src/pmp_entry.sv
+#     8096fa222348f1e50f0182b196af6e59010c1f585a8cca63a814ed0b55c9eeb0  core/pmp/src/pmp_data_if.sv
+#   serdiv
+#     bbf0614771ceb9526356bb8e5234787324ef215884bc11b4aa27e91fc3cc8910  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/cf_math_pkg.sv
+#     f31989be4369ea7c4809c0c3d61df28581e9ac7666005fde6e476a975d1acd07  .bender/git/checkouts/common_cells-7e395bb92335c3c4/src/lzc.sv
+#     64f4838b10118dde144c957229f3c7987de7f36c3b1e8420ab81baae5562398d  core/include/config_pkg.sv
+#     409f3b2c4a69bdc1bb5f44f546af353a583c3dac8e28586a7da5285322888367  core/include/cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv
+#     ec71960e88f869f4045a1b5293cc87197e979fb2d4e5623ea4fcc1f9de6068cb  core/include/riscv_pkg.sv
+#     f492b1dda7044c4d202df1a1e4609a53fbecc94ad3f08b5d6d9a150b4569d2d7  core/include/ariane_pkg.sv
+#     7b4d4b0be7512ec025fd3f4cec4e140e2f4466115237dd244fabc6b2095425f6  core/serdiv.sv

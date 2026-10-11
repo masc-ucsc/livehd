@@ -33,9 +33,20 @@
 #   vpu_defs_pkg.sv        a11b8378a1a11bcaadb85854bc0d884ef8a8de87f725c7ff2781a5f5f01d41dd
 # The four patched files are BYTE-IDENTICAL between the D4 repo and master; only
 # map.tsv differs, and only in the absolute destination paths it embeds.
-# The D3 repo has NO patched_src/map.tsv at all -- a real missing prerequisite
-# for running D3's own copy of the script in place, and the reason this freeze
-# uses a project-local snapshot instead.
+# CORRECTED -- D3's missing map.tsv is NOT a blocker to RUNNING.  `subst_of()`
+# begins `[[ -r "$PATCH_MAP" ]] || { printf '%s' "$1"; return; }`, so an absent
+# map makes the script fall back to the ORIGINAL source path.  Verified by
+# running the pinned script from a snapshot with no map: rc=0, the four
+# originals named instead of the patched copies, and the `// patched:` notes
+# absent.  Absence changes the SUBSTITUTED INPUT BYTES, nothing else.  Both
+# variants of the only affected block are frozen:
+#   intpipe_decode.f          (mapped)   f2d55030f8ceffe97d8d9a966e2be9c4dee6a8e1ac57a60a28cfcb7e7b28c681
+#   filelists_nomap/..._decode.f (unmapped) 187f671ffdd6887f471ebc210ba4a737372ae0beb109209c29ab4c2f5ef00ac0
+# The other nine have zero substitutions, so their two variants coincide.
+# The CONTROLLED PAIRED EXPERIMENT uses the frozen MAPPED filelist on both
+# sides, so the two sides see identical bytes.  D3's own in-place historical
+# route -- which would use the originals -- is kept as separate provenance and
+# is not silently swapped for the mapped one.
 # Originals replaced (in core-et @ c72b6a2):
 #   hw/ip/minion/vpu/rtl/vpu_defs_pkg.sv
 #   hw/ip/tech_generic/prim_mul_div/rtl/intpipe_mul_div_ctl.sv
@@ -49,9 +60,14 @@
 #   GNU Make 4.4.1, TECH=generic.  Order is dependency order and is preserved;
 #   the lists are make-expanded, never text-parsed.
 #
-# TRANSITIVE INCLUDES.  Six of the ten carry
-# `+incdir+/mada/users/czeng14/projects/core-et/hw/ip/minion/intpipe/csr/rtl`,
-# whose eight .svh headers are inputs too:
+# TRANSITIVE INCLUDES, verified by scanning every consumed file for `include
+# rather than by directory membership.  There are exactly eight `include
+# directives across all 156 files, all eight in ONE file, intpipe_csr_file.sv,
+# and that file is named by exactly ONE of the ten blocks: intpipe_decode.
+# Six blocks carry the +incdir+ because coreet_filelist.sh adds it on
+# `grep -q '/intpipe/csr/rtl/'` -- any file from that directory, e.g.
+# intpipe_csr_file_conv.sv -- so five of them get an incdir they do not use.
+# The eight headers are therefore inputs to intpipe_decode ONLY:
 #   0949bbddb3f79969  hw/ip/minion/intpipe/csr/rtl/intpipe_csr_file_auto_declarations.svh
 #   e15e388196ec461e  hw/ip/minion/intpipe/csr/rtl/intpipe_csr_file_auto_decode_cases.svh
 #   0f774abb2a5a6d0b  hw/ip/minion/intpipe/csr/rtl/intpipe_csr_file_auto_decode_default.svh
@@ -63,7 +79,37 @@
 #
 # 156 unique RTL/package files are consumed across the ten; every one was
 # verified readable (0 missing).  Their full sha256 set is in
-# generated/master_port/sim_inputs/coreet10_inputs.json.
+# generated/master_port/sim_inputs/coreet10_inputs.json, together with the eight
+# headers' full hashes, the per-block header binding, the four patched copies'
+# ORIGINALS, the ANCHOR and the per-block REF_SV digests.
+#
+# GENERATED INPUTS OF THE RUNNER, resolved.  Both are deterministic functions of
+# bytes already frozen here, so they are DERIVED, not deferred, and no tool was
+# run to obtain them:
+#   ANCHOR   $GEN_DIR/livehd_filelist_anchor.sv -- written by
+#            printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
+#            70 bytes, sha256 22857e1702a1ed2f30ef366c266ee889803829d7467eaf6f295c3cb93b008299,
+#            identical for every block.
+#   REF_SV   $GEN_DIR/raw_<TOP>.sv -- `cat $(grep '\.sv$' $FILELIST)` in filelist
+#            order, i.e. the LEC gate's reference.  Per block (bytes, sha256-16):
+#              debug_breakpoint                 89,176  db0b2ae17120d814
+#              intpipe_alu                      89,063  f2e30659c3e3dec5
+#              intpipe_csr_file_conv            88,736  3ef8f14d45f80c1d
+#              intpipe_csr_file_fl_barrier      87,926  e1bad102656e0f87
+#              intpipe_csr_msgs                103,141  0a2db2fa36f1e391
+#              intpipe_csr_pmu_read_interface  100,807  bfff2d81add6b2c7
+#              intpipe_csr_replay               99,762  1e4cceccc3685eea
+#              intpipe_decode                2,413,587  821ae7d45679e6b6
+#              intpipe_fp_scoreboard           121,228  bedea00d9616b475
+#              intpipe_imm                      86,353  d386fda2e8575cf7
+#            The LEC gate re-supplies the incdir from the filelist, because
+#            concatenation drops it.
+#
+# ORIGINALS behind the four patched copies (core-et @ c72b6a2):
+#   db0f0942344072ce  hw/ip/tech_generic/prim_mul_div/rtl/intpipe_mul_div_ctl.sv   24,502 B
+#   d440e376ef00b89f  hw/ip/minion/vpu/rtl/txfmactl_top.sv                         94,090 B
+#   0385b61b430b886b  hw/ip/minion/vpu/rtl/txfmaexp_top.sv                         18,904 B
+#   7f011b53899b7de7  hw/ip/minion/vpu/rtl/vpu_defs_pkg.sv                         68,398 B
 #
 block	top	filelist	filelist_sha256	filelist_bytes	origin	tech	n_src_files	incdir	patched_substitutions	missing_inputs
 debug_breakpoint	debug_breakpoint	generated/master_port/sim_inputs/filelists/debug_breakpoint.f	c95ef2170626ab0a8099721ed1e9b92f8899b1aec4a7a52b710f2fdf94f354d9	714	dv/rtlcosim/debug_breakpoint/Makefile:NEW_RTL_FINAL	generic	6	no	0	0

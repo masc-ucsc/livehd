@@ -1,0 +1,88 @@
+# READER / TOOLCHAIN / DEPENDENCY PINS per route, resolved from source only.
+# No build was run to obtain any of this.
+#
+# THE HEADLINE: slang is IDENTICAL on all four sides; yosys is NOT.
+#   slang   f33547e9a2d1b21510174f064584aa31efff5a6956dfda4153a21ee878ff90d5
+#           strip_prefix slang-11.0  -- D3, D4, FP and master, byte-identical pin
+#   yosys   D3/D4/FP  cd2b29bbd3c92e0cdc4df37af3c7b17b965b6ebdb9079377d7e32fdefb4dcd3b
+#                     strip_prefix yosys-0.60
+#           master    69fbe16a8bc5032d55b5f1ddc8437b73e083c538043999a137add530e697a789
+#                     strip_prefix yosys-435977e97008578a4532da60e70f75b5e88d076d (a git snapshot)
+#
+# WHAT THAT MEANS FOR THE COMPARISON.  `--reader yosys-slang` runs the VENDORED
+# yosys, so under identical external inputs the two sides do NOT share a
+# front-end binary.  This is declared BEFORE any run, not discovered after one.
+# A resulting raw-source difference is still a REAL pipeline byte mismatch and
+# is retained and attributed -- it is not excluded.  It does mean attribution
+# will often land on the reader rather than on pass.lean, which is exactly why
+# the identical-LG handoff of section 53.2 is worth running as a DIAGNOSTIC
+# beside it: step 3 consumes $LG_NORM and never invokes yosys, so it isolates
+# the emitter.  The handoff SUPPLEMENTS the same-external-input checks and
+# cannot waive a mismatch found by them.
+#
+# The system `slang` at /soe/czeng14/projects/slang/build/bin/slang (version
+# 9.1.214+68cad5ea0) is NOT the one used: MODULE.bazel vendors slang-11.0.
+# `yosys` is not on PATH at all; inou/yosys/inou_yosys_api.cpp execvp's the
+# runfiles copy.
+#
+route	MODULE.bazel_sha256_16	yosys_pin	slang_pin	lhd_binary	status
+D3 78a3e0d8c	60164438ec68adbd	yosys-0.60 cd2b29bbd3c92e0c	slang-11.0 f33547e9a2d1b215	bazel-bin/lhd/lhd	MISSING -- build with //lhd:lhd
+D4 f6ad1fe29	60164438ec68adbd	yosys-0.60 cd2b29bbd3c92e0c	slang-11.0 f33547e9a2d1b215	bazel-bin/lhd/lhd	MISSING -- build with //lhd:lhd
+FP 9bb41a09d	1fcfe246422a142a	yosys-0.60 cd2b29bbd3c92e0c	slang-11.0 f33547e9a2d1b215	bazel-bin/lhd/lhd	MISSING -- build with //lhd:lhd
+master b9515eaf8	0acfc76294937e39	yosys-435977e9 69fbe16a8bc5032d	slang-11.0 f33547e9a2d1b215	bazel-bin/lhd/lhd	PRESENT, built 2026-10-10, sha256 414d5dcbf99b37fea2ceac2b81c13140
+#
+# D3 and D4 share a MODULE.bazel byte for byte (60164438ec68adbd); FP's and
+# master's each differ.
+#
+# EXECUTABLE FUTURE COMMANDS -- none run in this checkpoint.
+#
+# 1. Build each branch's lhd into an ISOLATED output root, so no shared bazel
+#    cache is touched:
+#      for W in /mada/users/czeng14/projects/livehd-d3-translation-validation \
+#               /mada/users/czeng14/projects/livehd-d4-incremental \
+#               /mada/users/czeng14/projects/livehd-futamura/livehd ; do
+#        git -C "$W" rev-parse HEAD        # must equal the pin before building
+#        ( cd "$W" && nice -n19 ionice -c3 \
+#            bazel --output_user_root=/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/sim_bazel/$(basename "$W") \
+#            build -c opt //lhd:lhd )
+#      done
+#
+# 2. CORE-ET, same external inputs, per block B of the frozen ten:
+#      OUT=<project-local>/coreet/$SIDE/$B
+#      export TMPDIR=$OUT/runtime_tmp TMP=$OUT/runtime_tmp TEMP=$OUT/runtime_tmp
+#      $LHD compile verilog $OUT/generated_inputs/livehd_filelist_anchor.sv \
+#        --reader yosys-slang --top $B --workdir $OUT/lhd_work \
+#        --result-json $OUT/logs/lhd_compile_result.json --emit-dir lg:$OUT/lgdb_raw \
+#        --set yosys.filelist_file=<frozen mapped filelist for B> \
+#        --set yosys.setundef=zero -- --ignore-assertions --relax-enum-conversions
+#      $LHD pass single_edge --top $B lg:$OUT/lgdb_raw --emit-dir lg:$OUT/lgdb_norm \
+#        --workdir $OUT/lhd_work/se
+#      $LHD compile lg:$OUT/lgdb_norm --top $B --workdir $OUT/lhd_work/lean \
+#        --emit-dir lean:$OUT/lean --result-json $OUT/logs/lhd_lean_result.json \
+#        --set formal.lean.strict=true --set formal.lean.normalize=true \
+#        --set formal.lean.emit_cert=true --set formal.lean.emit_fast_bridge=false
+#      then compare $OUT/lean/${B}_Lgraph.lean byte for byte between the two sides.
+#      (`formal.lean.normalize` is inert on both sides -- see the normalize audit --
+#       and is passed only to keep the original invocation verbatim.)
+#      The mandatory LEC gate, with the frozen REF_SV:
+#      $LHD lec --impl lg:$OUT/lgdb_norm --ref verilog:$OUT/generated_inputs/raw_$B.sv \
+#        --top $B --reader yosys-slang --workdir $OUT/lhd_work/lec \
+#        --set formal.engine=auto --set formal.lec.hier=true \
+#        --set formal.lec.semdiff=structural --set formal.strict=<LEC_STRICT> \
+#        -- --ignore-assertions --relax-enum-conversions [-I <incdir from the filelist>]
+#
+# 3. CVA6 / FP ten, per block B (ONE step, no single_edge, no LEC gate):
+#      $LHD compile verilog $OUT/generated_inputs/livehd_filelist_anchor.sv \
+#        --reader yosys-slang --top $B --workdir $OUT/lhd_work \
+#        --result-json $OUT/logs/lhd_compile_result.json \
+#        --emit-dir lg:$OUT/lgdb --emit-dir lean:$OUT/lean \
+#        --set yosys.filelist_file=<frozen CVA6 filelist for B> \
+#        --set yosys.setundef=zero --set formal.lean.strict=true \
+#        --set formal.lean.normalize=true --set formal.lean.emit_cert=true \
+#        --set formal.lean.emit_fast_bridge=false --set formal.lean.cert_wf=skip \
+#        --set formal.lean.max_width=1048576 -- --ignore-assertions
+#
+# 4. The identical-LG diagnostic: run step 2's first two commands ONCE, then
+#    step 2's third command with each side's $LHD against the SAME $OUT/lgdb_norm.
+#    PREREQUISITE, still unverified: that one binary's on-disk GraphLibrary is
+#    readable by the other.

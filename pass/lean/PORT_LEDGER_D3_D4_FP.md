@@ -5455,3 +5455,115 @@ D3's absent `patched_src/map.tsv`.
 
 `bht`'s 7200 s attempt continues. No build, no emission batch, no cache
 mutation in this checkpoint.
+
+## 54. The input freeze completed, and the one pin that is not shared
+
+### 54.1 D3's missing map is not a blocker
+
+Section 53.3 called D3's absent `patched_src/map.tsv` "a real missing
+prerequisite". It changes bytes, it does not stop the script. `subst_of()`
+opens with
+
+```bash
+[[ -r "$PATCH_MAP" ]] || { printf '%s' "$1"; return; }
+```
+
+so an absent map falls back to the **original** source path. Verified by
+running the pinned script from a snapshot with no map: **rc=0**, the four
+originals named instead of the patched copies, and the `// patched:` notes
+gone. Both variants of the only affected block are frozen -- mapped
+`f2d55030f8ce...`, unmapped `187f671ffdd6...` -- and the other nine have zero
+substitutions, so their variants coincide.
+
+The controlled paired experiment uses the frozen **mapped** filelist on both
+sides, so the two sides see identical bytes. D3's own in-place historical
+route, which would use the originals, is kept as separate provenance and is not
+silently swapped for the mapped one.
+
+### 54.2 The headers belong to one block, not six
+
+Section 53.3 said six blocks carry the `+incdir+` "whose eight `.svh` headers
+are inputs too". Scanning every consumed file for `` `include `` rather than
+trusting directory membership: there are exactly **eight** `` `include ``
+directives across all 156 files, **all eight in one file**,
+`intpipe_csr_file.sv`, and that file is named by exactly **one** of the ten
+blocks -- `intpipe_decode`. The other five incdir-carrying blocks get it
+because `coreet_filelist.sh` tests `grep -q '/intpipe/csr/rtl/'`, which matches
+any file from that directory (`intpipe_csr_file_conv.sv`,
+`intpipe_csr_msgs.sv`). They receive an incdir they never use. The eight
+headers are now in the machine-readable manifest with full sha256, bound to
+`intpipe_decode` alone.
+
+### 54.3 The runner's generated inputs are derived, not deferred
+
+Both are deterministic functions of bytes already frozen, so no tool was run to
+obtain them and none had to be.
+
+**ANCHOR** is one `printf` of a single comment line: 70 bytes, sha256
+`22857e1702a1ed2f...`, identical for every CORE-ET block. The CVA6 runner's
+equivalent is 82 bytes, `60d722902e8811e2...`.
+
+**REF_SV** is `cat $(grep '\.sv$' $FILELIST)` in filelist order -- the LEC
+gate's reference side. Every block's byte count and sha256 is recorded, from
+`intpipe_imm` at 86,353 bytes to `intpipe_decode` at 2,413,587. The four
+originals behind the patched copies are hashed as well.
+
+### 54.4 The FP ten's CVA6 inputs
+
+`pass/lean/tests/MASTER_SIM_CVA6FP10_INPUTS.tsv`. The sample is unchanged.
+Filelists produced by the pinned recipe, `bender script flist-plus -t
+cv64a6_imafdc_sv39_hpdcache_wb --top <block> --trim-incdirs auto`, bender
+0.32.0: ten filelists, **19 unique consumed files, 0 missing**, each with its
+full sha256, plus the two `+define+` lines every list carries, the per-block
+incdirs, the target config package and both Bender manifests. `Bender.lock` is
+untracked and gitignored, so it is frozen by content.
+
+Running the ten resolutions left `Bender.lock` **byte-identical** and the CVA6
+checkout at **0 status entries** -- the user's tree was not mutated. This route
+has no LEC gate and no `REF_SV`, and it is a one-step pipeline, unlike
+CORE-ET's three.
+
+### 54.5 slang is shared; yosys is not
+
+Resolved from `MODULE.bazel` on each side, source only:
+
+| | D3 | D4 | FP | master |
+|---|---|---|---|---|
+| slang | `f33547e9…` slang-11.0 | same | same | **same** |
+| yosys | `cd2b29bb…` yosys-0.60 | same | same | **`69fbe16a…` yosys-435977e9 (a git snapshot)** |
+
+`--reader yosys-slang` runs the **vendored** yosys, so under identical external
+inputs the two sides do **not** share a front-end binary. This is declared
+before any run rather than discovered after one. It does not weaken the check:
+a resulting raw-source difference is a **real pipeline byte mismatch**, retained
+and attributed to whatever stage the evidence supports. It does mean attribution
+will often land on the reader rather than on `pass.lean` -- which is exactly why
+the identical-`$LG_NORM` handoff of 53.2 is worth running beside it as a
+**diagnostic**: step 3 never invokes yosys, so it isolates the emitter. The
+handoff supplements the same-external-input checks and cannot waive a mismatch
+they find. Its own prerequisite -- that one binary's on-disk GraphLibrary is
+readable by the other -- is still unverified.
+
+The system `slang` on PATH (9.1.214) is not the one used, and `yosys` is not on
+PATH at all; `inou_yosys_api.cpp` execs the runfiles copy. D3 and D4 share a
+`MODULE.bazel` byte for byte; FP's and master's each differ.
+
+### 54.6 Remaining execution prerequisites
+
+`pass/lean/tests/MASTER_SIM_TOOLCHAIN.tsv` carries the executable commands --
+isolated bazel output roots, real paths, explicit options, project-local
+`TMPDIR`. Nothing in it was run. What is still needed:
+
+1. `bazel-bin/lhd/lhd` at the three branch worktrees (`//lhd:lhd`), each built
+   into its own output root after verifying HEAD is the pin. Present on master
+   only.
+2. Verification that the `lg:` GraphLibrary written by one binary is readable
+   by the other, before the handoff diagnostic can mean anything.
+3. The `$LG_RAW` / `$LG_NORM` / emitted `_Lgraph.lean` artifacts themselves,
+   which are **deferred artifacts**: they need a real generation run, and no
+   content hash is invented for them here.
+
+`bht`'s 7200 s attempt continues. The remaining long FP blocks --
+`issue_read_operands` (capped twice, undecided), `scoreboard`, `frontend`,
+`issue_stage`, `csr_regfile` -- stay explicit in the queue. A cap stop or a run
+of agreeing partial seeds does not close a block.
