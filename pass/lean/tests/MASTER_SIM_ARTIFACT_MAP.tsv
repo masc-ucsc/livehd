@@ -1,0 +1,49 @@
+# SIMULATOR-SOURCE ARTIFACT MAP for the section 6.4 byte-for-byte acceptance.
+#
+# CORRECTION.  Section 50.2 of the ledger said "no original branch has a
+# generator".  That was WRONG, and the error was a mapping error: it searched
+# only for master's Direction-2 `make_sim_launcher.py` / `Sims/` route.  All
+# three pins DO emit Lean simulator source, from a NATIVE C++ emitter --
+# `pass/lean/pass_lean.cpp`, the `pass.lean` Eprp pass -- whose output file is
+# `<output_dir>/<base_name>_Lgraph.lean`, the same artifact name master emits.
+#
+#   D3  78a3e0d8c  pass/lean/pass_lean.cpp  sha256 eea28b5a16a7969788d814ca3f7561180f20a572e57d0827ffaa26fb6339cf02  3783 lines  lean_path at :2040
+#   D4  f6ad1fe29  pass/lean/pass_lean.cpp  sha256 cd41e7d92cc82d762bf7ae9af0fa3cf9df91f16e836d3ef0e457b982e127f5b2  3855 lines
+#   FP  9bb41a09d  pass/lean/pass_lean.cpp  sha256 ff2345c55705f8d5e77a3ef00fc1f86c74774cc09a02256fbb9c6e25b344782e  2455 lines  lean_path at :1449
+#   master b9515eaf8  pass/lean/pass_lean.cpp  103 lines (driver only, lean_path at :56); the emission is SPLIT into
+#     emit_legacy_fast_model.cpp (326) emit_legacy_graph_cert.cpp (119) emit_legacy_fast_bridge.cpp (457)
+#     emit_legacy_schema.cpp (127) emit_legacy_cert_wf.cpp (137) emit_design_cert.cpp (184) emit_dcert.cpp (286)
+#
+# Each pin emits `def <base>_comb`, `def <base>_next` and `def <base>_step`
+# (D3 :2796/:2830/:2890, D4 :2868/:2902/:2962, FP :1718/:1752/:1812).
+#
+# OPTION-SURFACE DIVERGENCE, which section 6.4 step 3 makes load-bearing:
+#   all three pins accept  strict emit_cert emit_fast_bridge cert_wf cert_wf_fallback
+#                          cert_chunk_size cert_chunk_limit max_width top NORMALIZE
+#   D3 and D4 also accept  mode (incl. verified_compiler); FP does NOT (0 occurrences)
+#   master accepts         the same MINUS `normalize`, PLUS mode
+# The FP benchmark invocation sets `formal.lean.normalize=true` explicitly, and
+# master has no such knob.  That must be pinned before any byte comparison.
+#
+# PINNED ORIGINAL INVOCATION (FP, scripts/run_cva6_module_lean_stress.sh):
+#   lhd compile verilog <dummy.sv> --reader yosys-slang --top <TOP>
+#       --workdir <W> --result-json <R>
+#       --emit-dir lg:<LG_DIR> --emit-dir lean:<LEAN_DIR>
+#       --set yosys.filelist_file=<FILELIST> --set yosys.setundef=zero
+#       [--set yosys.memory_mode=<M>]
+#       --set formal.lean.strict=true --set formal.lean.normalize=true
+#       --set formal.lean.emit_cert=<EC> --set formal.lean.emit_fast_bridge=<EFB>
+#       --set formal.lean.cert_wf=<CW> --set formal.lean.max_width=1048576
+#       -- <SLANG_FLAGS>
+#   Backend: yosys-slang reader -> LGraph -> native pass.lean emitter.
+#   Input type: RTL (a SystemVerilog filelist), NOT certificates.
+#
+route	branch	pin	emitter_source	invocation	backend	input_type	generated_artifact	master_route	status
+native pass.lean	D3	78a3e0d8c	pass/lean/pass_lean.cpp	pass.lean via lhd --emit-dir lean: with formal.lean.* options	yosys reader -> LGraph	RTL / LGraph	<base>_Lgraph.lean	pass_lean.cpp driver + emit_legacy_*/emit_design_cert/emit_dcert	MAPPED, comparison OPEN -- needs re-emission on both sides from identical pinned RTL and options
+native pass.lean	D4	f6ad1fe29	pass/lean/pass_lean.cpp	as above; the frozen-30 corpus under temp/cva6_30_auth was produced this way	yosys reader -> LGraph	RTL / LGraph	<base>_gate_Lgraph.lean	as above	MAPPED, comparison OPEN -- 113 block names already exist on BOTH sides, but from DIFFERENT elaborations (see below)
+native pass.lean	FP	9bb41a09d	pass/lean/pass_lean.cpp	scripts/run_cva6_module_lean_stress.sh, pinned above	yosys-slang -> LGraph	RTL (SV filelist)	<base>_Lgraph.lean	as above	MAPPED, comparison OPEN -- no _Lgraph.lean is retained in the FP worktree, so the branch side must be re-emitted
+checked compiler	D3	78a3e0d8c	pass/lean/pass_lean.cpp (mode=verified_compiler, 19 sites)	pass.lean mode:verified_compiler	same	RTL / LGraph	<base>_Lgraph.lean (+ .dcert, _io.json on master)	pass.lean mode:verified_compiler -> Lgraph.lean + .dcert + _io.json, one transaction	MAPPED, comparison OPEN
+checked compiler	D4	f6ad1fe29	pass/lean/pass_lean.cpp (mode=verified_compiler, 22 sites)	pass.lean mode:verified_compiler	same	RTL / LGraph	<base>_gate_Lgraph.lean	as above	MAPPED; one characterisation run executed, see below
+checked compiler	FP	9bb41a09d	--	mode option ABSENT at this pin	--	--	--	--	ABSENT at the pin: FP's pass_lean.cpp has no `mode` option and zero `verified_compiler` occurrences.  Narrowly established from the pinned implementation; this specific comparison cannot exist for FP.
+FP specialized residual	FP	9bb41a09d	formal/lean/Projection (mixDriver / ProtoFast / ProtoSum / ProtoShift)	proto_probe / total_probe	Lean specializer	DCERT1 certificate	NONE -- the residual is an in-memory `Program`	n/a	ABSENT: no FP probe writes residual source to a file.  `digest`, `szOf` and the decidable `R == F` test are in-process observations of a Program, NOT generated-source bytes, and are not offered as a substitute.
+D3 reified residual	D3	78a3e0d8c	D3 reifier	d3 harness	Lean reifier	certificate	emits under a gitignored path	--	OPEN: not inventoried at this checkpoint

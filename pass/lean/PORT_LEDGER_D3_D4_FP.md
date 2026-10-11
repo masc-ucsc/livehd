@@ -5044,11 +5044,20 @@ the same arithmetic on both sides, whatever the reset polarity does.
 
 ### 50.2 Section 6.4 cannot be executed as written
 
+> **CORRECTED IN SECTION 51.** The claim below -- that no original branch has a
+> generator -- is WRONG. It searched only for master's Direction-2
+> `make_sim_launcher.py` / `Sims/` route. All three pins emit Lean simulator
+> source from a native C++ emitter, `pass/lean/pass_lean.cpp`. The table in this
+> subsection is accurate about `make_sim_launcher` and `Sims/` specifically and
+> about nothing else; read section 51 for the real artifact map. The
+> determinism result in 50.3 stands, scoped as it already was.
+
 Section 6.4 carries a final-acceptance requirement: generate the simulator
 source twice for each original branch -- once with **that branch's own
 generator**, once on rebased master -- and require exact raw byte equality.
 
-**No original branch has such a generator.**
+**No branch has the Direction-2 launcher** (the overbroad conclusion drawn from
+this, corrected in section 51):
 
 | branch | reference | `make_sim_launcher` | `Sims/` tree | any file mentioning `Sims/` |
 |---|---|---|---|---|
@@ -5058,18 +5067,11 @@ generator**, once on rebased master -- and require exact raw byte equality.
 
 `pass/lean/scripts/make_sim_launcher.py` exists only on master, and its own
 docstring says what it is: "Direction 2's executable is a GENERIC simulator
-over `DesignCert`". The criterion appears to have been carried into this plan
-from D2, where the generator was the deliverable, without checking that D3, D4
-and FP pin one. By the criterion's own rule -- "a block that neither side can
-generate is not a passing comparison, it is an absent one" -- all thirty
-comparisons are absent, and the three substitutions it forbids (behavioural
-equality, cross-backend comparison, a new equivalence proof) are not offered
-here.
-
-**This is a plan-level decision and is left open rather than resolved
-unilaterally.** The options are to drop 6.4, to restate it as a master-side
-determinism requirement, or to pin a different artifact as the one whose
-preservation is checked.
+over `DesignCert`". Choosing it as *the* generator for 6.4 was an
+implementation assumption of this plan, not a user requirement, and it was the
+wrong artifact -- section 51 identifies the right one and the thirty checks are
+**not** impossible. The three substitutions 6.4 forbids are still not offered
+anywhere in this ledger.
 
 ### 50.3 What could be established instead, and was
 
@@ -5094,3 +5096,123 @@ two sha256 listings match line for line. Raw bytes, not normalised.
 
 That is determinism of master's generator. It is **not** the 6.4 preservation
 check and is not offered as one.
+
+## 51. Correction: every branch has a simulator-source emitter, and it is not the launcher
+
+### 51.1 What section 50.2 got wrong
+
+Section 50.2 concluded that section 6.4 "cannot be executed as written" because
+no original branch has a generator. That conclusion was wrong, and the error
+was a **mapping** error, not a measurement error: the search looked only for
+master's Direction-2 `make_sim_launcher.py` and its `Sims/` tree. Those really
+are absent at all three pins -- but their absence says nothing about whether
+those branches emit simulator source, because that is **not the route they
+use**.
+
+All three pins emit Lean simulator source from a native C++ emitter,
+`pass/lean/pass_lean.cpp` -- the `pass.lean` Eprp pass -- writing
+`<output_dir>/<base_name>_Lgraph.lean`, which is the **same artifact name
+master emits**:
+
+| branch | pin | emitter sha256 (first 16) | lines | `_comb`/`_next`/`_step` at |
+|---|---|---|---|---|
+| D3 | `78a3e0d8c` | `eea28b5a16a79697` | 3,783 | 2796 / 2830 / 2890 |
+| D4 | `f6ad1fe29` | `cd41e7d92cc82d76` | 3,855 | 2868 / 2902 / 2962 |
+| FP | `9bb41a09d` | `ff2345c55705f8d5` | 2,455 | 1718 / 1752 / 1812 |
+| master | `b9515eaf8` | driver only | 103 | split across the `emit_legacy_*` / `emit_design_cert` / `emit_dcert` modules (1,636 lines) |
+
+Master refactored the monolith into modules while keeping the artifact name --
+which is precisely the kind of change a byte comparison exists to police.
+The full map, with invocations and per-route status, is
+`pass/lean/tests/MASTER_SIM_ARTIFACT_MAP.tsv`.
+
+### 51.2 The routes, separated
+
+They are different paths and are not substituted for one another.
+
+- **Native `pass.lean` emitter** (all three pins and master). Input is RTL or
+  an LGraph, not a certificate. The FP benchmark invocation is pinned in
+  `scripts/run_cva6_module_lean_stress.sh`: `lhd compile verilog --reader
+  yosys-slang --top <TOP> --emit-dir lean:<LEAN_DIR> --set
+  formal.lean.strict=true --set formal.lean.normalize=true --set
+  formal.lean.emit_cert=<EC> --set formal.lean.emit_fast_bridge=<EFB> --set
+  formal.lean.cert_wf=<CW> --set formal.lean.max_width=1048576`.
+- **Checked-compiler emission**, `pass.lean mode:verified_compiler`. Present at
+  D3 (19 sites) and D4 (22 sites) and on master, where it publishes three
+  artifacts in one transaction. **Absent at the FP pin**: FP's `pass_lean.cpp`
+  has no `mode` option at all and zero occurrences of `verified_compiler`. That
+  one comparison cannot exist for FP, established from the pinned
+  implementation rather than from a missing directory.
+- **FP specialized residual.** No FP probe writes the residual to a file; it is
+  an in-memory `Program`. The digest, `szOf` and the decidable `R == F` test of
+  section 48 are in-process observations of a `Program` on the **current**
+  build. They are not generated-source bytes and are not offered as a
+  substitute for any 6.4 comparison.
+- **D3 reified residual.** Emits under a gitignored path; not inventoried at
+  this checkpoint, recorded as open.
+
+### 51.3 An option the rebase dropped
+
+Section 6.4 step 3 requires identical options, which makes the option surface
+load-bearing. All three pins accept `strict`, `emit_cert`, `emit_fast_bridge`,
+`cert_wf`, `cert_wf_fallback`, `cert_chunk_size`, `cert_chunk_limit`,
+`max_width`, `top` and **`normalize`**. D3 and D4 additionally accept `mode`.
+
+**Master accepts the same set minus `normalize`.** The original FP benchmark
+sets `formal.lean.normalize=true` explicitly, and master has no such knob --
+only internal normalisation helpers in `design_scan.cpp`. Pinning what master's
+behaviour corresponds to is a prerequisite for any byte comparison, and it is
+recorded here as open rather than assumed away.
+
+### 51.4 The one small comparison, and why it is a characterisation
+
+113 block names already carry a `_Lgraph.lean` on **both** master and the D4
+worktree, so one pair could be compared with no build at all. Taking
+`ariane_regfile_gate` (retained in
+`generated/master_port/sim_bytecmp/ariane_regfile_characterisation.txt`):
+
+```
+original  D4 temp/cva6_30_auth/.../ariane_regfile_gate_Lgraph.lean
+          sha256 6d8f46eff208810a...  147,810 bytes
+master    generated/master_port/d4_cva6_30/.../ariane_regfile_gate_Lgraph.lean
+          sha256 9df9dd297112ad59...   69,104 bytes
+byte-equal: NO
+```
+
+Both headers say `pass.lean in formal.lean.mode=verified_compiler`, confirming
+the route. The difference has **two independent causes**, and only one of them
+is what 6.4 tests:
+
+1. **The inputs are different elaborations.** Master declares 400 sources
+   (`0..399`), D4 declares 1,034 (`0..1033`) -- stable across all seven D4
+   copies and all master copies. The same gap appears in the certificates
+   (master `btb` 1,059 sources against D4's 1,784).
+2. **The emitter changed.** Master emits 4 theorems where D4 emitted 2, and the
+   header text differs: master's "the checks and theorems below instantiate its
+   generic correctness and all-fire compatibility results" against D4's "This
+   file contains NO semantic model and NO proof script".
+
+Because of (1) this pair does **not** meet 6.4 step 3, so it is recorded as a
+characterisation and **not** as a pass or a fail. Reporting it as a mismatch
+would be reporting an uninterpretable one.
+
+### 51.5 What each remaining byte check needs
+
+The ten-block criterion stands, unchanged and not replaced: not by master-only
+determinism, not by generic launcher output, not by behavioural agreement, not
+by normalisation, and not by a new equivalence proof. The frozen samples
+already recorded are kept and will be validated for applicability before
+generation, never repicked after a mismatch.
+
+To make the checks executable, per branch: build the pinned branch, re-emit the
+ten blocks from **identical pinned RTL/filelist inputs** with the **same
+emission options** (including whatever master's answer to `normalize` is),
+re-emit the same ten on master through the corresponding route, and compare raw
+bytes, retaining every input and output hash and the full diff of any mismatch.
+That needs a heavy build on each branch and is **not started here**, because
+the long FP benchmark runs own the machine at this checkpoint.
+
+The verified-compiler example and its original emitter stay in the plan: D3 and
+D4 carry `mode:verified_compiler`, master carries it, and that comparison is
+listed as MAPPED/OPEN. For FP it is recorded as ABSENT AT THE PIN, narrowly,
+with the implementation evidence.

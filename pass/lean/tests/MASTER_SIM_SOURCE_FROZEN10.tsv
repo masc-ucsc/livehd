@@ -1,10 +1,19 @@
 # TEN FROZEN SIMULATOR-SOURCE BLOCKS, and what could actually be checked.
 #
+# CORRECTED -- see MASTER_SIM_ARTIFACT_MAP.tsv and ledger section 51.  The
+# conclusion below ("not executable, no branch has a generator") was a MAPPING
+# ERROR: it searched only for master's Direction-2 make_sim_launcher.py / Sims/
+# route.  All three pins DO emit simulator source, natively, from
+# pass/lean/pass_lean.cpp -> <base>_Lgraph.lean.  The ten-block criterion stands
+# and is NOT replaced by anything in this file.  What this file records --
+# generator preservation across the port, and generator determinism -- remains
+# true and remains scoped to master's Direction-2 launcher only.
+#
 # Section 6.4 of this ledger asks, as a FINAL-ACCEPTANCE requirement, that the
 # generated simulator source be produced twice -- once on each original branch
 # with THAT BRANCH'S OWN generator, once on rebased master -- and compared byte
-# for byte.  That check is NOT EXECUTABLE as written, because no original branch
-# has such a generator:
+# for byte.  The following is true of the Direction-2 launcher SPECIFICALLY, and
+# of nothing else:
 #
 #   D3  livehd-d3-translation-validation @ 78a3e0d8c   no make_sim_launcher,
 #   D4  livehd-d4-incremental            @ f6ad1fe29   no sim_launcher, no
@@ -14,9 +23,11 @@
 #
 # `make_sim_launcher.py` is a DIRECTION-2 artifact and exists only on master; its
 # own docstring says so ("Direction 2's executable is a GENERIC simulator over
-# DesignCert").  Section 6.4 forbids three substitutions -- behavioural equality,
-# cross-backend comparison, and any new equivalence proof -- so none of those is
-# offered here.  What IS recorded is the two things that can be established:
+# DesignCert").  It is NOT the artifact section 6.4 should have named.  Section
+# 6.4 forbids three substitutions -- behavioural equality, cross-backend
+# comparison, and any new equivalence proof -- and none is offered here or
+# anywhere else.  What this file records is two narrower things, about the
+# launcher only:
 #
 #  1. PRESERVATION, directly.  The D3/D4/FP port never touched the generator.
 #     Its last change is 4ab3ac566 ("sim: run the ported launcher"), 77 commits
@@ -31,8 +42,10 @@
 #     two lakefile stanzas are identical, and the two sha256 listings match line
 #     for line.  Raw bytes, not normalised.
 #
-# This is determinism of master's generator.  It is NOT the section 6.4
-# preservation check and is not offered as one.
+# This is determinism of master's DIRECTION-2 LAUNCHER.  It is NOT the section
+# 6.4 preservation check, it is not a substitute for any of the thirty byte
+# comparisons, and it is not offered as one.  The real 6.4 route is the native
+# pass.lean emitter; see MASTER_SIM_ARTIFACT_MAP.tsv.
 #
 block	input	input_sha256	input_bytes	cert_out_sha256	main_out_sha256
 debug_breakpoint	generated/master_port/replay/jobs/CORE-ET/verified_compiler/debug_breakpoint/lean/debug_breakpoint_Lgraph.lean	f2c7215491fc83a79a6ab41399e324324015f0b0cb5b5f49cfda9884eb669781	12558	e16773d9b993e29b782c3bea74c9cc17ebd72ad8e155ff431e274f2613c807c5	6d1ad8f826050adfc1c047d2fc5c948ee6b7b14e513c88643b34aefe78c8ee4f
