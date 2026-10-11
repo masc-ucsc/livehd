@@ -1286,7 +1286,7 @@ private:
   // Keys that only mean something on particular operations (a key with a
   // membership meaning is never "unused").
   static bool synth_key_needs_op(const std::string& key) {
-    return !(key == "color" || key == "grow" || key == "ware" || key == "abc" || key == "delay");
+    return !(key == "color" || key == "grow" || key == "ware" || key == "abc" || key == "delay" || key == "partition");
   }
   void warn_unused_synth(const std::string& key, const livehd::synth_attr::Hint& hint, std::string_view srcid, std::string_view where) {
     auto d = locate_srcid(srcid,

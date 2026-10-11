@@ -41,10 +41,17 @@ namespace livehd::color {
   }
   const auto hints = livehd::synth_attr::read(a.get());
   const auto it    = hints.find(std::string(key));
-  if (it == hints.end()) {
-    return std::nullopt;
+  if (it != hints.end()) {
+    return it->second.value == "true";  // the specific cut condition wins
   }
-  return it->second.value == "true";
+  // `synth.partition` sets all four at once for its scope: coarse = no cut,
+  // fine = every cut (the width/size conditions still decide what is cuttable).
+  if (const auto part = livehd::synth_attr::get(hints, "partition"); part == "coarse") {
+    return false;
+  } else if (part == "fine") {
+    return true;
+  }
+  return std::nullopt;
 }
 
 constexpr int32_t NO_COLOR = 0;

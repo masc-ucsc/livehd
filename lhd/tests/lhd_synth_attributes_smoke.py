@@ -340,4 +340,25 @@ def inlined(name, head):
 plain_sh = inlined("inl_plain", "comb sh(a:U32,n:U5)->(y:U32) { y=(a<<n)#[0..=31] }")
 pinned_sh = inlined("inl_pinned", 'comb sh::[synth.barrel="log"](a:U32,n:U5)->(y:U32) { y=(a<<n)#[0..=31] }')
 assert plain_sh[0] == pinned_sh[0], (plain_sh, pinned_sh)
+# synth.partition on a scope = the run-wide coarse profile for that scope only.
+part_body = '''(a:U32,b:U32,s:U2,n:U5)->(y:U32) {
+  mut r:U32 = 0
+  match s {
+    == 0 { wrap r = a + b }
+    == 1 { wrap r = a - b }
+    == 2 { wrap r = a << n }
+    else { r = a >> n }
+  }
+  y = r
+}'''
+def part_run(name, attrs, *settings):
+    path = work / (name + ".prp")
+    path.write_text("pub comb " + name + "::[timecheck=false" + attrs + "]" + part_body)
+    doc, _ = synth(name, path, *settings)
+    total = doc["qor"]["abc"]["total"]
+    return total["gates"], len(doc["qor"]["abc"]["regions"])
+default_part = part_run("part_default", "")
+scoped_part  = part_run("part_scoped", ',synth.partition="coarse"')
+global_part  = part_run("part_global", "", "synth.partition=coarse")
+assert scoped_part == global_part and scoped_part[1] < default_part[1] and scoped_part[0] < default_part[0], (default_part, scoped_part, global_part)
 print("region contraction A -> B -> A and module-scope isolation passed")

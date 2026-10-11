@@ -410,6 +410,9 @@ std::vector<std::shared_ptr<hhds::Graph>> build_ware_modules(const std::vector<s
         // (br_mux_bin: 913 cells plain, 5627 once any attribute was present).
         if (const auto a = node.attr(attrs::synth_policy); a.has() && !kind.empty()) {
           const auto hints = synth_attr::read(a.get());
+          if (synth_attr::get(hints, "partition") == "coarse") {
+            continue;  // coarse scope: the operation stays in its region
+          }
           const auto has   = [&](std::string_view key) {
             const auto it = hints.find(std::string(key));
             return it != hints.end() && !it->second.value.empty() && it->second.value != "auto";

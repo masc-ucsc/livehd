@@ -47,6 +47,7 @@ inline constexpr Attr_spec kAttributes[] = {
     {  "stop_cmp",              "false", "LT, GT: cut colors at wide comparisons"},
     {"stop_shift",              "false", "SHL, SRA: cut colors at runtime shifters"},
     {    "memory",           "\"flops\"", "Memory: auto|flops|macro realization of one memory"},
+    { "partition",         "\"coarse\"", "any cell: region granularity of its scope -- coarse drops every stop_* cut and ware extraction, fine restores them"},
 };
 inline std::string json(const rapidjson::Value& v) {
   rapidjson::StringBuffer                    b;
@@ -132,6 +133,10 @@ inline void validate(std::string_view key, std::string_view value) {
     }
   } else if (key == "barrel") {
     if (s != "auto" && s != "log" && s != "reverse") {
+      bad();
+    }
+  } else if (key == "partition") {
+    if (s != "auto" && s != "fine" && s != "coarse") {
       bad();
     }
   } else if (key == "memory") {
