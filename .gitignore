@@ -100,3 +100,12 @@ generated/master_port/
 /generated/
 /temp/
 /formal/lean/LeanSemanticPrimitives/Gen/
+
+# Lean build OUTPUT for the projection probes. `.build-proj.sh` writes the
+# oleans into .olean-dev and `run_cert.sh` reads them back through LEAN_PATH;
+# `build-native.sh` writes .native-dev and calls itself a diagnostic that
+# nothing in the project depends on. Three FP commits (73dee5673, df8b7c8ec,
+# d8d84afbd) swept 46 .olean files -- 78 MB -- into the repository; they are
+# regenerable and are untracked again from here.
+/formal/lean/.olean-dev/
+/formal/lean/.native-dev/
