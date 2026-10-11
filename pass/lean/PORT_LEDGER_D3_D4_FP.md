@@ -3380,3 +3380,95 @@ because chasing it means running the test that destroys the measurement, and
 the measurement is the current job. `timeout_resumable` in the scheduler test
 failed once in the same window and is on the same list.
 
+## 37. D3 handoff checkpoint
+
+Stopping here at the user's direction to start the Futamura projection rebase.
+**Reordering closes nothing.** D3 translation validation, D4
+incremental/differential and FP all remain open, and the plan order is now:
+
+> this D3 checkpoint -> **FP rebase** -> remaining D3/D4 procedures and final
+> integrated validation -> ten-block byte checks per original branch ->
+> scoreboard timing and the Lean-construction research (SS31-32) last.
+
+### 37.1 The scoreboard attempt was stopped, not finished
+
+Identity verified before anything was signalled: lean PID 1317609,
+`starttime=203801332`, uid 1008, parent 1317608 (`/usr/bin/time`,
+`starttime=203801324`), probe `scoreboard_gate_s5_full.lean` sha256
+`0ada49ea...61963`. All four matched.
+
+Terminal evidence, captured BEFORE the stop: elapsed 1:05:29, RSS 5,814,868 kB,
+cgroup `memory.current` 5,217,636,352 B, `memory.peak` 5,229,641,728 B,
+`memory.max` 18,432,000,000 B, `memory.events` **oom 0, oom_kill 0**, and
+exactly the two expected pids in `cgroup.procs`.
+
+Then SIGTERM through its own guarded runner so `/usr/bin/time` still wrote its
+report: **exit 143, "Command terminated by signal 15", 1:05:39 wall, max RSS
+5,900,964 kB, 0 bytes of output.**
+
+**Disposition: OPERATOR-STOPPED / DEFERRED at the user's request.** Not a
+timeout, not an OOM, not a semantic failure, not a completed measurement, and
+not a proof. The probe is a runtime/mutation report, not a translation-proof
+command.
+
+What it did establish: at 3,939 s it was **9% past the 3,600 s bound the sweep
+used**, still running, with no output and no memory pressure of any kind. So
+`scoreboard_gate`'s real completion time is `> 3,939 s` and remains unmeasured.
+Attempt 1 was unenforced and terminated; attempt 2 died of SIGBUS because I ran
+a mutating test beside it (S36); attempt 3 is this one. All three are recorded
+in `diag/UNBOUNDED_README.txt`. Afterwards: no `lean` process alive, and **zero
+processes mapping the shared build**, so builds and mutating tests are safe
+again.
+
+### 37.2 What is built and validated, and what is only edited
+
+| | state |
+| --- | --- |
+| CORE-ET master corpus, executable gate | 76/76 `agree`, join complete, `join_rc=0` |
+| CVA6 frozen-30 master corpus, executable gate | 20/30 `agree`, 1 timeout, 9 no certificate |
+| CORE-ET imported corpus | 77/85 judged, all `typecheck=0`; 1 `rss_killed`, 7 deferred |
+| CORE-ET master `--prove` | 12/76 judged, **64 deferred on memory**; 1 accepted (unaudited), 10 budget stops |
+| transport repair + `simp (maxSteps := 4000000)` | **edited in source, NOT elaborated** |
+| join/sweep proof dispositions | built, 21 control legs pass |
+| `d3_cost_census.tsv`, `scoreboard_cost_ladder.tsv` | retained evidence |
+
+Four distinctions that must survive this handoff: **runtime `agree` is not a
+translation proof** (`proof` is a separate column and is `na` on every executable
+row); **a resource stop is not a semantic failure** (64 deferred, 1 rss_killed,
+1 timeout, 9 budget stops -- none is a design result); **deferred is not
+covered** (the `--prove` pass reached 12 of 76); and **edited is not built**
+(SS35 changes no result until the library is rebuilt, which will need fresh
+output and fresh fingerprints).
+
+### 37.3 Open, carried forward
+
+From `audits/d3_join_open_accounting_20261011/result.json`, against my own join
+repair at this HEAD -- all five are real and none is fixed here:
+
+1. An **unauthenticated** join (no `--meta`, no `results_sha256`, no
+   `manifest_digest`) exits 1 but still emits `proof_status=accepted` and a
+   "1/1 accepted" summary. An observed claim is not authenticated milestone
+   credit and the output does not yet separate them.
+2. `proof_axioms` is admitted as any non-empty string -- `[sorryAx]` or
+   garbage. No permitted-set parsing. A valid empty `[]` must stay legal.
+3. An unrecognised `run_status` (`runner_error`) was credited `proof=1`,
+   `agree=1` at exit 0. Credit should require a recognised finished-eligible
+   state.
+4. `corpus_origin` treats ANY path inside the worktree as "emitted here",
+   including a non-existent imported-copy directory. Path containment is not
+   emission provenance; the fresh corpora have `PROVENANCE.tsv` source hashes
+   and D4 `EMITTED` rows that are the actual evidence.
+5. Legacy rows predating `proof_stop` -- rc 124 and kernel OOM -- are still
+   mislabelled `refused`. They need evidence or an explicit unknown, not a
+   guess.
+
+Plus, from the same packet: the join does not carry the module backend's
+separate `module_proof` admission at all. A module worker can earn
+`module_proof=1` while the in-process `proof` stays `na`, and that is not an
+unattempted module stage.
+
+Also open: `resume_after_kill` (1 failure in 3 under load, the resume adding
+none of the four remaining targets) and `timeout_resumable` (1 failure),
+neither chased because chasing them meant running the test that destroys a live
+measurement.
+
