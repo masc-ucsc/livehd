@@ -4923,3 +4923,88 @@ source count is large: at nsrc = 1024 `cstD` is 4.1x smaller than `shalD` and
 
 All three of these modes produce profiles only -- no reference comparison and
 no execution of the residual -- and are recorded as such.
+
+## 49. FP checkpoint 12: the first sequential CVA6 results
+
+Section 46 ended with an awkward fact: every design in the FP evidence had
+**zero flops**, so no admitted FP run had ever executed a flop reset or a state
+update. That is fixed here.
+
+`proto_probe --support` accepts 22 of the 29 frozen-30 certificates present in
+`cva6_30_auth`. Eight of those already had FP evidence, and **all fourteen of
+the rest are sequential**. All fourteen were run on the covered backend --
+`total_probe`, `Projection.mixDriver` + `hwAPVarT`, the pair for which
+`IHwAdequate_varT`, `specializeDesign_varT_correct` and `simSound_varT` are
+proved -- at fuel 200000/2000, under an 8 GiB named scope with a 1800 s cap,
+through `fp_replay.py` and its forty-control admission boundary.
+
+**8 of 14 admitted**, every one sequential:
+
+| design | flops | sources | residual terms | bound | wall s | states reached | status |
+|---|---|---|---|---|---|---|---|
+| serdiv | 12 | 1,082 | 79,736 | 5,291 | 9.99 | 2 | pass |
+| ariane_regfile | 32 | 1,034 | 169,669 | 4,570 | 12.75 | 3 | pass |
+| perf_counters | 12 | 1,652 | 109,653 | 7,977 | 31.57 | 2 | pass |
+| cva6_ptw | 11 | 3,423 | 279,958 | 16,721 | 89.54 | 3 | pass |
+| instr_queue | 71 | 1,105 | 388,119 | 5,075 | 189.14 | 3 | pass |
+| store_buffer | 62 | 1,331 | 386,532 | 6,091 | 242.11 | 2 | pass |
+| btb | 64 | 1,784 | 415,935 | 8,075 | 1079.03 | 2 | pass |
+| id_stage | 30 | 10,503 | 1,600,933 | 48,805 | 1377.08 | 2 | pass |
+| issue_read_operands | 89 | 6,172 | 2,473,580 | 28,329 | 1800.28 | -- | wall cap |
+| bht | 256 | 7,372 | 6,118,005 | 33,199 | 1800.11 | -- | wall cap |
+| scoreboard | 243 | 9,396 | 7,891,050 | 42,765 | 1800.28 | -- | wall cap |
+| frontend | 409 | 13,466 | 20,259,844 | 61,316 | 1800.11 | -- | wall cap |
+| issue_stage | 332 | 14,686 | 20,470,076 | 67,410 | 1800.22 | -- | wall cap |
+| csr_regfile | 136 | 32,853 | 28,301,964 | 157,185 | 1800.21 | -- | wall cap |
+
+Each admitted row required all six width-aware stimuli to match
+`interpretDesign`, a four-cycle trace to agree, the checker to accept, and the
+control interpreter to match -- plus the attempt binding, the uniquely-parsed
+status and the prelaunch capture the controls enforce.
+
+### 49.1 The six stops are time, not memory, and are not failures
+
+Every stop is `exit 124` from `timeout`, recorded as **RESOURCE STOP,
+undecided**. None is called a failure and none is called an OOM, because the
+retained cgroup evidence says it was not one: `memory.events.oom_kill` is **0
+on all fourteen**, `memory.max` reads back as exactly 8 GiB, and the worst peak
+was `csr_regfile` at **1.29 GB** -- 15% of the budget. All six had already
+finished specializing when the cap fell; they were in the stimulus phase.
+All fourteen report `support_all true`.
+
+### 49.2 What separates admitted from stopped is residual size
+
+Not flop count, and not source count. Every admitted design has a residual of
+at most **1,600,933** terms; every stopped one has at least **2,473,580**.
+`id_stage` carries 30 flops and 10,503 sources and is admitted at 1377 s, while
+`issue_read_operands` carries 89 flops and 6,172 sources and is not -- so
+neither dimension separates the two groups on its own. What flop count does
+drive is terms per source: `id_stage` yields 152 terms per source at 30 flops,
+`bht` 830 at 256.
+
+`scoreboard` reappears here as a stopped design, as it did in the D3
+`scoreboard_gate` timeout at 3603 s. Different workload, same design class on
+the hard end.
+
+### 49.3 The scope these results do and do not have
+
+These are pre-D2 DCERT1 certificates, so every one carries the raw-port
+reset-polarity opposition of section 46. The **agreement** results are
+unaffected: the residual and `interpretDesign` consume the same certificate, so
+both sides apply the same inconsistent polarity, and their agreement is a
+statement about the specializer, not about the polarity. What is weakened is
+the reading of `states-reached`: 2 or 3 states over four cycles is **not**
+behavioural coverage of these designs, because one reset path is asserted
+throughout. The column is reported as an observation, not as coverage.
+
+No rows were added to `experiments.jsonl` for these runs.
+`record_experiment.py` reads the exit status from a `/usr/bin/time` trailer
+inside the log, which `fp_replay.py` does not write -- it keeps the status in a
+separate attempt-scoped `.exit` file. Recording them would have produced rows
+marked `exit None, MISSING -- the log carries no exit evidence; status is
+UNKNOWN`, which is weaker evidence than the join, not stronger. The join in
+`pass/lean/tests/fp/fp_frozen30_seq_join.tsv` carries the derived outer and
+worker status, the attempt binding and the guard observations instead.
+
+**CVA6 FP coverage now stands at 8 combinational + 8 sequential designs**, and
+at 16 of the 22 supported members of the frozen 30.
