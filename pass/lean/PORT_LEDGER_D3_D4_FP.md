@@ -2950,6 +2950,37 @@ are three orders of magnitude apart in cost, and it is the interpreter that is
 slow. That is a separate finding from §31's wide-bitvector cost, and it points
 at a different piece of code.
 
+The same ladder on `scoreboard_gate`, against its own ~290 s baseline:
+
+| component | passes | wall | marginal | per pass |
+| --- | --- | ---: | ---: | ---: |
+| structural line only | 0 | 290.3 s | -- | -- |
+| one `fast` evaluation | 1 fast | 317.9 s | 27.6 s | **27.6 s** |
+| `distinctObservables` | 32 fast | 1,574.7 s | 1,284.5 s | **40.1 s** |
+| `checkerSelfTest` | 1 `denoteResidual` | 302.3 s | 12.1 s | **12.1 s** |
+
+**And here the two sides swap places.** On `decoder_gate` the compiled model is
+free and the interpreter costs ~3 s a pass; on `scoreboard_gate` the compiled
+model costs 28-40 s a pass and the interpreter 12. The reason is worth chasing
+in this phase rather than guessing at: `runBindings` pushes `denoteExpr env
+b.rhs` into a `SlotEnv`, and if `CertVal` construction is lazy then a binding
+no sampled output or flop depends on is never forced, while `reify_design`'s
+straight-line `let` chain materialises every one. If that is what is happening,
+the interpreter is not merely different from the fast model -- it is doing
+STRICTLY LESS WORK, and the comparison the D3 gate rests on is between an
+eager evaluation and a demand-driven one. That does not weaken the gate (both
+sides still have to produce the same observable) but it does mean the two
+columns are not measuring the same quantity of work, and any optimisation
+claim here has to say which.
+
+Multiplying out: 65 fast passes at 28-40 s plus 33 interpreter passes at ~12 s
+is 2,200-3,000 s, against the `>= 3,332 s` the prefix ladder leaves for
+`#eval report`. The cost is accounted for.
+
+(`agree` -- 32 fast and 32 `denoteResidual` in one leg -- was still running when
+this was written; it is the sum of the two rows above and is confirmatory, not
+load-bearing.)
+
 ### 32.4 The candidates, each with the measurement that settles it
 
 **A. The bitwise primitives.** `bv_bitwise`, `bv_not`, `bits_to_int` and
