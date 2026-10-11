@@ -2946,7 +2946,7 @@ Measured, whole process (seconds / peak RSS):
 | `e2_sim1` | ONE `d3_fast` pass | 66.8 / 2.67 GB | 317.9 / 5.90 GB |
 | `e5_distinct` | 32 `d3_fast` passes | 71.3 / 2.66 GB | 1,574.7 / 5.89 GB |
 | `e3_selftest` | ONE `denoteResidual` + `sameResult r r` | 75.6 / 2.65 GB | 302.3 / 5.90 GB |
-| `e4_agree` | 32 `d3_fast` + 32 `denoteResidual` | 173.0 / 2.65 GB | pending |
+| `e4_agree` | 32 `d3_fast` + 32 `denoteResidual` | 173.0 / 2.65 GB | **2,400.1 / 5.89 GB, exit 124** |
 
 **The noise floor comes first.** On `decoder_gate` the four `e*` baselines span
 66.8-75.6 s, and in the earlier prefix ladder `s1_cert` (66.7 s) ran SLOWER
@@ -2966,20 +2966,30 @@ are all inside it. `scoreboard_gate` baselines are steadier (290.3 / 302.3 /
   passes are bounded under 5 s in total, essentially all of it is 32
   `denoteResidual` passes -- roughly 3 s each.
 
+**`e4_agree` on `scoreboard_gate` did not complete.** It was killed by its own
+`timeout 2400` at 2,400.13 s, exit **124**, with an EMPTY output -- no verdict
+was printed. It is undecided in exactly the way the sweep's row is, and it
+gives a bound, not a cost: the marginal is `> 2,110 s`, and with `e5`'s 32
+`fast` passes known to be 1,284.5 s, **32 `denoteResidual` passes cost more
+than 825 s, i.e. more than ~26 s each**.
+
 **What does NOT survive, and I stated it too strongly before.** I wrote that
 "the two sides swap places": that `scoreboard_gate`'s interpreter is cheaper
-than its compiled model. That rests on its `e3` marginal of 12.1 s, which is
-inside the wander of a 290 s baseline and is **not resolvable**. The honest
-position is that one `denoteResidual` pass on `scoreboard_gate` is somewhere
-under about 30 s and nothing finer is established. `e4_agree` is the leg that
-would settle it -- with `e5` known, subtracting isolates the interpreter -- and
-it had not returned when this was written.
+than its compiled model. The `e4` bound refutes it. The interpreter is at least
+~26 s per pass against the compiled model's 40.1 s -- the same order, with the
+model still ahead, and nothing finer than that is established.
 
-**And the selftest leg observes less than its name.** The probe prints
-`.base`, which forces one `denoteResidual` and `sameResult r r`. Whether the
-three mutation judgements inside `checkerSelfTest` are evaluated at all is not
-established, so that row is a lower bound on the component, not a measure of
-it.
+**An anomaly worth carrying into the phase rather than explaining away.**
+`e3_selftest` forces one `denoteResidual` and came in at 12.1 s marginal, while
+`e4` puts a single interpreter pass above ~26 s. Those do not reconcile. Either
+the 12.1 s is baseline wander, or `sameResult r r plan` -- a value compared
+against ITSELF -- forces materially less of `r` than `sameResult fast residual`
+does, in which case `checkerSelfTest`'s `base` leg is not exercising what its
+name suggests. **I do not know which, and the measurement here cannot tell
+them apart.** It is a direct question for §32.4-B, because "what does the
+interpreter actually force" is the same question as "why is it cheaper than the
+compiled model on `decoder_gate`", and both have to be answered before any
+optimisation of that path means anything.
 
 ### 32.4 The candidates, each with the measurement that settles it
 
