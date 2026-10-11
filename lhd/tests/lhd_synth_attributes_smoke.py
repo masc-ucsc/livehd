@@ -390,7 +390,7 @@ for mapper in ("abc", "usyn"):
                  "--set", "synth.liberty=" + lib, "--set", "synth.opentimer=false", "--set", "synth.mapper=" + mapper, ok=False)
     conflict = [json.loads(l) for l in log.splitlines() if '"synth-group-conflict"' in l]
     assert conflict and Path(conflict[0]["span"]["file"]).name == "pre_bad.prp" and conflict[0]["span"]["start_line"] == 6, log
-_, bad_log = run("synth", pre_ok, "--top", "pre_ok", "--workdir", work / "pre_cli", "--set", "synth.liberty=" + lib,
+bad_doc, _ = run("synth", pre_ok, "--top", "pre_ok", "--workdir", work / "pre_cli", "--set", "synth.liberty=" + lib,
                  "--set", "synth.abc_pre=dc2; system ls", ok=False)
-assert "allow-listed" in bad_log, bad_log
+assert "allow-listed" in json.dumps(bad_doc), bad_doc
 print("region contraction A -> B -> A and module-scope isolation passed")
