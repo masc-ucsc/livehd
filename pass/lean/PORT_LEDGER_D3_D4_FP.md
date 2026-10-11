@@ -262,6 +262,45 @@ clock-independent/quiet/simultaneous/reset edges on the projected step; and
 cross-compare checked projected/direct/compiler results **only where all their
 admission predicates hold**.
 
+### 6.4 Final acceptance, across all three branches: generated simulator source, byte for byte
+
+Carried into the plan as a **final-acceptance** requirement. It runs once, at
+acceptance, and it is a SAMPLE check -- not a gate on any intermediate
+checkpoint, and not a substitute for any branch's own acceptance above.
+
+For each original branch (D3, D4, FP), independently:
+
+1. **Freeze 10 supported blocks.** Written down before anything is generated,
+   so the sample cannot be re-picked after a mismatch. "Supported" means the
+   block is one that branch can emit a certificate for; a block that neither
+   side can generate is not a passing comparison, it is an absent one, and it
+   does not count toward the ten.
+2. **Generate the simulator source twice**: once on that branch, once on the
+   corresponding rebased final-master path. `pass/lean/scripts/make_sim_launcher.py`
+   is the generator on master (its output is `formal/lean/Sims/`); the branch's
+   own generator is whatever that branch pins.
+3. **Identical inputs, toolchain and options** on both sides. The same
+   certificate bytes in, the same Lean/Lake toolchain, the same generator
+   flags. A difference in any of those makes a mismatch uninterpretable.
+4. **Require exact raw byte equality** of the generated source. Not
+   normalized, not whitespace-insensitive, not "equivalent after formatting".
+5. **Retain the evidence**: the sha256 of every input and every generated file
+   on both sides, and the full diff of every mismatch. A recorded mismatch is
+   the product of this check just as much as a match is.
+
+Three substitutions are explicitly NOT permitted, because each one answers a
+different question:
+
+- **behavioral equality** -- running both simulators and comparing outputs. It
+  passes whenever two different generators happen to agree on the sampled
+  stimulus, which is precisely the gap a byte comparison closes.
+- **cross-backend comparison** -- comparing one side's simulator against some
+  other execution path. The claim is that the REBASE preserved the generator,
+  not that two implementations agree.
+- **any new equivalence proof.** None is required here. This is a source
+  identity check with a retained artifact, and arriving at it by way of a
+  proof obligation would change what is being accepted.
+
 ## 7. First migration step, staged
 
 The D3 `Defs` split is **derived, not copied** —
