@@ -32,7 +32,7 @@ constexpr std::string_view obsolete[]
     = {"support",          "literals",   "series",        "domino_overhead", "cmos_factor", "static_overhead",
        "nonunate_penalty", "cover_cuts", "domino_levels", "depth_slack",     "duplicate",   "cover_memories",
        "fanout_boundary",  "abc",        "fallback",      "recovery_rounds", "flow",        "area_flow",
-       "large_flow",       "large_ge",   "ware_trials",   "unroll_carry"};
+       "large_flow",       "large_ge",   "ware_trials"};
 
 template <typename T>
 bool parse(std::string_view text, T& value) {
@@ -220,6 +220,13 @@ bool read_options(const Eprp_var& var, Options& options) {
   }
   options.design.max_source_nodes = logical.max_nodes;
   options.design.specialize       = std::string(var.get_stage("specialize", "true")) != "false";
+  {
+    const auto text = std::string(var.get_stage("unroll_carry", "true"));
+    if (text != "true" && text != "false") {
+      return invalid_option("unroll_carry", "true|false");
+    }
+    options.design.unroll_carry = text == "true";
+  }
   options.design.cost_policy      = std::string(var.get_stage("cost_mode", "proxy"));
   // EXPERIMENT: literal-network statistics, one JSON line per region (literal_stats.hpp).
   options.design.literal_stats    = std::string(var.get_stage("literal_stats", ""));
@@ -245,7 +252,8 @@ bool read_options(const Eprp_var& var, Options& options) {
     options.mapping.cache_directory = (options.design.cache.directory / "tmap").string();
   }
   options.design.cache.context
-      = std::to_string(options.mapping.memory_budget_mb) + "/" + std::to_string(options.mapping.time_budget_ms);
+      = std::to_string(options.mapping.memory_budget_mb) + "/" + std::to_string(options.mapping.time_budget_ms) + "/unroll-"
+        + (options.design.unroll_carry ? "1" : "0");
   endpoint.cost_nodes = logical.max_nodes;
   residual.max_nodes  = logical.max_nodes;
   return true;
@@ -284,6 +292,11 @@ void Pass_usyn::setup() {
                        "shares native work and process/time limits; tmap=none runs one network",
                        "2");
   m.add_label_optional("target", "Output target; currently cmos retains original state", "cmos");
+  m.add_label_optional("unroll_carry",
+                       "true|false: expand carry-dependent compact loops per ordinal before synthesis (default true, as "
+                       "pass.abc). False maps one generic body and stitches the carry afterwards: the body keeps its "
+                       "ordinal-dependent logic, which replicates once per iteration",
+                       "true");
   m.add_label_optional("specialize",
                        "true|false: run pass.specialize (constant instance inputs folded into state-free callees) on the "
                        "private copy after pass.color (default true; the synth.specialize spelling)",
