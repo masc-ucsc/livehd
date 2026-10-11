@@ -159,6 +159,7 @@ struct Region_ctx {
   // region_opts overrides of the backend's own command strings (flow, load).
   std::optional<std::string>            flow;
   std::optional<std::string>            load;
+  std::optional<std::string>            pre;  // ABC optimization steps before the built-in flow's mapper
   // A ware trial re-maps a remembered region under candidate options: its
   // overrides are the ones recorded when the region was first mapped.
   bool                                  ware_trial       = false;

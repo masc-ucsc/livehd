@@ -758,6 +758,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "cut colors at wide comparisons (= pass.color.synth.stop_cmp); empty follows the mapper profile"},
     {"stop_shift","",Synth_set_option::Kind::boolean,
      "cut colors at runtime shifters (= pass.color.synth.stop_shift); empty follows the mapper profile"},
+    {"abc_pre","",Synth_set_option::Kind::file,
+     "`;`-separated ABC optimization steps run before the abc mapper of every region, e.g. `dc2; &dch -f` "
+     "(= pass.abc.pre; ignored by usyn); a source pin overrides it per region, and one color is one run, so "
+     "cells of a color that disagree are an error"},
     {"color","",Synth_set_option::Kind::source_only,
      "no run-wide value; names one explicit synthesis group (a name or integer)"},
     {"grow","",Synth_set_option::Kind::source_only,

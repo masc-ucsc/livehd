@@ -94,6 +94,7 @@ private:
   [[nodiscard]] std::string area_flow() const;
   [[nodiscard]] std::string resolve_flow(std::string_view builtin) const;
   [[nodiscard]] std::string subst_flow(std::string f) const;
+  [[nodiscard]] std::string with_pre(std::string builtin) const;
   // The resolved per-region ABC recipe, serialized VERBATIM for the region
   // cache's recipe gate: the pre-ABC lgraph does not encode it, so two regions
   // with equal logic but different flow/arch must never share a cached netlist.

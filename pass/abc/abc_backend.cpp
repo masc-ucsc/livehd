@@ -261,15 +261,43 @@ std::string Abc_backend::subst_flow(std::string f) const {
   return subst(std::move(f), "{F}", std::to_string(region_.max_fanout));
 }
 
+// The region's optimization steps spliced into a BUILT-IN flow: AIG commands
+// right after its first `strash`, GIA (`&`) commands right after its first
+// `&get -n`, so the flow's own restructuring and mapper run on the result.
+std::string Abc_backend::with_pre(std::string f) const {
+  if (region_.pre.empty()) {
+    return f;
+  }
+  std::string aig, gia;
+  for (std::string_view rest = region_.pre; !rest.empty();) {
+    const auto cut = rest.find(';');
+    auto       cmd = rest.substr(0, cut);
+    while (!cmd.empty() && (cmd.front() == ' ' || cmd.front() == '\t')) {
+      cmd.remove_prefix(1);
+    }
+    if (!cmd.empty()) {
+      (cmd.front() == '&' ? gia : aig) += std::string{cmd} + "; ";
+    }
+    rest = cut == std::string_view::npos ? std::string_view{} : rest.substr(cut + 1);
+  }
+  if (const auto p = f.find("&get -n; "); p != std::string::npos && !gia.empty()) {
+    f.insert(p + 9, gia);
+  }
+  if (const auto p = f.find("strash; "); p != std::string::npos && !aig.empty()) {
+    f.insert(p + 8, aig);
+  }
+  return f;
+}
+
 std::string Abc_backend::comb_flow() const {
   if (!region_.flow.empty()) {
     return subst_flow(region_.flow);
   }
   if (region_.delay.empty()) {
     // `none` disables the timed second candidate, not untimed synthesis.
-    return region_.area_flow == "none" ? subst_flow(resolve_flow(kAreaFlow)) : area_flow();
+    return region_.area_flow == "none" ? subst_flow(with_pre(resolve_flow(kAreaFlow))) : area_flow();
   }
-  return subst_flow(resolve_flow(kCombFlow));
+  return subst_flow(with_pre(resolve_flow(kCombFlow)));
 }
 
 std::string Abc_backend::area_flow() const {
@@ -283,7 +311,7 @@ std::string Abc_backend::area_flow() const {
   if (region_.max_fanout != 0) {
     f += region_.delay.empty() ? kBufferTail : kAreaTail;
   }
-  return subst_flow(std::move(f));
+  return subst_flow(with_pre(std::move(f)));
 }
 
 std::string Abc_backend::resolve_recipe(const synth::Region_ctx& ctx) const {
@@ -501,6 +529,9 @@ synth::Region_plan Abc_backend::plan(const synth::Region_ctx& ctx) {
   }
   if (ctx.load) {
     region_.load = *ctx.load;
+  }
+  if (ctx.pre) {
+    region_.pre = *ctx.pre;
   }
   // The region's delay BUDGET, spelled into `{B}` before ANY flow string of
   // this region is resolved: the built-in tails' `dnsize`/`upsize` take it as

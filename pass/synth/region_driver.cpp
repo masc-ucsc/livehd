@@ -214,6 +214,11 @@ bool parse_region_opts_entry(const rapidjson::Value& v, Region_opts& ro, std::st
         return bad("'ware' must be true or false");
       }
       ro.ware = val.GetBool();
+    } else if (key == "pre") {
+      if (!val.IsString() || !livehd::synth_attr::valid_abc_pre({val.GetString(), val.GetStringLength()})) {
+        return bad("'pre' must be a string of allow-listed ABC optimization steps separated by ';'");
+      }
+      ro.pre = std::string{val.GetString(), val.GetStringLength()};
     } else if (key == "flow" || key == "delay" || key == "load") {
       if (!val.IsString()) {
         return bad(std::format("'{}' must be a string", key));
@@ -358,6 +363,9 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
     if (ro.load.has_value()) {
       overrides.load = *ro.load;
     }
+    if (ro.pre.has_value()) {
+      overrides.pre = *ro.pre;
+    }
     if (src == "--set region_opts") {
       if (ro.adder) {
         opts_.source_adder = false;
@@ -394,22 +402,37 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
 
   // Non-arithmetic source options affect this region. Arithmetic choices stay
   // on individual nodes, so mixed architectures never force a partition cut.
+  //
+  // A region is ONE ABC invocation: whichever cells carry them, `delay`, `ware`,
+  // `abc` and `abc_pre` are options of the region, not of a cell. Two different
+  // explicit values among the cells of one color are therefore an error whatever
+  // their source precedence (a module default plus a block pin would otherwise
+  // silently change the whole region). Cells without the key inherit the value.
   livehd::synth_attr::Policy source;
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, size_t>> seen;  // key -> value -> cells
   for (const auto& node : rb.nodes) {
     if (auto a = node.attr(livehd::attrs::synth_policy); a.has()) {
       for (const auto& [key, h] : livehd::synth_attr::read(a.get())) {
-        if (key == "delay" || key == "ware" || key == "abc") {
+        if (key == "delay" || key == "ware" || key == "abc" || key == "abc_pre") {
+          ++seen[key][h.value];
           auto it = source.find(key);
-          if (it != source.end() && it->second.rank == h.rank && it->second.value != h.value) {
-            livehd::diag::err("pass.abc", "synth-region-conflict", "syntax")
-                .msg("region '{}' has conflicting synth.{} values", rb.module_name, key)
-                .fatal();
-          }
           if (it == source.end() || it->second.rank <= h.rank) {
             source[key] = h;
           }
         }
       }
+    }
+  }
+  for (const auto& [key, values] : seen) {
+    if (values.size() > 1) {
+      std::string list;
+      for (const auto& [value, cells] : values) {
+        list += std::format("{}{}={} ({} cells)", list.empty() ? "" : "; ", key, value, cells);
+      }
+      livehd::diag::err("pass.abc", "synth-region-conflict", "syntax")
+          .msg("region '{}' (color {}) has conflicting synth.{} values: {}", rb.module_name, rb.color, key, list)
+          .hint("one color is one ABC run: give the scopes the same value, or separate them with distinct synth.color groups")
+          .fatal();
     }
   }
   if (source.contains("delay")) {
@@ -421,6 +444,14 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
   if (source.contains("abc")) {
     overrides.flow  = livehd::synth_attr::get(source, "abc");
     flow_overridden = true;
+  }
+  if (source.contains("abc_pre")) {
+    overrides.pre = livehd::synth_attr::get(source, "abc_pre");
+    if (source.contains("abc")) {
+      livehd::diag::info("pass.abc", "synth-abc-pre-ignored", "unsupported")
+          .msg("region '{}': synth.abc_pre is ignored because synth.abc supplies the whole flow", rb.module_name)
+          .emit();
+    }
   }
   // Graph-embedded overrides first (the block-attribute channel writes a
   // "region_opts" member into coloring_info), CLI second so --set wins.
@@ -1119,7 +1150,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     (void)apply_region_overrides(rb, overrides);
   }
   if (!ware_trial_) {
-    auto  key   = tune_key(rb, opts_, overrides.flow.value_or(""), overrides.load.value_or(""), opts_.tune_salt);
+    auto  key   = tune_key(rb, opts_, overrides.flow.value_or(""), overrides.load.value_or("") + "|pre=" + overrides.pre.value_or(""), opts_.tune_salt);
     auto* owner = coordinator_ ? coordinator_ : this;
     owner->tune_keys_[rb.module_name] = key;
     bool replay                       = false;
@@ -1163,6 +1194,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   Region_ctx ctx{rb, opts_};
   ctx.flow             = overrides.flow;
   ctx.load             = overrides.load;
+  ctx.pre              = overrides.pre;
   ctx.ware_trial       = ware_trial_;
   ctx.timing_requested = timing_requested();
   ctx.input_ge         = input_ge;

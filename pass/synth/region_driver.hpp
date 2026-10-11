@@ -128,7 +128,7 @@ private:
   std::vector<std::unique_ptr<Region_driver>> parallel_drivers_;
   // The per-region overrides of the backend's own command strings.
   struct Backend_overrides {
-    std::optional<std::string> flow, load;
+    std::optional<std::string> flow, load, pre;
   };
   struct Ware_region {
     livehd::partition::Region_body rb;

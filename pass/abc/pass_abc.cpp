@@ -35,6 +35,7 @@
 #include "query.hpp"
 #include "region_cache.hpp"
 #include "satopt.hpp"
+#include "synth_policy.hpp"
 #include "ware_module.hpp"
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
@@ -50,6 +51,12 @@ void Pass_abc::setup() {
 void Pass_abc::add_mapping_labels(Eprp_method& m) {
   // The top module is the shared kernel `--top` flag (lhd plumbs it into the
   // `top` label), not a per-pass --set option.
+  m.add_label_optional("pre",
+                       "`;`-separated ABC optimization steps run before the built-in flow's mapper, e.g. `dc2; &dch -f` "
+                       "(AIG commands after the first strash, `&` commands after `&get -n`). Allow-listed vocabulary: "
+                       "balance rewrite refactor resub dc2 fraig resyn* compress* &dch &synch2 &syn2..4 &fraig ... "
+                       "Overridable per region (`pre`, source attribute synth.abc_pre); ignored under an explicit flow",
+                       "");
   m.add_label_optional("unroll_carry",
                        "true|false: expand carry-dependent loops before ABC mapping (default true). False maps their "
                        "bodies separately and stitches the carry connections afterwards, for benchmarking. Independent "
@@ -947,6 +954,12 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
 
   livehd::abc::Map_options opts;
   opts.flow              = flow;
+  opts.pre               = std::string{var.get("pre", "")};
+  if (!livehd::synth_attr::valid_abc_pre(opts.pre)) {
+    livehd::diag::err("pass.abc", "bad-pre", "syntax")
+        .msg("pass.abc.pre '{}' is not a ';'-separated list of allow-listed ABC optimization steps", opts.pre)
+        .fatal();
+  }
   opts.boundary          = boundary;
   opts.boundary_buffer   = boundary_buffer;
   opts.boundary_rounds   = boundary_rounds;

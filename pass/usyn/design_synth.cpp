@@ -193,6 +193,7 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     blast_options.eq_balance     = options.eq_balance;
     bool auto_adder = options.auto_sum_adder, auto_multiplier = options.auto_multiplier, auto_barrel = options.auto_barrel;
     bool allow_tune = true;
+    bool abc_ignored_noted = false;
     synth_attr::Policy mapping_policy;
     for (auto n : rb.nodes) {
       auto a = n.attr(attrs::synth_policy);
@@ -200,9 +201,13 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
         continue;
       }
       const auto p = synth_attr::read(a.get());
-      if (p.contains("abc")) {
-        fail(Status::invalid, "synth.abc cannot be honored by USYN in " + rb.module_name);
-        return;
+      if ((p.contains("abc") || p.contains("abc_pre")) && !abc_ignored_noted) {
+        // ABC steps are specific to the abc mapper. The same source is meant to
+        // build under both mappers, so USYN notes it and keeps its own flow.
+        abc_ignored_noted = true;
+        diag::warn("pass.usyn", "synth-abc-ignored", "unsupported")
+            .msg("region '{}': synth.abc / synth.abc_pre only apply to the abc mapper; ignored by USYN", rb.module_name)
+            .emit();
       }
       for (const auto* key : {"delay", "ware"}) {
         if (auto hint = p.find(key); hint != p.end()) {
@@ -252,9 +257,11 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     }
     if (auto it = options.region_opts.find(rb.color); it != options.region_opts.end()) {
       const auto& ro = it->second;
-      if (ro.flow) {
-        fail(Status::invalid, "synth.abc cannot be honored by USYN");
-        return;
+      if ((ro.flow || ro.pre) && !abc_ignored_noted) {
+        abc_ignored_noted = true;
+        diag::warn("pass.usyn", "synth-abc-ignored", "unsupported")
+            .msg("region '{}': a region ABC flow/pre option only applies to the abc mapper; ignored by USYN", rb.module_name)
+            .emit();
       }
       if (ro.ware) {
         allow_tune = *ro.ware;

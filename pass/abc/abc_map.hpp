@@ -19,6 +19,10 @@ using synth::Region_qor;
 // The region driver's options plus ABC's own.
 struct Map_options : synth::Driver_options {
   std::string flow;  // ABC command string (empty => built-in default)
+  // `;`-separated optimization steps run before the BUILT-IN flow's mapper
+  // (pass.abc.pre / synth.abc_pre / per-region `pre`). Ignored under a custom
+  // `flow`, which owns its whole command list.
+  std::string pre;
   // Cap on the fanout of any net ABC MAPS, enforced by appending
   // `buffer -N <n>; dnsize` to a built-in flow. 0 disables the tail.
   // Nets driven by native (unblasted) nodes are outside ABC and keep their

@@ -361,4 +361,36 @@ default_part = part_run("part_default", "")
 scoped_part  = part_run("part_scoped", ',synth.partition="coarse"')
 global_part  = part_run("part_global", "", "synth.partition=coarse")
 assert scoped_part == global_part and scoped_part[1] < default_part[1] and scoped_part[0] < default_part[0], (default_part, scoped_part, global_part)
+# ABC optimization steps per region: distinct colors may differ, one color may not,
+# the vocabulary is closed, and usyn keeps its own flow (warning, no error).
+pre_ok = work / "pre_ok.prp"
+pre_ok.write_text('''pub comb pre_ok::[timecheck=false](a:U16,b:U16,c:U16)->(x:U16,y:U16) {
+  {::[synth.color="p",synth.abc_pre="dc2"]
+    x = (a & b) | (a & c) | (b & c)
+  }
+  {::[synth.color="q",synth.abc_pre="fraig; resyn2"]
+    y = (a ^ b) ^ c
+  }
+}''')
+synth("pre_ok", pre_ok)
+_, usyn_log = run("synth", pre_ok, "--top", "pre_ok", "--workdir", work / "pre_ok_usyn", "--set", "synth.liberty=" + lib,
+                  "--set", "synth.opentimer=false", "--set", "synth.mapper=usyn")
+assert "synth-abc-ignored" in usyn_log, usyn_log
+pre_bad = work / "pre_bad.prp"
+pre_bad.write_text('''pub comb pre_bad::[timecheck=false](a:U16,b:U16,c:U16)->(x:U16,y:U16) {
+  {::[synth.color="p",synth.abc_pre="dc2"]
+    x = (a & b) | (a & c) | (b & c)
+  }
+  {::[synth.color="p",synth.abc_pre="resyn2"]
+    y = (a ^ b) ^ c
+  }
+}''')
+for mapper in ("abc", "usyn"):
+    _, log = run("synth", pre_bad, "--top", "pre_bad", "--workdir", work / ("pre_bad_" + mapper),
+                 "--set", "synth.liberty=" + lib, "--set", "synth.opentimer=false", "--set", "synth.mapper=" + mapper, ok=False)
+    conflict = [json.loads(l) for l in log.splitlines() if '"synth-group-conflict"' in l]
+    assert conflict and Path(conflict[0]["span"]["file"]).name == "pre_bad.prp" and conflict[0]["span"]["start_line"] == 6, log
+_, bad_log = run("synth", pre_ok, "--top", "pre_ok", "--workdir", work / "pre_cli", "--set", "synth.liberty=" + lib,
+                 "--set", "synth.abc_pre=dc2; system ls", ok=False)
+assert "allow-listed" in bad_log, bad_log
 print("region contraction A -> B -> A and module-scope isolation passed")

@@ -42,6 +42,7 @@ struct Ware_score : Ware_qor {
 struct Region_opts {
   std::optional<bool>              ware;
   std::optional<std::string>       flow;
+  std::optional<std::string>       pre;  // ABC steps before the built-in flow's mapper
   std::optional<std::string>       delay;
   std::optional<std::string>       load;
   std::optional<arith::Adder_kind> adder;

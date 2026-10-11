@@ -47,6 +47,7 @@ inline constexpr Attr_spec kAttributes[] = {
     {  "stop_cmp",              "false", "LT, GT: cut colors at wide comparisons"},
     {"stop_shift",              "false", "SHL, SRA: cut colors at runtime shifters"},
     {    "memory",           "\"flops\"", "Memory: auto|flops|macro realization of one memory"},
+    {  "abc_pre",     "\"dc2; &dch -f\"", "a region: ABC optimization steps run before the mapper (abc mapper only; usyn ignores it)"},
     { "partition",         "\"coarse\"", "any cell: region granularity of its scope -- coarse drops every stop_* cut and ware extraction, fine restores them"},
 };
 inline std::string json(const rapidjson::Value& v) {
@@ -76,6 +77,45 @@ inline std::string literal(std::string_view s) {
     throw std::invalid_argument("synthesis attributes require a literal value");
   }
   return json(d);
+}
+// `synth.abc_pre` / `pass.abc.pre`: `;`-separated ABC optimization steps run on
+// the region before its mapper. Only a fixed vocabulary of AIG (`dc2`, `fraig`,
+// `resyn2`, ...) and GIA (`&dch`, `&synch2`, ...) commands is accepted, so a
+// source attribute can never smuggle an arbitrary ABC command (file I/O, `source`,
+// system calls) into a flow. Options after the command name are free text
+// without `;`.
+inline bool valid_abc_pre(std::string_view steps) {
+  static constexpr std::string_view allowed[] = {
+      "balance", "b",     "rewrite", "rw",   "rwz",  "refactor", "rf",    "rfz",     "resub",     "rs",         "rsz",
+      "dc2",     "drw",   "drf",     "fraig","ifraig","sweep",   "resyn", "resyn2",  "resyn2a",   "resyn3",     "compress",
+      "compress2","compress2rs","resyn2rs","choice","choice2", "src_rw", "src_rs",  "src_rws", "dch",       "&dch",
+      "&synch2", "&syn2", "&syn3",   "&syn4","&fraig","&sweep", "&b",    "&dc2",    "&dc3",      "&dc4",       "&jf",
+      "&fx",     "&if",   "&mfs",    "&st", "sopb",  "&sopb",   "mfs",   "mfs2",    "lutpack",   "strash"};
+  size_t i = 0;
+  bool   any = false;
+  while (i <= steps.size()) {
+    auto cut = steps.find(';', i);
+    auto cmd = steps.substr(i, cut == std::string_view::npos ? std::string_view::npos : cut - i);
+    while (!cmd.empty() && (cmd.front() == ' ' || cmd.front() == '\t')) {
+      cmd.remove_prefix(1);
+    }
+    if (!cmd.empty()) {
+      const auto name = cmd.substr(0, cmd.find_first_of(" \t"));
+      bool       ok   = false;
+      for (const auto a : allowed) {
+        ok |= a == name;
+      }
+      if (!ok || cmd.find_first_of("\n\r`$|><") != std::string_view::npos) {
+        return false;
+      }
+      any = true;
+    }
+    if (cut == std::string_view::npos) {
+      break;
+    }
+    i = cut + 1;
+  }
+  return any || steps.empty();
 }
 inline void validate(std::string_view key, std::string_view value) {
   rapidjson::Document d;
@@ -114,6 +154,12 @@ inline void validate(std::string_view key, std::string_view value) {
   }
   if (key == "abc") {
     if (!d.IsString()) {
+      bad();
+    }
+    return;
+  }
+  if (key == "abc_pre") {
+    if (!d.IsString() || !valid_abc_pre(std::string_view{d.GetString(), d.GetStringLength()})) {
       bad();
     }
     return;

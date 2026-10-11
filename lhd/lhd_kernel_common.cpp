@@ -31,6 +31,7 @@
 #include "hhds/graph.hpp"
 #include "hhds/tree.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "synth_policy.hpp"
 #include "lhd_sim_tune_session.hpp"
 #include "lnast.hpp"
 #include "log.hpp"
@@ -770,6 +771,8 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
   for (const auto& [k, v] : opts.sets) {
     if (k == "synth.delay" && !v.empty()) {
       labels["delay"] = v;
+    } else if (k == "synth.abc_pre" && method == "pass.abc" && !v.empty()) {
+      labels["pre"] = v;
     } else if (k == "synth.memory" && method == "pass.abc") {
       labels["memory"] = v == "flops" ? "true" : v == "macro" ? "false" : "auto";
     }
@@ -1054,6 +1057,11 @@ void check_known_set_passes(const Options& opts) {
                         std::format("synth.{} is a source attribute with no run-wide value", flag),
                         std::format("write ::[synth.{}=...] on a module, block, call or declaration; `lhd describe synth.{}`", flag,
                                     flag)};
+      }
+      if (flag == "abc_pre" && !livehd::synth_attr::valid_abc_pre(value)) {
+        throw Lhd_error{"usage",
+                        std::format("synth.abc_pre '{}' is not a ';'-separated list of allow-listed ABC optimization steps", value),
+                        "e.g. `dc2`, `fraig; dc2`, `resyn2`, `&dch -f`, `&synch2 -K 6 -C 500`"};
       }
       if (flag == "memory" && value != "auto" && value != "flops" && value != "macro") {
         throw Lhd_error{"usage", std::format("synth.memory expects auto|flops|macro, got '{}'", value), ""};

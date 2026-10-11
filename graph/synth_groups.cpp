@@ -143,6 +143,7 @@ bool seed_groups(hhds::Graph* g) {
   std::map<std::string, Group>           groups;
   absl::flat_hash_map<Node, std::string> explicit_ids;
   absl::flat_hash_set<Node>              legacy_walls;
+  std::map<std::string, std::map<std::string, std::pair<Node, std::string>>> group_region_opts;  // id -> key -> (first cell, value)
   int                                    base = 0;
   for (auto node : g->body().nodes()) {
     base   = std::max(base, gu::node_color_of(node));
@@ -160,6 +161,26 @@ bool seed_groups(hhds::Graph* g) {
     }
     auto& group = groups[id];
     group.anchors.push_back(node);
+    // One explicit group is one region, mapped by one ABC run: the region-level
+    // options cannot differ between its cells. Reported here, at compile time and
+    // at the second pin's own source line, whatever mapper is selected later.
+    for (const auto* key : {"abc", "abc_pre", "delay", "ware"}) {
+      const auto it = p.find(key);
+      if (it == p.end()) {
+        continue;
+      }
+      auto& first = group_region_opts[id][key];
+      if (first.second.empty()) {
+        first = {node, it->second.value};
+      } else if (first.second != it->second.value) {
+        auto b = livehd::diag::err("pass.color", "synth-group-conflict", "syntax");
+        b.msg("explicit group {} has conflicting synth.{} values: {} and {}", id, key, first.second, it->second.value);
+        if (auto sid = node.attr(hhds::attrs::srcid); sid.has() && sid.get() != 0) {
+          b.at(g->source_locator().resolve_spans(static_cast<hhds::SourceId>(sid.get())));
+        }
+        b.hint("one color is one ABC run: give the scopes the same value or different synth.color names").fatal();
+      }
+    }
     if (auto it = p.find("grow"); it != p.end()) {
       group.grow &= text(it->second.value) != "false";
     }
