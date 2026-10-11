@@ -4017,3 +4017,119 @@ CORE-ET/CVA6/DINO discovery are beyond this file and are queued, not waived.
 Fresh DCERT2 FP transport stays open until the current parser plus FP admission
 and runtime route actually execute.
 
+## 42. FP checkpoint 5: nine file-ab rows, and an admitter that can refuse
+
+### 42.1 My own join asserted a value it had not derived
+
+`fp_native_replay_join.tsv` printed `exit 0` for all eight rows, and its
+producer set that column as a **literal**. The public transcript did confirm
+all eight were 0, so no observed result is retracted -- but a table that can
+say "exit 0" without looking is not evidence, and the retained `.time` files
+did not even carry the status.
+
+`pass/lean/scripts/fp_replay.py` replaces it. Every credited field is derived
+from a file the run wrote: `.exit` (the OUTER status, captured as `$?`),
+`.signal`, `.log`, `.time` (including the `exit %x` trailer the original
+recorder parses -- the WORKER's own view), `.cmd` (the exact full launch
+command including the guard), `.guard` (scope and limits), `.capture.json`.
+Identity is bound by FULL sha256, never a prefix.
+
+`pass` requires ALL of: outer status 0; the worker trailer agreeing; the log
+NEWER than the launch marker; the certificate and binary hashes being the ones
+the row names; and every required observable present and true.
+
+**Demonstrated refusing**, not assumed to:
+
+| injected fault | result |
+| --- | --- |
+| certificate hash not the row's | `refused: certificate is 41533d1c..., the row names 0000...` |
+| log older than the launch marker | `refused: the log predates the launch marker: stale output` |
+| outer status 3 under a success-looking log | `refused` |
+| no `.exit` file at all | `refused: the outer status was never captured` |
+
+That last one is how the EARLIER total_probe batch now reads. Re-admitted from
+its retained evidence it is **0/8** -- the observables are all still derivable
+from the logs, but the process status is not, so those rows are backfilled as
+**`observed_evidence_limited`** with `exit_evidence` citing the public
+transcript (task `bbq708esj`) and can never be `pass`. They were not re-run:
+re-running solely to manufacture provenance would be inventing it.
+
+### 42.2 Per-mode output contracts, because the runners do not share one
+
+The admitter refused all seven canonical file-ab rows on its first pass, with
+`required observable missing: support_all` -- and it was right to. `--file-ab`
+does **not** print total_probe's `| ALL true` support summary; it says
+`seed N: residual ok` where total_probe says `seed N: ok`; its trace line adds
+a `clock-domains` count; and it reports the bound as
+`checkResidual: ACCEPTED, proved-sufficient bound N` rather than inside a
+`residual N terms, checker bound M` line. Each mode's REAL lines are encoded
+now. Neither contract is weaker than the other; `--file-ab` additionally has
+`variant not applied` as a forbidden marker, so the variant-changed admission
+is checked by its absence beside a zero exit.
+
+### 42.3 Two identity questions, settled before running
+
+* **`rt_alu_gate.dcert` is byte-identical to canonical `alu_gate.dcert`** --
+  same sha256 `d731ee22a85e77ba...`, same 220,566 bytes. The alias is a genuine
+  content identity, not a substitution.
+* **`rt_decoder_gate.dcert` is NOT the canonical decoder.** 301,042 bytes,
+  sha256 `f87080df26fcfa7b...`, against the canonical 299,842 bytes and
+  `23b4f0316c46af8d...`. A different certificate; it is run as itself.
+* **Row 2's original identity is incomplete.** Its `code_identity` says so in
+  its own words: *"the WORKING TREE WHEN THIS RECORD WAS WRITTEN, which is NOT
+  evidence about what executed; the binary that ran was not hashed and is
+  UNKNOWN"*, and it records no command. Master's replay of row 2 is a fresh run
+  of that input under this configuration; it does not reproduce an old identity
+  that was never captured.
+
+### 42.4 The nine file-ab rows
+
+`proto_probe` built at `-O2` into its own ROOT: exit 0, 201.34 s, binary
+`ec40994e40e625ecab040bc561d697c3b2aadc254a3e284ad44bedfe9cbe488f`. The V1
+dependency route and the native invalidation rules are unchanged.
+
+Canonical rows 6-12 at 1800 s, then configured rows 2-3 at the recorded finite
+3600 s cap (the old decoder run took ~2900 s). Sequential, each under
+`systemd-run --scope MemoryMax=8G`.
+
+**9/9 admitted**: 6/6 seeds matching `interpretDesign`, four-cycle trace
+agreeing, control interpreter agreeing, all six support conjuncts true, an
+ACCEPTED `checkResidual` bound, and a derived zero exit, on every row.
+
+**What this is NOT.** `--file-ab` runs the FORK specializer
+(`ProtoFast.mixDriver`) and the PARTIAL interpreter variant (`hwAPVar`, from
+the `partial` `goInline`, which has no equivalence lemma). Its agreements are
+RUNTIME EVIDENCE and **do not inherit** the covered total variant's kernel
+guarantees -- `IHwAdequate_varT` and `specializeDesign_varT_correct` are about
+`hwAPVarT`, a different program.
+
+### 42.5 A capture bug that would have overstated provenance
+
+The first file-ab batch produced **zero** `.capture.json` files: I passed the
+recorder a relative path against a changed `cwd`, and swallowed the
+subprocess result. The rows would then have been recorded at `reconstructed`
+strength while looking like pre-launch ones. The call now reports its failure
+and the path is absolute; the batch was re-run with working captures, which is
+running the procedure correctly after fixing a defect -- not manufacturing
+provenance for an older run.
+
+All nine are in `fp_master_experiments.jsonl` with
+`code_identity.describes = "the code that ran"` and the exit from the unchanged
+`/usr/bin/time` trailer. The frozen original manifest is untouched.
+
+### 42.6 Coverage arithmetic
+
+Of 26 old passes: **9 fully admitted** (file-ab rows 2, 3, 6-12), **8 observed
+but evidence-limited** (total-probe S1 rows 15-22), **9 remaining** -- row 4
+(total-probe `rt_alu`) and rows 23-30 (the S2 stage). Non-passes preserved as
+recorded: rows 1 and 5 `exit 3`, rows 13 (host-var) and 14 (total-probe) exit
+unknown. **An old `exit 3` is not an obligation to turn into a pass, and an
+unknown exit is not an additional old pass.**
+
+Still open: the S2 and row-4 total configurations; the complete runner, trace,
+scaling, DCERT, census and fixture inventory; the CORE-ET/CVA6/DINO discovery;
+and fresh DCERT2 FP transport, which stays open until the current parser plus
+FP admission and runtime route execute. `pmp_data_if`'s fresh export remains
+`EMIT_FAILED rc=6` and in the denominator despite its historical replay
+passing under both runners.
+
