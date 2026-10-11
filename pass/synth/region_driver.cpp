@@ -35,6 +35,7 @@
 #include "region_cache.hpp"
 #include "semdiff.hpp"
 #include "synthesis_cost.hpp"
+#include "ware_module.hpp"
 #include "worker_pool.hpp"
 
 namespace livehd::synth {
@@ -2060,6 +2061,35 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
       applied.pop_back();
       applied += ",\"operations\":" + applied_operations(w.rb.nodes, selected, "explored") + "}";
       startup_opts_.tune_store->applied(name, applied);
+      {
+        // The exact attribute that freezes this decision, at the source line(s)
+        // the region came from: profile once, then paste the pin.
+        std::string kind = name.starts_with("__ware_") ? name.substr(7, name.find('_', 7) - 7) : std::string{};
+        std::string pin;
+        if (kind == "sum" || kind == "lt" || kind == "gt") {
+          pin = std::format("synth.adder=\"{}\"", adder_name(selected.adder));
+          if (selected.block_size != 0) {
+            pin += std::format(", synth.block_size={}", selected.block_size);
+          }
+        } else if (kind == "mult") {
+          pin = std::format("synth.multiplier=\"{}\", synth.adder=\"{}\"", multiplier_name(selected.multiplier),
+                            adder_name(selected.adder));
+        } else if (kind == "shl" || kind == "sra") {
+          pin = std::format("synth.barrel=\"{}\"", barrel_name(selected.reverse_barrel));
+        }
+        if (!pin.empty()) {
+          for (const auto& site : ware_sites(name)) {
+            livehd::diag::info("pass.abc", "synth-tune-pin", "unsupported")
+                .at(site)
+                .msg("exploration chose this for the {} here ({} cells, {} ps); pin it with ::[{}]",
+                     kind,
+                     qor_[row].gates,
+                     qor_[row].delay,
+                     pin)
+                .emit();
+          }
+        }
+      }
       std::print(
           "[synth.tune] region={} selected={} validation=structural; source pin hint: ::[synth.adder=\"{}\", "
           "synth.multiplier=\"{}\", synth.barrel=\"{}\"]\n",

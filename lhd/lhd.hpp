@@ -693,7 +693,8 @@ static_assert(sim_tune_registry_ok(), "sim.tune.* holds only speed knobs (with a
 // `lhd synth --help` options block. Pass-level tuning still rides the pass
 // namespaces (`--set abc.adder=cla`, `--set color.hier=false`, ...).
 struct Synth_set_option {
-  enum class Kind { boolean, file, integer, mapper };
+  // `source_only`: a source attribute with no run-wide value; --set is refused.
+  enum class Kind { boolean, file, integer, mapper, source_only };
   std::string_view name;
   std::string_view default_value;
   Kind             kind;
@@ -745,6 +746,27 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"multiplier","auto",Synth_set_option::Kind::file,"shared default: auto|array|tree|csa|tdm"},
     {"barrel","auto",Synth_set_option::Kind::file,"shared default: auto|log|reverse"},
     {"block_size","0",Synth_set_option::Kind::integer,"shared CSKA/CLA block width; 0 derives it from width"},
+    {"memory","auto",Synth_set_option::Kind::file,
+     "auto|flops|macro: bit-blast memories to flops + decode (flops), keep the native macro (macro), or let pass.abc.memory_max_bits and "
+     "the port count decide (auto); an explicit pass.abc.memory wins; source pins override it per memory"},
+    {"delay","",Synth_set_option::Kind::integer,"timing budget in ps for every region (= pass.abc.delay); source pins override it"},
+    {"stop_mux","",Synth_set_option::Kind::boolean,
+     "cut colors at muxes (= pass.color.synth.stop_mux); empty follows the mapper profile; source pins override it"},
+    {"stop_arith","",Synth_set_option::Kind::boolean,
+     "cut colors at wide adders/multipliers/dividers (= pass.color.synth.stop_arith); empty follows the mapper profile"},
+    {"stop_cmp","",Synth_set_option::Kind::boolean,
+     "cut colors at wide comparisons (= pass.color.synth.stop_cmp); empty follows the mapper profile"},
+    {"stop_shift","",Synth_set_option::Kind::boolean,
+     "cut colors at runtime shifters (= pass.color.synth.stop_shift); empty follows the mapper profile"},
+    {"color","",Synth_set_option::Kind::source_only,
+     "no run-wide value; names one explicit synthesis group (a name or integer)"},
+    {"grow","",Synth_set_option::Kind::source_only,
+     "no run-wide value; false keeps an explicit group from absorbing neighbouring cones"},
+    {"ware","",Synth_set_option::Kind::source_only,
+     "no run-wide value; true|false whether the region's arithmetic/shift modules are explored; run-wide control is "
+     "synth.tune.profile and pass.color.synth.ware_*"},
+    {"abc","",Synth_set_option::Kind::source_only,
+     "no run-wide value; the ABC flow script for the region (run-wide: pass.abc.flow)"},
     {"partition","auto",Synth_set_option::Kind::file,
      "auto|fine|coarse: region granularity, independent of the mapper. fine cuts at wide arithmetic/shifters/compares/muxes "
      "and extracts ware modules (small ABC regions); coarse keeps register-to-register cones and extracts nothing. "

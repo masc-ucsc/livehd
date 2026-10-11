@@ -750,11 +750,30 @@ void merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_
 void merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels) {
   // Disjoint by construction (check_known_set_passes gives every pass.color
   // option one spelling), so the order is immaterial.
+  // The run-wide spelling of a cut-condition attribute (synth.stop_*) is the
+  // lowest layer: an explicit pass.color.synth.stop_* below still wins.
+  for (const auto key : {"stop_mux", "stop_arith", "stop_cmp", "stop_shift"}) {
+    const auto full = std::string("synth.") + key;
+    for (const auto& [k, v] : opts.sets) {
+      if (k == full && !v.empty()) {
+        labels[key] = v;
+      }
+    }
+  }
   merge_sets(opts, "pass.color", labels);
   merge_sets(opts, "pass.color.synth", labels);
 }
 
 void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels) {
+  // synth.delay / synth.memory are the run-wide spellings of source attributes;
+  // the pass's own namespace (merged below) wins over them.
+  for (const auto& [k, v] : opts.sets) {
+    if (k == "synth.delay" && !v.empty()) {
+      labels["delay"] = v;
+    } else if (k == "synth.memory" && method == "pass.abc") {
+      labels["memory"] = v == "flops" ? "true" : v == "macro" ? "false" : "auto";
+    }
+  }
   if (const auto* mapper = mapper_of_method(method); mapper != nullptr && mapper->inherits_abc) {
     // The mapper exposes ABC's whole mapping vocabulary, so the ABC namespace is
     // the shared spelling; the pass's own namespace is merged last and wins.
@@ -1029,6 +1048,15 @@ void check_known_set_passes(const Options& opts) {
         throw Lhd_error{"usage",
                         std::format("synth.mapper expects abc|usyn, got '{}'", value),
                         value == "synth" ? "the unate-synthesis mapper was renamed: use --set synth.mapper=usyn" : ""};
+      }
+      if (opt->kind == Synth_set_option::Kind::source_only) {
+        throw Lhd_error{"usage",
+                        std::format("synth.{} is a source attribute with no run-wide value", flag),
+                        std::format("write ::[synth.{}=...] on a module, block, call or declaration; `lhd describe synth.{}`", flag,
+                                    flag)};
+      }
+      if (flag == "memory" && value != "auto" && value != "flops" && value != "macro") {
+        throw Lhd_error{"usage", std::format("synth.memory expects auto|flops|macro, got '{}'", value), ""};
       }
       if (flag == "partition" && value != "auto" && value != "fine" && value != "coarse") {
         throw Lhd_error{"usage", std::format("synth.partition expects auto|fine|coarse, got '{}'", value),

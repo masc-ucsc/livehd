@@ -9,6 +9,7 @@
 #include "gtest/gtest.h"
 #include "lhd.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "synth_policy.hpp"
 
 // satopt is opt-in for every command. An explicit pass.satopt always wins;
 // mappers get no satopt labels (they map what compile produced).
@@ -194,4 +195,36 @@ TEST(LhdOptions, HelpDoesNotAdvertiseRemovedLecNamespace) {
       EXPECT_FALSE(std::regex_search(out, removed)) << out;
     }
   }
+}
+
+// Every source attribute `::[synth.K=V]` has a same-named `synth.K` option, and
+// `lhd describe synth.K` says it is also an attribute; options that exist only as
+// attributes are registered. The registry is also what validate() accepts.
+TEST(LhdOptions, SynthAttributesAreOptions) {
+  const auto listed = lhd::list_set_options();
+  const auto find   = [&](const std::string& name) {
+    return std::find_if(listed.begin(), listed.end(), [&](const auto& o) { return o.name == name; });
+  };
+  for (const auto& attr : livehd::synth_attr::kAttributes) {
+    SCOPED_TRACE(std::string(attr.key));
+    const auto it = find("synth." + std::string(attr.key));
+    ASSERT_NE(it, listed.end()) << "attribute synth." << attr.key << " has no synth." << attr.key << " option";
+    EXPECT_NE(it->help.find("source attribute"), std::string::npos) << it->help;
+    EXPECT_NO_THROW(livehd::synth_attr::validate(attr.key, attr.sample));
+  }
+  EXPECT_THROW(livehd::synth_attr::validate("not_an_attribute", "1"), std::invalid_argument);
+  // The reverse: a source-only option must be a registered attribute.
+  for (const auto& opt : lhd::kSynthSetOptions) {
+    if (opt.kind != lhd::Synth_set_option::Kind::source_only) {
+      continue;
+    }
+    const auto& attrs = livehd::synth_attr::kAttributes;
+    EXPECT_NE(std::find_if(std::begin(attrs), std::end(attrs), [&](const auto& a) { return a.key == opt.name; }), std::end(attrs))
+        << "source-only option synth." << opt.name << " is not a registered attribute";
+  }
+  // --set of a source-only attribute is a usage error that names the attribute form.
+  lhd::Options opts;
+  opts.command = "synth";
+  opts.sets.emplace_back("synth.color", "x");
+  EXPECT_THROW(lhd::check_known_set_passes(opts), lhd::Lhd_error);
 }

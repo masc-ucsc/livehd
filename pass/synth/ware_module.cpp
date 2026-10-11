@@ -9,6 +9,7 @@
 #include <climits>
 #include <format>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
@@ -41,6 +42,32 @@ Ware_policy ware_policy(const hhds::Graph& graph, Ware_policy policy) {
     }
   }
   return policy;
+}
+
+namespace {
+std::mutex                                           g_sites_mutex;
+std::map<std::string, std::vector<hhds::Source_span>> g_sites;
+constexpr size_t                                     kMaxSitesPerModule = 8;
+
+void note_site(const std::string& module, const hhds::Source_span& span) {
+  std::lock_guard lock(g_sites_mutex);
+  auto&           rows = g_sites[module];
+  if (rows.size() >= kMaxSitesPerModule) {
+    return;
+  }
+  for (const auto& r : rows) {
+    if (r.file == span.file && r.start_line == span.start_line) {
+      return;
+    }
+  }
+  rows.push_back(span);
+}
+}  // namespace
+
+std::vector<hhds::Source_span> ware_sites(std::string_view module) {
+  std::lock_guard lock(g_sites_mutex);
+  const auto      it = g_sites.find(std::string(module));
+  return it == g_sites.end() ? std::vector<hhds::Source_span>{} : it->second;
 }
 
 namespace {
@@ -313,6 +340,12 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   inst.set_subnode(io);
   gu::carry_node_attrs(node, inst);
   gu::carry_srcid(node, inst);
+  if (auto sid = node.attr(hhds::attrs::srcid); sid.has() && sid.get() != 0) {
+    const auto span = parent.source_locator().resolve_spans(static_cast<hhds::SourceId>(sid.get())).primary;
+    if (!span.is_null()) {
+      note_site(name, span);
+    }
+  }
   for (size_t i = 0; i < edges.size(); ++i) {
     if (const auto drv = edges[i].get_driver_pin(); !drv.is_const()) {
       const auto src = is_affine_edge(edges[i]) ? affine->chain.index : drv;

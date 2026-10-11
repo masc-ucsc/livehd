@@ -8,6 +8,7 @@
 #include "diag.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "pass.hpp"
+#include "synth_policy.hpp"
 
 namespace lhd {
 
@@ -227,7 +228,16 @@ std::vector<Set_option> list_set_options() {
   }
   // The `synth.*` command namespace (synth_command), same single-source rule.
   for (const auto& s : kSynthSetOptions) {
-    out.push_back(Set_option{std::format("synth.{}", s.name), "synth", std::string{s.default_value}, std::string{s.help}});
+    auto help = std::string{s.help};
+    // Options that are also source attributes say so, so `lhd describe` is the
+    // one place that documents both spellings (the registry is the same list
+    // synth_attr::validate accepts).
+    for (const auto& a : livehd::synth_attr::kAttributes) {
+      if (a.key == s.name) {
+        help = std::format("[source attribute ::[synth.{}=...] on: {}] ", a.key, a.scope) + help;
+      }
+    }
+    out.push_back(Set_option{std::format("synth.{}", s.name), "synth", std::string{s.default_value}, std::move(help)});
   }
   std::sort(out.begin(), out.end(), [](const Set_option& a, const Set_option& b) { return a.name < b.name; });
   return out;

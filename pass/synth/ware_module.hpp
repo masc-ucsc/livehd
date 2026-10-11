@@ -2,11 +2,19 @@
 #pragma once
 #include <memory>
 #include <set>
+#include <string_view>
 #include <vector>
 
 #include "hhds/graph.hpp"
 
 namespace livehd::synth {
+// Source sites of the instances of one ware module, by module name. A ware
+// module is shared by every operation of the same shape, so its body has no
+// single source line; the instances in the parents do. Tuning reports use these
+// to say WHERE a learned choice would be pinned. Informational only (it never
+// changes a result); filled by build_ware_modules, one entry per distinct line.
+std::vector<hhds::Source_span> ware_sites(std::string_view module);
+
 struct Ware_policy {
   bool arith = true;
   bool cmp   = true;

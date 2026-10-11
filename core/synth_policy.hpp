@@ -19,6 +19,35 @@ struct Hint {
   int         rank = 0;
 };
 using Policy = std::map<std::string, Hint>;
+
+// Every source attribute `::[synth.<key>=<value>]`, with a valid sample value.
+// ONE rule ties the two vocabularies together: each key here has a same-named
+// `synth.<key>` command option (kSynthSetOptions in lhd/lhd.hpp), so
+// `lhd describe synth.<key>` documents the attribute and `--set synth.<key>=`
+// sets the run-wide default the attribute overrides. Options with no global
+// meaning (color, grow, ware, abc) exist as source-only entries. lhd_options_test
+// pins the correspondence; validate() below rejects any key not listed here.
+struct Attr_spec {
+  std::string_view key;
+  std::string_view sample;  // JSON, accepted by validate()
+  std::string_view scope;   // which cells the key applies to
+};
+inline constexpr Attr_spec kAttributes[] = {
+    {     "color",             "\"g\"", "any cell: group membership (a name or an integer)"},
+    {      "grow",              "false", "any cell: false keeps an explicit group from absorbing neighbouring cones"},
+    {     "adder",              "\"cla\"", "Sum, LT, GT, Mult, Div"},
+    {"multiplier",              "\"tdm\"", "Mult"},
+    {    "barrel",           "\"reverse\"", "SHL, SRA"},
+    {"block_size",                "8", "Sum, LT, GT, Mult, Div"},
+    {     "delay",              "1000", "a region: its timing budget in ps"},
+    {      "ware",               "true", "a region: whether its arithmetic/shift modules are explored"},
+    {       "abc",     "\"strash;map\"", "a region: the ABC flow script"},
+    {  "stop_mux",              "false", "Mux, Hotmux: cut colors at muxes"},
+    {"stop_arith",              "false", "Sum, Mult, Div: cut colors at wide arithmetic"},
+    {  "stop_cmp",              "false", "LT, GT: cut colors at wide comparisons"},
+    {"stop_shift",              "false", "SHL, SRA: cut colors at runtime shifters"},
+    {    "memory",           "\"flops\"", "Memory: auto|flops|macro realization of one memory"},
+};
 inline std::string json(const rapidjson::Value& v) {
   rapidjson::StringBuffer                    b;
   rapidjson::Writer<rapidjson::StringBuffer> w(b);
@@ -51,6 +80,15 @@ inline void validate(std::string_view key, std::string_view value) {
   rapidjson::Document d;
   d.Parse(value.data(), value.size());
   const auto bad = [&] { throw std::invalid_argument("invalid synth." + std::string(key) + "=" + std::string(value)); };
+  // The registry is the vocabulary: a key outside it has no `synth.<key>` option
+  // either, so it is refused here before any value is looked at.
+  bool known = false;
+  for (const auto& a : kAttributes) {
+    known |= a.key == key;
+  }
+  if (!known) {
+    throw std::invalid_argument("unknown synthesis attribute synth." + std::string(key) + " (see `lhd list options 'synth\\..*'`)");
+  }
   if (d.HasParseError()) {
     bad();
     return;

@@ -64,7 +64,10 @@ source = work / "auto.prp"
 source.write_text('pub comb auto::[timecheck=false](a:U32,b:U32)->(y:Bool) { y=a<b }')
 plain, _ = synth("auto", source)
 assert sum(r["ware_trials"] for r in plain["qor"]["abc"]["regions"]) == 0
-profile, _ = synth("auto", source, "synth.tune.profile=on", "synth.tune.validate=region")
+profile, profile_log = synth("auto", source, "synth.tune.profile=on", "synth.tune.validate=region")
+pins = [json.loads(l) for l in profile_log.splitlines() if '"synth-tune-pin"' in l]
+assert pins and all(Path(p["span"]["file"]).name == "auto.prp" and p["span"]["start_line"] == 1 for p in pins), pins
+assert all("pin it with ::[synth." in p["message"] for p in pins), pins
 assert sum(r["ware_trials"] for r in profile["qor"]["abc"]["regions"]) > 0
 state = json.loads((work / "auto/synth_tune/state.json").read_text())
 assert state["decisions"] and all(d["validation"] == "region" for d in state["decisions"].values())
