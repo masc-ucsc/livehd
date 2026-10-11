@@ -523,6 +523,9 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         }
         if (op == Ntype_op::Sub) {
           auto cg = m.get_subnode_graph();
+          if (!cg && m.is_loop_break()) {
+            continue;  // a body-less SEQUENTIAL cell (mapped flop/latch): last period's value
+          }
           if (!cg) {
             if (expanded.insert(m).second) {
               // Arbitrary/Sub node: a compact loop carry-in sink holds two drivers.
@@ -638,6 +641,9 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         }
         if (op == Ntype_op::Sub) {
           auto cg = m.get_subnode_graph();
+          if (!cg && m.is_loop_break()) {
+            return;  // a body-less SEQUENTIAL cell (mapped flop/latch): last period's value
+          }
           if (!cg) {
             all_inputs(m);  // body-less blackbox: depend on everything connected
             return;

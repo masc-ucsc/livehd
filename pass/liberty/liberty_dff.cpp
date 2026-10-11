@@ -1313,7 +1313,12 @@ std::shared_ptr<hhds::GraphIO> create_dff_io(hhds::GraphLibrary& outlib, const D
   };
   in1(dff.d_pin, 1);
   in1(dff.clk_pin, 2);
-  io->add_output(dff.q_pin, 3);
+  // The state output: every instance of this cell is then a loop break (hhds
+  // stamps it from the declaration), also when the cell has no body. A mapped
+  // netlist is full of body-less DFF instances; without the mark a hierarchy
+  // that nests them looks combinational D -> Q to legalize/port_reach and a
+  // counter's registered outputs close false loops.
+  io->add_output(dff.q_pin, 3, /*loop_break=*/true);
   io->set_bits(dff.q_pin, 1);
   io->set_unsign(dff.q_pin, true);
   if (!dff.reset0_pin.empty()) {

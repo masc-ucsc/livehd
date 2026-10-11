@@ -149,3 +149,42 @@ TEST(PortReach, WideInstanceKeepsAllDriversAndSkipsUnconnectedPorts) {
   pr::Cache cache;
   EXPECT_EQ(cache.of(parent).out2ins.at(3), (Pids{0, 1, 2}));
 }
+
+// A mapped netlist instantiates technology cells that have an interface and no
+// body. A flop cell declares its state output `loop_break`: every instance is a
+// loop break, so a def holding it must not read as combinational D -> Q (that
+// closed false loops through a counter's registered outputs once the hierarchy
+// kept the counter as a definition). A body-less cell without the mark stays
+// combinational in all of its inputs.
+TEST(PortReach, BodylessCellsFollowTheirLoopBreakDeclaration) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_port_reach_cells");
+
+  auto dff = lib.create_io("DFF_CELL");
+  dff->add_input("D", 1);
+  dff->add_input("CLK", 2);
+  dff->add_output("Q", 3, /*loop_break=*/true);
+  auto inv = lib.create_io("INV_CELL");
+  inv->add_input("A", 1);
+  inv->add_output("Y", 2);
+
+  auto io = lib.create_io("holder");
+  io->add_input("d", 0);
+  io->add_input("clk", 1);
+  io->add_output("q", 2);
+  io->add_output("n", 3);
+  auto g = io->create_graph();
+  auto f = gu::create_typed_node(*g, Ntype_op::Sub);
+  f.set_subnode(dff);
+  g->get_input_pin("d").connect_sink(f.create_sink_pin(1));
+  g->get_input_pin("clk").connect_sink(f.create_sink_pin(2));
+  f.create_driver_pin(3).connect_sink(g->get_output_pin("q"));
+  auto i = gu::create_typed_node(*g, Ntype_op::Sub);
+  i.set_subnode(inv);
+  g->get_input_pin("d").connect_sink(i.create_sink_pin(1));
+  i.create_driver_pin(2).connect_sink(g->get_output_pin("n"));
+
+  pr::Cache cache;
+  const auto& r = cache.of(g);
+  EXPECT_TRUE(r.input_independent(2)) << "a registered output depends on no input";
+  EXPECT_EQ(r.out2ins.at(3), (Pids{0})) << "an inverter cell stays combinational";
+}
