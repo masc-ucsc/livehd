@@ -1,0 +1,67 @@
+# Per-mode ledger for the FP prototype entrypoint `formal/lean/scripts/proto_probe.lean`.
+# One row per dispatch branch in `main` (19 flags + the bare shape form), with the
+# ACTUAL status on master.  A mode is `executed` only when this tree ran it and the
+# raw output was retained; nothing here is credited from the original branch.
+#
+# binary        generated/master_port/fp/nat-proto-O2/nat/proto_probe
+# binary_sha256 ec40994e40e625ecab040bc561d697c3b2aadc254a3e284ad44bedfe9cbe488f
+# source        formal/lean/scripts/proto_probe.lean
+#               sha256 7227c426896ab05b540d7c0eb55640c9c29a300c96754aec36e7572ba39c04a4 (master, adapted)
+#               pinned 01f2ee284b2fa0ba388d6c04a66ad96a1442b346d872aab7b8dd23f2c0e267c5 (9bb41a09d)
+# raw output    generated/master_port/fp/proto_modes/<run>.log, .time, .argv (UNTRACKED: /generated/ is gitignored)
+# backend       ProtoFast.mixDriver + hwAPVar -- FORK/PARTIAL.  Every row below is
+#               EXECUTION EVIDENCE on an unproved backend, never a kernel-certified result.
+#
+# CERTIFICATE FINGERPRINTS USED BELOW
+#   seq.dcert                 f5d2ff4dea1d360065e4996ed514e5b1bbbc0f91660bcf937c1d783660c4397b  DCERT1, 1 flop, sync reset, no flopQAsync source
+#   tiny.dcert                930022423a0c4e32a7949fab3bafb9c7b7073ea6f96dcba37365d33f1900d9f0  DCERT1, 0 flops
+#   wide.dcert                d7f9994b51fe734baa693815958487b5e7f2fa556db5255f79436f532a3947d9  DCERT1, 2 flops, memImg + memConst sources
+#   diffpin.dcert             01c23f0d0bf8efeca60817324cc30e2559340e56b4560d50752bb2f22a9b86d6  DCERT1 CONTROL written here: read side names input 0, commit side names input 1.  TRACKED COPY: pass/lean/tests/fp/fp_reset_polarity_control.dcert (byte-identical); the run used the generated path
+#   ariane_regfile_gate.dcert 9c6b9a230db0e1468fe16f5926a19bcd653e32c1be404ae5774001faa1a0c240  DCERT1 (imported pre-D2), 32 flops
+#   serdiv_gate.dcert         36fb3c39d71f2736c744ad520371d7f07beb0b487fdaae0b42238d0c5d41edbf  DCERT1 (imported pre-D2), 12 flops
+#   btb_gate.dcert            23e05cf036c3b30d54a8c2184ef37f133cb6eef9f3645965f861940a5d1507b0  DCERT2 (master-emitted) -- used ONLY to observe the loader refusal
+#
+mode	dispatch_line	status	run	invocation_tail	exit	exit_meaning	wall_s	peak_rss_kb	what_the_output_ESTABLISHES	what_it_does_NOT_establish
+--reset-probe	537	executed	reset-probe-seq	--reset-probe seq.dcert	0	no reset-descriptor conflict	0.02	9204	Drives reset ASSERTED for 2 cycles then DE-ASSERTED for 6 and reports progression only after release: 3 distinct post-release states, alternating moved/initial. Non-vacuous: the state moves after release, so the fixture is not reset-stuck.	Nothing about intended RTL semantics; reference-only (interpretDesign), no specialization, no projection.
+--reset-probe	537	executed	reset-probe-ariane_regfile	--reset-probe ariane_regfile_gate.dcert	1	QUARANTINE: reset-descriptor conflict	6.81	11204	Fires the quarantine exit on a real imported certificate: sources say (input 2, activeLow true), flop records say (input 2, activeLow false). Post-release state is CONSTANT over 6 cycles and the probe labels it INCONCLUSIVE rather than claiming unreachability.	NOT a projection bug and NOT an RTL bug -- see the reset-polarity census: this is a pre-D2 export shape, not reproducible by master's writer.
+--reset-probe	537	executed	reset-probe-serdiv	--reset-probe serdiv_gate.dcert	1	QUARANTINE: reset-descriptor conflict	5.00	11288	Same conflict on a second, independent imported design (input 8, sources activeLow true vs flop records false); 12/12 flops.	As above.
+--reset-probe	537	executed	reset-probe-diffpin	--reset-probe diffpin.dcert	0	no conflict reported	0.02	9144	LIMITATION CONTROL.  On a certificate whose read side names input 0 and whose commit side names input 1 -- a genuine mismatch -- the mode prints "sources say [(0, true)], flop records say [(1, true)]" and reports NO conflict, exit 0.  The scan is `if i == j && al != bl` (line 568): it compares pin SETS by index and fires only on a SAME-INDEX polarity difference.	A clean exit from --reset-probe is therefore NOT evidence that the two reset records agree; a different-pin mismatch passes it.  reset_polarity_census.py classifies this case as raw-port:different-pin.
+--trace-ref	616	executed	trace-ref-seq	--trace-ref seq.dcert 4	0	coverage reported	0.02	9172	4 cycles: state changed on 0, 1 distinct state. The canned per-cycle stimulus (patternAt seeds 0..3) drives this fixture's enable low or its reset high at every one of the 4 cycles, so the flop holds.	A 1-state observation is NOT degeneracy: the mode says so itself. Not a correctness verdict.
+--trace-ref	616	executed	trace-ref-seq-16	--trace-ref seq.dcert 16	0	coverage reported	0.02	9172	Same fixture over 16 cycles: state changed on 4, 3 distinct states. Confirms the 4-cycle result was stimulus length, not a stuck design.	Coverage only.
+--trace-ref	616	executed	trace-ref-ariane_regfile	--trace-ref ariane_regfile_gate.dcert 8	0	coverage reported	7.40	11224	8 cycles over 32 real flops: state changed on 3, 3 distinct states -- genuine sequential progression on a real imported design.	The polarity opposition is live in this run, so the state space explored is one in which one of the two reset paths is always asserted.
+--trace-ref	616	executed	trace-ref-serdiv	--trace-ref serdiv_gate.dcert 8	0	coverage reported	5.32	11204	8 cycles over 12 flops: state changed on 1, 2 distinct states.	As above.
+--support	650	executed	support-positive	--support tiny.dcert seq.dcert	0	at least one file SUPPORTED	0.02	9124	Both positive fixtures report all SIX SupportedByProjection fields true (wf, memFree, sources, ops, arities, flopClocks) and SUPPORTED true.	Support is a loadability predicate, not a correctness result.
+--support	650	executed	support-refusal	--support wide.dcert	2	NO file supported	0.02	9188	Intended refusal, with the actual reason printed per field: memFree FALSE and sources FALSE (wide.dcert carries a memImg and a memConst source); wf, ops, arities and flopClocks remain true. The refusal is NOT on flopClocks.	The exit code is a per-INVOCATION disjunction ("any file supported"), not a per-file verdict; only the printed fields are per-file.
+--support	650	executed	support-corpus-seq	--support ariane_regfile_gate.dcert serdiv_gate.dcert	0	at least one file SUPPORTED	0.03	11208	Both imported SEQUENTIAL designs are SUPPORTED with all six fields true -- so FP's loadable corpus does contain sequential CVA6 designs.	Every such design carries the raw-port polarity opposition; see fp_reset_polarity_census.tsv.
+--support	650	executed	support-frozen30	--support <29 frozen-30 certificates of cva6_30_auth>	0	at least one file SUPPORTED	0.39	33152	Projectability of the frozen target set: 22 SUPPORTED, 7 refused.  All 7 fail `ops`; 5 also fail `sources` (aes, cva6_hpdcache_subsystem, fpu_wrap, load_unit, store_unit); `memFree` fails only on cva6_hpdcache_subsystem; wf, arities and flopClocks hold on all 7.  The printed shapes also cross-check reset_polarity_census.py against the Lean loader: 0 mismatches on (sources, nodes, flops) over all 29.	A loadability measurement only -- nothing was projected, run or compared.  29 of 30: cva6_ptw's 30th copy lives in cva6_30_auth2.
+--support	650	executed	dcert2-refusal-support	--support <master-emitted btb_gate.dcert>	1	uncaught exception from the loader	0.02	9148	CertIO.V1.loadCert refuses a master-emitted certificate: "bad magic: expected DCERT1". Establishes that the FP prototype's reachable corpus on master is DCERT1-ONLY.	Not a graceful refusal: it is an uncaught exception, exit 1, distinct from --support's own exit 2.
+--inline-negative	794	executed	inline-negative	--inline-negative	0	side condition is load-bearing	0.02	9164	On the built-in counterexample: found true, useInNext 1, nextStrict true, beforeTotal FALSE, applied false. Before the rewrite the outcome is typeError; with the rewrite FORCED it is outOfFuel. The checker refuses it and the two outcomes differ.	A single counterexample; it shows the guard is necessary, not that the guard set is complete.
+--env0-ab	816	executed	env0-ab	--env0-ab	0	full agreement	2.51	24260	STRICT acceptance: rewrite applies (found/selfRef 0/useInNext 1/useLater 0/nextStrict/beforeTotal/applied all as intended); variant resolves, bta, wfA, erase-ok; 8 designs x 6 stimuli all agree; an out-of-range dep yields typeError on BOTH sides (same-kind, neither a success); 5 traces over 6 cycles agree with states-reached 4/4/2/1/1 (flopD 8, flopD 32, toggle, hold, reset-only); 7 projection A/B rows agree with tl collapsing 4033->1, 28545->1, 61313->1, 126849->1 on cstD and 61184->32640 on srcD.	Same fork specializer on both sides -- this is interpreter-vs-interpreter agreement, not a bridge to the proved backend.
+--file-ab	931	executed	(checkpoint 5)	--file-ab <cert> 200000 2000	0	per-run	-	-	Nine canonical/configured inputs; recorded in fp_fileab_canonical_join.tsv and fp_fileab_configured_join.tsv and in fp_master_experiments.jsonl.	-
+--rewrite-agree	662	executed	(checkpoint 5)	--rewrite-agree	0	agreement	-	-	Recorded in the checkpoint-5 evidence.	-
+--grid	522	NOT EXECUTED	-	--grid	-	-	-	-	-	Scaling grid over 11 (nsrc, nnode) points; not run on master. No credit taken.
+--host-var-total	708	NOT EXECUTED	-	--host-var-total <cert> <sf> <wf>	-	-	-	-	-	Not run on master. No credit taken.
+--host-var	749	NOT EXECUTED	-	--host-var <cert> <sf> <wf>	-	-	-	-	-	Not run on master. No credit taken.
+--node-depth	902	NOT EXECUTED	-	--node-depth	-	-	-	-	-	Not run on master. No credit taken.
+--depth-grid	912	NOT EXECUTED	-	--depth-grid	-	-	-	-	-	Not run on master. No credit taken.
+--file-profile	1018	NOT EXECUTED	-	--file-profile <cert> <sf> <wf>	-	-	-	-	-	Not run on master. No credit taken.
+--file-fuel	1024	NOT EXECUTED	-	--file-fuel <cert> <sf> <wf>	-	-	-	-	-	Not run on master. No credit taken.
+--file	1026	NOT EXECUTED	-	--file <cert>	-	-	-	-	-	Not run on master. No credit taken.
+--file-ref	1027	NOT EXECUTED	-	--file-ref <cert>	-	-	-	-	-	Not run on master. No credit taken.
+--file-fast	1028	NOT EXECUTED	-	--file-fast <cert>	-	-	-	-	-	Not run on master. No credit taken.
+--ref	1029	NOT EXECUTED	-	--ref <shape> <n>	-	-	-	-	-	Not run on master. No credit taken.
+--fast	1030	NOT EXECUTED	-	--fast <shape> <n>	-	-	-	-	-	Not run on master. No credit taken.
+(bare shape)	61-63	NOT EXECUTED	-	chain|fan|flop <n>	-	-	-	-	-	Synthetic shape constructors reachable through --ref/--fast/--grid; not run directly on master.
+#
+# TALLY: 20 dispatch forms.  EXECUTED 7 (--reset-probe, --trace-ref, --support,
+# --inline-negative, --env0-ab this checkpoint; --file-ab and --rewrite-agree earlier).
+# NOT EXECUTED 13.  The grid, profile, depth, host-var and remaining file modes are
+# explicitly NOT credited.
+#
+# TWO LIMITATIONS OBSERVED, not repaired (proto_probe.lean is pinned prototype source):
+#  1. --reset-probe's conflict scan is a SAME-INDEX polarity test over pin sets; a
+#     different-pin mismatch exits 0 (row reset-probe-diffpin).
+#  2. --reset-probe drives the reset per the SOURCE polarity only.  On a certificate
+#     carrying the raw-port opposition, 'de-asserted' for the read side is 'asserted'
+#     for the commit side, which is why ariane_regfile and serdiv report a constant
+#     post-release state -- the probe cannot release both paths at once.

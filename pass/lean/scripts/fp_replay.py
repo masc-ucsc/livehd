@@ -355,7 +355,13 @@ def admit(outdir, name, cert, binary, plan, want_cert_sha, allow_missing_capture
         f["guard_observed"] = json.dumps(g.get("observed", {}))
     oomk = ""
     if gj.is_file():
-        oomk = str((json.loads(gj.read_text()).get("observed") or {}).get("oom_kill", ""))
+        # The SAMPLER emits the cgroup's own key names, so the counter is
+        # `memory.events.oom_kill`. Reading a bare `oom_kill` found nothing and
+        # the attribution could never fire -- every signal stop would have said
+        # "no retained cgroup evidence" even when the cgroup had recorded a kill.
+        ob = json.loads(gj.read_text()).get("observed") or {}
+        oomk = str(ob.get("memory.events.oom_kill", ob.get("oom_kill", "")))
+        f["oom_kill_observed"] = oomk
     if outer is None:
         pass
     elif outer == 124:
@@ -462,7 +468,8 @@ COLS = ["record_id", "block", "mode", "status", "attempt", "outer_exit", "worker
         "guard_requested", "guard_observed", "cmd", "cmd_file", "log_file", "time_file",
         "exit_file", "wall_file", "guard_file", "capture_file", "argv_file",
         "runner_argv", "exit_evidence",
-        "evidence_class_refusals", "observable_class_refusals", "refusals"]
+        "oom_kill_observed", "evidence_class_refusals", "observable_class_refusals",
+        "refusals"]
 
 
 def main():

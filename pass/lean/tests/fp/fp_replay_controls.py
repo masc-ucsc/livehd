@@ -248,6 +248,17 @@ def main():
                                     R(d, "time").write_text(R(d, "time").read_text()
                                                             .replace("exit 0", "exit 124"))),
          "refused", "RESOURCE STOP", tmp)
+    def signal_with_oom_event(d):
+        R(d, "exit").write_text("-9\n")
+        R(d, "signal").write_text("9\n")
+        R(d, "signal.attempt").write_text(R(d, "attempt").read_text())
+        g = json.loads(R(d, "guard.json").read_text())
+        g["observed"] = dict(g.get("observed") or {})
+        g["observed"]["memory.events.oom_kill"] = "1"
+        R(d, "guard.json").write_text(json.dumps(g))
+    case("signal_with_retained_oom_event", signal_with_oom_event, "refused",
+         "cgroup memory.events records an oom_kill", tmp)
+
     case("signal_stop_not_called_oom",
          lambda d: (R(d, "exit").write_text("-9\n"),
                     R(d, "signal").write_text("9\n"),

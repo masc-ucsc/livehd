@@ -4467,3 +4467,195 @@ benchmark passes beyond `instr_scan`, and fresh DCERT2 transport -- all open
 until executed. `pmp_data_if`'s historical acceptance stays separate from its
 fresh `EMIT_FAILED rc=6`.
 
+
+## 46. FP checkpoint 9: five prototype modes, and a corpus the FP prototype cannot read
+
+### 46.1 What ran
+
+Five `proto_probe` dispatch modes were executed on master, serially, each under
+a named 8 GiB scope with a 1800 s cap, from the pinned binary
+`ec40994e40e625ecab040bc561d697c3b2aadc254a3e284ad44bedfe9cbe488f`. Raw output,
+exact argv, wall and peak RSS are retained per run under
+`generated/master_port/fp/proto_modes/` and tabulated in
+`pass/lean/tests/fp/fp_proto_mode_ledger.tsv`, one row per dispatch form.
+
+`--reset-probe` was driven on a genuinely sequential fixture, not a zero-flop
+case: `seq.dcert`, one flop with an enable and a synchronous reset. It asserts
+reset for two cycles, releases, and measures only the six cycles after release:
+**3 distinct post-release states**. The per-cycle line alternates
+`moved`/`initial`, but that label only compares against the initial state, so
+`moved` covers more than one state and the distinct count is the number that
+matters. The progression is non-vacuous -- the state moves after the release,
+so the fixture is not reset-stuck.
+
+`--trace-ref seq.dcert 4` reported **1 distinct state**, which at first looks
+like the vacuous case the mode exists to detect. It is not. The per-cycle
+stimulus is `patternAt` seed `k`, and on this fixture seeds 0..3 drive either
+the enable low or the reset high at every one of the four cycles, so the flop
+holds. Re-running the same fixture at 16 cycles gives **state changed on 4, 3
+distinct states**. The 4-cycle reading was stimulus length, not the design, and
+the mode's own text already refuses to call 1 state degenerate.
+
+`--support` was run on positives and on the intended refusal. `tiny.dcert` and
+`seq.dcert` report all six `SupportedByProjection` fields true. `wide.dcert` is
+refused, and the printed reason is **`memFree false` and `sources false`** --
+it carries a `memImg` and a `memConst` source. That is not where I expected the
+refusal: the standing note said `wide` refuses on the async/clock field. It does
+not; `wf`, `ops`, `arities` and `flopClocks` are all true. The exit code is also
+weaker than it looks -- `--support` returns 0 if ANY file in the invocation is
+supported and 2 if none, so a zero exit is a disjunction over the argument list,
+never a per-file verdict. Only the printed fields are per-file.
+
+`--inline-negative` ran on its actual counterexample: `found true`,
+`useInNext 1`, `nextStrict true`, `beforeTotal FALSE`, `applied false`. Before
+the rewrite the outcome is `typeError`; with the rewrite FORCED it is
+`outOfFuel`. The checker refuses it and the two outcomes differ, so the side
+condition is load-bearing. One counterexample shows the guard is necessary, not
+that the guard set is complete.
+
+`--env0-ab`, the strict acceptance command, exits 0 with every case and
+assertion its dispatch defines: the rewrite applies with the intended flags,
+the variant resolves (`bta`, `wfA`, `erase-ok`), **8 designs x 6 stimuli all
+agree**, an out-of-range dep yields `typeError` on both sides (same kind,
+neither a success), five traces over six cycles agree with states-reached
+4/4/2/1/1 (`flopD 8`, `flopD 32`, toggle, hold, reset-only), and seven
+projection A/B rows agree with `tl` collapsing 4033 -> 1, 28545 -> 1,
+61313 -> 1 and 126849 -> 1 on `cstD`, and 61184 -> 32640 on `srcD`. Both sides
+run the same fork specializer, so this is interpreter-vs-interpreter agreement,
+not a bridge to the proved backend.
+
+**Mode tally: 7 of 20 dispatch forms executed** (`--file-ab` and
+`--rewrite-agree` earlier, these five now). The grid, depth, profile, host-var
+and remaining file modes are **not** credited and are listed as NOT EXECUTED.
+
+### 46.2 `--reset-probe` quarantined two real designs, and the quarantine is right
+
+Run on real imported CVA6 certificates the mode exits 1:
+
+```
+ariane_regfile_gate.dcert: 32 flops
+  reset pins -- sources say [(2, true)], flop records say [(2, false)]
+  !! POLARITY CONFLICT on input 2 ...
+serdiv_gate.dcert: 12 flops
+  reset pins -- sources say [(8, true)], flop records say [(8, false)]
+```
+
+`formal/lean/scripts/cva6_corpus_audit.py`, which matches by FLOP IDENTITY
+rather than by pin set, agrees: `CONFLICT=32` and `CONFLICT=12`, every flop.
+Across the frozen 30 it is **21 sequential blocks, 21 with a conflict, 16 with a
+conflict on every flop, 0 unknown**.
+
+That looked like a corpus-wide defect, and `DirectCheck.lean` already says it is
+not -- it declines to cross-check reset polarity and gives the reason:
+
+> an async flop's `resetPin` slot and its `resetInput` ordinal legitimately
+> differ in POLARITY -- the census shows 9,262 async sources whose `activeLow`
+> is the opposite of their `FlopDesc.resetActiveLow`, because the pin slot reads
+> an already-inverted node while the ordinal reads the raw port.
+
+That justification is **conditional on the pin slot being a node**, and the
+condition is checkable. `formal/lean/scripts/reset_polarity_census.py` is new
+and checks exactly it; `pass/lean/tests/fp/fp_reset_polarity_census.tsv` is the
+result, and it is also the only retained artifact for a census of this kind --
+the 9,262 figure arrived with the D2 port (`106531b2e`) and nothing in this tree
+reproduces it.
+
+| corpus | schema | certs | node-mediated | raw-port OPPOSITE |
+|---|---|---|---|---|
+| imported pre-D2 (`cva6_30_auth`, `cva6_30_auth2`) | DCERT1 | 59 | **0** | **5,837** |
+| master-emitted (`generated/master_port/**`) | DCERT2 | 132 | 2,195 | **0** |
+
+In the imported corpus **every** reset-bearing flop points `resetPin` at a raw
+`.input` -- never a node -- and carries `activeLow = 0`, while the same port's
+`flopQAsync` source carries `al = 1`. In `cva6_30_auth` alone that is 2705 of
+2705 flop rows at 0 and 2673 of 2673 source rows at 1, with no counterexample on
+either side. Both sides read ONE port with OPPOSITE polarity
+(`Runtime.lean:83` against `DesignSemantics.lean:67`), so no value of that port
+leaves both paths out of reset, and DirectCheck's reason does not cover it.
+
+Master's output is the shape DirectCheck describes: `resetPin` resolves to the
+already-inverted node, 2,195 times, with zero oppositions. It cannot be
+otherwise -- `certificate_ir.cpp:72` and `:271` both assign the single scanned
+`f.active_low`, and `emit_dcert.cpp:169` and `:231` both emit the single
+`reset_active_low`, so the two fields are structurally incapable of disagreeing.
+
+**Classification: a pre-D2 export-boundary shape, confined to the imported
+DCERT1 corpora, not reproducible by master's writer.** Not an RTL bug, not a
+projection bug, and not something to repair by editing certificate literals --
+which is what the probe's own quarantine text says.
+
+**Impact on results claimed so far: none.** Every design in the FP evidence --
+`instr_scan`, `pmp_data_if`, `pmp`, `decoder`, `compressed_decoder`,
+`commit_stage`, `alu_wrapper`, `alu` -- has **0 flops**, so no flop reset
+semantics ever executed in an admitted FP run. Every master-port D3/D4 corpus is
+DCERT2 with zero oppositions. Differential results are unaffected in any case:
+both sides of an agreement consume the same certificate. What the opposition
+does weaken is any reachability reading of a sequential run over the imported
+corpus, including the two `--trace-ref` runs in 46.1, because one reset path is
+asserted throughout.
+
+### 46.3 Two limitations of `--reset-probe`, observed not repaired
+
+A control certificate was written for this, tracked as
+`pass/lean/tests/fp/fp_reset_polarity_control.dcert` and run from the
+byte-identical `generated/master_port/fp/fixtures/dcert/diffpin.dcert`: its read side
+names input 0 and its commit side names input 1 -- a genuine mismatch. The mode
+prints `sources say [(0, true)], flop records say [(1, true)]` and **exits 0**.
+Its scan is `if i == j && al != bl` (line 568): a same-index polarity test over
+pin sets, so a different-pin mismatch passes it. A clean `--reset-probe` exit is
+therefore not evidence that a certificate's two reset records agree. The census
+script classifies this case as `raw-port:different-pin`, and the control is the
+only input in the tree that exercises that branch.
+
+Second, `drive` asserts and releases the reset per the SOURCE polarity alone. On
+a certificate carrying the opposition, the source's "released" is the commit
+side's "asserted", which is why `ariane_regfile` and `serdiv` report a constant
+post-release state and the mode labels it INCONCLUSIVE rather than claiming
+unreachability. The probe cannot release both paths at once on those inputs.
+
+`proto_probe.lean` is pinned prototype source and neither limitation was
+repaired here.
+
+### 46.4 The FP prototype's reachable corpus is DCERT1-only
+
+`proto_probe --support` on a master-emitted certificate fails with
+`bad magic: expected DCERT1` -- an uncaught exception, exit 1, distinct from
+`--support`'s own exit 2. `CertIO.V1.loadCert` reads DCERT1 and nothing else.
+
+The consequence is a real scope limit on this stage, and it explains 46.2's
+impact line from the other side. `--support` reports `ariane_regfile` and
+`serdiv` SUPPORTED with all six fields true, so the FP prototype's loadable
+corpus **does** contain sequential CVA6 designs -- but every one of them is a
+pre-D2 DCERT1 certificate carrying the raw-port opposition, and the
+opposition-free certificates (master's DCERT2) are the ones it cannot read. So
+today the prototype can exercise sequential reset semantics only on hand-written
+DCERT1 fixtures such as `seq.dcert`. Carrying FP onto master-emitted sequential
+designs needs DCERT2 transport, which remains open.
+
+### 46.5 What the frozen 30 can even be projected onto, and a parser cross-check
+
+`--support` over the 29 frozen-30 certificates present in `cva6_30_auth`, one
+invocation, 0.39 s, peak RSS 33,152 KB, exit 0: **22 SUPPORTED, 7 refused.**
+All seven fail `ops`. Five also fail `sources` -- `aes`,
+`cva6_hpdcache_subsystem`, `fpu_wrap`, `load_unit`, `store_unit`. Only
+`cva6_hpdcache_subsystem` fails `memFree`. `wf`, `arities` and `flopClocks`
+hold on all seven. So FP's ceiling on this set is **22 of 30 before anything is
+projected**, and that is a loadability measurement, not a run: nothing was
+projected or compared here. Recorded in `fp_obligation_inventory.tsv`.
+
+The 5,837 figure in 46.2 comes from a new parser, so it was cross-checked
+against two independent readers on the same 29 files. `reset_polarity_census.py`
+agrees with the Lean loader's own printed `src N node M flop F` on all 29, and
+with `cva6_corpus_audit.py`'s separate parser on all 29: **0 mismatches** on
+`(sources, nodes, flops)` either way. The one apparent mismatch during this
+check was mine, not the parser's -- `cva6_ptw_gate.dcert` exists in both
+`cva6_30_auth` (3423/3774) and `cva6_30_auth2` (3424/3775), and keying the
+comparison by basename collapsed them. Keyed by path, they agree.
+
+### 46.6 Open after this checkpoint
+
+Unchanged: the scaling and prototype grids (`s0_grid`, `s1_identity`,
+`s2_probe`, `s2a_probe`, `s3_probe`, `perf_probe`), the thirteen uncredited
+`proto_probe` modes, real `cert_runner` benchmark passes beyond `instr_scan`,
+and fresh DCERT2 FP transport. `pmp_data_if`'s historical acceptance stays
+separate from its fresh `EMIT_FAILED rc=6`, which stays in the denominator.
