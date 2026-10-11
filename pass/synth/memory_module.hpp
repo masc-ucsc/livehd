@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -48,10 +49,27 @@ inline constexpr uint64_t kAutoFoldPortsAbove = 3;
   return std::nullopt;
 }
 
+// One row of the memory table: what each memory became and why. `graph` is the
+// owning module; `realization` is flops|native|inline-array; `reason` names the
+// rule that decided it (a `synth.memory` pin, the pass-wide mode, or the
+// `auto` size/port/clock predicates), so a reader can tell "kept native by
+// size" from "kept native by contract" without the diagnostics stream.
+struct Memory_row {
+  std::string graph;
+  std::string name;
+  uint64_t    bits   = 0;  // element width
+  uint64_t    size   = 0;  // entries
+  uint64_t    ports  = 0;
+  uint64_t    clocks = 0;  // distinct write clocks
+  std::string realization;
+  std::string reason;
+};
+
 // Replace memories selected for lowering with named child modules. Native
 // memories whose cgen form is an inline array are also enclosed in a module.
 // The returned definitions belong to the parents' scratch graph library.
 // `max_bits` (0 = no limit) is the `auto` storage threshold only.
 std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
-                                                               Memory_fold mode, uint64_t max_bits);
+                                                               Memory_fold mode, uint64_t max_bits,
+                                                               std::vector<Memory_row>* report = nullptr);
 }  // namespace livehd::synth

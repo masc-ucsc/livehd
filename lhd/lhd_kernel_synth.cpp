@@ -49,6 +49,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "rapidjson/document.h"
 #include "attrs.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
@@ -62,6 +63,84 @@ namespace lhd {
 namespace {
 
 bool truthy(std::string_view v) { return !v.empty() && v != "false" && v != "0" && v != "off"; }
+
+// The timing target the run was asked to meet against what STA measured, so a
+// reader (and the delay-driven decisions that feed on it) can tell "target met",
+// "slightly missed" and "out of reach at this partition" apart. The target is the
+// mapper's explicit `abc.delay` budget (ps) when set, else the first
+// `create_clock -period` of the SDC (Liberty time units). Achieved is STA's
+// worst endpoint delay of the top design. Empty when there is nothing to compare.
+std::string timing_target_json(const std::string& abc_qor, const std::string& sta_qor, const std::string& sdc_path) {
+  if (sta_qor.empty()) {
+    return {};
+  }
+  rapidjson::Document sta;
+  sta.Parse(sta_qor.c_str());
+  if (sta.HasParseError() || !sta.IsObject() || !sta.HasMember("designs") || !sta["designs"].IsArray() || sta["designs"].Empty()
+      || !sta.HasMember("time_unit") || !sta["time_unit"].IsString()) {
+    return {};
+  }
+  const std::string unit = sta["time_unit"].GetString();
+  const double      to_ps = unit == "ns" ? 1e3 : unit == "us" ? 1e6 : unit == "ps" ? 1.0 : unit == "fs" ? 1e-3 : 0.0;
+  const auto&       top   = sta["designs"][0];
+  if (to_ps == 0.0 || !top.IsObject() || !top.HasMember("max_delay") || !top["max_delay"].IsNumber()) {
+    return {};
+  }
+  const double achieved = top["max_delay"].GetDouble() * to_ps;
+  double       target   = 0.0;
+  std::string  source   = "none";
+  if (!abc_qor.empty()) {
+    rapidjson::Document abc;
+    abc.Parse(abc_qor.c_str());
+    if (!abc.HasParseError() && abc.IsObject() && abc.HasMember("delay_target") && abc["delay_target"].IsString()) {
+      const std::string t = abc["delay_target"].GetString();
+      char*             end = nullptr;
+      const double      v   = std::strtod(t.c_str(), &end);
+      if (!t.empty() && end != t.c_str() && v > 0) {
+        target = v;
+        source = "abc.delay";
+      }
+    }
+  }
+  if (source == "none" && !sdc_path.empty()) {
+    std::ifstream in(sdc_path);
+    const std::string text{std::istreambuf_iterator<char>(in), {}};
+    if (const auto at = text.find("-period"); at != std::string::npos) {
+      char*        end = nullptr;
+      const char*  b   = text.c_str() + at + 7;
+      const double v   = std::strtod(b, &end);
+      if (end != b && v > 0) {
+        target = v * to_ps;
+        source = "sdc";
+      }
+    }
+  }
+  if (source == "none") {
+    return std::format(R"({{"source":"none","achieved_ps":{:.1f}}})", achieved);
+  }
+  const double slack = target - achieved;
+  const bool   met   = slack >= 0;
+  // Beyond 25 % over, the timing objective is degenerate: every adder/shifter
+  // choice lands on the same path, so trials rank on noise.
+  const bool unreachable = achieved > target * 1.25;
+  if (unreachable) {
+    livehd::diag::info("synth", "synth-target-unreachable", "unsupported")
+        .msg("timing target {:.0f} ps ({}) is out of reach: achieved {:.0f} ps (+{:.0f} %); delay-driven choices "
+             "are degenerate here -- relax the target or compare designs by delay instead",
+             target,
+             source,
+             achieved,
+             (achieved / target - 1.0) * 100.0)
+        .emit();
+  }
+  return std::format(R"({{"source":"{}","target_ps":{:.1f},"achieved_ps":{:.1f},"slack_ps":{:.1f},"met":{},"unreachable":{}}})",
+                     source,
+                     target,
+                     achieved,
+                     slack,
+                     met ? "true" : "false",
+                     unreachable ? "true" : "false");
+}
 
 // One JSON value from a sidecar file ("" when absent/empty), trailing
 // whitespace stripped so it can ride RawValue into the envelope.
@@ -566,10 +645,12 @@ void synth_command(Options& opts, Result& res) {
   // each sub-report byte-identical to what its pass alone embeds, so a
   // consumer checks each report kind before reading its fields. USYN mapping
   // uses technology-map; logical-only output has abc:null and no STA report.
-  res.qor_json = std::format(R"({{"schema_version":1,"kind":"synth","top":"{}","abc":{}{}{}}})",
+  const auto timing_target = timing_target_json(abc_qor, sta_qor, sdc);
+  res.qor_json = std::format(R"({{"schema_version":1,"kind":"synth","top":"{}","abc":{}{}{}{}}})",
                              json_escape_min(top),
                              abc_qor.empty() ? std::string{"null"} : abc_qor,
                              sta_qor.empty() ? std::string{} : std::format(R"(,"sta":{})", sta_qor),
+                             timing_target.empty() ? std::string{} : std::format(R"(,"timing_target":{})", timing_target),
                              mapper_qor.empty() ? std::string{} : std::format(R"(,"{}":{})", mapper->report, mapper_qor));
   harvest_abc_incremental(res);           // the envelope's `incremental.abc` (one place for every reuse tier)
   harvest_sta_incremental(res, sta_qor);  // ... and `incremental.sta`

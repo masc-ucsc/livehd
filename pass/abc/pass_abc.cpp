@@ -330,7 +330,8 @@ absl::flat_hash_map<std::string, uint64_t> physical_instances(const Abc_hier& hi
 
 void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view top, const livehd::abc::Map_options& opts,
               const std::string& qor_path, const livehd::synth::Region_cache* incr, bool abc_started, const Abc_hier& hier,
-              const livehd::liberty::Dff_selection& dff_sel, const livehd::synth::Parallel_stats& parallel) {
+              const livehd::liberty::Dff_selection& dff_sel, const livehd::synth::Parallel_stats& parallel,
+              const std::vector<livehd::synth::Memory_row>& memories) {
   // PHYSICAL totals: a region's gates times the number of times its module is
   // instantiated (a replicated loop body N times, a shared `tap` 64 times).
   // The per-module sums are kept beside them as module_gates/module_area —
@@ -418,6 +419,16 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       tarea,
       crit,
       tdivbb == 0 ? std::string{} : std::format(" [PARTIAL: {} blackboxed div/mod cone(s) unscored]", tdivbb));
+
+  if (!memories.empty()) {
+    // The memory table: what each memory became and why. Without it a folded
+    // memory's flops look like logic and a native one's storage vanishes from
+    // the area, so the design reads smaller or larger than it is.
+    std::print("pass.abc memories: {}\n", memories.size());
+    for (const auto& m : memories) {
+      std::print("  {}.{} {}x{}b {}p {}clk -> {} ({})\n", m.graph, m.name, m.size, m.bits, m.ports, m.clocks, m.realization, m.reason);
+    }
+  }
 
   if (incr != nullptr) {
     // The number that actually answers "did incremental help": what the
@@ -571,6 +582,15 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       parallel.peak_abc,
       parallel.memory_limit,
       parallel.memory_waits);
+  j += ",\"memories\":[";
+  for (size_t i = 0; i < memories.size(); ++i) {
+    const auto& m  = memories[i];
+    j             += std::format("{}{{\"module\":\"{}\",\"name\":\"{}\",\"bits\":{},\"size\":{},\"ports\":{},\"write_clocks\":{},"
+                                 "\"realization\":\"{}\",\"reason\":\"{}\"}}",
+                     i != 0 ? "," : "", jesc(m.graph), jesc(m.name), m.bits, m.size, m.ports, m.clocks, m.realization,
+                     jesc(m.reason));
+  }
+  j += "]";
   j += ",\"regions\":[";
   for (size_t r = 0; r < qor.size(); ++r) {
     const auto& q = qor[r];
@@ -1095,7 +1115,8 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   }
   auto ware_modules = livehd::synth::build_ware_modules(scratch_graphs, ware_policy, option_colors);
   resolve_graphs.insert(resolve_graphs.end(), ware_modules.begin(), ware_modules.end());
-  auto memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits);
+  std::vector<livehd::synth::Memory_row> memory_table;
+  auto memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits, &memory_table);
   resolve_graphs.insert(resolve_graphs.end(), memory_modules.begin(), memory_modules.end());
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
@@ -1387,7 +1408,8 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   }
 
   if (!canonical_final) {
-    emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.backend_started(), hier, dff_sel, mapper.parallel_stats());
+    emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.backend_started(), hier, dff_sel, mapper.parallel_stats(),
+             memory_table);
   } else if (!qor_path.empty()) {
     std::ifstream       in(canonical_qor);
     const std::string   contents{std::istreambuf_iterator<char>(in), {}};

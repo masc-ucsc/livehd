@@ -307,6 +307,62 @@ bool seed_groups(hhds::Graph* g) {
       claim(cones[best]);
     }
   }
+  // An explicit group nested inside another explicit group is mapped as its own
+  // region, so the outer group is cut at its boundary. That is sometimes the
+  // intent (an arithmetic block the user wants isolated) and often an accident:
+  // dino with a top color plus inner ALU/NextPC colors was 23477 cells against
+  // 17678 for the top color alone. Say so, at the inner attribute, with the
+  // size of the cut, so the user can drop it or accept it knowingly.
+  for (const auto& [id, group] : groups) {
+    rapidjson::Document d;
+    d.Parse(id.data(), id.size());
+    if (d.HasParseError() || !d.IsArray() || d.Size() < 2) {
+      continue;
+    }
+    std::string parent_id;
+    for (size_t len = d.Size() - 1; len >= 1 && parent_id.empty(); --len) {
+      std::string cand = "[";
+      for (size_t i = 0; i < len; ++i) {
+        cand += (i ? "," : "") + json(d[static_cast<rapidjson::SizeType>(i)]);
+      }
+      cand += "]";
+      if (groups.contains(cand)) {
+        parent_id = cand;
+      }
+    }
+    if (parent_id.empty()) {
+      continue;
+    }
+    size_t inner = 0, cut = 0;
+    for (const auto& [n, gid] : owner) {
+      if (gid != id) {
+        continue;
+      }
+      ++inner;
+      for (auto drv : fanin[n]) {
+        auto it = owner.find(drv);
+        cut += it != owner.end() && it->second == parent_id ? 1 : 0;
+      }
+      for (auto snk : fanout[n]) {
+        auto it = owner.find(snk);
+        cut += it != owner.end() && it->second == parent_id ? 1 : 0;
+      }
+    }
+    auto b = livehd::diag::warn("pass.color", "synth-nested-group", "unsupported");
+    b.msg("explicit group {} is nested inside explicit group {}: its {} node(s) map as a separate region and cut {} connection(s) "
+          "out of the outer one; drop the inner color if the outer region should cover it",
+          id,
+          parent_id,
+          inner,
+          cut);
+    if (!group.anchors.empty()) {
+      auto a = group.anchors.front().attr(hhds::attrs::srcid);
+      if (a.has() && a.get() != 0) {
+        b.at(g->source_locator().resolve_spans(static_cast<hhds::SourceId>(a.get())));
+      }
+    }
+    b.emit();
+  }
   std::string entries = "{";
   for (const auto& [id, group] : groups) {
     if (entries.size() > 1) {

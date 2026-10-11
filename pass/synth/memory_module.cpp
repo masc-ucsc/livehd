@@ -673,7 +673,8 @@ size_t write_clock_count(const hhds::Node_class& mem) {
 }  // namespace
 
 std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
-                                                               Memory_fold pass_mode, uint64_t max_bits) {
+                                                               Memory_fold pass_mode, uint64_t max_bits,
+                                                               std::vector<Memory_row>* report) {
   std::vector<std::shared_ptr<hhds::Graph>> modules;
   std::unique_ptr<Scratch>                  scratch;
   fs::path                                  rtl;
@@ -691,6 +692,10 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
       // An external loader can supply every bit, even with no functional writer.
       // Preserve the native macro boundary; never specialize it to the image.
       if (gu::memory_image_of(mem)) {
+        if (report) {
+          report->push_back({std::string(graph->get_name()), gu::has_name(mem) ? std::string(mem.get_name()) : gu::default_instance_name(mem),
+                             0, 0, 0, 0, "native", "loader-image"});
+        }
         continue;
       }
       // Assign the fallback before either realization can clone/re-number it.
@@ -744,15 +749,24 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
       // A source `synth.memory` pin (flops|macro|auto) overrides the pass-wide
       // fold mode for this one memory.
       Memory_fold mode = pass_mode;
+      std::string source = "pass memory=" + std::string(memory_fold_name(pass_mode));
       if (const auto a = mem.attr(attrs::synth_policy); a.has()) {
         const auto pin = livehd::synth_attr::get(livehd::synth_attr::read(a.get()), "memory", "auto");
         if (pin == "flops") {
-          mode = Memory_fold::Always;
+          mode   = Memory_fold::Always;
+          source = "pin synth.memory=flops";
         } else if (pin == "macro") {
-          mode = Memory_fold::Never;
+          mode   = Memory_fold::Never;
+          source = "pin synth.memory=macro";
         }
       }
       const size_t wr_clocks = write_clock_count(mem);
+      const auto   record    = [&](std::string_view realization, std::string reason) {
+        if (report) {
+          report->push_back({std::string(graph->get_name()), std::string(gu::default_instance_name(mem)), bits, size, ports,
+                             wr_clocks, std::string(realization), std::move(reason)});
+        }
+      };
       if (wr_clocks > 1) {
         if (mode != Memory_fold::Never) {
           auto note = mode == Memory_fold::Always ? diag::warn("pass.abc", "memory-multiclock", "unsupported")
@@ -764,6 +778,7 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
                   wr_clocks)
               .emit();
         }
+        record(inline_array ? "inline-array" : "native", "multiclock write ports (" + std::to_string(wr_clocks) + " clocks)");
         if (!inline_array) {
           continue;
         }
@@ -823,6 +838,16 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
                   max_bits)
               .emit();
         }
+      }
+      {
+        std::string why = source;
+        if (mode == Memory_fold::Auto) {
+          why = map ? (oversized ? "auto: " + std::to_string(ports) + " ports > " + std::to_string(kAutoFoldPortsAbove) +
+                                      " has no macro"
+                                 : "auto: " + std::to_string(size * bits) + " bits <= memory_max_bits")
+                    : "auto: " + std::to_string(size * bits) + " bits > memory_max_bits=" + std::to_string(max_bits);
+        }
+        record(map ? "flops" : (inline_array ? "inline-array" : "native"), std::move(why));
       }
       if (!map && !inline_array) {
         continue;

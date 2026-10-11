@@ -20,9 +20,11 @@ def run(*args, ok=True):
     return json.loads(report.read_text()), result.stdout + result.stderr
 
 def synth(name, source, *settings):
+    timer = "synth.opentimer=true" if "synth.opentimer=true" in settings else "synth.opentimer=false"
+    settings = [v for v in settings if v != "synth.opentimer=true"]
     return run("synth", source, "--top", name, "--workdir", work / name,
                "--emit-dir", "lg:" + str(work / (name + "-net")),
-               "--set", "synth.liberty=" + lib, "--set", "synth.opentimer=false",
+               "--set", "synth.liberty=" + lib, "--set", timer,
                *[a for value in settings for a in ("--set", value)])
 
 guided = work / "guided.prp"
@@ -292,8 +294,33 @@ def memory_regions(pin, fold, *extra):
                    '  reg q:[8]U8:[clock_pin=clk' + (',synth.memory="' + pin + '"' if pin != "none" else "") + ']\n'
                    '  if we { q[a] = d }\n  o = q[a]\n}')
     doc, _ = synth("mem_" + pin, src, "pass.abc.memory=" + fold, *extra)
+    table = doc["qor"]["abc"]["memories"]
+    assert len(table) == 1 and table[0]["name"] == "q" and table[0]["size"] == 8 and table[0]["bits"] == 8, table
+    assert table[0]["realization"] == ("flops" if table[0]["reason"] != "" and any(
+        m.endswith("_blasted") for m in {r["module"] for r in doc["qor"]["abc"]["regions"]}) else "native"), table
+    memory_reasons.append(table[0]["reason"])
     return {r["module"] for r in doc["qor"]["abc"]["regions"]}
+memory_reasons = []
 assert not any(m.endswith("_blasted") for m in memory_regions("none", "auto", "pass.abc.memory_max_bits=8"))
 assert any(m.endswith("_blasted") for m in memory_regions("flops", "auto", "pass.abc.memory_max_bits=8"))
 assert not any(m.endswith("_blasted") for m in memory_regions("macro", "true"))
+assert memory_reasons[0].startswith("auto: 64 bits > memory_max_bits"), memory_reasons
+assert memory_reasons[1] == "pin synth.memory=flops" and memory_reasons[2] == "pin synth.memory=macro", memory_reasons
+nested = work / "nested.prp"
+nested.write_text('''comb lane::[synth.color="inner"](a:U8,b:U8)->(y:U8) { y=(a+b)#[0..=7] }
+pub comb nested::[timecheck=false,synth.color="outer"](a:U8,b:U8,c:U8)->(x:U8,y:U8) {
+ x=lane(a=a,b=b).y
+ y=(a-c)#[0..=7]
+}''')
+_, nested_log = synth("nested", nested)
+hit = [json.loads(l) for l in nested_log.splitlines() if '"synth-nested-group"' in l]
+assert len(hit) == 1 and Path(hit[0]["span"]["file"]).name == "nested.prp" and hit[0]["span"]["start_line"] == 1, hit
+# The timing target against what STA measured.
+tight, tight_log = synth("nested", nested, "synth.opentimer=true", "pass.abc.delay=100")
+tt = tight["qor"]["timing_target"]
+assert tt["source"] == "abc.delay" and tt["met"] is False and tt["unreachable"] is True and tt["slack_ps"] < 0, tt
+assert "synth-target-unreachable" in tight_log
+loose, _ = synth("nested", nested, "synth.opentimer=true", "pass.abc.delay=100000")
+tt = loose["qor"]["timing_target"]
+assert tt["met"] is True and tt["unreachable"] is False and tt["slack_ps"] > 0, tt
 print("region contraction A -> B -> A and module-scope isolation passed")
