@@ -48,6 +48,79 @@ class JoinError(Exception):
     pass
 
 
+# What the sweep writes into `proof_max_rss_source` when the proof STAGE was
+# stopped by the aggregate limit rather than finishing.  It is a field, not
+# prose in `detail`, precisely so a reader does not have to grep English.
+PROOF_RESOURCE_SRC = "sampled-aggregate-lower-bound"
+
+PROOF_STATES = ("accepted", "accepted_unaudited", "refused", "resource",
+                "unattempted", "no_certificate", "not_run", "uncreditable")
+
+
+def proof_disposition(r: dict) -> tuple:
+    """(proof, proof_status, axioms) for a COMPLETE result row.
+
+    Four outcomes, and they are not orderings of one another:
+
+    * `accepted`   -- the theorem closed AND the audited axiom set is recorded.
+    * `refused`    -- the proof stage ran and the theorem did not close.
+    * `resource`   -- the proof stage was stopped at a limit. UNDECIDED: it is
+                      not a refusal, and the row says so rather than letting a
+                      zero be read as one.
+    * `unattempted`-- no proof stage was run for this row.
+
+    Independent of `agree`.  A design can agree on 32 samples and have its
+    theorem refused, or be proved and have been scheduled out of its executable
+    stage; collapsing the two columns is how a sampled row starts being read as
+    proved.
+
+    `accepted_unaudited` exists for rows written before the sweep recorded the
+    axiom set: the claim is there, the thing that authenticates it is not, so it
+    is reported separately and NOT counted as accepted.
+    """
+    proof = (r.get("proof") or "na").strip()
+    axioms = (r.get("proof_axioms") or "").strip()
+    if proof == "1":
+        return (proof, "accepted" if axioms else "accepted_unaudited", axioms)
+    if proof == "0":
+        if (r.get("proof_max_rss_source") or "").strip() == PROOF_RESOURCE_SRC:
+            return (proof, "resource", axioms)
+        return (proof, "refused", axioms)
+    return ("na", "unattempted", axioms)
+
+
+def corpus_origin(meta: dict, root: pathlib.Path) -> str:
+    """Whether the certificates came from THIS worktree or were imported.
+
+    The header asserted "IMPORTED CERTIFICATES: compatibility evidence only" on
+    every join, including joins over a corpus this worktree emitted, where it
+    says the opposite of the truth. The sidecar records the resolved `certs`
+    paths, so this is derivable and does not need asserting.
+    """
+    # `certs` sits at the TOP of the sidecar, not under `config`; reading it from
+    # the wrong level answered UNKNOWN for every join, which is a safe default
+    # and still the wrong answer.
+    certs = meta.get("certs") or []
+    if not certs:
+        return ("certificate origin UNKNOWN: the sidecar records no `certs` path, so "
+                "whether this corpus was emitted here cannot be established.")
+    inside = []
+    for c in certs:
+        try:
+            pathlib.Path(c).resolve().relative_to(root.resolve())
+            inside.append(True)
+        except ValueError:
+            inside.append(False)
+    if all(inside):
+        return ("certificates were EMITTED BY THIS WORKTREE; a gate passed here is "
+                "end-to-end evidence for this branch.")
+    if not any(inside):
+        return ("IMPORTED CERTIFICATES: compatibility evidence only. These rows do NOT "
+                "show this branch can generate the certificates end to end.")
+    return ("MIXED certificate origin: some directories are inside this worktree and "
+            "some are not, so the rows do not share one provenance.")
+
+
 def atomic_write(path: pathlib.Path, text: str) -> None:
     """Same-directory temp, fsync, replace.  This is a milestone artifact; a
     half-written one must never be readable as a result table."""
@@ -129,7 +202,13 @@ def main() -> int:
         row = {"target": key, "certificate": cert_name,
                "cert_available": 1 if available else 0,
                "manifest_sha256": (mrow.get("sha256") or ""),
-               "nodes": mrow.get("nodes", ""), "proof": "na"}
+               "nodes": mrow.get("nodes", ""),
+               # Filled from the RESULT row below. It was hardcoded `"na"` here
+               # and never written again, so a design whose theorem was proved
+               # and axiom-audited arrived in the milestone table as "no proof
+               # was attempted" -- the join asserting the opposite of its own
+               # input. See `proof_disposition`.
+               "proof": "na", "proof_status": "", "proof_axioms": ""}
 
         if not available:
             # Explicit, and uncreditable. This is the row that stops 85/85 from
@@ -139,12 +218,14 @@ def main() -> int:
             row["verdict"] = "no_certificate"
             row["detail"] = mrow.get("blocked_cause", "") or "no certificate"
             row["status"] = "blocked_upstream"
+            row["proof_status"] = "no_certificate"
         elif r is None:
             for g in CREDITABLE:
                 row[g] = 0
             row["verdict"] = "not_run"
             row["detail"] = "the manifest claims a certificate but the sweep has no row"
             row["status"] = "missing_result"
+            row["proof_status"] = "not_run"
             problems.append(f"{key}: no result row")
         else:
             got = (r.get("cert_sha256") or "").strip()
@@ -156,6 +237,15 @@ def main() -> int:
                 for g in CREDITABLE:
                     row[g] = 0
                 row["verdict"] = "unauthenticated"
+                # The row cannot be tied to the bytes it claims to describe, so
+                # a `proof=1` on it is not creditable either -- the theorem was
+                # about SOMETHING, and nothing here says what.
+                #
+                # `proof` is left EMPTY rather than `na` or `0`: "na" reads as
+                # "not attempted" and "0" as "refused", and a proof that was
+                # attempted and cannot be credited is neither. Empty means the
+                # column cannot speak for this row; `proof_status` says why.
+                row["proof"], row["proof_status"] = "", "uncreditable"
                 row["detail"] = (f"missing certificate hash (manifest={want[:12] or 'none'}, "
                                  f"result={got[:12] or 'none'})")
                 row["status"] = "unauthenticated"
@@ -165,6 +255,7 @@ def main() -> int:
                 for g in CREDITABLE:
                     row[g] = 0
                 row["verdict"] = "hash_mismatch"
+                row["proof"], row["proof_status"] = "", "uncreditable"
                 row["detail"] = (f"result was produced from {got[:12]}, "
                                  f"manifest records {want[:12]}")
                 row["status"] = "stale_result"
@@ -187,6 +278,11 @@ def main() -> int:
                 row["verdict"] = st
                 row["detail"] = r.get("detail", "") or f"{st} by the scheduler"
                 row["status"] = st
+                # The whole row was limit-stopped, so the proof stage was too --
+                # or never started. Either way undecided, never a refusal.
+                row["proof"], row["proof_status"], row["proof_axioms"] = (
+                    (r.get("proof") or "na").strip(), "resource",
+                    (r.get("proof_axioms") or "").strip())
                 problems.append(f"{key}: {st}, no gate was judged")
             else:
                 for g in CREDITABLE:
@@ -194,6 +290,8 @@ def main() -> int:
                 row["verdict"] = r.get("verdict", "")
                 row["detail"] = r.get("detail", "")
                 row["status"] = "ran"
+                row["proof"], row["proof_status"], row["proof_axioms"] = \
+                    proof_disposition(r)
                 for extra in ("tier", "distinct_obs", "wall_s", "module", "run_status"):
                     row[extra] = r.get(extra, "")
         out_rows.append(row)
@@ -206,6 +304,10 @@ def main() -> int:
             "no --meta sidecar was given, so nothing verified the artifact digest, "
             "the manifest digest, the selftest brand, the drift marker, or the row "
             "bytes. This join is UNAUTHENTICATED and is not milestone evidence.")
+    # Without --meta there is no sidecar, so the origin cannot be derived and
+    # the header says UNKNOWN rather than asserting either answer.
+    cfg = {}
+    meta_doc = {}
     if a.meta:
         try:
             meta = json.loads(pathlib.Path(a.meta).read_text())
@@ -226,6 +328,7 @@ def main() -> int:
             problems.append(
                 f"{a.meta}: no results_sha256, so the rows are UNBOUND; this join is "
                 f"not authenticated and must not be cited as milestone evidence")
+        meta_doc = meta
         cfg = meta.get("config", {}) or {}
         if cfg.get("runner_selftest"):
             raise JoinError(
@@ -265,8 +368,8 @@ def main() -> int:
                   f"(tier={cfg.get('tier') or 'all'}, samples={cfg.get('samples')})")
 
     cols = (["target", "certificate", "module", "cert_available", "status", "verdict"]
-            + CREDITABLE + ["proof", "tier", "nodes", "distinct_obs", "wall_s",
-                            "manifest_sha256", "detail"])
+            + CREDITABLE + ["proof", "proof_status", "proof_axioms", "tier", "nodes",
+                            "distinct_obs", "wall_s", "manifest_sha256", "detail"])
     digest = hashlib.sha256()
     for r in out_rows:
         digest.update(f"{r['target']}:{r['verdict']}:{r.get('agree', 0)}\n".encode())
@@ -274,10 +377,10 @@ def main() -> int:
         f"# join of {res_path.name} onto {man_path.name}",
         f"# denominator = {len(man)} targets (one row each, including targets with "
         f"no certificate)",
-        "# IMPORTED CERTIFICATES: compatibility evidence only. These rows do NOT show "
-        "this branch can generate the certificates end to end.",
-        "# proof=na throughout: no per-design translation proof is generated or checked "
-        "by this pass.",
+        f"# {corpus_origin(meta_doc, ROOT)}",
+        "# proof_status is INDEPENDENT of agree: accepted / accepted_unaudited / "
+        "refused / resource (undecided) / unattempted / no_certificate / not_run / "
+        "uncreditable.",
         f"# manifest_sha256={hashlib.sha256(man_path.read_bytes()).hexdigest()}",
         f"# join_sha256={digest.hexdigest()}",
         "\t".join(cols),
@@ -293,7 +396,18 @@ def main() -> int:
           f"(denominator {len(man)})")
     for g in CREDITABLE:
         print(f"  {g:<10} {sum(1 for r in out_rows if r.get(g) == 1)}/{len(out_rows)}")
-    print(f"  {'proof':<10} 0/{len(out_rows)} (na -- not attempted)")
+    tally = {k: 0 for k in PROOF_STATES}
+    for r in out_rows:
+        tally[r.get("proof_status") or "unattempted"] = \
+            tally.get(r.get("proof_status") or "unattempted", 0) + 1
+    print(f"  {'proof':<10} {tally['accepted']}/{len(out_rows)} accepted "
+          f"(axiom set recorded)")
+    for k in ("accepted_unaudited", "refused", "resource", "uncreditable"):
+        if tally.get(k):
+            print(f"  {'':<10} {tally[k]} {k}")
+    print(f"  {'':<10} {tally.get('unattempted', 0)} unattempted, "
+          f"{tally.get('no_certificate', 0)} no certificate, "
+          f"{tally.get('not_run', 0)} not run")
     ndef = sum(1 for r in out_rows if r.get("status") in ("deferred", "rss_killed",
                                                          "timeout"))
     if ndef:

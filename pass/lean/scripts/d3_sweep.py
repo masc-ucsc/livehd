@@ -1881,7 +1881,7 @@ def extract_proof_gate(row, out: str, rc, expect_module=None, oom: bool = False,
             why = f"{len(hits)} proof markers in the log, expected exactly 1"
         row["detail"] = (row.get("detail") or "") + ("; " if row.get("detail") else "") + why
         return
-    thm, _axioms = hits[0]
+    thm, axioms = hits[0]
     if thm != PROOF_THEOREM:
         # EXACT, not a prefix.  `d3_fast.wrong` starts with `d3_fast` and would
         # have been credited; the marker has to name the theorem the probe was
@@ -1892,6 +1892,11 @@ def extract_proof_gate(row, out: str, rc, expect_module=None, oom: bool = False,
                          + f"proof marker names {thm!r}, expected {PROOF_THEOREM!r}")
         return
     row["proof"] = "1"
+    # Recorded, not merely checked.  `d3_proof_gate` has already refused anything
+    # outside the allowed set, so reaching here means the audit passed -- but a
+    # row that says `proof=1` and cannot say WHAT it depends on is an assertion,
+    # and a downstream table has no way to tell it from one.
+    row["proof_axioms"] = axioms.strip()
 
 
 ERR_RE = re.compile(r"^(?:[^\s:]+:\d+:\d+: )?error: (.*)$")
@@ -1930,6 +1935,7 @@ def deferred_row(target: Target, samples: int, why: str) -> dict:
         "sim_max_rss_kb": "", "sim_user_s": "", "sim_sys_s": "", "sim_wall_s": "",
         "proof_max_rss_kb": "", "proof_max_rss_source": "",
         "proof_user_s": "", "proof_sys_s": "", "proof_wall_s": "",
+        "proof_axioms": "",
         "drift": "", "launched": "0",
     })
     for k in ("sources", "nodes", "outputs", "flops", "mems", "inputs", "bindings",
@@ -2783,6 +2789,11 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
     "sim_max_rss_kb", "sim_user_s", "sim_sys_s", "sim_wall_s",
     "proof_max_rss_kb", "proof_max_rss_source",
     "proof_user_s", "proof_sys_s", "proof_wall_s",
+    # The AUDITED axiom set, verbatim from the gate line.  `proof=1` without it
+    # is an assertion; with it the row carries what the audit actually allowed,
+    # and a join can refuse to credit an acceptance whose axioms nobody wrote
+    # down.  It was parsed and discarded before -- `thm, _axioms = hits[0]`.
+    "proof_axioms",
     # MODULE-PROOF BACKEND, kept apart from `proof_*` and from `agree`.
     # A sampled agreement and a kernel proof are different claims; collapsing
     # them into one column is how a sampled row starts being read as proved.
