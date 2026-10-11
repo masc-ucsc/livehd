@@ -31,7 +31,7 @@ Exit: 0 pass / 1 disagreement or checker rejection / 2 setup / 3 out of fuel.
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Projection.CertLoad
 import LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorShift
-import LeanSemanticPrimitives.Compiler.CertIO
+import LeanSemanticPrimitives.Compiler.CertIOV1
 
 open Compiler Projection Projection.Hw Projection.Runner Projection.ProtoVar
 
@@ -175,7 +175,7 @@ def accept (D : DesignCert) (R : Program) (tms : Nat) : IO UInt32 := do
     return (if bad then 1 else 0)
 
 def cert (path backend : String) (sf wf : Nat) : IO UInt32 := do
-  let D ← CertIO.loadCert path
+  let D ← CertIO.V1.loadCert path
   IO.println s!"{path}"
   IO.println s!"  sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size}"
   let sr := CertLoad.supportReport D
@@ -217,7 +217,7 @@ def main (args : List String) : IO UInt32 := do
   match args with
   | ["spec", "grid", s, n, a, b] =>
       specOnly (gridD ((s.toNat?).getD 64) ((n.toNat?).getD 64) ((a.toNat?).getD 2)) b
-  | ["spec", "cert", p, b] => do specOnly (← CertIO.loadCert p) b
+  | ["spec", "cert", p, b] => do specOnly (← CertIO.V1.loadCert p) b
   | ["grid"] => grid
   | ["cert", p, b] => cert p b 200000 2000
   | ["cert", p, b, a, c] => cert p b ((a.toNat?).getD 200000) ((c.toNat?).getD 2000)

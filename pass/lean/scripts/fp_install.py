@@ -52,15 +52,18 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 # fold over the UNGUARDED `2 ^ k` formula -- which is what the pinned shared
 # base computed.
 #
-# Master's `Op_SHL` saturates at the result width, so those three are FALSE here
-# and the build says so by name. That is the tripwire working, not a defect in
-# it: the semantics genuinely differ from the base FP overlaid.
+# Master's `Op_SHL` saturates at the result width, so those three do not close
+# by `rfl` here -- and I first read that as the statements being FALSE on
+# master. They are not. A `rfl` failure is a failure of definitional reduction;
+# `2 ^ w` divides `u * 2 ^ k` whenever `k >= w`, so the guarded and unguarded
+# terms are the same value, and all three ORIGINAL statements are proved
+# (`shl_step_eq`, `shl_fold_eq`). The same holds for `evalOp_Sext`.
 #
-# The overlay on master is inert in the strongest sense -- a definition is added
-# and no call site is touched, so `eval_op` is byte-identical to before. The
-# statement that says so here names master's step, `bv_shl_step`, instead of the
-# base's formula. Deleting master's guard to make FP's original statement true
-# would be the R46 regression a second time.
+# So the adaptation here is PROOF-ONLY: every statement is the pinned one,
+# verbatim, and only the proof terms change. The overlay on master is inert in
+# the strongest sense -- a definition is added and no call site is touched, so
+# `eval_op` is byte-identical to before. Deleting master's guard to force FP's
+# `rfl` through would be the R46 regression a second time.
 HELPER_WHY = ("master's eval_op carries two boundary repairs, so the pinned rfl "
               "proofs do not reduce; the equalities still hold and these lemmas "
               "prove them from core lemmas only")
@@ -83,6 +86,46 @@ ADAPTATIONS = {
          "  Projection/ObjectLanguage",
          "master's Compiler/CertIO is DCERT2 and needs Mathlib, which this driver "
          "excludes by design; CertIOV1 is what CertLoad resolves against"),
+    ],
+    "formal/lean/scripts/proto_probe.lean": [
+        ("import LeanSemanticPrimitives.Compiler.CertIO",
+         "import LeanSemanticPrimitives.Compiler.CertIOV1",
+         "master's Compiler.CertIO is DCERT2 and needs Mathlib, which .build-proj.sh "
+         "excludes; the historical runners take the V1 route, as CertLoad does"),
+        ("CertIO.loadCert", "CertIO.V1.loadCert",
+         "same transport, at the call site", 9),
+    ],
+    "formal/lean/scripts/s2_probe.lean": [
+        ("import LeanSemanticPrimitives.Compiler.CertIO",
+         "import LeanSemanticPrimitives.Compiler.CertIOV1",
+         "master's Compiler.CertIO is DCERT2 and needs Mathlib, which .build-proj.sh "
+         "excludes; the historical runners take the V1 route, as CertLoad does"),
+        ("CertIO.loadCert", "CertIO.V1.loadCert",
+         "same transport, at the call site", 1),
+    ],
+    "formal/lean/scripts/s2a_probe.lean": [
+        ("import LeanSemanticPrimitives.Compiler.CertIO",
+         "import LeanSemanticPrimitives.Compiler.CertIOV1",
+         "master's Compiler.CertIO is DCERT2 and needs Mathlib, which .build-proj.sh "
+         "excludes; the historical runners take the V1 route, as CertLoad does"),
+        ("CertIO.loadCert", "CertIO.V1.loadCert",
+         "same transport, at the call site", 1),
+    ],
+    "formal/lean/scripts/s3_probe.lean": [
+        ("import LeanSemanticPrimitives.Compiler.CertIO",
+         "import LeanSemanticPrimitives.Compiler.CertIOV1",
+         "master's Compiler.CertIO is DCERT2 and needs Mathlib, which .build-proj.sh "
+         "excludes; the historical runners take the V1 route, as CertLoad does"),
+        ("CertIO.loadCert", "CertIO.V1.loadCert",
+         "same transport, at the call site", 2),
+    ],
+    "formal/lean/scripts/total_probe.lean": [
+        ("import LeanSemanticPrimitives.Compiler.CertIO",
+         "import LeanSemanticPrimitives.Compiler.CertIOV1",
+         "master's Compiler.CertIO is DCERT2 and needs Mathlib, which .build-proj.sh "
+         "excludes; the historical runners take the V1 route, as CertLoad does"),
+        ("CertIO.loadCert", "CertIO.V1.loadCert",
+         "same transport, at the call site", 1),
     ],
     "formal/lean/LeanSemanticPrimitives/Projection/OperatorBridge.lean": [
         # PROOF-ONLY. Every statement below is the pinned FP statement verbatim.
@@ -185,15 +228,20 @@ def main() -> int:
         rel = r["asset"]
         text = (src_root / rel).read_bytes()
         reasons, applied = [], 0
-        for old, new_, why in ADAPTATIONS.get(rel, []):
+        for edit in ADAPTATIONS.get(rel, []):
+            old, new_, why = edit[0], edit[1], edit[2]
+            # An explicit count, because a transported call site can legitimately
+            # repeat. Stating it means a source that gains or loses one is a
+            # refusal rather than a silently different edit.
+            want = edit[3] if len(edit) > 3 else 1
             t = text.decode("utf-8")
             n = t.count(old)
-            if n != 1:
+            if n != want:
                 problems.append(f"{rel}: adaptation anchor appears {n} times, "
-                                f"expected exactly 1: {old[:70]!r}")
+                                f"expected exactly {want}: {old[:70]!r}")
                 continue
-            text = t.replace(old, new_, 1).encode("utf-8")
-            applied += 1
+            text = t.replace(old, new_, n).encode("utf-8")
+            applied += n
             reasons.append(why)
         r["adapted_edits"] = applied
         r["adaptation_reason"] = "; ".join(reasons)

@@ -26,7 +26,7 @@ Exit: 0 pass / 1 disagreement or checker rejection / 2 setup / 3 out of fuel.
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Projection.CertLoad
 import LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorSummary
-import LeanSemanticPrimitives.Compiler.CertIO
+import LeanSemanticPrimitives.Compiler.CertIOV1
 
 open Compiler Projection Projection.Hw Projection.Runner Projection.ProtoVar
 
@@ -170,7 +170,7 @@ def accept (D : DesignCert) (R : Program) (tms : Nat) : IO UInt32 := do
     return (if bad then 1 else 0)
 
 def cert (path backend : String) (sf wf : Nat) : IO UInt32 := do
-  let D ← CertIO.loadCert path
+  let D ← CertIO.V1.loadCert path
   IO.println s!"{path}"
   IO.println s!"  sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size}"
   let sr := CertLoad.supportReport D

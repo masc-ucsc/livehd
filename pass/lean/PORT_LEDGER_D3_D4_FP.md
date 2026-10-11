@@ -3582,7 +3582,7 @@ behind it and are blocked, not failing.
 | fixture | exit | wall | peak RSS | guards |
 | --- | ---: | ---: | ---: | ---: |
 | `Projection/Demo.lean` (first projection) | **0** | 1.40 s | 487,180 kB | 28 |
-| `Projection/Gate0.lean` (self-application / second projection) | **0** | 3.01 s | 493,632 kB | 17 |
+| `Projection/Gate0.lean` (self-application / second projection) | **0** | 3.01 s | 493,632 kB | 16 |
 | `scripts/repr_prototype.lean` (diagnostic runner) | **0** | -- | -- | -- |
 
 `Gate0`'s own header says *"Everything here is a `#guard`, so the build is the
@@ -3652,7 +3652,8 @@ Core lemmas only -- `Int.pow_pos`, `Int.emod_nonneg`, `Int.emod_lt_of_pos`,
 
 ### 39.3 Finite boundary controls, and a demonstration that they discriminate
 
-`pass/lean/tests/fp/fp_sext_controls.lean`, 17 `#guard`s, exit 0 in 0.69 s:
+`pass/lean/tests/fp/fp_sext_controls.lean`, **16** `#guard` directives plus 6
+`#print axioms`, exit 0 in 0.69 s:
 `n = 0` at two widths, `n < a.width` truncate-then-sign-extend in three signs,
 `n = a.width` with the sign bit set, `n > a.width`, zero-width input, zero-width
 result, unreduced `BV.value` (`⟨4, 19⟩` is 3), negative `BV.value` (`⟨4, -1⟩` is
@@ -3673,6 +3674,14 @@ control, and the file says so.
 These are additional evidence. The obligation is the universal theorem, which
 holds for all `w`, `a` and `amount`.
 
+### 39.3a A counting correction
+
+Earlier guard totals came from `grep -c '#guard'`, which counts LINES MENTIONING
+the word -- prose in a doc comment included. Counting DIRECTIVES instead:
+`fp_sext_controls` has **16** (not 17), `Gate0` **16** (not 17), `Scaling` **31**
+(not 33). `Demo` (28) and `CertLoad` (13) were right. `fp_sext_controls` also
+carries 6 `#print axioms`, a different kind of directive, counted separately.
+
 ### 39.4 Rebuilt, and the original fixtures re-run
 
 `.build-proj.sh` from a cleared `.olean-dev`: **33 modules, 0 failures,
@@ -3684,9 +3693,9 @@ eight that were blocked: `HardwareInterpreter`, `HardwareAdequacy`,
 | fixture | exit | wall | peak RSS | guards |
 | --- | ---: | ---: | ---: | ---: |
 | `Demo` (first projection) | 0 | 4.97 s | 488,484 kB | 28 |
-| `Gate0` (self-application) | 0 | 2.60 s | 496,012 kB | 17 |
+| `Gate0` (self-application) | 0 | 2.60 s | 496,012 kB | 16 |
 | `CertLoad` (historical DCERT1 V1 grammar/admission) | 0 | 1.24 s | 529,144 kB | 13 |
-| `Scaling` | 0 | 12.64 s | 535,684 kB | 33 |
+| `Scaling` | 0 | 12.64 s | 535,684 kB | 31 |
 | `Audit` | 0 | 0.69 s | 519,556 kB | -- |
 | `scripts/repr_prototype.lean` | 0 | -- | -- | -- |
 
@@ -3722,4 +3731,148 @@ emission gap (rc 6, combinational loop) is open, not dropped. The 311 primary
 axiom reports still cover 21 of 38 modules. Object second projection stays
 distinct from unproved host-specializer correctness. Module builds and fixture
 exits close no benchmark coverage.
+
+## 40. FP checkpoint 3: all 38 modules, and the first historical benchmark
+
+### 40.1 The 13 Proto modules, in dependency order
+
+Order derived from actual imports, not assumed: `InterpreterVariant`,
+`MixProgramSummary`, `PartialEvaluatorFast`, `PartialEvaluatorShift`,
+`PartialEvaluatorSummary` have no Proto dependencies;
+`VariantTransport <- InterpreterVariant`, `RewriteTotal <- VariantTransport`,
+`VariantAdequacy <- RewriteTotal`, then `VariantExec` and `ProtoAudit` off
+`VariantAdequacy`, `RunnerSupport <- VariantExec`, and the two mirror checks
+last.
+
+**All 13 build, rc=0, zero errors, and NONE needed adaptation.** The pinned
+`.build-proj.sh` builds them unmodified -- `Proto/X` resolves through its
+`Projection/` branch -- so the driver stayed verbatim for this.
+
+| module | wall | peak RSS | | module | wall | peak RSS |
+| --- | ---: | ---: | --- | --- | ---: | ---: |
+| InterpreterVariant | 1.37 s | 510,920 kB | | VariantAdequacy | **25.95 s** | **1,754,676 kB** |
+| MixProgramSummary | 1.45 s | 545,964 kB | | VariantExec | 1.29 s | 521,896 kB |
+| PartialEvaluatorFast | 6.04 s | 581,128 kB | | ProtoAudit | 0.73 s | 557,136 kB |
+| PartialEvaluatorShift | 6.16 s | 559,940 kB | | RunnerSupport | 0.91 s | 531,544 kB |
+| PartialEvaluatorSummary | 6.23 s | 590,276 kB | | LookupMirrorCheck | 2.84 s | 515,560 kB |
+| VariantTransport | 1.56 s | 610,132 kB | | S2aMirrorCheck | 2.79 s | 515,716 kB |
+| RewriteTotal | 1.46 s | 549,096 kB | | | | |
+
+That is **38 of 38** Projection modules built from master sources in one
+isolated project-local `.olean-dev` under pinned Lean 4.31. The evidence is the
+clean-rebuild command and its exit, not the presence of `.olean`s.
+
+### 40.2 The original assertions execute
+
+| module | exit | wall | peak RSS | `#guard` | axiom reports |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `Proto/ProtoAudit` | 0 | 0.68 s | 515,644 kB | -- | **43** |
+| `Proto/VariantExec` | 0 | 1.19 s | 505,904 kB | **22** | -- |
+| `Proto/LookupMirrorCheck` | 0 | 2.73 s | 503,884 kB | **12** | -- |
+| `Proto/S2aMirrorCheck` | 0 | 2.65 s | 503,548 kB | **13** | -- |
+| `Audit` (primary) | 0 | 0.68 s | 523,864 kB | -- | **311** |
+
+Axiom sets across all 354 reports: 158 `[propext]`, 118
+`[propext, Quot.sound]`, 75 `[propext, Classical.choice, Quot.sound]`, 6 with
+none. No `sorryAx`, nothing outside the permitted set, no declaration dropped.
+
+`VariantExec` is the smallest original variant SEQUENTIAL fixture, and it is
+the one the checkpoint asks for: explicit budgets (20000/200) rather than
+`projectDesign`'s hardcoded pair, reset beating enable, enable-low holding,
+output = the OLD `q`, next-state flops per cycle, and a 3-cycle trace where
+each cycle starts from the previous `nextState` -- plus a fail-closed case at
+an impossible budget.
+
+### 40.3 `proto_probe --rewrite-agree`, the original CLI
+
+```
+hwS main: partial-vs-total  same-body true  same-report true
+          (applied true/true, beforeTotal true/true)
+negS: partial beforeTotal false applied false | total beforeTotal false applied false
+  OK: the kernel-visible transform agrees with the checked one
+```
+exit 0, 3.29 s, 571,520 kB. Both the real body and the ORIGINAL negative
+fixture `negS`, with the original observable report fields.
+
+**What it is.** The probe's own comment is the right framing and is preserved:
+`RewriteTotal`'s traversals are structurally recursive so the kernel can reduce
+them; `InterpreterVariant`'s are `partial` and opaque to it. *Nothing can PROVE
+they agree* -- a `partial def` has no equations to reason from. This is
+regression evidence that the kernel-visible facts are about the same transform
+the gate checks. **Runtime agreement on `hwSVar` does not transport the theorem
+about `hwSVarT`**, and the coverage index keeps the two apart.
+
+### 40.4 A transport the runners needed
+
+Five original runners -- `proto_probe`, `s2_probe`, `s2a_probe`, `s3_probe`,
+`total_probe` -- import `Compiler.CertIO` and call `CertIO.loadCert`. On master
+that name is DCERT2 and its chain imports Mathlib, which `.build-proj.sh`
+excludes by design. They take the **V1 route**, exactly as `CertLoad` does:
+same historical contract, same reason, recorded in the install map. 8 of 56
+assets are now adapted; 48 verbatim.
+
+The installer's new validate-before-write pass earned itself immediately: I
+registered 5 `CertIO.loadCert` call sites in `proto_probe` from a truncated
+`grep`, and it **refused before writing anything**, naming the real count (9).
+Under the old code that refusal would have landed after 55 files.
+
+### 40.5 Coverage index over all 38 modules
+
+`pass/lean/tests/fp/fp_coverage_index.tsv`. Totals: **557 theorems, 352 with an
+exact-name axiom report** (63%), 854 definitions of which **16 are `partial`**
+and so have no kernel theorem by construction, **6 `@[csimp]`** equivalences and
+**0 `@[implemented_by]`**, 306 `#guard` directives and 357 `#print axioms`.
+Every one of the 22 modules that declares a theorem has at least one audited;
+16 modules declare none and are definition-and-guard only.
+
+The index keeps three distinctions the standard asks for: a `#guard` is a
+COMPILED-EVALUATOR check and not a kernel result; a `partial def` has no
+equations and cannot carry one; and a `@[csimp]` equivalence is a separate
+obligation from the theorem it accelerates. The primary `Audit` imports 14
+modules directly and transitively covers 21 of 38 -- it is not a full-module
+audit, and `ProtoAudit`'s 43 reports are a second, disjoint set rather than an
+extension of it.
+
+### 40.6 The first historical benchmark on master
+
+`instr_scan`, the smallest of the eight canonical CVA6 passing blocks (original
+record row 15), through the ORIGINAL V1 runner `cert_runner.lean` at the
+original invocation `<file.dcert> 4 1`:
+
+```
+cert_sha256 41533d1c315437991614088efbfabc325e3daf1a128c2d62fcc27485c5aa20aa
+  bytes 39469  read 1 ms  parse 67 ms
+  sources 1235  nodes 1264  outputs 13 flops 0  memories 0  clocks 1
+  support: wf true  memFree true  sources true  ops true arities true  flopClocks true
+  asyncOK (DCERT1 v1 cannot carry FlopDesc.asyncReset): true
+  specialize+check 250389 ms   residual funs 1 size 2335903  bound 3241
+  surviving caseT tags [120]   (tagState = 120)
+  one cycle AGREES: OUT[13] 1:0 1:0 64:28 1:0 1:0 1:0 1:0 1:0 1:0 64:58 1:0 1:0 1:0 | FLOP[0]
+  trace AGREES (4 results)
+```
+exit 0, 293.95 s wall, 627,336 kB peak. The certificate hash matches the
+recorded one exactly, and all six `SupportedByProjection` conjuncts are
+reported separately, as the original does.
+
+**Its limits, from the procedure itself.** The runner prints: *"agreement here
+is EXECUTION EVIDENCE about this file, not a kernel proof about it; `SimWF` is
+still undischarged for a loaded certificate."* And `asyncOK` is true because
+**DCERT1 cannot carry `FlopDesc.asyncReset` at all** -- V1 does not restore
+omitted clock/reset metadata, it reports that the format has none.
+
+This is one block of eight, under one configuration, on the HISTORICAL replay
+route. It begins benchmark preservation and closes nothing.
+
+### 40.7 Still open
+
+The other seven canonical inputs; the 30 experiment rows and their
+configurations (26 successes are not the inventory); the runner, trace, scaling
+and DCERT experiment sets; `pmp_data_if`, whose fresh emission is
+`EMIT_FAILED rc=6` with a native combinational-loop diagnostic and which stays
+IN the denominator; the csimp equivalence proofs as checks distinct from
+executable use through the original runners; the fresh DCERT2 FP transport,
+open until the current parser plus FP admission and runtime procedures actually
+execute; and conditional `mixDriver`/`checkResidual` premises, which are not
+concrete specialization proofs. Object second projection stays distinct from
+unproved host-specializer correctness.
 
