@@ -54,6 +54,8 @@ s1_identity	s1-identity	(no args)	0	10.61	1051948	18	ALL CHECKS PASSED: true; 18
 s0_grid	s0-grid	(no args)	0	23.94	11540	20	ALL CHECKS PASSED: true; 11 host-anchored points all same true; 20/20 chk true ref true	FORK is the subject and is 7-11x SLOWER than the proved host where both ran (A S=256: fork 402 vs host 48 ms; C E=1024: 763 vs 72 ms). Largest fork point D S=N=1024: 6259 ms. No exponent is fitted here.
 perf_probe	perf-chain	16 32 64 128 256 512	0	0.85	8380	6	projectDesign + checkResidual only; exit is ALWAYS 0, so it carries no verdict	specialize 4/11/19/37/140/621 ms; residual size 15n+33; bound 3n+5
 perf_probe	perf-fan	--fan 16 32 64 128 256 512	0	1.56	8404	6	as above	specialize 6/13/22/61/259/1184 ms -- about 2x chainD at equal n, isolating slot read depth; residual size 16n+32
+build-native.sh	build-native	(default optimisation, probe perf_probe)	0	153.42	1604860	36 modules + probe	rc=0; built .native-dev/perf_probe, sha256 232357cc22d73ed70af3dcb45a2e6447013f67f748ced12ce51e1983a975c518	the ONLY entrypoint that had no execution record of its own; it writes .olean-dev and .native-dev, both now gitignored, so running it leaves the worktree clean
+perf_probe	native-perf-chain	16 32 64 128 256 512, from the build-native binary	0	9.74	15796	6	same residual as the -O2 build at every point: sizes 273/513/993/1953/3873/7713 and bounds 53/101/197/389/773/1541 are identical	specialize 26/30/88/341/1507/7716 ms against the -O2 build's 4/11/19/37/140/621 ms -- 2.7x to 12.4x slower, and the gap WIDENS with n. Optimisation level changes the time, not the residual.
 #
 # CROSS-PROBE CONSISTENCY (independent binaries, independent builds)
 #   s2-grid vs s3-grid, HOST column: the 25 lines cover 20 DISTINCT (S, N, E)
@@ -70,11 +72,15 @@ perf_probe	perf-fan	--fan 16 32 64 128 256 512	0	1.56	8404	6	as above	specialize
 #   No probe log in this set contains the string `false`, nor FAILED, REJECTED,
 #   OUT OF FUEL or NOT SupportedByProjection.
 #
-# perf_probe's RSS COLUMN IS NOT A PEAK AND IS NOT USED.  Measured: in one
-# process it reports 9104, 9116, 9136 then 8408 kB -- it goes DOWN.  Sampling
+# perf_probe's RSS COLUMN IS NOT A PEAK AND IS NOT USED.  Measured on the -O2
+# build: in one process it reports 9104, 9116, 9136 then 8408 kB -- it goes
+# DOWN.  Sampling
 # /proc/<pid>/status from outside the same run shows the same non-monotonicity
 # (max VmHWM observed 9176 kB, final 8408 kB, /usr/bin/time %M 8412 kB), so the
 # column tracks residency at print time rather than a high-water mark and is not
-# comparable with %M.  The mechanism was not pinned down.  The figure of record
+# comparable with %M.  The build-native (-O0) binary's column IS monotone
+# (9564 ... 16852 kB) yet still ends ABOVE that run's %M of 15796 kB, so the
+# column is unusable as a peak in both builds, for different reasons.  The
+# mechanism was not pinned down.  The figure of record
 # for every row above is the guarded runner's %M in peak_rss_kb; no claim here
 # rests on the probe's own column.

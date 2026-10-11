@@ -4778,7 +4778,36 @@ source slots at maximum depth, runs 6/13/22/61/259/1184 ms with size `16n+32`
 -- about twice chainD at equal n, which is the slot-read-depth cost the probe
 exists to isolate.
 
-### 47.6 Two repository findings from the same pass
+### 47.6 The last entrypoint, and what -O0 costs
+
+`build-native.sh` was the one entrypoint with no execution record of its own.
+It had none for a reason that only became visible in 47.7 below: it writes into
+`.olean-dev`, and three FP commits had left that directory TRACKED, so running
+it would have rewritten 78 MB of committed binaries. With both output
+directories ignored, it runs cleanly and leaves the worktree untouched:
+**rc=0, 153.42 s, 1.6 GB, 36 modules plus the probe**, producing
+`.native-dev/perf_probe`. That makes the entrypoint inventory **18 of 18
+executed**.
+
+The script exists to separate "the interpreter is slow" from "the specializer
+is slow", and running its binary against the `-O2` one on the same ladder
+answers that directly:
+
+| n | 16 | 32 | 64 | 128 | 256 | 512 |
+|---|---|---|---|---|---|---|
+| `build-native` (default) | 26 ms | 30 ms | 88 ms | 341 ms | 1507 ms | 7716 ms |
+| `build-opt -O2` | 4 ms | 11 ms | 19 ms | 37 ms | 140 ms | 621 ms |
+| ratio | 6.5x | 2.7x | 4.6x | 9.2x | 10.8x | 12.4x |
+
+Residual size and checker bound are **identical at every point** (273, 513,
+993, 1953, 3873, 7713 and 53, 101, 197, 389, 773, 1541). Optimisation level
+changes the time, not the residual, and the penalty widens with n.
+
+That run also sharpens 47.5: the `-O0` binary's RSS column **is** monotone
+(9564 ... 16852 kB) yet still ends *above* that run's `%M` of 15,796 kB. So the
+column is unusable as a peak in both builds, for two different reasons.
+
+### 47.7 Two repository findings from the same pass
 
 **The pin is not reachable from this repository.** `9bb41a09d` is the head of
 branch `projection` in `/mada/users/czeng14/projects/livehd-futamura/livehd`;
