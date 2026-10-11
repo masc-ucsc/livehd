@@ -196,6 +196,63 @@ def check(name, cond, note, failures, detail=""):
         failures.append(name)
 
 
+
+def build_users(build_root: pathlib.Path) -> list:
+    """Other processes of ours that have the live build mapped or open.
+
+    WHY THIS EXISTS.  Two legs below mutate the REAL `formal/lean/.lake`: one
+    renames it aside and symlinks it, the other appends a byte to the live
+    `D3Harness.olean` and writes it back.  Both restore what they changed, and
+    both are fine on an idle machine.
+
+    They are not fine next to a running probe.  A `lean` process mmaps the
+    `.olean`s it imports, so rewriting one under it invalidates pages inside a
+    live mapping and the probe dies of SIGBUS -- exit 135, no output, no
+    diagnostic that points anywhere near here.  Measured, on this branch: an
+    unbounded `scoreboard_gate` measurement was killed that way at 10:38.85 and
+    5.62 GiB, and the cause was this test running beside it.
+
+    So the test REFUSES rather than corrupting.  A guard that turns silent
+    destruction of someone else's run into a visible refusal is worth more than
+    the two legs it occasionally blocks.
+    """
+    base = str(build_root.resolve())
+    out = []
+    me = os.getpid()
+    for d in pathlib.Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        pid = int(d.name)
+        if pid == me:
+            continue
+        try:
+            maps = (d / "maps").read_text(errors="replace")
+        except (OSError, PermissionError):
+            continue
+        if base in maps:
+            try:
+                cmd = (d / "cmdline").read_bytes().replace(b"\0", b" ").decode(
+                    errors="replace").strip()
+            except OSError:
+                cmd = "?"
+            out.append((pid, cmd[:110]))
+    return out
+
+
+def refuse_if_build_in_use(build_root: pathlib.Path) -> None:
+    users = build_users(build_root)
+    if not users:
+        return
+    print("REFUSING to mutate the live build: another process has it mapped.",
+          file=sys.stderr)
+    for pid, cmd in users:
+        print(f"  pid {pid}: {cmd}", file=sys.stderr)
+    print("Rewriting an .olean under a running `lean` invalidates pages inside its "
+          "mapping and kills it with SIGBUS. Wait for those to finish.",
+          file=sys.stderr)
+    raise SystemExit(2)
+
+
 def main() -> int:
     f = []
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="d3_runner_test_", dir=str(ROOT / "temp")))
@@ -540,6 +597,7 @@ def main() -> int:
         shadow = tmp / "shared_lake"
         shadow.mkdir()
         moved = False
+        refuse_if_build_in_use(d3mod.build_root())
         try:
             real_lake.rename(tmp / "real_lake")
             real_lake.symlink_to(shadow)
@@ -565,6 +623,7 @@ def main() -> int:
         base = (d3mod.build_root() / "build" / "lib" / "lean"
                 / "LeanSemanticPrimitives" / "Compiler")
         victim_olean = base / "D3Harness.olean"
+        refuse_if_build_in_use(d3mod.build_root())
         before_dig = d3mod.artifact_digest()
         keep_bytes = victim_olean.read_bytes()
         try:

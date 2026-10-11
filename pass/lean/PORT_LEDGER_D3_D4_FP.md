@@ -3331,3 +3331,52 @@ proof procedure all wait for it. Fresh output and fresh fingerprints when they
 run: the existing `--prove` table predates this change and is not current
 evidence for it.
 
+## 36. I destroyed my own measurement, and the guard that stops it happening again
+
+The unbounded `scoreboard_gate` run died at **10:38.85 wall, 5.62 GiB peak,
+exit 135 -- SIGBUS**, with empty output. Not an OOM: the cap was 18,000,000 kB
+and the cgroup peak was 5.16 GiB. Not a property of the design either.
+
+`d3_runner_test.py` mutates the LIVE build. One leg renames
+`formal/lean/.lake` aside and symlinks it; another appends a byte to the live
+`D3Harness.olean` and writes it back. Both restore what they changed and both
+are harmless on an idle machine. They are not harmless beside a running probe:
+`lean` mmaps the `.olean`s it imports, so rewriting one under it invalidates
+pages inside a live mapping and the process dies of SIGBUS -- with no
+diagnostic pointing anywhere near the cause.
+
+I ran that test, to chase a flake, while the measurement was running. I had
+been told explicitly not to run competing builds against its imports. The
+measurement was lost and had to start again from zero.
+
+### 36.1 The guard
+
+`refuse_if_build_in_use` scans `/proc/*/maps` for any other process of ours
+holding the build root, and both mutating legs call it first. It prints the
+pid and the command line and exits 2 rather than proceeding. Verified against
+the live measurement:
+
+```
+REFUSING to mutate the live build: another process has it mapped.
+  pid 1317609: .../bin/lean .../scoreboard_gate_s5_full.lean
+Rewriting an .olean under a running `lean` invalidates pages inside its
+mapping and kills it with SIGBUS. Wait for those to finish.
+```
+
+A guard that turns silent destruction of someone else's run into a visible
+refusal is worth more than the two legs it occasionally blocks. This is the
+second time in this port that concurrent access to one Lake context produced a
+failure with a misleading signature -- the first was 7,090 Mathlib
+`.olean.server` replay errors from running tests beside a module proof -- and
+neither was detectable from the symptom.
+
+### 36.2 Carried forward, not chased
+
+`resume_after_kill` in `d3_runner_test.py` failed **1 run in 3** under load,
+with *"resume completed the run to 2 rows"* -- the resume adding none of the
+four remaining targets. That is a statement about resumability, not about the
+assertion, and it deserves its own investigation. It is NOT being chased now,
+because chasing it means running the test that destroys the measurement, and
+the measurement is the current job. `timeout_resumable` in the scheduler test
+failed once in the same window and is on the same list.
+
