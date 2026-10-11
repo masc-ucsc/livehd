@@ -55,7 +55,7 @@ struct Driver_options {
   // smallest buffer, `icg_fanout` sinks per buffer, level by level. One net on
   // thousands of flops is unbuffered and dominates every gate-level timing report
   // (minion: a 1.5-2.5 ns ICG output as the whole critical path). 0 disables.
-  uint32_t icg_fanout = 64;
+  uint32_t icg_fanout = 16;
   // Optional region hook, and its identity in the region-cache recipe (two
   // regions with equal logic but different hook settings never share a body).
   Region_hook                                                               region_hook;

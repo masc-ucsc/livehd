@@ -361,6 +361,8 @@ default_part = part_run("part_default", "")
 scoped_part  = part_run("part_scoped", ',synth.partition="coarse"')
 global_part  = part_run("part_global", "", "synth.partition=coarse")
 assert scoped_part == global_part and scoped_part[1] < default_part[1] and scoped_part[0] < default_part[0], (default_part, scoped_part, global_part)
+# The per-scope form also drives the coloring profile of a hierarchy (flop_to_flop
+# cones), not just the cut conditions: a module pinned coarse colors like the run-wide one.
 # ABC optimization steps per region: distinct colors may differ, one color may not,
 # the vocabulary is closed, and usyn keeps its own flow (warning, no error).
 pre_ok = work / "pre_ok.prp"

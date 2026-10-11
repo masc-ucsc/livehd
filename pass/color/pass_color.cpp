@@ -772,6 +772,40 @@ void Pass_color::color(Eprp_var& var) {
   }
   auto retained_bodies = loop_bodies;
   retained_bodies.insert(reused_bodies.begin(), reused_bodies.end());
+  // A module whose cells carry `synth.partition=coarse|fine` takes that profile
+  // for ITS OWN coloring (the per-scope form of synth.partition): coarse is the
+  // usyn profile (register-to-register cones, no cut at wide arithmetic, muxes,
+  // comparisons or shifters), fine the abc one. An explicit option on the
+  // command line still wins. Applied to a def and to the virtual-flat view.
+  auto apply_scope_profile = [&](hhds::Graph* g, Color_opts& o) {
+    if (alg != "synth") {
+      return;
+    }
+    size_t coarse = 0, fine = 0;
+    for (auto n : g->body().nodes()) {
+      if (auto a = n.attr(livehd::attrs::synth_policy); a.has()) {
+        const auto part = livehd::synth_attr::get(livehd::synth_attr::read(a.get()), "partition");
+        coarse += part == "coarse";
+        fine   += part == "fine";
+      }
+    }
+    if (coarse == 0 && fine == 0) {
+      return;
+    }
+    const bool usyn_profile = coarse >= fine;
+    const auto set_default  = [&](std::string_view key, bool value, bool& field) {
+      if (var.get(key, "").empty()) {
+        field = value;
+      }
+    };
+    set_default("ctrl_cones", !usyn_profile && std::string{var.get("mode", "cones")} == "cones", o.ctrl_cones);
+    set_default("stop_mux", usyn_profile, o.mux_in_data);  // mux_in_data == !stop_mux
+    set_default("stop_arith", !usyn_profile, o.stop_arith);
+    set_default("stop_cmp", !usyn_profile, o.stop_cmp);
+    set_default("stop_shift", !usyn_profile, o.stop_shift);
+    set_default("flop_to_flop", usyn_profile, o.flop_to_flop);
+  };
+
   bool virtual_flat = false;
   if (alg == "synth" && opts.hier && top_g != nullptr && gid2graph.size() > 1) {
     auto*       lib = top_g->get_io() ? top_g->get_io()->get_library() : nullptr;
@@ -795,6 +829,7 @@ void Pass_color::color(Eprp_var& var) {
       Def_color_sizes flat_sizes;
       Color_opts      o = opts;
       o.sizes           = stats ? &flat_sizes : nullptr;
+      apply_scope_profile(flat.get(), o);
       run_one(alg, flat.get(), o, var);
 
       // Colors are only meaningful as the flat coloring, so the descriptor is
@@ -861,6 +896,7 @@ void Pass_color::color(Eprp_var& var) {
     Def_color_sizes sizes;
     Color_opts      o = opts;
     o.sizes           = stats ? &sizes : nullptr;
+    apply_scope_profile(g, o);
     if (loop_bodies.contains(g->get_gid())) {
       livehd::color::Color_flat(o).label(g);
     } else {
