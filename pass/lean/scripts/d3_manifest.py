@@ -283,11 +283,49 @@ def cva6_manifests(certs_dir: pathlib.Path, out: pathlib.Path, refreeze: bool,
             "no_cert": len(no_cert), "digest": digest, "target30_digest": target30_digest}
 
 
+IMPORTED_STATUS = (
+    "IMPORTED: compatibility evidence only. Passing a gate here does NOT "
+    "show this branch can generate the certificate end to end.")
+LOCAL_STATUS = (
+    "EMITTED BY THIS WORKTREE: collected by d3_master_corpus.py from a D4 "
+    "emission run, which admits a certificate only when its own row says "
+    "emit_status=EMITTED and the emitted trailer is post-D2. A gate passed "
+    "here IS end-to-end evidence for this branch.")
+
+
+def corpus_sources(certs_dir: pathlib.Path) -> str:
+    """The `# source` lines d3_master_corpus.py wrote beside a collected corpus."""
+    prov = certs_dir.parent / "PROVENANCE.tsv"
+    if not prov.is_file():
+        return ""
+    out = []
+    for line in prov.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("# source\t"):
+            out.append(line.split("\t", 1)[1])
+    return "; ".join(out)
+
+
 def provenance(coreet: pathlib.Path, cva6: pathlib.Path, out: pathlib.Path,
                digests: dict) -> None:
-    src_repo = pathlib.Path("${LIVEHD_NEW_ROOT:-../livehd-new}")
+    # The status line is DERIVED, not asserted.  Writing "IMPORTED:
+    # compatibility evidence only" over a corpus this worktree emitted says the
+    # opposite of the truth, and a provenance record that can be wrong about
+    # which repository produced its files is worse than none.
     rows = []
     for label, d in (("coreet", coreet), ("cva6", cva6)):
+        try:
+            d.resolve().relative_to(ROOT.resolve())
+            local = True
+        except ValueError:
+            local = False
+        # Ask the certificates which repository they are in.  The historical
+        # placeholder was recorded verbatim, so `git -C "${LIVEHD_NEW_ROOT:-...}"`
+        # ran against a path that does not exist and the observed head came back
+        # "unknown" whenever the corpus was given by an explicit path.
+        top = git(d, "rev-parse", "--show-toplevel") if not local else ""
+        src_repo = (ROOT if local
+                    else pathlib.Path(top) if top
+                    else pathlib.Path("${LIVEHD_NEW_ROOT:-../livehd-new}"))
         files = sorted(d.glob("*_Lgraph.lean"))
         newest = max((f.stat().st_mtime for f in files), default=0)
         oldest = min((f.stat().st_mtime for f in files), default=0)
@@ -310,8 +348,9 @@ def provenance(coreet: pathlib.Path, cva6: pathlib.Path, out: pathlib.Path,
             # that commit exists.  It records the worktree HEAD the generation
             # ran from, which is all it can honestly identify.
             "generation_worktree_base_head": git(ROOT, "rev-parse", "HEAD") or "unknown",
-            "status": "IMPORTED: compatibility evidence only. Passing a gate here does NOT "
-                      "show this branch can generate the certificate end to end.",
+            "status": (LOCAL_STATUS if local else IMPORTED_STATUS)
+                      + (f" Collected from: {corpus_sources(d)}."
+                         if local and corpus_sources(d) else ""),
         })
     write_tsv(out / "PROVENANCE.tsv", list(rows[0].keys()), rows)
 
