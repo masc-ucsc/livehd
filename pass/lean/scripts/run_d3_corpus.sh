@@ -26,6 +26,19 @@
 # `systemd-run --user --scope --property=Delegate=yes`; without it the sweep
 # REFUSES rather than silently degrading, and so does this script.
 #
+# Exit status
+# -----------
+#   2  this driver refused to start: no corpus named, or the certificate
+#      directory it would have read does not exist.  Nothing was written.
+#   0  the sweep completed AND the join is complete and consistent at the
+#      manifest's denominator.  That takes a whole corpus; a --only or --limit
+#      run cannot reach it, by design.
+#   1  anything else -- the sweep refused or failed, or it succeeded and the
+#      join found the result incomplete or inconsistent.  Which one it was is
+#      in the log as `sweep_rc=` and `join_rc=`, and those two are the lines to
+#      read: an incomplete run and a failed one are different outcomes and the
+#      status alone does not separate them.
+#
 # Usage:
 #   pass/lean/scripts/run_d3_corpus.sh coreet [extra d3_sweep args...]
 #   pass/lean/scripts/run_d3_corpus.sh cva6   [extra d3_sweep args...]
