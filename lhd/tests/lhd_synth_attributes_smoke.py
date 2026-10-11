@@ -326,4 +326,18 @@ assert "synth-target-unreachable" in tight_log
 loose, _ = synth("nested", nested, "synth.opentimer=true", "pass.abc.delay=100000")
 tt = loose["qor"]["timing_target"]
 assert tt["met"] is True and tt["unreachable"] is False and tt["slack_ps"] > 0, tt
+# Attributes never change compilation (nicesynth C12): a callee carrying a pin is
+# inlined exactly like an unattributed one, so a pin that restates the default
+# gives the identical netlist (region bookkeeping may differ: a source pin
+# anchors its cells, which are then shared as one implementation).
+def inlined(name, head):
+    path = work / (name + ".prp")
+    path.write_text(head + "\npub comb " + name + "::[timecheck=false](a:U32,b:U32,n:U5)->(x:U32,z:U32) {\n"
+                    " x=sh(a=a,n=n).y\n z=sh(a=b,n=n).y\n}")
+    doc, _ = synth(name, path)
+    total = doc["qor"]["abc"]["total"]
+    return total["gates"], len(doc["qor"]["abc"]["regions"])
+plain_sh = inlined("inl_plain", "comb sh(a:U32,n:U5)->(y:U32) { y=(a<<n)#[0..=31] }")
+pinned_sh = inlined("inl_pinned", 'comb sh::[synth.barrel="log"](a:U32,n:U5)->(y:U32) { y=(a<<n)#[0..=31] }')
+assert plain_sh[0] == pinned_sh[0], (plain_sh, pinned_sh)
 print("region contraction A -> B -> A and module-scope isolation passed")

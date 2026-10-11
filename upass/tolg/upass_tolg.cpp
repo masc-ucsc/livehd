@@ -1243,7 +1243,7 @@ private:
     // and never reached a cell it governs is silently ignored by every later
     // pass. Say so, at the attribute's own file:line.
     for (const auto& [key, hint] : cur_synth_) {
-      if (key.starts_with("_") || key == "color" || key == "grow" || key == "ware" || key == "abc" || key == "delay") {
+      if (key.starts_with("_") || !synth_key_needs_op(key)) {
         continue;
       }
       const auto before = saved_synth.find(key);
@@ -1251,18 +1251,7 @@ private:
         continue;
       }
       const auto where = synth_key_srcid_.find(key);
-      auto       d     = locate_srcid(where != synth_key_srcid_.end() ? where->second : std::string_view{},
-                              livehd::diag::Severity::warning,
-                              "synth-attr-unused",
-                              "unsupported",
-                              std::format("synth.{}={} has no effect: nothing in this scope is a {}", key, hint.value,
-                                          key == "multiplier"                               ? "multiplication"
-                                          : key == "barrel" || key == "stop_shift"          ? "runtime shift"
-                                          : key == "stop_mux"                               ? "mux"
-                                          : key == "stop_cmp"                               ? "wide comparison"
-                                                                                            : "wide add, subtract or compare"));
-      d.hint            = "put the attribute on the block, variable or module that contains the operation, or remove it";
-      livehd::diag::sink().emit(std::move(d));
+      warn_unused_synth(key, hint, where != synth_key_srcid_.end() ? where->second : std::string{}, "this scope");
     }
     // Keys used here count for the enclosing scope too (a nested block's cells
     // are the outer scope's cells).
@@ -1283,6 +1272,37 @@ private:
   // into a per-region mapping unit. region_abc_ collects the per-color ABC
   // flow payloads for the coloring_info "region_opts" member.
   livehd::synth_attr::Policy                            cur_synth_;
+  // Inlined-comb frames (`__synth_push`/`__synth_pop`): the call-site policy in
+  // force, and what to restore when the spliced body ends.
+  struct Synth_frame {
+    livehd::synth_attr::Policy synth;       // cur_synth_ before the push
+    livehd::synth_attr::Policy outer_call;  // enclosing frame's call policy
+    absl::flat_hash_set<std::string> used;  // enclosing scope's used keys
+    hhds::SourceId             srcid;       // the call site
+    livehd::synth_attr::Policy call;        // this frame's (un-composed) call policy
+  };
+  std::vector<Synth_frame>                              synth_frames_;
+  livehd::synth_attr::Policy                            frame_call_;
+  // Keys that only mean something on particular operations (a key with a
+  // membership meaning is never "unused").
+  static bool synth_key_needs_op(const std::string& key) {
+    return !(key == "color" || key == "grow" || key == "ware" || key == "abc" || key == "delay");
+  }
+  void warn_unused_synth(const std::string& key, const livehd::synth_attr::Hint& hint, std::string_view srcid, std::string_view where) {
+    auto d = locate_srcid(srcid,
+                          livehd::diag::Severity::warning,
+                          "synth-attr-unused",
+                          "unsupported",
+                          std::format("synth.{}={} has no effect: nothing in {} is a {}", key, hint.value, where,
+                                      key == "multiplier"                               ? "multiplication"
+                                      : key == "barrel" || key == "stop_shift"          ? "runtime shift"
+                                      : key == "stop_mux"                               ? "mux"
+                                      : key == "stop_cmp"                               ? "wide comparison"
+                                      : key == "memory"                                 ? "memory"
+                                                                                        : "wide add, subtract or compare"));
+    d.hint = "put the attribute on the block, variable or module that contains the operation, or remove it";
+    livehd::diag::sink().emit(std::move(d));
+  }
   absl::flat_hash_set<std::string>                      used_synth_;      // keys stamped on a cell in the current scope
   absl::flat_hash_map<std::string, std::string>         synth_key_srcid_;  // key -> SourceId text of the attribute that set it
   std::map<std::string, livehd::synth_attr::Policy>     synth_targets_;
@@ -1848,7 +1868,56 @@ private:
     if (synth_key == "__synth_scope") {
       auto val = lnast_->get_sibling_next(key_n);
       if (!val.is_invalid()) {
-        const auto scope = livehd::synth_attr::decode(lnast_->get_name(val));
+        const auto target = lnast_->get_name(tgt);
+        auto       scope  = livehd::synth_attr::decode(lnast_->get_name(val));
+        if (target.find("__synth_push") != std::string_view::npos) {
+          // An inlined comb: its call-site policy (possibly empty) governs the
+          // callee's cells until the matching pop. Composed with an enclosing
+          // call exactly as graph inlining composes instance policies (rescope),
+          // so inlining a callee never changes what its attributes mean.
+          Synth_frame frame{cur_synth_, frame_call_, std::move(used_synth_), cur_srcid_, scope};
+          used_synth_.clear();
+          // What a Sub instance would carry from its surroundings: membership
+          // (color/grow, and the path an enclosing inlined call already built).
+          // Operation pins (adder, ...) stay in cur_synth_ and apply to the
+          // spliced cells, which are lexically part of this scope.
+          livehd::synth_attr::Policy ambient;
+          for (const auto* key : {"color", "grow", "_path"}) {
+            if (auto it = cur_synth_.find(key); it != cur_synth_.end()) {
+              ambient.emplace(*it);
+            }
+          }
+          if (!ambient.empty()) {
+            livehd::synth_attr::rescope(scope, ambient);
+          }
+          frame_call_ = scope;
+          for (const auto& [key, hint] : scope) {
+            synth_key_srcid_[key] = std::to_string(cur_srcid_);
+          }
+          livehd::synth_attr::overlay(cur_synth_, scope);
+          synth_frames_.push_back(std::move(frame));
+          return;
+        }
+        if (target.find("__synth_pop") != std::string_view::npos) {
+          if (synth_frames_.empty()) {
+            return;
+          }
+          auto frame = std::move(synth_frames_.back());
+          synth_frames_.pop_back();
+          // A call-site pin that governed no cell of the callee is lost: say so.
+          for (const auto& [key, hint] : frame.call) {
+            if (!key.starts_with("_") && !used_synth_.contains(key) && synth_key_needs_op(key)) {
+              warn_unused_synth(key, hint, std::to_string(frame.srcid), "the call");
+            }
+          }
+          used_synth_ = std::move(frame.used);
+          cur_synth_  = std::move(frame.synth);
+          frame_call_ = std::move(frame.outer_call);
+          return;
+        }
+        if (!frame_call_.empty()) {
+          livehd::synth_attr::rescope(scope, frame_call_);
+        }
         for (const auto& [key, hint] : scope) {
           synth_key_srcid_[key] = std::to_string(cur_srcid_);
         }

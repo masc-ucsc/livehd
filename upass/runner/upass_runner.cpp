@@ -79,6 +79,7 @@
 #include "lsp_index.hpp"
 #include "op_kind_rules.hpp"
 #include "range_bits.hpp"
+#include "synth_policy.hpp"
 #include "ssa_demote.hpp"
 
 namespace {
@@ -8097,6 +8098,26 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
 
+  // Synthesis attributes must not change compilation: a comb that carries a
+  // module-scope hint (or is called with a call-site one) is spliced exactly like
+  // an unattributed one. The policy rides two scope markers around the spliced
+  // body (`__synth_push`/`__synth_pop`, handled by tolg), so it covers the
+  // callee's cells and never leaks into the rest of the caller. A callee that
+  // becomes a Sub instance (mod, pipe, inline=false) keeps the call-site policy
+  // as the `__synth_call` named actual instead (paths above and below).
+  const auto has_synth_scope = [&](auto&& self, const auto& node) -> bool {
+    if (callee->get_name(node) == "__synth_scope") {
+      return true;
+    }
+    for (const auto& child : callee->children(node)) {
+      if (self(self, child)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const bool synth_framed = !call_synth.empty() || has_synth_scope(has_synth_scope, callee->get_root());
+
   // A pipe or a non-method mod lowers to a Sub INSTANCE, whose ports tolg wires
   // by declaration order for any unnamed actual. That mis-binds a
   // type-distinguished unnamed actual — the runner resolved it by KIND (e.g.
@@ -8115,7 +8136,12 @@ bool uPass_runner::try_inline_func_call() {
     // into the flattened `req.a`/`req.b` leaf params — a binding the source
     // spelling cannot express for tolg (the store names `req`, which is not a
     // port). Materialize it as dotted named actuals unconditionally.
-    if (becomes_sub && (any_unnamed || tuple_actual_expanded)) {
+    // A synthesis-attributed Sub callee reached from inside an inline frame is
+    // re-emitted by name too: a plain decline copies the call through the frame
+    // rename and tags the callee ref `inl1_f`, a function tolg cannot find.
+    const bool any_ref_pass = std::any_of(actuals.begin(), actuals.end(), [](const Actual& a) { return a.is_ref_pass; });
+    const bool framed_sub   = synth_framed && lm->in_inline_frame() && !any_ref_pass && !has_self;
+    if (becomes_sub && (any_unnamed || tuple_actual_expanded || framed_sub)) {
       std::vector<std::pair<std::string, Lnast_node>> named;
       named.reserve(nbind);
       for (std::size_t i = 0; i < nbind; ++i) {  // becomes_sub ⇒ no self slot
@@ -8130,47 +8156,6 @@ bool uPass_runner::try_inline_func_call() {
       emit_named_instance_call(dst_name, frame_portable_callee_name(callee_name, callee), call_inst_name, named);
       return true;
     }
-  }
-
-  // A module-scoped synthesis hint belongs to the callee, not the rest of
-  // the caller. Preserve the instance until graph inlining, which carries
-  // node policies without extending their lexical scope.
-  const auto has_synth_scope = [&](auto&& self, const auto& node) -> bool {
-    if (callee->get_name(node) == "__synth_scope") {
-      return true;
-    }
-    for (const auto& child : callee->children(node)) {
-      if (self(self, child)) {
-        return true;
-      }
-    }
-    return false;
-  };
-  if (!call_synth.empty() || has_synth_scope(has_synth_scope, callee->get_root())) {
-    // Same rule as the Sub-instance paths below: re-emit as NAMED actuals when
-    // the source used an unnamed one (tolg binds an unnamed actual to the next
-    // declared port, so `f(a=x, b)` bound `b` to `a`) or when this call sits in
-    // an inline frame (a plain decline copies the call through the frame rename,
-    // tagging the callee ref `inl1_f`, a function tolg cannot find).
-    const bool scoped_unnamed = std::any_of(actuals.begin(), actuals.end(), [](const Actual& a) { return !a.is_named; });
-    const bool scoped_ref     = std::any_of(actuals.begin(), actuals.end(), [](const Actual& a) { return a.is_ref_pass; });
-    if ((tuple_actual_expanded || (scoped_unnamed && !scoped_ref) || (lm->in_inline_frame() && !scoped_ref)) && !has_self) {
-      std::vector<std::pair<std::string, Lnast_node>> named;
-      named.reserve(nbind);
-      for (std::size_t i = 0; i < nbind; ++i) {
-        if (param_set[i]) {
-          named.emplace_back(io.inputs[i].name, param_val[i]);
-        }
-      }
-      named.insert(named.end(), minted_actuals.begin(), minted_actuals.end());
-      if (!call_synth.empty()) {
-        named.emplace_back("__synth_call", Lnast_node::create_const(call_synth));
-      }
-      emit_named_instance_call(dst_name, frame_portable_callee_name(callee_name, callee), call_inst_name, named);
-      return true;
-    }
-    stash_sub_instance_port_facts(dst_name, callee);
-    return false;
   }
 
   // A `pipe` callee (any output carries a stages annotation) is
@@ -8625,6 +8610,12 @@ bool uPass_runner::try_inline_func_call() {
   hier_prefix_stack_.push_back(inline_level);
   active_inline_callees_.push_back(callee.get());
   flush_deferred_emits();  // flush caller-tree parked writes before entering
+  if (synth_framed) {
+    // The call-site policy (empty when only the callee's module scope applies).
+    emit_inline_attr(std::format("%__synth_push_{}", salt),
+                     "__synth_scope",
+                     call_synth.empty() ? std::string("'") + livehd::synth_attr::encode({}) + "'" : call_synth);
+  }
   // Call-site id, re-minted into the root locator (the calling
   // tree may itself be a callee in nested inlining), anchors every node
   // spliced from this body via combine(callee_def, call_site) in carry_srcid.
@@ -8750,6 +8741,9 @@ bool uPass_runner::try_inline_func_call() {
   }
   flush_deferred_emits();  // flush callee-tree parked writes before leaving
   lm->pop_source();
+  if (synth_framed) {
+    emit_inline_attr(std::format("%__synth_pop_{}", salt), "__synth_scope", std::string("'") + livehd::synth_attr::encode({}) + "'");
+  }
   unroll_requested_ = saved_unroll;
   inline_call_sites_.pop_back();
   active_inline_callees_.pop_back();
