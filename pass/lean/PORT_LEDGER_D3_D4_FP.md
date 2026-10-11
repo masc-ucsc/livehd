@@ -3097,19 +3097,31 @@ downstream of those.
 ### 33.1 A search budget that was never raised
 
 The probe sets `maxRecDepth 1000000` and `maxHeartbeats 0`, and **nothing sets
-simp's `maxSteps`**, which defaults to 100,000. The word does not appear in
-`ReifyProof.lean` or in `d3_sweep.py`. `prove_reified`'s closing tactic is a
-plain
+simp's `maxSteps`**, which is `defaultMaxSteps := 100000` at Lean 4.31
+`Init/MetaTypes.lean:208`. The word appears nowhere in `ReifyProof.lean` or in
+`d3_sweep.py`.
+
+**I quoted the wrong tactic here and must correct it.** The tactic I printed
+is the CHUNKED backend's, from around `ReifyProof.lean:750`. The legacy
+`prove_reified` that these probes actually run closes at
+`ReifyProof.lean:299-301` with
 
 ```lean
-simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
-      Compiler.compileMemory, Compiler.flopNext_eq, ...]
+simp [$f:ident, $d:ident, Compiler.runBindings, Compiler.denoteExpr,
+      Compiler.refBV, Compiler.refBVs, Compiler.refMem, Compiler.denoteRef,
+      Compiler.sourceEnvArr, Compiler.compileOutput, CertVal.asBV]
 ```
 
-so every design above about a hundred bindings exhausts the budget. The
-boundary is sharp and size-driven, not shape-driven: `intpipe_imm` has 108
-bindings, **no flops and no memories**, and still dies, while
-`debug_breakpoint` at 81 bindings is the only design that proves.
+-- no `compileFlop`, no `compileMemory`, no `flopNext_eq`, no `CertVal.asMem`.
+That difference is not cosmetic; §33.2 below turns on it.
+
+Nine of the eleven failures are this budget, and the two that are not are the
+28-binding async case and the 81-binding design that passes. **What eleven
+designs do NOT establish is a universal boundary.** The smallest observed
+failure of this kind is 108 bindings (`intpipe_imm`, with no flops and no
+memories, so it is a pure size effect there) and the largest observed success
+is 81. The real boundary lies somewhere between, depends on what the bindings
+contain, and the 64 deferred designs have not been asked.
 
 Raising it is a budget change of exactly the kind `maxHeartbeats 0` already is,
 and it weakens nothing: the axiom audit is what makes `proof=1` mean something
@@ -3117,12 +3129,11 @@ and it is untouched. The repair is a config on the emitted `simp`, since
 `maxSteps` is a `Simp.Config` field rather than a `set_option`. **Not applied
 at this checkpoint** -- the run in progress is the "before" measurement.
 
-### 33.2 A missing rewrite for async-reset flops
+### 33.2 The legacy transport has no flop or memory rewrites at all
 
 `intpipe_csr_file_fl_barrier` is the exception that is NOT a budget problem: 28
-bindings, well inside the default, and it fails with `unsolved goals` rather
-than a step limit. The goal left open is headed by `flopNextV` and the term
-carries `SourceDesc.flopQAsync 4 2 4 0 true`:
+bindings, well inside the default, failing with `unsolved goals` rather than a
+step limit. The goal left open is headed by `flopNextV`:
 
 ```
 ⊢ flopNextV 13
@@ -3130,17 +3141,26 @@ carries `SourceDesc.flopQAsync 4 2 4 0 true`:
        (match sourceValue i st (SourceDesc.flopQAsync 4 2 4 0 true) with ...
 ```
 
-`flopNext_eq` is in the simp set and the generator does carry `clock` and
-`asyncReset` into the emitted descriptor (ReifyProof.lean, the comment at the
-emission site says so explicitly), so the descriptor is right and the rewrite
-still does not close. The design has **5 flops of which 2 are async**, and it
-is the smallest design in the corpus that has any -- which makes it the minimal
-reproducer and the right fixture for the repair.
+**My first reading of this was wrong twice over**, and both errors came from
+quoting the chunked backend's tactic in §33.1.
 
-Nine of the 76 CORE-ET master designs carry async-reset flops, 23 across both
-master corpora. Whether all of them fail this way, or only some, is what the
-full run will say -- the 28-binding case is simply the only one so far small
-enough that the step limit did not hide it.
+* I said `flopNext_eq` is in the simp set and still fails to close. It is
+  **not** in the legacy set. Neither are `compileFlop`, `compileMemory` or
+  `CertVal.asMem`. The legacy transport carries the rewrites for the
+  COMBINATIONAL path -- `compileOutput`, `CertVal.asBV` -- and nothing for
+  state. A goal headed by `flopNextV` is left open because there is no rewrite
+  offered for it, which is a much more ordinary explanation than a rewrite that
+  mysteriously does not fire.
+* I called it an async-reset defect. **An async source appearing inside the
+  open goal does not establish an async cause** -- it establishes that this
+  design happens to have one. The gap is in the stateful path generally, and a
+  SYNCHRONOUS RAM fixture exposes the same thing, which rules the async-only
+  reading out directly.
+
+So the heading this section originally carried was wrong. What
+`intpipe_csr_file_fl_barrier` is, is the smallest FRESH design in the corpus
+that exercises the stateful transport at all: 28 bindings, 5 flops. That still
+makes it a good fixture, for a different reason than I gave.
 
 ### 33.3 The run did not reach all 76: it hit the memory budget at target 12
 
