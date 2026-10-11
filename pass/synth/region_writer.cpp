@@ -5,6 +5,7 @@
 #include "region_writer.hpp"
 
 #include <algorithm>
+#include <map>
 #include <format>
 #include <numeric>
 
@@ -433,6 +434,8 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   };
   int    latch_cells     = 0;
   double latch_area      = 0.0;
+  int    clock_tree_cells = 0;
+  double clock_tree_area  = 0.0;
   int    latch_inv_cells = 0;  // D-side inverters (QN cells) and enable/reset level inverters
   // One min-size library inverter (the same cell a negedge clock or a reset
   // polarity takes), shared per source where the caller caches it.
@@ -812,6 +815,10 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     icg_area += cell.area;
     return out;
   };
+
+  // Register clock pins by driver, for the clock-fanout tree built once every
+  // cell exists (see Driver_options::icg_fanout).
+  absl::flat_hash_map<hhds::Pin_class, std::vector<hhds::Pin_class>> clock_sinks;
 
   // --- latch cells: enable and reset pins (Latch_map) ---
   // A traced source reaches the pin natively (one shared inverter when its
@@ -1480,7 +1487,9 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
         gu::set_unsign(q);
         set_net_driver(qnet, q);
         if (auto lclk = mapped_owner_clk(k); !lclk.is_invalid()) {
-          lclk.connect_sink(sub.create_sink_pin(cell.clk_pin));
+          auto csink = sub.create_sink_pin(cell.clk_pin);
+          lclk.connect_sink(csink);
+          clock_sinks[lclk].push_back(csink);
         }
         if (af != nullptr) {
           // The pin that loads this bit's reset value takes the register's
@@ -1678,6 +1687,61 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     }
     d.connect_sink(rd.sub.create_sink_pin(rd.cell->d_pin));
   }
+  // Clock fanout tree. A net clocking thousands of register cells (a region
+  // input, or a clock gate's output) is one unbuffered net, and in a gate-level
+  // report it IS the critical path (minion: 1.5-2.5 ns on one ICG output). Past
+  // `icg_fanout` sinks the net is dealt out in blocks, each driven by a
+  // non-inverting pair of minimum inverters, level by level until the root
+  // drives at most `icg_fanout` loads. Clock polarity and function are kept.
+  std::optional<uint32_t> clock_buf;
+  if (registers.icg_fanout != 0) {
+    for (size_t t = 0; t < lib.size(); ++t) {
+      if (lib.is_identity(static_cast<uint32_t>(t)) && (!clock_buf || lib.type(static_cast<uint32_t>(t)).area < lib.type(*clock_buf).area)) {
+        clock_buf = static_cast<uint32_t>(t);
+      }
+    }
+  }
+  if (registers.icg_fanout != 0 && clock_buf.has_value()) {
+    const size_t cap = registers.icg_fanout;
+    // Deterministic order: the minted names must not depend on hash iteration.
+    std::vector<hhds::Pin_class> drivers;
+    for (const auto& kv : clock_sinks) {
+      drivers.push_back(kv.first);
+    }
+    std::sort(drivers.begin(), drivers.end(), [](const hhds::Pin_class& a, const hhds::Pin_class& b) {
+      return std::make_pair(a.get_master_node().get_debug_nid(), a.get_port_id())
+             < std::make_pair(b.get_master_node().get_debug_nid(), b.get_port_id());
+    });
+    const auto& desc = lib.decl(*outlib_, *clock_buf);
+    for (const auto& driver : drivers) {
+      auto& sinks = clock_sinks[driver];
+      int   level = 0;
+      while (sinks.size() > cap) {
+        std::vector<hhds::Pin_class> next;
+        for (size_t g = 0; g * cap < sinks.size(); ++g) {
+          auto buf = gu::create_typed_node(*body, Ntype_op::Sub);
+          buf.set_subnode(desc.io);
+          buf.attr(hhds::attrs::name).set(std::format("{}__clkbuf{}_{}", rb.module_name, level, clock_tree_cells));
+          auto out = buf.create_driver_pin(desc.output_name);
+          gu::set_ubits(out, 1);
+          for (size_t i = g * cap; i < std::min(sinks.size(), (g + 1) * cap); ++i) {
+            sinks[i].del_sink();
+            out.connect_sink(sinks[i]);
+          }
+          next.push_back(buf.create_sink_pin(desc.input_names.front()));
+          ++clock_tree_cells;
+          clock_tree_area += lib.type(*clock_buf).area;
+        }
+        sinks = std::move(next);
+        ++level;
+      }
+      for (auto& sink_pin : sinks) {
+        if (sink_pin.get_driver_pins().empty()) {
+          driver.connect_sink(sink_pin);
+        }
+      }
+    }
+  }
   for (const auto& [sub, pin, po] : icg_en_pending) {
     pending_resets.push_back({sub, pin, po});
   }
@@ -1698,9 +1762,11 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // saw: count them where the identity-buffer bypass corrected the same row,
   // so abc.json `gates`/`area` (what lhdtrack scores as lhd_area, and what the
   // incremental cache persists) describe the netlist that was actually written.
-  if (qn_inv_cells != 0 || clock_inv_cells != 0 || reset_inv_cells != 0 || icg_cells != 0 || latch_cells != 0) {
-    counts.gates += qn_inv_cells + clock_inv_cells + reset_inv_cells + icg_cells + latch_cells + latch_inv_cells;
-    counts.area  += qn_inv_area + (clock_inv_cells + reset_inv_cells + latch_inv_cells) * inv_area + icg_area + latch_area;
+  if (qn_inv_cells != 0 || clock_inv_cells != 0 || reset_inv_cells != 0 || icg_cells != 0 || latch_cells != 0
+      || clock_tree_cells != 0) {
+    counts.gates += qn_inv_cells + clock_inv_cells + reset_inv_cells + icg_cells + latch_cells + latch_inv_cells + clock_tree_cells;
+    counts.area  += qn_inv_area + (clock_inv_cells + reset_inv_cells + latch_inv_cells) * inv_area + icg_area + latch_area
+                    + clock_tree_area;
   }
   trace_stage("readback-fanins");
 

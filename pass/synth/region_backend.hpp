@@ -50,6 +50,12 @@ using Region_hook = std::function<Region_rewrite(const Lnet& net, const Region_c
 
 // The options the region pipeline itself reads. A backend adds its own.
 struct Driver_options {
+  // A clock net (a region input, or a clock gate's output) that clocks more
+  // register cells than this is dealt out through a tree of the library's
+  // smallest buffer, `icg_fanout` sinks per buffer, level by level. One net on
+  // thousands of flops is unbuffered and dominates every gate-level timing report
+  // (minion: a 1.5-2.5 ns ICG output as the whole critical path). 0 disables.
+  uint32_t icg_fanout = 64;
   // Optional region hook, and its identity in the region-cache recipe (two
   // regions with equal logic but different hook settings never share a body).
   Region_hook                                                               region_hook;

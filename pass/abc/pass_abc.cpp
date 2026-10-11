@@ -106,6 +106,11 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   // delay. A cap of 16 bounds the mapped dino fanouts that originally exposed
   // the extrapolation. Nets driven by NATIVE (unblasted) nodes never reach ABC
   // and keep their fanout regardless.
+  m.add_label_optional("icg_fanout",
+                       "max register clock pins one clock net drives inside a region (a region input or a clock gate's "
+                       "output): past it the net is dealt out through a tree of the library's smallest buffer. One ICG or "
+                       "input on thousands of flops is an unbuffered net that dominates gate-level timing (0 disables)",
+                       "64");
   m.add_label_optional("max_fanout",
                        "cap the fanout of every net ABC maps, by appending `buffer -N <n>; dnsize {B}` to the "
                        "built-in flows (0 disables the tail, sizing included). A custom `flow` places `{F}` -- the bare "
@@ -837,6 +842,15 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   }
   // No silent fallback: a mis-typed cap would quietly change every mapped
   // netlist's fanout and, through it, every reported delay.
+  uint64_t icg_fanout = 64;
+  if (auto s = std::string{var.get("icg_fanout", "64")}; !s.empty()) {
+    const char* b = s.data();
+    const char* e = s.data() + s.size();
+    auto [p, ec]  = std::from_chars(b, e, icg_fanout);
+    if (ec != std::errc{} || p != e || icg_fanout > std::numeric_limits<uint32_t>::max()) {
+      livehd::diag::err("pass.abc", "bad-icg-fanout", "syntax").msg("pass.abc.icg_fanout '{}' is not an integer", s).fatal();
+    }
+  }
   uint64_t max_fanout = 16;
   {
     const auto s_mf = std::string{var.get("max_fanout", "16")};
@@ -966,6 +980,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   opts.boundary_drive    = boundary_drive;
   opts.io_load           = io_load;
   opts.max_fanout        = static_cast<uint32_t>(max_fanout);
+  opts.icg_fanout        = static_cast<uint32_t>(icg_fanout);
   opts.area_relax_pct    = static_cast<uint32_t>(area_relax_pct);
   opts.area_flow         = area_flow;
   opts.reg_margin        = reg_margin;

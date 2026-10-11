@@ -45,6 +45,8 @@ public:
     // the blaster planned onto cells (Bbox::latch); null = none.
     using Latch_ladders                     = std::vector<liberty::Dff_cell>[2][3];
     const Latch_ladders*                    latch   = nullptr;
+    // Max sinks per clock-gate cell (0: one cell per recognized gate).
+    uint32_t                                icg_fanout = 0;
   };
 
   void set_outlib(hhds::GraphLibrary* outlib) { outlib_ = outlib; }
