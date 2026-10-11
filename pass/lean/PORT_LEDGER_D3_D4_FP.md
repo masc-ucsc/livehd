@@ -3142,11 +3142,61 @@ master corpora. Whether all of them fail this way, or only some, is what the
 full run will say -- the 28-binding case is simply the only one so far small
 enough that the step limit did not hide it.
 
-### 33.3 Status
+### 33.3 The run did not reach all 76: it hit the memory budget at target 12
+
+It stopped on the aggregate limit, not on a verdict. `intpipe_alu`'s proof
+probe reached **18,079,524 kB (17.24 GiB) on its own**, the sampled hard limit
+terminated it, and the 64 targets behind it were deferred. Final state: 12
+judged, 64 deferred, `join_rc=1`, 122-row denominator, 46 without a
+certificate. Every deferred row is resumable and none is a design failure.
+
+The twelve that were judged, by binding count:
+
+| module | bindings | proof | sim RSS | proof RSS | wall |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `intpipe_csr_file_fl_barrier` | 28 | 0 | 1.45 GiB | 6.62 GiB | 42.4 s |
+| `debug_breakpoint` | 81 | **1** | 1.46 | 7.59 | 50.0 |
+| `intpipe_imm` | 108 | 0 | 1.46 | 6.91 | 69.3 |
+| `intpipe_csr_pmu_read_interface` | 110 | 0 | 1.46 | 6.87 | 46.5 |
+| `intpipe_csr_file_conv` | 154 | 0 | 1.48 | 7.23 | 46.1 |
+| `intpipe_inst_bits_stage` | 163 | 0 | 1.49 | 7.22 | 68.0 |
+| `intpipe_fp_scoreboard` | 200 | 0 | 1.47 | 7.45 | 75.8 |
+| `intpipe_int_scoreboard` | 203 | 0 | 1.47 | 7.63 | 77.3 |
+| `minion_dcache_atomic_alu_unit` | 315 | 0 | 1.51 | 8.54 | 89.6 |
+| `intpipe_mask_scoreboard` | 394 | 0 | 1.52 | 9.58 | 108.7 |
+| `intpipe_csr_replay` | 503 | 0 | 1.56 | 11.13 | 165.8 |
+| `intpipe_alu` | 2,133 | 0 | 2.02 | **17.24** | 279.1 |
+
+Two things fall out of that column. **Mathlib is a ~6.6 GiB floor** on every
+proof probe -- the 28-binding design pays it in full -- so at a 20 GB budget
+the proof stage can never hold more than two probes, and `--jobs 1` is not a
+preference there but the only option. And above the floor the cost grows with
+the design: ~10.6 GiB of growth across 2,105 bindings, about 5 MB each.
+
+**A caution about reading that as a diagnosis.** It is tempting to say the
+memory is simp thrashing against its step limit, and the data does not support
+it: the one design that PASSES, at 81 bindings, used 7.59 GiB -- MORE than the
+108-binding design that failed on `maxSteps` at 6.91 GiB. Whether the §33.1
+repair lowers this, raises it, or leaves it alone is unknown and has to be
+measured, not assumed. It is possible that closing the proof costs more term,
+not less.
+
+### 33.4 Status
 
 `proof` is a real gate and it is now reporting a real result: **not `na`, and
-not passing.** The 76 runtime agreements stand exactly as before and are
-unaffected by this -- `agree` and `proof` are separate columns for this reason.
-The run is being left to classify all 76 before either repair is attempted, so
-that the repair has a baseline to be judged against rather than an anecdote.
+not passing** -- 1 of 12 judged, with 64 undecided behind a resource stop. The
+76 runtime agreements stand exactly as before and are unaffected; `agree` and
+`proof` are separate columns for this reason.
+
+One incidental confirmation: this is the first real-world exercise of the
+deferral-reason repair. The 64 rows read *"the run stopped launching new
+targets; a previous target was terminated by the HARD aggregate RSS limit at
+18079524 kB"* -- the cause and the measured figure, where before they would
+have said "aggregate RSS cap reached before launch (0 kB)" about a cap that was
+never armed.
+
+Neither proof repair is attempted here. §33.1 is a one-line budget change with
+a known shape; §33.2 is a missing rewrite with a 28-binding reproducer. Both
+need the baseline above to be judged against, and §33.3 says plainly which part
+of that baseline is a measurement and which is a resource stop.
 
