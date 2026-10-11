@@ -393,4 +393,16 @@ for mapper in ("abc", "usyn"):
 bad_doc, _ = run("synth", pre_ok, "--top", "pre_ok", "--workdir", work / "pre_cli", "--set", "synth.liberty=" + lib,
                  "--set", "synth.abc_pre=dc2; system ls", ok=False)
 assert "allow-listed" in json.dumps(bad_doc), bad_doc
+# Two exclusive adders merged by cprop into one Sum behind operand muxes keep the
+# source pin (the retyped Mux root used to fall back to the run default).
+def merged_sum(name, attrs, *settings):
+    path = work / (name + ".prp")
+    path.write_text("pub comb " + name + "::[timecheck=false" + attrs + "](a:U32,b:U32,c:U32,d:U32,s:U1)->(y:U32) {\n"
+                    "  wrap y = if s == 1 { a + b } else { c + d }\n}")
+    doc, _ = synth(name, path, *settings)
+    return doc["qor"]["abc"]["total"]["gates"]
+plain_sum  = merged_sum("msum_plain", "")
+pinned_sum = merged_sum("msum_pin", ',synth.adder="brent"')
+global_sum = merged_sum("msum_global", "", "synth.adder=brent")
+assert pinned_sum == global_sum != plain_sum, (plain_sum, pinned_sum, global_sum)
 print("region contraction A -> B -> A and module-scope isolation passed")

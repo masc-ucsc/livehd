@@ -12,6 +12,7 @@
 #include "cprop.hpp"
 #include "cprop_muxctx.hpp"
 #include "cprop_value.hpp"
+#include "synth_policy.hpp"
 
 namespace {
 namespace gu = livehd::graph_util;
@@ -558,6 +559,33 @@ void Cprop::mux_op_share_pass() {
     }
     gu::clear_proven(root);
     gu::set_type_op(root, base.op);
+    // The root was a Mux and keeps only the policy keys a Mux takes (membership).
+    // Retyped to the shared operator it must also carry the operator keys its
+    // arms agreed on (`synth.adder`, `multiplier`, ...): otherwise the merged
+    // adder silently falls back to the run default and a source pin is lost.
+    {
+      livehd::synth_attr::Policy agreed;
+      bool                       first = true;
+      for (const auto& arm : arms) {
+        auto       a      = arm.attr(livehd::attrs::synth_policy);
+        const auto policy = a.has() ? livehd::synth_attr::read(a.get()) : livehd::synth_attr::Policy{};
+        if (first) {
+          agreed = policy;
+          first  = false;
+          continue;
+        }
+        for (auto it = agreed.begin(); it != agreed.end();) {
+          auto other = policy.find(it->first);
+          it         = other != policy.end() && other->second.value == it->second.value ? std::next(it) : agreed.erase(it);
+        }
+      }
+      if (!agreed.empty()) {
+        auto       ra     = root.attr(livehd::attrs::synth_policy);
+        auto       merged = ra.has() ? livehd::synth_attr::read(ra.get()) : livehd::synth_attr::Policy{};
+        livehd::synth_attr::overlay(merged, agreed);
+        ra.set(livehd::synth_attr::write(merged));
+      }
+    }
     for (size_t j = 0; j < operands.size(); ++j) {
       gu::setup_sink_pid(root, base.operands[j].role).connect_driver(operands[j]);
     }
