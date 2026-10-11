@@ -5216,3 +5216,120 @@ The verified-compiler example and its original emitter stay in the plan: D3 and
 D4 carry `mode:verified_compiler`, master carries it, and that comparison is
 listed as MAPPED/OPEN. For FP it is recorded as ABSENT AT THE PIN, narrowly,
 with the implementation evidence.
+
+## 52. The `normalize` option, audited to its implementation
+
+### 52.1 What it is, and what it is not
+
+Section 51.3 flagged `formal.lean.normalize` as an option the rebase dropped,
+and recorded it as open rather than assumed away. Traced to its implementation
+it turns out to be inert on the Lean route, and the real behaviour it names is
+intact. Full table in `pass/lean/tests/MASTER_LEAN_NORMALIZE_AUDIT.tsv`.
+
+**At all three pins the member is write-only.** It is declared
+(`pass_lean.hpp:31`), parsed (D3 `:1948-49`, D4 `:1964-65`, FP `:1368-69`) and
+registered (D3 `:2005`, D4 `:2021`, FP `:1416`) -- and **read nowhere**.
+`if (normalize)` appears in no `pass/lean` file at any pin, and
+`git log -S'if (normalize)' -- pass/lean` returns **no commit in master's
+entire history**, so the Lean emitter never read it at any point.
+
+**The behaviour the name refers to is real, and it is preserved.** It lives in
+the Isabelle emitter:
+
+```cpp
+if (ctx.normalize) {
+  normalize_zero_width_get_masks(ctx, topo);
+}
+```
+
+master `pass/isabelle/pass_isabelle.cpp:2649` (bound at `:2489`), D4 pin at
+`:2711` (bound at `:2553`). Master's kernel still routes `formal.normalize` to
+that pass (`lhd_kernel_common.cpp:2614-15`).
+
+So the answer is the middle one of the three the audit asked about: **a flag is
+simply no longer exposed on the Lean route; no preprocessing behaviour was
+removed from it, because none was ever behind it there.** No no-op option was
+added to make the sets match, and no legacy normalization was restored.
+
+### 52.2 Two consequences for the byte comparison
+
+**The option sets reconcile without a change.** `check_labels`
+(`pass/common/eprp_method.cpp:15-28`) enforces only *required* labels, so
+passing `--set formal.lean.normalize=true` to master is accepted and ignored.
+Since neither side ever read it, the emitted bytes cannot depend on it at
+either end, and the original invocation can be replayed verbatim.
+
+**The removal is upstream, not this port.** `b7a24e0b0`, Jose Renau,
+2026-09-14, *"several cleanups and reviews on options and miss-used options"* --
+295 commits back on master. It is present in the D3 and D4 repositories but is
+**not an ancestor of their pins**, and is absent from the FP repository
+entirely. The same commit dropped the unprefixed `formal.strict` /
+`formal.normalize` fallbacks from `emit_lean_outputs`; the `formal.lean.*`
+prefixed form, which is what the original benchmark uses, still reaches
+`pass.lean`.
+
+### 52.3 No identical-graph handoff exists, on any side
+
+The manifest needed to say whether the frontend must be reproduced or whether
+an LGraph could simply be handed over. It must be reproduced:
+**`emit_lean_outputs` is called from `lhd_kernel_compile.cpp` and nowhere
+else** -- D3 `:1401`, D4 `:1401`, FP `:1533`, master `:1955`. No route on any
+side loads an `lg:` directory and emits Lean. The `lg:` emit dir in the
+original invocation is an output, not a re-entry point.
+
+That is why the `ariane_regfile` pair of 51.4 cannot be fixed by swapping
+inputs: 400 sources against 1,034 is a frontend difference, and the only way to
+remove it is to re-elaborate both sides from the same pinned RTL, filelist,
+config, reader and options.
+
+### 52.4 The paired-generation manifest
+
+`pass/lean/tests/MASTER_SIM_PAIRED_GENERATION.tsv`. **Nothing has been
+generated from it.** Applicability is recorded before generation and the
+samples are not repicked.
+
+- The CORE-ET frozen ten are **applicable to D3** (10/10 in
+  `pass/lean/manifests/coreet_122.tsv`) and **to D4** (10/10 in
+  `pass/lean/tests/d4/coreet_122.list`).
+- They are **not applicable to FP**, whose pin carries CORE-ET only as a
+  TSV-consuming census; its native emitter benchmark is CVA6. An FP ten was
+  therefore frozen at this checkpoint, before any generation, by a rule written
+  down first: `alu alu_wrapper commit_stage compressed_decoder decoder
+  instr_scan pmp pmp_data_if ariane_regfile serdiv`
+  (`generated/master_port/sim_frozen10_fp.json`).
+- Pinned inputs today: CVA6 at `bc510437` (`v5.3.0-167-gbc510437`), working tree
+  **clean**, target `cv64a6_imafdc_sv39_hpdcache_wb`, filelist via bender
+  0.32.0; CORE-ET at `c72b6a2` with **one dirty file**, recorded as a blocker
+  rather than waved through.
+- `bazel-bin/lhd/lhd` exists only on master (2026-10-10, sha256
+  `414d5dcbf99b37fe...`). It is **missing at all three branch worktrees**, and
+  the build target is `//lhd:lhd` on every side (D3 `BUILD:106`, D4 `:106`, FP
+  `:146`). The command recorded for later is
+  `nice -n19 ionice -c3 bazel --output_user_root=<isolated> build -c opt //lhd:lhd`
+  in each worktree, after verifying its HEAD is the pin. **Not run here** --
+  the long FP benchmark runs own the machine.
+
+### 52.5 `issue_read_operands` at 7200 s, and a projection I should not have made
+
+The retry terminated at its cap: **exit 124, wall 7200.18 s, four agreeing
+seeds (0, 1, 2, 3)**, `oom_kill 0`, peak 112 MB of the 8 GiB. It remains
+**REFUSED / undecided**, not a pass, and the 1800 s and 7200 s attempts are
+retained separately.
+
+My projection of ~5,600 s for it was unsound, and the reason is worth
+recording. I extrapolated a constant per-seed cost from `[ref 0]`. The
+reference-run cost is in fact strongly **stimulus-dependent**:
+
+| seed | 0 | 1 | 2 | 3 |
+|---|---|---|---|---|
+| `[ref]` ms | 507,924 | **1,788,680** | 402,073 | **3,067,588** |
+| `[step]` ms | 2,556 | 14,304 | 3,408 | 14,129 |
+
+a 7.6x spread on the reference and 5.6x on the residual. Any projection from a
+single seed is therefore worthless, and the 5-19 h figures I gave for
+`scoreboard`, `frontend`, `issue_stage` and `csr_regfile` carry the same defect
+and should be read as lower bounds only. What the table does show, at every
+seed, is the residual holding a 118x-217x margin over the interpreter.
+
+`bht`'s 7200 s attempt continues; the remaining long entries stay open, and a
+resource stop never counts as coverage.

@@ -1,0 +1,41 @@
+# AUDIT: formal.lean.normalize / formal.normalize, at the three pins and on master.
+#
+# QUESTION (ledger section 6.4 step 3 makes the option set load-bearing): does the
+# pins' `normalize=true` match an existing master route, is the flag simply no
+# longer exposed, or was a preprocessing BEHAVIOUR removed?
+#
+# ANSWER, from the sources and the history, not from the names:
+#   `normalize` is a WRITE-ONLY member of the Lean pass at ALL THREE PINS.  It is
+#   declared, parsed and registered, and READ NOWHERE.  `if (normalize)` does not
+#   occur anywhere in pass/lean at any pin -- and `git log -S'if (normalize)' --
+#   pass/lean` returns NO commit in master's entire history either, so the Lean
+#   emitter never read it at any point.
+#
+#   The behaviour the NAME refers to is real, but it lives in the ISABELLE
+#   emitter and is PRESERVED on master: `if (ctx.normalize)
+#   normalize_zero_width_get_masks(ctx, topo);`.
+#
+#   So: no preprocessing behaviour was removed from the Lean route, because there
+#   never was one behind this flag on the Lean route.  A mis-used flag is simply
+#   no longer exposed there.  This is NOT a no-op option added to make the sets
+#   match, and no legacy normalization was restored.
+#
+#   Master's `check_labels` (pass/common/eprp_method.cpp:15-28) enforces only
+#   REQUIRED labels, so passing `--set formal.lean.normalize=true` to master is
+#   accepted and ignored -- no error and, since neither side ever read it, no
+#   difference in emitted bytes.
+#
+#   ATTRIBUTION: the removal is UPSTREAM, not this port.  b7a24e0b0, Jose Renau,
+#   2026-09-14, "several cleanups and reviews on options and miss-used options",
+#   295 commits back on master; it is present in the D3/D4 repos but is NOT an
+#   ancestor of their pins, and is absent from the FP repo entirely.
+#
+where	D3 78a3e0d8c	D4 f6ad1fe29	FP 9bb41a09d	master b9515eaf8	verdict
+pass/lean member declaration	pass_lean.hpp:31	pass_lean.hpp:31	pass_lean.hpp:31	absent	removed
+pass/lean option parse	pass_lean.cpp:1948-1949	pass_lean.cpp:1964-1965	pass_lean.cpp:1368-1369	absent	removed
+pass/lean option registration	pass_lean.cpp:2005	pass_lean.cpp:2021	pass_lean.cpp:1416	absent	removed
+pass/lean READ of the member	NONE	NONE	NONE	NONE	the flag never had an effect on the Lean route, at any pin or in master's history
+kernel routing, Lean emit	lhd_kernel_common.cpp maps formal.strict and formal.normalize to labels, then merges formal.lean.*	same	same	only merges formal.lean.* (the unprefixed fallbacks were dropped for Lean)	the formal.lean.* prefixed form still reaches pass.lean on master; only the shared fallback is gone
+kernel routing, Isabelle emit	maps formal.normalize	maps formal.normalize	maps formal.normalize	lhd_kernel_common.cpp:2614-2615 maps formal.normalize	PRESERVED
+pass/isabelle use	ctx.normalize :2553, used :2711	ctx.normalize, used	present	ctx.normalize :2489, used :2649 -> normalize_zero_width_get_masks	PRESERVED -- the real behaviour, untouched
+unregistered-label handling	n/a	n/a	n/a	check_labels enforces REQUIRED labels only	passing formal.lean.normalize=true to master is accepted and ignored, not an error
