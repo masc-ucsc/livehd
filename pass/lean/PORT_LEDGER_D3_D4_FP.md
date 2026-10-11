@@ -2863,3 +2863,146 @@ operation of 1,000 bits or more. The two CVA6 blocks that would be worst --
 `cva6_hpdcache_subsystem` and `cva6_hpdcache_wrapper`, at ~108,000 nodes -- have
 no certificate at all, so they never reach this harness.
 
+## 32. LAST PHASE: Lean construction and refactoring research, with `scoreboard_gate` as the benchmark
+
+Where this sits: **after** final acceptance (§6.4), not before and not during.
+Every change proposed here moves the numbers acceptance is taken against -- wall
+time, peak RSS, which designs reach a verdict inside a bound -- so doing it
+first would mean accepting a port against a moving target. The port is accepted
+on the code as it stands; this phase then asks how much of the cost was
+inherent and how much was how the Lean was written.
+
+### 32.1 Why `scoreboard_gate` is the right benchmark
+
+It is the only target in either corpus that fails to finish, it fails for a
+reason that is fully understood (§31), and it comes with three controls in the
+same corpus, same toolchain, same harness:
+
+| block | nodes | ops >= 1000 bits | max width | total declared width | wall | verdict |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `scoreboard_gate` | 5,170 | 2,537 | 3,868 | 8,804,743 | >3,603 s | timeout |
+| `bht_gate` | 4,832 | 0 | 385 | 791,184 | 614.9 s | agree |
+| `btb_gate` | 1,037 | 346 | 2,080 | 741,138 | 328.5 s | agree |
+| `decoder_gate` | 3,714 | 0 | 439 | 55,097 | 88.5 s | agree |
+
+`decoder_gate` is the "wide operations absent" control at comparable node
+count. `btb_gate` is the "wide operations present, design small" control --
+a third the nodes of `decoder_gate` and four times the wall time. `bht_gate`
+is the "many narrow operations" control. A refactoring that helps
+`scoreboard_gate` and hurts `decoder_gate` has moved cost, not removed it, and
+these four together say which.
+
+A benchmark needs a target, not just a baseline. **`scoreboard_gate` reaching a
+verdict inside the unchanged 3,600 s bound, with the 32-sample gate and every
+checker self-test unchanged, is the goal.** Raising the bound, lowering the
+sample count or special-casing the design are all excluded: they change the
+measurement instead of the cost.
+
+### 32.2 Three costs that must be separated before anything is optimised
+
+The single biggest mistake available here is to optimise the wrong one. They
+are separable, and §31's ladder separates them:
+
+| cost | what it is | `scoreboard_gate` | `decoder_gate` |
+| --- | --- | ---: | ---: |
+| **(a) literal** | parsing + elaborating the `DesignCert` structure literal | 31.9 s | 66.7 s |
+| **(b) model** | elaborating + compiling `reify_design`'s output and `d3_residual` | 238.9 s | 7.1 s |
+| **(c) evaluation** | `#eval report` -- 65 `fast` and 33 `denoteResidual` passes | **>= 3,332 s** | ~6 s |
+
+(a) and (b) are elaboration and typechecking. (c) is running the result. For
+`scoreboard_gate` the answer is 92 % (c), and **(a) is not the problem at all**:
+its literal is 2.5x the bytes of `decoder_gate`'s and elaborates in half the
+time. Any proposal that starts "the certificate literal is too big" has to
+explain that row first.
+
+### 32.3 What the component measurements already say
+
+Running `report`'s components one at a time on `decoder_gate`, back to back
+under the same conditions (seconds, against a ~71 s baseline that is everything
+up to the `#eval`):
+
+| component | passes | wall | marginal |
+| --- | --- | ---: | ---: |
+| structural line only | 0 | 70.6 s | -- |
+| one `fast` evaluation | 1 fast | 66.8 s | ~0 |
+| `distinctObservables` | 32 fast | 71.3 s | **~0** |
+| `checkerSelfTest` | 1 `denoteResidual` | 75.6 s | ~5 s |
+| `agree` | 32 fast + 32 `denoteResidual` | **173.0 s** | **~102 s** |
+
+So on a design with no wide operations, **thirty-two evaluations of the
+compiled reified model cost nothing measurable, and thirty-two of the residual
+INTERPRETER cost about a hundred seconds.** The two sides of the D3 comparison
+are three orders of magnitude apart in cost, and it is the interpreter that is
+slow. That is a separate finding from §31's wide-bitvector cost, and it points
+at a different piece of code.
+
+### 32.4 The candidates, each with the measurement that settles it
+
+**A. The bitwise primitives.** `bv_bitwise`, `bv_not`, `bits_to_int` and
+`bv_bit` in `Translation/LGraphModel.lean` are bit-at-a-time over
+`List.range w`, allocating a big-integer modulo, a shift, a power of two and a
+list cell per bit: 550 us at 64 bits, 13,550 us at 3,868 (§31.4). `Nat.xor`,
+`Nat.land` and `Nat.lor` are native and O(w/64). The repair is a PROVED
+equality -- `Nat.testBit` lemmas -- and then the swap. It is NOT an
+`@[implemented_by]`: that would put an unverified implementation on both sides
+of the D3 comparison, where a wrong one makes the two sides agree wrongly, and
+the entire point of this harness is that the two sides are independent.
+*Settles it*: the micro-benchmark at 64/256/1024/2080/3868 bits, then
+`scoreboard_gate` end to end.
+
+**B. The residual interpreter.** `denoteResidual` does
+`runBindings R.bindings.toList (sourceEnvArr R.sources i s)`, and `runBindings`
+is `runBindings bs (env.push (denoteExpr env b.rhs))` over `SlotEnv = Array
+CertVal`. Reads are O(1) (`denoteRef` is `env[r]?.getD badVal`), so the
+suspects are the per-pass `Array.toList` of 5,170 bindings and whether
+`env.push` is destructive or copying -- `denoteExpr env b.rhs` borrows `env` in
+the same expression that consumes it, and if the reference count is not 1 at
+the push then every binding copies the whole environment and the pass is
+O(n^2). *Settles it*: count the copies. Lean can report this directly, and a
+pre-sized `Array.emptyWithCapacity` plus a binding loop over the Array
+(no `toList`) is the alternative to measure against. Note §32.3 says this path
+costs ~3 s per pass on a design where the compiled model costs nothing, so
+there is real headroom here independently of wide bitvectors.
+
+**C. The certificate literal, if (a) ever becomes the bottleneck.** 10,894
+structure literals inside `#[...]`. The alternative already exists and is
+already proved: DCERT2 plus `Compiler.CertIO.parseCert_renderCert`, which is
+total and invertible for every `DesignCert`. A probe could carry ONE
+`ByteArray` literal and decode it, instead of 10,894 elaborated structures.
+*Settles it*: the (a) column above on a design where (a) dominates. On
+`scoreboard_gate` it would buy 31.9 s of 3,603 and is not worth doing first.
+
+**D. The shape of the emitted model.** `reify_design` emits one straight-line
+`let` chain; (b) is 238.9 s of `scoreboard_gate`'s pre-evaluation cost. Three
+alternative reifiers already exist and the sweep can select them --
+`--reifier named`, `shared`, `chunked` -- and `--proof-segment-size` splits the
+walk further. They were built for the proof stage; nobody has measured them on
+ELABORATION cost. *Settles it*: the (b) column for all four reifiers on
+`scoreboard_gate` and the three controls.
+
+**E. The scheduler's cost model.** Not a Lean refactor, but it belongs to the
+same finding: `--tier` and the per-target `--timeout` derive from node count,
+which mispredicts by 4x in the wrong direction on `btb_gate`. Total declared
+bit-width is the predictor. *Settles it*: rank all 97 measured targets by each
+metric and compare against measured wall time.
+
+### 32.5 Rules this phase inherits
+
+The gates do not move to make the numbers work. No sample count is lowered, no
+timeout is raised as a repair, no design is special-cased, no checker self-test
+is dropped, and nothing becomes `native_decide` that was not. A change to a
+semantic primitive carries its proofs with it or it does not land. And every
+result is stated against the four-design benchmark, not against
+`scoreboard_gate` alone -- the failure mode of this kind of work is a change
+that moves cost from the design being watched onto the ones that are not.
+
+### 32.6 What would make this worth publishing
+
+The useful artefact is not "we made one design faster". It is a measured
+account of which of (a), (b) and (c) a verified-compiler certificate pipeline
+actually pays, how each scales -- in the design's node count, binding count and
+TOTAL BIT WIDTH -- and which Lean-level constructions move which. The data for
+that already exists in this branch: 97 targets with measured wall time, peak
+RSS, node, source, binding and width counts, across two corpora and two
+certificate schema eras.
+
