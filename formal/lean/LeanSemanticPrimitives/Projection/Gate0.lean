@@ -1,0 +1,199 @@
+/-
+  Gate 0 -- self-application, on a problem small enough to read.
+
+  Two questions, in order:
+
+  (a) Does `mixProgram` -- `mix` written in `L` -- compute what the Lean `mix`
+      computes?  If not, nothing about the second projection can be trusted,
+      and the bug is in a transcription rather than in the theory.
+
+  (b) Does specializing `mixProgram` to the toy interpreter produce a COMPILER?
+      That is the second projection, and it is the thing this branch exists to
+      answer.
+
+  Everything here is a `#guard`, so the build is the test.
+-/
+
+import LeanSemanticPrimitives.Projection.MixProgram
+import LeanSemanticPrimitives.Projection.Demo
+import LeanSemanticPrimitives.Projection.BTA
+
+namespace Projection
+namespace Gate0
+
+open MixProg
+
+/-! ## (a) `mixProgram` against the Lean specializer -/
+
+#guard mixResolved.toOption.isSome
+-- 53 before the one-pass transfer and the structural rules were ported:
+-- nine functions added (`shiftPV`, `pvToPRes`, `totalL`, the three peels,
+-- `primStructL`, `prepareL`, `mixPArgsL`), two removed (`mixUArgsL`,
+-- `inlineEnvL`)
+-- 61 since S1 (`PRes.val` promoted): `ofPVal` and `pvToCode` added, `pvToPRes`
+-- removed -- the `var` rule now CARRIES a spine instead of copying it, so
+-- nothing calls the copy.  See certio/PHASE6_PERF.md 34.
+-- 64 since S2 (the `nthD` lookup summary): `isNthDL`, `walkHeadL`, `nthEnvL`.
+-- `compilerP` below did NOT move: for the toy interpreter `isNthDL` is decided
+-- statically during the second projection, so the summary branch drops out.
+#guard mixProgram.funs.length == 64
+
+/-- Run the object-level specializer on the toy interpreter and the sample
+expression -- the same inputs `Demo.residual2` gave the Lean specializer. -/
+def objOut : EvalResult :=
+  evalFuel 100000 mixProgram []
+    (.call mixProgram.entry [.lit (encAProgram Demo.interpA2P), .lit (encVals [Demo.sample])])
+
+def objProgram : Option Program :=
+  match objOut with
+  | .value v => decProgram v
+  | _        => none
+
+-- it terminates and its output really is an encoded program
+#guard objProgram.isSome
+
+def objP : Program := objProgram.getD ⟨[], 0⟩
+
+/- THE AGREEMENT: the object specializer and the Lean specializer produce the
+SAME residual program, not merely programs that happen to agree on one input.
+
+This is a check on two CONCRETE runs, not a theorem.  What is proved generically
+is `mixDriver_iff`, about the Lean specializer; the object specializer has no
+generic correctness statement, because `mixProgram_implements_mixHost` is still
+absent.  `secondProjection_correct` is relative to the object specializer, so it
+does not supply one either.  So this guard says these two inputs agree, and
+nothing more. -/
+#guard objP == Demo.residual2P
+
+-- and it computes what the interpreter computed
+#guard evalFuel 200 objP [] (.call objP.entry [.lit Demo.sampleEnv]) == .value (.int 56)
+
+-- the two-dynamic-argument unfold, through the OBJECT specializer too
+def objTwoArg : EvalResult :=
+  evalFuel 100000 mixProgram []
+    (.call mixProgram.entry [.lit (encAProgram Demo.twoArgA), .lit (encVals [.int 10])])
+
+-- two dynamic arguments is exactly the path one-pass transfer replaced, so it
+-- is the sharpest of the three
+#guard (match objTwoArg with | .value v => decProgram v | _ => none) == some Demo.twoArgRes
+
+-- THE CASE THAT USED TO FAIL.  `Demo.twoFunA`'s entry is source function 1, so
+-- before the Lean driver was made function-major the two specializers produced
+-- residual programs differing by a permutation of the function table.  This is
+-- the guard that pins the fix.
+def objTwoFun : EvalResult :=
+  evalFuel 100000 mixProgram []
+    (.call mixProgram.entry [.lit (encAProgram Demo.twoFunA), .lit (encVals [.int 10])])
+
+#guard (match objTwoFun with | .value v => decProgram v | _ => none) == some Demo.twoFunRes
+
+/-! ## (b) The second projection
+
+`SecondProjection.lean` now proves this for ALL designs:
+`secondProjection_correct` says the derived compiler, run on a design, computes
+exactly what `mixProgram` computes on (interpreter, design).  What the checks
+below add is that the side conditions that theorem takes -- that BTA succeeded,
+that `mixDriver` succeeded, that the entry's division is `[stat, dyn]` -- really
+do hold for this instance, and that the answer is the expected one.
+
+So the split is now: the CLAIM is a theorem, the INSTANTIATION is a check.  The
+one thing still resting entirely on checks is `objP == Demo.residual2P` in part
+(a), which needs `mixProgram_implements_mixHost` -- that `mixProgram` computes
+what the Lean specializer computes -- and that is not proved.
+
+`mix(mix, interp)` -- specialize the specializer to the interpreter.  What comes
+out should be a COMPILER: a program that takes a source program and emits the
+residual program, without an interpreter's dispatch anywhere in it. -/
+
+def A_M : AProgram :=
+  match bta mixProgram mixInline [.stat, .dyn] 200 with
+  | .ok a    => a
+  | .error _ => ⟨[], 0⟩
+
+-- BTA must find the interpreter's ANNOTATED program static and the static
+-- arguments dynamic; everything below depends on the divisions it infers
+#guard (bta mixProgram mixInline [.stat, .dyn] 200).toOption.isSome
+
+/-- The division `mix`'s term walk gets.  This single row is what decides
+whether the second projection does anything: `A` static, `reqs` dynamic, the
+DIVISION static, `env` dynamic, the TERM static.  With the term dynamic --
+which is what the first version of `MixProgram.lean` produced -- `mixTerm`'s
+`switch` residualizes and `mix(mix, interp)` returns `mix`. -/
+def mixTermIdx : Nat := (mixS.funs.findIdx? (fun f => f.name == "mixTerm")).getD 0
+
+def mixTermDivision : Div × BT :=
+  match A_M.funs[mixTermIdx]? with | some fd => (fd.params, fd.ret) | none => ([], .dyn)
+
+#guard mixTermDivision == ([.stat, .dyn, .stat, .dyn, .stat], .dyn)
+
+def compilerR : Except MixError Program := mixDriver 200000 500 A_M [encAProgram Demo.interpA2P]
+
+#guard compilerR.toOption.isSome
+
+def compilerP : Program := match compilerR with | .ok p => p | .error _ => ⟨[], 0⟩
+
+-- one residual function per (division, subterm) reachable in the interpreter.
+-- 100 since S1 (was 99): the object `mix` it is specialized from gained
+-- `ofPVal`/`pvToCode` and the `tagRVal` arms and lost `pvToPRes`.  Every other
+-- guard in this file is unchanged and passes, including the compiled program's
+-- agreement with the interpreter.
+#guard compilerP.funs.length == 100
+
+/-- Run the compiler on the source program.  Its argument is the SOURCE, and
+nothing else -- the interpreter is gone, baked in. -/
+def compiled : EvalResult :=
+  evalFuel 200000 compilerP [] (.call compilerP.entry [.lit (encVals [Demo.sample])])
+
+def compiledProgram : Option Program :=
+  match compiled with | .value v => decProgram v | _ => none
+
+#guard compiledProgram.isSome
+
+-- THE SECOND PROJECTION: what the derived compiler emits is exactly what the
+-- specializer produces directly.  Again a check on one concrete design, not a
+-- generic claim -- see the note on the first agreement guard above.
+#guard compiledProgram == some Demo.residual2P
+
+-- and that program still computes what the interpreter computed
+#guard evalFuel 200 (compiledProgram.getD ⟨[], 0⟩) []
+         (.call (compiledProgram.getD ⟨[], 0⟩).entry [.lit Demo.sampleEnv])
+         == .value (.int 56)
+
+/-! ## Gate 3 -- the compiler must not still be an interpreter
+
+The test that actually distinguishes a compiler from a specializer that did
+nothing: `compilerProgram` must contain no residual dispatch on the annotated
+interpreter's TERM TAGS.  If it still walks the interpreter's syntax at run
+time, specialization achieved nothing even when its output happens to be right. -/
+
+def caseTags : Term → List Nat
+  | .lit _      => []
+  | .var _      => []
+  | .letIn a b  => caseTags a ++ caseTags b
+  | .ite a b c  => caseTags a ++ caseTags b ++ caseTags c
+  | .prim _ ts  => caseTagsL ts
+  | .ctorT _ ts => caseTagsL ts
+  | .caseT s as => caseTags s ++ (as.map Alt.tag) ++ caseTagsAlts as
+  | .call _ ts  => caseTagsL ts
+where
+  caseTagsL : List Term → List Nat
+    | []      => []
+    | t :: ts => caseTags t ++ caseTagsL ts
+  caseTagsAlts : List Alt → List Nat
+    | []      => []
+    | a :: as => caseTags a.body ++ caseTagsAlts as
+
+def programCaseTags (P : Program) : List Nat :=
+  (P.funs.map (fun fd => caseTags fd.body)).flatten
+
+/-- Tags 30-42 are `ATerm`'s: dispatching on one means walking the annotated
+interpreter's syntax. -/
+def aTermTagCount (P : Program) : Nat :=
+  ((programCaseTags P).filter (fun t => tagALit ≤ t && t ≤ tagAProgram)).length
+
+-- the specializer dispatches on the interpreter's syntax; the compiler does not
+#guard aTermTagCount mixProgram > 0
+#guard aTermTagCount compilerP == 0
+
+end Gate0
+end Projection

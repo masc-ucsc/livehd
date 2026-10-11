@@ -1,0 +1,555 @@
+/-
+  Semantics of the object language: a fuelled evaluator for execution, and an
+  inductive relation for the denotation.
+
+  WHY BOTH.  Object programs may diverge (`call` is unrestricted recursion) and
+  Lean requires definitions to terminate, so the executable evaluator takes fuel.
+  But fuel must not appear in the projection theorems -- a fuel-indexed statement
+  would leak an arbitrary constant into the end-to-end correctness claim.  So the
+  DENOTATION is the inductive relation `Eval`, every downstream theorem is stated
+  with it, and `evalFuel_sound` connects the two.
+
+  `outOfFuel` and `typeError` stay distinct.  Collapsing them into `none` turns a
+  specializer bug into "needs more fuel" and hides it.
+-/
+
+import LeanSemanticPrimitives.Projection.ObjectLanguage
+import LeanSemanticPrimitives.Translation.LGraphModel
+
+namespace Projection
+
+/-! ## Bit vectors, as encoded values
+
+`BV` is not a primitive type of `L`.  A bit vector is `ctor bvTag [int w, int v]`,
+mirroring `LGraphModel.BV = <width, value>`.  Keeping it an ordinary encoded value
+is what lets the object specializer carry bit vectors with no special support.
+
+THE OPERATIONS ARE THE PINNED ONES, NOT A COPY.  `evalPrim`'s bit-vector cases
+call `mk_bv`, `bv_bitwise`, `bv_not`, `bv_resize`, `bv_uint` and `bv_bit` from
+`Translation/LGraphModel.lean` directly, so the only thing this file supplies is
+the REPRESENTATION -- how a `BV` sits inside `Val` -- and not the arithmetic.
+
+That is a deliberate reversal of an earlier draft, which reimplemented the bit
+operations over `(Int, Int)` pairs.  The reimplementation was not equivalent:
+its `bvBitAt` masked an operand by the RESULT width where `bv_bit` masks by the
+operand's OWN width, so the two disagreed on any bit vector not already reduced
+modulo its own width (`ctor bvTag [int 2, int 7]` against a 4-bit operand is the
+smallest case).  Normalisation happens to be an invariant of the shared
+semantics, so the divergence was unreachable through `interpretDesign` -- but it
+was reachable through `evalPrim`, it would have had to be excluded by hypothesis
+in every operator bridge, and it is exactly the kind of quiet fork that
+Milestone 0 pinned the semantics to prevent.  Calling the pinned functions costs
+one import and makes each bridge lemma `rfl`.
+
+The import is `Translation/LGraphModel` only -- no Mathlib, so the library still
+builds in seconds.  `ObjectLanguage.lean`, which merely NAMES the primitives,
+stays free of it. -/
+
+/-- Reserved tag for encoded bit vectors.  High, to stay clear of the small tags
+`Encoding.lean` gives to `Term`/`Program` constructors and the 100-121 block
+`DesignEncoding.lean`/`RuntimeEncoding.lean` use for the hardware domain. -/
+def bvTag : Nat := 1000
+
+@[inline] def mkBV (w v : Int) : Val := .ctor bvTag [.int w, .int v]
+
+/-- A `BV` as an object value.  `RuntimeEncoding.encBV` is this function; the
+runtime encoding of a bit vector is not a translation but a retyping. -/
+@[inline] def ofBV (b : BV) : Val := mkBV (Int.ofNat b.width) b.value
+
+/-- …and back.  A negative width is rejected rather than clamped: `BV.width` is
+a `Nat`, so a negative one is junk in `Val`, not a bit vector of some width. -/
+@[inline] def asBV : Val → Option BV
+  | .ctor t [.int w, .int v] => if t = bvTag then (if 0 ≤ w then some ⟨w.toNat, v⟩ else none) else none
+  | _                        => none
+
+@[simp] theorem asBV_ofBV (b : BV) : asBV (ofBV b) = some b := by
+  simp [asBV, ofBV, mkBV]
+
+/-- A width argument arrives as an `Int` (everything in `L` counts in `Int`);
+this is the single place it becomes the `Nat` the hardware model wants. -/
+@[inline] def widthOf (w : Int) : Nat := w.toNat
+
+/-! ## Primitive evaluation
+
+The ONLY place a primitive is interpreted.  Adding a primitive touches this
+function and its correctness lemma -- never the specializer, whose `prim` rule is
+generic over `p` (see `PartialEvaluator.lean`). -/
+
+/-- A cons chain as a list, and back.  `mkCtorP`/`ctorFieldsP` move between the
+two representations of "several values": `ctor`'s field list, which is a Lean
+`List` inside the value, and a cons chain, which is what a program in `L` can
+actually walk. -/
+def valList : Val → Option (List Val)
+  | .nil      => some []
+  | .cons a b => (valList b).map (a :: ·)
+  | _         => none
+
+def listVal : List Val → Val
+  | []      => .nil
+  | v :: vs => .cons v (listVal vs)
+
+def evalPrim (p : Prim) (vs : List Val) : Except String Val :=
+  match p, vs with
+  | .addI, [.int a, .int b] => .ok (.int (a + b))
+  | .subI, [.int a, .int b] => .ok (.int (a - b))
+  | .mulI, [.int a, .int b] => .ok (.int (a * b))
+  | .divI, [.int a, .int b] => .ok (.int (if b = 0 then 0 else a / b))
+  | .modI, [.int a, .int b] => .ok (.int (if b = 0 then 0 else a % b))
+  | .ltI,  [.int a, .int b] => .ok (.bool (a < b))
+  | .leI,  [.int a, .int b] => .ok (.bool (a ≤ b))
+  | .eqI,  [.int a, .int b] => .ok (.bool (a = b))
+  | .andB, [.bool a, .bool b] => .ok (.bool (a && b))
+  | .orB,  [.bool a, .bool b] => .ok (.bool (a || b))
+  | .notB, [.bool a]          => .ok (.bool (!a))
+  | .isNil, [v] => .ok (.bool (match v with | .nil => true | _ => false))
+  | .hd, [.cons a _] => .ok a
+  | .tl, [.cons _ d] => .ok d
+  | .consP, [a, d]   => .ok (.cons a d)
+  | .eqV, [a, b]     => .ok (.bool (Val.beq a b))
+  | .mkCtorP, [.int k, l] =>
+      if 0 ≤ k then
+        match valList l with
+        | some fs => .ok (.ctor k.toNat fs)
+        | none    => .error "mkCtor: fields are not a list"
+      else .error "mkCtor: negative tag"
+  | .ctorTagP,    [.ctor t _]  => .ok (.int (Int.ofNat t))
+  | .ctorFieldsP, [.ctor _ fs] => .ok (listVal fs)
+  | .bvMk,    [.int w, .int v] => .ok (ofBV (mk_bv (widthOf w) v))
+  | .bvWidth, [v] => match asBV v with
+                     | some b => .ok (.int (Int.ofNat b.width))
+                     | none   => .error "bvWidth: not a BV"
+  | .bvUint,  [v] => match asBV v with
+                     | some b => .ok (.int (bv_uint b))
+                     | none   => .error "bvUint: not a BV"
+  | .bvBit,   [v, .int i] => match asBV v with
+                             | some b => .ok (.bool (0 ≤ i && bv_bit b i.toNat))
+                             | none   => .error "bvBit: not a BV"
+  | .bvAnd, [.int w, a, b] => match asBV a, asBV b with
+                              | some x, some y => .ok (ofBV (bv_bitwise (widthOf w) (· && ·) x y))
+                              | _, _ => .error "bvAnd: not a BV"
+  | .bvOr,  [.int w, a, b] => match asBV a, asBV b with
+                              | some x, some y => .ok (ofBV (bv_bitwise (widthOf w) (· || ·) x y))
+                              | _, _ => .error "bvOr: not a BV"
+  | .bvXor, [.int w, a, b] => match asBV a, asBV b with
+                              | some x, some y => .ok (ofBV (bv_bitwise (widthOf w) xor x y))
+                              | _, _ => .error "bvXor: not a BV"
+  | .bvNot, [.int w, a] => match asBV a with
+                           | some x => .ok (ofBV (bv_not (widthOf w) x))
+                           | none   => .error "bvNot: not a BV"
+  | .bvResize, [.int w, a] => match asBV a with
+                              | some x => .ok (ofBV (bv_resize (widthOf w) x))
+                              | none   => .error "bvResize: not a BV"
+  | .bvSra, [.int w, a, b] => match asBV a, asBV b with
+                              | some x, some s => .ok (ofBV (bv_sra (widthOf w) x s))
+                              | _, _ => .error "bvSra: not a BV"
+  | .bvGetMask, [.int w, a, b] => match asBV a, asBV b with
+                                  | some x, some m => .ok (ofBV (bv_get_mask (widthOf w) x m))
+                                  | _, _ => .error "bvGetMask: not a BV"
+  | .bvSint, [a] => match asBV a with
+                    | some x => .ok (.int (bv_sint x))
+                    | none   => .error "bvSint: not a BV"
+  | .bvShl, [.int w, a, b] => match asBV a, asBV b with
+                              | some x, some s => .ok (ofBV (bv_shl_step (widthOf w) x s))
+                              | _, _ => .error "bvShl: not a BV"
+  | p, vs =>
+      if vs.length = p.arity then
+        .error s!"primitive {repr p}: operand types do not match"
+      else
+        .error s!"primitive {repr p}: expected {p.arity} operands, got {vs.length}"
+
+/-! ## `caseT` alternative selection
+
+Pinned down rather than left implicit, because each choice is a place a
+specializer and an evaluator can silently disagree:
+
+* **duplicate tags** -- the FIRST matching alternative wins;
+* **missing branch** -- a `typeError`, never a silent default;
+* **arity mismatch** between the scrutinee's field count and the alternative's
+  `arity` -- a `typeError`.
+-/
+
+def findAlt : List Alt → Nat → Option Alt
+  | [],      _   => none
+  | a :: as, tag => if a.tag = tag then some a else findAlt as tag
+
+/-! ## The fuelled evaluator -/
+
+inductive EvalResult where
+  | value     : Val → EvalResult
+  | outOfFuel : EvalResult
+  | typeError : String → EvalResult
+  deriving Inhabited, Repr, BEq
+
+mutual
+
+/-- Evaluate a term.  Each `call`, and each recursive descent, consumes fuel.
+
+Function bodies are evaluated in a FRESH environment holding exactly the
+arguments (`var i` = argument `i`).  The language is first order: there are no
+closures, so nothing is captured from the caller. -/
+def evalFuel : Nat → Program → Env → Term → EvalResult
+  | 0,     _, _, _ => .outOfFuel
+  | n + 1, P, ρ, t =>
+    match t with
+    | .lit v   => .value v
+    | .var i   => match ρ[i]? with
+                  | some v => .value v
+                  | none   => .typeError s!"unbound de Bruijn index {i}"
+    | .letIn e b =>
+      match evalFuel n P ρ e with
+      | .value v     => evalFuel n P (v :: ρ) b
+      | .outOfFuel   => .outOfFuel
+      | .typeError m => .typeError m
+    | .ite c a b =>
+      match evalFuel n P ρ c with
+      | .value (.bool true)  => evalFuel n P ρ a
+      | .value (.bool false) => evalFuel n P ρ b
+      | .value _             => .typeError "ite: condition is not a Bool"
+      | .outOfFuel           => .outOfFuel
+      | .typeError m         => .typeError m
+    | .prim p ts =>
+      match evalFuelList n P ρ ts with
+      | .inl vs => match evalPrim p vs with
+                   | .ok v    => .value v
+                   | .error m => .typeError m
+      | .inr .outOfFuel     => .outOfFuel
+      | .inr (.typeError m) => .typeError m
+      | .inr (.value _)     => .typeError "internal: list result was a value"
+    | .ctorT k ts =>
+      match evalFuelList n P ρ ts with
+      | .inl vs             => .value (.ctor k vs)
+      | .inr .outOfFuel     => .outOfFuel
+      | .inr (.typeError m) => .typeError m
+      | .inr (.value _)     => .typeError "internal: list result was a value"
+    | .caseT s alts =>
+      match evalFuel n P ρ s with
+      | .value (.ctor tag vs) =>
+        match findAlt alts tag with
+        | none   => .typeError s!"caseT: no alternative for tag {tag}"
+        | some a =>
+          if a.arity = vs.length then evalFuel n P (vs ++ ρ) a.body
+          else .typeError s!"caseT: tag {tag} arity {a.arity} but {vs.length} fields"
+      | .value _     => .typeError "caseT: scrutinee is not a constructor"
+      | .outOfFuel   => .outOfFuel
+      | .typeError m => .typeError m
+    | .call f ts =>
+      match evalFuelList n P ρ ts with
+      | .inl vs =>
+        match P.fn f with
+        | none    => .typeError s!"call: no function {f}"
+        | some fd =>
+          if fd.arity = vs.length then evalFuel n P vs fd.body
+          else .typeError s!"call: function {f} arity {fd.arity} but {vs.length} args"
+      | .inr .outOfFuel     => .outOfFuel
+      | .inr (.typeError m) => .typeError m
+      | .inr (.value _)     => .typeError "internal: list result was a value"
+
+/-- Evaluate an argument list left to right, short-circuiting on the first
+non-value result.
+
+Fuel discipline: `evalFuel (n+1)` hands `n` to this function, and this function
+hands the SAME `n` to each element.  So everything reachable below fuel `n+1`
+runs at fuel `≤ n`, which is what makes strong induction on fuel work in
+`evalFuel_sound`.  (Passing `n+1` back to `evalFuel` here would still terminate,
+but the soundness induction would have no decreasing measure to hang on.) -/
+def evalFuelList : Nat → Program → Env → List Term → Sum (List Val) EvalResult
+  | _, _, _, []      => .inl []
+  | n, P, ρ, t :: ts =>
+    match evalFuel n P ρ t with
+    | .value v     => match evalFuelList n P ρ ts with
+                      | .inl vs => .inl (v :: vs)
+                      | .inr r  => .inr r
+    | .outOfFuel   => .inr .outOfFuel
+    | .typeError m => .inr (.typeError m)
+
+end
+
+/-! ## The denotation
+
+The relation every projection theorem is stated against.  No fuel appears here. -/
+
+mutual
+
+inductive Eval (P : Program) : Env → Term → Val → Prop where
+  | lit   : Eval P ρ (.lit v) v
+  | var   : ρ[i]? = some v → Eval P ρ (.var i) v
+  | letIn : Eval P ρ e v₁ → Eval P (v₁ :: ρ) b v → Eval P ρ (.letIn e b) v
+  | iteT  : Eval P ρ c (.bool true)  → Eval P ρ a v → Eval P ρ (.ite c a b) v
+  | iteF  : Eval P ρ c (.bool false) → Eval P ρ b v → Eval P ρ (.ite c a b) v
+  | prim  : EvalList P ρ ts vs → evalPrim p vs = .ok v → Eval P ρ (.prim p ts) v
+  | ctorT : EvalList P ρ ts vs → Eval P ρ (.ctorT k ts) (.ctor k vs)
+  | caseT : Eval P ρ s (.ctor tag vs) → findAlt alts tag = some a →
+            a.arity = vs.length → Eval P (vs ++ ρ) a.body v →
+            Eval P ρ (.caseT s alts) v
+  | call  : EvalList P ρ ts vs → P.fn f = some fd → fd.arity = vs.length →
+            Eval P vs fd.body v → Eval P ρ (.call f ts) v
+
+inductive EvalList (P : Program) : Env → List Term → List Val → Prop where
+  | nil  : EvalList P ρ [] []
+  | cons : Eval P ρ t v → EvalList P ρ ts vs → EvalList P ρ (t :: ts) (v :: vs)
+
+end
+
+/-! ## Soundness of the executable evaluator against the denotation -/
+
+/-- The list case is *derived* at each fuel level rather than co-inducted with the
+term case.  `evalFuelList n` calls `evalFuel n` at the SAME fuel, so a joint
+induction on fuel has no decreasing measure; but given the term property at `n`,
+the list property at `n` follows by ordinary induction on the list.
+
+The recurring `split at h <;> try contradiction` idiom discharges every arm that
+returned a non-`value` result: there `h` equates two distinct constructors.
+`contradiction` is the right closer because it fires on exactly that and nothing
+else.  `simp` is not -- in the surviving arm it half-solves (`Sum.inl xs =
+Sum.inl ys` becomes `xs = ys`) instead of failing, so `try` cannot back it out;
+and `cases` is not, because in that arm `h` is a real hypothesis it would
+consume.  (`Sum.noConfusion` is unusable here for an unrelated reason: `Sum`
+lives in `Type u`, so its `noConfusion` cannot be applied at `Eq.{1}`.) -/
+theorem evalFuelList_sound_of (n : Nat) (P : Program)
+    (h : ∀ ρ t v, evalFuel n P ρ t = .value v → Eval P ρ t v) :
+    ∀ ρ ts vs, evalFuelList n P ρ ts = .inl vs → EvalList P ρ ts vs := by
+  intro ρ ts
+  induction ts with
+  | nil =>
+    intro vs hv
+    simp only [evalFuelList] at hv
+    cases hv
+    exact .nil
+  | cons t ts ih =>
+    intro vs hv
+    simp only [evalFuelList] at hv
+    split at hv <;> try contradiction
+    rename_i v' hev
+    split at hv <;> try contradiction
+    rename_i vs' hvs
+    cases hv
+    exact .cons (h ρ t v' hev) (ih vs' hvs)
+
+/-- Soundness of the executable evaluator against the denotation.
+
+Note the shape: this is only *partial* correctness -- it says nothing about
+programs that run out of fuel or fail.  That is sufficient here because the
+hardware interpreter is total on a well-formed design, which is discharged
+separately, and because every projection theorem is conditioned on the
+specializer having produced a value. -/
+theorem evalFuel_sound :
+    ∀ (n : Nat) (P : Program) (ρ : Env) (t : Term) (v : Val),
+      evalFuel n P ρ t = .value v → Eval P ρ t v := by
+  intro n
+  induction n with
+  | zero =>
+    intro P ρ t v h
+    simp only [evalFuel] at h
+    contradiction
+  | succ n ih =>
+    intro P ρ t v h
+    -- the list property at THIS fuel, from the term property at this fuel
+    have hlist := evalFuelList_sound_of n P (ih P)
+    cases t with
+    | lit v' =>
+      simp only [evalFuel] at h
+      cases h
+      exact .lit
+    | var i =>
+      simp only [evalFuel] at h
+      split at h <;> try contradiction
+      rename_i v' hlk
+      cases h
+      exact .var hlk
+    | letIn e b =>
+      simp only [evalFuel] at h
+      split at h <;> try contradiction
+      rename_i v₁ he
+      exact .letIn (ih P ρ e v₁ he) (ih P (v₁ :: ρ) b v h)
+    | ite c a b =>
+      simp only [evalFuel] at h
+      split at h <;> try contradiction
+      · rename_i hc; exact .iteT (ih P ρ c _ hc) (ih P ρ a v h)
+      · rename_i hc; exact .iteF (ih P ρ c _ hc) (ih P ρ b v h)
+    | prim p ts =>
+      simp only [evalFuel] at h
+      split at h <;> try contradiction
+      rename_i vs hvs
+      split at h <;> try contradiction
+      rename_i v' hp
+      cases h
+      exact .prim (hlist ρ ts vs hvs) hp
+    | ctorT k ts =>
+      simp only [evalFuel] at h
+      split at h <;> try contradiction
+      rename_i vs hvs
+      cases h
+      exact .ctorT (hlist ρ ts vs hvs)
+    | caseT sc alts =>
+      simp only [evalFuel] at h
+      split at h <;> try contradiction
+      rename_i tag vs hs
+      split at h <;> try contradiction
+      rename_i a ha
+      split at h <;> try contradiction
+      rename_i har
+      exact .caseT (ih P ρ sc _ hs) ha har (ih P (vs ++ ρ) a.body v h)
+    | call f ts =>
+      simp only [evalFuel] at h
+      split at h <;> try contradiction
+      rename_i vs hvs
+      split at h <;> try contradiction
+      rename_i fd hfd
+      split at h <;> try contradiction
+      rename_i har
+      exact .call (hlist ρ ts vs hvs) hfd har (ih P vs fd.body v h)
+
+/-! ## Fuel monotonicity, and completeness against the denotation
+
+`evalFuel_sound` says the evaluator only ever reports true results.  These two
+say it reports ALL of them, given enough fuel -- which is what lets a theorem
+stated with `evalFuel` on the hypothesis side be restated with `Eval`.
+
+Monotonicity comes first because completeness combines sub-derivations that
+terminate at different fuels, and has to lift them all to one bound. -/
+
+theorem evalFuelList_mono_of (n m : Nat) (P : Program)
+    (h : ∀ ρ t v, evalFuel n P ρ t = .value v → evalFuel m P ρ t = .value v) :
+    ∀ ρ ts vs, evalFuelList n P ρ ts = .inl vs → evalFuelList m P ρ ts = .inl vs := by
+  intro ρ ts
+  induction ts with
+  | nil => intro vs hv; simpa [evalFuelList] using hv
+  | cons t ts ih =>
+      intro vs hv
+      simp only [evalFuelList] at hv ⊢
+      split at hv <;> try contradiction
+      rename_i v' hev
+      rw [h ρ t v' hev]
+      split at hv <;> try contradiction
+      rename_i vs' hvs
+      rw [ih vs' hvs]
+      exact hv
+
+theorem evalFuel_mono : ∀ (n m : Nat) (P : Program) (ρ : Env) (t : Term) (v : Val),
+    n ≤ m → evalFuel n P ρ t = .value v → evalFuel m P ρ t = .value v := by
+  intro n
+  induction n with
+  | zero => intro m P ρ t v _ h; simp [evalFuel] at h
+  | succ n ih =>
+      intro m P ρ t v hle h
+      cases m with
+      | zero => omega
+      | succ m' =>
+        have hstep : ∀ ρ t v, evalFuel n P ρ t = .value v → evalFuel m' P ρ t = .value v :=
+          fun ρ t v hh => ih m' P ρ t v (by omega) hh
+        have hlist := evalFuelList_mono_of n m' P hstep
+        cases t with
+        | lit w => simpa [evalFuel] using h
+        | var i => simpa [evalFuel] using h
+        | letIn e b =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            rename_i v₁ he
+            rw [hstep ρ e v₁ he]
+            exact hstep _ b v h
+        | ite c a b =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            · rename_i hcv; rw [hstep ρ c _ hcv]; exact hstep _ a v h
+            · rename_i hcv; rw [hstep ρ c _ hcv]; exact hstep _ b v h
+        | prim p ts =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            rename_i vs hvs
+            rw [hlist ρ ts vs hvs]
+            exact h
+        | ctorT k ts =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            rename_i vs hvs
+            rw [hlist ρ ts vs hvs]
+            exact h
+        | caseT s alts =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            rename_i tag vs hs
+            split at h <;> try contradiction
+            rename_i a ha
+            split at h <;> try contradiction
+            rename_i har
+            -- collect every sub-fact first, then rewrite the goal in ONE `simp`:
+            -- rewriting one at a time exposes matches that must iota-reduce
+            -- before the next rewrite can match
+            simp only [hstep ρ s _ hs, ha, if_pos har]
+            exact hstep _ a.body v h
+        | call f ts =>
+            simp only [evalFuel] at h ⊢
+            split at h <;> try contradiction
+            rename_i vs hvs
+            split at h <;> try contradiction
+            rename_i fd hfd
+            split at h <;> try contradiction
+            rename_i har
+            simp only [hlist ρ ts vs hvs, if_pos har]
+            exact hstep _ fd.body v h
+
+mutual
+
+theorem evalFuel_complete {P : Program} : ∀ {ρ : Env} {t : Term} {v : Val},
+    Eval P ρ t v → ∃ n, evalFuel n P ρ t = .value v
+  | _, _, _, .lit => ⟨1, by simp [evalFuel]⟩
+  | _, _, _, .var hv => ⟨1, by simp [evalFuel, hv]⟩
+  | _, _, _, .letIn he hb => by
+      obtain ⟨n₁, h₁⟩ := evalFuel_complete he
+      obtain ⟨n₂, h₂⟩ := evalFuel_complete hb
+      refine ⟨max n₁ n₂ + 1, ?_⟩
+      simp only [evalFuel]
+      rw [evalFuel_mono n₁ _ _ _ _ _ (by omega) h₁]
+      exact evalFuel_mono n₂ _ _ _ _ _ (by omega) h₂
+  | _, _, _, .iteT hc ha => by
+      obtain ⟨n₁, h₁⟩ := evalFuel_complete hc
+      obtain ⟨n₂, h₂⟩ := evalFuel_complete ha
+      refine ⟨max n₁ n₂ + 1, ?_⟩
+      simp only [evalFuel]
+      rw [evalFuel_mono n₁ _ _ _ _ _ (by omega) h₁]
+      exact evalFuel_mono n₂ _ _ _ _ _ (by omega) h₂
+  | _, _, _, .iteF hc hb => by
+      obtain ⟨n₁, h₁⟩ := evalFuel_complete hc
+      obtain ⟨n₂, h₂⟩ := evalFuel_complete hb
+      refine ⟨max n₁ n₂ + 1, ?_⟩
+      simp only [evalFuel]
+      rw [evalFuel_mono n₁ _ _ _ _ _ (by omega) h₁]
+      exact evalFuel_mono n₂ _ _ _ _ _ (by omega) h₂
+  | _, _, _, .prim hts hp => by
+      obtain ⟨n₁, h₁⟩ := evalFuelList_complete hts
+      exact ⟨n₁ + 1, by simp only [evalFuel, h₁, hp]⟩
+  | _, _, _, .ctorT hts => by
+      obtain ⟨n₁, h₁⟩ := evalFuelList_complete hts
+      exact ⟨n₁ + 1, by simp only [evalFuel, h₁]⟩
+  | _, _, _, .caseT hs hf har hb => by
+      obtain ⟨n₁, h₁⟩ := evalFuel_complete hs
+      obtain ⟨n₂, h₂⟩ := evalFuel_complete hb
+      refine ⟨max n₁ n₂ + 1, ?_⟩
+      simp only [evalFuel]
+      simp only [evalFuel_mono n₁ (max n₁ n₂) _ _ _ _ (Nat.le_max_left _ _) h₁, hf, if_pos har]
+      exact evalFuel_mono n₂ (max n₁ n₂) _ _ _ _ (Nat.le_max_right _ _) h₂
+  | _, _, _, .call hts hfd har hb => by
+      obtain ⟨n₁, h₁⟩ := evalFuelList_complete hts
+      obtain ⟨n₂, h₂⟩ := evalFuel_complete hb
+      refine ⟨max n₁ n₂ + 1, ?_⟩
+      simp only [evalFuel]
+      simp only [evalFuelList_mono_of n₁ (max n₁ n₂) _
+            (fun _ _ _ hh => evalFuel_mono n₁ (max n₁ n₂) _ _ _ _ (Nat.le_max_left _ _) hh) _ _ _ h₁,
+          hfd, if_pos har]
+      exact evalFuel_mono n₂ (max n₁ n₂) _ _ _ _ (Nat.le_max_right _ _) h₂
+
+theorem evalFuelList_complete {P : Program} : ∀ {ρ : Env} {ts : List Term} {vs : List Val},
+    EvalList P ρ ts vs → ∃ n, evalFuelList n P ρ ts = .inl vs
+  | _, _, _, .nil => ⟨0, by simp [evalFuelList]⟩
+  | _, _, _, .cons ht hts => by
+      obtain ⟨n₁, h₁⟩ := evalFuel_complete ht
+      obtain ⟨n₂, h₂⟩ := evalFuelList_complete hts
+      refine ⟨max n₁ n₂, ?_⟩
+      simp only [evalFuelList]
+      simp only [evalFuel_mono n₁ (max n₁ n₂) _ _ _ _ (Nat.le_max_left _ _) h₁,
+          evalFuelList_mono_of n₂ (max n₁ n₂) _
+            (fun _ _ _ hh => evalFuel_mono n₂ (max n₁ n₂) _ _ _ _ (Nat.le_max_right _ _) hh) _ _ _ h₂]
+
+end
+
+end Projection

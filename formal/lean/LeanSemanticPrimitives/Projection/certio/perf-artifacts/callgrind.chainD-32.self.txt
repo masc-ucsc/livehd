@@ -1,0 +1,56 @@
+--------------------------------------------------------------------------------
+Profile data file '/tmp/claude-1008/-mada-users-czeng14-projects/edda9607-d401-46cb-b1dc-bb71efe397ec/scratchpad/cg.32' (creator: callgrind-3.27.1)
+--------------------------------------------------------------------------------
+I1 cache: 
+D1 cache: 
+LL cache: 
+Timerange: Basic block 0 - 78308776
+Trigger: Program termination
+Profiled target:  ./.native-dev/perf_probe 32 (PID 1002283, part 1)
+Events recorded:  Ir
+Events shown:     Ir
+Event sort order: Ir
+Thresholds:       90
+Include dirs:     
+User annotated:   
+Auto-annotation:  on
+
+--------------------------------------------------------------------------------
+Ir                   
+--------------------------------------------------------------------------------
+436,259,484 (100.0%)  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+Ir                   file:function
+--------------------------------------------------------------------------------
+61,224,774 (14.03%)  ???:lean_is_ctor [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+41,453,880 ( 9.50%)  ???:lean_ptr_tag [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+28,257,588 ( 6.48%)  ???:lean_ctor_obj_cptr [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+26,687,722 ( 6.12%)  ???:lean_ctor_num_objs [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+25,117,856 ( 5.76%)  ???:lean_to_ctor [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+24,318,866 ( 5.57%)  ???:lean_ctor_get [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+21,617,244 ( 4.96%)  ???:lean_is_scalar [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+18,409,140 ( 4.22%)  ???:lean_ctor_set [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+14,128,794 ( 3.24%)  ???:lean_ptr_other [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+10,403,856 ( 2.38%)  ???:lean_align [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 9,970,362 ( 2.29%)  ???:lean_alloc_ctor [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 9,167,733 ( 2.10%)  ???:lean_is_exclusive [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 8,260,151 ( 1.89%)  ???:lean_dec_ref [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 8,204,528 ( 1.88%)  ???:lean_obj_tag [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 7,939,440 ( 1.82%)  ???:lean_is_st [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 6,948,336 ( 1.59%)  ???:lean_usize_add_checked [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 6,787,389 ( 1.56%)  ???:lean_inc_ref_n [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 6,313,980 ( 1.45%)  ???:mi_free [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 6,302,220 ( 1.44%)  ???:lean_dec_ref_cold [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 6,285,663 ( 1.44%)  ???:lean_alloc_small_object [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 6,172,891 ( 1.41%)  ???:lean_dec [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 5,438,100 ( 1.25%)  ???:lean_set_st_header [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 5,381,370 ( 1.23%)  ???:l_Projection_PVal_shift'2 [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 5,238,942 ( 1.20%)  ???:lean_inc [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 4,929,234 ( 1.13%)  ???:lean_dec_ref_known [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 4,439,912 ( 1.02%)  ???:l_Projection_prepare'2 [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 4,135,497 ( 0.95%)  ???:lean_alloc_ctor_memory [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 3,798,000 ( 0.87%)  ???:lean_inc_ref [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 3,788,154 ( 0.87%)  ???:l_Projection_mixTerm'2 [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+ 3,697,908 ( 0.85%)  ???:lean_usize_mul_checked [/mada/users/czeng14/projects/livehd-futamura/livehd/formal/lean/.native-dev/perf_probe]
+

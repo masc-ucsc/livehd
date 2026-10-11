@@ -3472,3 +3472,125 @@ none of the four remaining targets) and `timeout_resumable` (1 failure),
 neither chased because chasing them meant running the test that destroys a live
 measurement.
 
+## 38. FP checkpoint 1: installed, adapted, built, and two real reconciliation gaps
+
+Source: read-only `/mada/users/czeng14/projects/livehd-futamura/livehd` at
+`9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6`, semantic pin
+`90583be1349acbd25f740b176a406aa8bbe1251c`. Asset list and pinned digests from
+`audits/fp_original_procedure_baseline_20261010/result.json` -- named in
+advance, not discovered by walking the tree.
+
+### 38.1 Counts
+
+| | n | |
+| --- | ---: | --- |
+| pinned assets installed | **56** | 38 Projection modules + 18 procedure entrypoints |
+| of those, verbatim | **53** | installed digest = pinned digest |
+| adapted | **3** | 6 edits, each forced and recorded |
+| support assets installed | **31** | docs, `certio/` experiment record + perf artifacts, census, overlays |
+| shared-core modules built | **8** | |
+| Projection modules built | **16** | of 25 non-Proto |
+| blocked by a real failure | **1** | `OperatorBridge` |
+| blocked behind it | **8** | cascade only |
+| unattempted | **13** | the `Proto/` modules; not in the original driver's list |
+| original fixtures executed | **3** | below |
+
+`pass/lean/tests/fp/fp_install_map.tsv` is the source-to-master preservation
+map: one row per asset with the pinned digest, the digest actually installed,
+`verbatim`, the edit count and the reason. An unadapted row has equal digests,
+so "verbatim" is checkable rather than claimed.
+`fp_support_assets.tsv` records the support assets AS OBSERVED -- they are not
+in the pinned baseline, so their digests are not verified against a prior pin.
+
+### 38.2 The three adaptations
+
+1. **`Projection/CertLoad.lean` -> the V1 route.** FP's `Compiler.CertIO` is
+   the DCERT1 codec; master's is DCERT2 and FP's lives beside it as
+   `Compiler.CertIO.V1` (S22). Left alone, CertLoad would silently take the
+   DCERT2 contract and its own grammar guard --
+   `#guard (parseCert "DCERT1\n0\n0\n0\n0\n0\n".toUTF8).toOption.isSome` --
+   would fail on magic. The V1 route keeps the HISTORICAL guards testing the
+   grammar they were written for. **The fresh DCERT2 transport is a separate
+   obligation and is NOT discharged by this.**
+2. **`.build-proj.sh`.** The driver is itself a pinned asset, so its adaptation
+   has to live in the installer or a re-install reverts it -- which happened
+   once, silently taking `Compiler/CertIOV1` out of the list and breaking the
+   whole CertLoad chain. Master's `Compiler/CertIO` is also dropped from the
+   list: DCERT2 imports `CompileDesign`, whose chain imports Mathlib, and this
+   driver is deliberately "no lake, no Mathlib" (it excludes
+   `Translation/OpBridge` for the same reason). That is out of scope, not a
+   failure.
+3. **`OperatorBridge.lean`, three `rfl` theorems.** See S38.4.
+
+### 38.3 The overlay, adapted rather than applied
+
+FP carries one overlay on the shared semantics,
+`Projection/overlays/bv_shl_step.patch`: it factors the `Op_SHL` fold term out
+as `bv_shl_step` so three Projection modules can name it, and rewrites two call
+sites.
+
+**It must not be applied verbatim.** Its body is the UNGUARDED `2 ^ k` formula,
+and master's `Op_SHL` saturates at the result width -- the comment on master's
+`eval_op` says in as many words that the bound is the bridge's and is NOT
+claimed equal to the unguarded formula on every input. Taking FP's body would
+delete a boundary repair this branch proved, which is the R46 regression again.
+
+So master gets the name with MASTER'S body, guard included, and **no call site
+is touched** -- `eval_op` is byte-identical to before, which makes the overlay
+inert in the strongest sense. Without the definition,
+`ObjectLanguageSemantics` does not elaborate at all (`Unknown identifier
+bv_shl_step`), and with it, 16 Projection modules build.
+
+### 38.4 Two reconciliation gaps, both real
+
+Both are FP claims written against the PINNED BASE that are false against
+master's boundary repairs. Neither is a defect in master, and neither is
+repaired by weakening master.
+
+**(a) `Op_SHL`, resolved.** `OperatorBridge` carries three `rfl` theorems named
+`..._unchanged_by_overlay`, whose job is to certify the overlay changed
+nothing. They assert `eval_op`/`denote_op` equal a fold over the unguarded
+formula. On master those are **false**, and the build named all three. Since
+the overlay here is inert, the statement that says so names master's step
+instead; restated, the three hold by `rfl`.
+
+**(b) `Op_Sext`, OPEN.** With (a) fixed the build advances to
+`OperatorBridge.lean:333`, `evalOp_Sext`, whose closing `split <;> rfl` fails:
+
+```
+left:  { width := w, value := a.value % 2 ^ a.width % 2 ^ w }
+right: { width := w, value := (if ... < 2 ^ (k - 1) then ... else ... - 2 ^ k) % 2 ^ w }
+```
+
+That is master's **strict-greater Sext boundary** -- the third of the three
+boundary repairs S6.1 requires be preserved. FP's bridge was written before it.
+This needs the theorem restated against master's `Op_Sext`, which is proof work
+with a real obligation attached, not a mechanical edit. **Not attempted at this
+checkpoint.** `HardwareInterpreter`, `HardwareAdequacy`, `ProjectionCorrect`,
+`ResidualFragment`, `ProjectedStep`, `CertLoad`, `Scaling` and `Audit` are
+behind it and are blocked, not failing.
+
+### 38.5 Original fixtures executed on master
+
+| fixture | exit | wall | peak RSS | guards |
+| --- | ---: | ---: | ---: | ---: |
+| `Projection/Demo.lean` (first projection) | **0** | 1.40 s | 487,180 kB | 28 |
+| `Projection/Gate0.lean` (self-application / second projection) | **0** | 3.01 s | 493,632 kB | 17 |
+| `scripts/repr_prototype.lean` (diagnostic runner) | **0** | -- | -- | -- |
+
+`Gate0`'s own header says *"Everything here is a `#guard`, so the build is the
+test"*, and it asks two questions in order: does `mixProgram` compute what the
+Lean `mix` computes, and does specializing it to the toy interpreter produce a
+compiler. Both execute on master, with the shared core built from master's own
+post-D2 sources.
+
+**What this does not close.** Three fixtures are not the inventory. The
+check-off standard is every benchmark block that passed on the original branch,
+under each original applicable procedure, joined to fresh master execution with
+hashes, commands, exits and observable results -- and the 311 primary axiom
+reports cover only 21/38 modules. The `Proto/` modules, ProtoAudit, the csimp
+obligations, the runner/trace/scaling/DCERT experiments (the 30-row
+`certio/experiments.jsonl`), the historical V1 replay and the fresh DCERT2
+transport are all retained and all open. Object second projection stays
+distinct from unproved host-specializer correctness.
+

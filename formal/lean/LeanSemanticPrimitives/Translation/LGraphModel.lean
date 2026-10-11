@@ -93,6 +93,30 @@ def bv_bitwise (w : Nat) (f : Bool → Bool → Bool) (a b : BV) : BV :=
 def bv_not (w : Nat) (a : BV) : BV :=
   mk_bv w (bits_to_int w fun i => ¬ bv_bit a i)
 
+/-- One `Op_SHL` fold term: the shifted copy of `a` by the amount in `b`.
+
+MASTER-ADAPTED OVERLAY.  The pinned Futamura branch carries
+`Projection/overlays/bv_shl_step.patch`, which factors this step out of the
+`Op_SHL` fold so `Projection/ObjectLanguageSemantics`, `OperatorBridge` and
+`HardwareAdequacy` can name it.  That patch does not apply here and must not be
+applied verbatim: its body is the UNGUARDED `2 ^ k` formula, and master's fold
+saturates at the result width -- see the comment on `Op_SHL` in `eval_op`,
+which says in as many words that the bound is the bridge's and is NOT claimed
+equal to the unguarded formula on every input.
+
+So the name is master's step, guard included.  Taking FP's body instead would
+delete a boundary repair this branch proved, which is the regression recorded
+as R46.
+
+Definition only: the `eval_op` call site is left spelled out, so nothing that
+already reasons about that fold changes.  A consequence worth stating plainly
+-- FP's `bv_shl_step_unfolds`, which asserts this equals the unguarded formula
+by `rfl`, is FALSE here and is expected to fail. That failure is a real
+finding about the operator bridge, not something to engineer around. -/
+def bv_shl_step (w : Nat) (a b : BV) : BV :=
+  mk_bv w (if (bv_uint b).toNat ≥ w then 0
+           else bv_uint a * (2 : Int) ^ (bv_uint b).toNat)
+
 def bv_sint (x : BV) : Int :=
   let w := x.width
   let u := bv_uint x

@@ -1,0 +1,925 @@
+/-
+# DEFERRED-SHIFT PROTOTYPE -- certio/PHASE6_PERF.md 38.  NOT PROVED.
+
+A copy of the PROVED `Projection/PartialEvaluator.lean` at S2 (3c175a4da), with
+the `nthD` lookup summary already integrated, in namespace
+`Projection.ProtoShift`, and ONE representation change: `PVal` gains
+`shifted k v`, a binder adjustment that is composed rather than applied.
+
+  enter k binders   `PVal.shift` wraps or composes an offset -- O(1)
+  select a leaf     `walkHead`, `hnf` add offsets up and apply them once
+  reify             `toCodeAt` applies them during the traversal it already does
+
+`Term.var` and `Eval` are untouched: offsets live only in partial values.  The
+proved `k = 0` fast-path block is omitted (a deferred shift is O(1) anyway).
+No theorems; not imported by `Audit.lean`.  It exists to measure
+S1 -> summary -> summary + deferred shifting, with `scripts/s3_probe.lean`.
+-/
+import LeanSemanticPrimitives.Projection.BindingTime
+import LeanSemanticPrimitives.Projection.ObjectLanguageSemantics
+
+namespace Projection
+namespace ProtoShift
+
+/-! ## Requests, partial values, errors -/
+
+/-- A specialization request: which function, and the values of its static
+parameters in order.  The *pattern* of static positions is not stored because
+it is fixed by the callee's division -- binding-time analysis here is
+monovariant, so `funIdx` determines it. -/
+structure SpecRequest where
+  funIdx     : Nat
+  staticArgs : List Val
+  deriving Inhabited, Repr
+
+def SpecRequest.beq (a b : SpecRequest) : Bool :=
+  a.funIdx == b.funIdx && Val.beqList a.staticArgs b.staticArgs
+
+instance : BEq SpecRequest := ⟨SpecRequest.beq⟩
+
+/-- What a source variable is bound to during specialization: a value `mix`
+knows, a residual de Bruijn index, or a PARTIALLY KNOWN cons cell -- a spine
+`mix` knows the shape of, whose components it may not.
+
+`cons` is what makes a slot read cost O(1) instead of O(depth).  An interpreter
+carries its environment as data, and specializing a lookup into that data is
+only possible if the specializer can see the spine while the leaves stay
+dynamic.  Without it, `consP`/`hd`/`tl` all residualize and a static index walks
+a dynamic list at run time -- which is the O(N^2) wall `Scaling.lean` measures.
+
+LEAVES ARE `stat` OR `dyn`, NEVER ARBITRARY CODE, and that is forced rather than
+chosen: `PEnv.shiftBy` has to move every residual index when a binder is
+entered, and shifting arbitrary residual TERMS would need a de Bruijn weakening
+operation plus its correctness lemma -- exactly what argument transfer avoids
+by threading the environment instead.  A `dyn` index shifts by arithmetic.  So code
+placed into the environment is `let`-bound first and enters as a `dyn`. -/
+inductive PVal where
+  | stat : Val → PVal
+  | dyn  : Nat → PVal
+  | cons : PVal → PVal → PVal
+  /-- DEFERRED SHIFTING (PHASE6_PERF.md 38): `v` with every residual index
+  moved out by `k`, NOT yet applied.  Means exactly what the eager shift would:
+  `.shifted k v` holds in `ρ` iff `v` holds in `ρ.drop k`. -/
+  | shifted : Nat → PVal → PVal
+  deriving Inhabited, Repr
+
+abbrev PEnv := List PVal
+
+/-- Entering a residual binder shifts every residual index in scope.  Static
+entries are untouched -- they name no residual variable -- and a partial cons
+shifts componentwise, because its leaves are where the indices live. -/
+def PVal.shift (k : Nat) (v : PVal) : PVal :=
+  if k = 0 then v else
+  match v with
+  | .stat x       => .stat x                -- names no residual variable
+  | .dyn i        => .dyn (i + k)           -- a leaf: O(1) eagerly
+  | .shifted k' w => .shifted (k + k') w    -- offsets COMPOSE
+  | w             => .shifted k w           -- a spine: O(1), deferred
+
+/-- The environment is the CURRENT function's parameters -- short -- so a map
+of O(1) shifts is cheap; the long structures are the spines INSIDE entries. -/
+def PEnv.shiftBy (k : Nat) (env : PEnv) : PEnv :=
+  if k = 0 then env else env.map (PVal.shift k)
+
+/-- Expose the head constructor, pushing ONE layer of offset down to the
+children.  O(1); never returns `.shifted`.  Everything that pattern-matches a
+partial value goes through this. -/
+def PVal.hnfAt (acc : Nat) : PVal → PVal
+  | .shifted k v => PVal.hnfAt (acc + k) v
+  | .stat x      => .stat x
+  | .dyn i       => .dyn (i + acc)
+  | .cons a b    => .cons (PVal.shift acc a) (PVal.shift acc b)
+
+def PVal.hnf (v : PVal) : PVal := PVal.hnfAt 0 v
+
+-- (the proved `k = 0` fast-path block is omitted: a deferred shift is O(1))
+
+/-- `let e₀ in let e₁ in … let e_{k-1} in body`. -/
+def wrapLets : List Term → Term → Term
+  | [],      body => body
+  | e :: es, body => .letIn e (wrapLets es body)
+
+/-- The result of specializing one term.
+
+`cons` is the same partial structure as `PVal.cons`, but its leaves may be
+arbitrary `code`: a result is not yet in the environment, so nothing has had to
+shift it.
+
+`lets` is the PACKAGE -- residual bindings carried ALONGSIDE a partial value
+rather than wrapped around reified code.  Without it a partial structure dies at
+every result binder: a dynamic `letIn` would return `.code (.letIn e (toCode r))`
+and an unfolded call `.code (wrapLets dts (toCode r))`, both of which reify `r`
+and hand the caller something opaque.  That is what would make `I_hw`'s
+per-node binding self-defeating -- it would bind the node once and then flatten
+the body's environment on the way out.
+
+The binder does have a place to hang after all: a binding LIST that travels WITH
+the value.  `toCode` of the package is exactly the term the old rules emitted,
+which is why introducing it changes no residual and can be checked inert. -/
+inductive PRes where
+  | stat : Val → PRes
+  | code : Term → PRes
+  | cons : PRes → PRes → PRes
+  | lets : List Term → PRes → PRes
+  /-- A partial value CARRIED rather than converted.  `.val v` denotes exactly
+  what `v.toPRes` denotes, but costs O(1) to build where `toPRes` copies the
+  whole spine.  Built only through `PRes.ofPVal`, so it only ever holds a
+  genuine spine.  Promoted from `Proto/PartialEvaluatorFast.lean` (CHANGE 1);
+  see `certio/PHASE6_PERF.md` 26 and 27 for what it buys. -/
+  | val  : PVal → PRes
+  deriving Inhabited, Repr
+
+/-- Reify a partial value directly, without building a `PRes` first.  Agrees
+with `(PVal.toPRes v).toCode` -- `PRes.toCode_toPRes` in the correctness file
+says so -- which is why carrying `.val` changes no residual. -/
+def PVal.toCodeAt (acc : Nat) : PVal → Term
+  | .shifted k v => PVal.toCodeAt (acc + k) v
+  | .stat v      => .lit v
+  | .dyn k       => .var (k + acc)
+  | .cons a b    => .prim .consP [PVal.toCodeAt acc a, PVal.toCodeAt acc b]
+
+def PVal.toCode (v : PVal) : Term := PVal.toCodeAt 0 v
+
+/-- Turn any result into residual code.  On a static value this is the `lift`
+of the two-level language, and it is why lifting is always available: every
+`Val` is a legal `Term.lit`.  On a partial cons it re-emits the `consP` chain --
+the spine `mix` knew becomes ordinary residual code again, which is the price of
+letting a partial structure escape into a dynamic context. -/
+def PRes.toCode : PRes → Term
+  | .stat v   => .lit v
+  | .code t   => t
+  | .cons a b  => .prim .consP [PRes.toCode a, PRes.toCode b]
+  | .lets bs r => wrapLets bs (PRes.toCode r)
+  | .val v     => PVal.toCode v
+
+/-- Read a partial environment entry back as a result.  A preserved spine has
+to survive being looked up, or the `var` rule would flatten it the first time it
+is read and the whole point would be lost. -/
+-- used only by `Prepared.toPRes`, a proof-side helper; no runtime caller
+partial def PVal.toPRes (v : PVal) : PRes :=
+  match PVal.hnf v with
+  | .stat x   => .stat x
+  | .dyn k    => .code (.var k)
+  | .cons a b => .cons (PVal.toPRes a) (PVal.toPRes b)
+  | w         => .val w
+
+/-- The O(1) embedding of a partial value into a result.  It agrees with
+`PVal.toPRes` EXACTLY at the leaves -- a `stat` stays `stat`, a `dyn k` becomes
+`code (.var k)` -- and carries only a genuine spine as `.val`.
+
+Keeping `.val` to spines is deliberate, and it is where this promotion departs
+from the fork.  The fork's `peel` arms return a raw `.val a`, so they can build
+`.val (.stat v)` -- which `allStatic` rejects where it accepts `.stat v`, and
+which `primStruct`'s static fold does not match.  That is a latent new failure
+mode and a residual difference.  Through `ofPVal` every result is one the old
+specializer could have built, or `.val` standing for a spine it would have
+copied; so residuals are unchanged, which is what makes the change checkable. -/
+def PRes.ofPVal (v : PVal) : PRes :=
+  match PVal.hnf v with
+  | .stat x   => .stat x
+  | .dyn k    => .code (.var k)
+  | w         => .val w
+
+/-- Can this result's residual code fail to produce a value?
+
+A structural rule that DISCARDS a component -- `hd` drops the tail, `tl` drops
+the head, `isNil` on a known spine drops both -- is sound only if what it drops
+cannot fail, because `mixDriver_complete` reads "residual value implies source
+value" and the source evaluates every operand.  `hd (consP X loop)` is the
+counterexample: the source has no `Eval` at all, since `EvalList` needs every
+argument to have a value, while a residual reduced to `X` does.
+
+A `stat` is already a value and a `dyn` names a residual binding.  NOTE the
+subtlety: a `dyn` is total only under the compatible-environment invariant, not
+because it is syntactically a variable -- `Compat` is what says the index is in
+scope, which is why this predicate is only ever used with a `Compat` in hand. -/
+def PRes.total : PRes → Bool
+  | .stat _        => true
+  | .code (.var _) => true
+  | .code _        => false
+  | .cons a b      => PRes.total a && PRes.total b
+  | .lets _ _      => false
+  -- a partial value's leaves are `stat` or `dyn`, both total under `Compat`
+  | .val _         => true
+
+inductive MixError where
+  | outOfFuel
+  | unboundVar  : Nat → MixError
+  | unknownFun  : Nat → MixError
+  | notStatic   : String → MixError
+  | notCode     : String → MixError
+  | illAnnotated : String → MixError
+  | primFailed  : String → MixError
+  | noSpec      : Nat → MixError
+  | badArity    : String → MixError
+  deriving Inhabited, Repr
+
+/-- What `mixTerm` returns: a partial result plus every specialization the walk
+asked for. -/
+abbrev MixOut := PRes × List SpecRequest
+
+/-! ## Splitting a call's arguments
+
+At a residual call the static operands are consumed by `mix` and the dynamic
+ones survive into the residual program.  The callee's division says which is
+which; a mismatch between the division and what `mixTerm` produced is an
+annotation error, not a recoverable case. -/
+
+def splitArgs : Div → List PRes → Except MixError (List Val × List Term)
+  | [], [] => .ok ([], [])
+  | .stat :: bs, .stat v :: rs =>
+      match splitArgs bs rs with
+      | .ok (vs, ts) => .ok (v :: vs, ts)
+      | .error e     => .error e
+  | .dyn :: bs, r :: rs =>
+      match splitArgs bs rs with
+      | .ok (vs, ts) => .ok (vs, r.toCode :: ts)
+      | .error e     => .error e
+  | .stat :: _, .code _ :: _ => .error (.notStatic "call: static parameter got residual code")
+  | _, _ => .error (.badArity "call: argument count does not match the division")
+
+/-- The environment a specialized function body is specialized under: static
+parameters hold their values, and the `j`-th dynamic parameter becomes residual
+index `j`. -/
+def buildEnv : Div → List Val → Nat → Except MixError PEnv
+  | [], [], _ => .ok []
+  | .stat :: bs, v :: vs, j =>
+      match buildEnv bs vs j with
+      | .ok rest => .ok (.stat v :: rest)
+      | .error e => .error e
+  | .dyn :: bs, vs, j =>
+      match buildEnv bs vs (j + 1) with
+      | .ok rest => .ok (.dyn j :: rest)
+      | .error e => .error e
+  | _, _, _ => .error (.badArity "specialize: static argument count does not match the division")
+
+/-- How many parameters survive into the residual function. -/
+def dynCount : Div → Nat
+  | []          => 0
+  | .dyn :: bs  => dynCount bs + 1
+  | .stat :: bs => dynCount bs
+
+/-! ## Prepared arguments
+
+The result of getting an argument ready to cross an unfolded call: the bindings
+its code leaves need, plus the partial value whose `dyn` leaves index them.
+
+Returning the two TOGETHER is the point.  The transfer this replaced ran as two
+functions, `mixUArgs` and `inlineEnv`, each reconstructing the same binding
+layout independently and agreeing only because their arithmetic matched -- the
+same shape as the `wrapLets` index bug this branch already hit once.  With one
+package the agreement is structural. -/
+
+structure Prepared where
+  binds : List Term
+  value : PVal
+  deriving Inhabited
+
+/-- The denotation: bindings wrapped around the value's reified code. -/
+def Prepared.toPRes (p : Prepared) : PRes := .lets p.binds p.value.toPRes
+
+/-- Split a result into the bindings its code leaves need and a partial value
+whose `dyn` leaves index them.
+
+INDEX DISCIPLINE.  `wrapLets bs body` puts `bs`'s LAST binding at index 0, so a
+leaf bound as binding `j` of `k` sits at `k - 1 - j`, and a reference the caller
+already held shifts UP by `k`.  Both are arithmetic on `PVal`, which is exactly
+why leaves are `stat`/`dyn` and never arbitrary code.
+
+WHY THERE IS A FALLBACK.  Two sibling subtrees that BOTH need bindings cannot
+have their binding lists concatenated: the second list's terms were produced in
+the caller's scope and would then sit under the first list's binders, so they
+would need de Bruijn weakening -- the operation this development avoids by
+threading the environment instead.  When that happens `prepare` binds the whole
+subtree once and loses its spine.  `I_hw` never reaches it: the environment
+argument is `cons (node value) (spine of variables)`, so exactly one side ever
+needs a binding.
+
+A `lets` PACKAGE concatenates safely, and only it does: its inner bindings
+genuinely live under its outer ones, so no shift is owed. -/
+def prepare : PRes → Prepared
+  -- already a partial value: nothing to bind, nothing to copy
+  | .val v         => ⟨[], v⟩
+  | .stat v        => ⟨[], .stat v⟩
+  -- already a reference; binding it again would be a wasted let
+  | .code (.var i) => ⟨[], .dyn i⟩
+  | .code t        => ⟨[t], .dyn 0⟩
+  | .cons a b =>
+    match prepare a, prepare b with
+    | ⟨[], va⟩, ⟨bb, vb⟩ => ⟨bb, .cons (PVal.shift bb.length va) vb⟩
+    | ⟨ba, va⟩, ⟨[], vb⟩ => ⟨ba, .cons va (PVal.shift ba.length vb)⟩
+    | _,        _        => ⟨[PRes.toCode (.cons a b)], .dyn 0⟩
+  | .lets bs r =>
+    let p := prepare r
+    ⟨bs ++ p.binds, p.value⟩
+
+/-! ## Structural answers for the list primitives
+
+`hd`/`tl`/`isNil` can often be answered from a spine `mix` already holds,
+without emitting code.  Three things make this delicate.
+
+SEEING THROUGH A PACKAGE.  A result may be `lets bs (cons a b)`, and the answer
+has to keep `bs`: those bindings are what preserve the failure or divergence of
+work already moved out of the value, which is what keeps the completeness
+direction honest.  Note the bindings themselves need NOT be total -- retaining
+them is the point.
+
+RE-WRAPPING RATHER THAN FLATTENING.  A nested package is peeled one level at a
+time and re-wrapped.  Concatenating the binding lists is the obvious move and it
+is WRONG: the inner package's de Bruijn references run under the outer bindings,
+so `outer ++ inner` is off by the outer length -- the same index-arithmetic
+class as the `wrapLets` bug this branch already hit once.
+
+DISCARDING NEEDS A GUARD.  `hd` drops the tail, `tl` the head, `isNil` both, and
+`mixDriver_complete` reads "residual value implies source value" while the
+source evaluates every operand.  `hd (consP X loop)` is the counterexample.  The
+guard is `PRes.total` on what is dropped.
+
+WHAT IS DISCARDABLE IS A CONJUNCTION, and each half does different work:
+
+    discardable  =  computation-free  AND  references-in-scope
+
+`PRes.total` is the first half.  Once the package exists, a discarded component
+holds no computation -- every node's work has already been moved into some
+enclosing `lets` -- so what the spine carries is values, variables and spines of
+those.  Retaining `bs` is what preserves the failure or divergence of the work
+that moved.
+
+SCOPE IS THE SECOND HALF AND DOES NOT FOLLOW FROM THE FIRST: a `code (.var i)`
+leaf evaluates only if `i` is in range of the residual environment.  Nor does
+the first follow from the second -- a well-scoped `.code <loop>` is perfectly
+in scope and still must not be dropped, which is exactly what `total` rejects.
+Both halves are needed.
+
+`PRes.Scoped` (in `PartialEvaluatorCorrect.lean`) is the second half, and
+wiring these rules in waits on the invariant that `mixTerm` preserves it.  Until
+then these definitions are deliberately NOT wired into the `prim` rule. -/
+
+/-- THE PEELS ANSWER FROM A SPINE, NEVER FROM A STATIC VALUE.
+
+An earlier revision also had `peelHd (.stat (.cons a _)) = some (.stat a)` and
+its two siblings.  They are gone, for two reasons that agree.
+
+They were dead: a `hd`/`tl`/`isNil` whose operand is wholly static is already
+answered by the STATIC branch of the `prim` case, which just runs `evalPrim`.
+Reaching the static arm needs a binding-time analysis that marked a wholly
+static term dynamic.  Removing them was measured INERT -- `Scaling`'s and
+`Gate0`'s residuals are unchanged to the digit.
+
+And they were not expressible in `L`.  The object specializer has to make the
+same decisions as this one or the second projection's agreement is a
+coincidence, and deciding "is this Val a cons" needs a primitive `L` does not
+have: `isNil` separates nil from everything else, and `hd` on a non-cons is a
+type error rather than a failure one can test.  Keeping an arm here that the
+object cannot mirror would mean two independently designed specializers. -/
+def peelHd : PRes → Option PRes
+  | .lets bs r        => (peelHd r).map (PRes.lets bs)
+  | .cons a b         => if b.total then some a else none
+  -- a partial value's tail is total, so the guard is answered without a walk
+  | .val v            => match PVal.hnf v with
+                         | .cons a _ => some (PRes.ofPVal a)
+                         | _         => none
+  | _                 => none
+
+def peelTl : PRes → Option PRes
+  | .lets bs r        => (peelTl r).map (PRes.lets bs)
+  | .cons a b         => if a.total then some b else none
+  | .val v            => match PVal.hnf v with
+                         | .cons _ b => some (PRes.ofPVal b)
+                         | _         => none
+  | _                 => none
+
+def peelIsNil : PRes → Option PRes
+  | .lets bs r        => (peelIsNil r).map (PRes.lets bs)
+  | .cons a b         => if a.total && b.total then some (.stat (.bool false)) else none
+  | .val v            => match PVal.hnf v with
+                         | .cons _ _ => some (.stat (.bool false))
+                         | _         => none
+  | _                 => none
+
+/-- `consP` discards nothing, so it may always build a spine. -/
+def primStruct (p : Prim) (rs : List PRes) : Option PRes :=
+  match p, rs with
+  | .consP, [.stat a, .stat b] => some (.stat (.cons a b))
+  | .consP, [a, b]             => some (.cons a b)
+  | .hd,    [r]                => peelHd r
+  | .tl,    [r]                => peelTl r
+  | .isNil, [r]                => peelIsNil r
+  | _, _                       => none
+
+/-- Every result must be a value; used by the static cases, where the
+congruence rule guarantees it and a violation is an annotation error. -/
+def allStatic : List PRes → Except MixError (List Val)
+  | []            => .ok []
+  | .stat v :: rs =>
+      match allStatic rs with
+      | .ok vs   => .ok (v :: vs)
+      | .error e => .error e
+  | .code _ :: _  => .error (.notStatic "static node has a residual operand")
+  | .cons _ _ :: _ => .error (.notStatic "static node has a partially static operand")
+  | .lets _ _ :: _ => .error (.notStatic "static node has a residual operand")
+  | .val _ :: _    => .error (.notStatic "static node has a partially static operand")
+
+/-- The residual code of each DYNAMIC argument, in source order.  These become
+the `let`s an unfold wraps around the inlined body. -/
+def dynArgCodes : Div → List PRes → Except MixError (List Term)
+  | [], [] => .ok []
+  | .stat :: bs, _ :: rs => dynArgCodes bs rs
+  | .dyn :: bs, r :: rs =>
+      match dynArgCodes bs rs with
+      | .ok ts   => .ok (r.toCode :: ts)
+      | .error e => .error e
+  | _, _ => .error (.badArity "unfold: argument count does not match the division")
+
+/-- Is every parameter static?
+
+Checked rather than assumed.  A call whose RESULT is static must be unfolded in
+an environment `mix` fully knows, which is only possible if the callee has no
+dynamic parameter.  Well-annotatedness already guarantees it -- the congruence
+rule forces every operand of a static node static -- but checking here means
+`mix_sound` needs no `wfAProgram` hypothesis, and the cost is one `Bool`.
+
+The call sites pair this with an argument-COUNT test, for a reason specific to
+the converse direction: `mix_sound`'s forward half can read the count off the
+source's own arity test, but the converse starts from the residual and has no
+source in hand, so `mix` has to establish it itself. -/
+def allStatDiv : Div → Bool
+  | []          => true
+  | .stat :: bs => allStatDiv bs
+  | .dyn :: _   => false
+
+def findAAlt : List AAlt → Nat → Option AAlt
+  | [],      _ => none
+  | a :: as, t => if a.tag = t then some a else findAAlt as t
+
+/-- `[dyn 0, dyn 1, …, dyn (k-1)]` — a `caseT` alternative binds its fields with
+field `j` at index `j`, matching `Eval.caseT`'s `vs ++ ρ`. -/
+def freshDyns (k : Nat) : PEnv := (List.range k).map PVal.dyn
+
+/-! ## The specializer
+
+Fuel is a step budget, decremented on every recursive call, so this is
+structural recursion on `Nat`.  It is genuinely needed: unfolding a static call
+is unbounded, and a static loop that fails to terminate at specialization time
+is a real failure mode of offline partial evaluation, not a Lean artifact. -/
+
+
+/-! ## The `nthD` lookup summary (certio/PHASE6_PERF.md 35-37)
+
+At a dynamic unfold of a callee whose ANNOTATED definition is the list-index
+recursion, the `k + 1` unfolds a static index `k` would cost are replaced by a
+walk of the known spine.  It runs on `mixPArgs`' OUTPUT -- the bindings, the
+prepared list value and the static index -- so every argument is specialized
+exactly once, a failed attempt costs nothing extra, and binding order, requests
+and scope are `mixPArgs`' own.  Proved in `PartialEvaluatorCorrect.lean`:
+`isNthD_spec`, `nthD_source`, `walkHead_ok`, `nthSummaryEnv_scoped`, and the
+`ucall` cases of `mixTerm_scoped`, `mixTerm_complete` and `mixTerm_sound`. -/
+
+/-- The callee's annotated definition is the list-index recursion itself: a
+structural match, the self-recursion checked, never the name or the index.
+Every binding-time annotation the unfold path depends on is matched; the
+`ite`'s own is a wildcard because `mixTerm` dispatches on `btOf` of the
+condition, not on it. -/
+def isNthD (f : Nat) (fd : AFunDef) : Bool :=
+  match fd.params, fd.body with
+  | [.dyn, .stat],
+    .ite _ (.prim .stat .eqI [.var 1, .lit (.int 0)])
+           (.prim .dyn .hd [.var 0])
+           (.ucall .dyn g [.prim .dyn .tl [.var 0],
+                           .prim .stat .subI [.var 1, .lit (.int 1)]]) => g == f
+  | _, _ => false
+
+/-- Walk a known spine `k` cells.  `O(k)` host work: the summary removes the
+interpreter unfolds, not the walk. -/
+def walkHeadAt (acc : Nat) : PVal → Nat → Option PVal
+  | .shifted k v, n     => walkHeadAt (acc + k) v n
+  | .cons a _,    0     => some (PVal.hnf (PVal.shift acc a))
+  | .cons _ b,    n + 1 => walkHeadAt acc b n
+  | _,            _     => none
+
+/-- O(1) per cell and no allocation until the leaf: the offset is added up on
+the way down, never pushed through the spine. -/
+def walkHead (v : PVal) (n : Nat) : Option PVal := walkHeadAt 0 v n
+
+/-- The summary, read off the environment `mixPArgs` built for a recognised
+callee: the list's prepared value, then the static index.  Only a `dyn` leaf is
+answered -- at lookup time in `I_hw` every leaf is one (PHASE6_PERF.md 35.1),
+and a `stat` leaf is exactly where the unfold path rejects a static body, which
+the summary must not turn into success.  `none` falls through to the unfold. -/
+def nthSummaryEnv (f : Nat) (fd : AFunDef) (env : PEnv) : Option PRes :=
+  if isNthD f fd then
+    match env with
+    | [pv, .stat (.int k)] =>
+      if k < 0 then none else
+        match walkHead pv k.toNat with
+        | some (.dyn j) => some (.code (.var j))
+        | _             => none
+    | _ => none
+  else none
+
+mutual
+
+/-- Explicit `match` throughout rather than `do`.  `Except`'s bind does not
+expose a match, so `split at h` cannot see through it -- and every case of
+`mix_sound` is a `split` on exactly these branches. -/
+def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → ATerm →
+    Except MixError MixOut
+  | 0, _, _, _, _, _ => .error .outOfFuel
+  | n + 1, A, idx, Δ, env, t =>
+    match t with
+    | .lit v => .ok (.stat v, [])
+    | .var i =>
+      match Δ[i]?, (env[i]?).map PVal.hnf with
+      | some .stat, some (.stat v)   => .ok (.stat v, [])
+      | some .dyn,  some (.dyn k)    => .ok (.code (.var k), [])
+      -- a preserved spine reads back structurally rather than being flattened
+      | some .dyn,  some (.cons a b) => .ok (.val (.cons a b), [])
+      | some _,     some _           => .error (.illAnnotated "var: division disagrees with the environment")
+      | _,          _              => .error (.unboundVar i)
+    | .lift e =>
+      match mixTerm n A idx Δ env e with
+      | .error z          => .error z
+      | .ok (.stat v, rq) => .ok (.code (.lit v), rq)
+      | .ok (.code _, _)  => .error (.notStatic "lift: operand is not static")
+      | .ok (.cons _ _, _) => .error (.notStatic "lift: operand is not static")
+      | .ok (.lets _ _, _) => .error (.notStatic "lift: operand is not static")
+      | .ok (.val _, _)    => .error (.notStatic "lift: operand is not static")
+    | .letIn _ e body =>
+      match mixTerm n A idx Δ env e with
+      | .error z => .error z
+      | .ok (re, rq₁) =>
+        match btOf Δ e, re with
+        -- static binding: `mix` keeps the value and emits NO residual binder, so
+        -- the residual indices already in scope do not move
+        | .stat, .stat v =>
+          match mixTerm n A idx (.stat :: Δ) (.stat v :: env) body with
+          | .error z      => .error z
+          | .ok (rb, rq₂) => .ok (rb, rq₁ ++ rq₂)
+        -- dynamic binding: one residual binder is created, so everything in
+        -- scope shifts by one and the bound variable becomes index 0
+        | .dyn, _ =>
+          match mixTerm n A idx (.dyn :: Δ) (.dyn 0 :: env.shiftBy 1) body with
+          | .error z            => .error z
+          | .ok (.stat _, _)    => .error (.illAnnotated "letIn: dynamic binding with a static body")
+          -- the binding travels WITH the body rather than around its reified
+          -- code, so a partial body keeps its spine on the way out
+          | .ok (rb, rq₂)       => .ok (.lets [re.toCode] rb, rq₁ ++ rq₂)
+        | .stat, .code _ => .error (.notStatic "letIn: static binding produced code")
+        | .stat, .cons _ _ => .error (.notStatic "letIn: static binding produced a partial structure")
+        | .stat, .lets _ _ => .error (.notStatic "letIn: static binding produced code")
+        | .stat, .val _ => .error (.notStatic "letIn: static binding produced a partial structure")
+    | .ite _ c a e =>
+      match mixTerm n A idx Δ env c with
+      | .error z => .error z
+      | .ok (rc, rq₁) =>
+        match btOf Δ c, rc with
+        -- static condition: the untaken branch is never walked, so neither its
+        -- code nor its specialization requests are emitted.  This is where a
+        -- specialized interpreter loses its dispatch.
+        | .stat, .stat (.bool true) =>
+          match mixTerm n A idx Δ env a with
+          | .error z     => .error z
+          | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+        | .stat, .stat (.bool false) =>
+          match mixTerm n A idx Δ env e with
+          | .error z     => .error z
+          | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+        | .stat, _ => .error (.notStatic "ite: static condition is not a Bool")
+        | .dyn, _ =>
+          match mixTerm n A idx Δ env a, mixTerm n A idx Δ env e with
+          | .ok (ra, rq₂), .ok (re, rq₃) =>
+              .ok (.code (.ite rc.toCode ra.toCode re.toCode), rq₁ ++ rq₂ ++ rq₃)
+          | .error z, _ => .error z
+          | _, .error z => .error z
+    | .prim b p ts =>
+      match mixTerms n A idx Δ env ts with
+      | .error z => .error z
+      | .ok (rs, rq) =>
+        match b with
+        | .stat =>
+          match allStatic rs with
+          | .error z => .error z
+          | .ok vs =>
+            match evalPrim p vs with
+            | .ok v      => .ok (.stat v, rq)
+            | .error msg => .error (.primFailed msg)
+        | .dyn =>
+          -- a guarded structural answer if the spine supports one, otherwise
+          -- the opaque residual node
+          match primStruct p rs with
+          | some r => .ok (r, rq)
+          | none   => .ok (.code (.prim p (rs.map PRes.toCode)), rq)
+    | .ctorT b k ts =>
+      match mixTerms n A idx Δ env ts with
+      | .error z => .error z
+      | .ok (rs, rq) =>
+        match b with
+        | .stat =>
+          match allStatic rs with
+          | .error z => .error z
+          | .ok vs   => .ok (.stat (.ctor k vs), rq)
+        | .dyn => .ok (.code (.ctorT k (rs.map PRes.toCode)), rq)
+    | .caseT _ s alts =>
+      match mixTerm n A idx Δ env s with
+      | .error z => .error z
+      | .ok (rsc, rq₁) =>
+        match btOf Δ s, rsc with
+        -- static scrutinee: select the alternative now and bind its fields as
+        -- static values.  No residual `caseT` survives.
+        | .stat, .stat (.ctor tag vs) =>
+          match findAAlt alts tag with
+          | none => .error (.illAnnotated "caseT: no alternative for that tag")
+          | some a =>
+            if a.arity = vs.length then
+              match mixTerm n A idx (List.replicate a.arity .stat ++ Δ)
+                              (vs.map PVal.stat ++ env) a.body with
+              | .error z     => .error z
+              | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+            else .error (.badArity "caseT: alternative arity does not match the value")
+        | .stat, _ => .error (.notStatic "caseT: static scrutinee is not a constructor")
+        | .dyn, _ =>
+          match mixAlts n A idx Δ env alts with
+          | .error z         => .error z
+          | .ok (alts', rq₂) => .ok (.code (.caseT rsc.toCode alts'), rq₁ ++ rq₂)
+    | .call b f ts =>
+      match mixTerms n A idx Δ env ts with
+      | .error z => .error z
+      | .ok (rs, rq₁) =>
+        match A.fn f with
+        | none => .error (.unknownFun f)
+        | some fd =>
+          match b with
+          -- a static result cannot come out of a residual call, so unfold
+          | .stat =>
+            if allStatDiv fd.params then
+              if fd.params.length = rs.length then
+                match allStatic rs with
+                | .error z => .error z
+                | .ok vs =>
+                  match mixTerm n A idx fd.params (vs.map PVal.stat) fd.body with
+                  | .error z     => .error z
+                  | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+              else .error (.badArity "static call: argument count does not match the division")
+            else .error (.illAnnotated "static call to a function with a dynamic parameter")
+          -- ask the driver for a specialized copy and emit a call to it
+          | .dyn =>
+            match splitArgs fd.params rs with
+            | .error z => .error z
+            | .ok (svs, dts) =>
+              match idx ⟨f, svs⟩ with
+              | none   => .error (.noSpec f)
+              | some k => .ok (.code (.call k dts), rq₁ ++ [⟨f, svs⟩])
+    | .ucall b f ts =>
+      match A.fn f with
+      | none => .error (.unknownFun f)
+      | some fd =>
+        match b with
+        | .stat =>
+          match mixTerms n A idx Δ env ts with
+          | .error z => .error z
+          | .ok (rs, rq₁) =>
+            if allStatDiv fd.params then
+              if fd.params.length = rs.length then
+                match allStatic rs with
+                | .error z => .error z
+                | .ok vs =>
+                  match mixTerm n A idx fd.params (vs.map PVal.stat) fd.body with
+                  | .error z     => .error z
+                  | .ok (r, rq₂) => .ok (r, rq₁ ++ rq₂)
+              else .error (.badArity "static unfold: argument count does not match the division")
+            else .error (.illAnnotated "static unfold of a function with a dynamic parameter")
+        -- inline into residual code.  Each dynamic argument is `let`-bound
+        -- once, which is both what keeps `PVal.dyn` a plain index -- the body
+        -- is specialized in a scope whose shape we chose -- and what stops an
+        -- argument expression being duplicated at each of its uses.
+        | .dyn =>
+          match mixPArgs n A idx Δ env fd.params ts with
+          | .error z => .error z
+          | .ok (bs, env', rq₂) =>
+            -- the lookup summary, on the environment just built; `none` unfolds
+            match nthSummaryEnv f fd env' with
+            | some r => .ok (.lets bs r, rq₂)
+            | none =>
+            match mixTerm n A idx fd.params env' fd.body with
+            | .error z            => .error z
+            | .ok (.stat _, _)    => .error (.illAnnotated "ucall: dynamic unfold with a static body")
+            | .ok (rb, rq₃)       => .ok (.lets bs rb, rq₂ ++ rq₃)
+
+def mixTerms : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → List ATerm →
+    Except MixError (List PRes × List SpecRequest)
+  | _, _, _, _, _, [] => .ok ([], [])
+  | n, A, idx, Δ, env, t :: ts =>
+      match mixTerm n A idx Δ env t, mixTerms n A idx Δ env ts with
+      | .ok (r, rq₁), .ok (rs, rq₂) => .ok (r :: rs, rq₁ ++ rq₂)
+      | .error z, _ => .error z
+      | _, .error z => .error z
+
+def mixAlts : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → List AAlt →
+    Except MixError (List Alt × List SpecRequest)
+  | _, _, _, _, _, [] => .ok ([], [])
+  | n, A, idx, Δ, env, a :: as =>
+      -- the alternative binds `a.arity` residual fields, so the enclosing scope
+      -- shifts by that much
+      match mixTerm n A idx (List.replicate a.arity .dyn ++ Δ)
+                    (freshDyns a.arity ++ env.shiftBy a.arity) a.body,
+            mixAlts n A idx Δ env as with
+      -- one arm, not two: a static body becomes `lit v` and residual code stays
+      -- as it is, which is exactly `PRes.toCode`
+      | .ok (r, rq₁), .ok (as', rq₂) => .ok ((a.tag, a.arity, r.toCode) :: as', rq₁ ++ rq₂)
+      | .error z, _ => .error z
+      | _, .error z => .error z
+
+
+/-- Argument transfer for an unfolded call, in ONE pass.
+
+This replaced a PAIR of functions, `mixUArgs` and `inlineEnv`, that had to agree
+about the binding layout and agreed only because their arithmetic matched: one
+emitted a binding per dynamic parameter, the other indexed with `dynCount`.
+Preparation makes that equality false -- an argument may emit zero bindings (it
+was already a variable), one, or several.
+
+A single pass returns the emitted bindings,
+the callee environment, and -- implicitly, as `binds.length` -- the exact binder
+depth.  The agreement is structural rather than arithmetic, and no `dynCount`
+appears anywhere in it. -/
+def mixPArgs : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → Div →
+    List ATerm → Except MixError (List Term × PEnv × List SpecRequest)
+  | _, _, _, _, _, [], [] => .ok ([], [], [])
+  -- a static parameter is consumed by `mix` and emits no binding, so nothing
+  -- after it shifts
+  | n, A, idx, Δ, env, .stat :: ps, t :: ts =>
+      match mixTerm n A idx Δ env t with
+      | .error z          => .error z
+      | .ok (.stat v, rq₁) =>
+        match mixPArgs n A idx Δ env ps ts with
+        | .error z              => .error z
+        | .ok (bs, env', rq₂)   => .ok (bs, .stat v :: env', rq₁ ++ rq₂)
+      | .ok (_, _)        => .error (.notStatic "unfold: static parameter got residual code")
+  -- a dynamic parameter is PREPARED: its code leaves become bindings, its
+  -- partial structure survives.  Everything after it is mixed under however
+  -- many bindings it actually emitted -- zero, one, or several
+  | n, A, idx, Δ, env, .dyn :: ps, t :: ts =>
+      match mixTerm n A idx Δ env t with
+      | .error z => .error z
+      | .ok (r, rq₁) =>
+        let p := prepare r
+        match mixPArgs n A idx Δ (env.shiftBy p.binds.length) ps ts with
+        | .error z            => .error z
+        | .ok (bs, env', rq₂) =>
+            -- `p.value` indexes its own bindings; the later ones sit between it
+            -- and the body, so it shifts by exactly how many there are
+            .ok (p.binds ++ bs, PVal.shift bs.length p.value :: env', rq₁ ++ rq₂)
+  | _, _, _, _, _, _, _ =>
+      .error (.badArity "unfold: argument count does not match the division")
+end
+
+/-! ## Specializing one function -/
+
+/-- Specialize `req.funIdx` with respect to `req.staticArgs`.
+
+The residual function keeps only the dynamic parameters (`dynCount`), and
+`buildEnv` is what maps the `j`-th of them to residual index `j`.  A static
+return value becomes a constant function -- correct, and the case that makes
+the first projection collapse an interpreter's dispatch. -/
+def mixFun (stepFuel : Nat) (A : AProgram) (idx : SpecRequest → Option Nat)
+    (req : SpecRequest) : Except MixError (FunDef × List SpecRequest) :=
+  match A.fn req.funIdx with
+  | none    => .error (.unknownFun req.funIdx)
+  | some fd =>
+    match buildEnv fd.params req.staticArgs 0 with
+    | .error e => .error e
+    | .ok env =>
+      match mixTerm stepFuel A idx fd.params env fd.body with
+      | .error e     => .error e
+      | .ok (r, rq)  => .ok (⟨dynCount fd.params, r.toCode⟩, rq)
+
+/-! ## The driver
+
+Two passes over the same pure `mixTerm`.  The first discovers which
+specializations are reachable; the second generates them, now that every
+request has an index.
+
+The dummy `fun _ => some 0` in discovery is sound because an index appears only
+inside emitted code, never in a control-flow decision, so the two passes explore
+the same requests.  Nothing below relies on that: if discovery misses a request,
+generation reports `noSpec` rather than emitting a dangling call. -/
+
+def memberReq (r : SpecRequest) : List SpecRequest → Bool
+  | []      => false
+  | q :: qs => (r == q) || memberReq r qs
+
+def indexOfReqFrom (r : SpecRequest) (i : Nat) : List SpecRequest → Option Nat
+  | []      => none
+  | q :: qs => if r == q then some i else indexOfReqFrom r (i + 1) qs
+
+@[inline] def indexOfReq (rs : List SpecRequest) (r : SpecRequest) : Option Nat :=
+  indexOfReqFrom r 0 rs
+
+/-- Append the requests of `rq` that are not already known, preserving order and
+without introducing duplicates within `rq` itself. -/
+def addNew (seen : List SpecRequest) : List SpecRequest → List SpecRequest
+  | []      => []
+  | r :: rs =>
+      if memberReq r seen then addNew seen rs
+      else r :: addNew (seen ++ [r]) rs
+
+/-! ## The closure
+
+FUNCTION-MAJOR, not a worklist -- and this is a correctness requirement, not a
+preference.  `MixProgram.lean` must iterate function-major so that the callee's
+index stays STATIC, which is what makes the specializer self-applicable.  A
+worklist here would leave the two drivers computing residual programs that
+differ by a permutation of the function table, with the call indices embedded in
+the residual code pointing at the wrong entries -- so `mixProgram` would not
+implement this specializer, and it does not, as a `#guard` in `Gate0` records.
+
+Both loops count DOWN on an explicit `Nat` rather than up to `A.funs.length`.
+That keeps the recursion structural, and the bridge to the object program later
+inducts on the same countdown. -/
+
+def filterFun (f : Nat) : List SpecRequest → List SpecRequest
+  | []      => []
+  | r :: rs => if r.funIdx = f then r :: filterFun f rs else filterFun f rs
+
+def groupFrom (reqs : List SpecRequest) : Nat → Nat → List SpecRequest
+  | 0,     _ => []
+  | k + 1, f => filterFun f reqs ++ groupFrom reqs k (f + 1)
+
+@[inline] def groupByFun (A : AProgram) (reqs : List SpecRequest) : List SpecRequest :=
+  groupFrom reqs A.funs.length 0
+
+def collectFor (stepFuel : Nat) (A : AProgram) (idx : SpecRequest → Option Nat) (f : Nat) :
+    List SpecRequest → Except MixError (List SpecRequest)
+  | []      => .ok []
+  | r :: rs =>
+    if r.funIdx = f then
+      match mixFun stepFuel A idx r, collectFor stepFuel A idx f rs with
+      | .ok (_, rq), .ok rest => .ok (rq ++ rest)
+      | .error z,    _        => .error z
+      | _,           .error z => .error z
+    else collectFor stepFuel A idx f rs
+
+def collectFrom (stepFuel : Nat) (A : AProgram) (idx : SpecRequest → Option Nat)
+    (reqs : List SpecRequest) : Nat → Nat → Except MixError (List SpecRequest)
+  | 0,     _ => .ok []
+  | k + 1, f =>
+    match collectFor stepFuel A idx f reqs, collectFrom stepFuel A idx reqs k (f + 1) with
+    | .ok a,    .ok b     => .ok (a ++ b)
+    | .error z, _         => .error z
+    | _,        .error z  => .error z
+
+/-- The dummy index is deliberate, and matches the object program: with the real
+`indexOfReq seen` this would fail `.noSpec` on the first genuinely new request,
+since by definition it is not in `seen` yet.  Discovery only reads the REQUESTS
+a specialization makes; the code it emits is thrown away. -/
+@[inline] def collectAll (stepFuel : Nat) (A : AProgram) (reqs : List SpecRequest) :
+    Except MixError (List SpecRequest) :=
+  collectFrom stepFuel A (fun _ => some 0) reqs A.funs.length 0
+
+/-- Chaotic iteration to a fixed point.  `wlFuel` bounds the number of ROUNDS,
+which is the termination condition offline partial evaluation genuinely lacks:
+an infinite family of static argument tuples is a real (and useful to detect)
+outcome, not a Lean limitation. -/
+def closeFM (stepFuel : Nat) : Nat → AProgram → List SpecRequest →
+    Except MixError (List SpecRequest)
+  | 0,     _, _    => .error .outOfFuel
+  | k + 1, A, seen =>
+    match collectAll stepFuel A seen with
+    | .error z => .error z
+    | .ok fresh =>
+      let s2 := groupByFun A (seen ++ addNew seen fresh)
+      if seen.length = s2.length then .ok seen else closeFM stepFuel k A s2
+
+/-- Explicit recursion rather than `mapM`: `generate_spec` has to say that
+residual function `i` is the specialization of request `i`, and `List.mapM` over
+`Except` does not expose a structure to induct on. -/
+def generateFrom (stepFuel : Nat) (A : AProgram) (idx : SpecRequest → Option Nat) :
+    List SpecRequest → Except MixError (List FunDef)
+  | []      => .ok []
+  | r :: rs =>
+    match mixFun stepFuel A idx r, generateFrom stepFuel A idx rs with
+    | .ok (fd, _), .ok fds  => .ok (fd :: fds)
+    | .error e,    _        => .error e
+    | _,           .error e => .error e
+
+@[inline] def generate (stepFuel : Nat) (A : AProgram) (reqs : List SpecRequest) :
+    Except MixError (List FunDef) :=
+  generateFrom stepFuel A (indexOfReq reqs) reqs
+
+/-- `mix`.  The entry request is NOT residual function 0: function-major order
+puts requests for lower-numbered source functions first, so the entry's index
+has to be looked up -- exactly as `MixProgram.lean` does. -/
+def mixDriver (stepFuel wlFuel : Nat) (A : AProgram) (statics : List Val) :
+    Except MixError Program :=
+  match closeFM stepFuel wlFuel A (groupByFun A [⟨A.entry, statics⟩]) with
+  | .error z => .error z
+  | .ok reqs =>
+    match generate stepFuel A reqs with
+    | .error z  => .error z
+    | .ok funs =>
+      match indexOfReq reqs ⟨A.entry, statics⟩ with
+      | none   => .error (.noSpec A.entry)
+      | some e => .ok ⟨funs, e⟩
+
+end ProtoShift
+end Projection

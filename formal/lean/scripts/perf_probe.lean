@@ -1,0 +1,75 @@
+/- Bounded performance probe: how long does `mkSim` take, interpreted vs
+   native, on a synthetic chain of `n` nodes.
+
+   `chainD` is repeated here rather than imported from `Projection/Scaling.lean`
+   so the probe's dependency closure stops at `ProjectedStep` -- Scaling is 41 s
+   of `#guard`s that have nothing to do with this measurement. -/
+import LeanSemanticPrimitives.Projection.ProjectedStep
+
+open Compiler Projection
+
+def chainD (n : Nat) : DesignCert where
+  sources  := #[.input 0 4, .const 4 12]
+  nodes    := (List.range n).toArray.map (fun i =>
+                { op := .Op_And, width := 4
+                , deps := if i = 0 then #[0, 1] else #[2 + i - 1, 0] })
+  outputs  := #[{ slot := 2 + (n - 1), width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+/-- Every node reads BOTH source slots, so every read is at MAXIMUM depth --
+the opposite of `chainD`, whose first dep is always the immediately preceding
+node (depth 0).  Comparing the two at equal `n` isolates how much of the
+specializer's cost is driven by SLOT READ DEPTH. -/
+def fanD (n : Nat) : DesignCert where
+  sources  := #[.input 0 4, .const 4 12]
+  nodes    := (List.range n).toArray.map (fun _ => { op := .Op_And, width := 4, deps := #[0, 1] })
+  outputs  := #[{ slot := 2 + (n - 1), width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+partial def tsize : Term → Nat
+  | .lit _ | .var _ => 1
+  | .letIn a b      => 1 + tsize a + tsize b
+  | .ite a b c      => 1 + tsize a + tsize b + tsize c
+  | .caseT s as     => 1 + tsize s + (as.map (fun a => tsize a.2.2)).foldl (·+·) 0
+  | .prim _ ts | .ctorT _ ts | .call _ ts => 1 + (ts.map tsize).foldl (·+·) 0
+
+def rss : IO String := do
+  try
+    let t ← IO.FS.readFile "/proc/self/status"
+    match (t.splitOn "\n").find? (·.startsWith "VmHWM:") with
+    | some l => pure (l.replace "VmHWM:" "")
+    | none   => pure "n/a"
+  catch _ => pure "n/a"
+
+/-- Which STAGE fails, not just that one did: `projectDesign` running out of
+its hardcoded fuel and the fragment checker rejecting are different answers. -/
+def oneOf (tag : String) (D : DesignCert) (n : Nat) : IO Unit := do
+  let t0 ← IO.monoMsNow
+  match Projection.Hw.projectDesign D with
+  | .error e => do
+      let t1 ← IO.monoMsNow
+      IO.println s!"{tag} n={n}  projectDesign FAILED ({repr e}) after {t1 - t0} ms"
+  | .ok R =>
+  match Projection.Hw.checkResidual R with
+  | none => do
+      let t1 ← IO.monoMsNow
+      IO.println s!"{tag} n={n}  checkResidual REJECTED after {t1 - t0} ms"
+  | some b =>
+      -- build the bundle from the residual ALREADY computed; calling `mkSim`
+      -- here would re-run `projectDesign` and double every timing
+      let t1 ← IO.monoMsNow
+      let sz := (R.funs.map (fun fd => tsize fd.body)).foldl (·+·) 0
+      IO.println s!"{tag} n={n}  specialize {t1 - t0} ms  residual size {sz}  bound {b}  RSS{← rss}"
+
+def one (n : Nat) : IO Unit := oneOf "chainD" (chainD n) n
+
+/-- `--fan` switches the shape; everything else is identical. -/
+def main (args : List String) : IO UInt32 := do
+  let fan := args.contains "--fan"
+  for a in args do
+    match a.toNat? with
+    | some n => if fan then oneOf "fanD  " (fanD n) n else one n
+    | none   => pure ()
+  return 0
