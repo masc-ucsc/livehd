@@ -87,3 +87,16 @@ generated/master_port/
 # Analysis staging for the D3/D4/Futamura ports (file inventories, diffs).
 # The LEDGER is tracked under pass/lean/; its working notes are not.
 /generated/port_staging/
+
+# Derived trees, never source. `generated/` is run output and the imported
+# corpora (whose identity is pinned per certificate by the sha256 column of
+# pass/lean/manifests/*.tsv, not by git); `temp/` is the scratch root the tests
+# and drivers create under the project; `Gen/` is the per-design Lean models the
+# D3 reifier emits, for the same reason /formal/lean/Sims/ is ignored above.
+# Nothing under any of the three has ever been tracked. The four narrower
+# generated/ rules above are subsumed and kept only for their rationale -- a
+# canonical manifest run refuses a dirty worktree, and that refusal should mean
+# "source is uncommitted", not "a previous run left its output behind".
+/generated/
+/temp/
+/formal/lean/LeanSemanticPrimitives/Gen/
