@@ -5588,6 +5588,11 @@ written, and it is not raw native-emitter source.
 
 ### 55.2 Every historical "specialize" number includes a szOf traversal
 
+> **MEASURED AND REFUTED in section 56.** `szOf` on ALU's 89,996-term residual
+> takes **0 ms**. The digest really is inside `stage`'s timed region, but it
+> costs nothing at these sizes, so it explains none of the gap. The hypothesis
+> below was wrong.
+
 `total_probe` times its stages with `Projection.Runner.stage`, which calls its
 digest function **inside** the timed region:
 
@@ -5606,6 +5611,12 @@ the gap against a remembered sub-10-second generation, and it is measured
 rather than assumed.
 
 ### 55.3 The matched-ALU history, with the residual held constant
+
+> **SUPERSEDED by section 56.** The pin generates ALU in 18.53 s, so the +35%
+> against S2 is **not** a port regression. Every file on the generation path is
+> byte-identical between S2 and the pin, so it is not a code regression at all:
+> S2's 14.397 s and today's 18.53 s are the same code on different machine
+> state. The real port delta is +5.2% on ALU.
 
 Same certificate `d731ee22a85e77ba…`, same runner, same fuel 200000/2000, same
 `Projection.mixDriver`:
@@ -5680,3 +5691,126 @@ residual steps 12.819 s, with the trace and control uninstrumented and still
 pending. None of that elapsed time is generation latency. Builds and the serial
 matched timing follow on a quiet machine. No second long reference-validation
 job is launched ahead of this.
+
+## Final stage requested by the user: 12 × 5 simulator generation matrix
+
+Execute after the existing plan and acceptance obligations. [Plan section 15](PASS_LEAN_RESTRUCTURE_PLAN.md#15-final-stage-simulator-generation-across-five-approaches-and-twelve-blockscores) and the [live progress table](../../todo/livehd/simulator-generation-matrix.html) define all twelve rows and five approach columns. Prioritize standalone generation latency and complete block coverage. Every cell is PENDING until its own generation evidence exists. Only when all 60 cells are YES, make the final checkpoint and commit locally; the user will push. PicoRV32 uses `/soe/czeng14/projects/picorv32`. Current generation-first experiments continue unchanged.
+
+## 56. Generation latency, measured matched against the exact pin
+
+Both drivers built and run: pin `9bb41a09d` (binary `eeada8cf4405dc36…`) and
+master (`b7abe8e056b589cb…`), both Lean 4.31.0 at the same commit, same `leanc`
+clang 22.1.4, `-O2`, fuel 200000/2000, identical certificate bytes. Runs are
+interleaved pin/master back to back with the load average recorded beside each;
+the box carries a steady ~34 background load from other users that cannot be
+removed, so the design controls for it rather than claiming an idle machine.
+Table: `pass/lean/tests/fp/fp_generation_latency.tsv`.
+
+### 56.1 Coverage over the 33 frozen rows
+
+**25 `GENERATION OK`, 8 `GENERATION REFUSED (unsupported)`, 0 generation
+failures, 0 fuel stops, 0 missing inputs.** The eight refusals -- `aes`,
+`cva6_hpdcache_subsystem`, `cva6_hpdcache_wrapper`, `fpu_wrap`, `load_unit`,
+`mult`, `multiplier`, `store_unit` -- stay **in** the denominator and refuse
+cheaply, 8 to 120 ms. `GENERATION OK` is not a benchmark pass: no stimuli, no
+trace, no control.
+
+### 56.2 Sub-10-second generation exists, and ALU is not one of those blocks
+
+Master, ascending:
+
+| block | ms | | block | ms |
+|---|---|---|---|---|
+| commit_stage | 638 | | alu | 19,493 |
+| ariane_regfile | 642 | | rt_alu | 19,543 |
+| serdiv | 676 | | issue_read_operands | 20,883 |
+| instr_scan | 754 | | bht | 33,555 |
+| instr_queue | 956 | | decoder | 34,019 |
+| store_buffer | 1,242 | | rt_decoder | 34,218 |
+| perf_counters | 1,398 | | scoreboard | 55,624 |
+| compressed_decoder | 1,692 | | id_stage | 56,736 |
+| btb | 1,797 | | frontend | 118,149 |
+| pmp | 4,243 | | issue_stage | 134,651 |
+| cva6_ptw | 6,170 | | rt_csr_regfile | 663,828 |
+| pmp_data_if | 8,274 | | csr_regfile | 684,535 |
+| alu_wrapper | 19,232 | | | |
+
+**5 blocks generate in under a second, 12 of 25 under ten seconds, 21 under a
+minute.** So the remembered sub-10-second generation is real and reproduced --
+for most of the inventory. ALU is simply not one of those blocks: at 19.5 s it
+is in the slowest third, and no retained row ever put it below 14.4 s.
+
+### 56.3 The expensive generation is inherited, not introduced
+
+| block | pin ms | master ms | delta |
+|---|---|---|---|
+| issue_read_operands | 20,376 | 20,883 | +2.5% |
+| bht | 32,249 | 33,555 | +4.1% |
+| scoreboard | 50,428 | 55,624 | +10.3% |
+| frontend | 117,467 | 118,149 | +0.6% |
+| issue_stage | 130,191 | 134,651 | +3.4% |
+| **csr_regfile** | **663,170** | **684,535** | +3.2% |
+
+`csr_regfile`'s eleven minutes exist **at the FP pin itself**. The port did not
+create the slow blocks; it inherited them. That is the answer to where
+generation is genuinely slow: in the original FP specializer.
+
+### 56.4 The port costs a uniform few percent, and the phase is specialization
+
+Across the 25 `GENERATION OK` rows, master is slower in **25 of 25** -- minimum
++0.6%, **median +5.8%**, maximum +10.3%, and +3.0% on the summed specialization
+time. Unanimity over 25 blocks is not noise.
+
+The phase breakdown locates it exactly. Per block, pin against master:
+
+* **load** -- a few ms both sides. The `Compiler.CertIO` to
+  `Compiler.CertIOV1` adaptation is **exonerated**.
+* **support** -- 0 to 6 ms both sides. Exonerated.
+* **check** -- indistinguishable (`4/4`, `785/771`, `1141/1138`). Exonerated.
+* **specialize-whnf** -- master slower in **25 of 25**, and it carries the whole
+  delta.
+
+`specialize-force` is 0 everywhere: `mixDriver` is strict, so the entire
+residual is built inside the WHNF force and nothing is deferred.
+
+**The cause is not isolated.** Of the 38 modules in the build, exactly four
+differ between pin and master -- `Translation/LGraphModel`, `Compiler/CertIO`
+vs `CertIOV1`, `Projection/OperatorBridge`, `Projection/CertLoad` -- and every
+specializer module (`PartialEvaluator`, `PartialEvaluatorCorrect`, `MixProgram`,
+`PartialEvaluatorSummary`, `HardwareInterpreter`, `ResidualFragment`,
+`VariantExec`, `RunnerSupport`) is **byte-identical**. The only hot-path
+difference is `LGraphModel`'s `bv_shl_step`, where master adds a guard
+(`if (bv_uint b).toNat ≥ w then 0 else …`) and changes `bv_sra` to saturate at
+the source width -- the SHL/SRA boundary repairs, which are deliberate and are
+not to be reverted.
+
+**That attribution was tested and does not hold.** Shift density across the
+seven profiled blocks ranges 14.3% to 32.6% while the delta ranges +0.6% to
++10.3%, with **Spearman rho = 0.07**; `ariane_regfile` at 7% shift density shows
+a larger percentage delta than `alu` at 30%. What the data looks like instead is
+a roughly **uniform multiplicative slowdown** of the specializer -- consistent
+with compilation or code-layout differences between two binaries that differ in
+four modules -- and that is recorded as unattributed rather than pinned on an
+operator. No repair is proposed on an unestablished cause, and no timeout was
+raised.
+
+### 56.5 Two earlier hypotheses, refuted by measurement
+
+**`szOf` costs 0 ms.** The digest really is inside `stage`'s timed region, but
+on ALU's 89,996-term residual it takes under a millisecond. It explains nothing,
+and every historical `specialize` figure was an honest measurement.
+
+**S2 against the pin is not a regression.** Every file on the generation path is
+byte-identical between S2 (`3c175a4da`) and the pin (`9bb41a09d`). Identical
+code measured 14.397 s then and 18.53 s now, so that gap is machine state, not
+the port and not the branch. S2's row is not a controlled baseline and is not
+used as one.
+
+### 56.6 Proof accounting, unchanged by any of this
+
+Generation checks support (`supported_of_report` turns the observed Boolean into
+`SupportedByProjection`) and observes `checkResidual R = some b`. It **trusts**
+`hproj`: `mixDriver` does not kernel-reduce at nontrivial fuel, so no residual
+here carries kernel-checked `hproj` evidence. The runtime-shape premises are
+never reached. Nothing is discharged, nothing is kernel-certified, and no proof
+flag is claimed.

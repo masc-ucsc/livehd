@@ -101,10 +101,29 @@ is `Compiler.CertIOV1`:
 >  let D ← CertIO.loadCert path                      -- ADAPTATION(pin)
 ```
 
-| file | sha256 |
-|---|---|
-| `gen_probe.master.lean` | `b6dff38b6885b0d8559096374670bd907b84c883580624bef8acb27f22099f2c` |
-| `gen_probe.pin.lean` | `26b88f106c5f097b4ebef802e4b578cd0b6fcae8965299e7f4c14d3dac0db2bd` |
+| variant | installed at | sha256 |
+|---|---|---|
+| master | `formal/lean/scripts/gen_probe.lean` | `b6dff38b6885b0d8559096374670bd907b84c883580624bef8acb27f22099f2c` |
+| pin | `<pin_tree>/formal/lean/scripts/gen_probe.lean` | `26b88f106c5f097b4ebef802e4b578cd0b6fcae8965299e7f4c14d3dac0db2bd` |
+
+Each variant lives **inside its own tree's `scripts/`**, because `lean` refuses
+a source outside the root directory:
+
+```
+input file '…/genprobe/gen_probe.master.lean' must be contained in root
+directory (…/formal/lean/)
+```
+
+The first build attempt passed all 38 modules on both sides and failed only on
+that last step; the sources were moved in-tree and the builds rerun.
+
+### Measuring on a shared box
+
+The machine carries a steady background load from other users (load average
+~35 on 96 cores) that cannot be removed. The design controls for it rather than
+claiming an idle machine: for each block the **pin and master runs are
+interleaved back to back**, repeated, with `/proc/loadavg` recorded beside every
+run, and the reported figure is the **median** of the repetitions.
 
 The two `scripts/build-opt.sh` MODULES lists differ only in that same
 `Compiler/CertIO` vs `Compiler/CertIOV1` entry.
