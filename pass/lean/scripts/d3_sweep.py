@@ -1800,6 +1800,10 @@ def read_time_report(path: pathlib.Path) -> dict:
 
 
 PROOF_GATE_RE = r"^D3GATE proof=1 thm=(\S+) axioms=(.*)$"
+# `simp`'s own words when it runs out of `maxSteps`.  Matching the message is
+# the only signal available: the tactic does not distinguish itself from any
+# other elaboration error in the exit code.
+SIMP_BUDGET_RE = re.compile(r"`simp` failed: maximum number of steps exceeded")
 
 # The one theorem a proof probe is allowed to be reporting.
 PROOF_THEOREM = "d3_fast.correct"
@@ -1879,6 +1883,18 @@ def extract_proof_gate(row, out: str, rc, expect_module=None, oom: bool = False,
             why = f"proof probe exited {rc}"
         else:
             why = f"{len(hits)} proof markers in the log, expected exactly 1"
+        # A SEARCH BUDGET is not a refusal.  `simp` reports "maximum number of
+        # steps exceeded" when it runs out of `maxSteps`, and the probe then
+        # leaves `sorryAx` behind and exits nonzero -- indistinguishable, from
+        # the exit code alone, from a theorem that is false.  They are opposite
+        # claims: one says the search stopped, the other says it finished and
+        # failed.  Recorded as a FIELD so a join does not have to grep English.
+        if SIMP_BUDGET_RE.search(out):
+            row["proof_stop"] = "simp budget exhausted (maxSteps)"
+        elif rc == 124:
+            row["proof_stop"] = "proof stage timed out"
+        elif oom or sampled_kill_kb:
+            row["proof_stop"] = why
         row["detail"] = (row.get("detail") or "") + ("; " if row.get("detail") else "") + why
         return
     thm, axioms = hits[0]
@@ -1935,7 +1951,7 @@ def deferred_row(target: Target, samples: int, why: str) -> dict:
         "sim_max_rss_kb": "", "sim_user_s": "", "sim_sys_s": "", "sim_wall_s": "",
         "proof_max_rss_kb": "", "proof_max_rss_source": "",
         "proof_user_s": "", "proof_sys_s": "", "proof_wall_s": "",
-        "proof_axioms": "",
+        "proof_axioms": "", "proof_stop": "",
         "drift": "", "launched": "0",
     })
     for k in ("sources", "nodes", "outputs", "flops", "mems", "inputs", "bindings",
@@ -2794,6 +2810,11 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
     # and a join can refuse to credit an acceptance whose axioms nobody wrote
     # down.  It was parsed and discarded before -- `thm, _axioms = hits[0]`.
     "proof_axioms",
+    # Non-empty means the proof stage was STOPPED and the theorem is undecided:
+    # a search budget, a timeout, or a memory limit. Empty means the stage ran
+    # to a decision. It is the difference between "we stopped looking" and "it
+    # is false", which `proof=0` alone cannot express.
+    "proof_stop",
     # MODULE-PROOF BACKEND, kept apart from `proof_*` and from `agree`.
     # A sampled agreement and a kernel proof are different claims; collapsing
     # them into one column is how a sampled row starts being read as proved.

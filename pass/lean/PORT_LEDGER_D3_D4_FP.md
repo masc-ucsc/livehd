@@ -3220,3 +3220,114 @@ a known shape; §33.2 is a missing rewrite with a 28-binding reproducer. Both
 need the baseline above to be judged against, and §33.3 says plainly which part
 of that baseline is a measurement and which is a resource stop.
 
+## 34. The join was asserting the opposite of its own input
+
+`debug_breakpoint`'s sweep row carries `proof=1`, and its probe log carries
+`axioms=[propext, Classical.choice, Quot.sound]`. The joined row said `na`,
+under a header reading *"proof=na throughout: no per-design translation proof
+is generated or checked by this pass"*, and the summary printed
+`proof 0/122 (na -- not attempted)`.
+
+The cause is three lines of hardcoding. The row constructor set
+`"proof": "na"` and nothing ever wrote it again; the header comment and the
+summary were literals. So the one table a milestone is read from contradicted
+the run it was built from, and it did so in the direction that loses evidence.
+
+### 34.1 Dispositions, independent of `agree`
+
+`proof` is now carried from the result row and classified:
+
+| `proof_status` | means |
+| --- | --- |
+| `accepted` | the theorem closed AND the audited axiom set is recorded |
+| `accepted_unaudited` | it closed, nobody wrote down what it depends on |
+| `refused` | the proof stage ran and the theorem did not close |
+| `resource` | the stage was STOPPED. Undecided, never a refusal |
+| `unattempted` | no proof stage ran for this row |
+| `no_certificate` / `not_run` | nothing to prove / nothing ran |
+| `uncreditable` | the row is not tied to the bytes the manifest names |
+
+Independence is the point and the controls check it both ways: a design can
+agree on 32 samples and have its theorem refused, and a row that claims
+`proof=1` can be uncreditable because its certificate hash does not match.
+That last case leaves `proof` **empty**, not `na` and not `0` -- "na" reads as
+not attempted and "0" as refused, and a proof that was attempted and cannot be
+credited is neither.
+
+### 34.2 `accepted` now requires the axioms, because they were being discarded
+
+`PROOF_GATE_RE` already captured the audited set and the code threw it away:
+`thm, _axioms = hits[0]`. A row saying `proof=1` that cannot say what it
+depends on is an assertion. The sweep records `proof_axioms` now, and a row
+without it reports as `accepted_unaudited` and is NOT counted as accepted.
+Re-joining the existing table shows exactly that -- 1 `accepted_unaudited`, 10
+`refused`, 65 `resource`, 46 `no_certificate` -- because that run predates the
+column. It is a demonstration, not the new evidence.
+
+### 34.3 A search budget is not a refusal
+
+`simp` reporting "maximum number of steps exceeded" leaves `sorryAx` behind and
+exits nonzero, which from the exit code alone is indistinguishable from a
+theorem that is false. They are opposite claims: one says the search stopped,
+the other says it finished and failed. The sweep now records `proof_stop` as a
+FIELD, and the join maps any non-empty `proof_stop` to `resource`. The nine
+first-pass failures in §33 were budget stops, so they are **undecided**, not
+refusals, and the ledger's §33 table should be read that way.
+
+### 34.4 The corpus-origin label, derived
+
+The header asserted "IMPORTED CERTIFICATES: compatibility evidence only" on
+every join, including those over a corpus this worktree emitted. It now reads
+the sidecar's `certs` paths -- which sit at the TOP of the document, not under
+`config`, a level I had to correct after the first version answered UNKNOWN for
+everything -- and says EMITTED BY THIS WORKTREE, IMPORTED, MIXED, or UNKNOWN
+when there is no sidecar to ask.
+
+21 control legs on the real CLI in `pass/lean/tests/d3/d3_join_proof_controls.py`:
+every disposition, the axiom set surviving verbatim, a budget stop separated
+from a refusal, a mismatched row crediting neither gate nor proof, the four
+origin answers, and refusals for a mismatched manifest digest, a tampered
+results table and an unbound sidecar. Denominators preserved.
+
+## 35. The proof-only transport repair, applied to source
+
+The prepared candidate (`audits/d3_legacy_stateful_transport_isolated_20261010/
+candidate_proof_only_patch.diff`) is **30 added lines, all proof**:
+
+* `bv_resize_idempotent` -- resizing twice to the same width is the first
+  resize;
+* `flopNextV_resize_din` -- the legacy emitter resizes `din` before calling the
+  clock-aware helper, so the resize can be dropped inside it;
+* and the legacy closing `simp` gains `compileFlop`, `compileMemory`,
+  `flopNext_eq`, `flopNextV_resize_din`, `CertVal.asMem`.
+
+It does not touch the emitter, the theorem statements, the axiom gate or any
+contract. The statements stay universally quantified over edges, inputs and
+state.
+
+Its evidence packet is specific about what it does and does not show. The
+isolated fixture proves with standard axioms (`bridge_and_raw_din`, exit 0);
+the unpatched baseline fails (exit 1) with a goal containing `rmemWriteV` and
+`memImg` -- a MEMORY, which is what rules out my "async-reset" reading in §33.2
+directly; the bridge lemma ALONE still fails on a resized `din` (exit 1), so
+`flopNextV_resize_din` is load-bearing rather than decorative; and a deliberately
+wrong flop model is refused (exit 1), so the repair is not proving everything
+put in front of it. The production CLI packet records
+`candidate_reifier_sha256 == master_reifier_sha256`, i.e. that run used the
+UNPATCHED reifier, and **the fresh 28-binding barrier design timed out at 120 s
+and is NOT proved by that evidence.**
+
+Added beside it: an **explicit finite** `simp (maxSteps := 4000000)` on that
+same tactic. Finite on purpose -- an unbounded search turns a design that will
+never close into a job that never ends, and the sweep would have to separate
+those by wall clock. A budget that is exceeded is undecided (§34.3), so raising
+it later costs time and retracts no result.
+
+**Status: edited, not elaborated.** Rebuilding the proof library touches
+`.lake/build`, which the running unbounded `scoreboard_gate` measurement reads,
+and that measurement is the current job. The build, the bounded RAM
+positive/wrong-flop controls, the real barrier design, `intpipe_imm` and the
+proof procedure all wait for it. Fresh output and fresh fingerprints when they
+run: the existing `--prove` table predates this change and is not current
+evidence for it.
+

@@ -33,8 +33,8 @@ JOIN = ROOT / "pass" / "lean" / "scripts" / "d3_join.py"
 
 RESULT_COLS = ["target_key", "module", "verdict", "cert", "compile", "reify",
                "typecheck", "sim", "checker", "agree", "proof", "run_status",
-               "cert_sha256", "proof_max_rss_source", "proof_axioms", "tier",
-               "distinct_obs", "wall_s", "detail"]
+               "cert_sha256", "proof_max_rss_source", "proof_axioms", "proof_stop",
+               "tier", "distinct_obs", "wall_s", "detail"]
 
 AX = "[propext, Classical.choice, Quot.sound]"
 fails = []
@@ -101,7 +101,8 @@ def header(out: pathlib.Path):
 def main() -> int:
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="d3joinproof_", dir=str(ROOT / "temp")))
     sha = {m: hashlib.sha256(m.encode()).hexdigest() for m in
-           ("acc", "accx", "ref", "resrc", "unatt", "nocert", "norow", "stale")}
+           ("acc", "accx", "ref", "resrc", "unatt", "budget", "nocert", "norow",
+            "stale")}
     man = tmp / "m.tsv"
     write_manifest(man, [
         ("acc",    1, sha["acc"],    10, ""),
@@ -109,6 +110,7 @@ def main() -> int:
         ("ref",    1, sha["ref"],    10, ""),
         ("resrc",  1, sha["resrc"],  10, ""),
         ("unatt",  1, sha["unatt"],  10, ""),
+        ("budget", 1, sha["budget"], 10, ""),
         ("stale",  1, sha["stale"],  10, ""),
         ("norow",  1, sha["norow"],  10, ""),
         ("nocert", 0, "",            "", "NO_EMIT(compile)"),
@@ -133,6 +135,10 @@ def main() -> int:
              proof_max_rss_source="sampled-aggregate-lower-bound",
              detail="proof stage killed; the theorem was never decided"),
         base("unatt", proof="na"),
+        # A SEARCH BUDGET, not a refusal: proof=0 with proof_stop set.
+        base("budget", proof="0", proof_max_rss_source="time-max-rss",
+             proof_stop="simp budget exhausted (maxSteps)",
+             detail="proof probe exited 1"),
         base("stale", proof="1", proof_axioms=AX,
              cert_sha256=hashlib.sha256(b"different").hexdigest()),
     ])
@@ -146,6 +152,8 @@ def main() -> int:
     want = {"acc": ("1", "accepted"), "accx": ("1", "accepted_unaudited"),
             "ref": ("0", "refused"), "resrc": ("0", "resource"),
             "unatt": ("na", "unattempted"), "nocert": ("na", "no_certificate"),
+            # proof=0 but the search was STOPPED: undecided, never a refusal.
+            "budget": ("0", "resource"),
             "norow": ("na", "not_run"),
             # EMPTY, not "1" and not "na": the proof was attempted and cannot be
             # credited, which is neither "accepted" nor "not attempted". Carrying
@@ -173,8 +181,15 @@ def main() -> int:
         ok("hash_mismatch_uncreditable", "a mismatched row credits no gate and no proof")
     else:
         bad("hash_mismatch_uncreditable", str(rows["stale"]))
-    if len(rows) == 8:
-        ok("denominator_preserved", "8 manifest targets, 8 joined rows")
+    if rows["budget"].get("proof_status") == "resource" and \
+       rows["ref"].get("proof_status") == "refused":
+        ok("budget_is_not_a_refusal",
+           "a simp step-limit stop and a closed-and-failed theorem are different rows")
+    else:
+        bad("budget_is_not_a_refusal",
+            f"{rows['budget'].get('proof_status')} vs {rows['ref'].get('proof_status')}")
+    if len(rows) == 9:
+        ok("denominator_preserved", "9 manifest targets, 9 joined rows")
     else:
         bad("denominator_preserved", f"{len(rows)} rows")
     if "accepted" in r.stdout and "refused" in r.stdout and "resource" in r.stdout:

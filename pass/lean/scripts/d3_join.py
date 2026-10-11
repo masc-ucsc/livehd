@@ -83,6 +83,12 @@ def proof_disposition(r: dict) -> tuple:
     if proof == "1":
         return (proof, "accepted" if axioms else "accepted_unaudited", axioms)
     if proof == "0":
+        # `proof_stop` is the sweep's own field for "the stage was stopped and
+        # the theorem is undecided" -- a search budget, a timeout, a memory
+        # limit. The RSS-source check stays beside it because a row written
+        # before that field existed carries only the former.
+        if (r.get("proof_stop") or "").strip():
+            return (proof, "resource", axioms)
         if (r.get("proof_max_rss_source") or "").strip() == PROOF_RESOURCE_SRC:
             return (proof, "resource", axioms)
         return (proof, "refused", axioms)

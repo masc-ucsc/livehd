@@ -233,6 +233,18 @@ def auditOrThrow (what : Name) (where_ : String) : CommandElabM Unit := do
       {bad.toList}; allowed: {d3AllowedAxioms}. The theorem did not close -- \
       refusing to report success."
 
+/-- Resizing twice to the same width does not change the resized value. -/
+theorem bv_resize_idempotent (w : Nat) (x : BV) :
+    bv_resize w (bv_resize w x) = bv_resize w x := by
+  simp [bv_resize, mk_bv, bv_uint]
+
+/-- The legacy emitter resizes din before calling the clock-aware helper. -/
+theorem flopNextV_resize_din (w : Nat) (din : BV) (en rst : Option BV)
+    (rv : Int) (ral : Bool) (old : Option BV) (edge asyncReset : Bool) :
+    flopNextV w (bv_resize w din) en rst rv ral old edge asyncReset =
+      flopNextV w din en rst rv ral old edge asyncReset := by
+  simp only [flopNextV, bv_resize_idempotent]
+
 /-- `prove_reified <designCert> as <reifiedDef>` -/
 syntax (name := proveReified) "prove_reified " ident " as " ident : command
 
@@ -296,9 +308,25 @@ def elabProveReified : CommandElab := fun stx => do
         intro e i st
         simp only [Compiler.compileAndRun, $hRNm:ident, Compiler.denoteResidual,
                    $srcNm:ident, $outNm:ident, $flopNm:ident, $memNm:ident, $bindNm:ident]
-        simp [$f:ident, $d:ident, Compiler.runBindings, Compiler.denoteExpr,
+        -- AN EXPLICIT, FINITE BUDGET.  `simp`'s default is
+        -- `defaultMaxSteps := 100000` (Lean 4.31 `Init/MetaTypes.lean:208`) and
+        -- nothing here ever raised it, so every design past roughly a hundred
+        -- bindings died on the step limit and reported as if the theorem had
+        -- refused to close.  `maxHeartbeats 0` in the probe already removes the
+        -- TIME budget; this is the same kind of bound and the same reason.
+        --
+        -- Finite on purpose.  An unbounded search turns a design that will
+        -- never close into a job that never ends, and the sweep would have to
+        -- tell those apart by wall clock. A budget that is exceeded is an
+        -- UNDECIDED outcome -- the sweep records it as a resource stop, not as
+        -- a refusal -- so raising it later costs nothing but time and retracts
+        -- no result.
+        simp (maxSteps := 4000000)
+             [$f:ident, $d:ident, Compiler.runBindings, Compiler.denoteExpr,
               Compiler.refBV, Compiler.refBVs, Compiler.refMem, Compiler.denoteRef,
-              Compiler.sourceEnvArr, Compiler.compileOutput, CertVal.asBV]))
+              Compiler.sourceEnvArr, Compiler.compileOutput, Compiler.compileFlop,
+              Compiler.compileMemory, Compiler.flopNext_eq,
+              Compiler.flopNextV_resize_din, CertVal.asBV, CertVal.asMem]))
     elabCommand (← `(command|
       theorem $corNm : ∀ e i st, $f e i st = Compiler.interpretDesign $d e i st := by
         intro e i st
