@@ -5008,3 +5008,89 @@ worker status, the attempt binding and the guard observations instead.
 
 **CVA6 FP coverage now stands at 8 combinational + 8 sequential designs**, and
 at 16 of the 22 supported members of the frozen 30.
+
+## 50. What the projection buys, and a final-acceptance criterion that cannot run
+
+### 50.1 The speedup, measured on sixteen designs
+
+Every `total_probe` run times the same six stimuli twice: `reference-runs` is
+six calls to `interpretDesign`, `step-runs` is six calls to the specialized
+residual. Both are native `-O2` Lean in one process, so the ratio is the
+partial-evaluation speedup and nothing else. Across the sixteen admitted CVA6
+designs (`pass/lean/tests/fp/fp_speedup.tsv`):
+
+| | range | mean |
+|---|---|---|
+| **sequential** (8 designs) | **17x to 97x** | **49x** |
+| combinational (8 designs) | 0.9x to 22x | 5.9x |
+
+The top of the table is `instr_queue` at 97x, `btb` at 90x and `store_buffer`
+at 87x; the two wall-capped designs show larger ratios still in their completed
+stage lines -- `issue_read_operands` at 194x (507,691 ms against 2,623 ms) and
+`bht` at 172x.
+
+The bottom of the table matters as much. `pmp` is **0.9x**: its residual is
+*slower* than the interpreter. `alu` and `alu_wrapper` are 1.7x, `decoder`
+2.1x. On combinational designs the projection is marginal, and on one of them
+it is a small loss.
+
+Three limits on reading those numbers. It is a Lean-to-Lean ratio, not an RTL
+simulation figure and not a comparison against any external simulator.
+`specialize` is paid once and is reported separately -- on `alu` it is 18.9 s
+against a 9.8 s reference run, so the ratio is a per-stimulus steady-state
+figure, not an end-to-end win on a single run. And the sequential designs here
+are the imported DCERT1 certificates of section 46, so what is being timed is
+the same arithmetic on both sides, whatever the reset polarity does.
+
+### 50.2 Section 6.4 cannot be executed as written
+
+Section 6.4 carries a final-acceptance requirement: generate the simulator
+source twice for each original branch -- once with **that branch's own
+generator**, once on rebased master -- and require exact raw byte equality.
+
+**No original branch has such a generator.**
+
+| branch | reference | `make_sim_launcher` | `Sims/` tree | any file mentioning `Sims/` |
+|---|---|---|---|---|
+| D3 | `78a3e0d8c` | no | no | none |
+| D4 | `f6ad1fe29` | no | no | none |
+| FP | `9bb41a09d` | no | no | none |
+
+`pass/lean/scripts/make_sim_launcher.py` exists only on master, and its own
+docstring says what it is: "Direction 2's executable is a GENERIC simulator
+over `DesignCert`". The criterion appears to have been carried into this plan
+from D2, where the generator was the deliverable, without checking that D3, D4
+and FP pin one. By the criterion's own rule -- "a block that neither side can
+generate is not a passing comparison, it is an absent one" -- all thirty
+comparisons are absent, and the three substitutions it forbids (behavioural
+equality, cross-backend comparison, a new equivalence proof) are not offered
+here.
+
+**This is a plan-level decision and is left open rather than resolved
+unilaterally.** The options are to drop 6.4, to restate it as a master-side
+determinism requirement, or to pin a different artifact as the one whose
+preservation is checked.
+
+### 50.3 What could be established instead, and was
+
+Two things, both recorded in `pass/lean/tests/MASTER_SIM_SOURCE_FROZEN10.tsv`.
+
+**Preservation, directly.** The D3/D4/FP port never touched the generator. Its
+last change is `4ab3ac566` ("sim: run the ported launcher, and correct its
+invocation"), **77 commits before** the port's first commit `73dee5673`. The
+file is byte-unchanged across the entire port, which answers the preservation
+question more directly than regenerating and diffing outputs would.
+
+**Determinism, measured.** Ten blocks were frozen and written to
+`generated/master_port/sim_frozen10.json` **before** anything was generated --
+`debug_breakpoint`, `intpipe_alu`, `intpipe_csr_file_conv`,
+`intpipe_csr_file_fl_barrier`, `intpipe_csr_msgs`,
+`intpipe_csr_pmu_read_interface`, `intpipe_csr_replay`, `intpipe_decode`,
+`intpipe_fp_scoreboard`, `intpipe_imm`. The generator then ran twice over
+exactly those ten, the same inode hard-linked into two throwaway trees, same
+toolchain, no flags. Both passes exit 0 and emit 20 files; `diff -r` over the
+two `Sims` trees is **empty**, the two lakefile stanzas are identical, and the
+two sha256 listings match line for line. Raw bytes, not normalised.
+
+That is determinism of master's generator. It is **not** the 6.4 preservation
+check and is not offered as one.
