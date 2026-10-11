@@ -2500,6 +2500,81 @@ proof refused and `verdict=agree` retained.
 All six restored D3 tests and the other control suites still pass after the
 change.
 
+### 29.12 Real-CLI negative controls, through the process boundary
+
+The 19 helper legs test the decision; they do not test the worker/process
+boundary or the row that gets written. `d3_module_cli_controls.sh` does, over
+**17 legs on the actual command line**, asserting on the ROW each run produces
+and on the earned `cert..agree` being retained whenever proof admission
+refuses.
+
+Isolation: a private context per case -- its own `scripts/` (a copy of the
+sweep and a stub worker), its own certificate copy, its own `--out`. Nothing
+live is written to, and the suite verifies the live sweep, live worker and
+source certificate are byte-identical afterwards.
+
+**Correcting §29.11.** I wrote that a copied sweep "cannot resolve its Lean
+root (it looks for `generated/formal/lean`)". It resolves it perfectly well
+when told where it is: `D3_LEAN_ROOT` is an existing seam and the whole suite
+rests on it. `D3_RUN_ID` is the second seam that matters -- set per case, the
+run directory is stable and known in ADVANCE, which is what makes the stale
+and failed-unlink legs stageable **at the exact path the run reads** instead
+of at a guess.
+
+Legs: positive success; nonzero-after-proved; stale; failed unlink; input
+changed under the worker; missing, malformed and list-shaped schema; a hung
+worker; and the over-cap stop with its resume.
+
+### 29.13 Three ordering defects the over-cap leg exposed
+
+Sizing it correctly took three corrections, each a real defect rather than a
+test artefact:
+
+- **The cap was tripping at the wrong stage.** At 90,000 KiB the SIM probe
+  tripped it at 132,728 KiB and the module worker never ran. The stages are
+  sequential, so the aggregate during the module stage is the worker ALONE --
+  the sim probe's memory is already freed. The worker must out-allocate the
+  sim probe (~1,520,000 KiB here) for the cap to catch it where the leg aims.
+- **The sampled-stop block was overwritten.** It sat BEFORE the generic
+  `module_admit` and `module_proof_status` assignments, which then replaced
+  its values. Moved after them.
+- **The sampler reaped before it recorded.** `_reap_all()` ran, then
+  `killed_at_kb` and `_RSS_KILL` were written -- so a terminated stage could
+  return, be classified and have its row written before the trip's record
+  existed to read. The module stage hit exactly that: the worker came back
+  `-15`, the row looked for the record, found none, and wrote an ordinary
+  nonzero exit with `run_status=done`. **The record now precedes the reap**,
+  with the "only latch when something is running" property kept by checking
+  `_GROUPS` rather than the reap count.
+
+And one consequence of §29.9's own change: a `module_stopped` row was excluded
+from verdict recomputation, so `verdict` came back **EMPTY** -- the earned
+`agree` was not retracted so much as never written. `module_stopped` now joins
+`done` there, and only there, because it is the one nonterminal status whose
+gates are real.
+
+### 29.14 An outer bound on the module worker
+
+`--module-proof-timeout` bounds the composition INSIDE the worker. Nothing
+bounded the worker itself, so a hang anywhere earlier ran unbounded. The call
+now carries twice the inner bound plus five minutes -- generous enough that it
+can never fire before the mechanism it backs up -- and `run_group` returns 124,
+which admission refuses like any nonzero exit. Covered by the hung-worker leg.
+
+### 29.15 Owned cleanup, completed and verified
+
+`d3_cgroup_reclaim.py` takes candidates ONLY from the `composition.cgroup`
+records the runs wrote, refuses any path that is not an owned `d3build_*`
+cgroup, refuses any that is still populated, retries bounded, and **re-checks
+each path afterwards** rather than reporting success from a call returning.
+
+Both recorded leftovers reclaimed -- `d3build_1688839` and `d3build_3071143`,
+each `populated=0` with no processes -- two others already gone, **residual=0**,
+verified independently after the run.
+
+All six restored D3 tests and all four control suites pass after every change
+above.
+
 ### 29.6 The aggregate limit counts memory it cannot terminate
 
 Observed on the `txfma_f4` module run, and verified rather than inferred:

@@ -119,7 +119,18 @@ GATES = ["cert", "compile", "reify", "typecheck", "sim", "checker", "agree", "pr
 # DESIGN ("it passed only the first gate") that nothing had established -- and
 # `run_status=done` made the row terminal, so `--resume` would have reused a
 # timeout as finished work.
-NONTERMINAL_SCHEDULER_STATUSES = {"deferred", "rss_killed", "timeout"}
+#   module_stopped  the EXECUTABLE stages finished and their gates stand; the
+#                   module-proof worker was then terminated by the aggregate
+#                   limit, so the proof is undecided and the row must be run
+#                   again to decide it
+#
+# `module_stopped` is the one member whose gates are REAL rather than all-zero.
+# The others mean "no gate was judged"; this one means "every executable gate
+# was judged and the proof was not". Its verdict is therefore the earned one
+# and must not be retracted -- which falls out of the recomputation requiring
+# `run_status == "done"`, so a stopped row keeps what `run_one` wrote.
+NONTERMINAL_SCHEDULER_STATUSES = {"deferred", "rss_killed", "timeout",
+                                  "module_stopped"}
 
 # Per-probe failures that invalidate the WHOLE run rather than one row.
 #
@@ -719,7 +730,18 @@ def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
             # something. Otherwise the monitor keeps sampling, and the next
             # probe to launch is the one it stops. This can only ever kill
             # MORE, never less.
-            reaped = _reap_all()
+            # THE RECORD IS WRITTEN BEFORE THE KILL IS OBSERVABLE.
+            #
+            # This reaped first and recorded afterwards, so the terminated
+            # stage could return, be classified and have its row written
+            # before `killed_at_kb` or `_RSS_KILL` existed to read. The module
+            # stage hit exactly that: the worker came back `-15`, the row
+            # looked for the trip's record, found none, and recorded an
+            # ordinary nonzero exit with `run_status=done`. Deciding on
+            # `_GROUPS` keeps the "only latch when something is running"
+            # property from the idle case below.
+            with _GROUPS_LOCK:
+                reaped = len(_GROUPS)
             if reaped == 0:
                 if not _RSS_IDLE_SAID["v"]:
                     _RSS_IDLE_SAID["v"] = True
@@ -731,12 +753,13 @@ def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
                 continue
             with _RSS_LOCK:
                 _RSS_PEAK["killed_at_kb"] = total
-            print(f"d3_sweep: AGGREGATE RSS {total} kB reached the HARD limit "
-                  f"{kill_kb} kB -- terminated {reaped} running probe group(s). The "
-                  f"row is recorded as rss_killed, a SCHEDULING outcome and not a "
-                  f"gate failure.", file=sys.stderr)
             _RSS_KILL.set()
             _RSS_STOP.set()
+            print(f"d3_sweep: AGGREGATE RSS {total} kB reached the HARD limit "
+                  f"{kill_kb} kB -- terminating {reaped} running probe group(s). The "
+                  f"row is recorded as a scheduling outcome and not a gate failure.",
+                  file=sys.stderr)
+            _reap_all()
             return
         if _RSS_STOP.is_set() and not kill_kb:
             # Only when NO hard limit is armed.  Returning here unconditionally
@@ -2124,6 +2147,14 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             # grace and `_sweep_orphans` as the last resort. The per-group and
             # final caps inside the worker are untouched; this adds the
             # aggregate one, which was already supposed to apply.
+            # Snapshot the hard trip's own record BEFORE the worker starts.
+            # Reading `_RSS_KILL` after the fact was not reliable here: the
+            # flag is global and its visibility relative to this stage's return
+            # is not something to depend on. `killed_at_kb` is written exactly
+            # once, by the trip, so a change across this stage says the limit
+            # acted DURING it.
+            with _RSS_LOCK:
+                killed_at_before = _RSS_PEAK["killed_at_kb"]
             mp_out, mp_rc = run_group(
                 [sys.executable, str(SCRIPTS / "d3_module_proof.py"),
                  "--cert", str(cert), "--module", m, "--bindings", str(nb),
@@ -2131,10 +2162,28 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
                  *(["--timeout", str(MODULE_PROOF_TIMEOUT)]
                    if MODULE_PROOF_TIMEOUT else []),
                  "--out-dir", str(mdir)],
-                cwd=None, timeout=None)
+                cwd=None,
+                # AN OUTER BOUND, so a worker that hangs BEFORE its own
+                # composition timeout can still be stopped. `--module-proof-
+                # timeout` bounds the composition inside the worker; nothing
+                # bounded the worker itself, so a hang anywhere earlier ran
+                # unbounded. Deliberately generous -- twice the inner bound
+                # plus five minutes -- so it can never fire before the
+                # mechanism it is backing up, and `run_group` returns 124,
+                # which admission refuses like any nonzero exit.
+                timeout=(MODULE_PROOF_TIMEOUT * 2 + 300) if MODULE_PROOF_TIMEOUT else None)
             # The certificate must still be the one that was selected. A proof
             # about bytes that are no longer on disk is about nothing this row
             # names.
+            # Did the AGGREGATE limit stop this worker, or did the worker
+            # fail on its own? `run_group` reaps the group when `_RSS_KILL` is
+            # set, and both come back as a nonzero exit -- so the flag is read
+            # here, where the two are still distinguishable.
+            with _RSS_LOCK:
+                killed_at_after = _RSS_PEAK["killed_at_kb"]
+            module_sampled_stop = (mp_rc != 0
+                                   and (killed_at_after != killed_at_before
+                                        or _RSS_KILL.is_set()))
             cert_after = sha256_of(cert) if cert.exists() else ""
             res, res_err = read_module_result(mdir / "result.json")
             if res_err:
@@ -2185,6 +2234,26 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             row["module_runner_digest"] = res.get("tool_digest", "")
             row["module_olean_digest"] = res.get("olean_digest", "")
             row["module_log_dir"] = str(mdir)
+            if module_sampled_stop:
+                # EXPLICIT PROVENANCE, AND A RESUMABLE ROW.
+                #
+                # Without this the row said `run_status=done` with an EMPTY
+                # `module_proof_status` while the run's own stderr said the
+                # probe had been terminated -- so the stop was invisible in
+                # the row, and `--resume` treated it as finished work that
+                # simply had no proof. Measured: the cap caught 141,760 and
+                # 154,408 kB against 90,000 kB, killed the worker and its
+                # nested stage, and the row still read `done`.
+                #
+                # The executable gates stand: `verdict` stays whatever
+                # `cert..agree` earned, and `module_proof` is 0 because the
+                # proof was never decided. Only the SCHEDULER's view of the
+                # row changes, to one that `--resume` runs again.
+                row["module_proof_status"] = "sampled_stop"
+                row["run_status"] = "module_stopped"
+                row["module_admit"] = (
+                    "refused: terminated by the aggregate RSS limit"
+                    + (f"; {'; '.join(refusals)}" if refusals else ""))
             if res.get("olean_drift"):
                 row["detail"] = (row.get("detail", "") +
                                  " module-proof olean drift during composition").strip()
@@ -3612,8 +3681,17 @@ def main() -> int:
                     # is diagnostic, the abort is not conditional on it.
                     r["drift"] = {"1": "after", "0": "between"}.get(launched_hint, "unknown")
 
+            # `module_stopped` joins `done` here, and ONLY here.
+            #
+            # Every other nonterminal status carries all-zero gates, which is
+            # why reading a verdict from them would relabel a scheduling
+            # decision as a design result. `module_stopped` is the exception:
+            # its executable gates were all judged and passed, and only the
+            # module-proof stage was terminated. Excluding it left `verdict`
+            # EMPTY -- the earned `agree` was not retracted so much as never
+            # written -- which is worse than either outcome.
             if (not r.get("drift") and not synthesized
-                    and r.get("run_status") == "done"):
+                    and r.get("run_status") in ("done", "module_stopped")):
                 # Only a row that actually COMPLETED the gate pipeline has gates
                 # worth reading a verdict from.  Previously this excluded just
                 # `NONTERMINAL_SCHEDULER_STATUSES`, which let every `run_status`
