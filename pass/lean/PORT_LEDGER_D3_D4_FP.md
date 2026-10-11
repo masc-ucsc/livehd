@@ -5270,17 +5270,21 @@ prefixed form, which is what the original benchmark uses, still reaches
 
 ### 52.3 No identical-graph handoff exists, on any side
 
-The manifest needed to say whether the frontend must be reproduced or whether
-an LGraph could simply be handed over. It must be reproduced:
-**`emit_lean_outputs` is called from `lhd_kernel_compile.cpp` and nowhere
-else** -- D3 `:1401`, D4 `:1401`, FP `:1533`, master `:1955`. No route on any
-side loads an `lg:` directory and emits Lean. The `lg:` emit dir in the
-original invocation is an output, not a re-entry point.
+> **WRONG, corrected in section 53.2.** `emit_lean_outputs` really is called
+> only from `lhd_kernel_compile.cpp`, but `lhd compile` takes an `lg:`
+> directory as an INPUT as well as `verilog:`, so that call site is reachable
+> from an LGraph. The pinned CORE-ET runner uses exactly that form. An
+> identical-graph handoff IS available.
 
-That is why the `ariane_regfile` pair of 51.4 cannot be fixed by swapping
-inputs: 400 sources against 1,034 is a frontend difference, and the only way to
-remove it is to re-elaborate both sides from the same pinned RTL, filelist,
-config, reader and options.
+The manifest needed to say whether the frontend must be reproduced or whether
+an LGraph could simply be handed over. **`emit_lean_outputs` is called from
+`lhd_kernel_compile.cpp` and nowhere else** -- D3 `:1401`, D4 `:1401`, FP
+`:1533`, master `:1955`. The inference drawn from that below does not follow.
+
+The `ariane_regfile` pair of 51.4 still cannot be fixed by swapping inputs:
+400 sources against 1,034 is a frontend difference between two unrelated
+elaborations, and removing it needs either re-elaboration from the same pinned
+RTL or the graph handoff of 53.2.
 
 ### 52.4 The paired-generation manifest
 
@@ -5333,3 +5337,121 @@ seed, is the residual holding a 118x-217x margin over the interpreter.
 
 `bht`'s 7200 s attempt continues; the remaining long entries stay open, and a
 resource stop never counts as coverage.
+
+## 53. The input freeze, and two corrections to section 52
+
+### 53.1 core-et is not dirty
+
+Section 52.4 listed "CORE-ET at `c72b6a2` with one dirty file" as a blocker.
+That was wrong. `git diff --name-only HEAD` on that repository is **empty**;
+the tracked tree is clean. The single status entry is `?? core_et_blocks.txt`,
+an **untracked** 16,674-byte text inventory dated 2026-08-19, and no runner in
+this pipeline consumes it -- the only references anywhere are
+`coreet_preflight.sh`, its controls and a README, none of them on the filelist
+path. It is not an input, and it was left exactly where it is: not deleted, not
+stashed, not cleaned, and no permission asked to remove something that is not
+in the way.
+
+### 53.2 An identical-graph handoff does exist
+
+Section 52.3 concluded from `emit_lean_outputs` having one call site that no
+route loads an LGraph and emits Lean. The call site is right; the inference is
+not. **`lhd compile` takes `lg:<dir>` as an input form**, not only `verilog:`
+(`lhd_kernel_compile.cpp:133`, "an `lg:`-only compile (no sources, no `ln:`
+inputs) has no LNAST on the pipe"), and that path reaches `emit_lean_outputs`
+normally.
+
+The pinned CORE-ET runner uses exactly that form. It is a **three-step**
+pipeline, not one:
+
+```
+1) lhd compile verilog $ANCHOR --reader yosys-slang --top $TOP \
+     --emit-dir lg:$LG_RAW --set yosys.filelist_file=$FILELIST \
+     --set yosys.setundef=zero -- --ignore-assertions --relax-enum-conversions
+2) lhd pass single_edge --top $TOP lg:$LG_RAW --emit-dir lg:$LG_NORM
+3) lhd compile lg:$LG_NORM --top $TOP --emit-dir lean:$LEAN_DIR \
+     --set formal.lean.strict=true --set formal.lean.normalize=true \
+     --set formal.lean.emit_cert=$EMIT_CERT --set formal.lean.emit_fast_bridge=$EMIT_FAST_BRIDGE
+```
+
+Step 2 is mandatory, not incidental: `pass.lean` fatals on `Ntype_op::Latch`
+and core-et's `tech_generic` primitives are two-phase latch cells. A
+mandatory RTL-vs-LGraph LEC gate runs beside it.
+
+So two experiments are available, and they answer different questions.
+**(A) Identical external inputs**: run all three steps on both sides from the
+same filelist bytes, pin, reader and options. **(B) Identical graph handoff**:
+run steps 1-2 once and step 3 on both sides against the same `$LG_NORM`,
+isolating the emitter from the frontend. (B) has an unverified prerequisite --
+that the on-disk GraphLibrary one binary writes is readable by the other -- and
+that is recorded as a question, not assumed.
+
+**The comparison's boundary.** Under identical external inputs, a difference in
+the emitted source is a **real pipeline byte mismatch** and is retained as one,
+attributed to whatever stage the evidence supports. It is not discarded because
+the intermediate graph shapes differ. Pre-existing files from unrelated
+elaborations, like the `ariane_regfile` pair of 51.4, stay characterisations.
+The check is exact raw generated source, headers and theorem text included --
+no normalisation, no launcher substitution, no behavioural-equivalence proof,
+no master-only determinism.
+
+### 53.3 What is now frozen, by content
+
+`pass/lean/tests/MASTER_SIM_COREET10_INPUTS.tsv`, with the full hash set in
+`generated/master_port/sim_inputs/coreet10_inputs.json`. **Nothing has been
+emitted from it.**
+
+A repository HEAD does not pin these inputs, so a project-local snapshot does.
+`coreet_filelist.sh` reads `<repo>/generated/core-et/patched_src/map.tsv` at
+**runtime** and substitutes declaration-reorder copies for **four** source
+files -- the script's own comment says "two", and the map has four rows. That
+path is gitignored, so the map and all four files are frozen by content in
+`generated/master_port/sim_inputs/pinned/`. The four patched files are
+**byte-identical** between the D4 repo and master; only `map.tsv` differs, and
+only in the absolute destination paths it embeds -- which is notable because
+the three repos carry **three different** `coreet_patch_srcs.py` generators
+(D3 `09819356a420`, D4 `2cce04803dab`, master `3ecca755d659`). D3's repo has no
+`map.tsv` at all, a real missing prerequisite recorded as such.
+
+The filelists were then generated read-only -- `coreet_print.mk` is
+`print-%: ; @echo '$($*)'` and an explicit goal runs no recipe -- with GNU Make
+4.4.1, `TECH=generic`, and `TMPDIR`/`TMP`/`TEMP` pointed at a project-local
+directory because the script uses `mktemp`:
+
+| block | src files | origin | incdir | patched |
+|---|---|---|---|---|
+| debug_breakpoint | 6 | `dv/rtlcosim/.../Makefile:NEW_RTL_FINAL` | no | 0 |
+| intpipe_alu | 6 | same | no | 0 |
+| intpipe_csr_file_conv | 6 | same | yes | 0 |
+| intpipe_csr_file_fl_barrier | 6 | same | yes | 0 |
+| intpipe_csr_msgs | 6 | same | yes | 0 |
+| intpipe_csr_pmu_read_interface | 7 | same | yes | 0 |
+| intpipe_csr_replay | 6 | same | yes | 0 |
+| **intpipe_decode** | **156** | `hw/ip/minion/dv/Makefile:RTL_SRCS` | yes | **4** |
+| intpipe_fp_scoreboard | 7 | same as the rest | no | 0 |
+| intpipe_imm | 6 | same | no | 0 |
+
+**156 unique files** are consumed across the ten, every one verified readable
+(0 missing), each with its full sha256 retained. Order is dependency order and
+is preserved. Only `intpipe_decode` takes the whole-IP fallback, and it is the
+only block that pulls in the four patched sources. Six blocks carry
+`+incdir+.../intpipe/csr/rtl`, whose eight `.svh` headers are hashed as inputs
+too.
+
+### 53.4 Corrected applicability, and what is still missing
+
+FP's CORE-ET applicability is relabelled. Section 52.4 said the CORE-ET ten are
+"not applicable to FP". The evidence only showed that FP's pin carries CORE-ET
+as a TSV-consuming census; that does **not** establish that FP's native emitter
+cannot generate CORE-ET blocks, since it is the same `pass.lean` route. The
+honest label is **untested**. The FP ten frozen at the previous checkpoint
+stays frozen, and emission applicability for every row stays untested until a
+run establishes it.
+
+Still missing, and not started here: `bazel-bin/lhd/lhd` at all three branch
+worktrees (`//lhd:lhd`, command recorded); the per-block `$ANCHOR` and `$REF_SV`
+values the runner derives; the yosys and yosys-slang versions on each side; and
+D3's absent `patched_src/map.tsv`.
+
+`bht`'s 7200 s attempt continues. No build, no emission batch, no cache
+mutation in this checkpoint.
