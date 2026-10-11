@@ -3543,6 +3543,13 @@ bv_shl_step`), and with it, 16 Projection modules build.
 
 ### 38.4 Two reconciliation gaps, both real
 
+> **CORRECTED IN S39.** Both "gaps" were failures of DEFINITIONAL REDUCTION,
+> not false statements. Every one of FP's four original claims is TRUE on
+> master and is now proved, with its statement unchanged. The reading below --
+> that the claims are false here -- is wrong and is kept only so the correction
+> has something to point at.
+
+
 Both are FP claims written against the PINNED BASE that are false against
 master's boundary repairs. Neither is a defect in master, and neither is
 repaired by weakening master.
@@ -3593,4 +3600,126 @@ obligations, the runner/trace/scaling/DCERT experiments (the 30-row
 `certio/experiments.jsonl`), the historical V1 replay and the fresh DCERT2
 transport are all retained and all open. Object second projection stays
 distinct from unproved host-specializer correctness.
+
+## 39. FP checkpoint 2: the bridge was provable all along
+
+### 39.1 The analysis S38 got wrong
+
+I wrote that FP's `Op_SHL` and `Op_Sext` bridge claims are "false on master",
+on the evidence that their `rfl` proofs fail. **That inference is invalid.** A
+`rfl` failure says the two sides do not REDUCE to one another; it says nothing
+about whether they are equal. Master's `eval_op` carries two boundary repairs
+the pinned base did not have, so of course it does not reduce to the base's
+shape -- and both equalities hold anyway.
+
+All four original statements are preserved verbatim and **proved**:
+
+| theorem | axioms |
+| --- | --- |
+| `Projection.evalOp_Sext` | `[propext, Quot.sound]` |
+| `Projection.bv_shl_step_unfolds` | `[propext, Quot.sound]` |
+| `Projection.evalOp_SHL_unchanged_by_overlay` | `[propext, Quot.sound]` |
+| `Projection.denoteOp_SHL_unchanged_by_overlay` | `[propext, Quot.sound]` |
+
+No `sorryAx`, no axiom added, no gate weakened, nothing excluded from support,
+and `>` was not relaxed to `≥`. The adaptation is **proof-only**: three `rfl`s
+and one `split <;> rfl` became real proofs. Statements, support coverage and
+the universally quantified contracts are untouched.
+
+### 39.2 The two arguments
+
+**`Op_SHL`.** Master guards the fold term with `if k ≥ w then 0`. That is the
+same value: `2 ^ k = 2 ^ w * 2 ^ (k - w)` when `k ≥ w`, so `2 ^ w` divides
+`u * 2 ^ k` and the product is `0 mod 2 ^ w` -- which is what the guard returns.
+`shl_step_eq` proves the step, `shl_fold_eq` lifts it over the fold by
+`funext`, and the two original assertions follow by `unfold` + `exact`. The
+guard exists so the term EVALUATES at amounts that are values rather than
+widths; it was never a different answer. Master's own comment said the equality
+"is NOT claimed" -- true of the evidence then, not now -- and both copies of it
+have been corrected to point at the proof.
+
+**`Op_Sext`.** Master branches at `n > a.width`, STRICTLY, and returns plain
+zero extension there. `sext_wide` is the arithmetic: `bv_uint a` is non-negative
+and below `2 ^ a.width`; `n > a.width` gives `a.width ≤ n - 1` and so
+`bv_uint a < 2 ^ (n - 1)`, which both leaves the value unchanged mod `2 ^ n`
+and puts the sign bit at `n - 1` clear. The other branch splits the same sign
+test on both sides. `sint_resize` and `evalOp_Sext_shape` carry it, and the
+original theorem is `unfold eval_op; exact evalOp_Sext_shape w a _`.
+
+Core lemmas only -- `Int.pow_pos`, `Int.emod_nonneg`, `Int.emod_lt_of_pos`,
+`Int.emod_eq_of_lt`, `Nat.pow_le_pow_right`, `Int.mul_emod_right` -- because
+`.build-proj.sh` builds without Mathlib.
+
+### 39.3 Finite boundary controls, and a demonstration that they discriminate
+
+`pass/lean/tests/fp/fp_sext_controls.lean`, 17 `#guard`s, exit 0 in 0.69 s:
+`n = 0` at two widths, `n < a.width` truncate-then-sign-extend in three signs,
+`n = a.width` with the sign bit set, `n > a.width`, zero-width input, zero-width
+result, unreduced `BV.value` (`⟨4, 19⟩` is 3), negative `BV.value` (`⟨4, -1⟩` is
+15), a negative AMOUNT, and signed/unsigned at a common width.
+
+**The `≥` detector is shown to detect.** A control that would pass against the
+wrong implementation is worth nothing, so the same function with `>` weakened to
+`≥` was built beside it and evaluated:
+
+| input | master (`>`) | the `≥` variant |
+| --- | ---: | ---: |
+| `a = mk_bv 4 (-1)`, `n = 4`, `w = 8` | **255** | **15** |
+| `a = mk_bv 4 (-1)`, `n = 5`, `w = 8` | 15 | 15 |
+
+The first separates them; the second does not. It is the PAIR that is the
+control, and the file says so.
+
+These are additional evidence. The obligation is the universal theorem, which
+holds for all `w`, `a` and `amount`.
+
+### 39.4 Rebuilt, and the original fixtures re-run
+
+`.build-proj.sh` from a cleared `.olean-dev`: **33 modules, 0 failures,
+`build_rc=0`** -- 8 shared-core and all 25 Projection modules, including the
+eight that were blocked: `HardwareInterpreter`, `HardwareAdequacy`,
+`ProjectionCorrect`, `ResidualFragment`, `ProjectedStep`, `CertLoad`, `Scaling`,
+`Audit`.
+
+| fixture | exit | wall | peak RSS | guards |
+| --- | ---: | ---: | ---: | ---: |
+| `Demo` (first projection) | 0 | 4.97 s | 488,484 kB | 28 |
+| `Gate0` (self-application) | 0 | 2.60 s | 496,012 kB | 17 |
+| `CertLoad` (historical DCERT1 V1 grammar/admission) | 0 | 1.24 s | 529,144 kB | 13 |
+| `Scaling` | 0 | 12.64 s | 535,684 kB | 33 |
+| `Audit` | 0 | 0.69 s | 519,556 kB | -- |
+| `scripts/repr_prototype.lean` | 0 | -- | -- | -- |
+
+CertLoad's 13 guards are the historical V1 controls, executing and passing on
+the V1 route. **The fresh DCERT2 transport remains a separate obligation and is
+not touched by this.**
+
+### 39.5 Preservation accounting, repaired
+
+Three defects in my own installer, all found by review rather than by failure:
+
+* **Anchors were validated while writing.** A bad anchor on the last asset
+  refused AFTER the first fifty-five had landed. Validation is now a complete
+  first pass that writes nothing; only if every anchor resolves does anything
+  reach a destination.
+* **The map recorded the plan, not the result.** `destination_sha256` is now
+  read back from the installed file, and a mismatch between what was written
+  and what the file reads back is a refusal.
+* **The 31 support assets were "observed", which verified nothing** -- the
+  observation and the copy came from the same bytes. They are now bound to the
+  PINNED GIT OBJECT via `git rev-parse 9bb41a09d:<path>` and `git cat-file`:
+  **29 verified**, 2 `untracked_at_pin` (two perf-artifact logs git does not
+  have at that commit), each labelled as the observation it is.
+
+### 39.6 Still open
+
+Everything the check-off standard asks for. The 13 `Proto/` modules are
+unattempted; ProtoAudit and the csimp obligations are untouched; the 30-row
+`certio/experiments.jsonl` configurations, the eight canonical passing inputs,
+the runner/trace/scaling/DCERT experiments and the historical-vs-fresh
+transport split are all retained and all open; `pmp_data_if`'s fresh native
+emission gap (rc 6, combinational loop) is open, not dropped. The 311 primary
+axiom reports still cover 21 of 38 modules. Object second projection stays
+distinct from unproved host-specializer correctness. Module builds and fixture
+exits close no benchmark coverage.
 

@@ -86,22 +86,122 @@ power/mod/sign expression, with no mention of `bv_shl_step` -- and proves it by
 would not typecheck.  Both operator-semantics functions the overlay touched are
 covered. -/
 
+/-! ### Arithmetic the bridge needs, and the record this corrects
+
+MASTER ADAPTATION, PROOF ONLY.  Every theorem statement below this block is the
+pinned FP statement, unchanged.  What changed is that three of them were `rfl`
+and one closed with `split <;> rfl`, and master's `eval_op` does not REDUCE to
+the pinned base's shape -- it carries two boundary repairs the base did not
+have.
+
+A `rfl` that fails is a failure of definitional reduction.  It is not evidence
+that the equality is false, and I recorded it as such once; it is not.  Both
+equalities hold here and are proved below, from core lemmas only -- this file
+is built by `.build-proj.sh`, which has no Mathlib.
+
+`Op_SHL`: master guards the fold term with `if k >= w then 0`.  That is
+EXTENSIONALLY the same value, because `2^w` divides `u * 2^k` whenever
+`k >= w`; the guard exists so the term EVALUATES, not because the result
+differs.  `Op_Sext`: master takes a STRICTLY-greater branch at `n > a.width`
+and returns plain zero extension there, which agrees with the pinned formula
+because `bv_uint a < 2^a.width <= 2^(n-1)` puts the sign bit at `n-1` clear.
+Changing `>` to `>=` would break it: `a = mk_bv 4 (-1), n = 4, w = 8` gives 255
+under `>` and 15 under `>=`. -/
+
+private theorem p2pos (k : Nat) : (0:Int) < 2 ^ k := Int.pow_pos (by decide)
+private theorem p2ne (k : Nat) : (2:Int) ^ k ≠ 0 := Int.ne_of_gt (p2pos k)
+
+private theorem uint_nonneg (x : BV) : (0:Int) ≤ bv_uint x := by
+  unfold bv_uint; exact Int.emod_nonneg _ (p2ne _)
+
+private theorem uint_lt (x : BV) : bv_uint x < 2 ^ x.width := by
+  unfold bv_uint; exact Int.emod_lt_of_pos _ (p2pos _)
+
+private theorem p2mono {p q : Nat} (h : p ≤ q) : (2:Int) ^ p ≤ 2 ^ q := by
+  have : (2:Nat) ^ p ≤ 2 ^ q := Nat.pow_le_pow_right (by decide) h
+  exact_mod_cast this
+
+/-- The arithmetic bridge for master's STRICTLY-greater `Op_Sext` branch: at
+`n > a.width` the value is already reduced mod `2^n` and its sign bit is
+clear. -/
+theorem sext_wide (a : BV) (n : Nat) (h : n > a.width) :
+    bv_uint a % (2 ^ n : Int) = bv_uint a ∧ bv_uint a < (2 ^ (n - 1) : Int) := by
+  have h0 := uint_nonneg a
+  have h1 := uint_lt a
+  have h2 : (2:Int) ^ a.width ≤ 2 ^ (n - 1) := p2mono (by omega)
+  have hlt1 : bv_uint a < (2 ^ (n - 1) : Int) := Int.lt_of_lt_of_le h1 h2
+  have hn1 : (2:Int) ^ (n - 1) ≤ 2 ^ n := p2mono (by omega)
+  exact ⟨Int.emod_eq_of_lt h0 (Int.lt_of_lt_of_le hlt1 hn1), hlt1⟩
+
+theorem sint_resize (a : BV) (n : Nat) :
+    bv_sint (bv_resize n a)
+      = (if n = 0 then 0
+         else if bv_uint a % (2^n:Int) < (2^(n-1):Int) then bv_uint a % (2^n:Int)
+         else bv_uint a % (2^n:Int) - (2^n:Int)) := by
+  unfold bv_sint bv_resize bv_uint mk_bv
+  simp
+
+theorem evalOp_Sext_shape (w : Nat) (a : BV) (n : Nat) :
+    (if n = 0 then mk_bv w 0
+     else if n > a.width then mk_bv w (bv_uint a)
+     else (let u := bv_uint a % (2 ^ n : Int)
+           if u < (2 ^ (n - 1) : Int) then mk_bv w u else mk_bv w (u - (2 ^ n : Int))))
+      = mk_bv w (bv_sint (bv_resize n a)) := by
+  rw [sint_resize]
+  by_cases h0 : n = 0
+  · simp [h0]
+  · by_cases hw : n > a.width
+    · obtain ⟨hmod, hlt⟩ := sext_wide a n hw
+      simp [h0, hw, hmod, hlt]
+    · simp only [h0, hw, if_false]
+      split <;> simp_all
+
+/-- Master's guarded `Op_SHL` fold term equals the pinned unguarded one.
+`2^w` divides `u * 2^k` when `k >= w`, so the guard changes no value. -/
+theorem shl_step_eq (w : Nat) (u : Int) (k : Nat) :
+    mk_bv w (if k ≥ w then (0:Int) else u * 2 ^ k) = mk_bv w (u * 2 ^ k) := by
+  by_cases h : k ≥ w
+  · unfold mk_bv
+    simp only [h, if_true]
+    have hk : (2:Int) ^ k = 2 ^ w * 2 ^ (k - w) := by
+      rw [← Int.pow_add]; congr 1; omega
+    rw [hk, ← Int.mul_assoc, Int.mul_comm u ((2:Int) ^ w), Int.mul_assoc]
+    simp [Int.mul_emod_right]
+  · simp [h]
+
+theorem shl_fold_eq (w : Nat) (a : BV) (bs : List BV) :
+    bs.foldl (fun acc b => bv_bitwise w (fun x y => xor x y) acc
+      (mk_bv w (if (bv_uint b).toNat ≥ w then 0
+                else bv_uint a * (2:Int) ^ (bv_uint b).toNat))) (mk_bv w 0)
+    = bs.foldl (fun acc b => bv_bitwise w (fun x y => xor x y) acc
+      (mk_bv w (bv_uint a * (2:Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := by
+  have h : (fun acc b => bv_bitwise w (fun x y => xor x y) acc
+            (mk_bv w (if (bv_uint b).toNat ≥ w then 0
+                      else bv_uint a * (2:Int) ^ (bv_uint b).toNat)))
+       = (fun acc b => bv_bitwise w (fun x y => xor x y) acc
+            (mk_bv w (bv_uint a * (2:Int) ^ (bv_uint b).toNat))) := by
+    funext acc b; rw [shl_step_eq]
+  rw [h]
+
 theorem bv_shl_step_unfolds (w : Nat) (a b : BV) :
-    bv_shl_step w a b
-      = mk_bv w (if (bv_uint b).toNat ≥ w then 0
-                 else bv_uint a * (2 : Int) ^ (bv_uint b).toNat) := rfl
+    bv_shl_step w a b = mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat) :=
+  shl_step_eq w (bv_uint a) (bv_uint b).toNat
 
 theorem evalOp_SHL_unchanged_by_overlay (w : Nat) (a : BV) (bs : List BV) :
     eval_op .Op_SHL w (a :: bs)
       = bs.foldl (fun acc b =>
           bv_bitwise w (fun x y => xor x y) acc
-            (bv_shl_step w a b)) (mk_bv w 0) := rfl
+            (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := by
+  unfold eval_op
+  exact shl_fold_eq w a bs
 
 theorem denoteOp_SHL_unchanged_by_overlay (w : Nat) (a : BV) (bs : List BV) :
     denote_op .Op_SHL w (a :: bs)
       = bs.foldl (fun acc b =>
           bv_bitwise w (fun x y => xor x y) acc
-            (bv_shl_step w a b)) (mk_bv w 0) := rfl
+            (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := by
+  unfold denote_op
+  exact shl_fold_eq w a bs
 
 /-- The SIGNED reading, delegating to the pinned `bv_sint`.  `Op_SLT`/`Op_SGT`
 and `Op_Sext` all need it, and none of them re-derives sign conversion. -/
@@ -327,10 +427,8 @@ Not `rfl`, and the reason is one step of arithmetic: the pinned body takes
 theorem evalOp_Sext (w : Nat) (a amount : BV) :
     eval_op .Op_Sext w [a, amount]
       = mk_bv w (bv_sint (bv_resize (bv_uint amount).toNat a)) := by
-  simp only [eval_op, bv_sint, bv_resize, bv_uint, mk_bv, Int.emod_emod]
-  split
-  · simp_all
-  · split <;> rfl
+  unfold eval_op
+  exact evalOp_Sext_shape w a _
 
 theorem evalOpCert_Sext (w : Nat) (l : List BV) :
     eval_op_cert .Op_Sext w (l.map CertVal.bv) = .bv (eval_op .Op_Sext w l) :=

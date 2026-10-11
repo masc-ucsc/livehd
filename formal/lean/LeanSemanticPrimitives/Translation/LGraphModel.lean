@@ -234,9 +234,14 @@ def denote_op : LGraphOp → Nat → List BV → BV
     -- Saturates at the RESULT width: `shl_bridge` shifts `(zext a : BitVec w)`,
     -- and `_ <<< k = 0` for `k ≥ w`.  (SRA saturates at the SOURCE width
     -- instead -- see `bv_sra`.)  Per fold term, since each operand carries its
-    -- own amount.  The bound is the BRIDGE's; it is NOT claimed equal to the
-    -- unguarded `2 ^ k` formula on every input, which does not evaluate at the
-    -- amounts that motivated it.
+    -- own amount.  The bound is the BRIDGE's.
+    --
+    -- It IS equal to the unguarded `2 ^ k` formula on every input, and that is
+    -- now proved: `Projection.shl_step_eq`, because `2 ^ w` divides `u * 2 ^ k`
+    -- whenever `k ≥ w`.  This comment used to say the equality was not claimed,
+    -- which was true of the evidence at the time and is no longer. The guard is
+    -- here so the term EVALUATES -- the amounts that motivated it are values,
+    -- not widths -- not because it changes an answer.
     bs.foldl (fun acc b =>
       bv_bitwise w (fun x y => xor x y) acc
         (mk_bv w (if (bv_uint b).toNat ≥ w then 0
@@ -306,9 +311,14 @@ def eval_op : LGraphOp → Nat → List BV → BV
     -- Saturates at the RESULT width: `shl_bridge` shifts `(zext a : BitVec w)`,
     -- and `_ <<< k = 0` for `k ≥ w`.  (SRA saturates at the SOURCE width
     -- instead -- see `bv_sra`.)  Per fold term, since each operand carries its
-    -- own amount.  The bound is the BRIDGE's; it is NOT claimed equal to the
-    -- unguarded `2 ^ k` formula on every input, which does not evaluate at the
-    -- amounts that motivated it.
+    -- own amount.  The bound is the BRIDGE's.
+    --
+    -- It IS equal to the unguarded `2 ^ k` formula on every input, and that is
+    -- now proved: `Projection.shl_step_eq`, because `2 ^ w` divides `u * 2 ^ k`
+    -- whenever `k ≥ w`.  This comment used to say the equality was not claimed,
+    -- which was true of the evidence at the time and is no longer. The guard is
+    -- here so the term EVALUATES -- the amounts that motivated it are values,
+    -- not widths -- not because it changes an answer.
     bs.foldl (fun acc b =>
       bv_bitwise w (fun x y => xor x y) acc
         (mk_bv w (if (bv_uint b).toNat ≥ w then 0

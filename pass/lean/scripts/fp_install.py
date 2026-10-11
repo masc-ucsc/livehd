@@ -61,6 +61,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 # statement that says so here names master's step, `bv_shl_step`, instead of the
 # base's formula. Deleting master's guard to make FP's original statement true
 # would be the R46 regression a second time.
+HELPER_WHY = ("master's eval_op carries two boundary repairs, so the pinned rfl "
+              "proofs do not reduce; the equalities still hold and these lemmas "
+              "prove them from core lemmas only")
+
 ADAPTATIONS = {
     # The build driver is itself a pinned asset, so its master adaptation has to
     # live here or a re-install silently reverts it -- which is exactly what
@@ -81,33 +85,41 @@ ADAPTATIONS = {
          "excludes by design; CertIOV1 is what CertLoad resolves against"),
     ],
     "formal/lean/LeanSemanticPrimitives/Projection/OperatorBridge.lean": [
-        ("""theorem bv_shl_step_unfolds (w : Nat) (a b : BV) :
-    bv_shl_step w a b = mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat) := rfl""",
-         """theorem bv_shl_step_unfolds (w : Nat) (a b : BV) :
-    bv_shl_step w a b
-      = mk_bv w (if (bv_uint b).toNat \u2265 w then 0
-                 else bv_uint a * (2 : Int) ^ (bv_uint b).toNat) := rfl""",
-         "master's Op_SHL saturates at the result width; FP's unguarded unfolding "
-         "is false here"),
-        ("""    eval_op .Op_SHL w (a :: bs)
-      = bs.foldl (fun acc b =>
-          bv_bitwise w (fun x y => xor x y) acc
-            (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := rfl""",
-         """    eval_op .Op_SHL w (a :: bs)
-      = bs.foldl (fun acc b =>
-          bv_bitwise w (fun x y => xor x y) acc
-            (bv_shl_step w a b)) (mk_bv w 0) := rfl""",
-         "same: the overlay is inert on master, and this is the statement that "
-         "says so against master's step"),
-        ("""    denote_op .Op_SHL w (a :: bs)
-      = bs.foldl (fun acc b =>
-          bv_bitwise w (fun x y => xor x y) acc
-            (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := rfl""",
-         """    denote_op .Op_SHL w (a :: bs)
-      = bs.foldl (fun acc b =>
-          bv_bitwise w (fun x y => xor x y) acc
-            (bv_shl_step w a b)) (mk_bv w 0) := rfl""",
-         "same, for denote_op"),
+        # PROOF-ONLY. Every statement below is the pinned FP statement verbatim.
+        # Three were `rfl` and one closed with `split <;> rfl`; master's eval_op
+        # does not REDUCE to the pinned base's shape because it carries two
+        # boundary repairs. Both equalities nonetheless HOLD, and are proved.
+        ("theorem bv_shl_step_unfolds", "/-! ### Arithmetic the bridge needs, and the record this corrects\n\nMASTER ADAPTATION, PROOF ONLY.  Every theorem statement below this block is the\npinned FP statement, unchanged.  What changed is that three of them were `rfl`\nand one closed with `split <;> rfl`, and master's `eval_op` does not REDUCE to\nthe pinned base's shape -- it carries two boundary repairs the base did not\nhave.\n\nA `rfl` that fails is a failure of definitional reduction.  It is not evidence\nthat the equality is false, and I recorded it as such once; it is not.  Both\nequalities hold here and are proved below, from core lemmas only -- this file\nis built by `.build-proj.sh`, which has no Mathlib.\n\n`Op_SHL`: master guards the fold term with `if k >= w then 0`.  That is\nEXTENSIONALLY the same value, because `2^w` divides `u * 2^k` whenever\n`k >= w`; the guard exists so the term EVALUATES, not because the result\ndiffers.  `Op_Sext`: master takes a STRICTLY-greater branch at `n > a.width`\nand returns plain zero extension there, which agrees with the pinned formula\nbecause `bv_uint a < 2^a.width <= 2^(n-1)` puts the sign bit at `n-1` clear.\nChanging `>` to `>=` would break it: `a = mk_bv 4 (-1), n = 4, w = 8` gives 255\nunder `>` and 15 under `>=`. -/\n\nprivate theorem p2pos (k : Nat) : (0:Int) < 2 ^ k := Int.pow_pos (by decide)\nprivate theorem p2ne (k : Nat) : (2:Int) ^ k ≠ 0 := Int.ne_of_gt (p2pos k)\n\nprivate theorem uint_nonneg (x : BV) : (0:Int) ≤ bv_uint x := by\n  unfold bv_uint; exact Int.emod_nonneg _ (p2ne _)\n\nprivate theorem uint_lt (x : BV) : bv_uint x < 2 ^ x.width := by\n  unfold bv_uint; exact Int.emod_lt_of_pos _ (p2pos _)\n\nprivate theorem p2mono {p q : Nat} (h : p ≤ q) : (2:Int) ^ p ≤ 2 ^ q := by\n  have : (2:Nat) ^ p ≤ 2 ^ q := Nat.pow_le_pow_right (by decide) h\n  exact_mod_cast this\n\n/-- The arithmetic bridge for master's STRICTLY-greater `Op_Sext` branch: at\n`n > a.width` the value is already reduced mod `2^n` and its sign bit is\nclear. -/\ntheorem sext_wide (a : BV) (n : Nat) (h : n > a.width) :\n    bv_uint a % (2 ^ n : Int) = bv_uint a ∧ bv_uint a < (2 ^ (n - 1) : Int) := by\n  have h0 := uint_nonneg a\n  have h1 := uint_lt a\n  have h2 : (2:Int) ^ a.width ≤ 2 ^ (n - 1) := p2mono (by omega)\n  have hlt1 : bv_uint a < (2 ^ (n - 1) : Int) := Int.lt_of_lt_of_le h1 h2\n  have hn1 : (2:Int) ^ (n - 1) ≤ 2 ^ n := p2mono (by omega)\n  exact ⟨Int.emod_eq_of_lt h0 (Int.lt_of_lt_of_le hlt1 hn1), hlt1⟩\n\ntheorem sint_resize (a : BV) (n : Nat) :\n    bv_sint (bv_resize n a)\n      = (if n = 0 then 0\n         else if bv_uint a % (2^n:Int) < (2^(n-1):Int) then bv_uint a % (2^n:Int)\n         else bv_uint a % (2^n:Int) - (2^n:Int)) := by\n  unfold bv_sint bv_resize bv_uint mk_bv\n  simp\n\ntheorem evalOp_Sext_shape (w : Nat) (a : BV) (n : Nat) :\n    (if n = 0 then mk_bv w 0\n     else if n > a.width then mk_bv w (bv_uint a)\n     else (let u := bv_uint a % (2 ^ n : Int)\n           if u < (2 ^ (n - 1) : Int) then mk_bv w u else mk_bv w (u - (2 ^ n : Int))))\n      = mk_bv w (bv_sint (bv_resize n a)) := by\n  rw [sint_resize]\n  by_cases h0 : n = 0\n  · simp [h0]\n  · by_cases hw : n > a.width\n    · obtain ⟨hmod, hlt⟩ := sext_wide a n hw\n      simp [h0, hw, hmod, hlt]\n    · simp only [h0, hw, if_false]\n      split <;> simp_all\n\n/-- Master's guarded `Op_SHL` fold term equals the pinned unguarded one.\n`2^w` divides `u * 2^k` when `k >= w`, so the guard changes no value. -/\ntheorem shl_step_eq (w : Nat) (u : Int) (k : Nat) :\n    mk_bv w (if k ≥ w then (0:Int) else u * 2 ^ k) = mk_bv w (u * 2 ^ k) := by\n  by_cases h : k ≥ w\n  · unfold mk_bv\n    simp only [h, if_true]\n    have hk : (2:Int) ^ k = 2 ^ w * 2 ^ (k - w) := by\n      rw [← Int.pow_add]; congr 1; omega\n    rw [hk, ← Int.mul_assoc, Int.mul_comm u ((2:Int) ^ w), Int.mul_assoc]\n    simp [Int.mul_emod_right]\n  · simp [h]\n\ntheorem shl_fold_eq (w : Nat) (a : BV) (bs : List BV) :\n    bs.foldl (fun acc b => bv_bitwise w (fun x y => xor x y) acc\n      (mk_bv w (if (bv_uint b).toNat ≥ w then 0\n                else bv_uint a * (2:Int) ^ (bv_uint b).toNat))) (mk_bv w 0)\n    = bs.foldl (fun acc b => bv_bitwise w (fun x y => xor x y) acc\n      (mk_bv w (bv_uint a * (2:Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := by\n  have h : (fun acc b => bv_bitwise w (fun x y => xor x y) acc\n            (mk_bv w (if (bv_uint b).toNat ≥ w then 0\n                      else bv_uint a * (2:Int) ^ (bv_uint b).toNat)))\n       = (fun acc b => bv_bitwise w (fun x y => xor x y) acc\n            (mk_bv w (bv_uint a * (2:Int) ^ (bv_uint b).toNat))) := by\n    funext acc b; rw [shl_step_eq]\n  rw [h]\n\ntheorem bv_shl_step_unfolds", HELPER_WHY),
+        ("""    bv_shl_step w a b = mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat) := rfl""",
+         """    bv_shl_step w a b = mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat) :=
+  shl_step_eq w (bv_uint a) (bv_uint b).toNat""",
+         "statement unchanged; rfl replaced by the divisibility argument"),
+        ("""            (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := rfl
+
+theorem denoteOp_SHL_unchanged_by_overlay""",
+         """            (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := by
+  unfold eval_op
+  exact shl_fold_eq w a bs
+
+theorem denoteOp_SHL_unchanged_by_overlay""",
+         "statement unchanged; rfl replaced by shl_fold_eq"),
+        ("""            (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := rfl
+
+/-- The SIGNED reading""",
+         """            (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := by
+  unfold denote_op
+  exact shl_fold_eq w a bs
+
+/-- The SIGNED reading""",
+         "statement unchanged; rfl replaced by shl_fold_eq, for denote_op"),
+        ("""  simp only [eval_op, bv_sint, bv_resize, bv_uint, mk_bv, Int.emod_emod]
+  split
+  · simp_all
+  · split <;> rfl""",
+         """  unfold eval_op
+  exact evalOp_Sext_shape w a _""",
+         "statement unchanged; the closing split <;> rfl replaced by the "
+         "strictly-greater arithmetic bridge"),
     ],
     "formal/lean/LeanSemanticPrimitives/Projection/CertLoad.lean": [
         ("import LeanSemanticPrimitives.Compiler.CertIO",
@@ -119,8 +131,9 @@ ADAPTATIONS = {
     ],
 }
 
-COLS = ["asset", "pinned_sha256", "source_sha256", "installed_sha256", "verbatim",
-        "adapted_edits", "adaptation_reason", "state"]
+COLS = ["asset", "pinned_sha256", "source_sha256", "installed_sha256",
+        "destination_sha256", "verbatim", "adapted_edits",
+        "adaptation_reason", "state"]
 
 
 def sha256(p: pathlib.Path) -> str:
@@ -162,47 +175,67 @@ def main() -> int:
             print(f"  {p}", file=sys.stderr)
         return 2
 
-    installed = adapted = 0
+    # PASS 1: resolve every adaptation and validate every anchor. NOTHING is
+    # written in this pass. The earlier version interleaved validation with
+    # writing, so a bad anchor on the last asset refused AFTER the first
+    # fifty-five had already landed -- a refusal that leaves a half-installed
+    # contribution behind is worse than no check at all.
+    staged = {}
     for r in rows:
         rel = r["asset"]
-        dst = ROOT / rel
-        edits = ADAPTATIONS.get(rel, [])
         text = (src_root / rel).read_bytes()
-        reasons = []
-        if edits:
-            s = text.decode("utf-8")
-            applied = 0
-            for old, new, why in edits:
-                if s.count(old) != 1:
-                    problems.append(f"{rel}: adaptation anchor {old!r} appears "
-                                    f"{s.count(old)} times, expected 1")
-                    continue
-                s = s.replace(old, new, 1)
-                applied += 1
-                reasons.append(why)
-            text = s.encode("utf-8")
-            r["adapted_edits"] = applied
-        else:
-            r["adapted_edits"] = 0
+        reasons, applied = [], 0
+        for old, new_, why in ADAPTATIONS.get(rel, []):
+            t = text.decode("utf-8")
+            n = t.count(old)
+            if n != 1:
+                problems.append(f"{rel}: adaptation anchor appears {n} times, "
+                                f"expected exactly 1: {old[:70]!r}")
+                continue
+            text = t.replace(old, new_, 1).encode("utf-8")
+            applied += 1
+            reasons.append(why)
+        r["adapted_edits"] = applied
         r["adaptation_reason"] = "; ".join(reasons)
         r["installed_sha256"] = hashlib.sha256(text).hexdigest()
         r["verbatim"] = "1" if r["installed_sha256"] == r["source_sha256"] else "0"
-        if a.apply:
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_bytes(text)
-            if (src_root / rel).stat().st_mode & 0o111:
-                dst.chmod(dst.stat().st_mode | 0o755)
-            r["state"] = "installed"
-            installed += 1
-            if r["adapted_edits"]:
-                adapted += 1
-        else:
-            r["state"] = "would_install"
+        staged[rel] = text
 
     if problems:
-        print("REFUSING: adaptation anchors did not match:", file=sys.stderr)
-        for p in problems:
-            print(f"  {p}", file=sys.stderr)
+        print("REFUSING before writing anything: adaptation anchors did not match:",
+              file=sys.stderr)
+        for q in problems:
+            print(f"  {q}", file=sys.stderr)
+        return 2
+
+    # PASS 2: write, then READ BACK. `destination_sha256` is what is on disk
+    # now, not what was intended -- a map that records the plan rather than the
+    # result cannot catch a short write or a stale file.
+    installed = adapted = 0
+    for r in rows:
+        rel = r["asset"]
+        if not a.apply:
+            r["state"] = "would_install"
+            r["destination_sha256"] = ""
+            continue
+        dst = ROOT / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(staged[rel])
+        if (src_root / rel).stat().st_mode & 0o111:
+            dst.chmod(dst.stat().st_mode | 0o755)
+        r["destination_sha256"] = sha256(dst)
+        if r["destination_sha256"] != r["installed_sha256"]:
+            problems.append(f"{rel}: wrote {r['installed_sha256'][:12]} but the "
+                            f"destination reads back {r['destination_sha256'][:12]}")
+        r["state"] = "installed"
+        installed += 1
+        if r["adapted_edits"]:
+            adapted += 1
+
+    if problems:
+        print("REFUSING: destinations do not match what was written:", file=sys.stderr)
+        for q in problems:
+            print(f"  {q}", file=sys.stderr)
         return 2
 
     out = pathlib.Path(a.out)
@@ -212,6 +245,8 @@ def main() -> int:
         fh.write(f"# pin\t{doc.get('pin','')}\n")
         fh.write(f"# baseline\t{pathlib.Path(a.baseline).resolve()}\n")
         fh.write("# verbatim=1 means the installed bytes equal the pinned source bytes.\n")
+        fh.write("# destination_sha256 is READ BACK from the installed file, so the map\n")
+        fh.write("# records what is on disk rather than what was intended.\n")
         fh.write("# An adapted row records every edit and why it was forced.\n")
         fh.write("\t".join(COLS) + "\n")
         for r in rows:
