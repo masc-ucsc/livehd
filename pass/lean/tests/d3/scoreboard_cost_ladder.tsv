@@ -1,0 +1,32 @@
+# The scoreboard_gate cost ladder, raw, with decoder_gate as the control.
+# wall_s and max_rss_kb are WHOLE-PROCESS measurements from /usr/bin/time.
+# Any per-pass figure quoted elsewhere is a SUBTRACTION against the matching
+# *_e1_struct baseline, never a measurement, and the baseline itself wanders
+# with machine load -- see `what_it_forces` for what each leg actually
+# OBSERVES, which is narrower than its name in at least one case.
+# Probes were cut from the sweep's own probe file for run
+# 20261010-202655-4087841. LEAN_PATH was the live formal/lean/.lake build
+# plus its packages; toolchain leanprover/lean4:v4.31.0. Legs ran serially
+# under nice -n19 ionice -c3 with LEAN_NUM_THREADS=2, outside the sweep's
+# cgroup and not charged to its aggregate.
+design	leg	wall_s	max_rss_kb	exit	probe_bytes	probe_sha256	observed_output	what_it_forces
+decoder_gate	s1_cert	66.69	1971228	0	406797	2877eb2107898bff6e2dbdf20ba1e45c181b92a13f1f7aa25f319b6cf4164ac1		elaborate the DesignCert literal only
+decoder_gate	s2_step	37.57	2009752	0	407096	c5aab55153420d0ece356f0fd46582bfcc565c38a70818f37f1163d04415b7b9		+ the _step definition
+decoder_gate	s3_reify	84.49	2636968	0	407144	2e7bc016d679ce39b6717cf8d58765403027fd8342720af78f12bf7c5d98a942	reify_design: d3_fast emitted, 2031 sources, 3714 bindings	+ reify_design (elaborate AND compile d3_fast)
+decoder_gate	s4_residual	73.78	2654856	0	407276	cb44ef536ab69da76485b904f4180c1af6bb2c4b0678d49a49b32343a5878c9b	reify_design: d3_fast emitted, 2031 sources, 3714 bindings	+ d3_residual (still NO evaluation)
+decoder_gate	s5_full	80.11	2654728	0 (first validation run, before the ladder was cut; timing file t_decoder_s5_full.txt)	407409	07a941ddacaa46eeabf827d7c449cd858c0782583445cbd60dfa4363098158de		the unmodified probe: #eval D3.report. Run once to show the ladder reproduces the sweep's own 88.55 s row for this design
+scoreboard_gate	s1_cert	31.93	2307816	0	1018923	a7d3d1560dd81e0aea4222367320db4ccf8423fdbe486cbc0a414028c0ad578a		elaborate the DesignCert literal only
+scoreboard_gate	s2_step	31.98	2374064	0	1019231	f06fbf30504c8d5f0e4e693452c53519d4cf592da33f12fcb2796e0cda605ca6		+ the _step definition
+scoreboard_gate	s3_reify	260.65	5897080	0	1019282	61a8b54250e6e36c5ac57b377c960ed865c5a642a25b6899b649186327297929	reify_design: d3_fast emitted, 5724 sources, 5170 bindings	+ reify_design (elaborate AND compile d3_fast)
+scoreboard_gate	s4_residual	270.83	5890552	0	1019417	ec1ea79680e6b2fc4c1232dfbe6f7e43de66ce8ae6d84ed2e50793a93fa844ed	reify_design: d3_fast emitted, 5724 sources, 5170 bindings	+ d3_residual (still NO evaluation)
+scoreboard_gate	s5_full			not run	1019559	0ada49eada5c9ed2e393085bf02ad435d90ac9463c5f61165871236d5bd61963		the unmodified probe. NOT run in this ladder: the sweep's own row is the measurement (3603.11 s, run_status=timeout, killed at the 3600 s bound, so /usr/bin/time wrote no RSS)
+decoder_gate	e1_struct	70.57	2668124	0	407540	fe1885b5bd6a86f5b44452e143acea12368d65935c1c96deaafb95a2797ee458	reify_design: d3_fast emitted, 2031 sources, 3714 bindings | struct sources=2031 nodes=3714 outputs=3 flops=0 inputs=30	prints sizes only; forces NO evaluation of the model
+decoder_gate	e2_sim1	66.83	2670960	0	407468	e966a8f79917ea745046f0ffdf62faea0880b0ab4a3f0d44f3d5514f6b3d3bba	reify_design: d3_fast emitted, 2031 sources, 3714 bindings | obs=1419606883389857208027191018928925888947973282399010593	forces ONE d3_fast pass (prints obs)
+decoder_gate	e3_selftest	75.62	2651916	0	407376	f1f051b209cbdc60b38a7ea42354912313632ac87a2d75fbe0b813850a9e5a91	reify_design: d3_fast emitted, 2031 sources, 3714 bindings | base=true	prints .base ONLY, so it forces one denoteResidual plus sameResult r r; whether the three mutation judgements are forced is NOT established
+decoder_gate	e4_agree	173.04	2654636	0	407417	2db4f0362044873b7028c57400493b09f080615861056a2ef367e708019d612a	reify_design: d3_fast emitted, 2031 sources, 3714 bindings | agree=true	forces 32 d3_fast + 32 denoteResidual (prints the verdict)
+decoder_gate	e5_distinct	71.28	2656004	0	407422	a7d3eebe9c1d65067f7ac0e7fea51af0840912b56a3947fcb8b28a663a943399	reify_design: d3_fast emitted, 2031 sources, 3714 bindings | distinct=32	forces 32 d3_fast passes (prints the distinct count)
+scoreboard_gate	e1_struct	290.28	5893236	0	1019696	4b95d4aee5a4ea38ff1a1589fb2f9a1f516400f73e8e5f7211fca4de9eeb1bbf	reify_design: d3_fast emitted, 5724 sources, 5170 bindings | struct sources=5724 nodes=5170 outputs=10 flops=243 inputs=	prints sizes only; forces NO evaluation of the model
+scoreboard_gate	e2_sim1	317.85	5896024	0	1019618	8425bf95ab6930686811c9489ba73e91f602382d5d2cd39bf62ec5a79b7ced3e	reify_design: d3_fast emitted, 5724 sources, 5170 bindings | obs=9457650543572317433625028158041602296592701684476040080	forces ONE d3_fast pass (prints obs)
+scoreboard_gate	e3_selftest	302.34	5902516	0	1019520	a1a9fbe11b0f618688abedbfc33d28519b392c759d306c2a0d4113f40e76a75f	reify_design: d3_fast emitted, 5724 sources, 5170 bindings | base=true	prints .base ONLY, so it forces one denoteResidual plus sameResult r r; whether the three mutation judgements are forced is NOT established
+scoreboard_gate	e4_agree			RUNNING at the time of writing	1019564	7b3b5ce53739c598946fe4f65da9429e4b46131cf5ec6e56677c3c6b6ef9a740		forces 32 d3_fast + 32 denoteResidual (prints the verdict)
+scoreboard_gate	e5_distinct	1574.73	5893684	0	1019569	6746b3904ab16e3154a2b3198092c763a219ad324a901aa711e1ad7634ea3146	reify_design: d3_fast emitted, 5724 sources, 5170 bindings | distinct=32	forces 32 d3_fast passes (prints the distinct count)
