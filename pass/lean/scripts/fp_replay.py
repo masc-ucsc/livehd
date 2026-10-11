@@ -105,8 +105,14 @@ def launch(binary, cert, plan, outdir, name, timeout_s, attempt):
     argv = [str(binary)] + ([plan["mode"]] if plan.get("mode") else []) \
         + [str(cert), str(plan["fuel_step"]), str(plan["fuel_work"])]
     memmax = plan["memmax"]
-    guard = ["systemd-run", "--user", "--scope", "--quiet", "--property=Delegate=yes",
-             f"--property=MemoryMax={memmax}"]
+    # NAME the scope. Without --unit the only pid we hold is systemd-run's own
+    # client, which lives in the SESSION scope -- so sampling from it read the
+    # whole session's cgroup (memory.max "max", a 128 GB peak) and reported it
+    # as if it were this run's guard. With a unit name the scope's cgroup path
+    # is deterministic and can be read directly.
+    unit = f"fpreplay-{name}-{attempt}"
+    guard = ["systemd-run", "--user", "--scope", "--quiet", f"--unit={unit}",
+             "--property=Delegate=yes", f"--property=MemoryMax={memmax}"]
     timed = ["/usr/bin/time", "-f", "RSS %M KB\nexit %x", "-o",
              str(outdir / f"{name}.time"), "-a",
              "timeout", str(timeout_s), "nice", "-n19", "ionice", "-c3"]
@@ -123,13 +129,52 @@ def launch(binary, cert, plan, outdir, name, timeout_s, attempt):
         "fuel_step": plan["fuel_step"], "fuel_work": plan["fuel_work"]}, indent=1))
     (outdir / f"{name}.guard.json").write_text(json.dumps({
         "attempt": attempt,
-        "requested": {"MemoryMax": memmax, "wall_timeout_s": timeout_s,
+        "requested": {"MemoryMax": memmax, "wall_timeout_s": timeout_s, "unit": unit,
                       "scope": "systemd-run --user --scope Delegate=yes"},
         "observed": {},
     }, indent=1))
     t0 = time.time()
+    observed = {}
     with (outdir / f"{name}.log").open("wb") as fh:
-        rc = subprocess.run(full, stdout=fh, stderr=subprocess.STDOUT).returncode
+        proc = subprocess.Popen(full, stdout=fh, stderr=subprocess.STDOUT)
+        # OBSERVE THE GUARD WHILE THE SCOPE EXISTS. The scope's cgroup is torn
+        # down when the process exits, so `memory.max`, `memory.peak` and
+        # `memory.events` have to be read during the run. An empty
+        # `guard_observed` is the ABSENCE of an observation, not evidence that
+        # the limit was enforced, so this samples rather than assuming.
+        uid = os.getuid()
+        cg = pathlib.Path(f"/sys/fs/cgroup/user.slice/user-{uid}.slice/"
+                          f"user@{uid}.service/app.slice/{unit}.scope")
+        while proc.poll() is None:
+            if not (cg / "memory.max").is_file():
+                time.sleep(0.2)
+                continue
+            if True:
+                for k in ("memory.max", "memory.peak", "memory.current"):
+                    try:
+                        v = (cg / k).read_text().strip()
+                        if k == "memory.peak":
+                            observed[k] = max(int(v), int(observed.get(k, 0)))
+                        else:
+                            observed[k] = v
+                    except (OSError, ValueError):
+                        pass
+                try:
+                    for ln in (cg / "memory.events").read_text().split("\n"):
+                        if ln.strip():
+                            kk, vv = ln.split()
+                            observed[f"memory.events.{kk}"] = vv
+                except (OSError, ValueError):
+                    pass
+                observed["cgroup"] = str(cg)
+                observed["unit"] = unit
+                try:
+                    observed["scope_pids"] = sorted(
+                        (cg / "cgroup.procs").read_text().split())
+                except OSError:
+                    pass
+            time.sleep(0.25)
+        rc = proc.wait()
     wall = time.time() - t0
     # subprocess returns a NEGATIVE value when the child died on a signal.
     sig = -rc if rc < 0 else (rc - 128 if rc > 128 else 0)
@@ -137,7 +182,12 @@ def launch(binary, cert, plan, outdir, name, timeout_s, attempt):
     (outdir / f"{name}.wall").write_text(f"{wall:.2f}\n")
     if sig:
         (outdir / f"{name}.signal").write_text(f"{sig}\n")
-    for suf in ("exit", "wall", "signal", "time", "log", "cmd", "argv.json"):
+    gp = outdir / f"{name}.guard.json"
+    g = json.loads(gp.read_text())
+    g["observed"] = observed
+    gp.write_text(json.dumps(g, indent=1))
+    for suf in ("exit", "wall", "signal", "time", "log", "cmd", "argv.json",
+                "guard.json"):
         a = outdir / f"{name}.{suf}.attempt"
         if (outdir / f"{name}.{suf}").is_file():
             a.write_text(attempt + "\n")

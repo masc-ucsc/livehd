@@ -4334,3 +4334,136 @@ FP transport, which stays separate from the historical DCERT1 replay these rows
 exercise. `pmp_data_if` passes historically under both runners and its fresh
 export is still `EMIT_FAILED rc=6`, in the denominator.
 
+## 45. FP checkpoint 8: the fixture and loader procedures, and the real inventory
+
+### 45.1 `guard_observed = {}` was absence, and now is not
+
+Every guarded run so far recorded `observed: {}`. That is the ABSENCE of an
+observation, not evidence that the limit was enforced, and I had been writing
+it beside a `requested` block as though the pair said something.
+
+Two defects had to be fixed to get a real one. The sampler read the cgroup of
+`proc.pid` -- but that is `systemd-run`'s CLIENT, which lives in the SESSION
+scope, so it sampled the whole session: `memory.max "max"`, a 128 GB peak, and
+reported it as this run's guard. Naming the scope with `--unit` makes the
+cgroup path deterministic, and sampling must happen WHILE the scope exists
+because it is torn down when the process exits. Observed now, for real:
+
+```
+requested: MemoryMax 8G, wall_timeout_s 1800, unit fpreplay-pmp-<attempt>
+observed : memory.max 8589934592   memory.peak 13590528   memory.current 13459456
+           memory.events low/high/max/oom/oom_kill/oom_group_kill all 0
+           cgroup .../fpreplay-pmp-<attempt>.scope   scope_pids [3352443, 3352448, 3352449]
+```
+
+`memory.max` reads back as exactly the 8 GiB requested. Absent observations
+are still left absent rather than backfilled.
+
+### 45.2 The fixture and loader route
+
+`run_cert.sh --emit` into a fresh project-local directory, then each fixture
+through the historical DCERT1 loader at the original defaults (`4 1`):
+
+| fixture | bytes | magic | exit | result |
+| --- | ---: | --- | ---: | --- |
+| `tiny` | 48 | DCERT1 | 0 | one cycle AGREES `OUT[1] 4:0`; trace AGREES (4 results); residual 48, bound 9 |
+| `seq` | 82 | DCERT1 | 0 | one cycle AGREES `OUT[1] 4:13 | FLOP[1] 4:0`; trace AGREES (4 results); residual 149, bound 19 |
+| `wide` | 162 | DCERT1 | **2** | **REFUSED**, by admission |
+
+`seq` is the one that matters for threaded state: the output and the flop
+next-state are both reported and both agree across four cycles, so this is
+output AND state, not an exit code.
+
+**`wide` is an ADMISSION refusal with its intended reason**, which is what the
+checkpoint asks for and what a wrong-magic rejection cannot give: it parses
+fine, `support` reports `memFree false` and `sources false`, and the runner
+says *"the file has flopQAsync sources but v1 gives every flop asyncReset =
+false, so this would simulate a DIFFERENT design."* That is the DCERT1 metadata
+limitation refusing a body, not a format check.
+
+### 45.3 The grammar refusals, with reasons rather than booleans
+
+`CertLoad` carries these as `#guard rejects "..."`, which says a malformed
+input is refused but not why.
+`pass/lean/tests/fp/fp_dcert1_admission_controls.lean` prints what the parser
+actually says, for all eight plus the minimal valid file:
+
+```
+empty (no magic)        : bad magic: expected DCERT1
+wrong magic DCERX1      : bad magic: expected DCERT1
+truncated, no counts    : malformed certificate
+missing nodes count     : malformed certificate
+unknown opcode 99       : malformed certificate
+trailing garbage        : malformed certificate
+source count > records  : malformed certificate
+unknown source tag 9    : malformed certificate
+minimal valid           : ACCEPTED
+```
+
+**A limitation worth stating rather than glossing.** The V1 parser produces
+exactly TWO distinct reasons. Six structurally different faults -- truncation,
+a missing count, an unknown opcode, trailing data, a count overrun, an unknown
+tag -- all collapse to `malformed certificate`. Each is genuinely refused, and
+the control proves that; what it cannot show is that the parser distinguishes
+them, because it does not.
+
+### 45.4 `ab_probe` at -O0 and -O2
+
+Built twice from the same sources into isolated ROOTs -- `-O0` in 167.72 s
+(`4bbf1195...`), `-O2` in 214.61 s (`9216322f...`) -- and each run once under
+an 8 GiB named scope with a 1800 s cap. Both exit 0, and the FULL original
+procedure ran: nothing was shortened.
+
+Sequential: reset `next==0`, enabled `next==12`, held `next==3`, the
+`runtimeShape` refusal, and a 3-cycle trace with `len3`, `next-states-ok` and
+`ref-equal`. Node ladder at n = 8, 16, 32, 64, 128 and source ladder at
+nsrc = 16, 64, 256, 1024, 4096 (nodes = 64), each checking HOST
+(`mixDriver` + `hwAPVarT`) and FORK (`ProtoFast` + `hwAPVar`) at their own
+accepted bounds, with `terms` equal and `same-size true` at every point.
+
+**Every result, value and shape field is IDENTICAL across the two builds.**
+Only timing and memory differ, and those are kept separate:
+
+| | host @4096 | fork @4096 | peak RSS |
+| --- | ---: | ---: | ---: |
+| `-O0` | 9,600 ms | 25,283 ms | 66,876 kB |
+| `-O2` | 1,049 ms | 2,573 ms | 15,800 kB |
+
+The fork route stays execution evidence: `ProtoFast` + `hwAPVar` comes from the
+`partial` `goInline` and has no equivalence lemma, so it is not promoted
+through the total variant's theorems.
+
+### 45.5 The inventory, including where FP has nothing
+
+`fp_entrypoint_inventory.tsv` freezes all 18 original entrypoints with each
+one's sha256, the modes parsed from its OWN argument dispatch, what it asserts,
+its original status and master's evidence: **8 executed, 1 partial, 8 open, 1
+adapted-but-not-separately-run**. The modes column is a denominator in itself --
+`proto_probe` alone dispatches 22 modes and two have been exercised.
+
+`fp_obligation_inventory.tsv` records the per-corpus denominators, and its
+point is the column that says where the original has nothing:
+
+* **CVA6** -- 11 distinct designs across the 30 rows. Real evidence. 10
+  admitted, 16 evidence-limited, 0 unattempted.
+* **CVA6 frozen-30** -- FP never ran the frozen 30 as a set. There is no FP
+  denominator here, and D3's or D4's accepted subset is not FP coverage.
+* **CORE-ET** -- FP has a CENSUS only: `coreet_operator_census.py` reports
+  which operators the CORE-ET certificates use and checks fixed arities. It
+  simulates and specializes nothing. **FP has no CORE-ET execution evidence**,
+  and the census has not been run on master.
+* **DINO** -- nothing. DINO appears only as a scaling LIMIT:
+  `HardwareInterpreter.lean` and `Scaling.lean` both put the practical ceiling
+  at roughly N = 1000-2000 slots and note that DINO's 4,772-node
+  `SingleCycleCPU` is already past it, and `SIMULATOR_PLAN.md` records
+  real-design evaluation as **Not started**.
+
+### 45.6 Open
+
+The scaling and prototype grids (`s0_grid`, `s1_identity`, `s2_probe`,
+`s2a_probe`, `s3_probe`, `perf_probe`), the remaining 20 `proto_probe` modes,
+`cert_shape.py`, `cva6_corpus_audit.py`, the CORE-ET census, real `cert_runner`
+benchmark passes beyond `instr_scan`, and fresh DCERT2 transport -- all open
+until executed. `pmp_data_if`'s historical acceptance stays separate from its
+fresh `EMIT_FAILED rc=6`.
+

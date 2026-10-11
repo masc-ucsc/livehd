@@ -1,0 +1,24 @@
+# The 18 original FP formal entrypoints, frozen at pin
+# 9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6, with each one's executable
+# modes, what it asserts, its original status and what master has run.
+# `modes_parsed` comes from the runner's own argument dispatch; it is the
+# denominator of modes, and executing one mode does not cover the others.
+entrypoint	sha256	purpose	modes_parsed	modes_documented	original_status	master_evidence
+scripts/ab_probe.lean	09e2fc3fc5513db0cf83706fe6cdc1cfc8a48c8fc54529967567ebd26811c2eb	-O0 vs -O2 A/B over host+TOTAL variant	(not a mode dispatcher)	seq reset/enabled/held/runtimeShape-refusal/3-cycle trace; node ladder 8..128; source ladder 16..4096 at nodes=64; host and fork each at their own bound	original procedure	EXECUTED both -O0 and -O2; all fields identical, timing separate
+scripts/cert_runner.lean	c7d34f7b1abb590a97036388ec183e785610b8a5a03eebac492550ec23d6ba39	thin entry to CertLoad.main	(not a mode dispatcher)	<file.dcert> [cycles] [seed]; --emit <dir>	original procedure	EXECUTED: --emit + tiny/seq/wide + one canonical instr_scan
+scripts/run_cert.sh	271ff725cb110f8f47211e7ec4c04a8553e25462b6faa5f086903cd879394321	wrapper: LEAN_PATH + /usr/bin/time around cert_runner	(not a mode dispatcher)	--emit <dir>; <file.dcert> [cycles] [seed]	original procedure	EXECUTED: --emit and all three fixtures
+scripts/proto_probe.lean	7227c426896ab05b540d7c0eb55640c9c29a300c96754aec36e7572ba39c04a4	fork/partial A/B and host-variant modes	chain,fan,flop,--grid,--reset-probe,--trace-ref,--support,--rewrite-agree,--host-var-total,--host-var,--inline-negative,--env0-ab,--node-depth,--depth-grid,--file-ab,--file-profile,--file-fuel,--file,--file-ref,--file-fast,--ref,--fast	see modes column	original procedure	PARTIAL: --file-ab executed on 9 rows; --rewrite-agree executed; other modes OPEN
+scripts/total_probe.lean	33e41f21fb559c0f31b9428f20d3cad1f7cc43f10bc091e81ff5586c962d6e12	covered backend: mixDriver + hwAPVarT	(not a mode dispatcher)	<cert> <stepFuel> <wlFuel>	original procedure	EXECUTED: rows 4, 15-22 (evidence-limited), 23-30
+scripts/s0_grid.lean	e093091f26840f6e641db06f8cc54f19bcd20827c2ce225bc0c7a2b828e80276	S0 grid	(not a mode dispatcher)	grid sweep	original procedure	OPEN: not executed
+scripts/s1_identity.lean	e168fc80db8440ca80e383e874e0965e334799a4dbaf415fee5746d8793d6e71	S1 identity	(not a mode dispatcher)	identity check	original procedure	OPEN: not executed
+scripts/s2_probe.lean	a62bb0ecff30d36f7b098b56ad90a915f6128e3c4fe6ad71fc4d2f7e9fe91fe1	S2 probe	(not a mode dispatcher)	<cert> ...	original procedure	OPEN: not executed
+scripts/s2a_probe.lean	a199d3582e76121c4325d4487b83caf6c589b8524933de782f9dab9733308084	S2a probe	(not a mode dispatcher)	<cert> ...	original procedure	OPEN: not executed
+scripts/s3_probe.lean	bf23c0acc16da6acf2d99300058aba32a05f91bd271f21984fe9f88a44213f0c	S3 probe	(not a mode dispatcher)	<cert> ...; spec cert <p> <b>	original procedure	OPEN: not executed
+scripts/perf_probe.lean	10a0c420c199ad7fdd1efc9e2c2cf9d2ca3c76abf593487ad113ba507c280494	performance probe	(not a mode dispatcher)	default	original procedure	OPEN: not executed
+scripts/repr_prototype.lean	b8b2b09044e630a948371b34f235afba86e1a476cf76cf832a5dc8135c3fdc66	representation-change prototype (diagnostic)	(not a mode dispatcher)	default	original DIAGNOSTIC, not production	EXECUTED: exit 0
+scripts/cert_shape.py	1502858333bc8f0c8f3457a99d06dc8f706849b403a1b0cde84bcb4a6195b215	certificate shape report	(not a mode dispatcher)	<cert>	original procedure	OPEN: not executed
+scripts/cva6_corpus_audit.py	ed1aef269b72ccc49d7d50376ece9b81441f928973c0c5f1c2f9c86e4bf88119	CVA6 corpus audit	(not a mode dispatcher)	corpus dir	original procedure	OPEN: not executed
+scripts/record_experiment.py	7881f9018ef9950eb53d7b253f4b78e2f004a1dce772adc5b1eabb3427cc40e2	experiment recorder	(not a mode dispatcher)	prelaunch / record / selftest	original procedure	EXECUTED: selftest + 19 records at pre-launch strength
+scripts/build-native.sh	8203b38e7f54b16af0ac1ec2c2616b94142fcacc294b16f978e12ca2d43accfa	unoptimised native build	(not a mode dispatcher)	[--clean] <probe.lean>	original procedure	ADAPTED (CertIOV1); not separately executed -- build-opt covers the route
+scripts/build-opt.sh	a83d5df2e8bee1bc6806f212ccb6d1b7af2c75ed8c80f14b65fa6153aea6d0df	explicit-OPT native build into an isolated ROOT	(not a mode dispatcher)	OPT=.. ROOT=.. <probe.lean>	original procedure	EXECUTED: total_probe -O2, proto_probe -O2, ab_probe -O0 and -O2
+formal/lean/.build-proj.sh	d40408380c216a44022862d5c7b9bd0830cba717d0c72770b1975cef12927e4c	olean build of the shared core + Projection	(not a mode dispatcher)	[module ...]	original procedure	EXECUTED: all 38 modules, rc=0

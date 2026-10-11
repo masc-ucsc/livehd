@@ -1,0 +1,11 @@
+# FP benchmark/procedure denominators, per corpus.
+# The point of this table is the THIRD column: where the original FP branch
+# has no execution evidence, that is recorded as absence. Another branch's
+# accepted subset is not FP coverage and is never substituted for one.
+corpus	denominator	fp_original_execution_evidence	master_evidence	note
+CVA6	11 distinct designs across the 30 recorded experiment rows: 8 canonical cva6_30_auth blocks + rt_alu, rt_decoder, rt_csr_regfile	YES -- 26 passing rows, 2 exit-3, 2 exit-unknown	10 admitted, 16 observed-evidence-limited, 0 unattempted	The 30 rows are experiment configurations, not 30 designs; aliases and stages are separate rows.
+CVA6 frozen-30	30 blocks (the D3/D4 frozen target set)	NO -- FP never ran the frozen 30 as a set; its CVA6 evidence is the 11 designs above	n/a: FP has no such denominator to replay	Borrowing D3's or D4's accepted subset here would be inventing FP coverage.
+CORE-ET	FP carries an operator CENSUS procedure (Projection/census/coreet_operator_census.py) over <generated>/coreet_census.tsv rows with verdict==READY	CENSUS ONLY -- operator coverage and arity checking, NOT benchmark execution	OPEN: the census script has not been run on master	FP has NO CORE-ET execution evidence. The census answers which operators the CORE-ET certificates use; it does not simulate or specialize any of them.
+DINO	none established	NO -- DINO appears only as a SCALING LIMIT	n/a: nothing to replay	HardwareInterpreter.lean and Scaling.lean both say the practical ceiling is about N = 1000-2000 slots and that DINO's 4,772-node SingleCycleCPU is already beyond it; SIMULATOR_PLAN.md records real-design evaluation as Not started.
+fixtures	tiny, seq, wide (emitted by cert_runner --emit)	YES -- the original fixture/loader route	EXECUTED: all three; tiny and seq agree over a 4-cycle trace, wide is an intended admission refusal	wide refuses on asyncOK because DCERT1 cannot carry FlopDesc.asyncReset.
+grammar/admission	8 malformed inputs + 1 minimal valid, from CertLoad's own guards	YES -- as boolean #guards	EXECUTED with reasons printed	The V1 parser distinguishes only `bad magic` from `malformed certificate`, so six structurally different faults share one reason.
