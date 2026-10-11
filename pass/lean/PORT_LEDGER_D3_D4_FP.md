@@ -3069,3 +3069,84 @@ flop, async-flop and width-distribution counts, built by
 `pass/lean/scripts/d3_cost_census.py` from the sweep tables and the
 certificates themselves.
 
+## 33. The proof stage: two defects, found on the first eleven designs
+
+`run_d3_corpus.sh coreet-master --prove` over the corpus this worktree emitted.
+The executable gate is unaffected -- every row still reaches `agree` -- but the
+last-mile theorem closes on **one of the first eleven designs**. The failures
+are not one defect, they are two, and they need different repairs.
+
+| design | bindings | flops | async | proof | why |
+| --- | ---: | ---: | ---: | --- | --- |
+| `debug_breakpoint` | 81 | 0 | 0 | **1** | -- |
+| `intpipe_csr_file_fl_barrier` | 28 | 5 | 2 | 0 | **unsolved goal on `flopNextV`** |
+| `intpipe_imm` | 108 | 0 | 0 | 0 | `simp` maxSteps |
+| `intpipe_csr_pmu_read_interface` | 110 | 6 | 6 | 0 | `simp` maxSteps |
+| `intpipe_csr_file_conv` | 154 | 7 | 3 | 0 | `simp` maxSteps |
+| `intpipe_inst_bits_stage` | 163 | 32 | 0 | 0 | `simp` maxSteps |
+| `intpipe_fp_scoreboard` | 200 | 0 | 0 | 0 | `simp` maxSteps |
+| `intpipe_int_scoreboard` | 203 | 0 | 0 | 0 | `simp` maxSteps |
+| `minion_dcache_atomic_alu_unit` | 315 | 0 | 0 | 0 | `simp` maxSteps |
+| `intpipe_mask_scoreboard` | 394 | 0 | 0 | 0 | `simp` maxSteps |
+| `intpipe_csr_replay` | 503 | 6 | 6 | 0 | `simp` maxSteps |
+
+Error census over the eleven proof logs: nine `` `simp` failed: maximum number
+of steps exceeded ``, one `unsolved goals`, and ten axiom-audit refusals
+downstream of those.
+
+### 33.1 A search budget that was never raised
+
+The probe sets `maxRecDepth 1000000` and `maxHeartbeats 0`, and **nothing sets
+simp's `maxSteps`**, which defaults to 100,000. The word does not appear in
+`ReifyProof.lean` or in `d3_sweep.py`. `prove_reified`'s closing tactic is a
+plain
+
+```lean
+simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
+      Compiler.compileMemory, Compiler.flopNext_eq, ...]
+```
+
+so every design above about a hundred bindings exhausts the budget. The
+boundary is sharp and size-driven, not shape-driven: `intpipe_imm` has 108
+bindings, **no flops and no memories**, and still dies, while
+`debug_breakpoint` at 81 bindings is the only design that proves.
+
+Raising it is a budget change of exactly the kind `maxHeartbeats 0` already is,
+and it weakens nothing: the axiom audit is what makes `proof=1` mean something
+and it is untouched. The repair is a config on the emitted `simp`, since
+`maxSteps` is a `Simp.Config` field rather than a `set_option`. **Not applied
+at this checkpoint** -- the run in progress is the "before" measurement.
+
+### 33.2 A missing rewrite for async-reset flops
+
+`intpipe_csr_file_fl_barrier` is the exception that is NOT a budget problem: 28
+bindings, well inside the default, and it fails with `unsolved goals` rather
+than a step limit. The goal left open is headed by `flopNextV` and the term
+carries `SourceDesc.flopQAsync 4 2 4 0 true`:
+
+```
+⊢ flopNextV 13
+    (bv_resize 13 (Residual.rsextV 13 (Residual.rmuxV 13 ...
+       (match sourceValue i st (SourceDesc.flopQAsync 4 2 4 0 true) with ...
+```
+
+`flopNext_eq` is in the simp set and the generator does carry `clock` and
+`asyncReset` into the emitted descriptor (ReifyProof.lean, the comment at the
+emission site says so explicitly), so the descriptor is right and the rewrite
+still does not close. The design has **5 flops of which 2 are async**, and it
+is the smallest design in the corpus that has any -- which makes it the minimal
+reproducer and the right fixture for the repair.
+
+Nine of the 76 CORE-ET master designs carry async-reset flops, 23 across both
+master corpora. Whether all of them fail this way, or only some, is what the
+full run will say -- the 28-binding case is simply the only one so far small
+enough that the step limit did not hide it.
+
+### 33.3 Status
+
+`proof` is a real gate and it is now reporting a real result: **not `na`, and
+not passing.** The 76 runtime agreements stand exactly as before and are
+unaffected by this -- `agree` and `proof` are separate columns for this reason.
+The run is being left to classify all 76 before either repair is attempted, so
+that the repair has a baseline to be judged against rather than an anecdote.
+
