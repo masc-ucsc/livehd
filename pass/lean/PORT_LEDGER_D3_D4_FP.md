@@ -2847,11 +2847,25 @@ disposition `timeout` already says undecided.
    one makes the two sides agree wrongly. The honest repair is a proved
    equality (`Nat.testBit` lemmas) and then the swap. Recorded, not taken: this
    is an evaluator change and it needs its own acceptance.
-2. **The sweep sizes targets by node count.** `--tier` and the per-target
-   `--timeout` both derive from `nodes`, which mispredicts by 4x in the wrong
-   direction on `btb_gate`. Total declared bit-width is the predictor; a
-   width-aware tier would have scheduled and bounded `scoreboard_gate`
-   correctly instead of giving it the same 3,600 s as a 55-kbit design.
+2. **The sweep sizes targets by node count, and node count under-predicts the
+   tail by an order of magnitude.** `--tier` and the per-target `--timeout`
+   both derive from `nodes`. Measured over the 96 targets that completed
+   (`pass/lean/tests/d3/d3_cost_census.tsv`), a log-log fit gives
+   `wall ~ nodes^0.45`, R^2 = 0.612, and its worst under-predictions are
+   `btb_gate` at **14.9x** and `bht_gate` at **14.0x** -- the two widest designs
+   in the corpus. The same fit on total declared width gives
+   `wall ~ width^0.41`, R^2 = **0.705**, and its worst under-prediction is
+   6.7x.
+
+   **Correcting the obvious overstatement before it is made:** width is not
+   simply "the right metric". By RANK correlation node count is marginally
+   better (Spearman +0.910 against width's +0.864), because the ordering is
+   dominated by sixty small designs sitting on a ~3 s floor where nothing
+   distinguishes them. What width is better at is MAGNITUDE, and a timeout is a
+   magnitude question -- does this fit in 3,600 s -- which is why the bound
+   should not be derived from nodes. Neither metric is sufficient alone:
+   `txfmactl_top` is under-predicted 6.7x by width and has 289 flops and no
+   operation over 1,000 bits, so flop count carries something neither captures.
 
 ### 31.6 Nothing else is near the cliff
 
@@ -2981,10 +2995,16 @@ ELABORATION cost. *Settles it*: the (b) column for all four reifiers on
 `scoreboard_gate` and the three controls.
 
 **E. The scheduler's cost model.** Not a Lean refactor, but it belongs to the
-same finding: `--tier` and the per-target `--timeout` derive from node count,
-which mispredicts by 4x in the wrong direction on `btb_gate`. Total declared
-bit-width is the predictor. *Settles it*: rank all 97 measured targets by each
-metric and compare against measured wall time.
+same finding, and the measurement is already done: `pass/lean/tests/d3/
+d3_cost_census.tsv` carries all 97 measured targets with both what the sweep
+recorded and what the certificate contains. Node count fits
+`wall ~ nodes^0.45` at R^2 = 0.612 and under-predicts `btb_gate` by 14.9x;
+total declared width fits `wall ~ width^0.41` at R^2 = 0.705 and its worst
+under-prediction is 6.7x. Neither is sufficient: `txfmactl_top` is the 6.7x
+case and has 289 flops with no operation over 1,000 bits.
+*Settles it*: a composite predictor fitted on the census and validated by the
+only question a bound has to answer -- would it have given `scoreboard_gate`
+more than 3,600 s and every other target less.
 
 ### 32.5 Rules this phase inherits
 
@@ -3002,7 +3022,9 @@ The useful artefact is not "we made one design faster". It is a measured
 account of which of (a), (b) and (c) a verified-compiler certificate pipeline
 actually pays, how each scales -- in the design's node count, binding count and
 TOTAL BIT WIDTH -- and which Lean-level constructions move which. The data for
-that already exists in this branch: 97 targets with measured wall time, peak
-RSS, node, source, binding and width counts, across two corpora and two
-certificate schema eras.
+that already exists in this branch, as `pass/lean/tests/d3/d3_cost_census.tsv`:
+97 targets with measured wall time and peak RSS beside node, source, binding,
+flop, async-flop and width-distribution counts, built by
+`pass/lean/scripts/d3_cost_census.py` from the sweep tables and the
+certificates themselves.
 
