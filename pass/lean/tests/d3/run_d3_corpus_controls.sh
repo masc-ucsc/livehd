@@ -61,6 +61,9 @@ run() { # run <case> <expect-rc> <livehd-new-root> <driver args...>
 REAL_LNR="${LIVEHD_NEW_ROOT:-$ROOT/../livehd-new}"
 HAVE_CORPUS=0
 [[ -d "$REAL_LNR/generated/vc_sweep2/lean" ]] && HAVE_CORPUS=1
+MASTER_CERTS="$ROOT/generated/master_port/d3_corpus/master_coreet/lean"
+HAVE_MASTER=0
+[[ -d "$MASTER_CERTS" ]] && HAVE_MASTER=1
 
 # --- argument handling -----------------------------------------------------
 run no-corpus          2 "$REAL_LNR"
@@ -89,6 +92,43 @@ grep -q 'REFUSING: certificate directory' "$LOG" \
   || bad "missing-certs-cva6: refusal not in the log"
 [[ -z "$(ls -A "$W/out_missing-certs-cva6")" ]] \
   || bad "missing-certs-cva6: wrote into the output directory before refusing"
+
+# The master corpora live inside the worktree, so LIVEHD_NEW_ROOT cannot make
+# them disappear and a missing one is a different message: it names the script
+# that builds it, not a checkout to point at.  The leg that matters is that
+# each master corpus name resolves to the manifest and certificates it claims,
+# and that the two pairs do not cross.
+if [[ "$HAVE_MASTER" == "1" ]]; then
+  run master-names-resolve 1 "$REAL_LNR" coreet-master --dry-run --allow-dirty
+  grep -q 'manifests/master/coreet_122.tsv' "$LOG" \
+    || bad "master-names-resolve: coreet-master did not take the master manifest"
+  grep -q 'master_coreet/lean' "$LOG" \
+    || bad "master-names-resolve: coreet-master did not take the master certificates"
+  grep -q '^sweep_rc=0$' "$LOG" || bad "master-names-resolve: the dry run did not succeed"
+
+  run master-cva6-names 1 "$REAL_LNR" cva6-master --dry-run --allow-dirty
+  grep -q 'manifests/master/cva6_30.tsv' "$LOG" \
+    || bad "master-cva6-names: cva6-master did not take the master manifest"
+  grep -q 'master_cva6/lean' "$LOG" \
+    || bad "master-cva6-names: cva6-master did not take the master certificates"
+
+  # The master corpus is the one that can reach `agree`; the imported one stops
+  # at `typecheck`.  One design each, so the difference is measured, not assumed.
+  run master-one-design 1 "$REAL_LNR" coreet-master --only tima_adder --allow-dirty
+  grep -q '^sweep_rc=0$' "$LOG" || bad "master-one-design: the sweep did not succeed"
+  JM="$W/out_master-one-design/coreet-master_joined.tsv"
+  if [[ -f "$JM" ]]; then
+    line=$(grep -P '^tima_adder\t' "$JM")
+    [[ "$(echo "$line" | cut -f6)" == "agree" ]] \
+      || bad "master-one-design: verdict is '$(echo "$line" | cut -f6)', wanted agree"
+    [[ "$(echo "$line" | cut -f10)" == "1" ]] \
+      || bad "master-one-design: typecheck was not credited"
+  else
+    bad "master-one-design: no joined table at $JM"
+  fi
+else
+  printf 'SKIP  master corpus legs (no %s)\n' "$MASTER_CERTS"
+fi
 
 # --- a directory that exists but holds the wrong bytes ---------------------
 # The dangerous case: the driver's own check passes and the sweep's manifest
@@ -128,7 +168,15 @@ if [[ "$HAVE_CORPUS" == "1" ]]; then
     # 122 targets, 121 of them uncredited.
     rows=$(grep -cv '^#' "$J")
     [[ "$rows" -eq 123 ]] || bad "positive-one-design: joined table has $rows lines, wanted 123"
-    grep -q $'^tima_adder\t' "$J" || bad "positive-one-design: tima_adder missing from the join"
+    line=$(grep -P '^tima_adder\t' "$J")
+    [[ -n "$line" ]] || bad "positive-one-design: tima_adder missing from the join"
+    # The imported corpus is pre-D2: `compileAndRun` is applied at the old
+    # arity, so the certificate reaches `reify` and stops at `typecheck`.
+    # Asserting it here keeps the boundary measured rather than remembered.
+    [[ "$(echo "$line" | cut -f10)" == "0" ]] \
+      || bad "positive-one-design: the pre-D2 certificate typechecked; the boundary moved"
+    [[ "$(echo "$line" | cut -f6)" == "reify" ]] \
+      || bad "positive-one-design: verdict is '$(echo "$line" | cut -f6)', wanted reify"
   else
     bad "positive-one-design: no joined table at $J"
   fi

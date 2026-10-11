@@ -10,10 +10,22 @@
 # terminal (`agree`/`disagree`), refused, unavailable (no certificate), or a
 # resource stop.
 #
-# The corpus is the IMPORTED one recorded in pass/lean/manifests/PROVENANCE.tsv,
-# NOT the local re-emission under generated/.  Those are different bytes and the
-# manifest's sha256 column names which: a run against generated/core-et is a
-# different experiment and the manifest resolver says so, by refusing.
+# Four corpora, two pairs
+# -----------------------
+#   coreet        the IMPORTED CORE-ET corpus, pinned by pass/lean/manifests/
+#   cva6          the IMPORTED frozen CVA6-30 corpus, likewise
+#   coreet-master the corpus THIS worktree emitted, pinned by manifests/master/
+#   cva6-master   likewise
+#
+# The imported pair is pre-D2 and its certificates do NOT typecheck here: the
+# emitted trailer applies `compileAndRun` at the old arity, so every one of them
+# stops at the `typecheck` gate.  Running them is still the measurement that
+# establishes that boundary, which is why they stay.  The master pair is what
+# can reach `agree`.  See pass/lean/manifests/master/README.md.
+#
+# In both cases the corpus is the one the manifest's sha256 column names, never
+# whatever happens to be in a directory: a run against the wrong bytes is a
+# different experiment and the resolver refuses it.
 #
 # Enforcement
 # -----------
@@ -53,18 +65,30 @@ cd "$ROOT"
 
 CORPUS="${1:-}"
 shift || true
+LIVEHD_NEW_ROOT="${LIVEHD_NEW_ROOT:-$ROOT/../livehd-new}"
 case "$CORPUS" in
-  coreet) MANIFEST="pass/lean/manifests/coreet_122.tsv"; CERTSUB="vc_sweep2/lean" ;;
-  cva6)   MANIFEST="pass/lean/manifests/cva6_30.tsv";    CERTSUB="cva6_vc/lean"   ;;
-  *) echo "usage: $0 <coreet|cva6> [extra d3_sweep args...]" >&2; exit 2 ;;
+  coreet)
+    MANIFEST="pass/lean/manifests/coreet_122.tsv"
+    CERTS="$LIVEHD_NEW_ROOT/generated/vc_sweep2/lean"
+    WHERE="the imported corpus named in pass/lean/manifests/PROVENANCE.tsv; set LIVEHD_NEW_ROOT to the checkout that holds it" ;;
+  cva6)
+    MANIFEST="pass/lean/manifests/cva6_30.tsv"
+    CERTS="$LIVEHD_NEW_ROOT/generated/cva6_vc/lean"
+    WHERE="the imported corpus named in pass/lean/manifests/PROVENANCE.tsv; set LIVEHD_NEW_ROOT to the checkout that holds it" ;;
+  coreet-master)
+    MANIFEST="pass/lean/manifests/master/coreet_122.tsv"
+    CERTS="$ROOT/generated/master_port/d3_corpus/master_coreet/lean"
+    WHERE="built by pass/lean/scripts/d3_master_corpus.py; see pass/lean/manifests/master/README.md for the command" ;;
+  cva6-master)
+    MANIFEST="pass/lean/manifests/master/cva6_30.tsv"
+    CERTS="$ROOT/generated/master_port/d3_corpus/master_cva6/lean"
+    WHERE="built by pass/lean/scripts/d3_master_corpus.py; see pass/lean/manifests/master/README.md for the command" ;;
+  *) echo "usage: $0 <coreet|cva6|coreet-master|cva6-master> [extra d3_sweep args...]" >&2; exit 2 ;;
 esac
 
-LIVEHD_NEW_ROOT="${LIVEHD_NEW_ROOT:-$ROOT/../livehd-new}"
-CERTS="$LIVEHD_NEW_ROOT/generated/$CERTSUB"
 if [ ! -d "$CERTS" ]; then
   echo "REFUSING: certificate directory $CERTS does not exist." >&2
-  echo "It is the imported corpus named in pass/lean/manifests/PROVENANCE.tsv;" >&2
-  echo "set LIVEHD_NEW_ROOT to the checkout that holds it." >&2
+  echo "It is $WHERE." >&2
   exit 2
 fi
 

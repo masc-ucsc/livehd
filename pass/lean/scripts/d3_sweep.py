@@ -1575,6 +1575,34 @@ def write_rows_atomic(out_path: pathlib.Path, cols, rows) -> None:
     _atomic_write(out_path, "\n".join(body) + "\n")
 
 
+def _defer_reason(primary: str) -> str:
+    """A deferral says what stopped the run, not which flag noticed.
+
+    Two things set `_RSS_STOP` and only the SOFT one records `tripped_at_kb`,
+    so printing that field unconditionally made every target queued behind a
+    HARD kill read "aggregate RSS cap reached before launch (0 kB)" -- a cap
+    that was never armed, at a number that was never measured.  Measured on the
+    real CORE-ET corpus: seven rows said exactly that while the cause, a probe
+    terminated at 18,011,320 kB, appeared only in the killed row.
+
+    The memory cause is appended to WHICHEVER primary reason applies.  A hard
+    kill can be followed by a fatal cgroup-cleanup failure, which sets
+    `_SHUTDOWN`; the queued target then leaves by that guard instead, and its
+    reason would say nothing about memory at all.  Which guard a queued task
+    reaches is not a disposition.
+    """
+    with _RSS_LOCK:
+        killed_at = _RSS_PEAK["killed_at_kb"]
+        tripped_at = _RSS_PEAK["tripped_at_kb"]
+    if killed_at:
+        return (f"{primary}; a previous target was terminated by the HARD "
+                f"aggregate RSS limit at {killed_at} kB")
+    if tripped_at:
+        return (f"{primary}; the SOFT aggregate RSS cap was reached at "
+                f"{tripped_at} kB")
+    return primary
+
+
 def run_config(a, manifest_digest: str) -> dict:
     """What a resumed run must match before it may reuse a row."""
     return {
@@ -1989,13 +2017,14 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         # says what actually happened and stays nonterminal for `--resume`.
         # This is what stops a QUEUED target at jobs=1, where cancelling futures
         # cannot help: the next task is already submitted.
-        return deferred_row(target, samples,
-                            "the run was shutting down before this target launched")
+        return deferred_row(
+            target, samples,
+            _defer_reason("the run was shutting down before this target launched"))
 
     if _RSS_STOP.is_set():
-        return deferred_row(target, samples,
-                            f"aggregate RSS cap reached before launch "
-                            f"({_RSS_PEAK['tripped_at_kb']} kB)")
+        return deferred_row(
+            target, samples,
+            _defer_reason("the run stopped launching new targets"))
 
     if not cert.is_file() or cert.stat().st_size == 0:
         row["detail"] = "certificate file missing or empty"

@@ -25,6 +25,7 @@ Run: python3 pass/lean/scripts/d3_scheduler_test.py
 import csv
 import importlib.util
 import json
+import re
 import os
 import pathlib
 import shutil
@@ -271,6 +272,20 @@ def main() -> int:
                   ["scheduling"]["max_aggregate_rss_kb"] == 0,
               "and this case ran with the SOFT cap disabled, so the hard limit "
               "is demonstrably what acted (case 8 covers soft-stop-only)")
+        # ...and the deferred rows must say so. BOTH guards set `_RSS_STOP` and
+        # only the soft one records `tripped_at_kb`, so the detail used to read
+        # "aggregate RSS cap reached before launch (0 kB)" -- a cap that was
+        # never armed, at a number that was never measured -- on every target
+        # queued behind a HARD kill. Measured on the real CORE-ET corpus: seven
+        # rows said that while the cause was a probe terminated at 18,011,320 kB.
+        qdetail = {m: rows8b[m].get("detail", "") for m in queued}
+        qkb = [re.search(r"HARD aggregate RSS limit at (\d+) kB", d) for d in qdetail.values()]
+        check("hard_kill_defer_detail_names_the_hard_limit",
+              bool(qdetail) and all(m and int(m.group(1)) > 0 for m in qkb)
+              and not any("cap reached before launch" in d for d in qdetail.values()),
+              "a target deferred behind a hard kill names the hard limit and a "
+              "POSITIVE kB it was terminated at, never an unarmed cap",
+              str(qdetail)[:400])
 
         # ---- 8d. the hard monitor SURVIVES the soft cap -----------------------
         # The regression for the bug that cost a real pilot: the soft cap tripped,
@@ -283,13 +298,24 @@ def main() -> int:
         # least one sample (this is where the old code returned), then cross
         # HARD. Against the old loop the final crossing is never observed and
         # nothing is ever rss_killed.
+        #
+        # The leading low samples are not padding. At 0.05 s the soft crossing
+        # could land BEFORE the first probe had launched, `_RSS_STOP` then
+        # deferred every target, nothing ever ran and nothing was ever killed --
+        # so the case failed for a reason that had nothing to do with the bug it
+        # guards. Observed on a loaded machine, intermittently. Four low samples
+        # at 0.5 s give the launch two seconds of slack before the soft cap can
+        # trip, and the stub runs six, so both crossings happen while a probe is
+        # demonstrably running. (8b needs no such margin: with no soft cap, a
+        # pre-launch sample over the hard limit hits the `reaped == 0` branch and
+        # does not latch.)
         out8d = tmp / "o8d.tsv"
         d8d = run(tmp, cdir, out8d,
                   ["--order-by", str(tbl), "--jobs", "1",
                    "--max-aggregate-rss-kb", "1000", "--kill-over-rss-kb", "5000",
-                    "--rss-sample-seconds", "0.05"],
-                  env_extra={"STUB_DELAY": "3", 
-                             "D3_TEST_RSS_SEQ": "10,1500,2000,2500,9000"})
+                    "--rss-sample-seconds", "0.5"],
+                  env_extra={"STUB_DELAY": "6",
+                             "D3_TEST_RSS_SEQ": "10,10,10,10,1500,2000,2500,9000"})
         rows8d = {r["module"]: r for r in rt.rows_of(out8d)}
         k8d = {m for m, r in rows8d.items() if r["run_status"] == "rss_killed"}
         check("hard_survives_soft_cap",
