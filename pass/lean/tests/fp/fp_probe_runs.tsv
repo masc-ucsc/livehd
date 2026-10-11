@@ -1,0 +1,80 @@
+# The six FP scaling/prototype probes, executed on master.  Each was built with
+# the original `scripts/build-opt.sh` at -O2 into its own ROOT, then run serially
+# under a named 8 GiB scope with a 1800 s cap.  Raw output, argv, wall and peak
+# RSS per run are under generated/master_port/fp/probe_runs/ (UNTRACKED:
+# /generated/ is gitignored); the build command and build time are in each
+# ROOT's build.cmd / build.time.
+#
+# BINARIES (sha256)
+#   s2a_probe    4fc4a3fca37f67a933605adb5edff56996b1c596f9fe7ddd7eae205e078f9541
+#   s2_probe     6117ddc87632a1a5765aa3360c0c398b6265fb7e91f42b0f1f2cca7bacc8f12a
+#   s3_probe     6ffd3408fa497a6fcc636d74f0eeffb71703365f9b0e2b835e241a623e4aab94
+#   s1_identity  dc293ae90f10d68be018c27e5a157937c881a1932e46ad94f6f72977aeff246b
+#   s0_grid      1ee0b1ad1888876d6fa3ef79227078d271dab4712915b17ff7396698e6a5f790
+#   perf_probe   0243aceb7353addfbdc0d5833a196f20ec04d97c8e1fb5bbbf23356627c8c3b8
+# CERTIFICATE
+#   instr_scan_gate.dcert, sha256 41533d1c315437991614088efbfabc325e3daf1a128c2d62fcc27485c5aa20aa
+#   1235 sources, 1264 nodes, 0 flops, all six SupportedByProjection fields true
+#
+# WHAT THESE PROBES CANNOT DO ON ONE BUILD.  S1/S2/S3 are specified as "ONE
+# source, built TWICE" -- once against a tree whose proved specializer is S1's
+# (0f175676b) and once against the current tree.  In all three probes
+# `specS1 = Projection.mixDriver`, i.e. whatever the CURRENT tree's proved
+# specializer is, so the label `s1`/`host` is BUILD-RELATIVE, not a pinned
+# implementation.  Master's five specializer files are byte-identical to the S3
+# pin, so on this build every `s1`/`host` column is the SAME code.  The
+# cross-build S1-vs-S2 comparison is therefore NOT executed here and is not
+# credited.  `PartialEvaluatorSummary.lean` and `PartialEvaluatorShift.lean` do
+# not exist at 0f175676b at all.
+# Consequence: s2_probe and s2a_probe are the SAME experiment on one build.
+# Their sources differ only in prose, labels, the backend keyword (host vs s1)
+# and one extra printed field (s2 prints the HOST digest); both compare
+# `mixDriver` against `ProtoSum.mixDriver`.
+#
+# `identical` / `same` in a grid line is `digest A == digest B`: a 64-bit
+# structural hash over the whole residual term (constructor tag, literals, var
+# indices, primitive codes, ctor names, case alternatives, call targets).  Equal
+# digests are strong evidence of an identical residual, NOT a proof of it.
+#
+probe	run	invocation_tail	exit	wall_s	peak_rss_kb	points	result	key_numbers
+s2a_probe	s2a-cert-s1	cert instr_scan s1	0	8.04	12036	1 design	checker accepted; 6/6 seeds match interpretDesign; 4-cycle trace agrees	48439 terms, bound 5711, digest 16712272993486204376, specialize 733 ms
+s2a_probe	s2a-cert-proto	cert instr_scan proto	0	7.87	12008	1 design	same, on ProtoSum	48439 terms, bound 5711, digest 16712272993486204376, specialize 710 ms
+s2_probe	s2-cert-host	cert instr_scan host	0	7.90	12028	1 design	same	48439 terms, bound 5711, digest 16712272993486204376, specialize 747 ms
+s2_probe	s2-cert-proto	cert instr_scan proto	0	7.83	12032	1 design	same	48439 terms, bound 5711, digest 16712272993486204376, specialize 742 ms
+s3_probe	s3-cert-host	cert instr_scan host	0	7.90	12092	1 design	same	48439 terms, bound 5711, digest 16712272993486204376, specialize 741 ms
+s3_probe	s3-cert-shift	cert instr_scan shift	0	7.38	12020	1 design	same, on ProtoShift	48439 terms, bound 5711, digest 16712272993486204376, specialize 162 ms -- 4.6x the host on the same input, same residual
+s3_probe	s3-spec-cert-host	spec cert instr_scan host	0	0.77	12016	1 design	specialize only, no residual execution	745 ms, 48439 terms, digest 16712272993486204376
+s3_probe	s3-spec-cert-shift	spec cert instr_scan shift	0	0.19	11980	1 design	specialize only	162 ms, 48439 terms, digest 16712272993486204376
+s3_probe	s3-spec-grid-host	spec grid 256 256 2 host	0	0.09	9188	1 point	specialize only	71 ms, 3868 terms, digest 14114322847766392356
+s3_probe	s3-spec-grid-shift	spec grid 256 256 2 shift	0	0.05	9180	1 point	specialize only	34 ms, 3868 terms, digest 14114322847766392356
+s2a_probe	s2a-grid	grid	0	11.37	16700	25	ALL CHECKS PASSED: true; 25/25 identical true; both backends chk+ref true at every point	ProtoSum tracks the proved host within noise on the static sweeps (D S=N=2048: 2685 vs 2532 ms) and is SLOWER on the all-dynamic points (dyn S=256: 123 -> 175 ms)
+s2_probe	s2-grid	grid	0	11.72	16784	25	ALL CHECKS PASSED: true; 25/25 identical true	same experiment as s2a-grid on this build; HOST digests printed and equal to s3-grid's at all 20 shared points
+s3_probe	s3-grid	grid	0	7.61	16852	25	ALL CHECKS PASSED: true; 25/25 identical true	ProtoShift is 3-8x the proved host on the static sweeps (A S=1024: 189 -> 36 ms; D S=N=2048: 2767 -> 342 ms) and ~1x on the all-dynamic points (dyn S=256: 128 vs 120 ms), with an identical residual everywhere
+s1_identity	s1-identity	(no args)	0	10.61	1051948	18	ALL CHECKS PASSED: true; 18/18 chk true ref true	per-point HOST terms + digest recorded for a future cross-build diff. The proved host is 2-9x FASTER than the fork: srcD 4096 host 1068 vs fork 2534 ms; gridD S=N=512 host 182 vs fork 1598 ms
+s0_grid	s0-grid	(no args)	0	23.94	11540	20	ALL CHECKS PASSED: true; 11 host-anchored points all same true; 20/20 chk true ref true	FORK is the subject and is 7-11x SLOWER than the proved host where both ran (A S=256: fork 402 vs host 48 ms; C E=1024: 763 vs 72 ms). Largest fork point D S=N=1024: 6259 ms. No exponent is fitted here.
+perf_probe	perf-chain	16 32 64 128 256 512	0	0.85	8380	6	projectDesign + checkResidual only; exit is ALWAYS 0, so it carries no verdict	specialize 4/11/19/37/140/621 ms; residual size 15n+33; bound 3n+5
+perf_probe	perf-fan	--fan 16 32 64 128 256 512	0	1.56	8404	6	as above	specialize 6/13/22/61/259/1184 ms -- about 2x chainD at equal n, isolating slot read depth; residual size 16n+32
+#
+# CROSS-PROBE CONSISTENCY (independent binaries, independent builds)
+#   s2-grid vs s3-grid, HOST column: the 25 lines cover 20 DISTINCT (S, N, E)
+#     coordinates (S=256,N=256,E=512 recurs in sweeps A, B, C and D); all 20
+#     agree on both term count and digest, 0 disagreements.
+#   s0-grid (fork) vs s2-grid (host): 15 genuinely shared coordinates, all agree
+#     on term count.  The 2 apparent mismatches are coordinate collisions, not
+#     disagreements: s2's `dyn` sweep reuses (S=64,N=64,E=128) and
+#     (S=256,N=64,E=128) with every source dynamic, which is a different design.
+#   instr_scan: `mixDriver`, `ProtoSum.mixDriver` and `ProtoShift.mixDriver`
+#     all produce 48439 terms, checker bound 5711 and digest
+#     16712272993486204376, and the earlier total_probe row-15 record agrees
+#     (48439 / 5711 / 741 ms).
+#   No probe log in this set contains the string `false`, nor FAILED, REJECTED,
+#   OUT OF FUEL or NOT SupportedByProjection.
+#
+# perf_probe's RSS COLUMN IS NOT A PEAK AND IS NOT USED.  Measured: in one
+# process it reports 9104, 9116, 9136 then 8408 kB -- it goes DOWN.  Sampling
+# /proc/<pid>/status from outside the same run shows the same non-monotonicity
+# (max VmHWM observed 9176 kB, final 8408 kB, /usr/bin/time %M 8412 kB), so the
+# column tracks residency at print time rather than a high-water mark and is not
+# comparable with %M.  The mechanism was not pinned down.  The figure of record
+# for every row above is the guarded runner's %M in peak_rss_kb; no claim here
+# rests on the probe's own column.

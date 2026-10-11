@@ -5,6 +5,11 @@
 # destination_sha256 is READ BACK from the installed file, so the map
 # records what is on disk rather than what was intended.
 # An adapted row records every edit and why it was forced.
+# RE-VERIFIED 2026-10-11, independently of the installer, on all 56 rows:
+#   pinned_sha256 re-read with `git -C <source> show <pin>:<asset>`  -> 0 mismatches
+#   destination_sha256 re-hashed from the working tree              -> 0 drift since install
+#   installed_sha256 vs destination_sha256                          -> 0 disagreements
+#   verbatim flag vs (pin == tree)                                  -> 0 errors
 asset	pinned_sha256	source_sha256	installed_sha256	destination_sha256	verbatim	adapted_edits	adaptation_reason	state
 formal/lean/.build-proj.sh	7d20f9cf2402a0a06f4bde65e0792e628c98acb03c20242ebf5cb71b04c3e255	7d20f9cf2402a0a06f4bde65e0792e628c98acb03c20242ebf5cb71b04c3e255	d40408380c216a44022862d5c7b9bd0830cba717d0c72770b1975cef12927e4c	d40408380c216a44022862d5c7b9bd0830cba717d0c72770b1975cef12927e4c	0	1	master's Compiler/CertIO is DCERT2 and needs Mathlib, which this driver excludes by design; CertIOV1 is what CertLoad resolves against	installed
 formal/lean/LeanSemanticPrimitives/Projection/Audit.lean	603a17ad4d29467f5ba26f6aaef6f42e94e9344c4ffcc5c7bf048f8db0e15b5e	603a17ad4d29467f5ba26f6aaef6f42e94e9344c4ffcc5c7bf048f8db0e15b5e	603a17ad4d29467f5ba26f6aaef6f42e94e9344c4ffcc5c7bf048f8db0e15b5e	603a17ad4d29467f5ba26f6aaef6f42e94e9344c4ffcc5c7bf048f8db0e15b5e	1	0		installed

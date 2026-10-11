@@ -4659,3 +4659,144 @@ Unchanged: the scaling and prototype grids (`s0_grid`, `s1_identity`,
 `proto_probe` modes, real `cert_runner` benchmark passes beyond `instr_scan`,
 and fresh DCERT2 FP transport. `pmp_data_if`'s historical acceptance stays
 separate from its fresh `EMIT_FAILED rc=6`, which stays in the denominator.
+
+## 47. FP checkpoint 10: the six scaling probes, and what one build cannot show
+
+### 47.1 All six built and ran, and nothing in them is false
+
+The six entrypoints still marked OPEN -- `s0_grid`, `s1_identity`, `s2_probe`,
+`s2a_probe`, `s3_probe`, `perf_probe` -- were built with the original
+`scripts/build-opt.sh` at `-O2`, each into its own ROOT (202-255 s, 1.6-1.9 GB
+each, all rc=0), and run serially under named 8 GiB scopes with a 1800 s cap.
+**17 runs, every one exit 0.** Per-run argv, wall, peak RSS and the raw output
+are retained under `generated/master_port/fp/probe_runs/` and tabulated in
+`pass/lean/tests/fp/fp_probe_runs.tsv`.
+
+None of the 17 run logs contains the string `false`, nor `FAILED`,
+`REJECTED`, `OUT OF FUEL` or `NOT SupportedByProjection`. Every grid ends
+`ALL CHECKS PASSED: true`.
+
+### 47.2 The identity result, on a real design
+
+On `instr_scan_gate.dcert` (1235 sources, 1264 nodes, 0 flops) three different
+specializers -- the proved `Projection.mixDriver`, the S2a summary prototype
+`ProtoSum.mixDriver`, and the S3 deferred-shift prototype
+`ProtoShift.mixDriver` -- all produce
+
+```
+48439 terms   checker bound 5711   digest 16712272993486204376
+```
+
+and in every case the checker accepts, all six width-aware stimuli match
+`interpretDesign`, and the four-cycle trace agrees. The earlier `total_probe`
+row-15 record agrees independently (48439 terms, bound 5711, 741 ms).
+
+Specialize time on that input: host **745 ms**, `ProtoSum` **710-742 ms**,
+`ProtoShift` **162 ms** -- a **4.6x** reduction with a residual the digest
+cannot distinguish.
+
+`identical`/`same` in these probes is `digest A == digest B`, a 64-bit
+structural hash over the whole residual term -- constructor tag, literals,
+variable indices, primitive codes, constructor names, case alternatives, call
+targets. Equal digests are strong evidence of an identical residual, not a
+proof of one, and the probes' own wording is kept.
+
+### 47.3 What the grids say
+
+| grid | points | identity | timing |
+|---|---|---|---|
+| `s2a_probe grid` | 25 | 25/25 identical | `ProtoSum` tracks the proved host within noise, and is SLOWER on the all-dynamic points (dyn S=256: 123 -> 175 ms) |
+| `s2_probe grid` | 25 | 25/25 identical | same experiment on this build (see 47.4) |
+| `s3_probe grid` | 25 | 25/25 identical | `ProtoShift` is 3-8x the host on the static sweeps (D S=N=2048: 2767 -> 342 ms) and ~1x on the all-dynamic points |
+| `s0_grid` | 20 | 11 host-anchored points all `same true` | the FORK is 7-11x SLOWER than the proved host where both ran; largest fork point D S=N=1024 at 6259 ms |
+| `s1_identity` | 18 | per-point HOST terms + digest recorded | the proved host is 2-9x FASTER than the fork (gridD S=N=512: 182 vs 1598 ms) |
+
+Every point of every grid reports `chk true ref true` on both backends: the
+fragment checker accepted and the residual matched `interpretDesign` at its own
+checked bound, outside the timed section.
+
+Cross-probe, from independent binaries and independent builds: `s2-grid` and
+`s3-grid` cover 20 distinct `(S, N, E)` coordinates in common and agree on
+**both** term count and digest at all 20. `s0-grid`'s fork column and
+`s2-grid`'s host column share 15 coordinates and agree on term count at all 15
+-- the two apparent mismatches are coordinate collisions, not disagreements,
+because `s2`'s `dyn` sweep reuses `(64,64,128)` and `(256,64,128)` with every
+source dynamic.
+
+### 47.4 One build cannot run a two-build experiment, and `s2` = `s2a` here
+
+S1, S2 and S3 are specified as *one source, built twice*: once against a tree
+whose proved specializer is S1's (`0f175676b`) and once against the current
+tree. In all three probes, though,
+
+```lean
+def specS1 (sf wf : Nat) (D : DesignCert) : Except MixError Program :=
+  mixDriver sf wf hwAPVarT [encDesign D]
+```
+
+-- the label `s1`/`host` is **build-relative**, not a pinned implementation.
+Master's five specializer files (`PartialEvaluator`, `PartialEvaluatorCorrect`,
+`MixProgram`, `Proto/PartialEvaluatorSummary`, `Proto/PartialEvaluatorShift`)
+are byte-identical to the S3 pin, and the last two **do not exist at all** at
+`0f175676b`. So on master's single build every `s1`/`host` column is the same
+code, and the cross-build S1-vs-S2 comparison is **not executed and not
+credited**.
+
+That also means `s2_probe` and `s2a_probe` are the **same experiment** on one
+build. Diffing their sources with the probe names normalised away leaves 36
+lines: prose, labels, the backend keyword (`host` vs `s1`) and one extra
+printed field (`s2` prints the HOST digest). Both compare `mixDriver` against
+`ProtoSum.mixDriver`. Running both is a reproducibility check, not two results,
+and the measured numbers bear that out -- 25/25 identical in each, HOST digests
+equal at every shared coordinate.
+
+It also explains the one result that looks disappointing: `ProtoSum` shows no
+speedup over the host. On a build whose host **already contains** the
+integrated summary, there is nothing for the prototype to beat. That is the
+cross-build comparison, and it is exactly the half that is missing.
+
+The S1 tree is reachable: `0f175676b` and the pin `9bb41a09d` are both in
+`/mada/users/czeng14/projects/livehd-futamura/livehd`, branch `projection`.
+Building against it is a branch-history performance study, not a statement
+about master's behaviour, so it is left open rather than attempted here.
+
+### 47.5 `perf_probe`'s RSS column is not a peak
+
+`perf_probe` reports, within one process, `9104, 9116, 9136` then `8408` kB --
+it goes **down**, which no high-water mark does. Sampling
+`/proc/<pid>/status` from outside the same run reproduces the
+non-monotonicity: max `VmHWM` observed 9176 kB, final 8408 kB, and
+`/usr/bin/time %M` 8412 kB. So the column tracks residency at print time rather
+than a peak and is not comparable with `%M`. The mechanism was not pinned down
+and is not guessed at here. Every RSS figure in `fp_probe_runs.tsv` is the
+guarded runner's `%M`; no claim rests on the probe's own column.
+
+`perf_probe` also always returns 0, so its exit code carries no verdict -- the
+content does. chainD specialize runs 4/11/19/37/140/621 ms at n = 16..512 with
+residual size `15n+33` and bound `3n+5`; fanD, where every node reads both
+source slots at maximum depth, runs 6/13/22/61/259/1184 ms with size `16n+32`
+-- about twice chainD at equal n, which is the slot-read-depth cost the probe
+exists to isolate.
+
+### 47.6 Two repository findings from the same pass
+
+**The pin is not reachable from this repository.** `9bb41a09d` is the head of
+branch `projection` in `/mada/users/czeng14/projects/livehd-futamura/livehd`;
+`git cat-file` fails on it here. `fp_entrypoint_inventory.tsv` claimed its
+`pinned_sha256` column was read with `git show` without saying where, which is
+not reproducible. The header now names the repository and the exact command.
+All 18 entrypoint rows and all 56 `fp_install_map.tsv` rows were then
+re-verified against it, independently of the installer: **0 pin mismatches, 0
+drift since install, 0 installed/read-back disagreements, 0 `verbatim`-flag
+errors.**
+
+**78 MB of build output was committed.** `formal/lean/.olean-dev` is where
+`.build-proj.sh` writes its oleans and `run_cert.sh` reads them back through
+`LEAN_PATH`; `.native-dev` is `build-native.sh`'s output, which that script
+calls a diagnostic nothing in the project depends on. Neither is among the
+install map's 56 assets. Three FP commits -- `73dee5673`, `df8b7c8ec`,
+`d8d84afbd` -- nevertheless swept 46 `.olean` files, 78 MB of a 208 MB pack,
+into the repository. They are untracked again and both directories are now
+ignored; the files stay on disk and nothing tracked reads them. The blobs
+remain in those three commits, and dropping them from history would need a
+rewrite, which is not done here.
