@@ -3876,3 +3876,144 @@ execute; and conditional `mixDriver`/`checkResidual` premises, which are not
 concrete specialization proofs. Object second projection stays distinct from
 unproved host-specializer correctness.
 
+## 41. FP checkpoint 4: the native route, and eight historical rows reproduced
+
+### 41.1 Three counting corrections
+
+* **`@[csimp]`: FOUR active, not six.** The attribute is also discussed in
+  prose; counting textual mentions on a body with only BLOCK comments stripped
+  caught two `--` notes. Active registrations are declaration-attached:
+  `PVal.shift_eq_shiftFast` and `PEnv.shiftBy_eq_shiftByFast` in
+  `PartialEvaluator`, and the same two names under `ProtoSum` in
+  `Proto/PartialEvaluatorSummary`.
+* **`ProtoAudit`: 46 reports, not 43.** I counted `depends on axioms` and
+  missed the three `does not depend on any axioms` lines. 46 directives, 46
+  output lines. **311 + 46 = 357**, which is what the axiom-set distribution
+  already summed to (158 + 118 + 75 + 6 = 357); my "354" was inconsistent with
+  my own figures.
+* **The partial-def claim was too broad.** I wrote that a `partial def` "has no
+  kernel theorem by construction". The accurate statement is that it has no
+  kernel UNFOLDING EQUATIONS, so a proof cannot reduce through its body and the
+  usual equational reasoning is unavailable. That is a limit on how it can be
+  reasoned about, not a proof that no theorem can mention or constrain it.
+
+The coverage index is regenerated with comment-aware counting -- block AND line
+comments stripped, and `csimp_active` requiring the attribute to sit on a
+`theorem`. Totals: 38 modules, 557 theorems, **352 audited**, 854 defs, 16
+`partial`, **4 active csimp**, 0 `implemented_by`, 306 guards, 357 axiom
+directives. It is an INVENTORY and is labelled as one; it does not promote
+itself to axiom acceptance.
+
+### 41.2 The four csimp equalities, and the two obligations kept apart
+
+`pass/lean/tests/fp/fp_csimp_checks.lean`, exit 0 in 0.87 s:
+
+```
+'Projection.PVal.shift_eq_shiftFast'              [propext, Quot.sound]
+'Projection.PEnv.shiftBy_eq_shiftByFast'          [propext, Quot.sound]
+'Projection.ProtoSum.PVal.shift_eq_shiftFast'     [propext, Quot.sound]
+'Projection.ProtoSum.PEnv.shiftBy_eq_shiftByFast' [propext, Quot.sound]
+```
+
+The file states the split it rests on: the KERNEL obligation is that each
+equality is proved, which the axiom report evidences; the COMPILED obligation
+is that `@[csimp]` makes the compiler emit the fast body, which only running
+the original runners exercises. **A passing axiom report says nothing about
+which body was emitted, and a passing runner says nothing about whether the
+equality is proved.**
+
+### 41.3 The frozen experiment matrix, configurations not collapsed
+
+`pass/lean/tests/fp/fp_experiment_matrix.tsv` -- all 30 rows of
+`certio/experiments.jsonl`, one row each: 26 old passes, 2 old `exit 3`, 2 with
+no recorded exit. Runners: 18 `total-probe`, 11 `file-ab`, 1 `host-var`.
+
+**The thing it would have been easy to get wrong.** Rows 15-22 and 23-30 are
+the SAME eight designs under `total-probe` at the SAME fuel -- and they are not
+duplicates. Row 15 is stage **S1** (`mixDriver` carrying `PRes.val`, binary
+`acc023ee...`, 15.66 s); row 23 is stage **S2** (the `nthD` lookup summary
+integrated, binary `1b5531a6...`, 9.65 s). My first pass keyed `master_status`
+on the design filename alone and reported 23 rows covered. Keyed on
+design + runner + fuel + stage it is **8**. An old `exit 3` row is preserved as
+its recorded disposition and is NOT an obligation to make pass.
+
+### 41.4 The native route, reconciled and isolated
+
+`build-opt.sh` is already the isolated procedure the checkpoint asks for: it
+REQUIRES an absolute project-local `ROOT`, builds into `$ROOT/olean` and
+`$ROOT/nat`, takes `OPT` explicitly (default `-O2`), and says in its header that
+it exists so `.olean-dev` and `.native-dev` -- the in-flight experiment
+contexts -- are not touched. Both it and `build-native.sh` named
+`Compiler/CertIO` in the shared dependency list; both now name
+`Compiler/CertIOV1`, the same reconciliation `CertLoad` and the probes take.
+Dependency order and the invalidation rule are unchanged and nothing is
+deleted.
+
+```
+OPT=-O2 ROOT=<worktree>/generated/master_port/fp/nat-total-O2 \
+  bash scripts/build-opt.sh scripts/total_probe.lean
+```
+exit **0**, 202.11 s, 1,811,772 kB. Lean 4.31.0 (68218e87), clang 22.1.4.
+Binary `nat/total_probe`, 5,372,328 bytes, sha256 `bb30aec586724436...`.
+
+### 41.5 Rows 15-22 reproduced on master
+
+`total_probe <cert> 200000 2000`, sequentially, each under
+`systemd-run --scope MemoryMax=8G` with a 1800 s bound:
+
+| row | block | exit | wall | peak RSS | seeds | trace | control | residual | bound |
+| ---: | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |
+| 15 | instr_scan | 0 | 9.45 s | 11,988 kB | 6/6 | agrees | matches | = | = |
+| 16 | commit_stage | 0 | 36.07 s | 11,260 kB | 6/6 | agrees | matches | = | = |
+| 17 | compressed_decoder | 0 | 8.99 s | 14,708 kB | 6/6 | agrees | matches | = | = |
+| 18 | pmp | 0 | 12.37 s | 15,400 kB | 6/6 | agrees | matches | = | = |
+| 19 | **pmp_data_if** | 0 | 35.01 s | 20,420 kB | 6/6 | agrees | matches | = | = |
+| 20 | alu_wrapper | 0 | 69.31 s | 23,928 kB | 6/6 | agrees | matches | = | = |
+| 21 | alu | 0 | 69.57 s | 23,168 kB | 6/6 | agrees | matches | = | = |
+| 22 | decoder | 0 | 130.46 s | 29,556 kB | 6/6 | agrees | matches | = | = |
+
+**8/8 certificate hashes match the recorded ones.** All six width-aware seeds
+(0,1,2,3,4,7) match `interpretDesign` on every design; the 4-cycle
+independent-state trace agrees on every design; the control interpreter matches
+on every design; all six support conjuncts are true on every design. Residual
+term counts and checker bounds also equal the recorded values -- reported
+separately because matching the old size is NOT an original contract.
+
+`pmp_data_if` passes here on its retained historical certificate. Its fresh
+master DCERT2 export is a SEPARATE obligation and is still `EMIT_FAILED rc=6`
+with a native combinational-loop diagnostic; that is an export disposition and
+is not evidence about historical FP replay. It stays in the denominator.
+
+**What is not reproduced, by construction.** The recorded S1 binary was built
+on the old branch; master builds from the pinned S3 source. What is compared is
+the CONFIGURATION and the OBSERVABLES, never the binary. And the backend's own
+note is preserved: `mixDriver` does not kernel-reduce at nontrivial fuel, so
+the concrete `hproj` is not certified -- this is trusted native execution, not
+a kernel-certified result and not RTL equivalence.
+
+### 41.6 `record_experiment.py`, at its strong form
+
+`selftest` passes (4 runners), exit 0. One path adapted: its scratch directory
+resolved to `projects/.perfwork` -- OUTSIDE this worktree -- because
+`formal/lean/../../..` meant something different in the old layout. It now
+resolves inside the tree, and the no-fallback-to-`/tmp` refusal is untouched.
+
+The recorder then did its job twice over. A `record` without the right trailer
+reported *"exit None, MISSING -- the log carries no exit evidence; status is
+UNKNOWN"* rather than inferring success, and the fix was to emit the trailer it
+parses, not to relax the check. With a `prelaunch` capture the record carries
+`code_identity.describes = "the code that ran"`, binary `bb30aec5...`, exit 0
+from the time trailer, 6 stimuli all matching, residual 48439, bound 5711,
+support all six -- written to `fp_master_experiments.jsonl`, never into the
+frozen original manifest.
+
+### 41.7 Coverage, exactly
+
+**8 of 30 matrix rows replayed.** 18 open (including all 8 S2 rows and the 11
+`file-ab` and 1 `host-var` configurations), 2 preserved as old `exit 3`, 2 as
+old exit unknown. The 30 rows are not the whole original inventory: the runner,
+trace, scaling, DCERT, census and fixture procedures and the
+CORE-ET/CVA6/DINO discovery are beyond this file and are queued, not waived.
+Fresh DCERT2 FP transport stays open until the current parser plus FP admission
+and runtime route actually execute.
+

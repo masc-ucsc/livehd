@@ -19,7 +19,11 @@ export LEAN_PATH="$OUT"
 MODULES=(
   SemanticPrimitives Translation/LGraphModel Translation/GraphRefine
   Compiler/DesignCert Compiler/Runtime Compiler/DesignCertWF
-  Compiler/DesignSemantics Compiler/CertIO
+  # master's Compiler/CertIO is DCERT2 and its chain imports Mathlib, which
+  # this route does not build. The historical V1 runners take CertIOV1, the
+  # same reconciliation CertLoad and the probes take. Dependency ORDER and
+  # the invalidation rule below are unchanged; nothing is deleted.
+  Compiler/DesignSemantics Compiler/CertIOV1
   Projection/ObjectLanguage Projection/ObjectLanguageSemantics
   Projection/BindingTime Projection/Encoding Projection/Surface
   Projection/SurfaceSemantics Projection/BTA Projection/PartialEvaluator

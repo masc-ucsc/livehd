@@ -436,7 +436,14 @@ def cmd_selftest(_a):
     # artifact in a tracked tree.  `dir=None` would silently fall back to /tmp
     # on a fresh checkout, which the workspace instructions forbid, so the
     # directory is CREATED and a failure is raised rather than papered over.
-    scratch = os.path.abspath(os.path.join(LEAN, '..', '..', '..',
+    # ADAPTED PATH, same contract. On the FP branch `formal/lean/../../..`
+    # landed beside the repository; in this worktree the same arithmetic lands
+    # in `projects/`, OUTSIDE the tree, and the workspace rule is that runtime
+    # scratch stays inside the project. The refusal below is untouched: the
+    # directory is still created and a failure still raises rather than falling
+    # back to /tmp.
+    scratch = os.path.abspath(os.path.join(LEAN, '..', '..',
+                                           'generated', 'master_port', 'fp',
                                            '.perfwork', 'recorder-tests'))
     try:
         os.makedirs(scratch, exist_ok=True)

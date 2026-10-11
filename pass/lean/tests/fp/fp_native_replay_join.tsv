@@ -1,0 +1,22 @@
+# Flat per-configuration result join: original rows 15-22 (stage S1,
+# runner total-probe, fuel 200000/2000) replayed on master.
+# binary	generated/master_port/fp/nat-total-O2/nat/total_probe
+# binary_sha256	bb30aec586724436c6ca3ad6790de56e2b40b66ae58eac2cefd68602a9387a65
+# build	OPT=-O2 ROOT=<project-local> bash scripts/build-opt.sh scripts/total_probe.lean
+# toolchain	Lean 4.31.0 (68218e87) / clang 22.1.4
+# enforcement	systemd-run --user --scope MemoryMax=8G, timeout 1800 per attempt
+#
+# BINARY IDENTITY DIFFERS BY CONSTRUCTION. The recorded S1 binary was built
+# from the old branch; master builds from the pinned S3 source. What is
+# compared is the CONFIGURATION and the OBSERVABLES, not the binary.
+# residual_match/bound_match are reported separately because matching the
+# old size is NOT an original contract.
+record_id	block	cert_sha256	cert_match	command	exit	wall_s	peak_rss_kb	support_all	residual_terms	old_residual_terms	residual_match	checker_bound	old_checker_bound	bound_match	seeds_ok	seeds_total	all_match_interpretDesign	trace_agrees	trace_cycles	states_reached	control_matches	old_exit	old_wall_s	disposition
+15	instr_scan	41533d1c31543799	yes	total_probe /mada/users/czeng14/projects/livehd-d4-incremental/temp/cva6_30_auth/blocks/instr_scan/lean/instr_scan_gate.dcert 200000 2000	0	9.45	11988	true	48439	48439	yes	5711	5711	yes	6	6	true	true	4	1	true	0	15.66	OLD PASS REPRODUCED (observables)
+16	commit_stage	cdd13da3a970531b	yes	total_probe /mada/users/czeng14/projects/livehd-d4-incremental/temp/cva6_30_auth/blocks/commit_stage/lean/commit_stage_gate.dcert 200000 2000	0	36.07	11260	true	44052	44052	yes	5448	5448	yes	6	6	true	true	4	1	true	0	45.08	OLD PASS REPRODUCED (observables)
+17	compressed_decoder	8fae0eb0bce3fe8d	yes	total_probe /mada/users/czeng14/projects/livehd-d4-incremental/temp/cva6_30_auth/blocks/compressed_decoder/lean/compressed_decoder_gate.dcert 200000 2000	0	8.99	14708	true	41508	41508	yes	8962	8962	yes	6	6	true	true	4	1	true	0	23.42	OLD PASS REPRODUCED (observables)
+18	pmp	461667a63df00594	yes	total_probe /mada/users/czeng14/projects/livehd-d4-incremental/temp/cva6_30_auth/blocks/pmp/lean/pmp_gate.dcert 200000 2000	0	12.37	15400	true	51517	51517	yes	14277	14277	yes	6	6	true	true	4	1	true	0	52.3	OLD PASS REPRODUCED (observables)
+19	pmp_data_if	30424920b7f8a1d4	yes	total_probe /mada/users/czeng14/projects/livehd-d4-incremental/temp/cva6_30_auth/blocks/pmp_data_if/lean/pmp_data_if_gate.dcert 200000 2000	0	35.01	20420	true	81408	81408	yes	19743	19743	yes	6	6	true	true	4	1	true	0	103.51	OLD PASS REPRODUCED (observables)
+20	alu_wrapper	209e122f54ef0b28	yes	total_probe /mada/users/czeng14/projects/livehd-d4-incremental/temp/cva6_30_auth/blocks/alu_wrapper/lean/alu_wrapper_gate.dcert 200000 2000	0	69.31	23928	true	89961	89961	yes	28889	28889	yes	6	6	true	true	4	1	true	0	225.69	OLD PASS REPRODUCED (observables)
+21	alu	d731ee22a85e77ba	yes	total_probe /mada/users/czeng14/projects/livehd-d4-incremental/temp/cva6_30_auth/blocks/alu/lean/alu_gate.dcert 200000 2000	0	69.57	23168	true	89996	89996	yes	28899	28899	yes	6	6	true	true	4	1	true	0	220.44	OLD PASS REPRODUCED (observables)
+22	decoder	23b4f0316c46af8d	yes	total_probe /mada/users/czeng14/projects/livehd-d4-incremental/temp/cva6_30_auth/blocks/decoder/lean/decoder_gate.dcert 200000 2000	0	130.46	29556	true	137480	137480	yes	38754	38754	yes	6	6	true	true	4	1	true	0	440.54	OLD PASS REPRODUCED (observables)

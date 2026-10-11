@@ -87,6 +87,34 @@ ADAPTATIONS = {
          "master's Compiler/CertIO is DCERT2 and needs Mathlib, which this driver "
          "excludes by design; CertIOV1 is what CertLoad resolves against"),
     ],
+    "formal/lean/scripts/record_experiment.py": [
+        ("""    scratch = os.path.abspath(os.path.join(LEAN, '..', '..', '..',
+                                           '.perfwork', 'recorder-tests'))""",
+         """    # ADAPTED PATH, same contract. On the FP branch `formal/lean/../../..`
+    # landed beside the repository; in this worktree the same arithmetic lands
+    # in `projects/`, OUTSIDE the tree, and the workspace rule is that runtime
+    # scratch stays inside the project. The refusal below is untouched: the
+    # directory is still created and a failure still raises rather than falling
+    # back to /tmp.
+    scratch = os.path.abspath(os.path.join(LEAN, '..', '..',
+                                           'generated', 'master_port', 'fp',
+                                           '.perfwork', 'recorder-tests'))""",
+         "scratch must stay inside the worktree; the no-/tmp refusal is unchanged"),
+    ],
+    "formal/lean/scripts/build-opt.sh": [
+        ("  Compiler/DesignSemantics Compiler/CertIO\n",
+         "  # master's Compiler/CertIO is DCERT2 and its chain imports Mathlib, which\n"
+         "  # this route does not build. The historical V1 runners take CertIOV1, the\n"
+         "  # same reconciliation CertLoad and the probes take. Dependency ORDER and\n"
+         "  # the invalidation rule below are unchanged; nothing is deleted.\n"
+         "  Compiler/DesignSemantics Compiler/CertIOV1\n",
+         "historical V1 route for the optimised build's shared dependency list"),
+    ],
+    "formal/lean/scripts/build-native.sh": [
+        ("  Compiler/CertIO\n",
+         "  Compiler/CertIOV1\n",
+         "same reconciliation, for the unoptimised native route"),
+    ],
     "formal/lean/scripts/proto_probe.lean": [
         ("import LeanSemanticPrimitives.Compiler.CertIO",
          "import LeanSemanticPrimitives.Compiler.CertIOV1",
