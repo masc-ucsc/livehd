@@ -4133,3 +4133,103 @@ FP admission and runtime route execute. `pmp_data_if`'s fresh export remains
 `EMIT_FAILED rc=6` and in the denominator despite its historical replay
 passing under both runners.
 
+## 43. FP checkpoint 6: the admission boundary, repaired and controlled
+
+### 43.1 Seven admissions that should have been refusals
+
+Retained CLI controls against `fp_replay.py` at
+`456a7518c76c4724519c4f7268a7939f534246626992aced656ee05db59524b1` showed it
+admitting a row with **no worker timing, no launch marker, ONE stimulus, ONE
+trace cycle, a command naming a different binary, and a capture naming a
+different binary**. Only a nonzero outer status refused. I wrote that admitter
+as the fix for a join that asserted `exit=0` as a literal, and it was still too
+permissive.
+
+Four more defects beside those:
+
+* the capture producer printed its failure and **launched anyway**, so a row
+  with no capture at all could be admitted looking like a pre-launch one;
+* `--admit-only` **re-invoked prelaunch**, mutating the very evidence it was
+  meant to re-read;
+* status and signal files were not scoped to an attempt, so an earlier run's
+  `.exit` could be read as this one's;
+* `wall_s` was the PARSER's elapsed time, so re-admission reported seconds that
+  had nothing to do with the run.
+
+### 43.2 What `pass` now requires
+
+All of: an `.attempt` id with **every** evidence file carrying it; an outer
+status present and uniquely parsed and zero; the worker's own `exit` trailer
+present, uniquely parsed and agreeing; a launch marker with the log newer than
+it; a recorded command naming this binary, this mode, this certificate and
+BOTH fuel numbers; a prelaunch capture that parses, names this binary and
+certificate by full sha256 and **predates** the launch marker; exactly the six
+stimuli `0,1,2,3,4,7` with no duplicates, all matching; a four-cycle agreeing
+trace; and the mode's support, checker and control contracts.
+
+Beside that: `subprocess`'s NEGATIVE return for a signal is handled; a signal
+stop is called a signal stop and is **only** called an OOM when retained cgroup
+`memory.events` says `oom_kill` was nonzero; `wall_s` comes from a `.wall`
+file written at launch; guard metadata is kept as REQUESTED and OBSERVED
+separately with absent observations left absent; capture failure **fails
+closed** without launching; and `--admit-only` launches nothing and takes no
+capture.
+
+One further bug the controls exposed: the recorded command contains a literal
+newline (`-f "RSS %M KB\nexit %x"`), and writing it raw **split the join row in
+two**, so a reader took the tail of the command as the first column of a second
+record. Fields are escaped now.
+
+### 43.3 Thirty-two controls, each on its own reason
+
+`pass/lean/tests/fp/fp_replay_controls.py`, real CLI, isolated copies,
+`--admit-only` throughout so nothing builds or runs: positive; missing,
+malformed and DUPLICATED worker trailer; missing and malformed status; missing
+launch marker; missing attempt; a foreign attempt file; missing, malformed,
+post-launch and wrong-binary capture; wrong command; a command missing the fuel;
+wrong input hash; wrong binary; stale log; missing, duplicated and disagreeing
+stimulus; truncated and disagreeing trace; failed support, checker and control;
+`variant not applied`; nonzero exit under success-looking output; timeout;
+signal-not-OOM; `--admit-only` leaving all 16 evidence files byte- and
+mtime-identical across two runs; and capture failure failing closed.
+
+Each case asserts the REFUSAL REASON, not merely a nonzero exit -- a check that
+only reads the status cannot tell "refused for the right reason" from "refused
+for another". **All 32 pass.**
+
+Two of them failed first on the FIXTURE rather than the admitter: the fixture
+copied the binary, so the recorded command legitimately named a different path.
+That is the admitter being right about a fixture that was wrong, and the
+fixture now uses the real binary read-only.
+
+### 43.4 What the repaired boundary says about the nine
+
+Re-admitted from genuine retained evidence, **without re-running them**: 8 of
+the 9 file-ab rows and all 8 total-probe rows now report
+**`observed_evidence_limited`** -- their observables are all still there and all
+still good (six matching stimuli, agreeing trace, agreeing control, six support
+conjuncts, an ACCEPTED bound), but they predate attempt scoping, so they cannot
+be AUTHENTICATED to a run and are not credited.
+
+`--observed-only` is opt-in and can never return `pass`; by default missing or
+malformed evidence refuses, which is what the controls check. Evidence-class
+and observable-class refusals are separated into their own columns, because
+"this cannot be authenticated" and "this did not do what the contract requires"
+are different claims.
+
+`pmp` is the exception, admitted at full strength -- I ran it once under the
+repaired launcher to check that the repaired tool produces complete evidence
+end to end, which is validating the tool rather than improving a label.
+
+### 43.5 Corrected coverage
+
+Of the 26 old passes: **1 fully admitted**, **16 observed but
+evidence-limited**, **9 never attempted** (row 4 and the eight S2 rows). Rows 1
+and 5 remain `exit 3` and rows 13 and 14 remain exit-unknown; neither is an
+obligation to turn into a pass.
+
+That is a smaller credited number than checkpoint 5 reported, and it is the
+honest one. Nothing observed has been retracted -- the comparisons are retained
+in the joins with their evidence paths -- but a row is credited only when the
+evidence can be tied to the run that produced it.
+

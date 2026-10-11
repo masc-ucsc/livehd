@@ -1,74 +1,52 @@
 #!/usr/bin/env python3
 """Replay one original FP runner configuration, and ADMIT a row only on evidence.
 
-WHY THIS EXISTS.  The first replay batch wrote `exit=0` into its join as a
-LITERAL.  The public transcript happened to confirm all eight were 0, so no
-observed result was wrong -- but the join asserted a value it had not derived,
-and a table that can say "exit 0" without looking is not evidence.  The
-retained `.time` files did not even carry the exit code.
+WHY THIS IS STRICT.  Two earlier versions were not.  The first wrote `exit=0`
+into its join as a LITERAL.  The second derived the status but still admitted a
+row with no worker timing, no launch marker, ONE stimulus, ONE trace cycle, a
+command that did not match the row, and a capture naming a different binary.
+Retained CLI controls showed seven such admissions, so the boundary is restated
+here as explicit requirements rather than as whatever the parser happened to
+look at.
 
-So every field a row is credited on is derived from a file this run wrote:
+ADMISSION.  `pass` requires ALL of:
 
-  <blk>.exit     the OUTER process status, captured as `$?`, one integer
-  <blk>.signal   the signal, when the status says one
-  <blk>.log      complete stdout+stderr
-  <blk>.time     /usr/bin/time, including the `exit %x` trailer the original
-                 recorder parses -- the WORKER's own view of its status
-  <blk>.cmd      the exact full launch command, including the guard
-  <blk>.guard    the enforcement scope and its limits
-  <blk>.capture.json  the pre-launch hashes, when a capture was taken
+  * `.attempt` present, and EVERY other evidence file carrying the same attempt
+    id -- so a status or signal file left by an earlier attempt cannot be read
+    as this one's;
+  * the outer status present and UNIQUELY parsed, and zero;
+  * the worker's own `exit` trailer present, uniquely parsed, and agreeing;
+  * a launch marker present, and the log newer than it;
+  * the recorded command naming this binary, this mode, this certificate and
+    BOTH fuel numbers;
+  * a prelaunch capture that parses, names this binary and this certificate by
+    full sha256, and predates the launch marker;
+  * exactly the six stimuli 0,1,2,3,4,7 -- no missing, no duplicates -- all
+    matching;
+  * a four-cycle trace that agrees;
+  * the mode's own support, checker and control contracts.
 
-ADMISSION.  `pass` requires ALL of: the outer status is 0; the worker trailer
-agrees; the log is NEWER than the launch; the certificate and binary hashes are
-the ones the row names; and every required observable is present and true.
-Anything else is recorded with its status and refused -- a success-looking log
-after a nonzero exit is the case this exists for.
+Anything missing or malformed REFUSES with the reason.  A signal stop is a
+signal stop: it is only called an OOM when retained cgroup `memory.events`
+says `oom_kill` was nonzero.
 
-Identity is bound by FULL sha256, never a prefix.
+Timing: `wall_s` is the RUN's duration, written at launch into `.wall`.  It is
+never the parser's own elapsed time, which is what re-admission would otherwise
+report.  Guard metadata is kept as REQUESTED and OBSERVED separately; absent
+observations stay absent rather than being backfilled.
 """
 
-import argparse, hashlib, json, os, pathlib, re, subprocess, sys, time
+import argparse, hashlib, json, os, pathlib, re, subprocess, sys, time, uuid
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
+WANT_SEEDS = ["0", "1", "2", "3", "4", "7"]
+WANT_TRACE_CYCLES = 4
 
 
 def sha(p):
     return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
 
 
-def launch(binary, cert, fuel_s, fuel_w, outdir, name, memmax, timeout_s, mode):
-    outdir.mkdir(parents=True, exist_ok=True)
-    log, tf = outdir / f"{name}.log", outdir / f"{name}.time"
-    for f in (log, tf, outdir / f"{name}.exit"):
-        if f.exists():
-            f.unlink()
-    argv = [str(binary)] + ([mode] if mode else []) + [str(cert), str(fuel_s), str(fuel_w)]
-    guard = ["systemd-run", "--user", "--scope", "--quiet",
-             "--property=Delegate=yes", f"--property=MemoryMax={memmax}"]
-    timed = ["/usr/bin/time", "-f", "RSS %M KB\nexit %x", "-o", str(tf), "-a",
-             "timeout", str(timeout_s), "nice", "-n19", "ionice", "-c3"]
-    full = guard + timed + argv
-    (outdir / f"{name}.cmd").write_text(" ".join(full) + "\n")
-    (outdir / f"{name}.guard").write_text(
-        f"scope=systemd-run --user --scope Delegate=yes MemoryMax={memmax}\n"
-        f"wall_bound={timeout_s}s (timeout(1)); exceeding it is a RESOURCE STOP\n")
-    t0 = time.time()
-    with log.open("wb") as fh:
-        rc = subprocess.run(full, stdout=fh, stderr=subprocess.STDOUT).returncode
-    (outdir / f"{name}.exit").write_text(f"{rc}\n")
-    if rc > 128:
-        (outdir / f"{name}.signal").write_text(f"{rc - 128}\n")
-    return rc, t0
-
-
-# PER-MODE OUTPUT CONTRACTS.  The original runners do NOT share a format, and
-# assuming one is how an admitter ends up refusing a good run or crediting a
-# bad one.  `--file-ab` prints its support fields WITHOUT total_probe's
-# `| ALL true` summary, says "residual ok" where total_probe says "ok", adds a
-# `clock-domains` count to the trace line, and reports the checker bound as
-# "checkResidual: ACCEPTED, proved-sufficient bound N" rather than inside a
-# "residual N terms, checker bound M" line.  Each mode's real lines are encoded
-# here; none of these requirements is weaker than the other's.
 CONTRACTS = {
     "--file-ab": {
         "support_fields": r"support: wf (\w+) memFree (\w+) sources (\w+) ops (\w+) "
@@ -79,12 +57,9 @@ CONTRACTS = {
         "control": r"control: variant interpreter ok vs interpretDesign (\w+)",
         "bound": r"checkResidual: ACCEPTED, proved-sufficient bound (\d+)",
         "terms": r"^  terms (\d+)",
-        # `--file-ab` refuses with this on stderr and returns 2 when the variant
-        # was not applied; its ABSENCE beside a zero exit is the evidence that
-        # the variant-changed admission held.
         "forbidden": [r"variant not applied"],
     },
-    "": {   # total_probe, positional
+    "": {
         "support_all": r"support: .*\| ALL (\w+)",
         "seed": r"seed (\d+): ok  matches interpretDesign (\w+)",
         "trace": r"trace: (\d+) cycles, independent states -- agrees (\w+)\s+"
@@ -96,79 +71,217 @@ CONTRACTS = {
 }
 
 
-def admit(outdir, name, cert, binary, mode, want_cert_sha, fallback=None):
-    """Derived from retained files, never assumed.  (status, fields, refusals).
+def capture(plan, binary, cert, outdir, name, attempt):
+    """Genuine pre-launch capture, or a refusal.  Returns (ok, detail)."""
+    rec = pathlib.Path(plan["recorder"]).resolve()
+    argv = " ".join([str(binary)] + ([plan["mode"]] if plan.get("mode") else [])
+                    + [str(cert), str(plan["fuel_step"]), str(plan["fuel_work"])])
+    dst = outdir / f"{name}.capture.json"
+    cp = subprocess.run([sys.executable, "-I", str(rec), "prelaunch", str(cert),
+                         "--binary", str(binary), "--cmd", argv, "--out", str(dst),
+                         "--runner", plan["recorder_runner"]],
+                        cwd=plan.get("recorder_cwd", "."), capture_output=True, text=True)
+    if cp.returncode != 0 or not dst.is_file():
+        return False, f"rc={cp.returncode} {(cp.stderr or cp.stdout).strip()[:200]}"
+    (outdir / f"{name}.capture.attempt").write_text(attempt + "\n")
+    return True, ""
 
-    Freshness is judged against the `.cmd` file, which this runner writes
-    IMMEDIATELY before launching -- so a log older than it is output from a
-    previous run and is refused as stale.
-    """
-    refus, f = [], {}
-    ep, cp, lp = (outdir / f"{name}.exit"), (outdir / f"{name}.cmd"), (outdir / f"{name}.log")
-    if not ep.is_file():
-        # BACKFILL, and it is never a pass. An earlier batch recorded its exits
-        # only in the public transcript, so the observables below can still be
-        # derived from the retained log -- but the process status cannot, and a
-        # row whose status comes from prose outside the evidence tree is
-        # reported as evidence-limited rather than credited. Re-running purely
-        # to manufacture provenance would be inventing it.
-        if not fallback:
-            return "refused", f, ["no .exit file: the outer status was never captured"]
-        f["outer_exit"] = fallback.get("exit", "")
-        f["exit_evidence"] = fallback.get("evidence", "")
-        limited = True
+
+def launch(binary, cert, plan, outdir, name, timeout_s, attempt):
+    outdir.mkdir(parents=True, exist_ok=True)
+    for suf in ("log", "time", "exit", "signal", "wall", "cmd", "guard.json", "attempt"):
+        f = outdir / f"{name}.{suf}"
+        if f.exists():
+            f.unlink()
+    argv = [str(binary)] + ([plan["mode"]] if plan.get("mode") else []) \
+        + [str(cert), str(plan["fuel_step"]), str(plan["fuel_work"])]
+    memmax = plan["memmax"]
+    guard = ["systemd-run", "--user", "--scope", "--quiet", "--property=Delegate=yes",
+             f"--property=MemoryMax={memmax}"]
+    timed = ["/usr/bin/time", "-f", "RSS %M KB\nexit %x", "-o",
+             str(outdir / f"{name}.time"), "-a",
+             "timeout", str(timeout_s), "nice", "-n19", "ionice", "-c3"]
+    full = guard + timed + argv
+    (outdir / f"{name}.attempt").write_text(attempt + "\n")
+    (outdir / f"{name}.cmd").write_text(" ".join(full) + "\n")
+    (outdir / f"{name}.guard.json").write_text(json.dumps({
+        "attempt": attempt,
+        "requested": {"MemoryMax": memmax, "wall_timeout_s": timeout_s,
+                      "scope": "systemd-run --user --scope Delegate=yes"},
+        "observed": {},
+    }, indent=1))
+    t0 = time.time()
+    with (outdir / f"{name}.log").open("wb") as fh:
+        rc = subprocess.run(full, stdout=fh, stderr=subprocess.STDOUT).returncode
+    wall = time.time() - t0
+    # subprocess returns a NEGATIVE value when the child died on a signal.
+    sig = -rc if rc < 0 else (rc - 128 if rc > 128 else 0)
+    (outdir / f"{name}.exit").write_text(f"{rc}\n")
+    (outdir / f"{name}.wall").write_text(f"{wall:.2f}\n")
+    if sig:
+        (outdir / f"{name}.signal").write_text(f"{sig}\n")
+    for suf in ("exit", "wall", "signal", "time", "log", "cmd"):
+        a = outdir / f"{name}.{suf}.attempt"
+        if (outdir / f"{name}.{suf}").is_file():
+            a.write_text(attempt + "\n")
+    return rc
+
+
+def one(v, pat, text, flags=0):
+    """Exactly one match, or None.  A second match is malformed evidence."""
+    ms = re.findall(pat, text, flags)
+    return ms[0] if len(ms) == 1 else None
+
+
+def admit(outdir, name, cert, binary, plan, want_cert_sha, allow_missing_capture=False):
+    mode = plan.get("mode") or ""
+    refus, f = [], {"mode": mode or "(positional)"}
+    P = lambda suf: outdir / f"{name}.{suf}"
+
+    attempt = ""
+    if not P("attempt").is_file():
+        refus.append("no .attempt id: this evidence is not scoped to a run")
     else:
-        outer = int(ep.read_text().strip())
+        attempt = P("attempt").read_text().strip()
+        f["attempt"] = attempt
+    for suf in ("exit", "wall", "time", "log", "cmd"):
+        ap = P(f"{suf}.attempt")
+        if not P(suf).is_file():
+            refus.append(f"missing evidence file: .{suf}")
+        elif attempt and (not ap.is_file() or ap.read_text().strip() != attempt):
+            refus.append(f".{suf} is not scoped to attempt {attempt}: it may be an "
+                         f"earlier run's file")
+    # Only a MISSING log or status stops the parse. An authentication failure
+    # does not: the observables are still worth collecting, so a run recorded
+    # before this standard existed can keep its comparison data under
+    # `--observed-only` instead of arriving empty.
+    if not P("log").is_file():
+        return "refused", f, refus + ["no log"]
+
+    outer = None
+    if P("exit").is_file():
+        raw = P("exit").read_text().strip()
+        if not re.fullmatch(r"-?\d+", raw):
+            return "refused", f, refus + [f"malformed outer status {raw!r}"]
+        outer = int(raw)
         f["outer_exit"] = outer
-        f["exit_evidence"] = f"derived from {ep}"
-        limited = False
-    outer = f["outer_exit"] if isinstance(f["outer_exit"], int) else 0
-    sg = outdir / f"{name}.signal"
-    f["signal"] = sg.read_text().strip() if sg.is_file() else ""
-    if not lp.is_file():
-        return "refused", f, ["no log"]
+    # A missing status is NOT backfilled from anywhere. The field stays empty
+    # and the refusal above already says why; the observables below are still
+    # collected, so the run's comparison survives without a status being
+    # invented for it.
+    f["signal"] = P("signal").read_text().strip() if P("signal").is_file() else ""
+    f["wall_s"] = P("wall").read_text().strip() if P("wall").is_file() else ""
+    f["exit_evidence"] = f"derived from {P('exit')}"
+
+    tt = P("time").read_text(errors="replace") if P("time").is_file() else ""
+    w = one(None, r"^exit (\d+)\s*$", tt, re.M)
+    if w is None:
+        refus.append("no uniquely parsed worker `exit` trailer in .time")
+        f["worker_exit"] = ""
+    else:
+        f["worker_exit"] = int(w)
+        if outer is not None and 0 <= outer <= 128 and int(w) != outer:
+            refus.append(f"worker trailer says {w}, outer status says {outer}")
+    rss = one(None, r"RSS (\d+) KB", tt)
+    f["peak_rss_kb"] = rss or ""
+    if rss is None:
+        refus.append("no uniquely parsed RSS in .time")
+
+    lp, cp = P("log"), P("cmd")
     if cp.is_file() and lp.stat().st_mtime < cp.stat().st_mtime:
         refus.append("the log predates the launch marker: stale output")
-    t = lp.read_text(errors="replace")
-    tf = outdir / f"{name}.time"
-    tt = tf.read_text(errors="replace") if tf.is_file() else ""
-    m = re.search(r"^exit (\d+)\s*$", tt, re.M)
-    f["worker_exit"] = int(m.group(1)) if m else ""
-    if m and int(m.group(1)) != outer and outer <= 128:
-        refus.append(f"worker trailer says {m.group(1)}, outer status says {outer}")
-    mr = re.search(r"RSS (\d+) KB", tt)
-    f["peak_rss_kb"] = mr.group(1) if mr else ""
+    # Binding checks apply only when there IS a recorded command. Running them
+    # against an absent file produced four "does not name this ..." refusals
+    # that read as contract violations when the only fact is that the file is
+    # missing -- which the evidence refusal above already states.
+    cmd = cp.read_text() if cp.is_file() else ""
+    f["cmd"] = cmd.strip()
+    if cp.is_file():
+        for needle, what in ((str(binary), "binary"), (str(cert), "certificate"),
+                             (str(plan["fuel_step"]), "step fuel"),
+                             (str(plan["fuel_work"]), "work fuel")):
+            if needle not in cmd:
+                refus.append(f"the recorded command does not name this {what}")
+        if mode and mode not in cmd:
+            refus.append(f"the recorded command does not name mode {mode}")
+        if not mode and "--" in cmd.split(str(binary))[-1]:
+            refus.append("the recorded command carries a mode flag this row does not use")
+
+    capf = P("capture.json")
+    f["capture_file"] = str(capf) if capf.is_file() else ""
+    if not capf.is_file():
+        if allow_missing_capture:
+            f["capture_state"] = "absent (explicitly allowed)"
+        else:
+            refus.append("no pre-launch capture")
+    else:
+        capa = P("capture.attempt")
+        try:
+            cap = json.loads(capf.read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            cap = None
+            refus.append(f"the capture does not parse: {e}")
+        if cap is not None:
+            if not capa.is_file() or capa.read_text().strip() != attempt:
+                refus.append("the capture is not scoped to this attempt")
+            if cp.is_file() and capf.stat().st_mtime > cp.stat().st_mtime:
+                refus.append("the capture is NEWER than the launch marker: it does "
+                             "not describe what ran")
+            blob = json.dumps(cap)
+            if sha(binary) not in blob:
+                refus.append("the capture does not name this binary's sha256")
+            if sha(cert) not in blob:
+                refus.append("the capture does not name this certificate's sha256")
+            f["capture_state"] = "pre-launch, validated"
+
     f["cert_sha256"], f["binary_sha256"] = sha(cert), sha(binary)
     if want_cert_sha and f["cert_sha256"] != want_cert_sha:
         refus.append(f"certificate is {f['cert_sha256']}, the row names {want_cert_sha}")
-    if outer == 124:
+
+    gj = P("guard.json")
+    if gj.is_file():
+        g = json.loads(gj.read_text())
+        f["guard_requested"] = json.dumps(g.get("requested", {}))
+        f["guard_observed"] = json.dumps(g.get("observed", {}))
+    oomk = ""
+    if gj.is_file():
+        oomk = str((json.loads(gj.read_text()).get("observed") or {}).get("oom_kill", ""))
+    if outer is None:
+        pass
+    elif outer == 124:
         refus.append("timeout(1) stopped it: RESOURCE STOP, undecided")
-    elif outer > 128:
-        refus.append(f"terminated by signal {outer - 128}: RESOURCE/SIGNAL STOP, undecided")
+    elif f["signal"]:
+        refus.append(f"terminated by signal {f['signal']}: SIGNAL STOP, undecided"
+                     + ("; cgroup memory.events records an oom_kill"
+                        if oomk not in ("", "0") else
+                        "; no retained cgroup evidence that this was an OOM"))
     elif outer != 0:
         refus.append(f"process exited {outer}")
 
-    C = CONTRACTS[mode or ""]
+    t = lp.read_text(errors="replace")
+    C = CONTRACTS[mode]
     for pat in C["forbidden"]:
         if re.search(pat, t):
             refus.append(f"the log contains a refusal marker: {pat!r}")
     seeds = re.findall(C["seed"], t)
+    got = [s for s, _ in seeds]
+    f["seeds"] = ",".join(got)
     f["seeds_total"], f["seeds_ok"] = len(seeds), sum(1 for _, v in seeds if v == "true")
-    f["seeds"] = ",".join(x for x, _ in seeds)
-    if f["seeds_total"] == 0:
-        refus.append("no stimulus results in the log")
-    elif f["seeds_ok"] != f["seeds_total"]:
+    if got != WANT_SEEDS:
+        dup = [x for x in set(got) if got.count(x) > 1]
+        refus.append(f"stimuli are {got}, the contract is {WANT_SEEDS}"
+                     + (f" (duplicates {dup})" if dup else ""))
+    if f["seeds_ok"] != f["seeds_total"]:
         refus.append(f"{f['seeds_total'] - f['seeds_ok']} stimulus/stimuli disagreed")
+
     if "support_fields" in C:
         ms = re.search(C["support_fields"], t)
+        f["support_all"] = ("true" if ms and all(v == "true" for v in ms.groups())
+                            else ("FALSE" if ms else ""))
         if not ms:
             refus.append("required observable missing: support fields")
-            f["support_all"] = ""
-        else:
-            vals = ms.groups()
-            f["support_all"] = "true" if all(v == "true" for v in vals) else "FALSE"
-            if f["support_all"] != "true":
-                refus.append(f"support conjuncts not all true: {vals}")
+        elif f["support_all"] != "true":
+            refus.append(f"support conjuncts not all true: {ms.groups()}")
     else:
         ms = re.search(C["support_all"], t)
         f["support_all"] = ms.group(1) if ms else ""
@@ -176,119 +289,146 @@ def admit(outdir, name, cert, binary, mode, want_cert_sha, fallback=None):
             refus.append("required observable missing: support_all")
         elif f["support_all"] != "true":
             refus.append(f"support_all is {f['support_all']!r}")
+
     mt = re.search(C["trace"], t)
-    f["trace_agrees"] = mt.group(2) if mt else ""
     if not mt:
         refus.append("required observable missing: trace")
-    elif f["trace_agrees"] != "true":
-        refus.append(f"trace_agrees is {f['trace_agrees']!r}")
+        f["trace_agrees"], f["trace_cycles"] = "", ""
+    else:
+        f["trace_cycles"], f["trace_agrees"] = mt.group(1), mt.group(2)
+        if int(mt.group(1)) != WANT_TRACE_CYCLES:
+            refus.append(f"trace is {mt.group(1)} cycles, the contract is "
+                         f"{WANT_TRACE_CYCLES}")
+        if f["trace_agrees"] != "true":
+            refus.append(f"trace_agrees is {f['trace_agrees']!r}")
+
     mc = re.search(C["control"], t)
     f["control"] = mc.group(1) if mc else ""
     if not mc:
         refus.append("required observable missing: control")
     elif f["control"] != "true":
         refus.append(f"control is {f['control']!r}")
+
     if "residual" in C:
         mres = re.search(C["residual"], t)
         f["residual_terms"] = mres.group(1) if mres else ""
         f["checker_bound"] = mres.group(2) if mres else ""
         if not mres:
-            refus.append("no residual/checker-bound line: malformed or truncated result")
+            refus.append("no residual/checker-bound line: malformed or truncated")
     else:
-        mb, mterm = re.search(C["bound"], t), re.search(C["terms"], t, re.M)
+        mb = re.search(C["bound"], t)
+        mterm = re.search(C["terms"], t, re.M)
         f["checker_bound"] = mb.group(1) if mb else ""
         f["residual_terms"] = mterm.group(1) if mterm else ""
         if not mb:
-            refus.append("no accepted checkResidual bound: malformed or truncated result")
+            refus.append("no accepted checkResidual bound: malformed or truncated")
         if not mterm:
             refus.append("no residual term count")
-    if refus:
-        return "refused", f, refus
-    return ("observed_evidence_limited" if limited else "pass"), f, refus
+
+    # EVIDENCE-class refusals say the run cannot be AUTHENTICATED to this
+    # attempt; OBSERVABLE-class ones say the run did not do what the contract
+    # requires. They are different claims and `--observed-only` separates them,
+    # so a batch recorded before this standard existed can keep its observations
+    # without being credited. It is opt-in: by default missing or malformed
+    # evidence refuses, which is what the controls check.
+    f["evidence_class_refusals"] = "; ".join(
+        r for r in refus if any(k in r for k in EVIDENCE_MARKERS))
+    f["observable_class_refusals"] = "; ".join(
+        r for r in refus if not any(k in r for k in EVIDENCE_MARKERS))
+    return ("pass" if not refus else "refused"), f, refus
+
+
+EVIDENCE_MARKERS = (".attempt id", "not scoped to", "missing evidence file",
+                    "pre-launch capture", "capture does not", "capture is NEWER",
+                    "uniquely parsed", "malformed outer status")
+
+
+COLS = ["record_id", "block", "mode", "status", "attempt", "outer_exit", "worker_exit",
+        "signal", "wall_s", "peak_rss_kb", "seeds", "seeds_ok", "seeds_total",
+        "trace_cycles", "trace_agrees", "support_all", "control", "residual_terms",
+        "checker_bound", "cert_sha256", "binary_sha256", "cert_path", "capture_state",
+        "guard_requested", "guard_observed", "cmd", "cmd_file", "log_file", "time_file",
+        "exit_file", "wall_file", "guard_file", "capture_file", "exit_evidence",
+        "evidence_class_refusals", "observable_class_refusals", "refusals"]
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--plan", required=True, help="JSON list of rows to replay")
-    ap.add_argument("--out", required=True, help="join TSV")
+    ap.add_argument("--plan", required=True)
+    ap.add_argument("--out", required=True)
     ap.add_argument("--admit-only", action="store_true",
-                    help="re-admit from RETAINED evidence without launching; the "
-                         "freshness check still applies, so a stale log still refuses")
+                    help="re-admit from RETAINED evidence. Launches nothing and takes "
+                         "no capture, so the retained bytes and timestamps are left "
+                         "exactly as they are.")
+    ap.add_argument("--observed-only", action="store_true",
+                    help="for rows whose ONLY refusals are evidence-authentication "
+                         "ones, report observed_evidence_limited and keep the "
+                         "observables, instead of discarding them. Never `pass`.")
+    ap.add_argument("--allow-missing-capture", action="store_true",
+                    help="admit a row whose capture is absent, marking it so. Without "
+                         "this a missing capture refuses.")
     a = ap.parse_args()
     plan = json.loads(pathlib.Path(a.plan).read_text())
-    outdir = pathlib.Path(plan["outdir"])
-    binary = pathlib.Path(plan["binary"])
-    rows, COLS = [], ["record_id", "block", "mode", "status", "outer_exit", "worker_exit",
-                      "signal", "wall_s", "peak_rss_kb", "seeds", "seeds_ok", "seeds_total",
-                      "support_all", "trace_agrees", "control", "residual_terms",
-                      "checker_bound", "cert_sha256", "binary_sha256", "cert_path",
-                      "cmd_file", "log_file", "time_file", "exit_file", "guard_file",
-                      "capture_file", "exit_evidence", "refusals"]
+    outdir, binary = pathlib.Path(plan["outdir"]), pathlib.Path(plan["binary"])
+    rows = []
     for r in plan["rows"]:
         name, cert = r["name"], pathlib.Path(r["cert"])
         print(f"{name:<22}", end="", flush=True)
+        base = {c: "" for c in COLS} | {"record_id": r["record_id"], "block": name,
+                                        "cert_path": str(cert),
+                                        "mode": plan.get("mode") or "(positional)"}
         if not cert.is_file():
-            rows.append({c: "" for c in COLS} | {
-                "record_id": r["record_id"], "block": name, "mode": plan.get("mode", ""),
-                "status": "input_unavailable", "cert_path": str(cert),
-                "refusals": "certificate not present"})
+            rows.append(base | {"status": "input_unavailable",
+                                "refusals": "certificate not present"})
             print("INPUT_UNAVAILABLE"); continue
-        # GENUINE pre-launch capture: hashes taken BEFORE the process starts, which
-        # is the only form that pins the executed code without assumption. Never
-        # synthesised afterwards -- a capture written after the run describes the
-        # tree, not what ran, and the recorder labels it that way on purpose.
-        if plan.get("capture"):
-            argv_preview = " ".join([str(binary)] + ([plan["mode"]] if plan.get("mode") else [])
-                                    + [str(cert), str(plan["fuel_step"]), str(plan["fuel_work"])])
-            rec = pathlib.Path(plan["recorder"]).resolve()
-            cp = subprocess.run([sys.executable, "-I", str(rec), "prelaunch",
-                                 str(cert), "--binary", str(binary), "--cmd", argv_preview,
-                                 "--out", str(outdir / f"{name}.capture.json"),
-                                 "--runner", plan["recorder_runner"]],
-                                cwd=plan.get("recorder_cwd", "."), capture_output=True,
-                                text=True)
-            # NOT swallowed. The first version ignored this result and passed a
-            # relative recorder path against a changed cwd, so every capture
-            # silently failed to exist and the rows would have been recorded at
-            # `reconstructed` strength while looking like pre-launch ones.
-            if cp.returncode != 0 or not (outdir / f"{name}.capture.json").is_file():
-                print(f"\n  PRE-LAUNCH CAPTURE FAILED for {name}: rc={cp.returncode} "
-                      f"{(cp.stderr or cp.stdout).strip()[:160]}", file=sys.stderr)
-                print(f"{name:<22}", end="", flush=True)
-        t0 = time.time()
-        rc, _ = (0, 0) if a.admit_only else launch(binary, cert, plan["fuel_step"], plan["fuel_work"], outdir, name,
-                       plan["memmax"], r.get("timeout_s", plan["timeout_s"]),
-                       plan.get("mode"))
-        st, f, refus = admit(outdir, name, cert, binary, plan.get("mode"),
-                             r.get("cert_sha256", ""), r.get("exit_fallback"))
-        wall = re.search(r"wall_s\s+([\d.]+)", "") or None
-        rows.append({c: "" for c in COLS} | {
-            "record_id": r["record_id"], "block": name, "mode": plan.get("mode", ""),
-            "status": st, "wall_s": f"{time.time() - t0:.2f}", "cert_path": str(cert),
+        if not a.admit_only:
+            attempt = f"{time.strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
+            if plan.get("capture"):
+                ok, why = capture(plan, binary, cert, outdir, name, attempt)
+                if not ok:
+                    # FAIL CLOSED. The previous version printed the failure and
+                    # launched anyway, so the row would have been admitted with no
+                    # capture at all while looking like a pre-launch one.
+                    rows.append(base | {"status": "capture_failed", "attempt": attempt,
+                                        "refusals": f"pre-launch capture failed: {why}; "
+                                                    f"not launched"})
+                    print(f"CAPTURE_FAILED  {why[:70]}"); continue
+            launch(binary, cert, plan, outdir, name,
+                   r.get("timeout_s", plan["timeout_s"]), attempt)
+        st, f, refus = admit(outdir, name, cert, binary, plan, r.get("cert_sha256", ""),
+                             a.allow_missing_capture)
+        if (st == "refused" and a.observed_only
+                and not f.get("observable_class_refusals")):
+            st = "observed_evidence_limited"
+        rows.append(base | {k: v for k, v in f.items() if k in COLS} | {
+            "status": st, "refusals": "; ".join(refus),
             "cmd_file": str(outdir / f"{name}.cmd"), "log_file": str(outdir / f"{name}.log"),
             "time_file": str(outdir / f"{name}.time"),
             "exit_file": str(outdir / f"{name}.exit"),
-            "guard_file": str(outdir / f"{name}.guard"),
-            "capture_file": str(outdir / f"{name}.capture.json")
-            if (outdir / f"{name}.capture.json").is_file() else "",
-            "refusals": "; ".join(refus)} | {k: v for k, v in f.items() if k in COLS})
-        print(f"{st:<10} exit={f.get('outer_exit')} seeds={f.get('seeds_ok')}/"
-              f"{f.get('seeds_total')} {('REFUSED: ' + refus[0]) if refus else ''}")
+            "wall_file": str(outdir / f"{name}.wall"),
+            "guard_file": str(outdir / f"{name}.guard.json")})
+        print(f"{st:<10} exit={f.get('outer_exit','')} seeds={f.get('seeds','')} "
+              f"{('REFUSED: ' + refus[0][:70]) if refus else ''}")
     out = pathlib.Path(a.out)
     with out.open("w", encoding="utf-8") as fh:
-        fh.write(f"# runner binary\t{binary}\n")
-        fh.write(f"# binary_sha256\t{sha(binary)}\n")
+        fh.write(f"# runner binary\t{binary}\n# binary_sha256\t{sha(binary)}\n")
         fh.write(f"# mode\t{plan.get('mode') or '(positional)'}\n")
         fh.write(f"# fuel\t{plan['fuel_step']}/{plan['fuel_work']}\n")
         fh.write(f"# build\t{plan.get('build_cmd','')}\n")
-        fh.write("# Every credited field is DERIVED from a file this run wrote; the\n")
-        fh.write("# per-row cmd/log/time/exit/guard paths are the evidence. Identity is\n")
-        fh.write("# bound by FULL sha256. `status` is pass only when the outer process\n")
-        fh.write("# status is 0, the worker trailer agrees, the log is fresh, the hashes\n")
-        fh.write("# match and every required observable is present and true.\n")
+        fh.write("# Every credited field is DERIVED from a file of THIS attempt; the\n")
+        fh.write("# attempt id scopes them, so an earlier run's status cannot be read\n")
+        fh.write("# as this one's. Identity is bound by FULL sha256. wall_s is the RUN's\n")
+        fh.write("# duration from .wall, never the parser's elapsed time. Guard metadata\n")
+        fh.write("# is REQUESTED and OBSERVED separately; absent observations stay absent.\n")
         fh.write("\t".join(COLS) + "\n")
         for r in rows:
-            fh.write("\t".join(str(r.get(c, "")) for c in COLS) + "\n")
+            # A field must not carry a tab or a newline: the recorded command
+            # legitimately contains one (`-f "RSS %M KB\nexit %x"`), and writing
+            # it raw split the row in two, so a reader picked up the tail of the
+            # command as the first column of a second record.
+            fh.write("\t".join(
+                str(r.get(c, "")).replace("\t", "\\t").replace("\n", "\\n")
+                for c in COLS) + "\n")
     npass = sum(1 for r in rows if r["status"] == "pass")
     print(f"\n{npass}/{len(rows)} admitted; join {out}")
     return 0 if npass == len(rows) else 1
