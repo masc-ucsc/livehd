@@ -41,9 +41,9 @@ struct Map_options : synth::Driver_options {
   // mapping. Needs a physical (NLDM) Liberty and a `delay` target: with neither
   // there is no budget to be inside of.
   uint32_t    area_relax_pct = 200;
-  // tmap regions only (pass.usyn.tmap_choices): compute structural choices
-  // (`&dch -f -C 500`) before `&nf`.
-  bool        tmap_choices   = false;
+  // tmap regions only (pass.usyn.tmap_pre): `;`-separated GIA commands run
+  // before `&nf` (empty: none).
+  std::string tmap_pre;
   // The AREA objective (also a second candidate after meeting a delay budget):
   // empty = the former baseline with &fraig/dc2/&dch/&nf, "none"
   // disables only the second candidate, anything else is an ABC command string run

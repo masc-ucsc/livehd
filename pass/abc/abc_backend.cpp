@@ -752,8 +752,16 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
   }
   if (rewrite.map == synth::Region_rewrite::Map::tmap) {
     std::vector<std::string> tmap_cmds{"strash", "&get -n", "&st"};
-    if (region_.tmap_choices) {
-      tmap_cmds.emplace_back("&dch -f -C 500");
+    for (std::string_view rest = region_.tmap_pre; !rest.empty();) {
+      const auto cut = rest.find(';');
+      auto       cmd = rest.substr(0, cut);
+      while (!cmd.empty() && cmd.front() == ' ') {
+        cmd.remove_prefix(1);
+      }
+      if (!cmd.empty()) {
+        tmap_cmds.emplace_back(cmd);
+      }
+      rest = cut == std::string_view::npos ? std::string_view{} : rest.substr(cut + 1);
     }
     tmap_cmds.emplace_back(tmap_nf);
     tmap_cmds.emplace_back("&put -o");

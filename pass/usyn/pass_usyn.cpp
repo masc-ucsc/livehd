@@ -194,8 +194,22 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!read("max_fanout", "16", mapping.max_fanout)) {
     return invalid_option("max_fanout", "an integer in [0, 4294967295]; 0 disables the `buffer -N` tail");
   }
-  if (!flag("tmap_choices", mapping.choices, "true")) {
-    return invalid_option("tmap_choices", "true|false");
+  mapping.pre = std::string(var.get_stage("tmap_pre", "&dch -f -C 500"));
+  {
+    // Allow-listed GIA commands only: the mapper never runs an arbitrary string.
+    static constexpr std::string_view allowed[] = {"&dch", "&synch2", "&syn2", "&syn3", "&syn4", "&fraig", "&sweep", "&b", "&st"};
+    for (std::string_view rest = mapping.pre; !rest.empty();) {
+      const auto cut = rest.find(';');
+      auto       cmd = rest.substr(0, cut);
+      while (!cmd.empty() && cmd.front() == ' ') {
+        cmd.remove_prefix(1);
+      }
+      const auto name = cmd.substr(0, cmd.find(' '));
+      if (!cmd.empty() && std::find(std::begin(allowed), std::end(allowed), name) == std::end(allowed)) {
+        return invalid_option("tmap_pre", "`;`-separated &dch, &synch2, &syn2, &syn3, &syn4, &fraig, &sweep, &b or &st commands");
+      }
+      rest = cut == std::string_view::npos ? std::string_view{} : rest.substr(cut + 1);
+    }
   }
   if (!read("area_relax", "200", mapping.area_relax_pct)) {
     return invalid_option("area_relax", "an integer in [0, 4294967295]; 0 always maps for minimum delay");
@@ -408,10 +422,12 @@ void Pass_usyn::setup() {
   m.add_label_optional("max_fanout",
                        "tmap fanout cap: `buffer -N <n>` plus down-sizing to the budget after mapping (0 disables)",
                        "16");
-  m.add_label_optional("tmap_choices",
-                       "compute structural choices (`&dch -f`) on the logic handed to the mapper so `&nf` can pick among "
-                       "equivalent structures; the function and the region cut are untouched (false: map the network as is)",
-                       "true");
+  m.add_label_optional("tmap_pre",
+                       "`;`-separated ABC GIA commands run on the logic handed to the mapper just before `&nf` (default: "
+                       "structural choices, so `&nf` can pick among equivalent structures). Empty maps the network as is. "
+                       "Heavier restructuring (`&synch2 -K 6 -C 500; &dch -C 500`) shrinks designs whose native search is "
+                       "exhausted, at some delay cost. Allowed: &dch &synch2 &syn2 &syn3 &syn4 &fraig &sweep &b &st",
+                       "&dch -f -C 500");
   m.add_label_optional("area_relax",
                        "max percent of measured slack a timed tmap region trades back for area by re-running the same "
                        "mapping-only `&nf -R <pct>`, then re-sizing to the budget (0 disables; needs delay and NLDM)",

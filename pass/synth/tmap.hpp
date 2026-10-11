@@ -27,10 +27,12 @@ struct Tmap_options {
   int                                   boundary_rounds  = 1;       // exact re-size rounds, 1..64
   std::string                           reg_margin       = "auto";  // `auto` or non-negative ps
   uint32_t                              area_relax_pct   = 200;     // slack-to-area `&nf -R` remap cap; 0 disables
-  // Structural choices (`&dch -f`) computed on the handed-over network before
-  // the mapper, so `&nf` can pick among equivalent structures. It adds no new
-  // logic of its own and leaves the Boolean function (and the region cut) alone.
-  bool                                  choices          = true;
+  // GIA commands run on the handed-over network just before the mapper, `;`
+  // separated (default: structural choices, so `&nf` can pick among equivalent
+  // structures). Empty maps the network as is. The Boolean function and the
+  // region cut are untouched; only the allow-listed commands of pass.usyn are
+  // accepted.
+  std::string                           pre              = "&dch -f -C 500";
   int                                   memory_budget_mb = 16384;   // per-region growth; process ceiling is shared
   uint64_t                              time_budget_ms   = 0;
   std::string                           cache_directory;  // internal; empty disables mapped reuse
