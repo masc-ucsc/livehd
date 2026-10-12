@@ -6870,3 +6870,40 @@ Matrix state across JSON, TSV, HTML and this ledger: **10 YES, 11 NO, 37
 BLOCKED, 2 RUNNING — 60 cells, none PENDING.**  The two RUNNING cells are
 `B09`'s TV re-attempt and `B09`'s FP readiness, both with live PIDs recorded.
 The all-60-YES gate is **not** met and nothing is pushed.
+
+### 63.11 The Futamura column is complete: both CVA6 units reach executed readiness
+
+`issue_stage_gate` readiness is terminal and passed, at the budget at which its
+generation succeeded:
+
+```
+8 cycles of Hw.stepOf at the checked bound: ok,ok,ok,ok,ok,ok,ok,ok
+distinct flop-state vectors 5 of 9    distinct output vectors 8 of 8
+ms: load 614  support 20  specialize 381876  check 1685  execute 298048
+process: wall 703.49 s, user 685.74, sys 11.23, maxrss 6,830,964 KiB = 6.51 GiB, exit 0
+residual 2,926,014 terms, checker bound 32,369
+```
+
+Both CVA6 units therefore pass the same four phases, and the two readiness runs
+agree on the shape of the result — **5 distinct flop-state vectors across 9
+recorded states and 8 distinct output vectors** on each — so the state really
+advances under the residual.  That is counted, not asserted; the driver prints
+the distinct counts precisely so a never-moving vector could not be narrated as
+motion.
+
+**All twelve FP dispositions:** 2 YES (`frontend_gate`, `issue_stage_gate`),
+1 BLOCKED on three concretely named inherited gaps (`picorv32`: `memFree`,
+`memImg` source, `Op_MemRead`/`Op_MemWriteBE` operators), and 9 BLOCKED on the
+inherited common-input blocker shared with the TV column.
+
+What this is not, restated because the phase names invite the wrong reading: the
+readiness runs are **INTERPRETED** executions of the residual through the
+projection's own checked simulator.  They are not equivalence, not acceptance,
+not a reference comparison against `interpretDesign`, not kernel certification,
+and they imply nothing about native linking, which remains a separate readiness
+mode that this workspace cannot build for the DCERT2 route.  The specialization
+each readiness run performs is a **new attempt** forced by the ephemerality of
+the generated `Program`, and its cost is not a second generation measurement.
+
+Matrix: **11 YES, 11 NO, 37 BLOCKED, 1 RUNNING** over 60 cells.  The single
+RUNNING cell is `B09`'s TV re-attempt at the 7200 s budget.

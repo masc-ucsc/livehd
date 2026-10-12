@@ -1044,20 +1044,21 @@
    },
    "approaches": {
     "Futamura projection": {
-     "status": "RUNNING",
+     "status": "YES",
      "evidence": {
-      "decode": "DCERT2, admitted under readCertChecked",
-      "support": "all six conjuncts true",
-      "generate": "gen_probe_v2 GENERATION OK at fuel 200000/5000 -- checker bound 32369, residual 2,926,014 terms. The earlier 20000/200 attempt returned OUT OF FUEL after 233 ms of specialization: a failure AT THAT BUDGET, not a capability rejection, and it is retained as a separate attempt. An earlier default-stack attempt aborted on interpreter deep recursion and is also retained.",
-      "readiness": "LIVE: gen_readiness_v2 launched 2026-10-11T22:10:31-07:00, pid 3305225, fuel 200000/5000, 8 explicit cycles, driver sha256 93761c103096fc5d38cbb5473cde2039cc742e9d53c546a3b795055ce5621484 (post-guard; the frontend result used pre-guard dc7ec7d5..., and the guards change only the cycles=0/malformed-config refusals)",
-      "scope": "INTERPRETED; native linking not implied"
+      "decode": "DCERT2, admitted under readCertChecked (parse + certWfError). The decode driver evaluates NO support predicate.",
+      "support": "all six conjuncts true: wf, memFree, sources, ops, arities, flopClocks",
+      "generate": "gen_probe_v2 GENERATION OK at fuel 200000/5000 -- checker bound 32369, residual 2,926,014 terms, szOf measured OUTSIDE the interval at 0 ms. The earlier 20000/200 attempt returned OUT OF FUEL after 233 ms of specialization: a failure AT THAT BUDGET, not a capability rejection, retained as a separate attempt. An earlier default-stack attempt aborted on interpreter deep recursion in Projection.mixTerms and is also retained; --tstack=262144 alone did not help on the companion design.",
+      "readiness": "gen_readiness_v2 READINESS OK -- 8 cycles of Hw.stepOf at the checked bound, outcomes ok,ok,ok,ok,ok,ok,ok,ok; 5 distinct flop-state vectors across 9 recorded states and 8 distinct output vectors, so the state genuinely advances (counted, not asserted). Driver sha256 93761c103096fc5d38cbb5473cde2039cc742e9d53c546a3b795055ce5621484 (post-guard).",
+      "respecialization": "readiness re-specializes because gen_probe_v2 serializes nothing and its Program is ephemeral -- a NEW attempt whose cost is kept out of the standalone generation metric",
+      "scope": "INTERPRETED (lean --run, ulimit -s unlimited, --tstack=1048576). NOT equivalence, NOT acceptance, NOT a reference comparison, NOT kernel certification. Native linking is a separate readiness mode and is not implied. hproj is TRUSTED: mixDriver does not kernel-reduce at nontrivial fuel."
      },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
       "generation_user_cpu_ms": null,
       "generation_system_cpu_ms": null,
-      "peak_rss_kb": 6809596,
+      "peak_rss_kb": 6830964,
       "observed_cgroup_peak_bytes": null,
       "phase_times_ms": {
        "generate": {
@@ -1078,13 +1079,23 @@
         "wall_ms": 60650,
         "peak_rss_kib": 6592540,
         "exit_code": 3
+       },
+       "readiness": {
+        "load_ms": 614,
+        "support_ms": 20,
+        "specialize_ms": 381876,
+        "check_ms": 1685,
+        "execute_ms": 298048,
+        "wall_ms": 703490,
+        "peak_rss_kib": 6830964,
+        "exit_code": 0
        }
       },
       "artifact_bytes": null,
       "environment_sha256": null,
-      "attempt_record": "fp/dcert2/genv2/issue_ul2 + fp/dcert2/readiness/issue (live)",
-      "peak_rss_kib": 6809596,
-      "peak_rss_gib": 6.5
+      "attempt_record": "fp/dcert2/genv2/issue_ul2 + fp/dcert2/readiness/issue",
+      "peak_rss_kib": 6830964,
+      "peak_rss_gib": 6.51
      }
     },
     "Verified compiler": {
