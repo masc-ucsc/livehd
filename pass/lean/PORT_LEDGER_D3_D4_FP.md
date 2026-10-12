@@ -7839,3 +7839,71 @@ next-image selection inside the emitted interpreter.  `SourceSupported`,
 `OpSupported` and `memFree` are untouched, deliberately: broadening them ahead of
 the soundness bridge is the one thing that must not happen.  PicoRV32 stays
 **BLOCKED**.
+
+### 63.28 Actual object-language memory dispatch, executed through the resolved hardware program
+
+**`Projection/HardwareMem.lean`** adds the memory source and operator dispatch to
+the **same backend**, in its own module so the original memory-free `hwS` and
+every theorem about it stay byte-identical.  `hwMemS` is built **from** `hwS` by
+*adding* four functions — no existing function is edited — and the whole program
+is resolved afresh by `resolveProgram`, so no pre-resolved numeric id is reused.
+Measured: 45 functions, `memAt` 41, `romWords` 42, `srcValM` 43, `applyOpM` 44.
+
+* `srcValM` answers the two memory source forms and **delegates** every other
+  form to the original `srcVal`:
+  - `memImg i _ _` → the i-th encoded image, or the **absent** image (`[]`,
+    zero-width zero) when the list is shorter — matching
+    `s.mems[idx]?.getD (fun _ => mk_bv 0 0)`;
+  - `memConst _ dw ct` → first-order initialised words from `ct` with a zero
+    default, so the word count is **`contents.size`**, not `2 ^ aw`.
+* `applyOpM` dispatches the real opcodes **26** (`Op_MemRead`) and **28**
+  (`Op_MemWriteBE`) to the object primitives, reading operands in certificate
+  dependency order through `slot`, with the node width and the **payload**
+  (`byte_w`) from the certificate; every other opcode **delegates** to the
+  original `applyOp`, so the scalar cases and the SHL/SRA/Sext work behind them
+  are untouched.
+
+**Executed through the resolved program**, not a host wrapper: every check calls
+`evalFuel hwMemP` at the ids `resolveProgram` assigned.  Thirteen pass —
+
+* `memImg 0` → the state's image; `memImg 3` against a one-image list → the
+  **absent** image exactly;
+* `memConst` → `contents.size` initialised words, read back as 33 at index 2;
+* `Op_MemRead` on a ROM → the **initialised** word; a disabled read → 0;
+* `Op_MemWriteBE` payload **`byte_w = 1`** (PicoRV32's real shape), mask 8 →
+  stored word exactly **8**, read back through the same dispatch;
+* `byte_w = 8`, mask 1 → **`0x000000FF`** — the byte-lane case, distinct from the
+  bit-enable one above;
+* an enabled **out-of-range** write → `typeError` from inside the dispatch;
+* a **malformed** image → `typeError`;
+* a non-memory source still reaching the original `srcVal`.
+
+The `byte_w = 1` control bites: expecting `0xFF` there fails the build.
+
+**Staged, and not claimed.**  `main` and `mkSources` are **not** rewired: the
+memory-bearing state/result encoding and the per-memory clock-controlled commit
+inside `main` are the next increment.  This module is **source and operator
+dispatch only** — no whole-step, adequacy or support credit follows from it.
+`SourceSupported`, `OpSupported` and `memFree` are untouched and the public route
+still refuses memory-bearing designs.  No `sorry`, no new axioms, no disabled
+checks.
+
+**B01's two distinct old-side phases, recorded separately** (neither is old FP
+support):
+
+1. the old **frontend** passes the whole `minion_dcache_top` compile — exit 0,
+   8.79 s, `graph_io 198087696323` — while master refuses at concat-lane-width
+   `mux_94508` in its second `pass.bitwidth`, on the same frozen input;
+2. old **`single_edge`** on a privately copied emitted whole graph then **refuses**
+   — exit 7, 0.15 s, 62,668 KiB: `gen_offload_reduce.u_reduce.u_ba_alloc_fifo.mem`
+   would commit every phase-divider sub-step, slot enables not wired into Memory.
+
+So the old route gets *further* than master and then stops for a different
+reason.  Neither phase yields a certificate.
+
+**B03 is a shared refusal, not a master regression.**  Old `9bb` on the frozen
+31-source `icache_top` input refuses with the **same first ambiguity** as master —
+`icache_pkg.sv:21:50`, `PaSize` imported from both `etlink_pkg` and `minion_pkg`
+— exit 1, 0.13 s.  That is an actual shared raw-source/configuration refusal; the
+fix is a proper input/configuration adapter with the qualification documented, not
+silencing the ambiguity check.
