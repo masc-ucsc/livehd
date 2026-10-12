@@ -7328,3 +7328,49 @@ reset/async metadata carried through; `Hw.checkResidual`'s bound for these
 traversals; and `SupportedByProjection` replacing `memFree` with the real
 conditions.  PicoRV32 stays **BLOCKED**: nothing is wired into `I_hw`, no
 predicate is weakened, no memory or metadata erased.
+
+### 63.18 The general evaluator bridge for the lookup path is proved
+
+**It landed.**  `getGo_body` and `getGo_sound` hold for **every list, every
+run-time address and every fuel at or above `4 · length + 8`** — a negative
+address, an address inside the table and an address past the end all covered,
+which is what the `if 0 ≤ x` in the statement records.
+
+The fix was to stop asking one broad `simp` to drive the whole six-function
+program, exactly as the audit suggested.  The proof is now a chain of rewrites
+over small one-step lemmas — `eval_lit_succ`, `eval_var_succ`,
+`evalList_cons_eq`, `eval_prim_succ`, `eval_ite_true_succ`,
+`eval_ite_false_succ`, `eval_call_succ` — with the list-index step factored into
+`cons_index_step` (split `x = 0` / `x > 0` / `x < 0`, integer and `toNat`
+arithmetic discharged by `omega`), and the induction on the **list**.  Fuel
+levels are written as explicit successors at every site, which is what the
+earlier attempt got wrong.
+
+**The audit's measurements matched the proof.**  Minimum observed body fuel for a
+far-outside address was 3, 6, 9, 27, 99 at lengths 0, 1, 2, 8, 32 — three levels
+per list step, i.e. `3·len + 3`.  The proved bound `4·len + 8` sits above that
+with slack, and three `#guard`s now exercise the **proved** bound at PicoRV32's
+table size: 137 fuel suffices for an in-range address, the far end, and an
+address past it.
+
+**Axioms, reported as they are.**  `cons_index_step` and the eleven earlier
+theorems use `propext` / `Quot.sound` only.  `getGo_body` and `getGo_sound`
+additionally use **`Classical.choice`**, which enters through `simp`/`omega`'s
+classical reasoning.  It is one of Lean's own three axioms, not an addition to
+this development's trusted base, and I am recording it rather than rounding it
+down: no `sorryAx` and no `Lean.ofReduceBool` anywhere.  File elaborates exit 0
+in 5.04 s, 667,596 KiB.
+
+**Still not proved, and named:** the `set`/`setGo` update and the
+`maskGo`/`writeBE` byte mask have **no general correspondence theorem** — only
+the executed `#guard`s.  The same lemma kit applies to them and they are next.
+Then the `I_hw` `memImg`/`memConst` source cases and the
+`Op_MemRead`/`Op_MemWriteBE` operator paths, which also need the function-index
+question answered: `memProg`'s functions are numbered 0–5 and **cannot be
+appended to `I_hw` unchanged** — either the helper program is composed with an
+index offset, or its calls are relocated.  After that: the memory-bearing result
+and runtime relation, clock-controlled commit with reset/async metadata
+preserved, a residual bound the checker accepts, and `SupportedByProjection`.
+
+PicoRV32 stays **BLOCKED**.  An evaluator lemma is not admission, and nothing
+here is wired into `I_hw`.

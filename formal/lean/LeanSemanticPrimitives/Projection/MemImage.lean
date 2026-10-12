@@ -332,27 +332,198 @@ the build if the answer is wrong -- on PicoRV32's actual memory shape, `aw 5,
 dw 32`.  Every run goes through `evalFuel` over `encMemImg`-encoded data, so it
 is projected execution, not a host wrapper.
 
-**Open obligation, stated rather than papered over.**  A GENERAL soundness
-theorem `evalFuel n memProg ρ (call 1 [encMemImg m, x]) = .value (ofBV (m.get x))`
-for all `m`, `x` and sufficient `n` is NOT proved here.  The obstacle is fuel
-indexing, not the implementation: the recursive `call 0` runs at a smaller fuel
-than the enclosing call, so a plain induction on the address does not line the
-induction hypothesis up, and the proof needs the standard fuel-monotone strong
-induction on `n`.  That is the next step on this path and it is listed in the
-obligations at the end of the file.
+**The general lookup theorem is now PROVED** -- `getGo_body` and `getGo_sound`
+above, for every list, every run-time address (negative, in range, or past the
+end) and every fuel at or above `4 * length + 8`.  The earlier obstacle was
+tactic plumbing, and the fix was to stop unfolding the six-function program with
+a broad `simp`: the small one-step lemmas (`eval_lit_succ`, `eval_var_succ`,
+`evalList_cons_eq`, `eval_prim_succ`, `eval_ite_*_succ`, `eval_call_succ`) do the
+reduction explicitly, the list-index step is a separate lemma with its integer
+arithmetic discharged by `omega`, and the induction is on the LIST.
+
+What is still NOT proved for the other two paths: the `set`/`setGo` update and
+the `maskGo`/`writeBE` byte mask have no general correspondence theorem yet, only
+the executed `#guard`s below.  They are the next ones, and the same lemma kit
+applies to them.
 
 **Fuel is bounded statically, and NOT by the syntax height.**  `getGo` walks the
-table, so its cost is the address; `maskGo` runs once per bit, so its cost is the
-word width.  Both are fixed by the design -- `2 ^ aw` or `contents.size`, and
-`dw` -- and are known when the design is specialized, never by run-time data.
-`memFuel` records that bound.  The existing `Hw.checkResidual` height bound does
-NOT cover these traversals, and wiring this bound into the checker is an open
-obligation; nothing here assumes the old bound suffices. -/
+table and stops at `nil`, so its cost is the table LENGTH -- the run-time address
+does not enter the bound, and is fixed by nothing.  `maskGo` runs once per bit,
+so its cost is the word width.  Length and width are design-determined (`2 ^ aw`
+or `contents.size`, and `dw`), which is what makes the bound design-dependent
+rather than data-dependent.  `memFuel` RECORDS a proposal; `getGo_body` below
+PROVES the lookup half of it.  The existing `Hw.checkResidual` height bound does
+NOT cover these traversals, and wiring a bound into the checker is a separate
+open obligation; nothing here assumes the old bound suffices. -/
 
 /-- PROPOSED fuel bound -- in the table LENGTH (the walk stops at `nil`, so the
 run-time address does not enter it) and the word width (one mask pass per bit).
 This is a recorded proposal, NOT a theorem: nothing below proves it. -/
 def memFuel (len width : Nat) : Nat := 4 * len + 6 * width + 32
+
+/-! ### Small evaluation lemmas
+
+Unfolding the whole six-function program with a broad `simp` does not drive the
+nested `evalFuel`/`evalFuelList` matches to completion.  These one-step lemmas do
+the reduction explicitly, so each proof below is a chain of rewrites rather than
+a hope about `simp`. -/
+
+section EvalHelpers
+variable {P : Program} {ρ : Env}
+
+theorem eval_lit_succ (n : Nat) (v : Val) : evalFuel (n + 1) P ρ (.lit v) = .value v := by
+  simp [evalFuel]
+
+@[simp] theorem evalList_nil_eq (n : Nat) : evalFuelList n P ρ ([] : List Term) = .inl [] := by
+  cases n <;> simp [evalFuelList]
+
+theorem eval_var_succ (n i : Nat) {v : Val} (h : ρ[i]? = some v) :
+    evalFuel (n + 1) P ρ (.var i) = .value v := by
+  simp [evalFuel, h]
+
+theorem evalList_cons_eq (n : Nat) (t : Term) (ts : List Term) {v : Val} {vs : List Val}
+    (h : evalFuel n P ρ t = .value v) (hs : evalFuelList n P ρ ts = .inl vs) :
+    evalFuelList n P ρ (t :: ts) = .inl (v :: vs) := by
+  simp [evalFuelList, h, hs]
+
+theorem eval_prim_succ (n : Nat) (p : Prim) (ts : List Term) {vs : List Val} {r : Val}
+    (hs : evalFuelList n P ρ ts = .inl vs) (hp : evalPrim p vs = .ok r) :
+    evalFuel (n + 1) P ρ (.prim p ts) = .value r := by
+  simp [evalFuel, hs, hp]
+
+theorem eval_ite_true_succ (n : Nat) {c : Term} (a b : Term)
+    (hc : evalFuel n P ρ c = .value (.bool true)) :
+    evalFuel (n + 1) P ρ (.ite c a b) = evalFuel n P ρ a := by
+  simp [evalFuel, hc]
+
+theorem eval_ite_false_succ (n : Nat) {c : Term} (a b : Term)
+    (hc : evalFuel n P ρ c = .value (.bool false)) :
+    evalFuel (n + 1) P ρ (.ite c a b) = evalFuel n P ρ b := by
+  simp [evalFuel, hc]
+
+theorem eval_call_succ (n f : Nat) (ts : List Term) {vs : List Val} {fd : FunDef}
+    (hs : evalFuelList n P ρ ts = .inl vs) (hf : P.fn f = some fd)
+    (ha : fd.arity = vs.length) :
+    evalFuel (n + 1) P ρ (.call f ts) = evalFuel n P vs fd.body := by
+  simp [evalFuel, hs, hf, ha]
+
+end EvalHelpers
+
+/-! ### The list-index step, with the integer arithmetic discharged separately -/
+
+theorem cons_index_step (a : BV) (t : List BV) (d : BV) {x : Int} (hx : x ≠ 0) :
+    (if 0 ≤ x then ((a :: t)[x.toNat]?.getD d) else d)
+      = (if 0 ≤ x - 1 then (t[(x - 1).toNat]?.getD d) else d) := by
+  by_cases hpos : 0 ≤ x
+  · have h2 : (0:Int) ≤ x - 1 := by omega
+    have hnat : x.toNat = (x - 1).toNat + 1 := by omega
+    rw [if_pos hpos, if_pos h2, hnat, List.getElem?_cons_succ]
+  · have h2 : ¬ (0:Int) ≤ x - 1 := by omega
+    rw [if_neg hpos, if_neg h2]
+
+/-- **The object-language table walk is correct for every list and every
+run-time address.**
+
+The address is quantified, not assumed small or known: a negative address and an
+address past the end both walk to `nil` and give the default, which is what the
+`if 0 ≤ x` records.  The fuel bound is in the TABLE LENGTH, and the induction is
+on the LIST, so nothing here depends on the address.
+
+Stated about the function BODY with a value environment, because that is what the
+recursive `call` re-enters: its arguments are computed terms, so a hypothesis
+phrased about a `call` with literal arguments would not apply. -/
+theorem getGo_body : ∀ (ws : List BV) (x : Int) (d : BV) (n : Nat),
+    4 * ws.length + 8 ≤ n →
+    evalFuel n memProg [encListG ofBV ws, Val.int x, ofBV d] fGetGo.body
+      = .value (ofBV (if 0 ≤ x then (ws[x.toNat]?.getD d) else d)) := by
+  intro ws
+  induction ws with
+  | nil =>
+    intro x d n hn
+    simp only [List.length_nil] at hn
+    rcases n with _ | _ | _ | k
+    · omega
+    · omega
+    · omega
+    have hc : evalFuel (k + 2) memProg [encListG ofBV ([] : List BV), Val.int x, ofBV d]
+                (.prim .isNil [.var 0]) = .value (.bool true) :=
+      eval_prim_succ (k + 1) _ _
+        (evalList_cons_eq _ _ _ (eval_var_succ k 0 rfl) (evalList_nil_eq _)) (by simp [evalPrim, encListG])
+    show evalFuel (k + 3) memProg _ (Term.ite _ _ _) = _
+    rw [eval_ite_true_succ (k + 2) _ _ hc, eval_var_succ (k + 1) 2 rfl]
+    simp
+  | cons a t ih =>
+    intro x d n hn
+    simp only [List.length_cons] at hn
+    rcases n with _ | _ | _ | _ | _ | k
+    · omega
+    · omega
+    · omega
+    · omega
+    · omega
+    have hL : encListG ofBV (a :: t) = .cons (ofBV a) (encListG ofBV t) := rfl
+    have hc1 : evalFuel (k + 4) memProg [encListG ofBV (a :: t), Val.int x, ofBV d]
+                 (.prim .isNil [.var 0]) = .value (.bool false) :=
+      eval_prim_succ (k + 3) _ _
+        (evalList_cons_eq _ _ _ (eval_var_succ (k + 2) 0 rfl) (evalList_nil_eq _))
+        (by rw [hL]; simp [evalPrim])
+    show evalFuel (k + 5) memProg _ (Term.ite _ _ _) = _
+    rw [eval_ite_false_succ (k + 4) _ _ hc1]
+    by_cases hx0 : x = 0
+    · subst hx0
+      have hc2 : evalFuel (k + 3) memProg [encListG ofBV (a :: t), Val.int 0, ofBV d]
+                   (.prim .eqI [.var 1, .lit (.int 0)]) = .value (.bool true) :=
+        eval_prim_succ (k + 2) _ _
+          (evalList_cons_eq (k + 2) _ _ (eval_var_succ (k + 1) 1 rfl)
+            (evalList_cons_eq (k + 2) _ _ (eval_lit_succ (k + 1) _) (evalList_nil_eq (k + 2))))
+          (by simp [evalPrim])
+      rw [eval_ite_true_succ (k + 3) _ _ hc2]
+      rw [eval_prim_succ (k + 2) .hd [.var 0] (r := ofBV a)
+            (evalList_cons_eq _ _ _ (eval_var_succ (k + 1) 0 rfl) (evalList_nil_eq _))
+            (by rw [hL]; simp [evalPrim])]
+      simp
+    · have hc2 : evalFuel (k + 3) memProg [encListG ofBV (a :: t), Val.int x, ofBV d]
+                   (.prim .eqI [.var 1, .lit (.int 0)]) = .value (.bool false) :=
+        eval_prim_succ (k + 2) _ _
+          (evalList_cons_eq (k + 2) _ _ (eval_var_succ (k + 1) 1 rfl)
+            (evalList_cons_eq (k + 2) _ _ (eval_lit_succ (k + 1) _) (evalList_nil_eq (k + 2))))
+          (by simp [evalPrim, hx0])
+      rw [eval_ite_false_succ (k + 3) _ _ hc2]
+      have hargs : evalFuelList (k + 2) memProg [encListG ofBV (a :: t), Val.int x, ofBV d]
+          [.prim .tl [.var 0], .prim .subI [.var 1, .lit (.int 1)], .var 2]
+          = .inl [encListG ofBV t, Val.int (x - 1), ofBV d] :=
+        evalList_cons_eq _ _ _
+          (eval_prim_succ (k + 1) .tl [.var 0]
+            (evalList_cons_eq _ _ _ (eval_var_succ k 0 rfl) (evalList_nil_eq _))
+            (by rw [hL]; simp [evalPrim]))
+          (evalList_cons_eq _ _ _
+            (eval_prim_succ (k + 1) .subI [.var 1, .lit (.int 1)]
+              (evalList_cons_eq (k + 1) _ _ (eval_var_succ k 1 rfl)
+                (evalList_cons_eq (k + 1) _ _ (eval_lit_succ k _) (evalList_nil_eq (k + 1))))
+              (by simp [evalPrim]))
+            (evalList_cons_eq _ _ _ (eval_var_succ (k + 1) 2 rfl) (evalList_nil_eq _)))
+      rw [eval_call_succ (k + 2) 0 _ hargs rfl rfl]
+      rw [cons_index_step a t d hx0]
+      exact ih (x - 1) d (k + 2) (by omega)
+
+/-- The same thing at the call site, for any sufficient fuel. -/
+theorem getGo_sound (ws : List BV) (x : Int) (d : BV) (ρ : Env) (n : Nat)
+    (hn : 4 * ws.length + 9 ≤ n) :
+    evalFuel n memProg ρ
+      (.call 0 [.lit (encListG ofBV ws), .lit (.int x), .lit (ofBV d)])
+      = .value (ofBV (if 0 ≤ x then (ws[x.toNat]?.getD d) else d)) := by
+  rcases n with _ | m
+  · omega
+  · have hargs : evalFuelList m memProg ρ
+        [.lit (encListG ofBV ws), .lit (.int x), .lit (ofBV d)]
+        = .inl [encListG ofBV ws, Val.int x, ofBV d] := by
+      rcases m with _ | j
+      · omega
+      · exact evalList_cons_eq (j + 1) _ _ (eval_lit_succ j _)
+          (evalList_cons_eq (j + 1) _ _ (eval_lit_succ j _)
+            (evalList_cons_eq (j + 1) _ _ (eval_lit_succ j _) (evalList_nil_eq (j + 1))))
+    rw [eval_call_succ m 0 _ hargs rfl rfl]
+    exact getGo_body ws x d m (by omega)
 
 /-! ### Worked runs at PicoRV32's shape (`aw 5, dw 32`) -/
 
@@ -524,6 +695,16 @@ theorem StateRelM_denote_functional {v : Val} {s t : StateM}
     (h₁ : StateRelM v s) (h₂ : StateRelM v t) : denote s = denote t :=
   congrArg denote (StateRelM_functional h₁ h₂)
 
+/- The PROVED bound at PicoRV32's table size (32 words): 4*32+9 = 137 fuel is
+enough for a get-call at an address inside the table, at the far end, and past
+it.  These agree with `getGo_sound`; they are a sanity run of it, not its proof. -/
+#guard evalFuel 137 MemImg.memProg [] (.call 0 [.lit (encListG ofBV (List.replicate 32 (mk_bv 32 0))),
+         .lit (.int 31), .lit (ofBV (mk_bv 32 7))]) == .value (ofBV (mk_bv 32 0))
+#guard evalFuel 137 MemImg.memProg [] (.call 0 [.lit (encListG ofBV (List.replicate 32 (mk_bv 32 0))),
+         .lit (.int 100000), .lit (ofBV (mk_bv 32 7))]) == .value (ofBV (mk_bv 32 7))
+#guard evalFuel 137 MemImg.memProg [] (.call 0 [.lit (encListG ofBV (List.replicate 32 (mk_bv 32 0))),
+         .lit (.int (-100)), .lit (ofBV (mk_bv 32 7))]) == .value (ofBV (mk_bv 32 7))
+
 /- A memory-bearing state really does survive the codec, carrying a ROM's
 initial contents: this is the case `decState` cannot represent at all. -/
 #guard decStateM (encStateM ⟨#[mk_bv 3 5], #[MemImg.ofMemConst 32 #[11, 22, 33]]⟩)
@@ -532,6 +713,9 @@ initial contents: this is the case `decState` cannot represent at all. -/
 end StateM
 
 section Audit
+#print axioms Projection.MemImg.getGo_body
+#print axioms Projection.MemImg.getGo_sound
+#print axioms Projection.MemImg.cons_index_step
 #print axioms Projection.MemImg.denote_writeEn
 #print axioms Projection.MemImg.denote_writeBE
 #print axioms Projection.MemImg.setAt_outOfRange
