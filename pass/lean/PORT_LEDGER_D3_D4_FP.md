@@ -6161,8 +6161,16 @@ instr_queue.sv:392:23: error: invalid member access for type 'fetch_entry_t' (ak
 cvxif_issue_register_commit_if_driver.sv:44:20: error: invalid member access for type 'x_register_t' (aka 'logic')
 ```
 
-21 errors on `frontend`, more on `issue_stage`. Elaborating a submodule as its
-own top degrades the config's struct typedefs to bare `logic`.
+21 errors on `frontend`, more on `issue_stage`.
+
+**The root cause, precisely.** `issue_stage` and `frontend` declare a default
+`CVA6Cfg = cva6_cfg_empty` and default their ten type parameters to `logic`.
+Selecting the raw block as the top leaves those defaults in place, so the
+member accesses are against `logic`. **Bender did not convert valid structs into
+`logic`** -- the slice was fine; what was missing was concrete configuration and
+types, which the AST-derived whole-unit wrappers supply. The whole-core 353-line
+route is an established recipe that works, not evidence that every other
+dependency slice is intrinsically incapable.
 
 ### 59.3 The real route, read off the existing corpus
 
@@ -6195,17 +6203,29 @@ which is the documented `max_width` option, not a weakened predicate.
 
 | row | approach | emission | artifact |
 |---|---|---|---|
-| B10 CVA6 frontend | verified compiler | 1.46 s | `frontend_gate_Lgraph.lean` 5,422,167 B + `frontend_gate.dcert` 274,052 B |
-| B10 CVA6 frontend | legacy (`cert_wf=eval`) | 1.64 s | `frontend_gate_Lgraph.lean` 969,162 B |
-| B09 CVA6 issue/scoreboard | verified compiler | 0.77 s | `issue_stage_gate_Lgraph.lean` 6,393,936 B + `issue_stage_gate.dcert` 530,496 B |
-| B09 CVA6 issue/scoreboard | legacy (`cert_wf=eval`) | 1.25 s | `issue_stage_gate_Lgraph.lean` 1,252,028 B |
+| B10 CVA6 frontend | verified compiler | 1.46 s | `frontend_gate_Lgraph.lean` **969,162 B** (`cb73b273…`) + `frontend_gate.dcert` 274,052 B |
+| B10 CVA6 frontend | legacy (`cert_wf=eval`) | 1.64 s | `frontend_gate_Lgraph.lean` **5,422,167 B** (`cc5cb1b7…`) |
+| B09 CVA6 issue/scoreboard | verified compiler | 0.77 s | `issue_stage_gate_Lgraph.lean` **1,252,028 B** (`4afcfb50…`) + `issue_stage_gate.dcert` 530,496 B |
+| B09 CVA6 issue/scoreboard | legacy (`cert_wf=eval`) | 1.25 s | `issue_stage_gate_Lgraph.lean` **6,393,936 B** (`fc33a941…`) |
+
+> **SIZE ATTRIBUTION CORRECTED.** The first version of this table swapped the
+> verified-compiler and legacy sizes on both rows. The file headers settle it --
+> the verified-compiler artifact opens
+> ``-- Emitted by pass.lean in `formal.lean.mode=verified_compiler`.`` and the
+> legacy one opens `/-` -- and the corrected direction matches PicoRV32, where
+> the verified-compiler literal is also the smaller of the two. I read an `ls`
+> ordering as an attribution and did not check the headers.
 
 Upstream phases are separate measurements, not folded in: `frontend` elaborated
 to an LGraph in 1.60 s and `single_edge` in 0.33 s; `issue_stage` in 9.64 s and
 0.06 s.
 
 **These are emissions, not YES.** Their generation checks -- elaboration of the
-emitted Lean -- are **RUNNING**; the cells stay RUNNING until those pass.
+emitted Lean -- are **RUNNING**; the cells stay RUNNING until those pass. One
+has landed: `B10` verified compiler elaborated in **80.46 s**, user 59.40 s,
+peak **7,765,208 KiB = 7.40 GiB**, retained olean, exit 0. The other three are
+queued or in flight and are **not credited**. A cap or a signal on any of them
+is undecided/failed-check evidence, never a backend refusal.
 
 ### 59.5 Still open
 

@@ -747,15 +747,45 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "emission": {
+       "wall_s": "0.77",
+       "user_cpu_s": "0.56",
+       "sys_cpu_s": "0.05",
+       "max_rss_kib": "104864",
+       "exit": "0",
+       "cgroup_memory_max_bytes": "51539607552",
+       "cgroup_memory_peak_bytes": "31461376",
+       "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+       "cgroup_observation_scope": "LAST-SAMPLE-BEFORE-EXIT (bounded sampling at 0.5 s; NOT a guaranteed final peak or final OOM counter) samples=1",
+       "cgroup_samples": "1",
+       "started_at": "2026-10-11T18:40:18-07:00",
+       "ended_at": "2026-10-11T18:40:19-07:00",
+       "loadavg_start": "33.26 34.41 34.76",
+       "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\ncompile\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/s2_single_edge/lg\n--top\nissue_stage_gate\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/verified_compiler_mw/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/verified_compiler_mw/result.json\n--emit-dir\nlean:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/verified_compiler_mw/lean\n--set\nformal.lean.mode=verified_compiler\n--set\nformal.lean.max_width=1048576",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      },
+      "artifact": {
+       "path": "generated/master_port/cov12x5/B09_cva6_issue_scoreboard/verified_compiler_mw/lean/issue_stage_gate_Lgraph.lean",
+       "bytes": 1252028,
+       "sha256": "4afcfb504459d9a787b5e2e5b730ea7d4f36f79680fab9d1326af21fb4fca461"
+      },
+      "generation_check": {
+       "wall_s": null,
+       "user_cpu_s": null,
+       "sys_cpu_s": null,
+       "max_rss_kib": null,
+       "exit": null,
+       "cgroup_memory_max_bytes": null,
+       "cgroup_memory_peak_bytes": null,
+       "cgroup_events": null,
+       "cgroup_observation_scope": null,
+       "cgroup_samples": null,
+       "started_at": null,
+       "ended_at": null,
+       "loadavg_start": null,
+       "argv": null,
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      }
      }
     },
     "Translation validation": {
@@ -782,15 +812,45 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "emission": {
+       "wall_s": "1.25",
+       "user_cpu_s": "0.62",
+       "sys_cpu_s": "0.08",
+       "max_rss_kib": "107032",
+       "exit": "0",
+       "cgroup_memory_max_bytes": "51539607552",
+       "cgroup_memory_peak_bytes": "48275456",
+       "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+       "cgroup_observation_scope": "LAST-SAMPLE-BEFORE-EXIT (bounded sampling at 0.5 s; NOT a guaranteed final peak or final OOM counter) samples=2",
+       "cgroup_samples": "2",
+       "started_at": "2026-10-11T18:40:19-07:00",
+       "ended_at": "2026-10-11T18:40:20-07:00",
+       "loadavg_start": "33.26 34.41 34.76",
+       "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\ncompile\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/s2_single_edge/lg\n--top\nissue_stage_gate\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/legacy_mw/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/legacy_mw/result.json\n--emit-dir\nlean:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/legacy_mw/lean\n--set\nformal.lean.emit_cert=true\n--set\nformal.lean.cert_wf=eval\n--set\nformal.lean.max_width=1048576",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      },
+      "artifact": {
+       "path": "generated/master_port/cov12x5/B09_cva6_issue_scoreboard/legacy_mw/lean/issue_stage_gate_Lgraph.lean",
+       "bytes": 6393936,
+       "sha256": "fc33a941d5dd2a02e120e07fbd04fa28d9a42a41947e8736612c0019297f7686"
+      },
+      "generation_check": {
+       "wall_s": null,
+       "user_cpu_s": null,
+       "sys_cpu_s": null,
+       "max_rss_kib": null,
+       "exit": null,
+       "cgroup_memory_max_bytes": null,
+       "cgroup_memory_peak_bytes": null,
+       "cgroup_events": null,
+       "cgroup_observation_scope": null,
+       "cgroup_samples": null,
+       "started_at": null,
+       "ended_at": null,
+       "loadavg_start": null,
+       "argv": null,
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      }
      }
     },
     "IR-as-semantics": {
@@ -808,6 +868,42 @@
       "environment_sha256": null,
       "attempt_record": null
      }
+    }
+   },
+   "metrics": {
+    "upstream_rtl_elaboration": {
+     "wall_s": "9.64",
+     "user_cpu_s": "9.70",
+     "sys_cpu_s": "0.89",
+     "max_rss_kib": "635628",
+     "exit": "0",
+     "cgroup_memory_max_bytes": "51539607552",
+     "cgroup_memory_peak_bytes": "627326976",
+     "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+     "cgroup_observation_scope": "LAST-SAMPLE-BEFORE-EXIT (bounded sampling at 0.5 s; NOT a guaranteed final peak or final OOM counter) samples=18",
+     "cgroup_samples": "18",
+     "started_at": "2026-10-11T18:38:09-07:00",
+     "ended_at": "2026-10-11T18:38:19-07:00",
+     "loadavg_start": "33.91 35.13 35.02",
+     "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\ncompile\nverilog\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cva6_foundation/cva6_wrappers/issue_stage_gate.sv\n--reader\nyosys-slang\n--top\nissue_stage_gate\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/s1_compile/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/s1_compile/result.json\n--emit-dir\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/s1_compile/lg\n--set\nyosys.filelist_file=/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cva6_foundation/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.flistplus.f\n--set\nyosys.setundef=zero\n--\n--ignore-assertions",
+     "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+    },
+    "single_edge": {
+     "wall_s": "0.06",
+     "user_cpu_s": "0.03",
+     "sys_cpu_s": "0.01",
+     "max_rss_kib": "58524",
+     "exit": "0",
+     "cgroup_memory_max_bytes": null,
+     "cgroup_memory_peak_bytes": null,
+     "cgroup_events": null,
+     "cgroup_observation_scope": "NONE (requested-only): no sample landed before exit; memory.max here is REQUESTED, not observed",
+     "cgroup_samples": null,
+     "started_at": "2026-10-11T18:38:19-07:00",
+     "ended_at": "2026-10-11T18:38:19-07:00",
+     "loadavg_start": "33.77 35.06 35.00",
+     "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\npass\nsingle_edge\n--top\nissue_stage_gate\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/s1_compile/lg\n--emit-dir\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/s2_single_edge/lg\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/s2_single_edge/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B09_cva6_issue_scoreboard/s2_single_edge/result.json",
+     "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
     }
    }
   },
@@ -852,15 +948,45 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "emission": {
+       "wall_s": "1.46",
+       "user_cpu_s": "1.05",
+       "sys_cpu_s": "0.07",
+       "max_rss_kib": "116288",
+       "exit": "0",
+       "cgroup_memory_max_bytes": "51539607552",
+       "cgroup_memory_peak_bytes": "55853056",
+       "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+       "cgroup_observation_scope": "LAST-SAMPLE-BEFORE-EXIT (bounded sampling at 0.5 s; NOT a guaranteed final peak or final OOM counter) samples=2",
+       "cgroup_samples": "2",
+       "started_at": "2026-10-11T18:40:14-07:00",
+       "ended_at": "2026-10-11T18:40:15-07:00",
+       "loadavg_start": "33.19 34.42 34.77",
+       "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\ncompile\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/s2_single_edge/lg\n--top\nfrontend_gate\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/verified_compiler_mw/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/verified_compiler_mw/result.json\n--emit-dir\nlean:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/verified_compiler_mw/lean\n--set\nformal.lean.mode=verified_compiler\n--set\nformal.lean.max_width=1048576",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      },
+      "artifact": {
+       "path": "generated/master_port/cov12x5/B10_cva6_frontend/verified_compiler_mw/lean/frontend_gate_Lgraph.lean",
+       "bytes": 969162,
+       "sha256": "cb73b273cb7aba6d15eaefaba6758171ec221f4a22ff24afd99eea2d9eca8d4e"
+      },
+      "generation_check": {
+       "wall_s": "80.46",
+       "user_cpu_s": "59.40",
+       "sys_cpu_s": "9.65",
+       "max_rss_kib": "7765208",
+       "exit": "0",
+       "cgroup_memory_max_bytes": "68719476736",
+       "cgroup_memory_peak_bytes": "2116653056",
+       "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+       "cgroup_observation_scope": "LAST-SAMPLE-BEFORE-EXIT (bounded sampling at 0.5 s; NOT a guaranteed final peak or final OOM counter) samples=154",
+       "cgroup_samples": "154",
+       "started_at": "2026-10-11T18:40:38-07:00",
+       "ended_at": "2026-10-11T18:41:59-07:00",
+       "loadavg_start": "33.25 34.33 34.73",
+       "argv": "env\nLEAN_PATH=/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Cli/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/batteries/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Qq/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/aesop/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/importGraph/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/plausible/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/mathlib/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/build/lib/lean:/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/lib/lean\n/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean\n-o\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/checks/verified_compiler/frontend_gate_Lgraph.olean\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/verified_compiler_mw/lean/frontend_gate_Lgraph.lean",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      }
      }
     },
     "Translation validation": {
@@ -887,15 +1013,45 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "emission": {
+       "wall_s": "1.64",
+       "user_cpu_s": "1.16",
+       "sys_cpu_s": "0.05",
+       "max_rss_kib": "114428",
+       "exit": "0",
+       "cgroup_memory_max_bytes": "51539607552",
+       "cgroup_memory_peak_bytes": "56745984",
+       "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+       "cgroup_observation_scope": "LAST-SAMPLE-BEFORE-EXIT (bounded sampling at 0.5 s; NOT a guaranteed final peak or final OOM counter) samples=3",
+       "cgroup_samples": "3",
+       "started_at": "2026-10-11T18:40:15-07:00",
+       "ended_at": "2026-10-11T18:40:17-07:00",
+       "loadavg_start": "33.19 34.42 34.77",
+       "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\ncompile\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/s2_single_edge/lg\n--top\nfrontend_gate\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/legacy_mw/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/legacy_mw/result.json\n--emit-dir\nlean:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/legacy_mw/lean\n--set\nformal.lean.emit_cert=true\n--set\nformal.lean.cert_wf=eval\n--set\nformal.lean.max_width=1048576",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      },
+      "artifact": {
+       "path": "generated/master_port/cov12x5/B10_cva6_frontend/legacy_mw/lean/frontend_gate_Lgraph.lean",
+       "bytes": 5422167,
+       "sha256": "cc5cb1b725c37ac694a879c385267f9fc9773eaaf206f13bff4ea3b09e3a632d"
+      },
+      "generation_check": {
+       "wall_s": null,
+       "user_cpu_s": null,
+       "sys_cpu_s": null,
+       "max_rss_kib": null,
+       "exit": null,
+       "cgroup_memory_max_bytes": null,
+       "cgroup_memory_peak_bytes": null,
+       "cgroup_events": null,
+       "cgroup_observation_scope": null,
+       "cgroup_samples": null,
+       "started_at": "2026-10-11T18:41:59-07:00",
+       "ended_at": null,
+       "loadavg_start": "33.18 34.06 34.60",
+       "argv": "env\nLEAN_PATH=/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Cli/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/batteries/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Qq/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/aesop/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/importGraph/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/plausible/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/mathlib/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/build/lib/lean:/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/lib/lean\n/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean\n-o\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/checks/legacy/frontend_gate_Lgraph.olean\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/legacy_mw/lean/frontend_gate_Lgraph.lean",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      }
      }
     },
     "IR-as-semantics": {
@@ -913,6 +1069,42 @@
       "environment_sha256": null,
       "attempt_record": null
      }
+    }
+   },
+   "metrics": {
+    "upstream_rtl_elaboration": {
+     "wall_s": "1.60",
+     "user_cpu_s": "1.53",
+     "sys_cpu_s": "0.74",
+     "max_rss_kib": "265224",
+     "exit": "0",
+     "cgroup_memory_max_bytes": "51539607552",
+     "cgroup_memory_peak_bytes": "257875968",
+     "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+     "cgroup_observation_scope": "LAST-SAMPLE-BEFORE-EXIT (bounded sampling at 0.5 s; NOT a guaranteed final peak or final OOM counter) samples=3",
+     "cgroup_samples": "3",
+     "started_at": "2026-10-11T18:38:03-07:00",
+     "ended_at": "2026-10-11T18:38:05-07:00",
+     "loadavg_start": "34.08 35.19 35.04",
+     "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\ncompile\nverilog\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cva6_foundation/cva6_wrappers/frontend_gate.sv\n--reader\nyosys-slang\n--top\nfrontend_gate\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/s1_compile/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/s1_compile/result.json\n--emit-dir\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/s1_compile/lg\n--set\nyosys.filelist_file=/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cva6_foundation/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.flistplus.f\n--set\nyosys.setundef=zero\n--\n--ignore-assertions",
+     "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+    },
+    "single_edge": {
+     "wall_s": "0.33",
+     "user_cpu_s": "0.02",
+     "sys_cpu_s": "0.04",
+     "max_rss_kib": "56308",
+     "exit": "0",
+     "cgroup_memory_max_bytes": null,
+     "cgroup_memory_peak_bytes": null,
+     "cgroup_events": null,
+     "cgroup_observation_scope": "NONE (requested-only): no sample landed before exit; memory.max here is REQUESTED, not observed",
+     "cgroup_samples": null,
+     "started_at": "2026-10-11T18:38:05-07:00",
+     "ended_at": "2026-10-11T18:38:05-07:00",
+     "loadavg_start": "34.08 35.19 35.04",
+     "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\npass\nsingle_edge\n--top\nfrontend_gate\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/s1_compile/lg\n--emit-dir\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/s2_single_edge/lg\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/s2_single_edge/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B10_cva6_frontend/s2_single_edge/result.json",
+     "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
     }
    }
   },
@@ -1096,15 +1288,40 @@
      },
      "generation_ms": 4010,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "emission": {
+       "wall_s": "4.01",
+       "user_cpu_s": "0.29",
+       "sys_cpu_s": "0.02",
+       "max_rss_kib": "76012",
+       "exit": "0",
+       "cgroup_memory_max_bytes": "17179869184",
+       "cgroup_memory_peak_bytes": "7766016",
+       "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+       "cgroup_observation_scope": "final-sample-before-exit samples=2",
+       "cgroup_samples": "2",
+       "started_at": "2026-10-11T17:56:33-07:00",
+       "ended_at": "2026-10-11T17:56:38-07:00",
+       "loadavg_start": "37.15 36.98 39.02",
+       "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\ncompile\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s2_single_edge/lg\n--top\npicorv32\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/vc_opt/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/vc_opt/result.json\n--emit-dir\nlean:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/vc_opt/lean\n--set\nformal.lean.mode=verified_compiler",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      },
+      "generation_check": {
+       "wall_s": "39.73",
+       "user_cpu_s": "17.07",
+       "sys_cpu_s": "9.52",
+       "max_rss_kib": "6929248",
+       "exit": "0",
+       "cgroup_memory_max_bytes": "34359738368",
+       "cgroup_memory_peak_bytes": "1190207488",
+       "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+       "cgroup_observation_scope": "final-sample-before-exit samples=76",
+       "cgroup_samples": "76",
+       "started_at": "2026-10-11T18:12:06-07:00",
+       "ended_at": "2026-10-11T18:12:46-07:00",
+       "loadavg_start": "33.88 34.77 36.85",
+       "argv": "env\nLEAN_PATH=/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Cli/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/batteries/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Qq/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/aesop/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/importGraph/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/plausible/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/mathlib/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/build/lib/lean:/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/lib/lean\n/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean\n-o\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/vc/picorv32_Lgraph.olean\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/vc_opt/lean/picorv32_Lgraph.lean",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      }
      }
     },
     "Translation validation": {
@@ -1190,15 +1407,40 @@
      },
      "generation_ms": 320,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "emission": {
+       "wall_s": "0.32",
+       "user_cpu_s": "0.27",
+       "sys_cpu_s": "0.03",
+       "max_rss_kib": "76148",
+       "exit": "0",
+       "cgroup_memory_max_bytes": null,
+       "cgroup_memory_peak_bytes": null,
+       "cgroup_events": null,
+       "cgroup_observation_scope": "NONE: the scope never appeared to the sampler; memory.max is REQUESTED only, not observed",
+       "cgroup_samples": null,
+       "started_at": "2026-10-11T18:15:58-07:00",
+       "ended_at": "2026-10-11T18:15:59-07:00",
+       "loadavg_start": "33.39 34.13 36.13",
+       "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\ncompile\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s2_single_edge/lg\n--top\npicorv32\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/legacy_wf/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/legacy_wf/result.json\n--emit-dir\nlean:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/legacy_wf/lean\n--set\nformal.lean.emit_cert=true\n--set\nformal.lean.cert_wf=eval",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      },
+      "generation_check": {
+       "wall_s": "87.87",
+       "user_cpu_s": "133.03",
+       "sys_cpu_s": "10.87",
+       "max_rss_kib": "8414084",
+       "exit": "0",
+       "cgroup_memory_max_bytes": "51539607552",
+       "cgroup_memory_peak_bytes": "2872528896",
+       "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+       "cgroup_observation_scope": "final-sample-before-exit samples=168",
+       "cgroup_samples": "168",
+       "started_at": "2026-10-11T18:16:09-07:00",
+       "ended_at": "2026-10-11T18:17:37-07:00",
+       "loadavg_start": "33.25 34.08 36.09",
+       "argv": "env\nLEAN_PATH=/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Cli/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/batteries/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Qq/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/aesop/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/importGraph/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/plausible/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/mathlib/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/build/lib/lean:/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/lib/lean\n/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean\n-o\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/legacy_wf/picorv32_Lgraph.olean\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/legacy_wf/lean/picorv32_Lgraph.lean",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      }
      }
     },
     "IR-as-semantics": {
@@ -1279,15 +1521,58 @@
      },
      "generation_ms": 60,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "emission": {
+       "wall_s": "0.06",
+       "user_cpu_s": "0.04",
+       "sys_cpu_s": "0.01",
+       "max_rss_kib": "13376",
+       "exit": "0",
+       "cgroup_memory_max_bytes": null,
+       "cgroup_memory_peak_bytes": null,
+       "cgroup_events": null,
+       "cgroup_observation_scope": "NONE: the scope never appeared to the sampler; memory.max is REQUESTED only, not observed",
+       "cgroup_samples": null,
+       "started_at": "2026-10-11T17:55:48-07:00",
+       "ended_at": "2026-10-11T17:55:48-07:00",
+       "loadavg_start": "34.33 36.63 39.02",
+       "argv": "python3\n-I\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/ir_as_semantics/tree/pass/lean/scripts/make_sim_launcher.py\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/verified_compiler2/lean/picorv32_Lgraph.lean",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      },
+      "generation_check": {
+       "wall_s": "9.13",
+       "user_cpu_s": "8.74",
+       "sys_cpu_s": "0.46",
+       "max_rss_kib": "850060",
+       "exit": "0",
+       "cgroup_memory_max_bytes": "34359738368",
+       "cgroup_memory_peak_bytes": "449781760",
+       "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+       "cgroup_observation_scope": "final-sample-before-exit samples=17",
+       "cgroup_samples": "17",
+       "started_at": "2026-10-11T18:14:51-07:00",
+       "ended_at": "2026-10-11T18:15:01-07:00",
+       "loadavg_start": "33.96 34.39 36.35",
+       "argv": "env\nLEAN_PATH=/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Cli/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/batteries/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Qq/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/aesop/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/importGraph/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/plausible/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/mathlib/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/build/lib/lean:/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/lib/lean\n/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean\n-o\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/sims/Sims/picorv32_Cert.olean\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/ir_as_semantics/tree/formal/lean/Sims/picorv32_Cert.lean",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      },
+      "generation_check_main": {
+       "wall_s": "0.84",
+       "user_cpu_s": "0.24",
+       "sys_cpu_s": "0.37",
+       "max_rss_kib": "478612",
+       "exit": "0",
+       "cgroup_memory_max_bytes": "34359738368",
+       "cgroup_memory_peak_bytes": "25206784",
+       "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+       "cgroup_observation_scope": "final-sample-before-exit samples=1",
+       "cgroup_samples": "1",
+       "started_at": "2026-10-11T18:15:09-07:00",
+       "ended_at": "2026-10-11T18:15:10-07:00",
+       "loadavg_start": "33.75 34.32 36.30",
+       "argv": "env\nLEAN_PATH=/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/sims:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Cli/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/batteries/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Qq/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/aesop/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/importGraph/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/plausible/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/mathlib/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/build/lib/lean:/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/lib/lean\n/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean\n-o\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/sims_main/picorv32_Main.olean\n-c\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/sims_main/picorv32_Main.c\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/ir_as_semantics/tree/formal/lean/Sims/picorv32_Main.lean",
+       "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+      },
+      "readiness": "elaboration + C emission only; the lake exe link and a launcher execution are NOT retained"
      }
     }
    },
@@ -1317,6 +1602,42 @@
      "loadavg_start": "36.97 37.99 39.80",
      "started_at": "2026-10-11T17:53:20-07:00",
      "ended_at": "2026-10-11T17:53:21-07:00"
+    }
+   },
+   "metrics": {
+    "upstream_rtl_elaboration": {
+     "wall_s": "5.16",
+     "user_cpu_s": "4.22",
+     "sys_cpu_s": "0.24",
+     "max_rss_kib": "326032",
+     "exit": "0",
+     "cgroup_memory_max_bytes": "17179869184",
+     "cgroup_memory_peak_bytes": "202678272",
+     "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+     "cgroup_observation_scope": "final-sample-before-exit samples=9",
+     "cgroup_samples": "9",
+     "started_at": "2026-10-11T17:53:06-07:00",
+     "ended_at": "2026-10-11T17:53:12-07:00",
+     "loadavg_start": "37.34 38.09 39.85",
+     "argv": "/mada/users/czeng14/projects/livehd-pass-lean-master/bazel-bin/lhd/lhd\ncompile\nverilog\n/mada/users/czeng14/projects/picorv32/picorv32.v\n--reader\nyosys-slang\n--top\npicorv32\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s1_compile/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s1_compile/result.json\n--emit-dir\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s1_compile/lg\n--set\nyosys.setundef=zero\n--\n--ignore-assertions",
+     "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
+    },
+    "single_edge": {
+     "wall_s": "1.15",
+     "user_cpu_s": "0.63",
+     "sys_cpu_s": "0.04",
+     "max_rss_kib": "148944",
+     "exit": "0",
+     "cgroup_memory_max_bytes": "17179869184",
+     "cgroup_memory_peak_bytes": "18284544",
+     "cgroup_events": "events.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0",
+     "cgroup_observation_scope": "final-sample-before-exit samples=2",
+     "cgroup_samples": "2",
+     "started_at": "2026-10-11T17:53:20-07:00",
+     "ended_at": "2026-10-11T17:53:21-07:00",
+     "loadavg_start": "36.97 37.99 39.80",
+     "argv": "/mada/users/czeng14/projects/livehd-pass-lean-master/bazel-bin/lhd/lhd\npass\nsingle_edge\n--top\npicorv32\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s1_compile/lg\n--emit-dir\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s2_single_edge/lg\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s2_single_edge/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s2_single_edge/result.json",
+     "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
     }
    }
   }
@@ -1357,5 +1678,21 @@
  "optimization_schedule": "after coverage table runs",
  "environment_record": "pass/lean/tests/MASTER_SIM_GENERATION_ENVIRONMENT.json",
  "observed_environment_sha256": "ad186ee1424e15afa052bfa000fa50843bd954354d0f10e49256e711632edd8a",
- "provisional": "INCOMPLETE/PROVISIONAL. 60 cells: 3 YES (PicoRV32, check-backed), 4 RUNNING (CVA6 frontend and issue/scoreboard emissions complete, elaboration checks in flight), 2 BLOCKED, 51 PENDING. A YES needs the approach-native artifact AND its declared generation check; emission alone is a phase."
+ "provisional": "INCOMPLETE/PROVISIONAL. 60 cells: 3 YES (PicoRV32, check-backed), 4 RUNNING (CVA6 frontend and issue/scoreboard; one check has passed and is NOT yet credited as YES pending the row policy), 2 BLOCKED, 51 PENDING.",
+ "environment_binding": {
+  "bazel_wrapper": "/soe/czeng14/.local/bin/bazel (Bazelisk), sha256 prefix 5a408715e932c025",
+  "version_selector": ".bazelversion in the cwd-resolved workspace",
+  "selected_from_master_cwd": "bazel 9.2.0 (master .bazelversion = 9.2.0)",
+  "selected_from_home_cwd": "bazel 9.3.0 -- DIFFERENT TOOL, same wrapper",
+  "note": "the wrapper hash does NOT identify the tool that ran: selection is cwd-dependent. Every attempt must bind cwd plus the resolved version, not the wrapper alone. The lhd used for coverage was built earlier and is bound by its own sha256 instead.",
+  "lhd_opt": "bazel-out/k8-opt/bin/lhd/lhd sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b (203,557,336 B)",
+  "lhd_fastbuild_not_used": "bazel-bin -> k8-fastbuild, sha256 414d5dcbf99b37fea2ceac2b81c13140 -- omits the .dcert; not used for coverage",
+  "lean": "4.31.0, commit 68218e876d2a38b1985b8590fff244a83c321783",
+  "leanc": "clang 22.1.4",
+  "bender": "/soe/czeng14/.local/bin/bender 0.32.0",
+  "slang_used": "bazel-vendored slang-11.0 (MODULE.bazel f33547e9...), NOT the system 9.1.214",
+  "cva6_source_pin": "/mada/users/czeng14/projects/cva6-blockfinding @ 6cb200105fb9441d170e45786125a737fab98e91; its only status entry is UNTRACKED cva6_blocks.txt, not a tracked RTL edit",
+  "cva6_clean_attempt": "/mada/users/czeng14/projects/cva6-clean/cva6 @ bc510437 was used for the raw-top attempts only; kept separate",
+  "max_width": "1048576, as scripts/run_cva6_module_lean_stress.sh:175 sets; the DEFAULT 1024 refusal is preserved and recorded, not removed"
+ }
 }
