@@ -44,10 +44,14 @@ exists.  What is claimed is a round trip for `MemImg`, and an exact denotation.
 `memProg` is a `Program` in the projection's own object language, built from its
 own `Prim`s -- list walking with `isNil`/`hd`/`tl`/`consP`, address arithmetic
 with `eqI`/`ltI`/`addI`/`subI`/`mulI`/`divI`, and bit work with `bvMk`/`bvBit`.
-It is NOT a host wrapper that calls `cert_mem_read`.  `memGet_sound` proves the
-object-language lookup equals `MemImg.get` for every image and address, by
-induction on the table, and the worked examples at PicoRV32's shape are
-`evalFuel` runs over encoded data.
+It is NOT a host wrapper that calls `cert_mem_read`.  `getGo_body` proves the
+table WALK correct for every list and address; `memGet_sound` lifts that to the
+ENCODED-IMAGE wrapper, so `call 1` on an `encMemImg` equals `MemImg.get`.  The
+worked examples at PicoRV32's shape are `evalFuel` runs over encoded data.
+
+Fuel bounds differ per theorem and are NOT interchangeable: `getGo_body` needs
+`4 * length + 8`, the literal-argument `getGo_sound` needs `+ 9`, and the wrapper
+`memGet_sound` needs `+ 14`.
 
 ## Fuel, honestly
 
@@ -401,6 +405,11 @@ theorem eval_ite_false_succ (n : Nat) {c : Term} (a b : Term)
     evalFuel (n + 1) P ρ (.ite c a b) = evalFuel n P ρ b := by
   simp [evalFuel, hc]
 
+theorem eval_letIn_succ (n : Nat) {e : Term} (b : Term) {v : Val}
+    (he : evalFuel n P ρ e = .value v) :
+    evalFuel (n + 1) P ρ (.letIn e b) = evalFuel n P (v :: ρ) b := by
+  simp [evalFuel, he]
+
 theorem eval_call_succ (n f : Nat) (ts : List Term) {vs : List Val} {fd : FunDef}
     (hs : evalFuelList n P ρ ts = .inl vs) (hf : P.fn f = some fd)
     (ha : fd.arity = vs.length) :
@@ -524,6 +533,88 @@ theorem getGo_sound (ws : List BV) (x : Int) (d : BV) (ρ : Env) (n : Nat)
             (evalList_cons_eq (j + 1) _ _ (eval_lit_succ j _) (evalList_nil_eq (j + 1))))
     rw [eval_call_succ m 0 _ hargs rfl rfl]
     exact getGo_body ws x d m (by omega)
+
+/-- **The ENCODED-IMAGE wrapper is correct.**  `call 1` on an `encMemImg` equals
+`MemImg.get` for every image and every run-time address -- negative, in range, or
+past the contents.  This is the theorem the module header claims; the table walk
+alone does not discharge it, because the wrapper also unpacks the constructor,
+finds the default word and does the sign test. -/
+theorem memGet_sound (m : MemImg) (x : Int) (ρ : Env) (n : Nat)
+    (hn : 4 * m.words.length + 15 ≤ n) :
+    evalFuel n memProg ρ (.call 1 [.lit (encMemImg m), .lit (.int x)])
+      = .value (ofBV (m.get x)) := by
+  rcases n with _|_|_|_|_|_|_|_|j
+  · omega
+  · omega
+  · omega
+  · omega
+  · omega
+  · omega
+  · omega
+  · omega
+  have hargs : evalFuelList (j + 7) memProg ρ
+      [.lit (encMemImg m), .lit (.int x)] = .inl [encMemImg m, Val.int x] :=
+    evalList_cons_eq (j + 7) _ _ (eval_lit_succ (j + 6) _)
+      (evalList_cons_eq (j + 7) _ _ (eval_lit_succ (j + 6) _) (evalList_nil_eq (j + 7)))
+  rw [eval_call_succ (j + 7) 1 _ hargs rfl rfl]
+  have hf : evalFuel (j + 6) memProg [encMemImg m, Val.int x] (.prim .ctorFieldsP [.var 0])
+      = .value (.cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil)) :=
+    eval_prim_succ (j + 5) _ _
+      (evalList_cons_eq (j + 5) _ _ (eval_var_succ (j + 4) 0 rfl) (evalList_nil_eq (j + 5)))
+      (by simp [evalPrim, encMemImg, listVal])
+  show evalFuel (j + 7) memProg _ (Term.letIn _ _) = _
+  rw [eval_letIn_succ (j + 6) _ hf]
+  have hw : evalFuel (j + 5) memProg
+      [.cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil), encMemImg m, Val.int x]
+      (.prim .hd [.var 0]) = .value (encListG ofBV m.words) :=
+    eval_prim_succ (j + 4) _ _
+      (evalList_cons_eq (j + 4) _ _ (eval_var_succ (j + 3) 0 rfl) (evalList_nil_eq (j + 4)))
+      (by simp [evalPrim])
+  rw [eval_letIn_succ (j + 5) _ hw]
+  have hdf : evalFuel (j + 4) memProg
+      [encListG ofBV m.words, .cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil),
+       encMemImg m, Val.int x]
+      (.prim .hd [.prim .tl [.var 1]]) = .value (ofBV m.dflt) :=
+    eval_prim_succ (j + 3) _ _
+      (evalList_cons_eq (j + 3) _ _
+        (eval_prim_succ (j + 2) .tl [.var 1] (r := .cons (ofBV m.dflt) .nil)
+          (evalList_cons_eq (j + 2) _ _ (eval_var_succ (j + 1) 1 rfl) (evalList_nil_eq (j + 2)))
+          (by simp [evalPrim]))
+        (evalList_nil_eq (j + 3)))
+      (by simp [evalPrim])
+  rw [eval_letIn_succ (j + 4) _ hdf]
+  by_cases hneg : x < 0
+  · have hc : evalFuel (j + 3) memProg
+        [ofBV m.dflt, encListG ofBV m.words,
+         .cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil), encMemImg m, Val.int x]
+        (.prim .ltI [.var 4, .lit (.int 0)]) = .value (.bool true) :=
+      eval_prim_succ (j + 2) _ _
+        (evalList_cons_eq (j + 2) _ _ (eval_var_succ (j + 1) 4 rfl)
+          (evalList_cons_eq (j + 2) _ _ (eval_lit_succ (j + 1) _) (evalList_nil_eq (j + 2))))
+        (by simp [evalPrim, hneg])
+    rw [eval_ite_true_succ (j + 3) _ _ hc, eval_var_succ (j + 2) 0 rfl,
+        MemImg.get_neg m hneg]
+  · have hc : evalFuel (j + 3) memProg
+        [ofBV m.dflt, encListG ofBV m.words,
+         .cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil), encMemImg m, Val.int x]
+        (.prim .ltI [.var 4, .lit (.int 0)]) = .value (.bool false) :=
+      eval_prim_succ (j + 2) _ _
+        (evalList_cons_eq (j + 2) _ _ (eval_var_succ (j + 1) 4 rfl)
+          (evalList_cons_eq (j + 2) _ _ (eval_lit_succ (j + 1) _) (evalList_nil_eq (j + 2))))
+        (by simp [evalPrim, hneg])
+    rw [eval_ite_false_succ (j + 3) _ _ hc]
+    have hcargs : evalFuelList (j + 2) memProg
+        [ofBV m.dflt, encListG ofBV m.words,
+         .cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil), encMemImg m, Val.int x]
+        [.var 1, .var 4, .var 0]
+        = .inl [encListG ofBV m.words, Val.int x, ofBV m.dflt] :=
+      evalList_cons_eq (j + 2) _ _ (eval_var_succ (j + 1) 1 rfl)
+        (evalList_cons_eq (j + 2) _ _ (eval_var_succ (j + 1) 4 rfl)
+          (evalList_cons_eq (j + 2) _ _ (eval_var_succ (j + 1) 0 rfl) (evalList_nil_eq (j + 2))))
+    rw [eval_call_succ (j + 2) 0 _ hcargs rfl rfl]
+    have hpos : (0:Int) ≤ x := by omega
+    rw [getGo_body m.words x m.dflt (j + 2) (by omega)]
+    simp [MemImg.get, hpos]
 
 /-! ### Worked runs at PicoRV32's shape (`aw 5, dw 32`) -/
 
@@ -695,6 +786,15 @@ theorem StateRelM_denote_functional {v : Val} {s t : StateM}
     (h₁ : StateRelM v s) (h₂ : StateRelM v t) : denote s = denote t :=
   congrArg denote (StateRelM_functional h₁ h₂)
 
+/- The PROVED WRAPPER bound at PicoRV32's table size: 4*32+15 = 143 fuel, on an
+encoded image, inside the table and past it. -/
+#guard evalFuel 143 MemImg.memProg []
+         (.call 1 [.lit (MemImg.encMemImg (MemImg.zeroImg 5 32)), .lit (.int 31)])
+       == .value (ofBV (mk_bv 32 0))
+#guard evalFuel 143 MemImg.memProg []
+         (.call 1 [.lit (MemImg.encMemImg (MemImg.ofMemConst 32 #[11, 22, 33])), .lit (.int 2)])
+       == .value (ofBV (mk_bv 32 33))
+
 /- The PROVED bound at PicoRV32's table size (32 words): 4*32+9 = 137 fuel is
 enough for a get-call at an address inside the table, at the far end, and past
 it.  These agree with `getGo_sound`; they are a sanity run of it, not its proof. -/
@@ -713,6 +813,7 @@ initial contents: this is the case `decState` cannot represent at all. -/
 end StateM
 
 section Audit
+#print axioms Projection.MemImg.memGet_sound
 #print axioms Projection.MemImg.getGo_body
 #print axioms Projection.MemImg.getGo_sound
 #print axioms Projection.MemImg.cons_index_step

@@ -7331,10 +7331,15 @@ predicate is weakened, no memory or metadata erased.
 
 ### 63.18 The general evaluator bridge for the lookup path is proved
 
-**It landed.**  `getGo_body` and `getGo_sound` hold for **every list, every
-run-time address and every fuel at or above `4 · length + 8`** — a negative
-address, an address inside the table and an address past the end all covered,
-which is what the `if 0 ≤ x` in the statement records.
+**It landed.**  `getGo_body` and `getGo_sound` hold for **every list and every
+run-time address** — a negative address, an address inside the table and an
+address past the end all covered, which is what the `if 0 ≤ x` in the statement
+records.
+
+**Their bounds are NOT the same**, and my first summary wrongly implied they
+were: `getGo_body` needs `4 · length + 8`, the literal-argument `getGo_sound`
+needs `4 · length + 9`.  Neither of them covers the encoded-image wrapper, which
+is a separate theorem (§63.19).
 
 The fix was to stop asking one broad `simp` to drive the whole six-function
 program, exactly as the audit suggested.  The proof is now a chain of rewrites
@@ -7374,3 +7379,48 @@ preserved, a residual bound the checker accepts, and `SupportedByProjection`.
 
 PicoRV32 stays **BLOCKED**.  An evaluator lemma is not admission, and nothing
 here is wired into `I_hw`.
+
+### 63.19 The encoded-image wrapper is proved, and a false header claim is fixed
+
+**The header claimed a theorem that did not exist.**  `MemImage.lean`'s header
+said *"`memGet_sound` proves the object-language lookup equals `MemImg.get` for
+every image and address"*.  There was no `memGet_sound`.  The proved table walk
+does **not** discharge that: the wrapper also has to unpack the constructor, find
+the default word and do the sign test.  The claim is now true because the theorem
+exists.
+
+`memGet_sound (m) (x) (ρ) (n) : 4 * m.words.length + 15 ≤ n →
+evalFuel n memProg ρ (call 1 [encMemImg m, x]) = .value (ofBV (m.get x))` — for
+**every image and every run-time address**, negative, in range, or past the
+contents.  Same method as the walk: `eval_letIn_succ` joins the existing one-step
+lemmas, each `letIn` is discharged with its own evaluated value, and the sign
+test splits into the `get_neg` branch and the `getGo_body` branch.
+
+**Three bounds, three different numbers**, now stated separately everywhere:
+
+| theorem | covers | bound |
+|---|---|---|
+| `getGo_body` | the walk, value environment | `4·len + 8` |
+| `getGo_sound` | the walk, literal arguments | `4·len + 9` |
+| `memGet_sound` | the **encoded image** wrapper | `4·len + 15` |
+
+Two `#guard`s exercise the proved **wrapper** bound at PicoRV32's table size
+(143 fuel): a `zeroImg 5 32` read at address 31, and a ROM read returning its
+**initialised** third word.  `memGet_sound` uses `propext`, `Classical.choice`
+and `Quot.sound` — Lean's own axioms, through `simp`/`omega` — with no `sorryAx`
+and no `Lean.ofReduceBool`.  File elaborates exit 0 in 5.92 s, 678,688 KiB.
+
+**Still owed, unchanged and not softened:** general correspondence for
+`setGo`/`set` and for `maskGo`/`writeBE` (only executed `#guard`s today); the
+combined `memFuel` stays labelled **unproved** until its composed bound is
+established; the enabled-write reference bridge still needs its real `InRange`,
+width, shape and byte-width conditions discharged on the supported path — our
+finite-table out-of-range no-op is **not** the reference function's write
+semantics; the `I_hw` source and operator cases, which require the helper
+function identity to be resolved properly (parameterised lookup, or composition
+with a checked evaluation-preserving relocation — appending functions 0–5
+unchanged is wrong); the memory-bearing **result** codec and a relation to the
+real `RuntimeState`/`RuntimeResult` rather than only to `StateM`; clock-controlled
+commit with reset/async metadata; and the residual/checker and adequacy premises.
+
+PicoRV32 stays **BLOCKED**.
