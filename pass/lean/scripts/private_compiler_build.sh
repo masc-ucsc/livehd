@@ -42,15 +42,84 @@ if [ -n "$(git -C "$PABS" status --porcelain)" ]; then
   echo "REFUSING: $PABS is dirty; a build whose source nobody can regenerate is not evidence"; exit 2
 fi
 
-# LIVE IMPORTERS.  Any other process whose command line references this private
-# root may be reading the very artifacts this build would replace.
-mine=$$
-live=$(ps -eo pid,args --no-headers 2>/dev/null \
-       | awk -v root="$PABS" -v me="$mine" '$1!=me && index($0,root)>0 {print}' \
-       | grep -v "private_compiler_build.sh" | grep -v "[a]wk -v root")
+# LIVE IMPORTERS -- detected from what a process actually HOLDS, not from what
+# its argv happens to mention.
+#
+# The first version of this guard grepped `ps -eo args` for the private root.
+# That is wrong in both directions: it MISSES a reader that found the root
+# through `LEAN_PATH` in its environment or through its working directory while
+# its argv is relative, and it REFUSES an unrelated waiter or observer whose
+# command line merely names the path.  The evidence used now is possession:
+#
+#   * an OPEN FILE DESCRIPTOR resolving under the private root -- the strongest
+#     signal, a process holding a file open right now;
+#   * a MAPPED FILE under it (`/proc/<pid>/maps`) -- how a loaded `.olean`
+#     actually shows up;
+#   * `LEAN_PATH` / `D3_LEAN_ROOT` / `LAKE_*` in the ENVIRONMENT pointing at it;
+#   * a working directory inside it.
+#
+# Every candidate path is RESOLVED before the containment test, so a symlink
+# into the root counts and a symlink out of it does not.  This process and its
+# own ancestors are excluded, so the guard cannot match itself.
+live=$(python3 -I - "$PABS" "$$" <<'PYGUARD'
+import os, sys, pathlib
+root = pathlib.Path(sys.argv[1]).resolve()
+me = int(sys.argv[2])
+
+def mine(pid):                      # self or one of my ancestors
+    seen, p = set(), pid
+    while p and p not in seen:
+        if p == me: return True
+        seen.add(p)
+        try:
+            st = pathlib.Path(f"/proc/{p}/stat").read_text()
+            p = int(st[st.rindex(")") + 2:].split()[1])
+        except Exception:
+            return False
+    return False
+
+def under(path):
+    try:    return pathlib.Path(path).resolve().is_relative_to(root)
+    except Exception: return False
+
+hits = []
+for d in pathlib.Path("/proc").iterdir():
+    if not d.name.isdigit(): continue
+    pid = int(d.name)
+    if pid == me or mine(pid): continue
+    why = None
+    try:
+        for fd in (d / "fd").iterdir():
+            if under(fd):
+                why = f"open fd -> {os.readlink(fd)}"; break
+    except Exception: pass
+    if not why:
+        try:
+            for line in (d / "maps").read_text().splitlines():
+                f = line.split(" ", 5)[-1].strip()
+                if f.startswith("/") and under(f):
+                    why = f"mapped {f}"; break
+        except Exception: pass
+    if not why:
+        try:
+            for kv in (d / "environ").read_bytes().split(b"\0"):
+                k, _, v = kv.decode("utf-8", "replace").partition("=")
+                if k in ("LEAN_PATH", "D3_LEAN_ROOT", "LAKE_HOME", "LAKE_PKG_URL_MAP") \
+                   and any(under(x) for x in v.split(":") if x):
+                    why = f"{k} references the root"; break
+        except Exception: pass
+    if not why and under(d / "cwd"):
+        why = "cwd inside the root"
+    if why:
+        try:    cmd = (d / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")[:110]
+        except Exception: cmd = "?"
+        hits.append(f"{pid:>8}  {why}\n          {cmd}")
+print("\n".join(hits))
+PYGUARD
+)
 if [ -n "$live" ]; then
   echo "REFUSING: this build context has live importers; wait for them to reach a terminal result"
-  echo "$live" | cut -c1-140
+  echo "$live"
   exit 4
 fi
 

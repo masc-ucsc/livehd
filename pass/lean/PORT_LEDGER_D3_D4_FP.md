@@ -6756,8 +6756,17 @@ certificates at a different fuel.  **Native linking is a separate readiness mode
 and is not implied by any interpreted run here.**  The native route
 (`scripts/build-opt.sh`) builds `Compiler/CertIOV1` and **not** `Compiler/CertIO`,
 because the DCERT2 codec reaches `Compiler/CompileDesign`, which does
-`import Mathlib`, and this workspace's mathlib package ships oleans with **no**
-native objects.
+`import Mathlib`, and this workspace's mathlib package currently ships oleans
+with **no** native objects (`find .lake/packages/mathlib/.lake/build -name '*.o'`
+returns 0, and there is no `.a` or `.so`).
+
+**Scope of that observation, corrected.**  It establishes a MISSING PREREQUISITE
+in this route — the native artifacts are not present and would have to be
+produced — and nothing more.  It is **not** a finding that such a build is
+impossible, and an earlier phrasing of mine ("this workspace cannot build
+native") overstated it.  What the cost of producing them would be was not
+measured, and that build is not started here: it is optional work that sits
+behind coverage.
 
 The DCERT1 blocker is confirmed by execution rather than inference: the retained
 native driver (`sha256 b7abe8e0…`) refuses both DCERT2 certificates with
@@ -6901,9 +6910,71 @@ readiness runs are **INTERPRETED** executions of the residual through the
 projection's own checked simulator.  They are not equivalence, not acceptance,
 not a reference comparison against `interpretDesign`, not kernel certification,
 and they imply nothing about native linking, which remains a separate readiness
-mode that this workspace cannot build for the DCERT2 route.  The specialization
+mode whose prerequisites this route does not currently have in place — see §63.8
+for what that observation does and does not establish.  The specialization
 each readiness run performs is a **new attempt** forced by the ephemerality of
 the generated `Program`, and its cost is not a second generation measurement.
 
 Matrix: **11 YES, 11 NO, 37 BLOCKED, 1 RUNNING** over 60 cells.  The single
 RUNNING cell is `B09`'s TV re-attempt at the 7200 s budget.
+
+### 63.12 A real false pass in the reuse path, and the guards that now stop it
+
+**The counterexample.**  A retained attempt with `exit` = 0 but GNU time
+reporting `exit 1` was **reused as a pass**.  The reuse branch read only the
+`exit` file and skipped the producer-status validation that a fresh phase
+performs — so a cell whose two records contradict each other was credited — and
+it wrote `REUSED exit=0` **over the retained `DISPOSITION.txt`**, destroying the
+record it claimed to be honouring.  It checked no certificate, source, fuel,
+cycle, tool or dependency identity, and `main` overwrote the module binding
+*before* deciding reuse, so the binding of the run that produced the retained
+attempt was replaced by the request that reused it.  `--force` and failed
+retries wrote into the same phase directory despite the comment promising a new
+attempt root.
+
+**Attempts are now immutable.**  Every run writes a fresh
+`<phase>/attempt-NNNN-<ts>/` and nothing ever writes into an existing one — not
+a retry, not `--force`, not a reuse decision.  Reuse verdicts live in
+`<phase>/decisions/`, per-request bindings in `<module>/requests/`, and an
+append-only `<phase>/index.tsv` lists the attempts.  A retained attempt's
+binding, logs, exit, timing and disposition are never touched.
+
+**Reuse is earned.**  All of these must hold, or the request gets a new attempt:
+`exit` present, parseable and 0; a parseable GNU-time producer status that is
+also 0 and agrees with it; a `DISPOSITION.txt` beginning `OK`; and a
+byte-identical `IDENTITY.txt` — same certificate **content**, same driver
+**content**, same lean binary and version, same resolved `LEAN_PATH`, same argv
+(which carries fuel and cycles) and the same timeout.  So reuse can never
+relabel an old result as a fresh source run, and a driver edited in place cannot
+be mistaken for the one that ran.
+
+Verified by `pass/lean/scripts/fp_cov_dcert2_reuse_test.sh`, which extracts the
+**live** functions from the dispatcher and drives them against synthetic
+attempts with a stub `lean` — no Lean, no certificate, no generation, under a
+second.  All eight cases pass, and `retained_unchanged` is **YES in every one**,
+including the reuse case.  Case 1 is the audited counterexample, now refused.
+
+**The LEAN_PATH guard is no longer lexical.**  Every entry is `readlink -e`
+resolved before the containment test, empty entries (which mean the implicit
+current directory) and relative entries are refused, and an entry that resolves
+outside the private closure or the one allowed toolchain is refused by name and
+by target.  A symlink under the private root pointing at a shared mutable build
+tree passes any string test and would have imported foreign bytes; it does not
+pass this one.
+
+**The live-importer guard now uses possession, not argv.**  Its first version
+grepped `ps -eo args` for the private root, which is wrong in both directions: it
+misses a reader that found the root through `LEAN_PATH` or its working directory
+while its argv is relative, and it refuses an unrelated waiter whose command line
+merely names the path.  It now looks for an **open file descriptor** under the
+root, a **mapped file**, `LEAN_PATH`/`D3_LEAN_ROOT`/`LAKE_*` in the
+**environment**, or a **working directory** inside it — every candidate resolved
+before the containment test — and excludes itself and its own ancestors.  Run
+against the live TV re-attempt it refuses with exit 4 and says *why* for each:
+`cwd inside the root` ×2, `D3_LEAN_ROOT references the root`, and `open fd ->
+…/logs/issue_stage_gate.time` ×2.
+
+**None of this retracts the observed passes.**  The frontend and issue-stage
+eight-cycle readiness runs, and the two TV `agree` verdicts, were produced by
+real runs whose raw records are retained; the counterexample is about what the
+dispatcher would credit in future, not about those.

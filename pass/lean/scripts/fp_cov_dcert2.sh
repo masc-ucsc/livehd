@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # FUTAMURA / DCERT2 serial coverage procedure: decode -> support -> generate ->
-# readiness.  One certificate at a time, each phase bound and recorded
-# separately, every producer exit propagated.
+# readiness.  One certificate at a time, each phase recorded as an IMMUTABLE
+# ATTEMPT, every producer exit propagated.
 #
 # THE FOUR PHASES ARE DIFFERENT CLAIMS AND ARE NEVER COLLAPSED:
 #
@@ -19,12 +19,27 @@
 #              was serialized, so it is a NEW attempt with its own cost and its
 #              specialize time is NOT a second generation measurement.
 #
-# REUSE, NOT REPLAY.  A phase whose retained cell already holds `exit 0` is NOT
-# re-run: it is reported REUSED with the retained record.  `--only readiness`
-# skips straight to the readiness phase for certificates whose earlier phases
-# already passed.  Re-running a passed hour-long generation to reach the phase
-# after it is replay, and replay is what this flag exists to prevent.  Use
-# --force to deliberately redo a phase; it then lands in a NEW attempt root.
+# ATTEMPTS ARE IMMUTABLE.  Every run writes a fresh `<phase>/attempt-NNNN-<ts>/`
+# and nothing ever writes into an existing one -- not a retry, not `--force`, not
+# a reuse decision.  An earlier version wrote the reuse verdict straight over the
+# retained `DISPOSITION.txt`, destroying the record it claimed to be honouring.
+# Reuse decisions now live in `<phase>/decisions/`, and the per-request binding in
+# `<module>/requests/`, so a retained attempt's binding, logs, exit, timing and
+# disposition are never touched.
+#
+# REUSE IS EARNED, NOT ASSUMED.  A COUNTEREXAMPLE made this concrete: a retained
+# cell with `exit`=0 but GNU time reporting `exit 1` was reused as a pass, because
+# the reuse branch read only the `exit` file and skipped the status validation a
+# fresh phase performs.  Reuse now requires ALL of:
+#     * `exit` present, parseable and 0;
+#     * a parseable GNU-time producer status that is also 0 (both records, agreeing);
+#     * a `DISPOSITION.txt` that begins with `OK`;
+#     * a byte-identical IDENTITY.txt -- same certificate CONTENT, same driver
+#       CONTENT, same lean binary and version, same resolved LEAN_PATH, same
+#       argv (which carries fuel and cycles) and the same timeout.
+# Anything missing, disagreeing, stale or differently configured is REFUSED as
+# evidence for this request, and a new attempt is run instead.  Reuse therefore
+# never relabels an old result as a fresh source run.
 #
 # INTERPRETER STACK.  `lean --run` aborts these designs with "deep recursion was
 # detected at 'interpreter'" inside Projection.mixTerms at the default stack.
@@ -36,7 +51,9 @@
 # Everything here is INTERPRETED.  Native linking is a separate readiness mode
 # and is not implied by any of it: the native route (scripts/build-opt.sh) builds
 # Compiler/CertIOV1 and NOT Compiler/CertIO, because the DCERT2 codec reaches
-# Compiler/CompileDesign, which does `import Mathlib`.
+# Compiler/CompileDesign, which does `import Mathlib`, and this workspace's
+# mathlib package currently ships oleans with no native objects.  That is a
+# MISSING PREREQUISITE in this route, not a proof that such a build is impossible.
 #
 #   fp_cov_dcert2.sh [--only PHASE] [--force] <private-checkout> <out-dir> \
 #                    <stepFuel> <workFuel> <cycles> <cert.dcert>...
@@ -64,33 +81,39 @@ done
 [ "$SF"  -gt 0 ] || { echo "REFUSING: stepFuel must be positive"; exit 2; }
 [ "$WF"  -gt 0 ] || { echo "REFUSING: workFuel must be positive"; exit 2; }
 # Zero cycles executes no residual step, so a READINESS OK would be a pass
-# earned by doing nothing.  The Lean driver refuses it too; refusing here as
-# well means the sweep never launches the work in the first place.
+# earned by doing nothing.  The Lean driver refuses it too.
 [ "$CYC" -gt 0 ] || { echo "REFUSING: cycles must be POSITIVE; zero executes no residual step"; exit 2; }
 # A sweep over zero certificates is not a successful sweep.
 [ "$#" -gt 0 ] || { echo "REFUSING: no certificate given; a sweep with no target is not a pass"; exit 2; }
 
-R=/mada/users/czeng14/projects/livehd-pass-lean-master
-LEANBIN=/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean
-TOOLCHAIN=/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0
+R=${FP_REPO_ROOT:-/mada/users/czeng14/projects/livehd-pass-lean-master}
+LEANBIN=${FP_LEAN_BIN:-/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean}
+TOOLCHAIN=${FP_TOOLCHAIN_ROOT:-/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0}
 [ -x "$LEANBIN" ] || { echo "REFUSING: no lean at $LEANBIN"; exit 2; }
-PABS=$(cd "$P" && pwd -P) || { echo "REFUSING: cannot resolve $P"; exit 2; }
+PABS=$(readlink -e "$P") || { echo "REFUSING: cannot resolve $P"; exit 2; }
+TCABS=$(readlink -e "$TOOLCHAIN") || { echo "REFUSING: cannot resolve toolchain $TOOLCHAIN"; exit 2; }
 
 LP=$(cd "$PABS/formal/lean" && lake env printenv LEAN_PATH 2>/dev/null)
 [ -n "$LP" ] || { echo "REFUSING: could not resolve LEAN_PATH from $PABS/formal/lean"; exit 2; }
-# EVERY entry must be inside the independently owned private closure, or inside
-# the one explicitly allowed immutable toolchain.  Checking only that the
-# private root appears SOMEWHERE in the string would pass a LEAN_PATH that also
-# carried a live shared build root -- which is exactly the shared-mutable-state
-# failure this whole private-root exercise exists to avoid.
+# EVERY entry is RESOLVED and then checked for containment.  A lexical check is
+# not a containment check: a symlink under the private root that points at a
+# shared mutable build tree passes any string test and still imports foreign
+# bytes.  Empty entries are refused too -- an empty element means "the current
+# directory", which is implicit, unrecorded state.
 IFS=':' read -r -a LPDIRS <<< "$LP"
 for d in "${LPDIRS[@]}"; do
-  [ -n "$d" ] || continue
-  case "$d" in
-    "$PABS"/*|"$TOOLCHAIN"/*) : ;;
-    *) echo "REFUSING: LEAN_PATH entry outside the private closure and the allowed toolchain: $d"; exit 2 ;;
+  if [ -z "$d" ]; then
+    echo "REFUSING: LEAN_PATH contains an empty entry, which means the implicit current directory"; exit 2; fi
+  case "$d" in /*) : ;; *) echo "REFUSING: LEAN_PATH entry is not absolute: $d"; exit 2 ;; esac
+  rd=$(readlink -e "$d") || { echo "REFUSING: LEAN_PATH entry does not resolve: $d"; exit 2; }
+  case "$rd" in
+    "$PABS"/*|"$TCABS"/*) : ;;
+    *) echo "REFUSING: LEAN_PATH entry resolves outside the private closure and the allowed toolchain:"
+       echo "          $d -> $rd"; exit 2 ;;
   esac
 done
+LPSHA=$(printf '%s' "$LP" | sha256sum | cut -d' ' -f1)
+LEANVER=$("$LEANBIN" --version)
 
 DRV_DECODE=$R/formal/lean/scripts/dcert2_loadcheck.lean
 DRV_SUPPORT=$R/formal/lean/scripts/dcert2_support.lean
@@ -101,48 +124,116 @@ for f in "$DRV_DECODE" "$DRV_SUPPORT" "$DRV_GEN" "$DRV_READY"; do
 done
 
 mkdir -p "$OUT"
+TS=$(date +%Y%m%d-%H%M%S)-$$
 
-# phase <cell> <timeout> <driver.lean> <driver-args...>
-#   argv is passed as an ARRAY and handed to the inner shell as positional
-#   parameters, so a path containing spaces survives intact.  `ulimit` needs a
-#   shell, which is why one is used at all; `$*` splicing is not.
+# identity_of <out-file> <timeout> <driver> <cert> <args...>
+#   The identity a reuse must match EXACTLY.  Content hashes, not paths alone:
+#   a driver edited in place must not be mistaken for the one that ran.
+identity_of() {
+  local f=$1 tmo=$2 drv=$3 cert=$4; shift 4
+  { echo "cert_sha256=$(sha256sum "$cert" | cut -d' ' -f1)"
+    echo "cert_bytes=$(stat -c%s "$cert")"
+    echo "driver=$drv"
+    echo "driver_sha256=$(sha256sum "$drv" | cut -d' ' -f1)"
+    echo "lean_bin=$LEANBIN"
+    echo "lean_version=$LEANVER"
+    echo "lean_path_sha256=$LPSHA"
+    echo "timeout_s=$tmo"
+    echo "tstack=1048576 ulimit_stack=unlimited"
+    printf 'argv=%s\n' "$LEANBIN --tstack=1048576 --run $drv $*"
+  } > "$f"
+}
+
+# reusable <attempt-dir> <wanted-identity-file>  -- 0 iff it may be reused
+#   Reads only; writes nothing into the attempt.
+reusable() {
+  local a=$1 want=$2 e t tr
+  [ -d "$a" ] || return 1
+  [ -f "$a/exit" ] || { echo "    no exit record"; return 1; }
+  e=$(cat "$a/exit"); case "$e" in ''|*[!0-9]*) echo "    unparseable exit '$e'"; return 1 ;; esac
+  [ "$e" = 0 ] || { echo "    retained exit=$e is not success"; return 1; }
+  t=$(awk '$1=="exit"{print $2; f=1} END{exit !f}' "$a/time.txt" 2>/dev/null); tr=$?
+  if [ "$tr" != 0 ] || [ -z "$t" ]; then echo "    no parseable producer status"; return 1; fi
+  [ "$t" = "$e" ] || { echo "    wrapper exit=$e disagrees with producer exit=$t"; return 1; }
+  [ -f "$a/DISPOSITION.txt" ] || { echo "    no disposition"; return 1; }
+  case "$(head -1 "$a/DISPOSITION.txt")" in OK*) : ;; *) echo "    disposition is not OK"; return 1 ;; esac
+  [ -f "$a/IDENTITY.txt" ] || { echo "    no identity record"; return 1; }
+  cmp -s "$a/IDENTITY.txt" "$want" || { echo "    identity differs from this request"; return 1; }
+  return 0
+}
+
+# phase <phase-dir> <timeout> <driver> <driver-args...>
 phase() {
-  local cell=$1 tmo=$2 drv=$3; shift 3
+  local pd=$1 tmo=$2 drv=$3; shift 3
   local -a dargs=("$@")
+  local cert=${dargs[0]}
+  mkdir -p "$pd/decisions"
+  local want=$pd/decisions/want-$TS.identity
+  identity_of "$want" "$tmo" "$drv" "$cert" "${dargs[@]}"
 
-  if [ "$FORCE" = 0 ] && [ -f "$cell/exit" ] && [ "$(cat "$cell/exit")" = 0 ]; then
-    echo "REUSED exit=0 (retained; not re-run)" > "$cell/DISPOSITION.txt"
-    return 0
+  local dec=$pd/decisions/DECISION-$TS.txt
+  if [ "$FORCE" = 0 ]; then
+    local a why
+    for a in "$pd"/attempt-*; do
+      [ -d "$a" ] || continue
+      why=$(reusable "$a" "$want") && {
+        { echo "decision=REUSE"; echo "attempt=$a"; echo "at=$(date -Iseconds)"
+          echo "basis=exit 0, producer status 0, disposition OK, identity byte-identical"
+        } > "$dec"
+        echo "REUSED exit=0 from $(basename "$a") (retained attempt untouched)"
+        return 0
+      }
+    done
+    { echo "decision=RUN"; echo "at=$(date -Iseconds)"
+      echo "reason=no retained attempt satisfied exit/producer-status/disposition/identity"
+    } > "$dec"
+  else
+    { echo "decision=RUN"; echo "at=$(date -Iseconds)"; echo "reason=--force"; } > "$dec"
   fi
-  mkdir -p "$cell"
-  { printf '%s\n' "$LEANBIN" "--tstack=1048576" "--run" "$drv" "${dargs[@]}"
-  } > "$cell/argv.txt"
-  { echo "driver=$drv sha256=$(sha256sum "$drv" | cut -d' ' -f1)"
-    echo "lean=$LEANBIN version=$("$LEANBIN" --version)"
-    echo "launched_at=$(date -Iseconds)"
-    echo "timeout_s=$tmo ulimit_stack=unlimited tstack=1048576"
+
+  # A NEW, IMMUTABLE attempt directory.  Never an existing one -- not on a
+  # retry, not under --force.
+  local n=1 a
+  while :; do
+    a=$(printf '%s/attempt-%04d-%s' "$pd" "$n" "$TS")
+    mkdir "$a" 2>/dev/null && break
+    n=$((n+1)); [ "$n" -gt 9999 ] && { echo "REFUSING: cannot allocate an attempt dir in $pd"; return 2; }
+  done
+  echo "attempt=$a" >> "$dec"
+  mv "$want" "$a/IDENTITY.txt"
+  printf '%s\n' "$LEANBIN" "--tstack=1048576" "--run" "$drv" "${dargs[@]}" > "$a/argv.txt"
+  { echo "launched_at=$(date -Iseconds)"
+    echo "host=$(uname -n) kernel=$(uname -r)"
+    echo "cwd=$PWD"
+    echo "private_root=$PABS"
+    echo "private_head=$(git -C "$PABS" rev-parse HEAD 2>/dev/null)"
+    echo "timeout_s=$tmo"
     echo "LEAN_PATH=$LP"
-  } > "$cell/BINDING.txt"
+    echo "lean_path_sha256=$LPSHA"
+  } > "$a/BINDING.txt"
 
   LEAN_PATH="$LP" /usr/bin/time \
-      -f 'wall %e\nuser %U\nsys %S\nmaxrss_kib %M\nexit %x' -o "$cell/time.txt" \
+      -f 'wall %e\nuser %U\nsys %S\nmaxrss_kib %M\nexit %x' -o "$a/time.txt" \
       bash -c 'ulimit -s unlimited; exec nice -n19 ionice -c3 timeout "$@"' bash \
       "$tmo" "$LEANBIN" --tstack=1048576 --run "$drv" "${dargs[@]}" \
-      > "$cell/stdout.log" 2> "$cell/stderr.log"
+      > "$a/stdout.log" 2> "$a/stderr.log"
   local rc=$? t tr
-  echo "$rc" > "$cell/exit"
-  t=$(awk '$1=="exit"{print $2; found=1} END{exit !found}' "$cell/time.txt" 2>/dev/null); tr=$?
+  echo "$rc" > "$a/exit"
+  t=$(awk '$1=="exit"{print $2; f=1} END{exit !f}' "$a/time.txt" 2>/dev/null); tr=$?
   if [ "$tr" != 0 ] || [ -z "$t" ]; then
-    echo "MISSING exit=$rc time_exit=- (no parseable producer status)" > "$cell/DISPOSITION.txt"; return 97
+    echo "MISSING exit=$rc time_exit=- (no parseable producer status)" > "$a/DISPOSITION.txt"
+    printf '%s\t%s\t%s\n' "$(basename "$a")" "MISSING" "$rc" >> "$pd/index.tsv"; return 97
   fi
   if [ "$t" != "$rc" ]; then
-    echo "DISAGREE exit=$rc producer=$t" > "$cell/DISPOSITION.txt"; return 96
+    echo "DISAGREE exit=$rc producer=$t" > "$a/DISPOSITION.txt"
+    printf '%s\t%s\t%s\n' "$(basename "$a")" "DISAGREE" "$rc" >> "$pd/index.tsv"; return 96
   fi
   case "$rc" in
     0)   echo "OK exit=0" ;;
     124) echo "CAP exit=124 (timeout ${tmo}s; partial and UNDECIDED, not a pass and not a refusal)" ;;
     *)   echo "REFUSED exit=$rc" ;;
-  esac > "$cell/DISPOSITION.txt"
+  esac > "$a/DISPOSITION.txt"
+  printf '%s\t%s\t%s\n' "$(basename "$a")" "$(head -1 "$a/DISPOSITION.txt" | cut -d' ' -f1)" "$rc" >> "$pd/index.tsv"
   return "$rc"
 }
 
@@ -153,36 +244,39 @@ note() { [ "$worst" = 0 ] && worst=$1; return 0; }
 for cert in "$@"; do
   [ -f "$cert" ] || { echo "REFUSING: no certificate at $cert"; note 2; continue; }
   m=$(basename "$cert" .dcert); d=$OUT/$m
-  mkdir -p "$d"
-  { echo "cert=$cert sha256=$(sha256sum "$cert" | cut -d' ' -f1) bytes=$(stat -c%s "$cert")"
-    echo "private_head=$(git -C "$PABS" rev-parse HEAD)"
+  mkdir -p "$d/requests"
+  # Per-REQUEST, never overwritten: an earlier version rewrote one module-level
+  # BINDING before deciding reuse, so the record of the run that produced the
+  # retained attempt was replaced by the request that reused it.
+  { echo "request_at=$(date -Iseconds)"
+    echo "cert=$cert sha256=$(sha256sum "$cert" | cut -d' ' -f1) bytes=$(stat -c%s "$cert")"
     echo "private_root=$PABS"
+    echo "private_head=$(git -C "$PABS" rev-parse HEAD 2>/dev/null)"
     echo "host=$(uname -n) kernel=$(uname -r)"
     echo "fuel=$SF/$WF cycles=$CYC only=$ONLY force=$FORCE"
+    echo "lean_bin=$LEANBIN version=$LEANVER"
+    echo "lean_path_sha256=$LPSHA"
     echo "route=INTERPRETED (lean --run, ulimit -s unlimited, --tstack=1048576); NOT native linking"
-  } > "$d/BINDING.txt"
+  } > "$d/requests/REQUEST-$TS.txt"
 
   if want decode; then
     phase "$d/decode" 600 "$DRV_DECODE" "$cert"; e=$?
-    echo "$m decode    $(cat "$d/decode/DISPOSITION.txt")"
-    [ "$e" = 0 ] || { note "$e"; continue; }
+    echo "$m decode    exit=$e"; [ "$e" = 0 ] || { note "$e"; continue; }
   fi
   if want support; then
     phase "$d/support" 600 "$DRV_SUPPORT" "$cert"; e=$?
-    echo "$m support   $(cat "$d/support/DISPOSITION.txt")"
-    [ "$e" = 0 ] || { note "$e"; continue; }
+    echo "$m support   exit=$e"; [ "$e" = 0 ] || { note "$e"; continue; }
   fi
   if want generate; then
     phase "$d/generate" 3600 "$DRV_GEN" "$cert" "$SF" "$WF"; e=$?
-    echo "$m generate  $(cat "$d/generate/DISPOSITION.txt")"
+    echo "$m generate  exit=$e"
     # exit 2 = unsupported, 3 = out of fuel: REAL dispositions for this
     # certificate.  They stop this row without stopping the sweep.
     [ "$e" = 0 ] || { note "$e"; continue; }
   fi
   if want readiness; then
     phase "$d/readiness" 5400 "$DRV_READY" "$cert" "$SF" "$WF" "$CYC"; e=$?
-    echo "$m readiness $(cat "$d/readiness/DISPOSITION.txt")"
-    [ "$e" = 0 ] || note "$e"
+    echo "$m readiness exit=$e"; [ "$e" = 0 ] || note "$e"
   fi
 done
 echo "FP DCERT2 SWEEP DISPOSITION exit=$worst (0 = every selected phase reached OK or was REUSED)"
