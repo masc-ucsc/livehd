@@ -865,10 +865,15 @@ the read gives the default 0.  They DIFFER.
 operand shape".  It was not refused by anything: the example merely falsifies the
 `InRange` premise, so the guarded theorems never applied, and the executed helper
 silently left the table alone.  A premise being false is not a producer
-rejecting an input.  `writeChecked` below is the actual admission check -- it is
-decidable, it **returns `none`** on this shape, and its `some` case carries the
-reference correspondence.  Only with that in place is the word "refused" earned,
-and the control below now exercises the check rather than the premise alone. -/
+rejecting an input.  `writeChecked` below is a decidable, PROVED HOST HELPER: it returns `none` on
+this shape, and its `some` case carries the reference correspondence.
+
+**Scope, again, because the first correction did not go far enough.**  A helper
+answering `none` is still not a PRODUCER refusing an input.  `writeChecked` is
+not yet wired into the FP route, so nothing in the generator, the support report
+or the checker consults it; calling this shape "actually refused" would make the
+same mistake one level up.  It will be an admission path when `I_hw` calls it --
+that integration is listed in the obligations at the end and has NOT happened. -/
 
 /-- The operand-shape condition an enabled write must satisfy: the address the
 table is indexed by has to be one the table HOLDS. -/
@@ -920,9 +925,8 @@ private def datW    : BV := mk_bv 32 0xDEADBEEF
 #guard readEn 32 (writeBE 32 imgW wideAddr datW (mk_bv 4 0xF) 8) wideAddr (mk_bv 1 1)
        == mk_bv 32 0
 
-/-- **The admission check actually REFUSES this shape.**  This is the difference
-between a premise being false and a producer rejecting an input: `writeChecked`
-answers `none`, so nothing downstream ever sees the disagreeing table. -/
+/-- The helper answers `none` on this shape.  That is a sound HOST-SIDE decision
+procedure, not a producer refusal: nothing in the FP route calls it yet. -/
 example : writeChecked 32 imgW wideAddr datW (mk_bv 4 0xF) 8 = none := by decide
 
 /-- …and it ADMITS the correctly shaped PicoRV32 write, so the check is not

@@ -7524,3 +7524,47 @@ result codec and a relation to the real `RuntimeResult`; clock-controlled commit
 with reset/async metadata; and — the structural one from §63.20 — a call-free
 residual construction or a proved checker extension, since `fragB` rejects every
 `.call`.  PicoRV32 stays **BLOCKED**.
+
+### 63.22 The memory-primitive route, costed at source — and what blocks it today
+
+**Correction, one level up from the last one.**  I called the wide-address shape
+"actually refused" because `writeChecked` answers `none`.  That is still wrong.
+`writeChecked` is a **sound host helper**, not a producer: nothing in the FP
+route — not the generator, not `supportReport`, not the checker — calls it.  A
+helper returning `none` establishes a refusal only once it is wired in, and it is
+not.  The module now says so at both places.
+
+**I costed the primitive route at source rather than estimating it.**  Adding a
+memory primitive to the object language touches, verifiably:
+
+| site | file | size today |
+|---|---|---|
+| `Prim` + `Prim.arity` | `ObjectLanguage.lean:151,183` | 18 arity cases |
+| `evalPrim` | `ObjectLanguageSemantics.lean:91` | 71 cases |
+| `primCode` / `decPrim` | `Encoding.lean:70,102` | with `decPrim_encPrim` parity at :107 |
+| **`primTable`** | **`MixProgram.lean:166`** | **32 entries, codes 0–31** |
+
+The fourth is the one that matters and is easy to miss: `primTable` is the
+**specializer's own object-language copy of `evalPrim`**, mapping primitive codes
+to terms.  A new primitive that is not mirrored there cannot be specialized by
+`mix` at all — so "add a primitive" is not a local change to the interpreter, it
+is a change to the interpreter *and* to `mix`'s self-representation, with the
+`decPrim_encPrim` round trip to re-prove.
+
+**Both routes therefore have a verified blocker, and neither is hand-waving:**
+
+* *memory primitive* — must be mirrored into `primTable` or specialization breaks;
+* *helper functions called from `I_hw`* — the calls survive into the residual, and
+  `fragB` answers `false` on every `.call` (§63.20), so `checkResidual` rejects it.
+
+The second has a known escape (a specializer that unrolls the walk emits a
+call-free residual) but §63.20's caution stands: the helper body takes a runtime
+list and address and receives **no static length parameter**, so whether `mix`
+actually unrolls it must be **tested on an emitted residual**, not inferred from
+the design metadata being static.  That test is the next concrete action.
+
+**What this checkpoint did not do:** it did not wire memory into `I_hw`, and no
+integration landed.  I am not going to start a partial `Prim` addition that
+leaves the development unbuildable; the next step is the specialization
+experiment above, which decides which of the two routes is actually open.
+PicoRV32 stays **BLOCKED**, and nothing in the 60-cell table changes.
