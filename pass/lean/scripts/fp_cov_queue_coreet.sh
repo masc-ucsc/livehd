@@ -24,7 +24,10 @@ CR="bash $R/pass/lean/scripts/fp_cov_run.sh"
 # or a diagnostic could carry.
 json_status() { python3 -I -c "import json,sys;print((json.load(open(sys.argv[1])) or {}).get('status',''))" "$1" 2>/dev/null; }
 # Confirm the INTENDED top is actually in the emitted library.
-has_top() { grep -qx "$2" "$1/library.txt" 2>/dev/null || grep -q "\\b$2\\b" "$1/library.txt" 2>/dev/null; }
+# The library record format is `graph_io <numeric_id> <name>`; match the NAME
+# field exactly rather than any occurrence of the string, which can appear in a
+# port name or a comment.
+has_top() { awk -v want="$2" '$1=="graph_io" && $3==want {found=1} END{exit !found}' "$1/library.txt" 2>/dev/null; }
 
 FL=$B/$UNIT.f
 if ! timeout 600 bash "$SNAP/scripts/coreet_filelist.sh" "$UNIT" "$FL" > "$B/filelist.log" 2>&1; then

@@ -30,6 +30,11 @@ mkdir "$B" 2>/dev/null || { echo "$ROW: ATTEMPT COLLISION, $B exists; refusing t
 CR="bash $R/pass/lean/scripts/fp_cov_run.sh"
 # Parse the TOP-LEVEL status field, not any "pass" substring anywhere in the
 # record (a phase name or a diagnostic can contain it).
+# Confirm the INTENDED top is actually in the emitted library.
+# The library record format is `graph_io <numeric_id> <name>`; match the NAME
+# field exactly rather than any occurrence of the string, which can appear in a
+# port name or a comment.
+has_top() { awk -v want="$2" '$1=="graph_io" && $3==want {found=1} END{exit !found}' "$1/library.txt" 2>/dev/null; }
 json_status() { python3 -I -c "import json,sys;print((json.load(open(sys.argv[1])) or {}).get('status',''))" "$1" 2>/dev/null; }
 
 # PRE-LAUNCH provenance binding: written BEFORE any phase executes.
@@ -49,7 +54,7 @@ s1=$(cat "$B/s1_compile/exit" 2>/dev/null || echo 99)
 # record must also say pass and the library must actually hold a graph.
 ok1=0
 [ "$s1" = 0 ] && [ "$(json_status "$B/s1_compile/result.json")" = pass ] \
-  && [ -s "$B/s1_compile/lg/library.txt" ] && ok1=1
+  && [ -s "$B/s1_compile/lg/library.txt" ] && has_top "$B/s1_compile/lg" "$TOP" && ok1=1
 [ "$ok1" = 1 ] || { echo "$ROW/$ATTEMPT: STOP after s1 (exit $s1)"; exit 1; }
 
 $CR "$ROW" s2_single_edge "$B/s2_single_edge" 48G 5400 -- \
@@ -59,7 +64,7 @@ $CR "$ROW" s2_single_edge "$B/s2_single_edge" 48G 5400 -- \
 s2=$(cat "$B/s2_single_edge/exit" 2>/dev/null || echo 99)
 ok2=0
 [ "$s2" = 0 ] && [ "$(json_status "$B/s2_single_edge/result.json")" = pass ] \
-  && [ -s "$B/s2_single_edge/lg/library.txt" ] && ok2=1
+  && [ -s "$B/s2_single_edge/lg/library.txt" ] && has_top "$B/s2_single_edge/lg" "$TOP" && ok2=1
 [ "$ok2" = 1 ] || { echo "$ROW/$ATTEMPT: STOP after single_edge (exit $s2)"; exit 1; }
 
 if [ "$APP" = verified_compiler ]; then

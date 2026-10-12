@@ -1130,7 +1130,9 @@
        }
       ],
       "pending": "the generation check (elaboration of Cert and Main) and the readiness execution are not yet run",
-      "input_reuse": "generated/master_port/cov12x5/B09_cva6_issue_scoreboard/verified_compiler_mw/lean/issue_stage_gate_Lgraph.lean, identical bound configuration"
+      "input_reuse": "generated/master_port/cov12x5/B09_cva6_issue_scoreboard/verified_compiler_mw/lean/issue_stage_gate_Lgraph.lean, identical bound configuration",
+      "next_required_phase": "Source emission completed; required Cert/Main generation checks and simulator execution await launch. No live Lean/Lake worker observed at 2026-10-11T20:29:51.082007-07:00",
+      "status_history": "was labelled RUNNING from generated source alone, which is not a launch; corrected to PENDING required checks by the supervisor audit, and now genuinely RUNNING: a retained serial worker (pass/lean/scripts/fp_cov_ir_check.sh, started 2026-10-11 20:36:31) is elaborating Cert then Main and will then run the launcher for 8 cycles. A cell is not RUNNING from intent or source."
      },
      "generation_ms": null,
      "metrics": {
@@ -1142,7 +1144,9 @@
       "phase_times_ms": {},
       "artifact_bytes": null,
       "environment_sha256": null,
-      "attempt_record": null
+      "attempt_record": null,
+      "readiness_status": "NOT_STARTED",
+      "status_observed_at": "2026-10-11T20:29:51.082007-07:00"
      }
     }
    },
@@ -1351,7 +1355,9 @@
        }
       ],
       "pending": "the generation check (elaboration of Cert and Main) and the readiness execution are not yet run",
-      "input_reuse": "generated/master_port/cov12x5/B10_cva6_frontend/verified_compiler_mw/lean/frontend_gate_Lgraph.lean, identical bound configuration"
+      "input_reuse": "generated/master_port/cov12x5/B10_cva6_frontend/verified_compiler_mw/lean/frontend_gate_Lgraph.lean, identical bound configuration",
+      "next_required_phase": "Source emission completed; required Cert/Main generation checks and simulator execution await launch. No live Lean/Lake worker observed at 2026-10-11T20:29:51.082007-07:00",
+      "status_history": "was labelled RUNNING from generated source alone, which is not a launch; corrected to PENDING required checks by the supervisor audit, and now genuinely RUNNING: a retained serial worker (pass/lean/scripts/fp_cov_ir_check.sh, started 2026-10-11 20:36:31) is elaborating Cert then Main and will then run the launcher for 8 cycles. A cell is not RUNNING from intent or source."
      },
      "generation_ms": null,
      "metrics": {
@@ -1363,7 +1369,9 @@
       "phase_times_ms": {},
       "artifact_bytes": null,
       "environment_sha256": null,
-      "attempt_record": null
+      "attempt_record": null,
+      "readiness_status": "NOT_STARTED",
+      "status_observed_at": "2026-10-11T20:29:51.082007-07:00"
      }
     }
    },
@@ -1852,7 +1860,7 @@
         "sha256": "43db2aee9195e43d1085b1e01c239a3c050140d35551f1746853cb40aa3f5c98"
        }
       ],
-      "remaining": "the lake exe link was not performed; elaboration plus C emission is what is claimed.",
+      "remaining": "The lake exe native link was not performed; interpreted execution is retained in checks/sims_run8. Full validation and certification remain separate obligations.",
       "readiness": {
        "phase": "EXECUTED -- the missing readiness phase, run once with nonzero simulator work",
        "route": "INTERPRETED (lean --run Sims/picorv32_Main.lean), NOT a native link; lake exe Simpicorv32 is still not performed",
@@ -1863,8 +1871,9 @@
        "sys_cpu_s": 0.33,
        "max_rss_kib": 477764,
        "output": "# lgraph-sim picorv32 sources=1302 nodes=2279 outputs=18 flops=174 mems=1 inputs=9 clocks=1, then 8 cycles of outputs and flop state, 18 lines retained",
-       "observed": "state advances across cycles (cycle 0 outputs all zero, cycle 1 carries a 1); the run exercises the memory (mems=1), which this route supports and the projection route does not",
-       "log": "generated/master_port/cov12x5/B12_picorv32/checks/sims_run8/stdout.log"
+       "observed": "8 flop lines, ALL IDENTICAL (one unique vector) -- the flop state does NOT advance; 8 output lines with TWO unique vectors (all-zero cycle 0, then seven identical non-zero cycles). mems=1 is a header field and establishes NO memory read or write transition.",
+       "log": "generated/master_port/cov12x5/B12_picorv32/checks/sims_run8/stdout.log",
+       "retraction": "an earlier record claimed advancing flop state and exercised memory; both are retracted. The run remains a genuine execution of the generated simulator, which is what this phase claims."
       },
       "usage_probe": {
        "argv": "lean --run ... (no args)",
@@ -1925,7 +1934,20 @@
        "argv": "env\nLEAN_PATH=/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/sims:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Cli/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/batteries/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Qq/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/aesop/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/importGraph/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/plausible/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/mathlib/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/build/lib/lean:/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/lib/lean\n/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean\n-o\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/sims_main/picorv32_Main.olean\n-c\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/sims_main/picorv32_Main.c\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/ir_as_semantics/tree/formal/lean/Sims/picorv32_Main.lean",
        "max_rss_note": "GNU time %M is KiB on this platform; GiB = KiB/1048576"
       },
-      "readiness": "elaboration + C emission only; the lake exe link and a launcher execution are NOT retained"
+      "readiness": {
+       "route": "INTERPRETED",
+       "phase": "SIMULATOR_EXECUTION",
+       "exit_code": 0,
+       "wall_ms": 1300,
+       "user_cpu_ms": 780,
+       "system_cpu_ms": 330,
+       "peak_rss_kib": 477764,
+       "cycles": 8,
+       "argv_file": "generated/master_port/cov12x5/B12_picorv32/checks/sims_run8/argv.txt",
+       "output_file": "generated/master_port/cov12x5/B12_picorv32/checks/sims_run8/stdout.log",
+       "native_link_status": "NOT_PERFORMED",
+       "verification_scope": "Eight-cycle interpreter invocation completed; this is usability, not RTL equivalence or memory read/write coverage."
+      }
      }
     }
    },

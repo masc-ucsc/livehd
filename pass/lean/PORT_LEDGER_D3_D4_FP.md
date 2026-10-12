@@ -6402,10 +6402,19 @@ exit 0, wall 1.30 s, user 0.78 s, sys 0.33 s, 477,764 KiB
 # lgraph-sim picorv32 sources=1302 nodes=2279 outputs=18 flops=174 mems=1 inputs=9 clocks=1
 ```
 
-18 lines retained, state advancing across cycles, and the run exercises the
-**memory** (`mems=1`) -- which this route supports and the projection route does
-not. A no-argument probe first returned the launcher's usage with exit 2,
-confirming the entry point loads.
+18 lines retained, and a no-argument probe first returned the launcher's usage
+with exit 2, confirming the entry point loads.
+
+> **TWO OVERSTATEMENTS RETRACTED.** I wrote that the state advances across
+> cycles and that the run exercises the memory. Recounted from the retained log:
+> the 8 flop lines are **all identical** -- one unique vector, so the flop state
+> does **not** advance -- and the 8 output lines hold **two** unique vectors,
+> an all-zero cycle 0 followed by seven identical non-zero cycles. `mems=1` is a
+> **header field**; it establishes no memory read or write transition. My
+> earlier count of "3 unique" came from a loose grep that also matched the
+> header line. The run is still a genuine execution of the generated simulator
+> -- which is what the readiness phase claims -- and no memory-validation
+> experiment is required at this checkpoint.
 
 **Honestly scoped: this is the INTERPRETED route** (`lean --run`), not a native
 link. `lake exe Simpicorv32` has still not been performed, and no emission or
