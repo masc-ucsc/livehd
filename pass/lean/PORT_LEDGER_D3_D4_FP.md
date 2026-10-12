@@ -6978,3 +6978,67 @@ against the live TV re-attempt it refuses with exit 4 and says *why* for each:
 eight-cycle readiness runs, and the two TV `agree` verdicts, were produced by
 real runs whose raw records are retained; the counterexample is about what the
 dispatcher would credit in future, not about those.
+
+### 63.13 Identity now binds bytes, and the importer guard's ownership logic was backwards
+
+**Two more synthetic counterexamples, both real.**  `IDENTITY.txt` bound the lean
+binary by *path and version* and the search path by a *hash of the LEAN_PATH
+string*.  Neither binds content, so:
+
+* replacing the lean **executable's bytes** at the same path, with `--version`
+  still agreeing, left the identity **byte-identical** — a different compiler
+  could have been reused as the same one;
+* editing a **dependency `.olean`** at the same LEAN_PATH left the identity
+  **byte-identical** — different imported bytes could have been reused as the
+  same.
+
+The identity now carries: `lean_bin_sha256` (the executable's bytes);
+`lean_path_closure_sha256`, a digest over **every `.olean` under the private-root
+LEAN_PATH entries** — measured 8,651 files / 1,909 MiB in **14.7 s**, computed
+once per invocation and reused by every phase, which is dependency accounting and
+belongs to no generation or readiness metric; `import_direct` lines giving each
+resolved `.olean` that `lean --deps` says the driver actually imports, **with its
+content hash**; the **normalized resolved** LEAN_PATH entries with an existence
+flag, rather than only validating them for containment; and the **exact argv as
+an array**, one element per line, so one argument containing a space is not two
+arguments.
+
+`readlink -e` became `readlink -m` for the containment test: `lake env` legitimately
+emits a LEAN_PATH entry for a package with nothing built (the `Cli` package here),
+and refusing that is wrong — while `-m` still resolves symlinks in the components
+that exist, so a symlinked entry pointing at a shared mutable tree is still caught.
+
+Eleven fixture checks now pass, scratch **project-local** (the default was a
+root-level `mktemp -d`, which violates the standing instruction), and
+`retained_unchanged` is YES in every one.
+
+**The importer guard's ownership logic was backwards.**  `mine(pid)` walked each
+**candidate's** ancestors looking for the guard's pid.  The comment claimed it
+excluded "my own ancestors"; it actually excluded every **descendant** of the
+invoking shell — so a real importer launched from the same session would have
+been silently skipped.  The exclusion is now exactly two pids: this shell and the
+inspection helper.  Nothing is excluded for being a descendant.
+
+Also fixed: an `fd` target of `pipe:[N]` or `socket:[N]` is not a filesystem
+path, and joining it onto a cwd inside the root made **every pipe a false hit**.
+Non-`/` targets are skipped.
+
+Added: `PCB_KNOWN_CONSUMERS="pid:starttime_ticks,…"` checks named handles by
+**identity**, so a recycled pid is reported as recycled rather than mistaken for
+the consumer; and a process that exists but cannot be inspected is reported
+**UNINSPECTABLE and refuses**, acknowledgeable only by naming its pid *and*
+starttime.  On this host that is `systemd --user` (pid 20340).
+
+Guard fixture, four spawned processes with known properties, each killed by pid
+and no `pgrep` pattern anywhere:
+
+| process | property | expected | observed |
+|---|---|---|---|
+| A | open fd inside the root, cwd outside | detected | detected by fd |
+| B | `LEAN_PATH` in the environment, **relative argv** | detected | detected by environment |
+| C | `mmap` of a file inside the root | detected | detected by fd (the mapping holds one) |
+| D | unrelated waiter whose **argv names the root**, holding nothing | absent | absent |
+
+B and D are precisely the two the argv grep got wrong in opposite directions, and
+all four are descendants of the invoking shell — which the ancestor walk would
+have excluded wholesale, reporting a clean context with three live readers.

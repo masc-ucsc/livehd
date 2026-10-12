@@ -1,0 +1,22 @@
+# FIXTURE-ONLY verification of private_compiler_build.sh's LIVE-IMPORTER guard.
+# Produced by pass/lean/scripts/pcb_importer_guard_test.sh, which EXTRACTS the
+# live guard body from the build script and points it at a throwaway
+# project-local root, against which it spawns four short-lived processes with
+# known properties.  Each is killed BY PID; no pgrep pattern is used anywhere,
+# because a pattern that matches a waiter's command line matches the waiter.
+#
+# WHAT THE EARLIER GUARDS GOT WRONG, and what these cases pin down:
+#   * an argv grep would have REFUSED D (argv merely names the root) and MISSED
+#     B (found the root through the environment, argv is relative);
+#   * the ancestor walk excluded every DESCENDANT of the invoking shell -- which
+#     A, B, C and D all are -- so it would have reported a clean context with
+#     three real readers live.
+#
+# C holds its mapping through an open fd, so the fd probe fires first: it is
+# detected as a reader, by fd rather than by the maps probe. Recorded as observed.
+#
+process	property	cwd	expected	observed	detected_by	result
+A	open fd on a file inside the root	outside	detected	detected	open fd	PASS
+B	LEAN_PATH in the environment, relative argv	outside	detected	detected	LEAN_PATH references the root	PASS
+C	mmap of a file inside the root	outside	detected	detected	open fd (held by the mapping)	PASS
+D	unrelated waiter, argv names the root, holds nothing	outside	absent	absent	-	PASS

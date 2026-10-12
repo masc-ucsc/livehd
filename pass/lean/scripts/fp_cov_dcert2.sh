@@ -101,19 +101,38 @@ LP=$(cd "$PABS/formal/lean" && lake env printenv LEAN_PATH 2>/dev/null)
 # bytes.  Empty entries are refused too -- an empty element means "the current
 # directory", which is implicit, unrecorded state.
 IFS=':' read -r -a LPDIRS <<< "$LP"
+LPNORM=""        # the NORMALIZED, RESOLVED entries, which is what goes in the identity
+LPPRIV=()        # the private-root entries whose .olean content is digested
 for d in "${LPDIRS[@]}"; do
   if [ -z "$d" ]; then
     echo "REFUSING: LEAN_PATH contains an empty entry, which means the implicit current directory"; exit 2; fi
   case "$d" in /*) : ;; *) echo "REFUSING: LEAN_PATH entry is not absolute: $d"; exit 2 ;; esac
-  rd=$(readlink -e "$d") || { echo "REFUSING: LEAN_PATH entry does not resolve: $d"; exit 2; }
+  # `readlink -m` canonicalises WITHOUT requiring existence, and still resolves
+  # symlinks in the components that do exist -- so a symlinked entry pointing at
+  # a shared mutable build tree is still caught, while an entry `lake env` emits
+  # for a package with nothing built (it does: the Cli package) is not a refusal.
+  rd=$(readlink -m "$d")
   case "$rd" in
     "$PABS"/*|"$TCABS"/*) : ;;
     *) echo "REFUSING: LEAN_PATH entry resolves outside the private closure and the allowed toolchain:"
        echo "          $d -> $rd"; exit 2 ;;
   esac
+  ex=no; [ -d "$rd" ] && ex=yes
+  LPNORM="$LPNORM$rd:$ex"$'\n'
+  case "$rd" in "$PABS"/*) [ "$ex" = yes ] && LPPRIV+=("$rd") ;; esac
 done
-LPSHA=$(printf '%s' "$LP" | sha256sum | cut -d' ' -f1)
 LEANVER=$("$LEANBIN" --version)
+# THE EXECUTABLE'S BYTES, not its path and version string.  A counterexample
+# showed that replacing the lean binary in place left the identity unchanged.
+LEANSHA=$(sha256sum "$LEANBIN" | cut -d' ' -f1)
+# THE IMPORTED BYTES, not the LEAN_PATH string.  A second counterexample showed
+# that editing a dependency `.olean` at the same LEAN_PATH left the identity
+# unchanged.  Digested once per invocation and reused by every phase: measured
+# 8,651 oleans / 1,909 MiB in 14.7 s on this workspace, which is dependency
+# accounting and belongs to no generation or readiness metric.
+LPCLOSURE=$( { for d in "${LPPRIV[@]}"; do find "$d" -name '*.olean' -print0; done; } \
+             | sort -z | xargs -0 -r sha256sum | sha256sum | cut -d' ' -f1 )
+echo "lean_path closure digest $LPCLOSURE over ${#LPPRIV[@]} private entries"
 
 DRV_DECODE=$R/formal/lean/scripts/dcert2_loadcheck.lean
 DRV_SUPPORT=$R/formal/lean/scripts/dcert2_support.lean
@@ -131,16 +150,38 @@ TS=$(date +%Y%m%d-%H%M%S)-$$
 #   a driver edited in place must not be mistaken for the one that ran.
 identity_of() {
   local f=$1 tmo=$2 drv=$3 cert=$4; shift 4
-  { echo "cert_sha256=$(sha256sum "$cert" | cut -d' ' -f1)"
+  local -a dargs=("$@")
+  local drvn certn
+  drvn=$(readlink -m "$drv"); certn=$(readlink -m "$cert")
+  { echo "cert=$certn"
+    echo "cert_sha256=$(sha256sum "$cert" | cut -d' ' -f1)"
     echo "cert_bytes=$(stat -c%s "$cert")"
-    echo "driver=$drv"
+    echo "driver=$drvn"
     echo "driver_sha256=$(sha256sum "$drv" | cut -d' ' -f1)"
-    echo "lean_bin=$LEANBIN"
+    echo "lean_bin=$(readlink -m "$LEANBIN")"
+    echo "lean_bin_sha256=$LEANSHA"
     echo "lean_version=$LEANVER"
-    echo "lean_path_sha256=$LPSHA"
+    echo "lean_path_closure_sha256=$LPCLOSURE"
+    printf '%s' "$LPNORM" | sed 's/^/lean_path_entry=/'
+    # The driver's DIRECT resolved imports, by content.  `lean --deps` prints the
+    # `.olean` each import actually resolved to on this LEAN_PATH, so this binds
+    # the bytes that will be loaded rather than the search path that finds them.
+    if [ -n "${FP_SKIP_DEPS:-}" ]; then
+      echo "import_direct=<skipped: FP_SKIP_DEPS>"
+    else
+      LEAN_PATH="$LP" "$LEANBIN" --deps "$drv" 2>/dev/null | sort -u | while read -r o; do
+        [ -n "$o" ] || continue
+        echo "import_direct=$(readlink -m "$o") $(sha256sum "$o" 2>/dev/null | cut -d' ' -f1)"
+      done
+    fi
     echo "timeout_s=$tmo"
     echo "tstack=1048576 ulimit_stack=unlimited"
-    printf 'argv=%s\n' "$LEANBIN --tstack=1048576 --run $drv $*"
+    # EXACT argv, one element per line.  A single `$*` string cannot distinguish
+    # two arguments from one argument containing a space.
+    local i=0 a
+    for a in "$LEANBIN" "--tstack=1048576" "--run" "$drv" "${dargs[@]}"; do
+      printf 'argv[%d]=%s\n' "$i" "$a"; i=$((i+1))
+    done
   } > "$f"
 }
 
@@ -209,7 +250,7 @@ phase() {
     echo "private_head=$(git -C "$PABS" rev-parse HEAD 2>/dev/null)"
     echo "timeout_s=$tmo"
     echo "LEAN_PATH=$LP"
-    echo "lean_path_sha256=$LPSHA"
+    echo "lean_path_closure_sha256=$LPCLOSURE"
   } > "$a/BINDING.txt"
 
   LEAN_PATH="$LP" /usr/bin/time \
@@ -254,8 +295,8 @@ for cert in "$@"; do
     echo "private_head=$(git -C "$PABS" rev-parse HEAD 2>/dev/null)"
     echo "host=$(uname -n) kernel=$(uname -r)"
     echo "fuel=$SF/$WF cycles=$CYC only=$ONLY force=$FORCE"
-    echo "lean_bin=$LEANBIN version=$LEANVER"
-    echo "lean_path_sha256=$LPSHA"
+    echo "lean_bin=$LEANBIN version=$LEANVER sha256=$LEANSHA"
+    echo "lean_path_closure_sha256=$LPCLOSURE"
     echo "route=INTERPRETED (lean --run, ulimit -s unlimited, --tstack=1048576); NOT native linking"
   } > "$d/requests/REQUEST-$TS.txt"
 

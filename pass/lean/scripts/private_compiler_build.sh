@@ -42,83 +42,165 @@ if [ -n "$(git -C "$PABS" status --porcelain)" ]; then
   echo "REFUSING: $PABS is dirty; a build whose source nobody can regenerate is not evidence"; exit 2
 fi
 
-# LIVE IMPORTERS -- detected from what a process actually HOLDS, not from what
-# its argv happens to mention.
+# LIVE IMPORTERS -- detected from what a process actually HOLDS, and from
+# KNOWN OWNED HANDLES that must be confirmed terminal by identity, not by silence.
 #
-# The first version of this guard grepped `ps -eo args` for the private root.
-# That is wrong in both directions: it MISSES a reader that found the root
-# through `LEAN_PATH` in its environment or through its working directory while
-# its argv is relative, and it REFUSES an unrelated waiter or observer whose
-# command line merely names the path.  The evidence used now is possession:
+# Two generations of this guard were wrong in different ways.
 #
-#   * an OPEN FILE DESCRIPTOR resolving under the private root -- the strongest
-#     signal, a process holding a file open right now;
-#   * a MAPPED FILE under it (`/proc/<pid>/maps`) -- how a loaded `.olean`
-#     actually shows up;
-#   * `LEAN_PATH` / `D3_LEAN_ROOT` / `LAKE_*` in the ENVIRONMENT pointing at it;
-#   * a working directory inside it.
+# The first grepped `ps -eo args` for the private root: it MISSED a reader that
+# found the root through `LEAN_PATH` or its working directory while its argv was
+# relative, and it REFUSED an unrelated waiter whose command line merely named
+# the path.
 #
-# Every candidate path is RESOLVED before the containment test, so a symlink
-# into the root counts and a symlink out of it does not.  This process and its
-# own ancestors are excluded, so the guard cannot match itself.
-live=$(python3 -I - "$PABS" "$$" <<'PYGUARD'
+# The second walked each CANDIDATE's ancestors looking for this guard's pid and
+# skipped any process that found it.  The comment claimed that excluded "my own
+# ancestors"; it actually excluded every DESCENDANT of this shell -- so a real
+# importer launched from the same session would have been silently skipped.  The
+# exclusion is now exactly two pids: this shell and the inspection helper itself.
+# Nothing is ever excluded for being a descendant.
+#
+# A process that exists but cannot be inspected is UNKNOWN, and unknown refuses.
+# A proc-wide scan whose permission errors are swallowed is not evidence that no
+# consumer remains.
+#
+# PCB_KNOWN_CONSUMERS="pid:starttime_ticks,..." names handles whose termination
+# must be established by identity.  A live pid whose starttime matches is a live
+# consumer; a live pid whose starttime differs is a RECYCLED pid and is reported
+# as such rather than being mistaken for the consumer.
+live=$(python3 -I - "$PABS" "$$" "${PCB_KNOWN_CONSUMERS:-}" "${PCB_ACK_UNINSPECTABLE:-}" <<'PYGUARD'
 import os, sys, pathlib
+
 root = pathlib.Path(sys.argv[1]).resolve()
-me = int(sys.argv[2])
+shell_pid = int(sys.argv[2])
+known = [h for h in sys.argv[3].replace(",", " ").split() if h]
+# A process that exists but cannot be inspected is UNKNOWN and refuses.  An
+# operator may acknowledge a SPECIFIC one, bound by pid AND starttime so the
+# acknowledgement cannot silently drift to another process later.
+ack = {}
+for _h in (sys.argv[4] if len(sys.argv) > 4 else "").replace(",", " ").split():
+    _p, _, _st = _h.partition(":")
+    if _p.isdigit():
+        ack[int(_p)] = _st
+EXCLUDE = {os.getpid(), shell_pid}          # this helper and the shell that ran it. Nothing else.
+MYUID = os.getuid()
 
-def mine(pid):                      # self or one of my ancestors
-    seen, p = set(), pid
-    while p and p not in seen:
-        if p == me: return True
-        seen.add(p)
-        try:
-            st = pathlib.Path(f"/proc/{p}/stat").read_text()
-            p = int(st[st.rindex(")") + 2:].split()[1])
-        except Exception:
-            return False
-    return False
+def resolve(path, cwd=None):
+    """Physically resolve, honouring a process's own cwd for a relative path."""
+    try:
+        q = pathlib.Path(path)
+        if not q.is_absolute() and cwd is not None:
+            q = pathlib.Path(cwd) / q
+        return q.resolve()
+    except Exception:
+        return None
 
-def under(path):
-    try:    return pathlib.Path(path).resolve().is_relative_to(root)
+def under(path, cwd=None):
+    r = resolve(path, cwd)
+    try:    return r is not None and r.is_relative_to(root)
     except Exception: return False
 
-hits = []
-for d in pathlib.Path("/proc").iterdir():
-    if not d.name.isdigit(): continue
+def starttime(pid):
+    st = pathlib.Path(f"/proc/{pid}/stat").read_text()
+    return st[st.rindex(")") + 2:].split()[19]
+
+hits, unknown, notes = [], [], []
+
+# ---- known owned handles, checked by IDENTITY ----------------------------
+for h in known:
+    pid_s, _, want = h.partition(":")
+    try:
+        pid = int(pid_s)
+    except ValueError:
+        unknown.append(f"  malformed known handle {h!r}"); continue
+    if not pathlib.Path(f"/proc/{pid}").exists():
+        notes.append(f"  known consumer {pid} is gone (starttime {want or '?'})"); continue
+    try:
+        got = starttime(pid)
+    except Exception as e:
+        unknown.append(f"  known consumer {pid} exists but its starttime is unreadable ({e})"); continue
+    if want and got != want:
+        notes.append(f"  pid {pid} is RECYCLED (starttime {got} != {want}); the known consumer is gone")
+    else:
+        hits.append(f"{pid:>8}  KNOWN OWNED CONSUMER still live (starttime {got})")
+
+# ---- possession scan over this user's processes --------------------------
+for d in sorted(pathlib.Path("/proc").iterdir()):
+    if not d.name.isdigit():
+        continue
     pid = int(d.name)
-    if pid == me or mine(pid): continue
-    why = None
+    if pid in EXCLUDE:
+        continue
+    try:
+        if d.stat().st_uid != MYUID:
+            continue                      # another user's process; not ours to inspect
+    except Exception:
+        continue                          # vanished between listing and stat
+    cwd = None
+    try:    cwd = os.readlink(d / "cwd")
+    except Exception: pass
+    why, probed, failed = None, 0, 0
     try:
         for fd in (d / "fd").iterdir():
-            if under(fd):
-                why = f"open fd -> {os.readlink(fd)}"; break
-    except Exception: pass
+            probed += 1
+            tgt = os.readlink(fd)
+            # pipe:[N], socket:[N] and anon_inode:... are NOT filesystem paths;
+            # joining one onto a cwd inside the root made every pipe a false hit.
+            if not tgt.startswith("/"):
+                continue
+            if under(tgt, cwd):
+                why = f"open fd -> {tgt}"; break
+    except FileNotFoundError:
+        continue                          # exited; nothing to decide
+    except Exception:
+        failed += 1
     if not why:
         try:
+            probed += 1
             for line in (d / "maps").read_text().splitlines():
                 f = line.split(" ", 5)[-1].strip()
-                if f.startswith("/") and under(f):
+                if f.startswith("/") and under(f, cwd):
                     why = f"mapped {f}"; break
-        except Exception: pass
+        except FileNotFoundError:
+            continue
+        except Exception:
+            failed += 1
     if not why:
         try:
+            probed += 1
             for kv in (d / "environ").read_bytes().split(b"\0"):
                 k, _, v = kv.decode("utf-8", "replace").partition("=")
                 if k in ("LEAN_PATH", "D3_LEAN_ROOT", "LAKE_HOME", "LAKE_PKG_URL_MAP") \
-                   and any(under(x) for x in v.split(":") if x):
+                   and any(under(x, cwd) for x in v.split(":") if x):
                     why = f"{k} references the root"; break
-        except Exception: pass
-    if not why and under(d / "cwd"):
-        why = "cwd inside the root"
+        except FileNotFoundError:
+            continue
+        except Exception:
+            failed += 1
+    if not why and cwd is not None and under(cwd):
+        why = f"cwd inside the root ({cwd})"
+    try:    cmd = (d / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")[:110]
+    except Exception: cmd = "?"
     if why:
-        try:    cmd = (d / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")[:110]
-        except Exception: cmd = "?"
         hits.append(f"{pid:>8}  {why}\n          {cmd}")
-print("\n".join(hits))
+    elif failed and failed == probed and pathlib.Path(f"/proc/{pid}").exists():
+        # Every probe failed on a process that is still there: this is UNKNOWN,
+        # not "no importer".
+        try:    _st = starttime(pid)
+        except Exception: _st = "?"
+        if pid in ack and (not ack[pid] or ack[pid] == _st):
+            notes.append(f"  ACKNOWLEDGED uninspectable: {pid} (starttime {_st}) {cmd}")
+        else:
+            unknown.append(f"{pid:>8}  UNINSPECTABLE ({failed}/{probed} probes failed, starttime {_st})"
+                           f"\n          {cmd}"
+                           f"\n          acknowledge with PCB_ACK_UNINSPECTABLE={pid}:{_st} if it is not a consumer")
+
+for n in notes:
+    print(n, file=sys.stderr)
+print("\n".join(hits + unknown))
 PYGUARD
 )
 if [ -n "$live" ]; then
-  echo "REFUSING: this build context has live importers; wait for them to reach a terminal result"
+  echo "REFUSING: this build context has live or uninspectable consumers; wait for a confirmed terminal result"
   echo "$live"
   exit 4
 fi
