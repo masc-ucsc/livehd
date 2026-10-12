@@ -221,3 +221,45 @@ diff --git ot/utility/logger.hpp ot/utility/logger.hpp
 @@ -255 +255 @@
 -  _write<LogType::DEBUG>(fpath, line, std::forward<ArgsT>(args)...);
 +  _write<LogType::DEBUG_LEVEL>(fpath, line, std::forward<ArgsT>(args)...);
+
+diff --git ot/timer/arc.hpp ot/timer/arc.hpp
+--- ot/timer/arc.hpp
++++ ot/timer/arc.hpp
+@@ -35,3 +35,7 @@
++    std::optional<float> delay(Split split, Tran from, Tran to) const {
++      return _delay[split][from][to];
++    }
++
+     bool is_cell_arc() const;
+     bool is_net_arc() const;
+     bool is_pseg() const;
+
+diff --git ot/liberty/celllib.cpp ot/liberty/celllib.cpp
+--- ot/liberty/celllib.cpp
++++ ot/liberty/celllib.cpp
+@@ -81,4 +81,12 @@
+       if(*itr == '(' || *itr == ')' || *itr == '{' || *itr == '}') {
+         tokens.push_back({itr, 1});
+       }
++      // Keep every related pin in a grouped Liberty timing arc.
++      else if(*itr == '"' && !tokens.empty() && tokens.back() == "related_pin") {
++        const char* first = ++itr;
++        while(itr != end && *itr != '"' && *itr != 0) ++itr;
++        OT_LOGF_IF(itr == end || *itr != '"', "unterminated related_pin");
++        tokens.push_back({first, static_cast<size_t>(itr - first)});
++      }
++      // Other quoted values retain the existing tokenizer behavior.
+       // extract the entire quoted string (this is buggy now...)
+@@ -643,3 +651,11 @@
+     else if(*itr == "timing") {
+-      cellpin.timings.emplace_back(_extract_timing(itr, end));
++      auto timing = _extract_timing(itr, end);
++      const std::string related = timing.related_pin;
++      size_t start = related.find_first_not_of(" \t\r\n");
++      while(start != std::string::npos) {
++        const auto stop = related.find_first_of(" \t\r\n", start);
++        timing.related_pin = related.substr(start, stop - start);
++        cellpin.timings.emplace_back(timing);
++        start = stop == std::string::npos ? stop : related.find_first_not_of(" \t\r\n", stop);
++      }
+     }

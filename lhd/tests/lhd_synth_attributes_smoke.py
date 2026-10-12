@@ -407,15 +407,20 @@ plain_sum  = merged_sum("msum_plain", "")
 pinned_sum = merged_sum("msum_pin", ',synth.adder="brent"')
 global_sum = merged_sum("msum_global", "", "synth.adder=brent")
 assert pinned_sum == global_sum != plain_sum, (plain_sum, pinned_sum, global_sum)
-# A clock net on many registers gets a buffer tree (pass.abc.icg_fanout, default 64).
+# A primary clock net is ideal in a timer: it gets a buffer tree (pass.abc.icg_fanout, default 16)
+# only once the design has pass.abc.icg_input_min register bits, never below.
 wide = work / "wide_clk.prp"
 wide.write_text('''pub mod wide_clk::[timecheck=false](clk:Clock, d:U200, rst:Reset) -> (q:U200@[]) {
   reg r:U200 = 0
   r = d
   q = r
 }''')
-tree_doc, _ = synth("wide_clk", wide)
+small_doc, _ = synth("wide_clk", wide)
 flat_doc, _ = run("synth", wide, "--top", "wide_clk", "--workdir", work / "wide_clk_flat", "--set", "synth.liberty=" + lib,
                   "--set", "synth.opentimer=false", "--set", "pass.abc.icg_fanout=0")
-assert tree_doc["qor"]["abc"]["total"]["gates"] > flat_doc["qor"]["abc"]["total"]["gates"], (tree_doc["qor"]["abc"]["total"], flat_doc["qor"]["abc"]["total"])
+tree_doc, _ = run("synth", wide, "--top", "wide_clk", "--workdir", work / "wide_clk_tree", "--set", "synth.liberty=" + lib,
+                  "--set", "synth.opentimer=false", "--set", "pass.abc.icg_input_min=1")
+gates = lambda d: d["qor"]["abc"]["total"]["gates"]
+assert gates(small_doc) == gates(flat_doc), (gates(small_doc), gates(flat_doc))
+assert gates(tree_doc) > gates(flat_doc), (gates(tree_doc), gates(flat_doc))
 print("region contraction A -> B -> A and module-scope isolation passed")

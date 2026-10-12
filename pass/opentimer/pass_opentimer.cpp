@@ -20,6 +20,11 @@ void Pass_opentimer::setup() {
   Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::time_work);
   m1.add_label_required("files", "Liberty, spef, sdc file[s] for timing");
   m1.add_label_optional("margin", "% arrival time marging (0-100)", "0");
+  m1.add_label_optional("critical", "Annotate all nodes on paths near their timing target; requires targets or SDC", "false");
+  m1.add_label_optional("critical_percent", "Setup slack margin as a percentage of each target period (0-100)", "5");
+  m1.add_label_optional("targets",
+                        "Comma-separated clock:period overrides, e.g. clk:1ns,bus:4ns; bare periods use Liberty units",
+                        "");
   m1.add_label_optional("io_load", "Primary-output load in fF; negative preserves the default", "-1");
   m1.add_label_optional("top", "analyze only this module (required when the library holds several defs)", "");
   m1.add_label_optional("hier",
@@ -54,6 +59,7 @@ void Pass_opentimer::setup() {
 }
 
 Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var) {
+  parse_critical_options(var);
   const auto load_text = std::string(var.get("io_load", "-1"));
   char*      load_end  = nullptr;
   io_load_ff_          = std::strtof(load_text.c_str(), &load_end);
@@ -268,9 +274,10 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
 
     if (directive == "create_clock") {
       ++sdc_clocks_;
-      bool        supported = true, have_period = false, have_name = false;
-      float       period = 1000;
-      std::string pname  = "clock";
+      bool                     supported = true, have_period = false, have_name = false;
+      float                    period = 1000;
+      std::string              pname  = "clock";
+      std::vector<std::string> source_ports;
       for (std::size_t i = 1; i < tok.size(); i++) {
         if (tok[i] == "-period" || tok[i] == "-name") {
           if (i + 1 >= tok.size()) {
@@ -293,19 +300,40 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           }
           ++i;
         } else if (sdc_strip(tok[i]) == "get_ports") {
-          supported = false;  // Physical clock binding/state timing needs a separate model.
+          bool closed = false;
           for (std::size_t j = i + 1; j < tok.size(); ++j) {
             clock_ports.insert(sdc_strip(tok[j]));
+            source_ports.push_back(sdc_strip(tok[j]));
             if (sdc_closes(tok[j])) {
-              i = j;
+              i      = j;
+              closed = true;
               break;
             }
           }
+          supported &= closed;
         } else {
           supported = false;  // Waveforms, generated clocks and Tcl expressions are not guessed.
         }
       }
-      if (supported && have_period && have_name && !pname.empty() && sdc_clocks_ == 1) {
+      if (!have_name && source_ports.size() == 1) {
+        pname = source_ports.front();
+      }
+      if ((critical_ || !target_overrides_.empty()) && (!supported || !have_period || period <= 0)) {
+        fail("critical-constraints", "critical annotations require a positive create_clock period without unsupported modifiers");
+      }
+      period = override_period(pname, source_ports, period);
+      if (critical_) {
+        if (timing_targets_.contains(pname)) {
+          fail("critical-constraints", std::format("clock '{}' is defined more than once", pname));
+        }
+        for (const auto& port : source_ports) {
+          if (!timer.primary_inputs().contains(port) || native_start_clocks_.contains(port)) {
+            fail("critical-constraints", std::format("clock port '{}' does not exist", port));
+          }
+        }
+      }
+      timing_targets_[pname] = {period, source_ports};
+      if (supported && source_ports.empty() && have_period && have_name && !pname.empty() && sdc_clocks_ == 1) {
         virtual_clock_name_   = pname;
         virtual_clock_period_ = period;
       } else {
@@ -319,6 +347,9 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     const bool is_slew = directive == "set_input_transition";
     const bool is_rat  = directive == "set_output_delay";
     if (!is_at && !is_slew && !is_rat) {
+      if (critical_) {
+        fail("critical-constraints", std::format("critical annotations cannot honor unsupported SDC command '{}'", directive));
+      }
       constraints_complete_ = false;
       // Recognized SDC, not modelled here. Say so once: a dropped exception or
       // load changes the number this pass reports.
@@ -352,11 +383,17 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           fail("sdc-syntax", std::format("{} {} needs a value", directive, t));
         }
         if (t == "-reference_pin" || !reference_clock.empty() || is_slew) {
+          if (critical_) {
+            fail("critical-constraints", std::format("unsupported or repeated clock reference '{}'", t));
+          }
           constraints_complete_ = false;
         }
         reference_clock = sdc_strip(tok[++i]);
       } else if (t == "-add_delay" || t == "-clock_fall" || t == "-level_sensitive" || t == "-network_latency_included"
                  || t == "-source_latency_included") {
+        if (critical_) {
+          fail("critical-constraints", std::format("critical annotations cannot honor '{}'", t));
+        }
         // no argument, no effect on what this pass computes
         constraints_complete_ = false;
       } else if (const std::string bare = sdc_strip(t); bare == "get_ports" || bare == "all_inputs" || bare == "all_outputs") {
@@ -376,6 +413,9 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           } else if (bare == "get_ports" && !arg.empty()) {
             ports.push_back(arg);
           } else if (!arg.empty()) {
+            if (critical_) {
+              fail("critical-constraints", std::format("unsupported port selector '{}'", arg));
+            }
             constraints_complete_ = false;
           }
           if (sdc_closes(tok[j])) {
@@ -386,6 +426,9 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           i = j;
         }
         constraints_complete_ &= closed;
+        if (critical_ && !closed) {
+          fail("sdc-syntax", "port selector is missing its closing bracket");
+        }
       } else if (!have_value && sdc_number(t, value)) {
         have_value = true;
       } else {
@@ -401,19 +444,24 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     }
     if (all_inputs) {
       for (const auto& [pname, _] : timer.primary_inputs()) {
-        if (!no_clocks || !clock_ports.contains(pname)) {
+        if (!native_start_clocks_.contains(pname) && (!no_clocks || !clock_ports.contains(pname))) {
           ports.push_back(pname);
         }
       }
     }
     if (all_outputs) {
       for (const auto& [pname, _] : timer.primary_outputs()) {
-        ports.push_back(pname);
+        if (!native_end_clocks_.contains(pname)) {
+          ports.push_back(pname);
+        }
       }
     }
 
     const bool clocked
         = !reference_clock.empty() && reference_clock == virtual_clock_name_ && virtual_clock_period_ > 0 && sdc_clocks_ == 1;
+    if (critical_ && is_rat && reference_clock.empty()) {
+      fail("critical-constraints", "critical annotations require set_output_delay to name its -clock");
+    }
     if ((!reference_clock.empty() && !clocked) || (is_rat && !clocked) || (is_at && virtual_clock_period_ > 0 && !clocked)) {
       constraints_complete_ = false;
     }
@@ -426,7 +474,25 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     const bool do_fall = want_fall || !want_rise;
     for (const auto& pname : ports) {
       if ((is_at || is_slew) ? !timer.primary_inputs().contains(pname) : !timer.primary_outputs().contains(pname)) {
+        if (critical_) {
+          fail("critical-constraints", std::format("SDC port '{}' does not exist", pname));
+        }
         constraints_complete_ = false;
+      }
+      if (critical_ && !reference_clock.empty() && !timing_targets_.contains(reference_clock)) {
+        fail("critical-constraints", std::format("SDC clock '{}' is not defined", reference_clock));
+      }
+      if (is_rat && !reference_clock.empty()) {
+        if (critical_ && output_clocks_.contains(pname) && output_clocks_.at(pname) != reference_clock) {
+          fail("critical-constraints", std::format("multiple clocks constrain output '{}'", pname));
+        }
+        output_clocks_[pname] = reference_clock;
+      }
+      if (is_at && !reference_clock.empty()) {
+        if (critical_ && input_clocks_.contains(pname) && input_clocks_.at(pname) != reference_clock) {
+          fail("critical-constraints", std::format("multiple clocks constrain input '{}'", pname));
+        }
+        input_clocks_[pname] = reference_clock;
       }
       for (const auto split : {ot::MIN, ot::MAX}) {
         if ((split == ot::MIN && !do_min) || (split == ot::MAX && !do_max)) {
@@ -445,9 +511,15 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           } else if (is_slew) {
             timer.set_slew(pname, split, tran, value);
           } else {
+            if (split == ot::MAX) {
+              output_max_constraints_[pname] |= static_cast<uint8_t>(1U << tran);
+            }
             // Setup captures at the next rising edge; hold captures at this
             // edge. SDC output delay subtracts from the required arrival.
-            const float required = clocked ? (split == ot::MAX ? virtual_clock_period_ - value : -value) : value;
+            const bool  resolved = (critical_ || !target_overrides_.empty()) && timing_targets_.contains(reference_clock);
+            const float required = resolved  ? (split == ot::MAX ? timing_targets_.at(reference_clock).period - value : -value)
+                                   : clocked ? (split == ot::MAX ? virtual_clock_period_ - value : -value)
+                                             : value;
             timer.set_rat(pname, split, tran, required);
           }
         }

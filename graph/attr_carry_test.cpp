@@ -46,6 +46,8 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   // One value per carried node-kind tag (see attr_carry.hpp).
   src.attr(hhds::attrs::name).set(std::string{"carried_name"});
   src.attr(la::color).set(int32_t{7});
+  src.attr(la::critical).set();
+  src.attr(la::sta).set(std::string{"timing_evidence"});
   src.attr(la::ctrl_members).set(std::string{"7 11"});
   src.attr(la::ctrl_stats).set(std::string{"ctrl_stats_blob"});
   src.attr(la::synth_region).set(std::string{"reg_A"});
@@ -71,12 +73,14 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::legalize_inlined).set(std::string{"callee.split"});
   src.attr(la::comb_reach).set(std::string{"s 0 1\no 2 0\n"});
   gu::set_match(src, 9);  // the NODE overload of the dual-role `match`
-  static_assert(kNodeTagsStamped == 27, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kNodeTagsStamped == 29, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_node_attrs(src, dst);
 
   EXPECT_EQ(dst.attr(hhds::attrs::name).get(), "carried_name");
   EXPECT_EQ(dst.attr(la::color).get(), 7);
+  EXPECT_TRUE(dst.attr(la::critical).has());
+  EXPECT_EQ(dst.attr(la::sta).get(), "timing_evidence");
   EXPECT_EQ(dst.attr(la::ctrl_members).get(), "7 11");
   EXPECT_EQ(dst.attr(la::ctrl_stats).get(), "ctrl_stats_blob");
   EXPECT_EQ(dst.attr(la::synth_region).get(), "reg_A");
@@ -149,6 +153,8 @@ TEST(AttrCarry, AbsentAttributesAreNotMaterialized) {
   gu::carry_node_attrs(src, dst);
 
   EXPECT_EQ(dst.attr(la::color).get(), 4);
+  EXPECT_FALSE(dst.attr(la::critical).has());
+  EXPECT_FALSE(dst.attr(la::sta).has());
   EXPECT_FALSE(dst.attr(la::ctrl_members).has());
   EXPECT_FALSE(dst.attr(la::ctrl_stats).has());
   EXPECT_FALSE(dst.attr(hhds::attrs::name).has());

@@ -317,6 +317,30 @@ std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::str
 }
 
 void Region_driver::prepare_region_opts(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
+  // Register bits of every graph including its instantiated children, once per
+  // definition: the largest is the design's total (the primary clock's fanout).
+  absl::flat_hash_map<hhds::Gid, uint64_t> total;
+  std::function<uint64_t(const std::shared_ptr<hhds::Graph>&, int)> count = [&](const std::shared_ptr<hhds::Graph>& g, int depth) {
+    if (auto it = total.find(g->get_gid()); it != total.end()) {
+      return it->second;
+    }
+    uint64_t bits = 0;
+    for (auto n : g->body().nodes()) {
+      if (livehd::graph_util::is_type_register(n)) {
+        bits += static_cast<uint64_t>(std::max<int32_t>(1, livehd::graph_util::bits_of(n.get_driver_pin(0))));
+      } else if (depth < 64 && livehd::graph_util::is_type_sub(n)) {
+        if (auto child = n.get_subnode_graph(); child != nullptr) {
+          bits += count(child, depth + 1);
+        }
+      }
+    }
+    return total[g->get_gid()] = bits;
+  };
+  for (const auto& g : graphs) {
+    if (g) {
+      design_state_bits_ = std::max(design_state_bits_, count(g, 0));
+    }
+  }
   for (const auto& g : graphs) {
     if (!g || graph_region_opts_.contains(g.get())) {
       continue;
@@ -798,6 +822,7 @@ void Region_driver::map_regions(std::span<const livehd::partition::Region_body> 
           worker->region_opts_cli_   = region_opts_cli_;
           worker->graph_region_opts_ = graph_region_opts_;
           worker->graph_ware_policy_ = graph_ware_policy_;
+          worker->design_state_bits_ = design_state_bits_;
           worker->dff_               = dff_;
           worker->dff_ladder_        = dff_ladder_;
           worker->areset_ladder_[0]  = areset_ladder_[0];
@@ -1255,6 +1280,8 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
                         opts_.inherited_barrel ? static_cast<int>(*opts_.inherited_barrel) : -1);
   recipe
       += std::format("|source={}/{}/{}/{}", opts_.source_adder, opts_.source_multiplier, opts_.source_barrel, opts_.source_block);
+  // The clock tree is written after mapping and cached with the body.
+  recipe += std::format("|clktree={}/{}", opts_.icg_fanout, design_state_bits_ >= opts_.input_clock_min ? 1 : 0);
   std::vector<std::string> local_hints;
   for (const auto& node : rb.nodes) {
     if (auto a = node.attr(attrs::synth_policy); a.has()) {
@@ -1542,7 +1569,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // --- read back: the mapped cells -> the region body ---
   Region_writer::Counts counts{qor_.back().gates, qor_.back().area, qor_.back().bypassed};
   const Region_writer::Registers
-      registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1], &icg_ladder_, &latch_ladder_, opts_.icg_fanout};
+      registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1], &icg_ladder_, &latch_ladder_, opts_.icg_fanout, design_state_bits_ >= opts_.input_clock_min};
   writer_.set_outlib(outlib_);
   writer_.set_flat(flat_);
   if (!writer_.write(rb, blast, *cells, backend_->cells(), registers, counts, trace_stage)) {

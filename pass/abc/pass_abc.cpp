@@ -111,6 +111,11 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "output): past it the net is dealt out through a tree of the library's smallest buffer. One ICG or "
                        "input on thousands of flops is an unbuffered net that dominates gate-level timing (0 disables)",
                        "16");
+  m.add_label_optional("icg_input_min",
+                       "register bits in the design past which the primary clock net is also dealt out through the "
+                       "icg_fanout buffer tree. The primary clock port is an ideal driver in a timer, so below this a tree "
+                       "only adds launch latency (0 = always buffer it)",
+                       "8192");
   m.add_label_optional("max_fanout",
                        "cap the fanout of every net ABC maps, by appending `buffer -N <n>; dnsize {B}` to the "
                        "built-in flows (0 disables the tail, sizing included). A custom `flow` places `{F}` -- the bare "
@@ -851,6 +856,15 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
       livehd::diag::err("pass.abc", "bad-icg-fanout", "syntax").msg("pass.abc.icg_fanout '{}' is not an integer", s).fatal();
     }
   }
+  uint64_t input_clock_min = 8192;
+  if (auto s = std::string{var.get("icg_input_min", "8192")}; !s.empty()) {
+    const char* b = s.data();
+    const char* e = s.data() + s.size();
+    auto [p, ec]  = std::from_chars(b, e, input_clock_min);
+    if (ec != std::errc{} || p != e || input_clock_min > std::numeric_limits<uint32_t>::max()) {
+      livehd::diag::err("pass.abc", "bad-icg-fanout", "syntax").msg("pass.abc.icg_input_min '{}' is not an integer", s).fatal();
+    }
+  }
   uint64_t max_fanout = 16;
   {
     const auto s_mf = std::string{var.get("max_fanout", "16")};
@@ -981,6 +995,7 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   opts.io_load           = io_load;
   opts.max_fanout        = static_cast<uint32_t>(max_fanout);
   opts.icg_fanout        = static_cast<uint32_t>(icg_fanout);
+  opts.input_clock_min   = static_cast<uint32_t>(input_clock_min);
   opts.area_relax_pct    = static_cast<uint32_t>(area_relax_pct);
   opts.area_flow         = area_flow;
   opts.reg_margin        = reg_margin;

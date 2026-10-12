@@ -82,3 +82,10 @@ cc_test(
     copts = COPTS,
     deps = [":pass_opentimer", "@googletest//:gtest_main"],
 )
+
+cc_test(
+    name = "critical_test",
+    srcs = ["critical_test.cpp"],
+    copts = COPTS,
+    deps = [":pass_opentimer", "@googletest//:gtest_main"],
+)

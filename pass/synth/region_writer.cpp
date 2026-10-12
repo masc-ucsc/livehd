@@ -1690,8 +1690,8 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // Clock fanout tree. A net clocking thousands of register cells (a region
   // input, or a clock gate's output) is one unbuffered net, and in a gate-level
   // report it IS the critical path (minion: 1.5-2.5 ns on one ICG output). Past
-  // `icg_fanout` sinks the net is dealt out in blocks, each driven by a
-  // non-inverting pair of minimum inverters, level by level until the root
+  // `icg_fanout` sinks the net is dealt out in blocks, each driven by one
+  // minimum identity buffer, level by level until the root
   // drives at most `icg_fanout` loads. Clock polarity and function are kept.
   std::optional<uint32_t> clock_buf;
   if (registers.icg_fanout != 0) {
@@ -1714,6 +1714,24 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     });
     const auto& desc = lib.decl(*outlib_, *clock_buf);
     for (const auto& driver : drivers) {
+      // A net fed straight from the design's primary clock port is ideal in
+      // every timer (CTS owns it): a tree there only adds latency. A derived
+      // clock is bounded here: a gate's or inverter's output this region drives,
+      // or a region input another region's gate drives.
+      if (gu::is_graph_input_pin(driver)) {
+        bool primary = true;
+        for (size_t idx = 0; idx < rb.inputs.size(); ++idx) {
+          if (body_input_pin[idx] == driver) {
+            primary = rb.inputs[idx].src_driver.is_invalid() || gu::is_graph_input_pin(rb.inputs[idx].src_driver);
+            break;
+          }
+        }
+        if (primary) {
+          if (!registers.primary_clock_tree) {
+            continue;
+          }
+        }
+      }
       auto& sinks = clock_sinks[driver];
       int   level = 0;
       while (sinks.size() > cap) {

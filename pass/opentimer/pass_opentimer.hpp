@@ -1,7 +1,9 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -41,6 +43,38 @@ protected:
 
   int    margin;  // % margin to mark nodes
   double freq;
+
+  bool        critical_         = false;
+  float       critical_percent_ = 5;
+  std::string targets_text_;
+  struct Timing_target {
+    float                    period = 0;
+    std::vector<std::string> ports;
+  };
+  std::map<std::string, Timing_target>                            timing_targets_;
+  std::map<std::string, std::string>                              target_overrides_;
+  std::map<std::string, std::string>                              output_clocks_;
+  std::map<std::string, std::string>                              input_clocks_;
+  std::map<std::string, uint8_t>                                  output_max_constraints_;
+  // Physical native-state boundaries, resolved through the same bus tracker
+  // as cell connectivity. Values are clock NET names, not guessed node names.
+  std::map<std::string, std::string>                              native_end_clocks_, native_start_clocks_;
+  absl::flat_hash_map<std::string, hhds::Node_class>              timing_pin_nodes_;
+  absl::flat_hash_map<std::string, std::vector<hhds::Node_class>> timing_net_nodes_;
+  // Node_class equality only compares its raw index. Scratch copies live in
+  // different graphs/libraries and may reuse that index.
+  using Timing_node_key = std::pair<const hhds::Graph*, uint64_t>;
+  static Timing_node_key timing_node_key(const hhds::Node_class& n) { return {n.get_graph(), n.get_debug_nid()}; }
+  absl::flat_hash_map<Timing_node_key, hhds::Node_class> timing_origins_;
+  std::string                                            annotation_records_, annotation_summary_;
+
+  void        parse_critical_options(const Eprp_var& var);
+  float       target_period(std::string_view value) const;
+  float       override_period(const std::string& name, const std::vector<std::string>& ports, float period) const;
+  void        prepare_critical_targets();
+  void        annotate_critical(const std::shared_ptr<hhds::Graph>& g);
+  bool        apply_annotations(const std::shared_ptr<hhds::Graph>& g, std::string_view records, std::string_view summary);
+  std::string annotation_identity(const std::shared_ptr<hhds::Graph>& g) const;
 
   std::string odir;          // output directory power trace
   float       max_delay;     // slowest arrival time (delay) on the circuit

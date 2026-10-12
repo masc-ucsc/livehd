@@ -428,7 +428,8 @@ const Help_doc* tool_help_doc(std::string_view name) {
       {{"cat", "structured dump of one ln:/lg:/source input"},
         {"grep", "filtered search over one or more lg: libraries"},
         {"diff", "unified or semdiff-aware comparison of two inputs"},
-        {"tree", "lg: instance hierarchy or LNAST structural skeleton"}},
+        {"tree", "lg: instance hierarchy or LNAST structural skeleton"},
+        {"sta", "query saved module-local timing annotations"}},
       {"lhd tool cat lg:dir --top m", "lhd tool grep color=nil lg:dir", "lhd tool diff lg:before lg:after", "lhd tool tree ln:dir"},
       {},
       {},
@@ -511,6 +512,30 @@ const Help_doc* tool_help_doc(std::string_view name) {
       {"stdout"}
   };
 
+  static const Help_doc sta{
+      "tool sta",
+      "query saved timing annotations without rerunning STA",
+      "tool sta [filters…] <lg:DIR…> [flags]",
+      {"Shows critical nodes by default; critical=false selects noncritical timing evidence. --top selects a module and its "
+       "reachable definitions, deduplicated across instances. Filters are AND-combined: clock, module, src, name, kind, "
+       "id, color, critical, slack, period, pin. Slack and period support decimal comparisons and use the row's time unit. "
+       "Generate annotations with pass.opentimer.critical=true and SDC or pass.opentimer.targets."},
+      {help_positional("inputs", "lg:DIR", "annotated libraries", true, true),
+        help_positional("filters", "field=value|term", "AND-combined timing filters", false, true),
+        help_flag("top", "--top M", "string", "select a module and its reachable definitions"),
+        help_flag("attr", "--attr CSV", "csv", "display columns"),
+        help_flag("max", "--max N", "int", "output row cap (0 = unlimited)"),
+        help_flag("diag-fmt", "--diag-fmt auto|json|pretty", "enum", "human or machine records")},
+      {},
+        {"lhd tool sta lg:net --top cpu",
+        "lhd tool sta clock=clk 'slack<0' lg:net --diag-fmt json", "lhd tool sta src=alu.prp lg:net",
+        "lhd tool sta critical=false lg:net", "lhd tool sta paths=5 'slack<0' lg:net --top cpu   # the 5 worst paths: slack, cells, start -> end"},
+      {"lg"},
+      {"stdout"}
+  };
+  if (name == "tool sta") {
+    return &sta;
+  }
   if (name == "tool") {
     return &parent;
   }
@@ -770,7 +795,7 @@ void print_general_help() {
       "               lhd formal verify foo.prp --top foo --set formal.bound=12\n"
       "  scan       report each .prp file's import strings (the result's \"scan\" member)\n"
       "               lhd scan x.prp y.prp\n"
-      "  tool       inspect ln:/lg: artifacts: cat | grep | diff | tree (stdout; --diag-fmt json)\n"
+      "  tool       inspect ln:/lg: artifacts: cat | grep | diff | tree | sta (stdout; --diag-fmt json)\n"
       "               lhd tool cat lg:dir --top m       # structured dump + attributes\n"
       "               lhd tool grep get_mask lg:dir     # filtered search (bare term -> any field)\n"
       "               lhd tool diff lg:before lg:after --attr color\n"
@@ -903,7 +928,7 @@ int help_tool(const std::string& sub) {
   const std::string name = sub.empty() ? "tool" : "tool " + sub;
   const auto*       doc  = tool_help_doc(name);
   if (doc == nullptr) {
-    std::print(stderr, "lhd help: unknown tool subcommand '{}' (cat | grep | diff | tree)\n", sub);
+    std::print(stderr, "lhd help: unknown tool subcommand '{}' (cat | grep | diff | tree | sta)\n", sub);
     return 1;
   }
   render_help_pretty(*doc);
@@ -1308,7 +1333,7 @@ int help_pass(const std::string& sub) {
 
 std::string json_general() {
   return std::format(
-      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"synth","summary":"one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA; QoR + timing report"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: {}"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
+      R"json({{"schema_version":1,"name":"lhd","version":"{}","description":"LiveHD stateless CLI kernel: one hermetic invocation per flow (declared inputs + config -> declared outputs + exit code); drives the registered pass/inou (EPRP) methods via argv","commands":[{{"name":"compile","summary":"sources and/or ln:/lg: IR -> ln:/lg:/verilog/pyrope (front-end + elaborate + synth)"}},{{"name":"synth","summary":"one-shot synthesis: compile -> color synth -> abc tech-map -> opentimer STA; QoR + timing report"}},{{"name":"sim","summary":"build + run a C++ simulation of a Pyrope design's test blocks (dynamic verify)"}},{{"name":"lec","summary":"logic equivalence check: prove_equal(ref, impl); --set formal.solver = cvc5|bitwuzla|lgyosys"}},{{"name":"formal","summary":"formal verification family: verify (assert/assume BMC) | lec (= lhd lec)"}},{{"name":"scan","summary":"report each .prp file's import strings"}},{{"name":"tool","summary":"inspect ln:/lg: artifacts: cat | grep | diff | tree | sta"}},{{"name":"pyrope","summary":"Pyrope developer tools: fmt | lsp"}},{{"name":"pass","summary":"run one graph pass over lg: inputs: {}"}},{{"name":"list","summary":"enumerate the CLI vocabulary: steps|emit-kinds|error-classes|options|log-channels"}},{{"name":"describe","summary":"one item's full record as JSON"}},{{"name":"version","summary":"print the tool version"}},{{"name":"help","summary":"per-command help: lhd help <command> (== lhd <command> --help)"}}],"examples":["lhd compile x.prp --emit verilog:net.v","lhd lec --impl impl.prp --ref ref.v","lhd help compile"]}})json",
       kVersion,
       kPassSubcommands);
 }
@@ -1335,7 +1360,7 @@ constexpr std::string_view kJsonPassAbc
     = R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> Liberty blackboxes. The cells come from THE one Liberty knob (--set synth.liberty, else $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib); pass.abc.library is refused. --emit-dir lg: (must differ from the input) receives the mapped netlist. --stats adds one QoR row per mapped color with resynth=1|0","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"stats","type":"flag"},{"name":"set","type":"synth.liberty=PATH | synth.threads=N | pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net --stats"]})json";
 
 constexpr std::string_view kJsonPassOpentimer
-    = R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. --stats adds one timing row per mapped color with resynth=1|0. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. hier defaults true: a --top that instantiates sub-modules is structurally flattened and timed as ONE design (--set pass.opentimer.hier=false rejects non-Liberty Subs instead: one flat module per run). With a --workdir and lhd.incremental (default true) the STA result cache at <workdir>/sta_cache replays the stored report for an unchanged netlist+environment instead of re-timing; counters ride the envelope's incremental.sta","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"stats","type":"flag"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m lg:net cells.lib --workdir W --stats"]})json";
+    = R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. --stats adds one timing row per mapped color with resynth=1|0. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. hier defaults true: a --top that instantiates sub-modules is structurally flattened and timed as ONE design (--set pass.opentimer.hier=false rejects non-Liberty Subs instead: one flat module per run). With a --workdir and lhd.incremental (default true) the STA result cache at <workdir>/sta_cache replays the stored report for an unchanged netlist+environment instead of re-timing; counters ride the envelope's incremental.sta. critical=true persists module-local marks for all paths with setup slack within critical_percent (default 5) of their target period. targets=core:1ns,bus:4ns overrides SDC clocks; missing targets without SDC are an error. Marks save in place or to --emit-dir lg:DIR and can be queried with lhd tool sta","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"stats","type":"flag"},{"name":"emit-dir","type":"lg:DIR/ | verilog:DIR/"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json","lg","verilog"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m lg:net cells.lib --workdir W --stats","lhd pass opentimer lg:net cells.lib design.sdc --top top --set pass.opentimer.critical=true","lhd tool sta lg:net --top top clock=core"]})json";
 
 constexpr std::string_view kJsonPassLiberty
     = R"json({"schema_version":1,"name":"pass liberty","description":"Liberty cells -> LGraph simulation models (gensim). Takes a Liberty FILE (not an lg: input; omit it to read --set synth.liberty); --emit-dir lg: receives the model library","args":{"required":[{"name":"subcommand","type":"enum","values":["gensim"],"positional":true}],"optional":[{"name":"file","type":"path (.lib; omit => --set synth.liberty)","positional":true},{"name":"emit-dir","type":"lg:DIR/"},{"name":"set","type":"pass.liberty.flag=value","repeatable":true}]},"inputs":[],"outputs":["lg"],"examples":["lhd pass liberty gensim sky130.lib --emit-dir lg:models"]})json";
@@ -1411,10 +1436,10 @@ int help_json_dispatch(const std::string& topic, const std::string& sub, const O
     if (sub.empty()) {
       return describe_as("tool");
     }
-    if (sub == "cat" || sub == "grep" || sub == "diff" || sub == "tree") {
+    if (sub == "cat" || sub == "grep" || sub == "diff" || sub == "tree" || sub == "sta") {
       return describe_as("tool " + sub);
     }
-    std::print(stderr, "lhd help: unknown tool subcommand '{}' (cat | grep | diff | tree)\n", sub);
+    std::print(stderr, "lhd help: unknown tool subcommand '{}' (cat | grep | diff | tree | sta)\n", sub);
     return 1;
   }
   if (topic == "pass") {

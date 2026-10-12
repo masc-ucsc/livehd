@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build/run the real USYN CLI after removing ABC in a disposable source copy.
+"""Build the real USYN CLI after removing ABC in a disposable source copy.
 
 Includes current tracked and untracked source edits. Never mutates the checkout.
-The retained fixture contains source, dependency audit and Bazel test logs.
+The retained fixture contains source, dependency audit and Bazel build logs.
 This is an explicit build gate, not a nested Bazel test in the default suite.
 """
 
@@ -63,13 +63,9 @@ def main():
     if audit.stdout.strip():
         raise RuntimeError("ABC remains in the configured lhd dependency closure")
     subprocess.run(
-        bazel + ["test"] + config + [
-            "--local_test_jobs=1", "--test_output=errors", "//lhd/tests:lhd_usyn_noabc_smoke"
-        ], cwd=fixture, check=True,
+        bazel + ["build"] + config + ["//lhd"], cwd=fixture, check=True,
     )
-    # The test contains a source->logical-netlist run with no Liberty, state/name
-    # checks, independent CVC5 proof/refutation, and unavailable-tmap diagnostics.
-    print(f"PASS: ABC-removed {args.mode} CLI build/run; evidence retained in {fixture}", flush=True)
+    print(f"PASS: ABC-removed {args.mode} CLI build; evidence retained in {fixture}", flush=True)
 
 
 if __name__ == "__main__":

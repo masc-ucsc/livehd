@@ -103,12 +103,14 @@ Sta_cache::Sta_cache(std::string dir, uint64_t salt) : dir_(std::move(dir)), sal
       continue;
     }
     Sta_record r;
-    r.time_unit       = jstr(m.value, "time_unit");
-    r.max_delay       = jnum(m.value, "max_delay", 0.0);
-    r.max_pin         = jstr(m.value, "max_pin");
-    r.block           = jstr(m.value, "block");
-    r.opaque_nodes    = static_cast<uint64_t>(jnum(m.value, "opaque_nodes", 0.0));
-    r.ambiguous_nodes = static_cast<uint64_t>(jnum(m.value, "ambiguous_nodes", 0.0));
+    r.time_unit          = jstr(m.value, "time_unit");
+    r.max_delay          = jnum(m.value, "max_delay", 0.0);
+    r.max_pin            = jstr(m.value, "max_pin");
+    r.block              = jstr(m.value, "block");
+    r.annotations        = jstr(m.value, "annotations");
+    r.annotation_summary = jstr(m.value, "annotation_summary");
+    r.opaque_nodes       = static_cast<uint64_t>(jnum(m.value, "opaque_nodes", 0.0));
+    r.ambiguous_nodes    = static_cast<uint64_t>(jnum(m.value, "ambiguous_nodes", 0.0));
     jstrs(m.value, "opaque_examples", r.opaque_examples);
     jstrs(m.value, "or_examples", r.or_examples);
     if (r.block.empty()) {
@@ -172,17 +174,18 @@ void Sta_cache::save() {
     }
     first  = false;
     out   += std::format("\"{}\":{{\"time_unit\":\"{}\",\"max_delay\":{:.9g},\"max_pin\":\"{}\",\"block\":\"{}\"",
-                       jesc(key),
-                       jesc(r.time_unit),
-                       r.max_delay,
-                       jesc(r.max_pin),
-                       jesc(r.block));
+                         jesc(key),
+                         jesc(r.time_unit),
+                         r.max_delay,
+                         jesc(r.max_pin),
+                         jesc(r.block));
+    out   += std::format(",\"annotations\":\"{}\",\"annotation_summary\":\"{}\"", jesc(r.annotations), jesc(r.annotation_summary));
     out   += ",\"colors\":[";
     for (size_t i = 0; i < r.colors.size(); ++i) {
       const auto& c  = r.colors[i];
       out           += std::format(
           "{}{{\"module\":\"{}\",\"color\":{},\"cells\":{},\"max_arrival\":{:.9g},\"critical_pin\":\"{}\","
-                    "\"critical_src\":\"{}\"}}",
+          "\"critical_src\":\"{}\"}}",
           i != 0 ? "," : "",
           jesc(c.module),
           c.color,

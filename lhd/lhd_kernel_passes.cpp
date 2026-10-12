@@ -1009,11 +1009,6 @@ void pass_command(Options& opts, Result& res) {
     // (2opt-freq D): STA on ONE tech-mapped module. Timing files are the bare
     // positional args after the subcommand (like `pass liberty gensim`);
     // `files` is a kernel-managed label, so the kernel builds it here.
-    if (const auto* lg_out = graph_out ? &*graph_out : nullptr; lg_out != nullptr) {
-      throw Lhd_error{"usage",
-                      std::format("pass opentimer does not emit an lg: library; --emit-dir lg:{} is unused", lg_out->path),
-                      "opentimer reports timing (see --workdir/timing.json), it does not transform the graph"};
-    }
     std::vector<std::string> tfiles(opts.files.begin() + 1, opts.files.end());
     // No positional .lib: fall back to THE Liberty (synth.liberty, else the
     // $HAGENT_TECH_DIR default) -- the same file `lhd pass abc` mapped with, so
@@ -1063,6 +1058,25 @@ void pass_command(Options& opts, Result& res) {
       labels["cache_dir"] = (fs::path(opts.workdir) / "sta_cache").string();
     }
     run_step("pass.opentimer", var, labels, opts, res);
+    const bool critical = labels["critical"] == "true" || labels["critical"] == "1";
+    if (graph_out && fs::weakly_canonical(graph_out->path) != fs::weakly_canonical(lg_in)) {
+      std::error_code ec;
+      fs::remove_all(graph_out->path, ec);
+      ensure_dir(graph_out->path);
+      auto& output = livehd::Hhds_graph_library::instance(graph_out->path);
+      auto& input  = livehd::Hhds_graph_library::instance(lg_in);
+      for (const auto& graph : var.graphs) {
+        if (graph && !livehd::copy_with_callees(output, input, graph->get_name())) {
+          throw Lhd_error{"config", "could not export the STA annotated graph", ""};
+        }
+      }
+      livehd::Hhds_graph_library::save(graph_out->path);
+      res.outputs.push_back(graph_out->path);
+    } else if (critical || graph_out) {
+      livehd::Hhds_graph_library::save(lg_in);
+      res.outputs.push_back(lg_in);
+    }
+
     embed_qor_sidecar(labels, res);
     harvest_sta_incremental(res, res.qor_json);
     if (!ephemeral_qor.empty() && labels["qor"] == ephemeral_qor) {

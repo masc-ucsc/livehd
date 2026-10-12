@@ -205,6 +205,7 @@ private:
   // module can produce hundreds of regions, so reparsing its JSON in every
   // apply_region_overrides call is needlessly quadratic in metadata size.
   std::map<const hhds::Graph*, Ware_policy>     graph_ware_policy_;
+  uint64_t                                      design_state_bits_ = 0;  // register bits under the largest graph (primary-clock fanout)
   // rewrite_trivial_rems scans and rewrites a whole source def. A def is shared
   // by all of its colored Region_body callbacks, so doing it once per region is
   // an accidental O(regions * def_nodes) cost (528 full RenameBuffer walks).

@@ -26,6 +26,7 @@
 #include "json_util.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
+#include "node_util.hpp"
 #include "pass_opentimer.hpp"
 #include "pass_partition.hpp"
 #include "pin_tracker.hpp"
@@ -324,7 +325,8 @@ void Pass_opentimer::time_work(Eprp_var& var) {
     return;
   }
 
-  auto g = selected.front();
+  auto       g              = selected.front();
+  const auto annotation_top = g;
 
   // A design compiled WITHOUT `compile.unroll` -- false is the DEFAULT, so this
   // is the ordinary path -- keeps ONE compact Sub standing for `count`
@@ -377,7 +379,7 @@ void Pass_opentimer::time_work(Eprp_var& var) {
     sta_key               = pass.cache_key(g);
     const auto* rec       = sta_key.empty() ? nullptr : sta_cache->lookup(sta_key);
     pass.cache_lookup_ms_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-    if (rec != nullptr) {
+    if (rec != nullptr && (!pass.critical_ || pass.apply_annotations(annotation_top, rec->annotations, rec->annotation_summary))) {
       pass.cache_hit_ = true;
       pass.replay(*rec);
       pass.write_qor();
@@ -445,7 +447,37 @@ void Pass_opentimer::time_work(Eprp_var& var) {
           .emit();
       return;
     }
-    if (!livehd::graph_util::materialize_occurrences_all(occurrence_graphs, "pass.opentimer")) {
+    if (pass.critical_) {
+      // copy_from retains body indices. Record those identities before compact
+      // instances are replaced; each new replica maps back to its source node.
+      for (const auto& copy : occurrence_graphs) {
+        const auto                           source = lib->find_io(copy->get_name())->get_graph();
+        std::map<uint64_t, hhds::Node_class> originals;
+        for (auto n : source->body().nodes()) {
+          originals.emplace(n.get_debug_nid(), n);
+        }
+        std::vector<hhds::Node_class> compact;
+        for (auto n : copy->body().nodes()) {
+          if (auto it = originals.find(n.get_debug_nid()); it != originals.end()) {
+            pass.timing_origins_[timing_node_key(n)] = it->second;
+          }
+          if (n.is_loop_subnode()) {
+            compact.push_back(n);
+          }
+        }
+        for (auto n : compact) {
+          const auto                    source_node = pass.timing_origins_.at(timing_node_key(n));
+          std::vector<hhds::Node_class> replicas;
+          if (!livehd::graph_util::materialize_occurrence(copy.get(), n, "pass.opentimer", &replicas)) {
+            return;
+          }
+          pass.timing_origins_.erase(timing_node_key(n));
+          for (auto replica : replicas) {
+            pass.timing_origins_[timing_node_key(replica)] = source_node;
+          }
+        }
+      }
+    } else if (!livehd::graph_util::materialize_occurrences_all(occurrence_graphs, "pass.opentimer")) {
       return;  // diag already emitted
     }
     g = top_copy;
@@ -484,7 +516,11 @@ void Pass_opentimer::time_work(Eprp_var& var) {
       // lands in the input library and is deleted at the end of the run.
       scratch_lib  = g->get_io()->get_library();
       scratch_name = pass.report_module_ + "__ot_flat_tmp";
-      scratch      = livehd::partition::flatten_hierarchy(g.get(), scratch_lib, scratch_name);
+      livehd::partition::Flat_origin_map origins;
+      scratch = livehd::partition::flatten_hierarchy(g.get(), scratch_lib, scratch_name, pass.critical_ ? &origins : nullptr);
+      for (const auto& [node, origin] : origins) {
+        pass.timing_origins_[timing_node_key(node)] = origin.src_node;
+      }
       if (!scratch) {
         return;  // diag already emitted
       }
@@ -495,8 +531,18 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   pass.setup_hier(g);
   pass.build_circuit(g);  // ensure_libs() runs here: a cache hit above never parses a Liberty
   pass.read_sdc_spef();
+  pass.prepare_critical_targets();
+  pass.annotate_critical(g);
   pass.compute_timing(g);
-  pass.populate_table(g);
+  if (!pass.critical_) {
+    pass.populate_table(g);
+  }
+  if (pass.critical_ && !livehd::diag::sink().has_errors()
+      && !pass.apply_annotations(annotation_top, pass.annotation_records_, pass.annotation_summary_)) {
+    livehd::diag::err("pass.opentimer", "critical-identity", "internal")
+        .msg("could not map timing annotations to input nodes")
+        .fatal();
+  }
   {
     // The Liberty time unit as a label, for the report and the cache record.
     if (auto u = pass.timer.time_unit(); u) {
@@ -1580,6 +1626,47 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   }
   emit_boundary_warning();
 
+  auto state_clock = [&](const hhds::Occurrence_node& node, hhds::Port_id port = 2) {
+    if (type_op_of(node) == Ntype_op::Latch) {
+      port = 4;  // a native latch's gate is its enable, not the reserved clock pin
+    }
+    auto local = node.base_node().try_get_sink_pin(port);
+    if (local.is_invalid()) {
+      return std::string{};
+    }
+    const auto drivers = local.get_driver_pins();
+    if (drivers.empty() || drivers.front().is_const()) {
+      return std::string{};
+    }
+    auto       pin    = g->occurrences().lift(drivers.front());
+    const auto values = pin_tracker.get_pin_vector(trk_id(pin));
+    if (!values.empty() && values.front().pos >= 0) {
+      return values.front().pos == 0 ? std::string{values.front().id()}
+                                     : std::format("{}.{}", values.front().id(), values.front().pos);
+    }
+    return get_driver_net_name(pin);
+  };
+  if (critical_) {
+    for (const auto& node : nodes) {
+      for (const auto& edge : node.out_edges()) {
+        if (edge.driver.is_invalid() || edge.driver.is_const()) {
+          continue;
+        }
+        const auto& values = pin_tracker.get_pin_vector(trk_id(edge.driver));
+        if (values.empty()) {
+          timing_net_nodes_[get_driver_net_name(edge.driver)].push_back(node.base_node());
+        } else {
+          for (const auto& value : values) {
+            if (value.pos >= 0) {
+              timing_net_nodes_[value.pos == 0 ? value.id() : std::format("{}.{}", value.id(), value.pos)].push_back(
+                  node.base_node());
+            }
+          }
+        }
+      }
+    }
+  }
+
   // 4th: create every sequential-boundary PI BEFORE queuing any gate
   // connection. leaf_nodes() is deliberately not ordered in flat mode, so a
   // single mixed loop can encounter a consuming gate before the flop/memory
@@ -1590,6 +1677,31 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     auto op = type_op_of(node);
     if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Memory && op != Ntype_op::Div && op != Ntype_op::Rem) {
       continue;
+    }
+    if (critical_ && (op == Ntype_op::Div || op == Ntype_op::Rem)) {
+      livehd::diag::err("pass.opentimer", "critical-coverage", "unsupported")
+          .msg("critical annotations require a timing model for native {}", Ntype::get_name(op))
+          .fatal();
+    }
+    auto launch_clock = critical_ ? state_clock(node) : std::string{};
+    if (critical_ && launch_clock.empty()) {
+      livehd::diag::err("pass.opentimer", "critical-clock-unresolved", "io")
+          .msg("native {} '{}' has no resolvable clock net", Ntype::get_name(op), livehd::graph_util::node_name_of(node.base_node()))
+          .fatal();
+    }
+    if (critical_ && op == Ntype_op::Memory) {
+      for (auto sink : node.inp_sorted_pins()) {
+        if (sink.get_port_id() % Ntype::Memory_port_stride != 2) {
+          continue;
+        }
+        const auto clock = state_clock(node, sink.get_port_id());
+        if (!launch_clock.empty() && clock != launch_clock) {
+          livehd::diag::err("pass.opentimer", "critical-memory-clock", "unsupported")
+              .msg("critical annotations require a Liberty timing model for a native memory with multiple clocks")
+              .fatal();
+        }
+        launch_clock = clock;
+      }
     }
     ++native_state_nodes_;
     // Path boundary, not a cell (2opt-freq D): pass.abc keeps flops, latches,
@@ -1628,10 +1740,83 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       const auto bits  = bits_of(dpin);
       timer.insert_primary_input(wname);  // idempotent net insert underneath
       set_input_delays(wname);
+      if (critical_) {
+        timing_pin_nodes_[wname]    = node.base_node();
+        native_start_clocks_[wname] = launch_clock;
+      }
       for (auto i = 1; i < bits; ++i) {
         auto bus_bit_name = absl::StrCat(wname, ".", str_tools::to_s(i));
         timer.insert_primary_input(bus_bit_name);
         set_input_delays(bus_bit_name);
+        if (critical_) {
+          timing_pin_nodes_[bus_bit_name]    = node.base_node();
+          native_start_clocks_[bus_bit_name] = launch_clock;
+        }
+      }
+    }
+  }
+
+  // Native state has no Liberty test arc. Attach a zero-load virtual output
+  // to each sampled data/control bit so it participates in required-time
+  // propagation, with the actual capture clock resolved through hierarchy.
+  if (critical_) {
+    for (const auto& node : nodes) {
+      const auto op = type_op_of(node);
+      if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Memory) {
+        continue;
+      }
+      for (const auto& sink : node.inp_sorted_pins()) {
+        const auto name = sink_pin_name_of(node, sink);
+        const bool data = name.ends_with("din") || (op != Ntype_op::Latch && name.ends_with("enable")) || name == "update"
+                          || name.ends_with("addr");
+        if (!data) {
+          continue;
+        }
+        for (const auto& driver : sink.get_driver_pins()) {
+          if (driver.is_const()) {
+            continue;
+          }
+          auto         values = pin_tracker.get_pin_vector(trk_id(driver));
+          const size_t bits   = values.empty() ? static_cast<size_t>(std::max(1, bits_of(driver))) : values.size();
+          for (size_t bit = 0; bit < bits; ++bit) {
+            if (!values.empty() && values[bit].pos < 0) {
+              continue;
+            }
+            const std::string wire
+                = values.empty() ? (bit == 0 ? get_driver_net_name(driver) : std::format("{}.{}", get_driver_net_name(driver), bit))
+                  : values[bit].pos == 0 ? std::string{values[bit].id()}
+                                         : std::format("{}.{}", values[bit].id(), values[bit].pos);
+            const auto endpoint = std::format("__sta_end_{}_{}_{}", inst_of(node, hier_mode_), name, bit);
+            timer.insert_primary_output(endpoint).disconnect_pin(endpoint).connect_pin(endpoint, wire);
+            timing_pin_nodes_[endpoint] = node.base_node();
+            const auto clock_port
+                = op == Ntype_op::Memory
+                      ? static_cast<hhds::Port_id>((sink.get_port_id() / Ntype::Memory_port_stride) * Ntype::Memory_port_stride + 2)
+                      : hhds::Port_id{2};
+            native_end_clocks_[endpoint] = state_clock(node, clock_port);
+            if (critical_ && native_end_clocks_[endpoint].empty() && op == Ntype_op::Memory) {
+              // An asynchronous read port has no clock of its own: it is timed in the memory's clock domain.
+              for (auto other : node.inp_sorted_pins()) {
+                if (other.get_port_id() % Ntype::Memory_port_stride != 2) {
+                  continue;
+                }
+                if (auto c = state_clock(node, other.get_port_id()); !c.empty()) {
+                  native_end_clocks_[endpoint] = c;
+                  break;
+                }
+              }
+            }
+            if (critical_ && native_end_clocks_[endpoint].empty()) {
+              livehd::diag::err("pass.opentimer", "critical-clock-unresolved", "io")
+                  .msg("native {} '{}' pin {} has no resolvable clock net (clock port {})",
+                       Ntype::get_name(op),
+                       livehd::graph_util::node_name_of(node.base_node()),
+                       name,
+                       clock_port)
+                  .fatal();
+            }
+          }
+        }
       }
     }
   }
@@ -1713,6 +1898,12 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     }
 
     timer.insert_gate(instance_name, type_name);
+    if (critical_) {
+      for (const auto& [name, pin] : lib->cell(type_name)->cellpins) {
+        (void)pin;
+        timing_pin_nodes_[instance_name + ":" + name] = node.base_node();
+      }
+    }
 
     // Setup driver pins and nets. out_pins() is a LAZY VIEW and can come back
     // empty for a driver that is nonetheless materialized and consumed -- the
@@ -1932,7 +2123,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   absl::flat_hash_map<std::string, hhds::Occurrence_node> inst2node;
   // region_id -> its color_qor_ row. A linear find per cell was O(cells x
   // regions): 10.6M cells x 6.4k regions on xs Rob.
-  absl::flat_hash_map<uint32_t, Color_qor*> qor_row;
+  absl::flat_hash_map<uint32_t, Color_qor*>               qor_row;
   if (stats_) {
     qor_row.reserve(color_qor_.size());
     for (auto& row : color_qor_) {
@@ -2117,6 +2308,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
 
   std::string j = std::format("{{\"module\":\"{}\"", jesc(report_module_.empty() ? std::string{g->get_name()} : report_module_));
   bool        timing_cells_complete = true;
+  std::string incomplete_cell;
   bool        area_cells_complete   = true;
   for (const auto corner : {ot::MIN, ot::MAX}) {
     const auto& celllib = timer.celllib(corner);
@@ -2156,14 +2348,34 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         }
         if (std::none_of(pin.timings.begin(), pin.timings.end(), [](const auto& arc) { return !arc.is_constraint(); })) {
           timing_cells_complete = false;
+          incomplete_cell       = gate.cell_name() + "/" + pin_name + " (no data arc)";
         }
         for (const auto& arc : pin.timings) {
-          if (!arc.is_constraint() && (!arc.cell_rise || !arc.cell_fall || !arc.rise_transition || !arc.fall_transition)) {
+          // Directional arcs (combinational_rise/fall, async preset/clear) move the output one way:
+          // their one table pair is complete. Pulse-width, period and tree-path records carry no delay.
+          const auto type       = arc.type.value_or(ot::TimingType::COMBINATIONAL);
+          const bool rise_pair  = arc.cell_rise && arc.rise_transition;
+          const bool fall_pair  = arc.cell_fall && arc.fall_transition;
+          const bool no_delay   = type == ot::TimingType::MIN_PULSE_WIDTH || type == ot::TimingType::MINIMUM_PERIOD
+                                || type == ot::TimingType::MAX_CLOCK_TREE_PATH || type == ot::TimingType::MIN_CLOCK_TREE_PATH;
+          const bool tables
+              = no_delay                                           ? true
+                : type == ot::TimingType::COMBINATIONAL_RISE       ? rise_pair
+                : type == ot::TimingType::COMBINATIONAL_FALL       ? fall_pair
+                : (type == ot::TimingType::PRESET || type == ot::TimingType::CLEAR) ? (rise_pair || fall_pair)
+                                                                    : (rise_pair && fall_pair);
+          if (!arc.is_constraint() && !tables) {
             timing_cells_complete = false;
+            incomplete_cell       = gate.cell_name() + "/" + pin_name + " (arc from " + arc.related_pin + " lacks a delay/transition table)";
           }
         }
       }
     }
+  }
+  if (critical_ && !timing_cells_complete) {
+    livehd::diag::err("pass.opentimer", "critical-coverage", "unsupported")
+        .msg("critical annotations require complete cell timing tables in the supplied Liberty corners: {}", incomplete_cell)
+        .fatal();
   }
   j += clock_qor_json();
   if (const auto area = timer.report_area(); area_cells_complete && area && std::isfinite(*area) && *area >= 0) {
@@ -2216,11 +2428,14 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     }
     j += "}";
   }
-  j          += "]";
+  j += "]";
   // The design block ends here; the per-color `--stats` tail is rendered
   // separately so the STA reuse cache can store the block verbatim and re-stamp
   // each row's `resynth` (which describes what pass.abc did in THIS run, not
   // the netlist) on a hit.
+  if (!annotation_summary_.empty()) {
+    j += ",\"critical\":" + annotation_summary_;
+  }
   sta_block_  = j;
   j          += render_colors();
   j          += "}";
@@ -2297,7 +2512,15 @@ std::string Pass_opentimer::cache_key(const std::shared_ptr<hhds::Graph>& g) con
     return {};
   }
   const uint64_t env = livehd::opentimer::Sta_cache::env_hash(timing_file_list, top_filter, hier_setting_, margin, stats_);
-  return std::format("{:016x}{:016x}{:016x}:load={:.9g}", d.h0, d.h1, env, io_load_ff_);
+  return std::format("{:016x}{:016x}{:016x}:load={:.9g}:critical={}:percent={:.9g}:targets={}:nodes={}",
+                     d.h0,
+                     d.h1,
+                     env,
+                     io_load_ff_,
+                     critical_,
+                     critical_percent_,
+                     targets_text_,
+                     annotation_identity(g));
 }
 
 void Pass_opentimer::replay(const livehd::opentimer::Sta_record& rec) {
@@ -2344,14 +2567,16 @@ void Pass_opentimer::replay(const livehd::opentimer::Sta_record& rec) {
 
 livehd::opentimer::Sta_record Pass_opentimer::snapshot() const {
   livehd::opentimer::Sta_record rec;
-  rec.time_unit       = time_unit_label_;
-  rec.max_delay       = max_delay;
-  rec.max_pin         = max_pin_;
-  rec.block           = sta_block_;
-  rec.opaque_nodes    = opaque_logic_nodes_;
-  rec.ambiguous_nodes = ambiguous_or_nodes_;
-  rec.opaque_examples = opaque_logic_examples_;
-  rec.or_examples     = ambiguous_or_examples_;
+  rec.time_unit          = time_unit_label_;
+  rec.max_delay          = max_delay;
+  rec.max_pin            = max_pin_;
+  rec.block              = sta_block_;
+  rec.annotations        = annotation_records_;
+  rec.annotation_summary = annotation_summary_;
+  rec.opaque_nodes       = opaque_logic_nodes_;
+  rec.ambiguous_nodes    = ambiguous_or_nodes_;
+  rec.opaque_examples    = opaque_logic_examples_;
+  rec.or_examples        = ambiguous_or_examples_;
   for (const auto& row : color_qor_) {
     rec.colors.push_back({row.module, row.color, row.cells, row.max_arrival, row.critical_pin, row.critical_src});
   }

@@ -56,6 +56,12 @@ struct Driver_options {
   // thousands of flops is unbuffered and dominates every gate-level timing report
   // (minion: a 1.5-2.5 ns ICG output as the whole critical path). 0 disables.
   uint32_t icg_fanout = 16;
+  // The primary clock port is an ideal driver in a timer, so a tree directly under
+  // it only adds launch latency. It pays only when the design's registers are so
+  // many that the unbuffered port slews every clock pin (minion: 25k flops on one
+  // port). Trees are built under a primary clock net only past this many register
+  // bits in the source graph; a derived clock (gate output) is always bounded.
+  uint32_t input_clock_min = 8192;
   // Optional region hook, and its identity in the region-cache recipe (two
   // regions with equal logic but different hook settings never share a body).
   Region_hook                                                               region_hook;

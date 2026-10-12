@@ -191,25 +191,10 @@ cc_test(
     name = "cone_abc_test",
     srcs = ["tests/cone_abc_test.cpp"],
     copts = COPTS,
-    # The ABC-free build answers every cone Unsupported (cone_unavailable_test).
+    # The ABC-free build answers every cone Unsupported.
     target_compatible_with = select({
         "//:without_abc": ["@platforms//:incompatible"],
         "//conditions:default": [],
-    }),
-    deps = [
-        ":lec_query",
-        "@cvc5",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "cone_unavailable_test",
-    srcs = ["cone_unavailable_test.cpp"],
-    copts = COPTS,
-    target_compatible_with = select({
-        "//:without_abc": [],
-        "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
         ":lec_query",

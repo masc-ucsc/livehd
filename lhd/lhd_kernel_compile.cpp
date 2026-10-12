@@ -90,7 +90,7 @@ void validate_emits(const Options& opts) {
     const std::string sub = opts.files.empty() ? std::string{} : opts.files.front();
     const bool        graph_output
         = sub == "color" || sub == "partition" || find_mapper(sub) != nullptr || sub == "single_edge" || sub == "liberty"
-          || sub == "satopt";
+          || sub == "satopt" || sub == "opentimer";
     for (const char* k : {"ln", "pyrope", "lnast-dump", "isabelle", "lean", "sim", "lg", "verilog"}) {
       if (graph_output && (std::string_view{k} == "lg" || std::string_view{k} == "verilog")) {
         continue;

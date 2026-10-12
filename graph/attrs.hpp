@@ -105,6 +105,20 @@ struct color_t {
 };
 inline constexpr color_t color{};
 
+// STA criticality is independent of synthesis partition colors. Per-definition
+// membership is the union over timed occurrences. sta stores per-clock timing
+// evidence as JSON; on the graph input node it stores the analysis descriptor.
+struct critical_t {
+  using value_type = hhds::flag;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr critical_t critical{};
+struct sta_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr sta_t sta{};
+
 // Space-separated control color memberships. Coloring writes exactly one (the
 // owner); the partition reader parses a list. Cleared on every recoloring.
 struct ctrl_members_t {
@@ -377,6 +391,10 @@ inline constexpr Attr_kind attr_kind<synth_policy_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<color_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<critical_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<sta_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<ctrl_members_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<ctrl_stats_t> = Attr_kind::node;
@@ -437,6 +455,8 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
   X(pin_delay)                      \
   X(pin_signed)                     \
   X(color)                          \
+  X(critical)                       \
+  X(sta)                            \
   X(synth_policy)                   \
   X(ctrl_members)                   \
   X(ctrl_stats)                     \

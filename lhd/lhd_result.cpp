@@ -290,6 +290,13 @@ bool write_pretty_sta(const rapidjson::Value& d, bool stats) {
       head += std::format("  max delay {:.3f}{}{}", md, unit.empty() ? "" : " ", unit);
     }
     std::print("{}\n", head);
+    if (auto it = des.FindMember("critical"); it != des.MemberEnd() && it->value.IsObject()) {
+      double marked = 0, nodes = 0, margin = 0;
+      if (json_num(it->value, "marked", marked) && json_num(it->value, "nodes", nodes)
+          && json_num(it->value, "margin_percent", margin)) {
+        std::print("    critical nodes: {:.0f}/{:.0f} (setup slack within {:g}% of target period)\n", marked, nodes, margin);
+      }
+    }
     if (auto cp = json_str(des, "critical_pin"); !cp.empty()) {
       auto src = json_str(des, "critical_src");
       std::print("    critical pin: {}{}\n", cp, src.empty() ? std::string{} : std::format("  ({})", src));

@@ -474,6 +474,12 @@ a { color: var(--accent); }
 
 <p>A mapped body is reusable when the new pre-mapping body is structurally identical to the stored one, by an exact node bijection, and the resolved recipe agrees. Hashes index candidate artifacts; structural matching and recipe checks authorize reuse. Producer versions and relevant library contents invalidate artifacts when their assumptions change. Independent regions use private backend sessions and are published in deterministic partition order. Admission accounts for projected worker storage, outstanding reservations and process memory before concurrent work starts; a region exceeding its time or memory allowance is refused.</p>
 
+<h3 id="disaggregated"><span class="secnum">3.6</span>Disaggregated Synthesis and Profiling</h3>
+
+<p>Disaggregated synthesis treats a design as a collection of independently optimized regions with explicit interfaces. After a local edit, unchanged regions retain their mapped implementations and are stitched to the resynthesized regions. Partitioning therefore balances incremental granularity against optimization scope: finer cuts reduce repeated work but can obstruct simplification and logic sharing, increasing cell count. Overlap-based grouping keeps related cones together, while source-level synthesis identities seed groups that express known structural relationships. Stable boundaries preserve reuse; unconstrained optimization across boundaries would require tracking the resulting dependencies.</p>
+
+<p>The synthesis profile option (<code>synth.tune.profile=on</code>) separates exploration from subsequent compilation. Within configured search budgets, profiling compares alternative arithmetic realizations; the ABC path evaluates their mapped area and timing. Decisions and exploration evidence are retained in the work directory, with a textual summary, so compatible later runs can replay the selected implementations without repeating the search. Explicit source attributes can fix a known implementation directly. This amortizes architecture selection across edits while keeping the validity of each decision tied to the region, synthesis policy and technology assumptions under which it was learned.</p>
+
 <!-- ===================================================================== -->
 <h2 id="optimization"><span class="secnum">4</span>Optimize Before Technology Mapping</h2>
 

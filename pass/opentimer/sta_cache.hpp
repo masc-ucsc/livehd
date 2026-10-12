@@ -44,7 +44,8 @@ struct Sta_record {
   std::string time_unit;        // "ns"/"ps"/"us" ("" = library declared none)
   double      max_delay = 0.0;  // the summary line's delay
   std::string max_pin;          // the summary line's pin ("" = no timed endpoint)
-  std::string block;            // design JSON block, WITHOUT the `,"colors":[...]` tail and its closing brace
+  std::string annotations, annotation_summary;
+  std::string block;  // design JSON block, WITHOUT the `,"colors":[...]` tail and its closing brace
   // Per-color `--stats` rows, keyed by (module,color) on replay. `resynth` is
   // deliberately absent: the hit path takes it from the current graph.
   struct Color_row {

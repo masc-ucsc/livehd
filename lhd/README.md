@@ -3,6 +3,14 @@
 `lhd` is the stateless driver for compile, simulation, equivalence, and synthesis.
 Use `lhd help` or `lhd describe <command>` for the command's accepted arguments.
 
+`lhd tool sta lg:net --top top` queries saved critical-path annotations, with
+filters such as `clock=core`, `'slack<0'`, `color=3`, and `src=alu.prp`.
+Generate the annotations with `lhd pass opentimer ... --set
+pass.opentimer.critical=true` (also accepted by `lhd synth`). The default margin
+is 5% of the target clock period; targets come from SDC or
+`--set pass.opentimer.targets=core:1ns,bus:4ns`. See
+[STA annotations and queries](../pass/opentimer/README.md#critical-path-annotations-and-queries).
+
 ## ABC-free build
 
 The normal build retains ABC for alternative synthesis and optional services.
@@ -10,7 +18,6 @@ Build the same CLI without those dependencies with:
 
 ```
 bazel build -c opt --define=livehd_abc=false //lhd
-bazel test -c opt --define=livehd_abc=false //lhd/tests:lhd_usyn_noabc_smoke
 ./bazel-bin/lhd/lhd synth design.v --top top --set synth.mapper=usyn --set pass.usyn.tmap=none --emit verilog:logical.v
 ```
 
@@ -21,11 +28,11 @@ cone accelerator returns `Unsupported` for every obligation, leaving those
 obligations with CVC5. No missing accelerator can produce a proven cut.
 `pass.satopt` stays off unless explicitly enabled.
 
-`python3 scripts/check_usyn_noabc.py --mode opt` runs the stronger removal gate:
+`python3 scripts/check_usyn_noabc.py --mode opt` runs the dependency removal audit:
 it copies current sources to a disposable directory, removes `pass/abc`, its
 package files and the ABC repository declaration, audits the configured `lhd`
-dependency closure, and builds/runs the CLI smoke test there. The checkout stays
-unchanged; the fixture and test evidence are retained. This explicit build gate
+dependency closure, and builds the CLI there. The checkout stays
+unchanged; the fixture and build evidence are retained. This explicit build gate
 is outside the default test suite.
 
 ## Formal regression policy

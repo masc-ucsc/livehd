@@ -633,6 +633,9 @@ void synth_command(Options& opts, Result& res) {
       labels["cache_dir"] = (fs::path(opts.workdir) / "sta_cache").string();
     }
     run_step("pass.opentimer", net, labels, opts, res);
+    if (labels["critical"] == "true" || labels["critical"] == "1") {
+      livehd::Hhds_graph_library::save(net_dir);
+    }
     sta_qor = slurp_json(timing_path);
     if (user_workdir && !sta_qor.empty()) {
       res.outputs.push_back(timing_path);

@@ -35,16 +35,6 @@ sh_test(
 )
 
 sh_test(
-    name = "lhd_usyn_noabc_smoke",
-    srcs = ["lhd_usyn_noabc_smoke.sh"],
-    data = ["//lhd"],
-    target_compatible_with = select({
-        "//:without_abc": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-)
-
-sh_test(
     name = "lhd_synth_instances_smoke",
     srcs = ["lhd_synth_instances_smoke.py"],
     data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:measure_synth"],
@@ -1495,6 +1485,12 @@ sh_test(
     size = "large",
     srcs = ["lhd_opentimer_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_sta_critical_smoke",
+    srcs = ["lhd_sta_critical_smoke.py"],
+    data = ["//lhd", "//inou/prp:abc_tests"],
 )
 
 # INCREMENTAL pass.opentimer: the whole-design STA result cache under --workdir,

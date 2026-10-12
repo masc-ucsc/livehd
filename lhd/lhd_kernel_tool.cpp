@@ -2,6 +2,7 @@
 // Unified LNAST/LGraph inspection tools: cat, grep, diff, and tree.
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <format>
@@ -22,6 +23,7 @@
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
+#include "rapidjson/document.h"
 #include "semdiff.hpp"
 
 namespace lhd {
@@ -58,12 +60,15 @@ struct Tool_filter {
   Kind        kind = Kind::sub;
   std::string sval;
   std::regex  re;
-  long        n1 = 0;
-  long        n2 = 0;
+  long        n1       = 0;
+  long        n2       = 0;
+  bool        floating = false;
+  double      r1 = 0, r2 = 0;
 };
 
 bool tool_is_numeric_field(std::string_view f) {
-  return f == "id" || f == "nid" || f == "color" || f == "bits" || f == "delay" || f == "hier_color" || f == "match";
+  return f == "id" || f == "nid" || f == "color" || f == "bits" || f == "delay" || f == "hier_color" || f == "match" || f == "slack"
+         || f == "period";
 }
 
 // The columns a `<field><sep><value>` filter may target. A token whose head is
@@ -72,7 +77,8 @@ bool tool_is_numeric_field(std::string_view f) {
 // mis-split into a bogus field.
 bool tool_is_known_field(std::string_view f) {
   return f == "nid" || f == "id" || f == "kind" || f == "name" || f == "color" || f == "src" || f == "partitionable" || f == "bits"
-         || f == "signed" || f == "from" || f == "to" || f == "delay" || f == "hier_color" || f == "match";
+         || f == "signed" || f == "from" || f == "to" || f == "delay" || f == "hier_color" || f == "match" || f == "critical"
+         || f == "clock" || f == "slack" || f == "period" || f == "module" || f == "pin" || f == "unit";
 }
 
 long tool_parse_long(std::string_view v, std::string_view ctx) {
@@ -87,6 +93,20 @@ long tool_parse_long(std::string_view v, std::string_view ctx) {
     throw Lhd_error{"usage", std::format("filter '{}': expected an integer, got '{}'", ctx, v), ""};
   }
   return n;
+}
+
+double tool_parse_real(std::string_view value) {
+  size_t used   = 0;
+  double number = 0;
+  try {
+    number = std::stod(std::string{value}, &used);
+  } catch (const std::exception&) {
+    used = 0;
+  }
+  if (used != value.size() || used == 0 || !std::isfinite(number)) {
+    throw Lhd_error{"usage", std::format("expected a finite number, got '{}'", value), ""};
+  }
+  return number;
 }
 
 Tool_filter parse_tool_filter(const std::string& tok) {
@@ -114,6 +134,32 @@ Tool_filter parse_tool_filter(const std::string& tok) {
   }
   if (val == "nil") {
     f.kind = Tool_filter::Kind::is_nil;
+    return f;
+  }
+  if (field == "slack" || field == "period") {
+    f.floating = true;
+    if (val.starts_with(">=")) {
+      f.kind = Tool_filter::Kind::num_ge;
+      val.erase(0, 2);
+    } else if (val.starts_with("<=")) {
+      f.kind = Tool_filter::Kind::num_le;
+      val.erase(0, 2);
+    } else if (val.starts_with(">")) {
+      f.kind = Tool_filter::Kind::num_gt;
+      val.erase(0, 1);
+    } else if (val.starts_with("<")) {
+      f.kind = Tool_filter::Kind::num_lt;
+      val.erase(0, 1);
+    } else {
+      f.kind = Tool_filter::Kind::num_eq;
+    }
+    if (auto range = val.find(".."); range != std::string::npos) {
+      f.kind = Tool_filter::Kind::num_range;
+      f.r1   = tool_parse_real(val.substr(0, range));
+      f.r2   = tool_parse_real(val.substr(range + 2));
+    } else {
+      f.r1 = tool_parse_real(val);
+    }
     return f;
   }
   if (tool_is_numeric_field(field)) {
@@ -202,6 +248,18 @@ bool tool_match(const Tool_record& r, const Tool_filter& f) {
     case Tool_filter::Kind::eq : return *v == f.sval;
     default                    : break;
   }
+  if (f.floating) {
+    const auto n = tool_parse_real(*v);
+    switch (f.kind) {
+      case Tool_filter::Kind::num_eq   : return n == f.r1;
+      case Tool_filter::Kind::num_gt   : return n > f.r1;
+      case Tool_filter::Kind::num_lt   : return n < f.r1;
+      case Tool_filter::Kind::num_ge   : return n >= f.r1;
+      case Tool_filter::Kind::num_le   : return n <= f.r1;
+      case Tool_filter::Kind::num_range: return n >= f.r1 && n <= f.r2;
+      default                          : return false;
+    }
+  }
   long n = tool_parse_long(*v, f.field);
   switch (f.kind) {
     case Tool_filter::Kind::num_eq   : return n == f.n1;
@@ -282,6 +340,7 @@ Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
   auto nm = gu::node_name_of(node);
   r.cols.emplace_back("name", nm.empty() ? std::string{"nil"} : std::string{nm});
   r.cols.emplace_back("color", tool_color_str(node));
+  r.cols.emplace_back("critical", node.attr(livehd::attrs::critical).has() ? "true" : "false");
   r.cols.emplace_back("match", tool_match_str(node));
   r.cols.emplace_back("src", tool_node_src(g, node));
   r.cols.emplace_back("partitionable", livehd::color::is_partitionable(node) ? "1" : "0");
@@ -400,6 +459,8 @@ std::string tool_render_jsonl(const Tool_record& r, std::string_view mod) {
   for (const auto& [k, v] : r.cols) {
     if (v == "nil") {
       out += std::format(",\"{}\":null", k);
+    } else if (k == "critical") {
+      out += std::format(",\"critical\":{}", v);
     } else if (k == "signed" || k == "partitionable") {
       out += std::format(",\"{}\":{}", k, v == "1" ? "true" : "false");
     } else if (tool_is_numeric_field(k) || k == "bits") {
@@ -1557,24 +1618,191 @@ std::string tool_input_kind(const std::string& t) {
   return "";
 }
 
+// Timing evidence is definition-local: a repeated module appears once, with
+// the worst occurrence per clock. Queries never require Liberty or re-run STA.
+struct Sta_path {
+  double                      slack = 0;
+  std::string                 clock, unit, start, end, module;
+  size_t                      cells = 0;
+  std::map<std::string, size_t> sources;
+};
+
+// Cells of one critical path share one slack value (STA slack is constant
+// along a path), so equal-slack rows of a clock are one path. Reports the
+// `limit` worst: slack, cell count, launching/capturing state and the source
+// lines the cells carry.
+std::string tool_sta_paths(const std::map<std::pair<std::string, std::string>, Sta_path>& groups, size_t limit) {
+  std::vector<const Sta_path*> order;
+  for (const auto& [key, path] : groups) {
+    order.push_back(&path);
+  }
+  std::sort(order.begin(), order.end(), [](const Sta_path* a, const Sta_path* b) { return a->slack < b->slack; });
+  std::string out;
+  for (size_t i = 0; i < order.size() && i < limit; ++i) {
+    const auto&                                  p = *order[i];
+    std::vector<std::pair<size_t, std::string>> src;
+    for (const auto& [name, count] : p.sources) {
+      src.emplace_back(count, name);
+    }
+    std::sort(src.rbegin(), src.rend());
+    std::string where;
+    for (size_t k = 0; k < src.size() && k < 3; ++k) {
+      where += std::format("{}{}x{}", k ? " " : "", src[k].second, src[k].first);
+    }
+    out += std::format("slack {:.4g}{} clock {} cells {} {} -> {}  [{}]  {}\n",
+                       p.slack,
+                       p.unit,
+                       p.clock,
+                       p.cells,
+                       p.start.empty() ? "?" : p.start,
+                       p.end.empty() ? "?" : p.end,
+                       p.module,
+                       where);
+  }
+  return out;
+}
+
+void tool_sta(Options& opts, const std::vector<std::string>& dirs, std::vector<Tool_filter> filters, size_t path_limit) {
+  if (std::none_of(filters.begin(), filters.end(), [](const auto& f) { return f.field == "critical"; })) {
+    filters.push_back(parse_tool_filter("critical=true"));
+  }
+  size_t      budget    = tool_budget(opts);
+  bool        jsonl     = opts.diag_fmt == Diag_fmt::jsonl;
+  bool        annotated = false;
+  bool        truncated = false;
+  std::string out;
+  std::map<std::pair<std::string, std::string>, Sta_path> groups;
+  const auto  columns = opts.tool_attr.empty()
+                            ? std::vector<std::string>{"critical", "clock", "slack", "period", "unit", "src", "pin"}
+                            : tool_split_csv(opts.tool_attr);
+  for (const auto& dir : dirs) {
+    std::set<hhds::Gid> seen;
+    for (const auto& top : tool_select_graphs(dir, opts)) {
+      for (const auto& graph : top->definitions().graphs()) {
+        if (!seen.insert(graph->get_gid()).second) {
+          continue;
+        }
+        annotated |= graph->get_input_node().attr(livehd::attrs::sta).has();
+        for (auto node : graph->body().nodes()) {
+          auto attribute = node.attr(livehd::attrs::sta);
+          if (!attribute.has()) {
+            continue;
+          }
+          annotated = true;
+          const std::string   text{attribute.get()};
+          rapidjson::Document data;
+          data.Parse(text.c_str());
+          if (data.HasParseError()) {
+            throw Lhd_error{"config", "invalid persisted STA annotation", "rerun pass opentimer"};
+          }
+          if (!data.IsArray()) {
+            continue;  // top-level analysis descriptor
+          }
+          for (const auto& row : data.GetArray()) {
+            if (!row.IsObject() || !row.HasMember("clock") || !row["clock"].IsString() || !row.HasMember("critical")
+                || !row["critical"].IsBool() || !row.HasMember("slack") || !row["slack"].IsNumber() || !row.HasMember("period")
+                || !row["period"].IsNumber() || !row.HasMember("pin") || !row["pin"].IsString()) {
+              throw Lhd_error{"config", "invalid persisted STA evidence", "rerun pass opentimer"};
+            }
+            auto r = tool_node_record(graph.get(), node);
+            for (auto& [key, value] : r.cols) {
+              if (key == "critical") {
+                value = row["critical"].GetBool() ? "true" : "false";
+              }
+            }
+            r.cols.emplace_back("module", graph->get_name());
+            r.cols.emplace_back("clock", row["clock"].GetString());
+            r.cols.emplace_back("slack", std::format("{:.9g}", row["slack"].GetDouble()));
+            r.cols.emplace_back("period", std::format("{:.9g}", row["period"].GetDouble()));
+            r.cols.emplace_back("pin", row["pin"].GetString());
+            if (row.HasMember("unit") && row["unit"].IsString()) {
+              r.cols.emplace_back("unit", row["unit"].GetString());
+            }
+            if (tool_match_all(r, filters) == opts.tool_invert) {
+              continue;
+            }
+            if (path_limit != 0) {
+              const auto* slack = tool_col(r, "slack");
+              const auto* clock = tool_col(r, "clock");
+              const auto* pin   = tool_col(r, "pin");
+              const auto* name  = tool_col(r, "name");
+              const auto* src   = tool_col(r, "src");
+              const auto* unit  = tool_col(r, "unit");
+              const auto  key   = std::make_pair(clock ? *clock : std::string{}, std::format("{:.3f}", std::stod(slack ? *slack : "0")));
+              auto&       path  = groups[key];
+              path.slack        = std::stod(slack ? *slack : "0");
+              path.clock        = key.first;
+              path.unit         = unit ? *unit : std::string{};
+              path.module       = graph->get_name().substr(0, 48);
+              ++path.cells;
+              if (src && *src != "nil" && !src->empty()) {
+                ++path.sources[*src];
+              }
+              const std::string where_pin = pin ? *pin : std::string{};
+              std::string       state;
+              if (name && !name->empty() && *name != "nil") {
+                state = *name;
+              } else if (auto cut = where_pin.find("__n"); cut != std::string::npos) {
+                state = where_pin.substr(0, cut);
+              }
+              if (where_pin.ends_with(":Q") || where_pin.ends_with(":QN")) {
+                path.start = state;
+              } else if (where_pin.ends_with(":D")) {
+                path.end = state;
+              }
+              continue;
+            }
+            if (budget == 0) {
+              truncated = true;
+              continue;
+            }
+            out += jsonl ? tool_render_jsonl(r, graph->get_name())
+                         : std::format("{}  {}", graph->get_name(), tool_render_pretty(r, columns));
+            out += '\n';
+            --budget;
+          }
+        }
+      }
+    }
+  }
+  if (!annotated) {
+    throw Lhd_error{"config", "design has no STA annotations", "run pass opentimer with --set pass.opentimer.critical=true"};
+  }
+  if (path_limit != 0) {
+    out = tool_sta_paths(groups, path_limit);
+  }
+  if (truncated) {
+    std::print(stderr, "STA query truncated at --max {}; use --max 0 for all matches\n", opts.tool_max);
+  }
+  std::fwrite(out.data(), 1, out.size(), stdout);
+  std::fflush(stdout);
+}
+
 void tool_command(Options& opts, Result& res) {
   setup_diag(opts, "tool");
   if (opts.files.empty()) {
     throw Lhd_error{"usage",
-                    "tool requires a verb: cat | grep | diff | tree",
+                    "tool requires a verb: cat | grep | diff | tree | sta",
                     "e.g. `lhd tool cat lg:dir` or `lhd tool grep color:nil lg:dir`"};
   }
   const std::string verb = opts.files[0];
-  if (verb != "cat" && verb != "grep" && verb != "diff" && verb != "tree") {
-    throw Lhd_error{"usage", std::format("unknown tool verb '{}'", verb), "use: cat | grep | diff | tree"};
+  if (verb != "cat" && verb != "grep" && verb != "diff" && verb != "tree" && verb != "sta") {
+    throw Lhd_error{"usage", std::format("unknown tool verb '{}'", verb), "use: cat | grep | diff | tree | sta"};
   }
 
   std::vector<std::string> lg_dirs;
   std::vector<std::string> ln_tokens;  // ln:/source tokens, raw for classify_ln_inputs
   std::vector<Tool_filter> filters;
+  size_t                   sta_paths = 0;  // `paths=N`: summarize the N worst critical paths instead of listing cells
   for (size_t k = 1; k < opts.files.size(); ++k) {
-    const std::string& t    = opts.files[k];
-    auto               kind = tool_input_kind(t);
+    const std::string& t = opts.files[k];
+    if (verb == "sta" && t.starts_with("paths=")) {
+      sta_paths = static_cast<size_t>(std::max(1L, tool_parse_long(std::string_view{t}.substr(6), t)));
+      continue;
+    }
+    const auto         separator = t.find_first_of(":=<>~");
+    const bool         is_filter = separator != std::string::npos && tool_is_known_field(std::string_view{t}.substr(0, separator));
+    auto               kind      = is_filter ? std::string{} : tool_input_kind(t);
     if (kind == "lg") {
       lg_dirs.push_back(t.substr(t.find(':') + 1));
     } else if (kind == "ln" || kind == "src") {
@@ -1598,6 +1826,16 @@ void tool_command(Options& opts, Result& res) {
     check_lg_input_dir(d);
   }
 
+  if (verb == "sta") {
+    if (!have_lg || have_ln) {
+      throw Lhd_error{"usage", "tool sta requires lg: input", ""};
+    }
+    if (!opts.tool_target.empty() && opts.tool_target != "node") {
+      throw Lhd_error{"usage", "tool sta queries node annotations", ""};
+    }
+    tool_sta(opts, lg_dirs, filters, sta_paths);
+    return;
+  }
   if (verb == "tree") {
     if (have_ln) {
       tool_tree_ln(opts, res, ln_tokens);  // LNAST structural skeleton

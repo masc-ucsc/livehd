@@ -47,6 +47,9 @@ public:
     const Latch_ladders*                    latch   = nullptr;
     // Max sinks per clock-gate cell (0: one cell per recognized gate).
     uint32_t                                icg_fanout = 0;
+    // The design is large enough that a primary clock net is also bounded
+    // (Driver_options::input_clock_min).
+    bool                                    primary_clock_tree = false;
   };
 
   void set_outlib(hhds::GraphLibrary* outlib) { outlib_ = outlib; }

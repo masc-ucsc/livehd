@@ -1155,13 +1155,9 @@ prerequisite to functional search.</li>
   <li><a href="../../scripts/check_usyn_noabc.py">check_usyn_noabc.py</a> copies
   current sources to a disposable directory, removes <code>pass/abc</code>, ABC's
   package files and repository declaration, audits the configured dependency
-  closure (including source salts), then builds and runs the actual CLI.
-  This opt gate passed on 2026-09-27. The user's checkout was not stripped of ABC.</li>
-  <li><code>lhd_usyn_noabc_smoke</code> checks stateful logical output without
-  Liberty, register count/name, no implicit SATOPT, standalone USYN, unavailable
-  tmap, and independent CVC5 proof/refutation. It passes in opt/debug (1.0/7.2 s);
-  the clean removed-package fixture test passes in 1.2 s. The unavailable-cone
-  test and six USYN utility targets also pass in both modes. Normal ABC-enabled
+  closure (including source salts), then builds the actual CLI.
+  The user's checkout retains ABC.</li>
+  <li>Six USYN utility targets pass in both modes. Normal ABC-enabled
   cone/query, optional-tmap, USYN smoke, options and SATOPT regressions also pass
   in opt/debug; this does not claim the full synthesis suite has passed.</li>
   </ul>

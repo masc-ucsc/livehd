@@ -29,11 +29,72 @@ lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
   tech-mapped module per run. (`hier=stitch` keeps the legacy name-stitched
   hier walk for debugging; its multi-bit module-boundary buses are not
   stitched.)
-- Options: `--set pass.opentimer.margin=<0-100>` (criticality coloring
-  threshold), `--set pass.opentimer.qor=FILE` (report path; `lhd pass
+- Options: `--set pass.opentimer.critical=true` (persist critical-path
+  annotations), `--set pass.opentimer.qor=FILE` (report path; `lhd pass
   opentimer` defaults it to `<workdir>/timing.json` under `--workdir`).
   `--stats` adds one row per mapped `(definition,color)` while retaining the
   whole-design critical-path report.
+
+## Critical-path annotations and queries
+
+```sh
+lhd pass opentimer lg:net cells.lib design.sdc --top top --workdir W \
+  --set pass.opentimer.critical=true
+lhd tool sta lg:net --top top
+lhd tool sta lg:net --top top clock=core 'slack<0' src=alu.prp
+lhd tool sta lg:net --top top color=3 --diag-fmt json --max 0
+```
+
+`critical=true` marks every node on every setup path whose slack is at most
+5% of its target clock period, including violations. With a 1 ns target the
+threshold is 0.05 ns of slack; paths below 0.9 ns are unmarked. The threshold
+is relative to the constraint, not the measured worst delay or a percentage
+of cells. `pass.opentimer.critical_percent=2` changes it to 2%; zero selects
+violations and paths exactly at the target. Required times propagate through
+all timing arcs, so near-critical reconvergent branches are included.
+
+SDC clocks supply the targets by default. To override their periods, use
+`--set pass.opentimer.targets=core:1ns,bus:4ns`. Names select SDC clock names
+or their source ports. Without an SDC, a target matching an input port binds
+that physical clock; another name defines a virtual clock. A single target
+also constrains otherwise unconstrained outputs. Multiple targets require
+explicit `set_output_delay -clock NAME` associations for external outputs.
+Periods accept `ps`, `ns`, `us`, or `s`; bare numbers use Liberty time units.
+Overrides affect required arrivals as well as annotations. Requesting critical
+annotations without a usable clock/target is a diagnostic error.
+
+Timing traverses instances hierarchically (`hier=true`, the default), then
+stores annotations on the original module-local nodes. A shared definition
+gets the union of its instances' critical nodes, and the minimum slack per
+node and clock. The `critical` flag is independent of the existing numeric
+partition `color`. The `sta` string attribute stores clock, period, setup slack,
+unit, critical status and a representative worst timing pin. The top input's
+`sta` attribute stores the analysis summary; `timing.json` exposes the same
+summary under `critical`. Native state retains the existing ideal boundary
+model (zero launch arrival and zero setup), with capture endpoints on sampled
+data/control pins. This does not model latch borrowing or clock-tree skew.
+
+The pass saves marks to its input graph library, or to `--emit-dir lg:marked`
+when supplied. `lhd synth` also accepts these options and saves the annotated
+mapped netlist. Each successful marking run replaces previous annotations in
+the selected top's reachable definitions. Cache hits restore the same marks;
+annotation options and local node/source identities participate in the key.
+
+`lhd tool sta` reads the saved evidence without running timing. It lists only
+critical rows by default; `critical=false` lists passing rows and
+`'critical~.*'` lists both. Filters include `module`, `src`, `name`, `color`,
+`clock`, `slack`, and `period`; numeric timing filters use the reported unit.
+Use `--attr critical,clock,slack,src` to select pretty-print columns,
+`--diag-fmt json` for JSONL records, and `--max 0` for all matches. Each row
+includes the owning module and node ID. An analyzed design with no critical
+paths returns an empty result; an unannotated design produces a diagnostic.
+Annotations describe the last analysis; rerun marking after changing a design.
+
+Marking rejects unsupported SDC commands/modifiers, unresolved or ambiguous
+clock bindings, unsupported clock-domain crossings, native multi-clock memories,
+unmodeled native combinational cuts and `hier=stitch`. Specify a Liberty model
+for such native operators/memories. Unclocked `set_output_delay` retains its
+legacy meaning for ordinary reporting, but marking requires its `-clock`.
 
 ## Incremental reuse (`<workdir>/sta_cache/`)
 
@@ -42,7 +103,8 @@ timing pin, including upper bits consumed through slices. Bus-level attributes
 and timing arcs are inherited by member pins. Lookup tables can inherit their
 axes from a named template; malformed value counts are rejected before writing
 outside the allocated table. The OpenTimer dependency patch is included in the
-STA cache salt.
+STA cache salt. Grouped `related_pin` lists produce an arc for every listed
+input, so required-time propagation includes every near-critical branch.
 
 With a user-named `--workdir` and `lhd.incremental` (default true) the pass
 keeps a **persistent STA result cache** — the third reuse tier next to the
@@ -55,7 +117,8 @@ cache at all.
 
 The key is **the netlist itself** — `semdiff::canonical_digest` over the timed
 top, Merkle-folded through every region body — plus the timing environment: the
-Liberty/SDC/SPEF/VCD file *content*, `--top`, `hier`, `margin`, `--stats`, and
+Liberty/SDC/SPEF/VCD file *content*, `--top`, `hier`, `margin`, critical options,
+`--stats`, and
 `kStaSrcSalt` (a build-time content hash of `pass/opentimer` + `pass/partition`
 + the `@opentimer` pin, so a timing-engine change drops every record with no
 human in the loop). Keying on the netlist rather than on the upstream sources is
@@ -118,13 +181,14 @@ cache hit is 0. Pretty mode renders each object on one `sta[stats]` line.
 
 ## Timing model
 
-- **Flops/latches/memories are path boundaries**, not cells (pass.abc keeps
-  them native; the Liberty stays combinational). Each consumed flop/latch Q or
+- **Native flops/latches/memories are path boundaries**. Each consumed flop/latch Q or
   memory read port becomes a virtual primary input arriving at 0, so
   state-to-state segments are scored; din/en/addr cones end at their driving
   gate pins. A latch is a hard timing break: transparency and time borrowing
   are intentionally not modeled. Clock trees are not modeled. `min period ≈
   max_delay` up to setup/clock-skew terms.
+- Liberty-mapped registers use clock-to-Q and setup tables. Critical marking
+  rejects missing setup coverage instead of dropping capture paths.
 - ABC's builtin tie cells (`_const0_`/`_const1_`) contribute no arrival.
 - Primary inputs arrive at 0 with slew 0 unless an `.sdc` overrides them
   (`create_clock -period`, `set_input_delay/-transition`, `set_output_delay`;
@@ -182,15 +246,9 @@ required-arrival interpretation and cannot certify a QoR replacement.
 
 - `pass.opentimer.power` (VCD-driven power) is registered but untested since
   the lgshell removal.
-- The `margin` criticality coloring (`populate_table`/`backpath_set_color`)
-  still has the TODO.txt bugs: it back-walks only the single worst edge and
-  stops at flops, so it under-marks launch-to-capture paths. The JSON report
-  does not depend on it, and neither does an STA cache hit: a hit replays the
-  report but does not re-mark node colors. That marking is unobservable today
-  (with the default `hier=true` it lands on the scratch flattened def, which is
-  deleted, and this pass never saves its input library), so it is a limitation
-  of the marking rather than of the cache — but a future consumer of those
-  colors would have to be fed from the record.
+- The legacy `margin` numeric coloring still back-walks only a single worst
+  edge and is not restored on cache hits. Use `critical=true` for persistent
+  path annotations and `lhd tool sta` queries.
 - SDC support is the small subset listed above; no SPEF-less wire-load model
   (zero wire delay without SPEF).
 
