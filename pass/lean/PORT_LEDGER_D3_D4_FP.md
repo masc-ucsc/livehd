@@ -7200,3 +7200,70 @@ reproved; the `HardwareAdequacy` runtime relation generalised off `memFree`;
 `Hw.checkResidual` accepting the new operator shapes with a sound bound; and
 `SupportedByProjection` replacing `memFree` with the real conditions.  Those are
 the next implementation steps, not a reason to stop.
+
+### 63.16 The base image was still a host oracle; `MemImage.lean` removes it
+
+**The correction.**  `MemLog` stored a base INDEX and its `denote`, `writeBE` and
+`readEn` all took an external `Array (Int → BV)` of base functions, which
+`encMemLog` never encoded.  So the representation was not self-contained: a
+first-order projected `Program` cannot reach a host function sitting outside the
+encoding.  Its three theorems are true *relative* write-log lemmas and they did
+**not** discharge the encoding obligation; saying that obligation was complete
+was wrong.  The file is retained with that stated at its head, not deleted.
+
+**`Projection/MemImage.lean`** carries the contents themselves:
+
+    MemImg := words : List BV   -- the actual contents, index = address
+              dflt  : BV        -- every address outside [0, words.length)
+
+`get` is total with no oracle and `encMemImg` encodes all of it.
+
+**The reachable-state contract is stated, not assumed.**  Reads are total on both
+sides and `readEn_eq` needs no hypothesis.  Writes agree only where the table has
+the address: `denote_writeEn` and `denote_writeBE` carry `InRange`, and
+`setAt_outOfRange` records that an out-of-range write is a **no-op**, never a
+silent extension.  `zeroImg_inRange` proves every `aw`-bit address is in range of
+a `2 ^ aw` table, so a read/write memory satisfies the contract by construction.
+`ofMemConst` uses **`contents.size`**, not `2 ^ aw`, keeps the initial words, and
+`ofMemConst_above` proves it reads the default above them.  No total first-order
+round trip for arbitrary `Int → BV` is claimed, because none exists.
+
+**The object language really evaluates it.**  `memProg` is a `Program` of six
+functions built from the projection's own `Prim`s — `isNil`/`hd`/`tl`/`consP` for
+the table walk, `eqI`/`ltI`/`addI`/`subI`/`mulI`/`divI` for addressing, `bvBit`
+and `bvMk` for the byte mask.  Nothing in it calls `cert_mem_read` or
+`MemImg.get`.  Ten `#guard`s run it over `encMemImg`-encoded data at PicoRV32's
+real shape (`aw 5, dw 32`): read of a zeroed file; a full masked write of
+`0xDEADBEEF` at address 7 read back through the object language; **partial** byte
+masks (byte 0 → `0x000000FF`, byte 2 → `0x00FF0000`); a disabled write leaving the
+encoded image untouched; a neighbouring address undisturbed; the ROM reading its
+**initialised** word inside its contents and the default above them; and the
+object-language write producing exactly `encMemImg` of the **host** `writeBE`
+result, on both the full and the partial-mask case.
+
+I checked that those guards bite rather than assuming it: mutating the
+partial-mask expectation from `0x000000FF` to `0xFFFFFFFF` makes the build fail
+with *"did not evaluate to `true`"*, while the unmutated file has zero errors.
+(My first attempt at that mutation test was itself broken — `lean` refused the
+file for being outside the root directory and compiled nothing, so its "no
+errors" meant nothing.  The result above is from the corrected test.)
+
+**What is NOT proved, stated plainly.**  A general
+`evalFuel n memProg ρ (call 1 [encMemImg m, x]) = .value (ofBV (m.get x))` for all
+`m`, `x` and sufficient `n` is **not** proved.  The obstacle is fuel indexing, not
+the implementation: the recursive `call` runs at a smaller fuel than its caller,
+so induction on the address does not line the hypothesis up, and the proof needs
+fuel-monotone strong induction on `n`.  That is the next step, and it is in the
+file's obligation list.
+
+**Fuel is bounded statically and NOT by the syntax height.**  The table walk
+costs the address and the mask costs the word width; both are fixed by the design
+(`2 ^ aw` or `contents.size`, and `dw`) and known at specialization, never by
+run-time data.  `memFuel` records the bound.  The existing `Hw.checkResidual`
+height bound does **not** cover these traversals, and wiring this one in is an
+open obligation — nothing here assumes the old bound suffices.
+
+Both modules elaborate exit 0 (`MemLog` 1.59 s / 533,768 KiB, `MemImage` 1.84 s /
+529,260 KiB).  PicoRV32 remains refused: `memFree` is untouched, no memory is
+erased, no predicate weakened, `RuntimeState` unchanged, and nothing is wired into
+`I_hw` yet.

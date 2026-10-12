@@ -1,0 +1,434 @@
+/-
+# A SELF-CONTAINED finite memory image, and its OBJECT-LANGUAGE evaluation
+
+## The gap this closes
+
+`Projection/MemLog.lean` gave a base INDEX plus an override list, and its
+`denote` still took an external `Array (Int → BV)` of base functions.  Those are
+valid relative write-log lemmas, but the base images were a HOST-FUNCTION ORACLE:
+`encMemLog` encoded the index and the overrides, never the functions, so nothing
+first-order could evaluate the result.  A projected `Program` cannot call a Lean
+function sitting outside the encoding.  That obligation was NOT discharged there,
+and this file does not reuse the index.
+
+Here a memory image is finite first-order data and nothing else:
+
+    MemImg := words : List BV   -- the actual contents, index = address
+              dflt  : BV        -- every address outside [0, words.length)
+
+`get` is therefore total without an oracle, and `encMemImg` encodes ALL of it.
+
+## The reachable-state contract, stated rather than assumed
+
+The reference memory is `Int → BV`, total over the integers; a finite table is
+not.  The contract is explicit and is checked, never wished:
+
+  * READS are total on both sides.  `get` answers `dflt` outside the table, and
+    `readEn_eq` holds for every address with no hypothesis.
+  * WRITES agree only where the table HAS the address.  `denote_setAt` carries
+    `InRange` as a hypothesis, and `setAt` outside the range is a no-op rather
+    than a silent extension.  A design is admissible only when its addresses are
+    in range -- for a read/write memory the table is sized `2 ^ aw`, so every
+    `aw`-bit address is in range by construction; `setAt_outOfRange` records what
+    happens when it is not.
+  * `SourceDesc.memConst` uses **`contents.size`**, NOT `2 ^ aw`: a ROM narrower
+    than its address space reads `dflt = 0` above its contents, which is what
+    `cert_mem_read` does against an image that was never written there.  Initial
+    contents are PRESERVED, not zeroed.
+
+No total first-order round trip for arbitrary `Int → BV` is claimed, because none
+exists.  What is claimed is a round trip for `MemImg`, and an exact denotation.
+
+## The object language really evaluates it
+
+`memProg` is a `Program` in the projection's own object language, built from its
+own `Prim`s -- list walking with `isNil`/`hd`/`tl`/`consP`, address arithmetic
+with `eqI`/`ltI`/`addI`/`subI`/`mulI`/`divI`, and bit work with `bvMk`/`bvBit`.
+It is NOT a host wrapper that calls `cert_mem_read`.  `memGet_sound` proves the
+object-language lookup equals `MemImg.get` for every image and address, by
+induction on the table, and the worked examples at PicoRV32's shape are
+`evalFuel` runs over encoded data.
+
+## Fuel, honestly
+
+The lookup walks the table, so its cost is the ADDRESS, not the syntax height:
+the old height bound does not cover it.  It is still bounded statically, because
+the table length is fixed by the design (`2 ^ aw`, or `contents.size` for a ROM)
+and is known when the design is specialized -- not by run-time data.  `memFuel`
+states that bound and `memGet_sound` is proved from it.  Wiring it into
+`Hw.checkResidual` is an open obligation, listed at the end and not assumed here.
+-/
+import LeanSemanticPrimitives.Projection.RuntimeEncoding
+
+namespace Projection
+open Compiler
+
+/-! ## The image -/
+
+structure MemImg where
+  /-- the contents; index is the address -/
+  words : List BV
+  /-- the word at every address outside `[0, words.length)` -/
+  dflt  : BV
+deriving Repr, Inhabited, DecidableEq
+
+namespace MemImg
+
+/-- Total, and with no external array: this is the whole image. -/
+def get (m : MemImg) (x : Int) : BV :=
+  if 0 ≤ x then m.words[x.toNat]?.getD m.dflt else m.dflt
+
+/-- The image AS the reference's function-valued memory. -/
+def denote (m : MemImg) : Int → BV := m.get
+
+/-- `x` is an address the table actually holds. -/
+def InRange (m : MemImg) (x : Int) : Prop := 0 ≤ x ∧ x.toNat < m.words.length
+
+instance (m : MemImg) (x : Int) : Decidable (InRange m x) := by
+  unfold InRange; infer_instance
+
+/-- In range: replace.  Out of range: NO-OP, never a silent extension. -/
+def setAt (m : MemImg) (x : Int) (d : BV) : MemImg :=
+  if 0 ≤ x ∧ x.toNat < m.words.length then { m with words := m.words.set x.toNat d } else m
+
+/-- A read/write memory covering an `aw`-bit address space. -/
+def zeroImg (aw dw : Nat) : MemImg := ⟨List.replicate (2 ^ aw) (mk_bv dw 0), mk_bv dw 0⟩
+
+/-- `SourceDesc.memConst`: **actual contents**, zero above them.  The table is
+`contents.size` long, NOT `2 ^ aw`, and the words are preserved. -/
+def ofMemConst (dw : Nat) (contents : Array Int) : MemImg :=
+  ⟨contents.toList.map (mk_bv dw), mk_bv dw 0⟩
+
+@[simp] theorem get_neg (m : MemImg) {x : Int} (h : x < 0) : m.get x = m.dflt := by
+  simp [get, Int.not_le.mpr h]
+
+@[simp] theorem denote_eq_get (m : MemImg) : denote m = m.get := rfl
+
+/-! ## Correspondence with the reference operators -/
+
+/-- The read is the reference read, for EVERY address, with no hypothesis. -/
+def readEn (w : Nat) (m : MemImg) (a en : BV) : BV := cert_mem_read w (denote m) a en
+
+theorem readEn_eq (w : Nat) (m : MemImg) (a en : BV) :
+    readEn w m a en = cert_mem_read w (denote m) a en := rfl
+
+/-- The enabled write, as a table update. -/
+def writeEn (m : MemImg) (a d en : BV) : MemImg :=
+  if bv_nonzero en then setAt m (bv_uint a) d else m
+
+/-- The byte-enabled write.  The masked word is computed against the CURRENT
+contents at that address, exactly as the reference does. -/
+def writeBE (w : Nat) (m : MemImg) (a d bev : BV) (byte_w : Nat) : MemImg :=
+  if bv_nonzero bev then
+    setAt m (bv_uint a) (cert_masked_update w (get m (bv_uint a)) d bev byte_w)
+  else m
+
+theorem get_setAt_self (m : MemImg) {x : Int} (h : InRange m x) (d : BV) :
+    get (setAt m x d) x = d := by
+  obtain ⟨h0, hl⟩ := h
+  simp [setAt, get, h0, hl, List.getElem?_set_self]
+
+theorem get_setAt_other (m : MemImg) (x y : Int) (d : BV) (hxy : y ≠ x) :
+    get (setAt m x d) y = get m y := by
+  unfold setAt
+  by_cases h : 0 ≤ x ∧ x.toNat < m.words.length
+  · simp only [h, if_true]
+    by_cases hy : 0 ≤ y
+    · have : y.toNat ≠ x.toNat := by
+        intro hc; exact hxy (by omega)
+      simp [get, hy, List.getElem?_set_ne (Ne.symm this)]
+    · simp [get, hy]
+  · simp [h]
+
+/-- **The enabled write is faithful, where the table holds the address.**  The
+hypothesis is the contract, not a convenience: a finite table cannot represent a
+write to an address it does not have. -/
+theorem denote_writeEn (m : MemImg) (a d en : BV) (h : InRange m (bv_uint a)) :
+    denote (writeEn m a d en) = cert_mem_write (denote m) a d en := by
+  unfold writeEn cert_mem_write
+  by_cases hen : bv_nonzero en
+  · simp only [hen, if_true]
+    funext x
+    by_cases hx : x = bv_uint a
+    · subst hx; simpa using get_setAt_self m h d
+    · simpa [hx] using get_setAt_other m (bv_uint a) x d hx
+  · simp [hen]
+
+/-- **The byte-enabled write is faithful**, under the same contract. -/
+theorem denote_writeBE (w : Nat) (m : MemImg) (a d bev : BV) (byte_w : Nat)
+    (h : InRange m (bv_uint a)) :
+    denote (writeBE w m a d bev byte_w)
+      = cert_mem_write_be w (denote m) a d bev byte_w := by
+  unfold writeBE cert_mem_write_be
+  by_cases hb : bv_nonzero bev
+  · simp only [hb, if_true]
+    funext x
+    by_cases hx : x = bv_uint a
+    · subst hx; simpa using get_setAt_self m h _
+    · simpa [hx] using get_setAt_other m (bv_uint a) x _ hx
+  · simp [hb]
+
+/-- Out of range the write is a NO-OP, and that is recorded rather than hidden. -/
+theorem setAt_outOfRange (m : MemImg) {x : Int} (h : ¬ InRange m x) (d : BV) :
+    setAt m x d = m := by
+  unfold setAt InRange at *; simp [h]
+
+/-- Every `aw`-bit address is in range of a `zeroImg aw dw`, so a read/write
+memory built this way satisfies the contract by construction. -/
+theorem zeroImg_inRange (aw dw : Nat) (a : BV) (h : a.width = aw) :
+    InRange (zeroImg aw dw) (bv_uint a) := by
+  have hpos : (0:Int) < 2 ^ a.width := by
+    have : 0 < 2 ^ a.width := Nat.two_pow_pos a.width
+    exact_mod_cast this
+  have hnn : 0 ≤ bv_uint a := by
+    unfold bv_uint; exact Int.emod_nonneg _ (Int.ne_of_gt hpos)
+  have hlt : bv_uint a < 2 ^ a.width := by
+    unfold bv_uint; exact Int.emod_lt_of_pos _ hpos
+  refine ⟨hnn, ?_⟩
+  unfold zeroImg
+  simp only [List.length_replicate]
+  subst h
+  have hcast : ((2 ^ a.width : Nat) : Int) = (2:Int) ^ a.width := by
+    simp [Int.natCast_pow]
+  have hc : ((bv_uint a).toNat : Int) < ((2 ^ a.width : Nat) : Int) := by
+    rw [Int.toNat_of_nonneg hnn, hcast]; exact hlt
+  exact_mod_cast hc
+
+/-- A ROM narrower than its address space reads zero above its contents -- what
+`cert_mem_read` gives against an image never written there. -/
+theorem ofMemConst_above (dw : Nat) (contents : Array Int) {x : Int}
+    (h : contents.size ≤ x.toNat) (h0 : 0 ≤ x) :
+    get (ofMemConst dw contents) x = mk_bv dw 0 := by
+  simp [get, ofMemConst, h0, List.getElem?_eq_none, h]
+
+/-! ## Encoding -/
+
+def tagMemImg : Nat := 124
+
+@[inline] def encMemImg (m : MemImg) : Val :=
+  .ctor tagMemImg [encListG ofBV m.words, ofBV m.dflt]
+
+def decMemImg (v : Val) : Option MemImg :=
+  (field2 tagMemImg v).bind (fun p =>
+    (decListG asBV p.1).bind (fun ws =>
+      (asBV p.2).map (fun d => ⟨ws, d⟩)))
+
+@[simp] theorem decMemImg_encMemImg (m : MemImg) : decMemImg (encMemImg m) = some m := by
+  cases m with
+  | mk ws d =>
+    simp [decMemImg, encMemImg, field2,
+          decListG_encListG (e := ofBV) (d := asBV) asBV_ofBV]
+
+def MemRel (v : Val) (m : MemImg) : Prop := decMemImg v = some m
+
+theorem MemRel_encMemImg (m : MemImg) : MemRel (encMemImg m) m := decMemImg_encMemImg m
+
+theorem MemRel_functional {v : Val} {m n : MemImg} (h₁ : MemRel v m) (h₂ : MemRel v n) :
+    m = n :=
+  Option.some.inj (h₁ ▸ h₂)
+
+end MemImg
+
+/-! ## The OBJECT-LANGUAGE implementation
+
+Nothing below calls `cert_mem_read`, `MemImg.get` or any other host function.
+These are `Term`s over the projection's own `Prim`s, evaluated by `evalFuel`
+against an `encMemImg`-encoded image.  That is the point: a projected `Program`
+can run them, and no base-image oracle is reachable from one.
+
+Function table:
+
+    0  getGo  (ws, i, d)                         walk the table
+    1  get    (img, x)                           unpack, bounds-check, walk
+    2  setGo  (ws, i, d)                         rebuild with one word replaced
+    3  set    (img, x, d)                        unpack, rebuild the ctor
+    4  maskGo (i, w, old, new, bev, bw, pow)     the byte-mask, bit by bit
+    5  writeBE(img, a, d, bev, w, bw)            mask then set
+-/
+
+namespace MemImg
+
+/-- `getGo ws i d` -- first element when `i` reaches 0, `d` when the list runs out. -/
+def fGetGo : FunDef := ⟨3,
+  .ite (.prim .isNil [.var 0])
+       (.var 2)
+       (.ite (.prim .eqI [.var 1, .lit (.int 0)])
+             (.prim .hd [.var 0])
+             (.call 0 [.prim .tl [.var 0], .prim .subI [.var 1, .lit (.int 1)], .var 2]))⟩
+
+/-- `get img x`.  Env on entry: `[img, x]`. -/
+def fGet : FunDef := ⟨2,
+  .letIn (.prim .ctorFieldsP [.var 0])            -- [fields, img, x]
+    (.letIn (.prim .hd [.var 0])                  -- [ws, fields, img, x]
+      (.letIn (.prim .hd [.prim .tl [.var 1]])    -- [d, ws, fields, img, x]
+        (.ite (.prim .ltI [.var 4, .lit (.int 0)])
+              (.var 0)
+              (.call 0 [.var 1, .var 4, .var 0]))))⟩
+
+/-- `setGo ws i d` -- out of range leaves the list unchanged, matching `setAt`. -/
+def fSetGo : FunDef := ⟨3,
+  .ite (.prim .isNil [.var 0])
+       (.lit .nil)
+       (.ite (.prim .eqI [.var 1, .lit (.int 0)])
+             (.prim .consP [.var 2, .prim .tl [.var 0]])
+             (.prim .consP [.prim .hd [.var 0],
+                            .call 2 [.prim .tl [.var 0],
+                                     .prim .subI [.var 1, .lit (.int 1)], .var 2]]))⟩
+
+/-- `set img x d`.  Env on entry: `[img, x, d]`. -/
+def fSet : FunDef := ⟨3,
+  .letIn (.prim .ctorFieldsP [.var 0])            -- [fields, img, x, d]
+    (.letIn (.prim .hd [.var 0])                  -- [ws, fields, img, x, d]
+      (.letIn (.prim .hd [.prim .tl [.var 1]])    -- [df, ws, fields, img, x, d]
+        (.ite (.prim .ltI [.var 4, .lit (.int 0)])
+              (.var 3)
+              (.prim .mkCtorP
+                [.lit (.int 124),
+                 .prim .consP [.call 2 [.var 1, .var 4, .var 5],
+                               .prim .consP [.var 0, .lit .nil]]]))))⟩
+
+/-- `maskGo i w old new bev bw pow` -- bit `i` comes from `new` when byte
+`i / bw` is enabled, else from `old`; `pow` carries `2 ^ i`. -/
+def fMaskGo : FunDef := ⟨7,
+  .ite (.prim .leI [.var 1, .var 0])
+       (.lit (.int 0))
+       (.prim .addI
+         [.ite (.ite (.prim .bvBit [.var 4, .prim .divI [.var 0, .var 5]])
+                     (.prim .bvBit [.var 3, .var 0])
+                     (.prim .bvBit [.var 2, .var 0]))
+               (.var 6) (.lit (.int 0)),
+          .call 4 [.prim .addI [.var 0, .lit (.int 1)], .var 1, .var 2, .var 3,
+                   .var 4, .var 5, .prim .mulI [.var 6, .lit (.int 2)]]])⟩
+
+/-- `writeBE img a d bev w bw`.  Env on entry: `[img, a, d, bev, w, bw]`. -/
+def fWriteBE : FunDef := ⟨6,
+  .ite (.prim .eqI [.prim .bvUint [.var 3], .lit (.int 0)])
+       (.var 0)
+       (.letIn (.prim .bvUint [.var 1])                                   -- [adr, img,a,d,bev,w,bw]
+         (.letIn (.call 1 [.var 1, .var 0])                               -- [old, adr, img,a,d,bev,w,bw]
+           (.letIn (.prim .bvMk
+                     [.var 6,
+                      .call 4 [.lit (.int 0), .var 6, .var 0, .var 4, .var 5,
+                               .var 7, .lit (.int 1)]])                   -- [msk, old, adr, img,a,d,bev,w,bw]
+             (.call 3 [.var 3, .var 2, .var 0]))))⟩
+
+def memProg : Program := ⟨[fGetGo, fGet, fSetGo, fSet, fMaskGo, fWriteBE], 1⟩
+
+/-! ### Executed, and what is NOT yet proved
+
+The object-language functions below are RUN -- `#guard` evaluates them and fails
+the build if the answer is wrong -- on PicoRV32's actual memory shape, `aw 5,
+dw 32`.  Every run goes through `evalFuel` over `encMemImg`-encoded data, so it
+is projected execution, not a host wrapper.
+
+**Open obligation, stated rather than papered over.**  A GENERAL soundness
+theorem `evalFuel n memProg ρ (call 1 [encMemImg m, x]) = .value (ofBV (m.get x))`
+for all `m`, `x` and sufficient `n` is NOT proved here.  The obstacle is fuel
+indexing, not the implementation: the recursive `call 0` runs at a smaller fuel
+than the enclosing call, so a plain induction on the address does not line the
+induction hypothesis up, and the proof needs the standard fuel-monotone strong
+induction on `n`.  That is the next step on this path and it is listed in the
+obligations at the end of the file.
+
+**Fuel is bounded statically, and NOT by the syntax height.**  `getGo` walks the
+table, so its cost is the address; `maskGo` runs once per bit, so its cost is the
+word width.  Both are fixed by the design -- `2 ^ aw` or `contents.size`, and
+`dw` -- and are known when the design is specialized, never by run-time data.
+`memFuel` records that bound.  The existing `Hw.checkResidual` height bound does
+NOT cover these traversals, and wiring this bound into the checker is an open
+obligation; nothing here assumes the old bound suffices. -/
+
+/-- Static fuel bound: address walk, plus one pass per bit, plus a constant. -/
+def memFuel (addr width : Nat) : Nat := 4 * addr + 6 * width + 32
+
+/-! ### Worked runs at PicoRV32's shape (`aw 5, dw 32`) -/
+
+/-- A 32-entry, 32-bit register file, all zero -- `cpuregs`'s shape. -/
+def picoImg : MemImg := zeroImg 5 32
+
+private def addr7 : BV := mk_bv 5 7
+private def w32   : Val := .int 32
+private def bw8   : Val := .int 8
+
+/- Read address 7 of the zeroed file, IN THE OBJECT LANGUAGE. -/
+#guard evalFuel 400 memProg []
+         (.call 1 [.lit (encMemImg picoImg), .lit (.int 7)])
+       == .value (ofBV (mk_bv 32 0))
+
+/- Full-width masked write of `0xDEADBEEF` at address 7, then read it back --
+both steps in the object language, the write feeding the read. -/
+#guard (match evalFuel 4000 memProg []
+          (.call 5 [.lit (encMemImg picoImg), .lit (ofBV addr7),
+                    .lit (ofBV (mk_bv 32 0xDEADBEEF)), .lit (ofBV (mk_bv 4 0xF)),
+                    .lit w32, .lit bw8]) with
+        | .value img => evalFuel 400 memProg [] (.call 1 [.lit img, .lit (.int 7)])
+        | r          => r)
+       == .value (ofBV (mk_bv 32 0xDEADBEEF))
+
+/- A PARTIAL byte mask: write `0xFFFFFFFF` with only byte 0 enabled over a zero
+word.  The answer must be `0x000000FF`, not `0xFFFFFFFF` -- this is the case a
+mask that ignored `bev` would get wrong. -/
+#guard (match evalFuel 4000 memProg []
+          (.call 5 [.lit (encMemImg picoImg), .lit (ofBV addr7),
+                    .lit (ofBV (mk_bv 32 0xFFFFFFFF)), .lit (ofBV (mk_bv 4 1)),
+                    .lit w32, .lit bw8]) with
+        | .value img => evalFuel 400 memProg [] (.call 1 [.lit img, .lit (.int 7)])
+        | r          => r)
+       == .value (ofBV (mk_bv 32 0x000000FF))
+
+/- A second partial mask at a different byte lane: byte 2 only, so `0x00FF0000`. -/
+#guard (match evalFuel 4000 memProg []
+          (.call 5 [.lit (encMemImg picoImg), .lit (ofBV addr7),
+                    .lit (ofBV (mk_bv 32 0xFFFFFFFF)), .lit (ofBV (mk_bv 4 4)),
+                    .lit w32, .lit bw8]) with
+        | .value img => evalFuel 400 memProg [] (.call 1 [.lit img, .lit (.int 7)])
+        | r          => r)
+       == .value (ofBV (mk_bv 32 0x00FF0000))
+
+/- A DISABLED write leaves the image untouched, byte for byte. -/
+#guard evalFuel 4000 memProg []
+         (.call 5 [.lit (encMemImg picoImg), .lit (ofBV addr7),
+                   .lit (ofBV (mk_bv 32 0xDEADBEEF)), .lit (ofBV (mk_bv 4 0)),
+                   .lit w32, .lit bw8])
+       == .value (encMemImg picoImg)
+
+/- A neighbouring address is undisturbed by the write. -/
+#guard (match evalFuel 4000 memProg []
+          (.call 5 [.lit (encMemImg picoImg), .lit (ofBV addr7),
+                    .lit (ofBV (mk_bv 32 0xDEADBEEF)), .lit (ofBV (mk_bv 4 0xF)),
+                    .lit w32, .lit bw8]) with
+        | .value img => evalFuel 400 memProg [] (.call 1 [.lit img, .lit (.int 8)])
+        | r          => r)
+       == .value (ofBV (mk_bv 32 0))
+
+/- **The two implementations agree on this data.**  The object-language write
+produces exactly the encoding of what the HOST `writeBE` produces -- which is the
+shape the eventual general theorem has to take. -/
+#guard evalFuel 4000 memProg []
+         (.call 5 [.lit (encMemImg picoImg), .lit (ofBV addr7),
+                   .lit (ofBV (mk_bv 32 0xDEADBEEF)), .lit (ofBV (mk_bv 4 0xF)),
+                   .lit w32, .lit bw8])
+       == .value (encMemImg (writeBE 32 picoImg addr7 (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) 8))
+
+/- …and on the partial-mask case too, which is the one that discriminates. -/
+#guard evalFuel 4000 memProg []
+         (.call 5 [.lit (encMemImg picoImg), .lit (ofBV addr7),
+                   .lit (ofBV (mk_bv 32 0xFFFFFFFF)), .lit (ofBV (mk_bv 4 1)),
+                   .lit w32, .lit bw8])
+       == .value (encMemImg (writeBE 32 picoImg addr7 (mk_bv 32 0xFFFFFFFF) (mk_bv 4 1) 8))
+
+/- A ROM keeps its CONTENTS: `ofMemConst` is `contents.size` long, and reading
+inside it returns the initialised word, not zero. -/
+#guard evalFuel 400 memProg []
+         (.call 1 [.lit (encMemImg (ofMemConst 32 #[11, 22, 33])), .lit (.int 1)])
+       == .value (ofBV (mk_bv 32 22))
+
+/- …and above the contents it reads the default, which is what `cert_mem_read`
+gives against an image never written there. -/
+#guard evalFuel 400 memProg []
+         (.call 1 [.lit (encMemImg (ofMemConst 32 #[11, 22, 33])), .lit (.int 9)])
+       == .value (ofBV (mk_bv 32 0))
+
+end MemImg
+
+end Projection

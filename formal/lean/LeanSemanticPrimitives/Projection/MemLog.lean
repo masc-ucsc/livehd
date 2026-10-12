@@ -1,4 +1,21 @@
 /-
+SUPERSEDED FOR ITS PURPOSE by `Projection/MemImage.lean`, and retained because
+its lemmas are true and were really proved -- not deleted to tidy a mistake.
+
+WHAT WAS WRONG WITH IT AS A MEMORY IMAGE.  `MemLog` stores a base INDEX, and
+`denote`/`writeBE`/`readEn` all take an external `Array (Int → BV)` of base
+functions.  `encMemLog` encodes the index and the overrides and NEVER those
+functions, so the representation is not self-contained: a first-order projected
+`Program` cannot evaluate it, because the base image is a host-function oracle
+sitting outside the encoding.  The three faithfulness theorems below are valid
+RELATIVE write-log lemmas -- they say the log tracks `cert_mem_write`,
+`cert_mem_write_be` and `cert_mem_read` given a base -- and they do not discharge
+the encoding obligation.  Claiming that first obligation complete was wrong.
+
+`MemImage.lean` carries the contents themselves (`words : List BV` plus a
+default), encodes all of it, and is evaluated by the object language.
+-/
+/-
 # A FINITE, ENCODABLE memory image — the first missing piece of FP memory support
 
 ## Why this file exists, concretely
