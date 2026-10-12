@@ -11,7 +11,7 @@
 #
 kind	path	what it holds
 frozen rows	generated/master_port/fp/genprobe/frozen_rows.json	the 33 rows, certificate paths and sha256, frozen before any run
-driver source	generated/master_port/fp/genprobe/gen_probe.master.lean	b6dff38b6885b0d8559096374670bd907b84c883580624bef8acb27f22099f2c
+driver source	generated/master_port/fp/genprobe/gen_probe.master.lean	b6dff38b6885b0d8559096374670bd907b84c883580624bef8acb27f22099f2c -- THE BYTES THE MEASURED BINARY WAS BUILT FROM; formal/lean/scripts/gen_probe.lean is now 36608266836d74b2f09c041d8de961f6cf64b133f83c6e6f3da1e7776c0c214b after a COMMENT-ONLY correction (the refuted szOf cost attribution). No code changed, so the procedure is the same, but the retained copy is the one that matches the binary.
 driver source	generated/master_port/fp/genprobe/gen_probe.pin.lean	26b88f106c5f097b4ebef802e4b578cd0b6fcae8965299e7f4c14d3dac0db2bd
 pin tree	generated/master_port/fp/genprobe/pin_tree/	formal/lean extracted at 9bb41a09d, 100 files
 build	generated/master_port/fp/genprobe/root-master/	olean+nat, binary sha256 b7abe8e056b589cb439b0cf65a657d7d57d0f049f1ed942897a74909e4e2d01f

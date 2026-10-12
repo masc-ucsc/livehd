@@ -18,8 +18,16 @@ WHAT IS MEASURED, and what is deliberately outside the measured interval:
   AFTER the interval, and reported separately, NEVER added to generation:
   `szOf`, the full term-count traversal.  `total_probe`'s `stage` helper calls
   its digest function INSIDE the timed region, so every "specialize" number it
-  has ever printed includes a full szOf traversal of the residual.  That is the
-  single most important difference between this driver's numbers and those.
+  has ever printed includes a szOf traversal of the residual.
+
+  CORRECTION.  This comment used to call that "the single most important
+  difference between this driver's numbers and those".  MEASUREMENT REFUTED IT:
+  szOf is reported at 0 ms on every run that reaches it, including 2,213,885
+  terms of CVA6 frontend residual in 0 ms.  So the traversal is not a material
+  share of a specialize number and cannot explain a difference between the two
+  drivers.  It stays outside the interval because a generation metric should not
+  contain a reporting traversal at all -- that is a measurement-hygiene reason,
+  not a cost one.
 
 THE ARTIFACT.  What generation produces is an IN-MEMORY `Program` -- a Lean
 value in this process.  Nothing is serialized and no source file is written.

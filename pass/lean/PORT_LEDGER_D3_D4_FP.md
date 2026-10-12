@@ -6518,7 +6518,7 @@ removed nothing.  Validation of the destination, all of it measured:
 * `formal/lean/.lake` is a **real directory, not a symlink**; `build_root()`
   therefore resolves inside the private `ROOT` and `build_root_is_external()`
   returns false.
-* **134,380 files / 13 GB in both trees**; **3 symlinks**, all relative and
+* **134,380 files / 13 GiB in both trees** (`du -h`, 1024-based); **3 symlinks**, all relative and
   internal to `packages/` (batteries' `docs/README.md`, two mathlib `scripts/`
   entries).  None escapes the private root.
 * `lake env` resolves **every** `LEAN_PATH` entry under the private checkout,
@@ -6526,16 +6526,42 @@ removed nothing.  Validation of the destination, all of it measured:
 * The private checkout is at `3d8bb696ce3cd712240368c9a82c434f8ba31e18` with an
   **empty `git status --porcelain`**, before and after the build.
 
-**Copied traces are not valid traces in a new root, and that had to be fixed.**
-Lake records the **absolute source path** as a trace input, so in the private
-root every local module keyed differently and `lake build --no-build` reported
-`target is out-of-date` for all 14 critical modules.  Artifact equality alone
-would therefore have been exactly the "preparation, not proof" the checkpoint
-warns about.  A private canonical `lake build --no-cache` fixed it:
-**exit 0, wall 18.20 s, user 14.72, sys 4.50, RSS 800,444 KiB**, after which
-`lake build --no-build` reports `All targets up-to-date` (rc 0).  The build
-**re-validated traces and did not re-elaborate**: all 14 critical artifacts hash
-**unchanged**.  `--no-cache` was passed so nothing was downloaded.
+**Copied traces are not valid traces in a new root.**  Lake records the
+**absolute source path** as a trace input, so in the private root every local
+module keys differently and reads out-of-date.
+
+**CORRECTION — the freshness claim first entered here was wrong.**  It said a
+private `lake build --no-cache` (exit 0, wall 18.20 s, user 14.72, sys 4.50,
+maxrss 800,444 KiB = 0.76 GiB) had re-validated all fourteen critical compiler
+traces.  **It had not.**  That invocation ran the DEFAULT target, which is the
+library root's import closure — **7 jobs** — and the fourteen critical
+`Compiler/*` modules are not in it.  Afterwards `lake build --no-build` with no
+target list reports `All targets up-to-date` about those same 7 jobs, and I read
+that as covering the closure the probes load.  It does not.
+
+The explicit check is `lake --no-build build` naming all fourteen targets, and
+the supervisor ran it:
+
+* **before** the Projection build: **exit 3**, `[3/50] Building
+  LeanSemanticPrimitives.Compiler.DesignCert — target is out-of-date and needs
+  to be rebuilt`;
+* **after** the 34-job Projection build: still **exit 3**, now at
+  `[5/76] ... Compiler.ResidualIR`.
+
+Raw evidence:
+`automate_workspace/master_rebase/audits/coverage_snapshot_212454_checked_2126/private_no_build_status.json`
+and `private_no_build_after_projection.json`.
+
+So for this closure: the fourteen artifacts are **hash-equal to the canonical
+audit on distinct inodes with `nlink=1`**, and that is **preparation**;
+**default-target success is not validation of it**, and their traces are still
+unvalidated in the private root.  Building the fourteen explicitly is a separate,
+still-owed step, and it must wait — see §63.7.
+
+What the TV run does bind, independently of traces, is the bytes it loaded: the
+sidecar's `artifact_digest = faa1ca2c0818ac6c8d4d549534469d27ac4e61551dea9e4c1b7314235961472e`
+recomputes exactly over those fourteen private `.olean`s, which are byte-identical
+to the audited ones.  That is an identity of loaded artifacts, not a fresh build.
 
 No shared mutable build-root alias, no hard link to the live compiler, no
 `--allow-dirty`, no `D3_ARTIFACT_DIR` test seam.
@@ -6586,9 +6612,15 @@ limitation, is the FP column's missing functional prerequisite.
 
 `formal/lean/scripts/gen_probe_v2.lean` is the DCERT2-capable driver.  It is
 `gen_probe.lean` with one substitution — `Compiler.CertIO.admitAny` in place of
-`CertIO.V1.loadCert` — and `gen_probe.lean` itself is **byte-unchanged**, so the
-existing native generation-latency procedure and its paired numbers stay
-comparable.  `admitAny` routes on the magic and then applies **each format's own
+`CertIO.V1.loadCert` — and `gen_probe.lean`'s CODE is unchanged, so the existing native
+generation-latency procedure and its paired numbers stay comparable.  Its header
+did change, once: the claim that the excluded `szOf` traversal was "the single
+most important difference" between its numbers and `total_probe`'s is **refuted
+by measurement** — szOf reports **0 ms** on every run that reaches it, including
+2,213,885 terms of CVA6 frontend residual — so the comment now says the exclusion
+is measurement hygiene rather than a cost.  Both source identities are retained:
+`b6dff38b…` is what the measured native binary was built from, `36608266…` is the
+corrected file.  `admitAny` routes on the magic and then applies **each format's own
 admission**: DCERT2 through `readCertChecked` (parse, then `certWfError`), DCERT1
 through FP's parse-then-`asyncOK`.  No policy is widened, narrowed or replaced
 with a third, and `magics_are_exclusive` proves the routing cannot mis-route.
@@ -6610,8 +6642,14 @@ Two things this establishes rather than asserts.  First, every parsed shape
 Second, the metadata DCERT1 **structurally cannot carry** is present and
 non-trivial: 409 of 409 frontend flops and 333 of 334 issue-stage flops carry
 `FlopDesc.asyncReset`, and PicoRV32's single memory carries a
-`MemoryDesc.clock`.  The support predicate is therefore evaluated on real
-clock/reset metadata, not on a defaulted one-clock table.
+`MemoryDesc.clock`.
+
+**Scope, corrected.**  `dcert2_loadcheck.lean` decodes and admits and does
+**nothing else** — it evaluates no `supportReport`, no conjunct and no
+projection, so none of its output is evidence about supportedness.  The six-field
+reports come from `dcert2_support.lean` and from the `gen_probe_v2` runs, and
+those are what §63.8 records.  What the decode result does establish is that the
+metadata the support predicate later reads is really present in the bytes.
 
 **What is still missing, stated precisely.**  `scripts/build-opt.sh` — the
 standalone native route the FP probes are built by — deliberately builds
@@ -6629,3 +6667,163 @@ conjuncts including `memFree`, so PicoRV32 — the one whole-core row, with
 projection semantics / runtime-relation / adequacy gap.  `memFree` was not
 removed, no memory was erased from any design, and no design is claimed
 supported that is not.
+
+### 63.7 A build overlapped a live importer, and the explicit 14-target build is still owed
+
+**The overlap, recorded rather than excused.**  While the TV sweep was running
+and its probes were importing `.olean`s out of the private `.lake`, I started a
+34-job `lake build --no-cache` of the Projection chain **into that same
+`.lake`** (wall 97.21 s, user 231.48, sys 21.12, maxrss 1,868,360 KiB = 1.78 GiB,
+exit 0).  It happened to rebuild `Compiler.Runtime` and `Compiler.DesignCertWF`,
+and `Runtime` is one of the fourteen artifacts the sweep's `artifact_digest`
+covers.  I checked afterwards and all fourteen still hash equal to the canonical
+audit, so no drift was detected and the sweep was not aborted — **but equal
+hashes afterwards do not prove isolation.**  The window existed; a differing byte
+would have been detected only as drift, and a replaced file mid-import could have
+failed in ways a digest comparison taken later cannot see.  It was an
+unnecessary risk to take against a canonical run and it should not have been
+taken.
+
+**Rule adopted:** no further writes into a build context that has live
+importers.  Either wait for the consumers to reach a terminal result, or use an
+independently owned output/dependency root.  Read-only use (`lean --run` against
+a `LEAN_PATH`, which writes nothing into `.lake`) is not a write and is not
+covered by this.
+
+**Still owed, and deliberately deferred until the consumers are terminal:** a
+private, explicit build of the fourteen canonical `Compiler` targets —
+`CompileDesignDefs`, `CompileGraphDefs`, `CompileOpDefs`, `CompileDesign`,
+`CompileGraph`, `CompileOp`, `D3Harness`, `ReifyGen`, `Reify`, `ReifyProof`,
+`Runtime`, `DesignCert`, `ResidualIR`, `ResidualSemantics` — capturing full
+argv/cwd/source/dependency identities, true exits and artifact hashes, and
+required to be followed by an explicit 14-target `lake --no-build build` that
+exits **0**.  Dependency-preparation cost stays separate from any generation
+number.  If any artifact changes, both identities are kept and only the affected
+evidence is re-obtained; nothing that already passed is blindly re-run.
+
+### 63.8 Futamura on DCERT2: what ran, and what each phase does and does not claim
+
+**Four phases, four different claims**, and the runnable procedure is
+`pass/lean/scripts/fp_cov_dcert2.sh` — committed, not described:
+
+1. **decode** (`dcert2_loadcheck.lean`) — the bytes are admitted under the
+   format's own policy.  **Evaluates no support predicate.**
+2. **support** (`dcert2_support.lean`) — the six conjuncts, and the concrete
+   sources/operators/memories responsible when one is false.
+3. **generate** (`gen_probe_v2.lean`) — specialize + `Hw.checkResidual`.
+   Produces an **in-memory** `Program` and **executes no residual step**.
+4. **readiness** (`gen_readiness_v2.lean`) — `Hw.stepOf` at the checked bound.
+
+A `GENERATION OK` at phase 3 is therefore **not** a usable-simulator result; the
+matrix's YES needs phase 4.  Phase 4 **re-specializes**, because phase 3
+serializes nothing and there is no retained `Program` to load: that makes it a
+**new attempt with its own cost**, never a second measurement of the generation
+metric.
+
+**PicoRV32's refusal, named concretely.**  `supportReport` gives
+`wf true, memFree false, sources false, ops false, arities true, flopClocks true`
+— and the three falses are three different gaps, not one restated:
+
+* `memFree` — 1 memory: `aw 5, dw 32, nextImg 3225, clock 0` (the register file);
+* `sources` — 1 unsupported source: `memImg(idx 0, aw 5, dw 32)`;
+* `ops` — 3 nodes on operators outside the seventeen `OpSupported` admits:
+  `Op_MemRead ×2` and `Op_MemWriteBE 1 ×1`.
+
+So whole-Pico is blocked by memory **semantics** (`memFree`), memory **sources**
+and memory **operators** together.  Nothing was removed, erased or weakened to
+say so, and the inherited runtime-relation/adequacy gap stands.
+
+**Both CVA6 units are `SupportedByProjection` on all six conjuncts**, and both
+generate.  The route needed a configuration the default does not provide: at the
+default `lean --run` stack both abort with *deep recursion … at 'interpreter'*
+inside `Projection.mixTerms`; `--tstack=262144` **alone did not help**;
+`ulimit -s unlimited` together with `--tstack=1048576` gets past it.  That is a
+route/configuration requirement and is recorded as one — **not** an optimization
+result and **not** a regression — and no further stack experiments were run.
+
+| row | fuel | result | measured total | proc wall | maxrss | checker bound | szOf |
+|---|---|---|---|---|---|---|---|
+| `frontend_gate` | 20000/200 | **GENERATION OK** | 341,773 ms | 385.39 s | 6,707,152 KiB = 6.40 GiB | 31,753 | 2,213,885 terms in **0 ms** |
+| `issue_stage_gate` | 20000/200 | OUT OF FUEL at this budget | 859 ms | 60.65 s | 6,592,540 KiB = 6.29 GiB | — | — |
+| `issue_stage_gate` | 200000/5000 | **GENERATION OK** | 384,065 ms | 429.62 s | 6,809,596 KiB = 6.50 GiB | 32,369 | 2,926,014 terms in **0 ms** |
+
+Every failed configuration is retained alongside the successful one; the
+out-of-fuel row is a failure **at that budget**, not a capability rejection.
+
+These are **interpreted** numbers and are not comparable to
+`fp_generation_latency.tsv`, which is the native −O2 binary on DCERT1
+certificates at a different fuel.  **Native linking is a separate readiness mode
+and is not implied by any interpreted run here.**  The native route
+(`scripts/build-opt.sh`) builds `Compiler/CertIOV1` and **not** `Compiler/CertIO`,
+because the DCERT2 codec reaches `Compiler/CompileDesign`, which does
+`import Mathlib`, and this workspace's mathlib package ships oleans with **no**
+native objects.
+
+The DCERT1 blocker is confirmed by execution rather than inference: the retained
+native driver (`sha256 b7abe8e0…`) refuses both DCERT2 certificates with
+`bad magic: expected DCERT1`.
+
+### 63.9 Readiness passed on CVA6 frontend; the procedures were hardened and the commit claim corrected
+
+**CORRECTION — "committed as scripts" was false when I said it.**  At the
+reviewed checkpoint, `HEAD` was `1d3407f8d` and
+`pass/lean/scripts/{fp_cov_dcert2.sh,tv_cov_sweep.sh}`,
+`formal/lean/scripts/{gen_readiness_v2.lean,dcert2_support.lean}` and the new
+`tests/fp/*` tables were all **untracked**.  They existed on disk; existence is
+not a commit.  They are committed with this checkpoint, and no claim of the form
+"already committed" should have been made before that.
+
+**`tv_cov_sweep.sh` is a RETAINED RECONSTRUCTION, not the thing that ran.**  It
+was written after the live TV sweep had already been launched by hand, and it has
+not itself been invoked.  Its argv, environment and gates are that run's — that
+is what makes it a reconstruction rather than a sketch — but no retained evidence
+was produced by it, and its header now says so.
+
+**Frontend readiness actually passed**, and it is genuine interpreted readiness:
+
+```
+8 cycles of Hw.stepOf at the checked bound: ok,ok,ok,ok,ok,ok,ok,ok
+distinct flop-state vectors 5 of 9    distinct output vectors 8 of 8
+ms: load 378  support 20  specialize 346966  check 1281  execute 70500
+process: wall 460.89 s, user 424.18, sys 11.58, maxrss 6,707,540 KiB = 6.40 GiB, exit 0
+```
+
+The state really does advance — five distinct flop vectors across nine recorded
+states, eight distinct output vectors — which is why the driver counts distinct
+vectors rather than asserting motion.  This is **not** equivalence, **not**
+acceptance, **not** a reference comparison and **not** kernel certification, and
+it is interpreted, so it implies nothing about native linking.  It was not
+repeated.
+
+**Boundary defects found by static review and fixed.**  Each was a way to earn a
+pass by doing nothing:
+
+| defect | behaviour | now |
+|---|---|---|
+| `gen_readiness_v2 cycles=0` | `List.range 0` ran no step, `bad` stayed `false`, exit 0 `READINESS OK` | refused **before** load or generation |
+| malformed fuel/cycles | `getD` silently substituted a different budget than the command line asked for | refused, with the offending token quoted |
+| `fp_cov_dcert2.sh` with no certificate | swept nothing, exited 0 | refused |
+| `tv_cov_sweep.sh` re-using an `OUT` root | `mkdir -p` overwrote a retained attempt's binding, logs and results | atomic `mkdir`, refuses an existing root |
+| wrapper `rc=0` with no GNU-time record | credited as a pass although the measurement was lost | **MISSING → 97**, never a pass |
+| `bash -c` with unquoted `$*` | a path containing a space was split into several argv entries | argv passed as an array through positional parameters |
+| LEAN_PATH check | accepted any string merely *containing* the private root | **every** entry must be under the private closure or the one allowed immutable toolchain |
+
+Verified without re-running any heavy generation: the four Lean guards refuse in
+13–20 s each (Mathlib load only — no certificate is read); the six shell guards
+refuse with the expected codes; the five outcome classes `OK / CAP(124) /
+REFUSED / MISSING(97) / DISAGREE(96)` are distinct on synthetic cells; the array
+form preserves five argv entries including two paths with spaces where the `$*`
+form splits them into seven fragments; and the path check **rejects** a LEAN_PATH
+with the live shared build root spliced in while accepting the real private one.
+
+**Reuse instead of replay.**  `fp_cov_dcert2.sh` now reports a retained
+`exit 0` phase as `REUSED` and does not re-run it, and `--only readiness` goes
+straight to readiness for certificates whose earlier phases already passed.
+Measured: a reused decode phase returns in **1.75 s** and launches no `lean`.
+Redoing a phase deliberately needs `--force`.  A passed hour-long generation is
+never re-run to reach the phase after it.
+
+Both readiness drivers' source identities are kept: the frontend result was
+produced by `dc7ec7d5…` (pre-guard), the issue-stage attempt runs
+`93761c10…` (post-guard).  The guards reject `cycles=0` and malformed
+configuration only; the 8-cycle path is unchanged between them.

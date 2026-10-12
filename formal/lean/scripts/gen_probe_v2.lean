@@ -24,7 +24,8 @@ a defaulted one-clock table.
 
 WHAT IS UNCHANGED FROM `gen_probe.lean`, deliberately, so the two are
 comparable: the measured interval (load + support + specialize + check), `szOf`
-reported AFTER it and never added to generation, the backend
+reported AFTER it and never added to generation (it measures 0 ms even on
+2,213,885 terms, so that exclusion is measurement hygiene, not a cost), the backend
 (`mixDriver sf wf hwAPVarT`), the exit codes, and the output lines.  The one
 added line names the detected format, because a generation result that does not
 say which codec admitted the bytes is not reproducible.

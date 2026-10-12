@@ -6,7 +6,12 @@
 # against the field counts computed independently from the emitted
 # <top>_Lgraph.lean, so the two artifact formats cross-validate.
 #
-# Run: lean --run generated/master_port/fp/dcert2/LoadCheck.lean <certs...>
+# SCOPE: THIS TABLE IS DECODE/ADMISSION ONLY. LoadCheck evaluates NO support
+# predicate -- no supportReport, no conjunct, no projection. The six-field
+# reports live in fp_dcert2_support.tsv, from dcert2_support.lean and from the
+# gen_probe_v2 runs; do not read any row here as evidence of supportedness.
+#
+# Run: lean --run formal/lean/scripts/dcert2_loadcheck.lean <certs...>
 #      wall 89.06 s, user 5.01, sys 7.81, maxrss 6,288,540 KiB, exit 0
 #      (that cost is dominated by loading Mathlib oleans, which the DCERT2 codec
 #       chain pulls in through CompileDesign; it is not a generation latency.)

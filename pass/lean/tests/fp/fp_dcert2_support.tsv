@@ -1,0 +1,16 @@
+# The six SupportedByProjection conjuncts on the DCERT2 certificates, WITH THE
+# CONCRETE OFFENDERS.  Produced by formal/lean/scripts/dcert2_support.lean
+# (wall 23.99 s, user 6.07, sys 9.04, maxrss 6,454,528 KiB = 6.16 GiB, exit 0).
+#
+# SCOPE CORRECTION: dcert2_loadcheck.lean decodes and admits only -- it evaluates
+# NO support predicate, and nothing in its output is a support result. These rows
+# come from supportReport, which gen_probe_v2 and this diagnostic both run.
+#
+# `sources` is false only for memImg/memConst; `ops` is false for any operator
+# outside the seventeen OpSupported admits. They are DIFFERENT gaps and are not
+# folded together: PicoRV32 fails all three of memFree, sources and ops.
+#
+module	wf	memFree	sources	ops	arities	flopClocks	ALL	concrete_blockers
+picorv32	true	false	false	false	true	true	false	memFree: 1 memory (aw 5, dw 32, nextImg 3225, clock 0) | sources: 1 unsupported -- memImg(idx 0, aw 5, dw 32) | ops: 3 nodes -- LGraphOp.Op_MemRead x2, LGraphOp.Op_MemWriteBE 1 x1
+frontend_gate	true	true	true	true	true	true	true	none
+issue_stage_gate	true	true	true	true	true	true	true	none
