@@ -977,13 +977,22 @@ theorem valMemWalk_eq : ∀ (ws : List BV) (d : BV) (x : Int),
       simp only [valMemWalk, if_neg hx, ih]
       exact (cons_index_step a t d hx).symm
 
+/-- An encoded word list passes the representation gate, so the gate costs valid
+images nothing. -/
+theorem valAllBV_encListG : ∀ (ws : List BV), valAllBV (encListG ofBV ws) = true := by
+  intro ws
+  induction ws with
+  | nil => rfl
+  | cons a t ih => simp [valAllBV, encListG, ih]
+
 /-- **The primitive is the reference read.**  For every image, address and
 enable, on valid operands. -/
 theorem valMemRead_eq (w : Nat) (m : MemImg) (a en : BV) :
     valMemRead w (encMemImg m) (ofBV a) (ofBV en)
       = some (cert_mem_read w (denote m) a en) := by
   unfold valMemRead encMemImg cert_mem_read
-  simp only [asBV_ofBV, memImgTag, tagMemImg, if_true, Option.map_some]
+  simp only [asBV_ofBV, memImgTag, tagMemImg, valAllBV_encListG, Bool.and_true,
+             if_true, Option.map_some]
   by_cases hen : bv_nonzero en
   · simp only [hen, if_true]
     rw [valMemWalk_eq m.words m.dflt (bv_uint a)]
@@ -1007,6 +1016,23 @@ not get stuck. -/
 #guard decPrim (encPrim .memRead) == some .memRead
 #guard primCode .memRead == 32
 #guard primCode .bvShl == 31
+/-- **The gate refuses a malformed word chain.**  A chain containing a non-`BV`
+answers `none`, so nothing downstream sees a default silently substituted for a
+word that was never a word. -/
+theorem valMemRead_refuses_badWords (w : Nat) (ws dv a en : Val) (h : valAllBV ws = false) :
+    valMemRead w (.ctor memImgTag [ws, dv]) a en = none := by
+  unfold valMemRead
+  cases ha : asBV a <;> cases he : asBV en <;> simp [h]
+
+/- THE DEFECT THIS GATE FIXES, kept as a control.  Before the gate, this image
+   gave `decMemImg = none` and `evalPrim .memRead = .ok (BV 32 7)` -- the default
+   word standing in for a malformed one.  Now both refuse. -/
+#guard decMemImg (.ctor 124 [.cons (.int 5) .nil, ofBV (mk_bv 32 7)]) == none
+#guard (match evalPrim .memRead
+          [.int 32, .ctor 124 [.cons (.int 5) .nil, ofBV (mk_bv 32 7)],
+           ofBV (mk_bv 5 0), ofBV (mk_bv 1 1)] with
+        | .error _ => true | _ => false)
+
 /- a malformed image is an error, not a wrong answer -/
 #guard (match evalPrim .memRead [.int 32, .nil, ofBV (mk_bv 5 1), ofBV (mk_bv 1 1)] with | .error _ => true | _ => false)
 /- a wrong tag is an error -/
@@ -1251,6 +1277,8 @@ end StateM
 
 section Audit
 #print axioms Projection.MemImg.memGet_sound
+#print axioms Projection.MemImg.valAllBV_encListG
+#print axioms Projection.MemImg.valMemRead_refuses_badWords
 #print axioms Projection.MemImg.valMemWalk_eq
 #print axioms Projection.MemImg.valMemRead_eq
 #print axioms Projection.MemImg.evalPrim_memRead

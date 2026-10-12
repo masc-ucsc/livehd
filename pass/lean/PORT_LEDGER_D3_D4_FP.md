@@ -7630,3 +7630,60 @@ Built in an independently owned context (`generated/memprim`, the repo's own
 **What this does not do:** `I_hw` does not yet call the primitive, there is no
 `Op_MemRead`/`Op_MemWriteBE` wiring, no memory-bearing result relation and no
 clock-controlled commit.  `memFree` is untouched.  PicoRV32 stays **BLOCKED**.
+
+### 63.24 A real malformed-image defect, fixed; and the mix-run claim attributed properly
+
+**The defect, reproduced before it was fixed.**  An image with the right tag but a
+non-`BV` word:
+
+```
+decMemImg (ctor 124 [cons (int 5) nil, ofBV 7])  =  none
+evalPrim .memRead [32, <that image>, 0, enabled] =  .ok (BV 32 7)      -- BEFORE
+```
+
+`valMemWalk` reads `(asBV a).getD d`, so a malformed word was **silently read as
+the default**: an image the decoder rejects still answered `.ok` with a
+plausible word.  My "a malformed image is an error" claim was **false** for this
+case — the checks I wrote covered a wrong tag, a wrong field count and a non-`BV`
+address, and missed a non-`BV` **word**.
+
+**Fixed by implementing the gate, not by softening the claim.**  `valAllBV`
+requires every element of the chain to be a `BV` and the chain to be
+nil-terminated, and `valMemRead` now demands it:
+
+* `valMemRead_refuses_badWords` — **proved** for all `w`, `ws`, `dv`, `a`, `en`:
+  a chain containing a non-`BV` gives `none` (`propext` only);
+* `valAllBV_encListG` — encoded lists pass the gate, so valid images cost nothing
+  and `valMemRead_eq` is unchanged (`propext` only);
+* measured after:
+
+```
+decMemImg <that image>  =  none
+evalPrim .memRead [...]  =  .error "memRead: malformed image or operand"   -- AFTER
+evalPrim .memRead [ROM, 1, enabled] = .ok (BV 32 22)                       -- still right
+```
+
+The reproduced image is retained as a control in the module, so the gate cannot
+regress silently.
+
+**Scope correction on the mix claim.**  I wrote that both mix paths were
+"validated against the actual `PartialEvaluator` code".  `MemPrimChecks.lean`
+calls `evalPrim`, `primStruct` and `fragB` **directly**; it does **not** run
+`mixTerm`, `mixDriver` or the object-level mix.  What it establishes is that the
+components `mixTerm`'s `.prim` case dispatches to behave as required.  The file
+header now says so.
+
+The actual mix evidence is the **independent audit's**, not mine, and is recorded
+as such: host `mixDriver` and object-language `mixProgram` run on static and
+dynamic `memRead` programs, the generated programs agreeing; ROM output 22,
+above-contents and disabled outputs 0; one arity-3 dynamic residual **accepted by
+`checkResidual` at bound 3 and executed at bound 3**; exit 0, 27.85 s, 511,924
+KiB; and the 22→23 mutation failing the guard with exit 1.  That last item is the
+one that matters for integration: a residualised `memRead` node is inside the
+checker's fragment, which the six-function helper program never was.
+
+Chain rebuilt in the independently owned context: 0 errors, 39 oleans, probe
+linked; `MemImage.lean` 22.93 s, 752,148 KiB, exit 0; `MemPrimChecks.lean` clean.
+
+Not done: the byte-enabled **write** primitive, and `I_hw` still does not call
+anything here.  `memFree` untouched.  PicoRV32 stays **BLOCKED**.

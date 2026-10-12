@@ -2,6 +2,13 @@
 Both mix paths for the new memory primitive, checked against the ACTUAL
 PartialEvaluator code rather than inferred from it.
 
+SCOPE, stated because the file name invites a stronger reading: these checks call
+`evalPrim`, `primStruct` and `fragB` DIRECTLY.  They do NOT run `mixTerm`,
+`mixDriver` or the object-level mix.  What they establish is that the components
+`mixTerm`'s `.prim` case dispatches to behave as required; an actual mix
+generation/execution run is separate evidence and is recorded in the ledger with
+its own provenance, not produced here.
+
 `mixTerm`'s `.prim` case does two different things:
   * `.stat` -> `allStatic` then `evalPrim p vs`, so a fully static application is
     FOLDED by the evaluator;

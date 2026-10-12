@@ -87,12 +87,27 @@ def valMemWalk : Val → BV → Int → BV
   | .cons a rest, d, x => if x = 0 then (asBV a).getD d else valMemWalk rest d (x - 1)
   | _,            d, _ => d
 
+/-- **The representation gate.**  Every element of an encoded word chain must be
+a `BV`, and the chain must be nil-terminated.
+
+This is not decoration.  `valMemWalk` uses `(asBV a).getD d`, so WITHOUT this
+check a non-`BV` word is silently read as the DEFAULT -- an image that
+`decMemImg` rejects would still answer `.ok` with a plausible-looking word.
+Measured before the gate existed: `ctor 124 [cons (int 5) nil, ofBV 7]` gave
+`decMemImg = none` and `evalPrim .memRead = .ok (BV 32 7)`.  Erasing a malformed
+word into a valid-looking memory is exactly what must not happen. -/
+def valAllBV : Val → Bool
+  | .nil         => true
+  | .cons a rest => (asBV a).isSome && valAllBV rest
+  | _            => false
+
 /-- The read, on an encoded image.  `none` is a genuine malformed-operand
-answer: a wrong tag, a wrong field count, or a non-`BV` where one is required. -/
+answer: a wrong tag, a wrong field count, a non-`BV` where one is required, or a
+word chain that is not entirely `BV`s. -/
 def valMemRead (w : Nat) (img a en : Val) : Option BV :=
   match img, asBV a, asBV en with
   | .ctor t [ws, dv], some av, some env =>
-      if t = memImgTag then
+      if t = memImgTag && valAllBV ws then
         (asBV dv).map (fun d =>
           if bv_nonzero env then bv_resize w (valMemWalk ws d (bv_uint av)) else mk_bv w 0)
       else none
