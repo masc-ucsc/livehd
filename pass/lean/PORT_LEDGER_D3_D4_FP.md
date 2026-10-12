@@ -6239,3 +6239,62 @@ byte-identical to the original `9bb41a09d`
 `memImg`/`memConst` and requires empty memories. That memory is preserved and
 the restriction is not removed; the memory-interpreter adequacy obligation stays
 open.
+
+## 60. Approach-major sweep: LEGACY across all twelve rows (PROVISIONAL)
+
+The queue is now **approach-major**: Legacy → verified compiler → IR-as-semantics
+→ translation validation → Futamura, one approach across all twelve rows before
+the next. Completed phases are credited, never rerun to repair a table label.
+
+### 60.1 Legacy, 11 of 12 rows closed
+
+| row | unit | legacy | reason |
+|---|---|---|---|
+| PicoRV32 whole core | `picorv32` | **YES** | emission 0.32 s, check 87.87 s, olean 70,343,304 B |
+| CVA6 frontend | `frontend_gate` | **NO** | emission 1.64 s OK; **check exit 1**, 1711.92 s, 14,527,196 KiB (13.85 GiB): *frontend_gate_state.mk has too many fields (409)*, then `dependsOnNoncomputable` |
+| CVA6 issue/scoreboard | `issue_stage_gate` | **NO** | emission 1.25 s OK; **check exit 1**, 1690.92 s, 19,488,268 KiB (18.59 GiB), same class |
+| CORE-ET DCache | `minion_dcache_top` | **NO** | s1 exit 1, 6.91 s: *Concat lane 0 (of 2, MSB-first) driver `mux_94508` occupies 2 bits but its declared window is 1* |
+| CORE-ET I-cache | `icache_top` | **NO** | s1 exit 1, 0.20 s: slang *multiple imports found for identifier `PaSize`* at `icache_pkg.sv:21:50` |
+| CORE-ET TLB | `minion_tlb` | **NO** | s1 **passed**; `single_edge` exit 7: memory `memory_1660:u_tlb_cache_rf.rf_q` *would commit on every sub-step* |
+| CORE-ET IntPipe | `intpipe_top` | **NO** | s1 exit 6, 4.19 s: *combinational loop*: sra → sext → get_mask → sra → … |
+| CORE-ET VPU | `vpu_top` | **NO** | s1 exit 6, 50.74 s: *combinational loop*: mux → mux → sext → sext → sext → mux |
+| CORE-ET ET-Link→AXI | -- | **BLOCKED** | `hw/ip/etlink/rtl` holds only `etlink_pkg.sv` and there is no `dv/rtlcosim` entry, so no whole unit is bindable in this checkout |
+| CVA6 LSU | `load_store_unit` | **BLOCKED** | no gate wrapper; `load_unit`/`store_unit`/`store_buffer` exist separately and a per-component substitute is **not** accepted |
+| CVA6 MMU/TLB/PTW | -- | **BLOCKED** | only `cva6_ptw` has a wrapper; the MMU and TLB components of the named group do not |
+| CVA6 HPDcache | `cva6_hpdcache_subsystem_gate` | PENDING | wrapper exists, route bound, not yet attempted |
+
+The two CVA6 **NO**s are the same capability blocker and deserve naming: the
+emitted legacy state record has **409 fields**, which the current toolchain's
+compiler IR check rejects, and `dependsOnNoncomputable` follows. That is a
+**failed executable generation check, not a timeout and not an OOM** -- both ran
+to completion in ~1700 s. Nothing was nested, no field was dropped, nothing was
+marked `noncomputable`, no check was disabled, no backend was substituted and no
+toolchain was upgraded to turn it into a YES. The successful emissions are
+retained as phases.
+
+Five of the CORE-ET refusals are *different* from each other -- a concat lane
+width, a duplicate package import, a single-edge memory commit, and two
+combinational loops -- so they are five separate findings, not one.
+
+### 60.2 Verified compiler already holds three, credited not rerun
+
+`CVA6 frontend` check exit 0, 80.46 s, 7,765,208 KiB; `CVA6 issue/scoreboard`
+exit 0, 91.75 s, 7,838,540 KiB; `PicoRV32` exit 0, 39.73 s. All three are
+credited where they stand.
+
+### 60.3 Queue defects fixed before relaunching
+
+`fp_cov_queue.sh` is **retired** (it stubs out with exit 2) because it wrote
+phases into fixed per-row directories and gated on `-d lg` after `|| true`. The
+CORE-ET queue reproduced one more of my own bugs worth recording: it passed the
+`.f` filelist as the positional source, so slang parsed the filelist as
+SystemVerilog (*expected member*, *expected a declaration name*). The positional
+is now an anchor `.sv` with the real sources arriving through
+`yosys.filelist_file`, and the filelist's `+incdir+` is forwarded to slang.
+
+### 60.4 Still open at their scheduled sweeps
+
+IR-as-semantics executable readiness, translation-validation private-build
+admission from the clean detached checkout, and Futamura's fresh DCERT2 loader
+plus the inherited memory adequacy obligation all remain, each at its own sweep,
+with no predicate weakened.

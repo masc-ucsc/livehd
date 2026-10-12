@@ -64,8 +64,13 @@
      }
     },
     "Legacy": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "NO",
+     "evidence": {
+      "row_id": "B01",
+      "top": "minion_dcache_top",
+      "reason": "s1 compile refused, exit 1, 6.91 s: \"Concat lane 0 (of 2, MSB-first) driver 'mux_94508' occupies 2 bits but its declared window is 1 -- a lane driver...\"",
+      "route": "coreet_filelist.sh whole unit -> lhd compile verilog (anchor + yosys.filelist_file) -> pass single_edge -> legacy emit"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -152,7 +157,12 @@
     },
     "Legacy": {
      "status": "PENDING",
-     "evidence": null,
+     "evidence": {
+      "row_id": "B02",
+      "top": "cva6_hpdcache_subsystem_gate",
+      "reason": "wrapper exists and the route is bound; not yet attempted",
+      "route": "gate wrapper + whole-core filelist"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -238,8 +248,13 @@
      }
     },
     "Legacy": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "NO",
+     "evidence": {
+      "row_id": "B03",
+      "top": "icache_top",
+      "reason": "s1 compile refused, exit 1, 0.20 s: slang -- icache_pkg.sv:21:50 error: multiple imports found for identifier 'PaSize'",
+      "route": "coreet_filelist.sh whole unit -> lhd compile verilog (anchor + yosys.filelist_file) -> pass single_edge -> legacy emit"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -325,8 +340,13 @@
      }
     },
     "Legacy": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "row_id": "B04",
+      "top": "(partial)",
+      "reason": "only cva6_ptw has a gate wrapper; the MMU and TLB components of the named group do not, so the WHOLE unit cannot be bound without generating them",
+      "route": "gate wrapper + whole-core filelist"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -412,8 +432,13 @@
      }
     },
     "Legacy": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "row_id": "B05",
+      "top": "(none)",
+      "reason": "no synthesizable unit: hw/ip/etlink/rtl holds only etlink_pkg.sv and there is no dv/rtlcosim entry, so no whole unit can be bound in this checkout",
+      "route": "coreet_filelist.sh whole unit -> lhd compile verilog (anchor + yosys.filelist_file) -> pass single_edge -> legacy emit"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -499,8 +524,13 @@
      }
     },
     "Legacy": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "row_id": "B06",
+      "top": "load_store_unit",
+      "reason": "no gate wrapper: cva6_wrappers has load_unit/store_unit/store_buffer individually but no load_store_unit; the grouped unit needs its own AST-derived wrapper (scripts/gen_cva6_wrappers.py). A per-component substitute is NOT accepted.",
+      "route": "gate wrapper + whole-core filelist"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -586,8 +616,13 @@
      }
     },
     "Legacy": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "NO",
+     "evidence": {
+      "row_id": "B07",
+      "top": "vpu_top",
+      "reason": "s1 compile refused, exit 6, 50.74 s: combinational loop in 'vpu_top': mux -> mux -> sext -> sext -> sext -> mux",
+      "route": "coreet_filelist.sh whole unit -> lhd compile verilog (anchor + yosys.filelist_file) -> pass single_edge -> legacy emit"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -673,8 +708,13 @@
      }
     },
     "Legacy": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "NO",
+     "evidence": {
+      "row_id": "B08",
+      "top": "intpipe_top",
+      "reason": "s1 compile refused, exit 6, 4.19 s: combinational loop in 'intpipe_top': sra -> sext -> get_mask -> sra -> ...",
+      "route": "coreet_filelist.sh whole unit -> lhd compile verilog (anchor + yosys.filelist_file) -> pass single_edge -> legacy emit"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -740,10 +780,11 @@
      }
     },
     "Verified compiler": {
-     "status": "RUNNING",
+     "status": "YES",
      "evidence": {
-      "phase": "emission COMPLETE, generation check (elaboration) RUNNING",
-      "cell_dir": "generated/master_port/cov12x5/B09_cva6_issue_scoreboard"
+      "emission": "0.77 s, issue_stage_gate_Lgraph.lean 1,252,028 B (4afcfb50) + issue_stage_gate.dcert 530,496 B",
+      "generation_check": "PASSED: exit 0, wall 91.75 s, user 63.20 s, sys 9.31 s, RSS 7,838,540 KiB (7.47 GiB), 172 cgroup samples",
+      "scope": "usable approach-native generation with its required check; NOT RTL equivalence or kernel certification"
      },
      "generation_ms": null,
      "metrics": {
@@ -805,10 +846,13 @@
      }
     },
     "Legacy": {
-     "status": "RUNNING",
+     "status": "NO",
      "evidence": {
-      "phase": "emission COMPLETE, generation check (elaboration) RUNNING",
-      "cell_dir": "generated/master_port/cov12x5/B09_cva6_issue_scoreboard"
+      "emission": "SUCCEEDED, 1.25 s, issue_stage_gate_Lgraph.lean 6,393,936 B (fc33a941) -- retained as a phase",
+      "generation_check": "FAILED: exit 1, wall 1690.92 s, user 1999.69 s, sys 106.73 s, RSS 19,488,268 KiB (18.59 GiB), 3204 cgroup samples",
+      "reason": "same class as CVA6 frontend: the compiler IR check fails on the generated state record under the current toolchain",
+      "classification": "FAILED EXECUTABLE GENERATION CHECK, not a timeout and not an OOM",
+      "not_done": "no nesting, field reduction, noncomputable marking, check disabling, backend substitution or toolchain upgrade"
      },
      "generation_ms": null,
      "metrics": {
@@ -941,10 +985,11 @@
      }
     },
     "Verified compiler": {
-     "status": "RUNNING",
+     "status": "YES",
      "evidence": {
-      "phase": "emission COMPLETE, generation check (elaboration) RUNNING",
-      "cell_dir": "generated/master_port/cov12x5/B10_cva6_frontend"
+      "emission": "1.46 s, frontend_gate_Lgraph.lean 969,162 B (cb73b273) + frontend_gate.dcert 274,052 B",
+      "generation_check": "PASSED: exit 0, wall 80.46 s, user 59.40 s, sys 9.65 s, RSS 7,765,208 KiB (7.40 GiB), 154 cgroup samples",
+      "scope": "usable approach-native generation with its required check; NOT RTL equivalence or kernel certification"
      },
      "generation_ms": null,
      "metrics": {
@@ -1006,10 +1051,13 @@
      }
     },
     "Legacy": {
-     "status": "RUNNING",
+     "status": "NO",
      "evidence": {
-      "phase": "emission COMPLETE, generation check (elaboration) RUNNING",
-      "cell_dir": "generated/master_port/cov12x5/B10_cva6_frontend"
+      "emission": "SUCCEEDED, 1.64 s, frontend_gate_Lgraph.lean 5,422,167 B (cc5cb1b7) -- retained as a phase",
+      "generation_check": "FAILED: exit 1, wall 1711.92 s, user 2015.62 s, sys 95.72 s, RSS 14,527,196 KiB (13.85 GiB)",
+      "reason": "compiler IR check failed: frontend_gate_state.mk has too many fields (409), followed by dependsOnNoncomputable errors",
+      "classification": "a FAILED EXECUTABLE GENERATION CHECK under the current toolchain -- not a timeout and not an OOM",
+      "not_done": "no nesting, no field reduction, no noncomputable marking, no compiler-check disabling, no backend substitution and no toolchain upgrade were used to obtain a YES"
      },
      "generation_ms": null,
      "metrics": {
@@ -1162,8 +1210,13 @@
      }
     },
     "Legacy": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "NO",
+     "evidence": {
+      "row_id": "B11",
+      "top": "minion_tlb",
+      "reason": "s1 compile PASSED (exit 0, 0.27 s); pass.single_edge refused, exit 7: memory 'memory_1660:u_tlb_cache_rf.rf_q' would commit on every sub-step under a p...",
+      "route": "coreet_filelist.sh whole unit -> lhd compile verilog (anchor + yosys.filelist_file) -> pass single_edge -> legacy emit"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -1678,7 +1731,7 @@
  "optimization_schedule": "after coverage table runs",
  "environment_record": "pass/lean/tests/MASTER_SIM_GENERATION_ENVIRONMENT.json",
  "observed_environment_sha256": "ad186ee1424e15afa052bfa000fa50843bd954354d0f10e49256e711632edd8a",
- "provisional": "INCOMPLETE/PROVISIONAL. 60 cells: 3 YES (PicoRV32, check-backed), 4 RUNNING (CVA6 frontend and issue/scoreboard; one check has passed and is NOT yet credited as YES pending the row policy), 2 BLOCKED, 51 PENDING.",
+ "provisional": "INCOMPLETE/PROVISIONAL, APPROACH-MAJOR. Legacy sweep closed on 11 of 12 rows: 1 YES (PicoRV32), 7 NO with exact refusals, 3 BLOCKED on bindable prerequisites, 1 PENDING (CVA6 HPDcache). Verified compiler already holds 3 YES from work completed earlier and is credited, not rerun.",
  "environment_binding": {
   "bazel_wrapper": "/soe/czeng14/.local/bin/bazel (Bazelisk), sha256 prefix 5a408715e932c025",
   "version_selector": ".bazelversion in the cwd-resolved workspace",
@@ -1694,5 +1747,13 @@
   "cva6_source_pin": "/mada/users/czeng14/projects/cva6-blockfinding @ 6cb200105fb9441d170e45786125a737fab98e91; its only status entry is UNTRACKED cva6_blocks.txt, not a tracked RTL edit",
   "cva6_clean_attempt": "/mada/users/czeng14/projects/cva6-clean/cva6 @ bc510437 was used for the raw-top attempts only; kept separate",
   "max_width": "1048576, as scripts/run_cva6_module_lean_stress.sh:175 sets; the DEFAULT 1024 refusal is preserved and recorded, not removed"
- }
+ },
+ "approach_order": [
+  "Legacy",
+  "Verified compiler",
+  "IR-as-semantics",
+  "Translation validation",
+  "Futamura projection"
+ ],
+ "sweep_policy": "APPROACH-MAJOR: complete one approach across all twelve rows before starting the next, in the order above. Completed phases are credited, never rerun to repair a table label."
 }
