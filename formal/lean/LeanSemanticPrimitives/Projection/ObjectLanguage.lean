@@ -181,12 +181,15 @@ inductive Prim where
   -- first-order, so nothing here reaches outside the encoding for a base image.
   -- Appended at the end so no existing primitive is renumbered.
   | memRead
+  -- `memWriteBE w img a d bev bw` -> the updated ENCODED image.
+  | memWriteBE
   deriving DecidableEq, Inhabited, Repr
 
 /-- Arity of a primitive.  `evalPrim` rejects any other operand count, so this is
 the single source of truth for primitive shape. -/
 def Prim.arity : Prim → Nat
   | .memRead                              => 4
+  | .memWriteBE                           => 6
   | .addI | .subI | .mulI | .divI | .modI => 2
   | .ltI  | .leI  | .eqI                  => 2
   | .andB | .orB                          => 2

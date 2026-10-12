@@ -7687,3 +7687,52 @@ linked; `MemImage.lean` 22.93 s, 752,148 KiB, exit 0; `MemPrimChecks.lean` clean
 
 Not done: the byte-enabled **write** primitive, and `I_hw` still does not call
 anything here.  `memFree` untouched.  PicoRV32 stays **BLOCKED**.
+
+### 63.25 The byte-enabled WRITE primitive, with refusal inside the primitive
+
+`Prim.memWriteBE` is implemented across the same six sites, **code 33, arity 6**,
+with nothing renumbered (`memRead` 32, `bvShl` 31): the constructor and arity;
+`valLen`, `valInRange`, `valMemSet`, `valMemWriteBE` and the `evalPrim` case;
+`primCode`/`primOfCode`; the `primTable` mirror with new `pE`/`pF` accessors; and
+the alternative in both `PartialEvaluatorCorrect` proof splits.
+
+**The admission condition now lives inside the primitive**, which is the gap that
+mattered.  `writeChecked` was a host helper nothing in the route called; the
+primitive is evaluated by the backend itself:
+
+* a **disabled** write is a no-op and is admitted;
+* an **enabled** write is admitted only in range and answers **`none`** otherwise;
+* the masked word is computed against the **current** contents at that address;
+* the strict representation gate applies — a chain that is not entirely `BV`s is
+  refused.
+
+Proved, with `propext`(/`Quot.sound`) only and no `sorryAx` or
+`Lean.ofReduceBool`:
+
+| theorem | content |
+|---|---|
+| `valLen_encListG`, `valInRange_iff` | the encoded range check **is** `InRange` |
+| `valMemSet_encListG` | the encoded update **is** the list update (via `cons_set_step`) |
+| `valMemWriteBE_eq` | **the primitive is `cert_mem_write_be`** on an admitted operand |
+| `valMemWriteBE_disabled` | a disabled write leaves the encoded image alone |
+| `valMemWriteBE_refuses_outOfRange` | an enabled out-of-range write gives `none` — a **proved refusal**, not a false premise |
+| `evalPrim_memWriteBE` | the evaluator case inherits all three |
+
+**Discriminating controls, all through primitives:** full-width write then read
+back; a **partial** byte mask giving `0x000000FF`; a neighbour untouched; a
+disabled write leaving the encoded image identical; an enabled **out-of-range**
+write (8-bit address 255 against a 32-word table) **refused by the primitive**;
+and a ROM's initial contents surviving a write to a different word.  Plus arity,
+code and round-trip checks with `memRead` still 32.
+
+The refusal control bites: flipping it to expect `.ok` fails the build.
+
+Chain rebuilt in the independently owned context: 0 errors, 39 oleans, probe
+linked; `MemImage.lean` 8.83 s, 787,872 KiB, exit 0; `MemPrimChecks.lean` clean.
+
+**Not done, and this is the remaining substance:** `I_hw` still does not call
+either primitive.  No `memImg`/`memConst` source cases, no
+`Op_MemRead`/`Op_MemWriteBE` operator cases, no memory-bearing result codec or
+`RuntimeResult` relation, no clock-controlled commit and no inactive-clock case.
+`memFree` is untouched and PicoRV32 stays **BLOCKED**.  Both primitives being
+inside `fragB`'s fragment (§63.23) is what makes that integration reachable.

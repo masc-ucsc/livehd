@@ -142,6 +142,8 @@ private def pA : SExp := hd_ (R "vs")
 private def pB : SExp := hd_ (tl_ (R "vs"))
 private def pC : SExp := hd_ (tl_ (tl_ (R "vs")))
 private def pD : SExp := hd_ (tl_ (tl_ (tl_ (R "vs"))))
+private def pE : SExp := hd_ (tl_ (tl_ (tl_ (tl_ (R "vs")))))
+private def pF : SExp := hd_ (tl_ (tl_ (tl_ (tl_ (tl_ (R "vs"))))))
 
 private def primTable : List (Int × SExp) :=
   [ (0,  .prim .addI [pA, pB]), (1,  .prim .subI [pA, pB])
@@ -166,7 +168,8 @@ private def primTable : List (Int × SExp) :=
   -- primitive has no term to fold to and the specializer answers typeError;
   -- a DYNAMIC application still residualises generically.  Both paths are
   -- validated in MemImage.lean rather than assumed.
-  , (32, .prim .memRead [pA, pB, pC, pD]) ]
+  , (32, .prim .memRead [pA, pB, pC, pD])
+  , (33, .prim .memWriteBE [pA, pB, pC, pD, pE, pF]) ]
 
 /-- An unrecognised code falls through to `hd nil`, a `typeError`. -/
 private def evalPrimBody : SExp :=

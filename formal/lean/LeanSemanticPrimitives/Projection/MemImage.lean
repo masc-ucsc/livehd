@@ -1005,6 +1005,82 @@ theorem evalPrim_memRead (w : Nat) (m : MemImg) (a en : BV) :
       = .ok (ofBV (cert_mem_read w (denote m) a en)) := by
   simp [evalPrim, widthOf, valMemRead_eq w m a en]
 
+/-! ### The WRITE primitive's reference bridge -/
+
+theorem valLen_encListG : ∀ (ws : List BV), valLen (encListG ofBV ws) = ws.length := by
+  intro ws; induction ws with
+  | nil => rfl
+  | cons a t ih => simp [valLen, encListG, ih]
+
+theorem valInRange_iff (m : MemImg) (x : Int) :
+    valInRange (encListG ofBV m.words) x = true ↔ InRange m x := by
+  unfold valInRange InRange
+  simp [valLen_encListG]
+
+/-- The encoded update is the list update, for every address. -/
+theorem valMemSet_encListG : ∀ (ws : List BV) (x : Int) (v : BV),
+    valMemSet (encListG ofBV ws) x v
+      = encListG ofBV (if 0 ≤ x then (ws.set x.toNat v) else ws) := by
+  intro ws
+  induction ws with
+  | nil => intro x v; simp [valMemSet, encListG]
+  | cons a t ih =>
+    intro x v
+    have hL : encListG ofBV (a :: t) = .cons (ofBV a) (encListG ofBV t) := rfl
+    by_cases hx : x = 0
+    · subst hx; simp [valMemSet, hL, encListG]
+    · rw [hL]
+      simp only [valMemSet, if_neg hx, ih]
+      rw [cons_set_step a t v hx]
+      rfl
+
+/-- **The write primitive is the reference byte-enabled write**, on an admitted
+operand: enabled, in range, well-formed. -/
+theorem valMemWriteBE_eq (w : Nat) (m : MemImg) (a d bev : BV) (bw : Nat)
+    (hen : bv_nonzero bev) (hr : InRange m (bv_uint a)) :
+    valMemWriteBE w (encMemImg m) (ofBV a) (ofBV d) (ofBV bev) bw
+      = some (encMemImg (writeBE w m a d bev bw)) := by
+  have hrange : valInRange (encListG ofBV m.words) (bv_uint a) = true :=
+    (valInRange_iff m (bv_uint a)).mpr hr
+  have hwalk : valMemWalk (encListG ofBV m.words) m.dflt (bv_uint a) = get m (bv_uint a) := by
+    rw [valMemWalk_eq m.words m.dflt (bv_uint a)]; rfl
+  unfold valMemWriteBE encMemImg
+  simp only [asBV_ofBV, memImgTag, tagMemImg, valAllBV_encListG, Bool.and_true, if_true,
+             hen, hrange, hwalk]
+  unfold writeBE setAt
+  obtain ⟨h0, hl⟩ := hr
+  rw [valMemSet_encListG m.words (bv_uint a) _, if_pos h0]
+  simp [hen, h0, hl]
+
+/-- A DISABLED write is admitted and leaves the encoded image alone. -/
+theorem valMemWriteBE_disabled (w : Nat) (m : MemImg) (a d bev : BV) (bw : Nat)
+    (hen : ¬ bv_nonzero bev) :
+    valMemWriteBE w (encMemImg m) (ofBV a) (ofBV d) (ofBV bev) bw
+      = some (encMemImg m) := by
+  unfold valMemWriteBE encMemImg
+  simp [asBV_ofBV, memImgTag, tagMemImg, valAllBV_encListG, hen]
+
+/-- **An enabled write outside the table is REFUSED**, by the primitive itself --
+not dropped, and not silently applied to a table that has no such address. -/
+theorem valMemWriteBE_refuses_outOfRange (w : Nat) (m : MemImg) (a d bev : BV) (bw : Nat)
+    (hen : bv_nonzero bev) (hr : ¬ InRange m (bv_uint a)) :
+    valMemWriteBE w (encMemImg m) (ofBV a) (ofBV d) (ofBV bev) bw = none := by
+  have hrange : valInRange (encListG ofBV m.words) (bv_uint a) = false := by
+    have := (valInRange_iff m (bv_uint a))
+    cases h : valInRange (encListG ofBV m.words) (bv_uint a)
+    · rfl
+    · exact absurd (this.mp h) hr
+  unfold valMemWriteBE encMemImg
+  simp [asBV_ofBV, memImgTag, tagMemImg, valAllBV_encListG, hen, hrange]
+
+/-- …and the evaluator case inherits all three. -/
+theorem evalPrim_memWriteBE (w : Nat) (m : MemImg) (a d bev : BV) (bw : Nat)
+    (hen : bv_nonzero bev) (hr : InRange m (bv_uint a)) :
+    evalPrim .memWriteBE
+      [.int (Int.ofNat w), encMemImg m, ofBV a, ofBV d, ofBV bev, .int (Int.ofNat bw)]
+      = .ok (encMemImg (writeBE w m a d bev bw)) := by
+  simp [evalPrim, widthOf, valMemWriteBE_eq w m a d bev bw hen hr]
+
 /-! ### Arity, encoding and malformed-operand behaviour
 
 Totality matters as much as the happy path: the evaluator must ANSWER on junk,
@@ -1044,6 +1120,57 @@ theorem valMemRead_refuses_badWords (w : Nat) (ws dv a en : Val) (h : valAllBV w
 /- a non-BV address is an error -/
 #guard (evalPrim .memRead
           [.int 32, encMemImg (zeroImg 5 32), .nil, ofBV (mk_bv 1 1)]).isOk == false
+
+/-! ### Discriminating runs of the WRITE primitive -/
+
+/- a full-width write, then a read of the SAME word, both through primitives -/
+#guard (match evalPrim .memWriteBE
+          [.int 32, encMemImg (zeroImg 5 32), ofBV (mk_bv 5 7), ofBV (mk_bv 32 0xDEADBEEF),
+           ofBV (mk_bv 4 0xF), .int 8] with
+        | .ok img => (match evalPrim .memRead
+                        [.int 32, img, ofBV (mk_bv 5 7), ofBV (mk_bv 1 1)] with
+                      | .ok v => v == ofBV (mk_bv 32 0xDEADBEEF) | _ => false)
+        | _ => false)
+/- a PARTIAL byte mask: byte 0 only, so 0x000000FF -/
+#guard (match evalPrim .memWriteBE
+          [.int 32, encMemImg (zeroImg 5 32), ofBV (mk_bv 5 7), ofBV (mk_bv 32 0xFFFFFFFF),
+           ofBV (mk_bv 4 1), .int 8] with
+        | .ok img => (match evalPrim .memRead
+                        [.int 32, img, ofBV (mk_bv 5 7), ofBV (mk_bv 1 1)] with
+                      | .ok v => v == ofBV (mk_bv 32 0x000000FF) | _ => false)
+        | _ => false)
+/- a NEIGHBOUR is untouched -/
+#guard (match evalPrim .memWriteBE
+          [.int 32, encMemImg (zeroImg 5 32), ofBV (mk_bv 5 7), ofBV (mk_bv 32 0xDEADBEEF),
+           ofBV (mk_bv 4 0xF), .int 8] with
+        | .ok img => (match evalPrim .memRead
+                        [.int 32, img, ofBV (mk_bv 5 8), ofBV (mk_bv 1 1)] with
+                      | .ok v => v == ofBV (mk_bv 32 0) | _ => false)
+        | _ => false)
+/- a DISABLED write leaves the encoded image identical -/
+#guard (match evalPrim .memWriteBE
+          [.int 32, encMemImg (zeroImg 5 32), ofBV (mk_bv 5 7), ofBV (mk_bv 32 0xDEADBEEF),
+           ofBV (mk_bv 4 0), .int 8] with
+        | .ok img => img == encMemImg (zeroImg 5 32) | _ => false)
+/- an ENABLED OUT-OF-RANGE write is REFUSED BY THE PRIMITIVE -- the wide 8-bit
+   address 255 against a 32-word table -/
+#guard (match evalPrim .memWriteBE
+          [.int 32, encMemImg (zeroImg 5 32), ofBV (mk_bv 8 255), ofBV (mk_bv 32 0xDEADBEEF),
+           ofBV (mk_bv 4 0xF), .int 8] with
+        | .error _ => true | _ => false)
+/- a ROM's initial contents survive a write to a different word -/
+#guard (match evalPrim .memWriteBE
+          [.int 32, encMemImg (ofMemConst 32 #[11, 22, 33]), ofBV (mk_bv 5 0),
+           ofBV (mk_bv 32 99), ofBV (mk_bv 4 0xF), .int 8] with
+        | .ok img => (match evalPrim .memRead
+                        [.int 32, img, ofBV (mk_bv 5 2), ofBV (mk_bv 1 1)] with
+                      | .ok v => v == ofBV (mk_bv 32 33) | _ => false)
+        | _ => false)
+/- arity and code, with nothing renumbered -/
+#guard Prim.arity .memWriteBE == 6
+#guard primCode .memWriteBE == 33
+#guard primCode .memRead == 32
+#guard decPrim (encPrim .memWriteBE) == some .memWriteBE
 
 /-! ### Discriminating runs of the PRIMITIVE on encoded data -/
 
@@ -1277,6 +1404,11 @@ end StateM
 
 section Audit
 #print axioms Projection.MemImg.memGet_sound
+#print axioms Projection.MemImg.valMemWriteBE_eq
+#print axioms Projection.MemImg.valMemWriteBE_disabled
+#print axioms Projection.MemImg.valMemWriteBE_refuses_outOfRange
+#print axioms Projection.MemImg.evalPrim_memWriteBE
+#print axioms Projection.MemImg.valMemSet_encListG
 #print axioms Projection.MemImg.valAllBV_encListG
 #print axioms Projection.MemImg.valMemRead_refuses_badWords
 #print axioms Projection.MemImg.valMemWalk_eq

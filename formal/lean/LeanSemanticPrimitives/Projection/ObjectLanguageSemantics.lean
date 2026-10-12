@@ -113,6 +113,51 @@ def valMemRead (w : Nat) (img a en : Val) : Option BV :=
       else none
   | _, _, _ => none
 
+/-- Length of an encoded word chain. -/
+def valLen : Val → Nat
+  | .cons _ rest => valLen rest + 1
+  | _            => 0
+
+/-- The address is one the chain actually holds.  This is the ADMISSION
+condition for an enabled write: the reference memory is total over the integers,
+a finite table is not, and an out-of-range enabled write is refused rather than
+dropped. -/
+def valInRange (ws : Val) (x : Int) : Bool :=
+  decide (0 ≤ x) && decide (x.toNat < valLen ws)
+
+/-- Replace one word of an encoded chain.  Out of range the chain is returned
+unchanged; the caller refuses that case for an enabled write. -/
+def valMemSet : Val → Int → BV → Val
+  | .cons a rest, x, v => if x = 0 then .cons (ofBV v) rest else .cons a (valMemSet rest (x - 1) v)
+  | other,        _, _ => other
+
+/-- The byte-enabled write, on an encoded image.
+
+  * a DISABLED write is a no-op and is admitted;
+  * an ENABLED write is admitted only when the address is in range, and answers
+    `none` otherwise -- it is not silently dropped;
+  * the masked word is computed against the CURRENT contents at that address,
+    exactly as `cert_mem_write_be` does.
+
+The same representation gate as the read applies: a chain that is not entirely
+`BV`s is refused. -/
+def valMemWriteBE (w : Nat) (img a d bev : Val) (bw : Nat) : Option Val :=
+  match img, asBV a, asBV d, asBV bev with
+  | .ctor t [ws, dv], some av, some dval, some bval =>
+      if t = memImgTag && valAllBV ws then
+        match asBV dv with
+        | none      => none
+        | some dflt =>
+          if bv_nonzero bval then
+            (if valInRange ws (bv_uint av) then
+               some (.ctor memImgTag
+                 [valMemSet ws (bv_uint av)
+                    (cert_masked_update w (valMemWalk ws dflt (bv_uint av)) dval bval bw), dv])
+             else none)
+          else some img
+      else none
+  | _, _, _, _ => none
+
 /-! ## Primitive evaluation
 
 The ONLY place a primitive is interpreted.  Adding a primitive touches this
@@ -158,6 +203,10 @@ def evalPrim (p : Prim) (vs : List Val) : Except String Val :=
       else .error "mkCtor: negative tag"
   | .ctorTagP,    [.ctor t _]  => .ok (.int (Int.ofNat t))
   | .ctorFieldsP, [.ctor _ fs] => .ok (listVal fs)
+  | .memWriteBE, [.int w, img, a, d, bev, .int bw] =>
+      match valMemWriteBE (widthOf w) img a d bev (widthOf bw) with
+      | some v => .ok v
+      | none   => .error "memWriteBE: malformed image, bad operand, or out-of-range enabled write"
   | .memRead, [.int w, img, a, en] =>
       match valMemRead (widthOf w) img a en with
       | some b => .ok (ofBV b)
