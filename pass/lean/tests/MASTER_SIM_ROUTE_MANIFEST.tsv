@@ -1,0 +1,43 @@
+# APPROACH-NATIVE ROUTES for the 12x5 generation matrix, resolved by running them
+# rather than by assuming a shared launcher.  PROVISIONAL: this records the routes
+# verified so far on the PicoRV32 row; the remaining eleven rows are not yet bound.
+#
+# TOOLS, resolved rather than inferred absent (the supervisor's narrow PATH saw
+# neither):
+#   bazel   /soe/czeng14/.local/bin/bazel    9.2.0
+#   bender  /soe/czeng14/.local/bin/bender   0.32.0
+#   slang   /soe/czeng14/projects/slang/build/bin/slang 9.1.214  -- NOT the one used;
+#           lhd links the bazel-vendored slang-11.0 (MODULE.bazel f33547e9...)
+#   yosys   not on PATH by design; vendored as @at_clifford_yosys2 and exec'd from
+#           runfiles by inou/yosys/inou_yosys_api.cpp
+#
+# THE GENERATOR BINARY MATTERS, and this cost a cell.  `bazel-bin` symlinks to
+# k8-FASTBUILD (lhd sha256 414d5dcbf99b37fe..., 682,220,592 bytes).  Run from it,
+# `pass.lean mode:verified_compiler` publishes the Lean literal and the sidecar
+# but SILENTLY OMITS the .dcert, with exit 0 and zero diagnostics, even though
+# pass_lean.cpp:88 publishes three items.  The k8-OPT binary
+# (9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b, 203,557,336
+# bytes) -- the one that produced the existing dcert-bearing corpora -- emits all
+# three.  Coverage runs are bound to the OPT binary.  The _Lgraph.lean itself is
+# byte-identical between the two builds; only the .dcert differed.
+#
+approach	generator	invocation	input_type	artifact	verified_on
+Futamura projection	gen_probe (Projection.mixDriver + hwAPVarT)	gen_probe <cert.dcert> 200000 2000	DCERT1 certificate	in-memory Program (NOT emitted source; no file is written)	blocked on PicoRV32: master emits DCERT2 and the loader is DCERT1-only
+Verified compiler	pass.lean mode:verified_compiler	lhd compile lg:<dir> --top <T> --emit-dir lean:<dir> --set formal.lean.mode=verified_compiler	LGraph	<T>_Lgraph.lean + <T>.dcert (DCERT2) + <T>_io.json, one publish_group	PicoRV32: YES
+Translation validation	d3_sweep.py	python3 pass/lean/scripts/d3_sweep.py --manifest <tsv> --certs <dir> --out <dir> --jobs 1	generated <T>_Lgraph.lean indexed from a directory, selected by a manifest row	D3 reified probes and sweep rows	PicoRV32: manifest resolves, run refused from a dirty worktree
+Legacy	pass.lean legacy emitter	lhd compile lg:<dir> --top <T> --emit-dir lean:<dir> --set formal.lean.emit_cert=true	LGraph	<T>_Lgraph.lean (fast model: <T>_comb/_next/_step plus <T>_node/_source/_graph) + <T>_io.json	PicoRV32: YES
+IR-as-semantics	make_sim_launcher.py (Direction 2 generic simulator)	python3 pass/lean/scripts/make_sim_launcher.py <T>_Lgraph.lean	the verified-compiler <T>_Lgraph.lean	Sims/<T>_Cert.lean + Sims/<T>_Main.lean, built as lake exe Sim<T>	PicoRV32: YES
+#
+# ROW PREPARATION, PicoRV32 (B12), the only row bound so far:
+#   RTL      /soe/czeng14/projects/picorv32/picorv32.v  94,657 bytes
+#            sha256 0836050971b3c6cdd28ac3b1e5719a67fb645161912bef1e472e63995ceb0622
+#            pin ef203c2b0a3fb793280f5114941416c425c5b461, tracked tree CLEAN
+#   top      picorv32 -- the WHOLE CORE, not a submodule
+#   step 1   lhd compile verilog picorv32.v --reader yosys-slang --top picorv32
+#              --emit-dir lg:<raw> --set yosys.setundef=zero -- --ignore-assertions
+#   step 2   lhd pass single_edge --top picorv32 lg:<raw> --emit-dir lg:<norm>
+#            REQUIRED.  Without it the lean emit fails:
+#            "pass.lean: unsupported certificate op(s): latch (first at n_1460).
+#             68 node(s) in this design have no certificate encoding."
+#   step 3   the per-approach invocation above, against lg:<norm>
+#   shape    1,302 sources, 2,279 nodes

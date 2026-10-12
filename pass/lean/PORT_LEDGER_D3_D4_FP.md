@@ -5853,9 +5853,15 @@ that appears in your own argv.
 
 8 paired repetitions per block, repetition 1 a retained warm-up excluded from
 the summaries, alternating A-B/B-A, both sides pinned to **cpu80**, wall and CPU
-time recorded, and the cgroup guard **observed** per run -- `memory.max
-8589934592` exactly as requested, `memory.peak` recorded, `max 0 oom 0
-oom_kill 0`. That closes the requested-versus-observed gap the table carried.
+time recorded, and the cgroup guard sampled per run -- `memory.max
+8589934592`, exactly the requested 8 GiB, genuinely read back from the scope.
+
+> **SCOPE CORRECTION.** The sampler reads the scope **once, at startup**, then
+> breaks. So `memory.peak` and `memory.events` in the `cb3` evidence are
+> **startup observations, not whole-run values** -- which is why sub-MB peaks
+> sit beside ~21 MB `maxrss` in the same rows. Only `memory.max` is a genuine
+> enforcement reading; the peak and the `oom`/`oom_kill` counters are initial,
+> not final. The coverage runner samples until exit and keeps the final values.
 
 | block | pin median | spread | master median | spread | delta | paired |
 |---|---|---|---|---|---|---|
@@ -5976,3 +5982,107 @@ prototype does not close either. Coverage stands at 25 `GENERATION OK` and 8
 unsupported refusals over the 33 frozen rows, with the eight kept in the
 denominator, and the historical DCERT1 successes stay distinct from fresh DCERT2
 support and export failures.
+
+## 58. Coverage first: the 12x5 matrix starts running (PROVISIONAL)
+
+Priority changed again: the coverage table runs **before** optimization and
+performance research. The 48 counterbalanced runs and the three profiles are
+retained as research evidence and close nothing; no further timing repetitions,
+profiling or `ProtoShift` proof work happens until coverage is done.
+
+**This is an incomplete, provisional record.** 60 cells: **3 YES, 2 BLOCKED,
+55 PENDING.** The final checkpoint is gated on all 60 YES.
+
+### 58.1 PicoRV32 whole core, the first row attempted
+
+RTL `/soe/czeng14/projects/picorv32/picorv32.v`, 94,657 bytes, sha256
+`0836050971b3c6cd…`, pin `ef203c2b0a3f…`, tracked tree clean. Top is
+`picorv32`, the **whole core**. Shape: 1,302 sources, 2,279 nodes.
+
+| approach | status | artifact | wall |
+|---|---|---|---|
+| Verified compiler | **YES** | `picorv32_Lgraph.lean` 279,483 B + `picorv32.dcert` 70,067 B (DCERT2) + `_io.json` | 4.01 s |
+| Legacy | **YES** | `picorv32_Lgraph.lean` 894,027 B + `_io.json` | 1.25 s |
+| IR-as-semantics | **YES** | `Sims/picorv32_Cert.lean` 277,445 B + `_Main.lean` 396 B | 0.06 s |
+| Futamura projection | **BLOCKED** | -- | -- |
+| Translation validation | **BLOCKED** | -- | -- |
+
+The three successes are genuinely different artifacts from their own routes, not
+one borrowed: legacy emits `picorv32_comb`/`_next`/`_step` plus
+`_node`/`_source`/`_graph`; the verified compiler emits `picorv32_designCert`,
+`_step`, `_residual`; IR-as-semantics emits a `DirectTrace` certificate and a
+launcher. A generation YES is **not** validation, RTL equivalence or kernel
+certification.
+
+### 58.2 `single_edge` is required, not optional
+
+A direct `compile verilog … --emit-dir lean:` fails:
+
+```
+[ERROR] pass.lean: unsupported certificate op(s): latch (first at n_1460).
+68 node(s) in this design have no certificate encoding.
+```
+
+so the row's route is three steps -- `compile verilog → lg`, `pass single_edge
+→ lg`, then the per-approach emit against the normalised graph. That is the
+same requirement the pinned CORE-ET runner documents, now confirmed on
+PicoRV32.
+
+### 58.3 The generator binary cost a cell, silently
+
+`bazel-bin` symlinks to **k8-fastbuild** (`lhd` sha256 `414d5dcbf99b37fe…`,
+682 MB). Run from it, `pass.lean mode:verified_compiler` publishes the Lean
+literal and the sidecar but **silently omits the `.dcert`** -- exit 0, zero
+diagnostics -- although `pass_lean.cpp:88` publishes three items through
+`publish_group`. The **k8-opt** binary (`9cdba78e6b236e8c…`, 203 MB), the one
+that produced the existing dcert-bearing corpora, emits all three. Coverage runs
+are now bound to the opt binary. The `_Lgraph.lean` is **byte-identical** between
+the two builds; only the certificate differed. Recorded as an observed
+behavioural difference, not diagnosed further -- that is optimization-adjacent
+work and is queued.
+
+### 58.4 The two blockers, precisely
+
+**Futamura projection.** The certificate master emits is **DCERT2**
+(`picorv32.dcert`, magic `DCERT2`, 1,302 sources, sha256 `f85a2a9db8ac89ba…`).
+The FP driver refuses it: `bad magic: expected DCERT1`. The prerequisite is
+fresh DCERT2 transport for FP -- the same gap section 46.4 recorded, now
+confirmed on a requested target rather than inferred.
+
+**Translation validation.** The route is
+`d3_sweep.py --manifest <tsv> --certs <dir> --out <dir> --jobs 1`, and it
+consumes the **generated `_Lgraph.lean`** indexed from a directory, selected by
+a manifest row -- not a `.dcert` (`--certs <file.dcert>` exits 2, "no targets
+selected"). A one-row manifest (`picorv32`, `cert_available 1`, sha256
+`8113993d2b3c670b…`, 2,279 nodes) resolves and selects the target, and then the
+sweep **refuses**: *"REFUSING a manifest run from a dirty worktree: commit
+first, or pass --allow-dirty for an exploratory run (its rows are not
+reproducible)"*. The worktree carries authorized uncommitted supervisor files,
+so a reproducible row needs those committed by their owner. An `--allow-dirty`
+run would be exploratory and is not recorded as a YES.
+
+### 58.5 Metrics recorded during coverage, and the guard scope
+
+`pass/lean/scripts/fp_cov_run.sh` runs each cell under a delegated scope and,
+unlike the counterbalanced script, **samples the cgroup until the process
+exits**, keeping the final `memory.peak` and final `memory.events` with
+`memory.max` read back as genuine enforcement. When a cell is too fast for a
+sample to land it records
+`observation_scope=NONE: … memory.max is REQUESTED only, not observed` rather
+than promoting the requested limit -- which is what the 0.06 s IR-as-semantics
+cell reports. Per cell: argv, start/end timestamps, load before and after, wall,
+user and system CPU, max RSS, exit status, stdout and stderr, and the artifact
+sizes and sha256s.
+
+The `cb3` counterbalanced evidence keeps its corrected label: its
+`memory.peak`/`memory.events` are **startup** observations, not whole-run
+values.
+
+### 58.6 Next
+
+Bind and run the remaining eleven rows. The CORE-ET rows need the frozen
+filelists already built in section 53; the CVA6 rows need their bender filelists
+from section 54. Nothing in this section discharges the migration gates, the
+fresh-16 or full validation, DCERT2 transport, the branch inventories, the
+remaining D3/D4 work, the 447+6 jobs or the thirty raw-source comparisons.
+Deferred D3 scoreboard timing and refactoring stay last.

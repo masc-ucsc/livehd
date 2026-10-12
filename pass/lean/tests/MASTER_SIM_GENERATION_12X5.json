@@ -1,0 +1,1175 @@
+{
+ "requested_at": "2026-10-11T15:39:41.244258-07:00",
+ "stage": "final stage after all existing rebase/acceptance work",
+ "priority_within_stage": "standalone simulator generation latency and complete block coverage",
+ "approaches": [
+  "Futamura projection",
+  "Verified compiler",
+  "Translation validation",
+  "Legacy",
+  "IR-as-semantics"
+ ],
+ "rows": [
+  {
+   "id": "B01",
+   "benchmark": "CORE-ET DCache",
+   "input_mapping": "PENDING",
+   "approaches": {
+    "Futamura projection": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  },
+  {
+   "id": "B02",
+   "benchmark": "CVA6 HPDcache",
+   "input_mapping": "PENDING",
+   "approaches": {
+    "Futamura projection": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  },
+  {
+   "id": "B03",
+   "benchmark": "CORE-ET neighborhood I-cache",
+   "input_mapping": "PENDING",
+   "approaches": {
+    "Futamura projection": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  },
+  {
+   "id": "B04",
+   "benchmark": "CVA6 MMU/TLB/PTW",
+   "input_mapping": "PENDING",
+   "approaches": {
+    "Futamura projection": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  },
+  {
+   "id": "B05",
+   "benchmark": "CORE-ET ET-Link\u2192AXI",
+   "input_mapping": "PENDING",
+   "approaches": {
+    "Futamura projection": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  },
+  {
+   "id": "B06",
+   "benchmark": "CVA6 LSU",
+   "input_mapping": "PENDING",
+   "approaches": {
+    "Futamura projection": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  },
+  {
+   "id": "B07",
+   "benchmark": "CORE-ET VPU",
+   "input_mapping": "PENDING",
+   "approaches": {
+    "Futamura projection": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  },
+  {
+   "id": "B08",
+   "benchmark": "CORE-ET IntPipe/scoreboards",
+   "input_mapping": "PENDING",
+   "approaches": {
+    "Futamura projection": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  },
+  {
+   "id": "B09",
+   "benchmark": "CVA6 issue/scoreboard",
+   "input_mapping": "PENDING",
+   "approaches": {
+    "Futamura projection": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  },
+  {
+   "id": "B10",
+   "benchmark": "CVA6 frontend",
+   "input_mapping": "PENDING",
+   "approaches": {
+    "Futamura projection": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  },
+  {
+   "id": "B11",
+   "benchmark": "CORE-ET TLB",
+   "input_mapping": "PENDING",
+   "approaches": {
+    "Futamura projection": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "PENDING",
+     "evidence": null,
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  },
+  {
+   "id": "B12",
+   "benchmark": "PicoRV32 whole core",
+   "input_mapping": {
+    "rtl": "/soe/czeng14/projects/picorv32/picorv32.v",
+    "rtl_sha256": "0836050971b3c6cdd28ac3b1e5719a67fb645161912bef1e472e63995ceb0622",
+    "pin": "ef203c2b0a3fb793280f5114941416c425c5b461 (clean)",
+    "top": "picorv32 (whole core, not a submodule)",
+    "route": "lhd compile verilog -> lg; lhd pass single_edge -> lg; lhd compile lg: -> lean. single_edge is REQUIRED: a direct compile fails with \"pass.lean: unsupported certificate op(s): latch (first at n_1460). 68 node(s) ... no certificate encoding\".",
+    "generator_binary": "k8-opt lhd sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b (bazel-bin/ points at k8-FASTBUILD, sha256 414d5dcbf99b37fe..., which silently omits the .dcert)",
+    "reader": "yosys-slang, yosys.setundef=zero, slang --ignore-assertions"
+   },
+   "approaches": {
+    "Futamura projection": {
+     "status": "BLOCKED",
+     "evidence": {
+      "blocker": "master emits DCERT2 (picorv32.dcert, magic DCERT2, 1302 sources); the FP driver CertIO.V1 is DCERT1-only and refuses with \"bad magic: expected DCERT1\". Fresh DCERT2 transport for FP is the prerequisite."
+     },
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Verified compiler": {
+     "status": "YES",
+     "evidence": {
+      "cell_dir": "generated/master_port/cov12x5/B12_picorv32/vc_opt",
+      "artifacts": [
+       {
+        "path": "generated/master_port/cov12x5/B12_picorv32/vc_opt/lean/picorv32_Lgraph.lean",
+        "bytes": 279483,
+        "sha256": "8113993d2b3c670b9a9dc5fd2c8297febeb2ddefc613e4122b6e7db2aed85b89"
+       },
+       {
+        "path": "generated/master_port/cov12x5/B12_picorv32/vc_opt/lean/picorv32.dcert",
+        "bytes": 70067,
+        "sha256": "f85a2a9db8ac89ba71adac23ccbefac9bf290301974733545c0f939d3abf49c9"
+       },
+       {
+        "path": "generated/master_port/cov12x5/B12_picorv32/vc_opt/lean/picorv32_io.json",
+        "bytes": 2275,
+        "sha256": "6a756674e1a268b3b8409a9bae76ed40ef74c5fb2f8e84d3d8a89c73d658cd6e"
+       }
+      ],
+      "wall_s": "4.01",
+      "user_s": "0.29",
+      "sys_s": "0.02",
+      "maxrss_kb": "76012",
+      "exit": "0",
+      "cgroup": "t=1791766596.991674519\nmemory.max=17179869184\nmemory.peak=7766016\nmemory.current=6225920\nevents.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0 \nobservation_scope=final-sample-before-exit samples=2"
+     },
+     "generation_ms": 4010,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Translation validation": {
+     "status": "BLOCKED",
+     "evidence": {
+      "route": "python3 pass/lean/scripts/d3_sweep.py --manifest <tsv> --certs <dir with <top>_Lgraph.lean> --out <dir> --jobs 1",
+      "resolved": "the route takes the GENERATED _Lgraph.lean plus a manifest, not a .dcert; a one-row manifest (module picorv32, cert_available 1, certificate picorv32, sha256 8113993d2b3c670b..., nodes 2279) resolves and selects the target.",
+      "blocker": "d3_sweep.py REFUSES a manifest run from a dirty worktree: \"commit first, or pass --allow-dirty for an exploratory run (its rows are not reproducible)\". The worktree carries authorized uncommitted supervisor files, so a REPRODUCIBLE row needs those committed by their owner; an --allow-dirty run would be exploratory and is not recorded as a YES.",
+      "earlier_attempts": "--certs <file.dcert> exits 2 with \"no targets selected\"; the --certs argument names DIRECTORIES that are indexed for *_Lgraph.lean, and targets come from the manifest rows."
+     },
+     "generation_ms": null,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "Legacy": {
+     "status": "YES",
+     "evidence": {
+      "cell_dir": "generated/master_port/cov12x5/B12_picorv32/legacy_opt",
+      "artifacts": [
+       {
+        "path": "generated/master_port/cov12x5/B12_picorv32/legacy_opt/lean/picorv32_Lgraph.lean",
+        "bytes": 894027,
+        "sha256": "fb3d8c81c7659064b3cbdfa7240a3b9e52ba7a1a6f117124e7175378be8258e2"
+       },
+       {
+        "path": "generated/master_port/cov12x5/B12_picorv32/legacy_opt/lean/picorv32_io.json",
+        "bytes": 2275,
+        "sha256": "6a756674e1a268b3b8409a9bae76ed40ef74c5fb2f8e84d3d8a89c73d658cd6e"
+       }
+      ],
+      "wall_s": "1.25",
+      "user_s": "0.36",
+      "sys_s": "0.03",
+      "maxrss_kb": "74572",
+      "exit": "0",
+      "cgroup": "t=1791766871.150937875\nmemory.max=17179869184\nmemory.peak=15929344\nmemory.current=15720448\nevents.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0 \nobservation_scope=final-sample-before-exit samples=2"
+     },
+     "generation_ms": 1250,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    },
+    "IR-as-semantics": {
+     "status": "YES",
+     "evidence": {
+      "cell_dir": "generated/master_port/cov12x5/B12_picorv32/ir_as_semantics",
+      "artifacts": [
+       {
+        "path": "generated/master_port/cov12x5/B12_picorv32/ir_as_semantics/tree/formal/lean/Sims/picorv32_Cert.lean",
+        "bytes": 277445,
+        "sha256": "8cac82ef4b1839d23ba99f8f8bd1e817650f6edfd717bd51c67a9d1d905a7156"
+       },
+       {
+        "path": "generated/master_port/cov12x5/B12_picorv32/ir_as_semantics/tree/formal/lean/Sims/picorv32_Main.lean",
+        "bytes": 396,
+        "sha256": "43db2aee9195e43d1085b1e01c239a3c050140d35551f1746853cb40aa3f5c98"
+       }
+      ],
+      "wall_s": "0.06",
+      "user_s": "0.04",
+      "sys_s": "0.01",
+      "maxrss_kb": "13376",
+      "exit": "0",
+      "cgroup": "observation_scope=NONE: the scope never appeared to the sampler; memory.max is REQUESTED only, not observed"
+     },
+     "generation_ms": 60,
+     "metrics": {
+      "generation_wall_ms": null,
+      "generation_user_cpu_ms": null,
+      "generation_system_cpu_ms": null,
+      "peak_rss_kb": null,
+      "observed_cgroup_peak_bytes": null,
+      "phase_times_ms": {},
+      "artifact_bytes": null,
+      "environment_sha256": null,
+      "attempt_record": null
+     }
+    }
+   }
+  }
+ ],
+ "checkpoint_gate": "All 60 cells YES with retained generation evidence; then create final local checkpoint commit. User pushes.",
+ "cell_states": [
+  "PENDING",
+  "RUNNING",
+  "YES",
+  "NO",
+  "BLOCKED"
+ ],
+ "evidence_required": [
+  "source repository/pin and dirty-input hashes",
+  "exact top(s), parameters, ordered filelist and transitive input hashes",
+  "approach-native generator/driver and code/toolchain/binary identity",
+  "generation argv and separate validation argv",
+  "generated artifact identity and runtime/loading path",
+  "load/admission, specialization/compilation, checking, emission and total generation latency",
+  "wall/CPU/peak-RSS and observed guard evidence",
+  "approach-specific support/proof premises and admission outcome",
+  "retained logs and exact blocker/refusal reason",
+  "shared hardware: CPU model/topology/NUMA/cache/RAM; OS/kernel",
+  "software: actual toolchain/compiler/build flags, resolved dependency versions/pins and hashes",
+  "per-attempt environment identity, affinity, governor/SMT contention, load, start/end counters"
+ ],
+ "picorv32": {
+  "user_path": "/soe/czeng14/projects/picorv32",
+  "resolved_path": "/mada/users/czeng14/projects/picorv32",
+  "observed_pin": "ef203c2b0a3fb793280f5114941416c425c5b461",
+  "observed_status": "clean",
+  "rtl": "/soe/czeng14/projects/picorv32/picorv32.v",
+  "rtl_sha256": "0836050971b3c6cdd28ac3b1e5719a67fb645161912bef1e472e63995ceb0622",
+  "top_candidate": "picorv32",
+  "parameters": "PENDING: freeze before generation"
+ },
+ "execution_priority": "Coverage-table runs before all further optimization/performance research; prepare needed functional dependencies, preserve original acceptance scope",
+ "optimization_schedule": "after coverage table runs",
+ "environment_record": "pass/lean/tests/MASTER_SIM_GENERATION_ENVIRONMENT.json",
+ "observed_environment_sha256": "ad186ee1424e15afa052bfa000fa50843bd954354d0f10e49256e711632edd8a",
+ "provisional": "INCOMPLETE/PROVISIONAL: 3 of 60 cells YES, 1 BLOCKED, 1 RUNNING, 55 PENDING. The final checkpoint is gated on all 60 YES."
+}

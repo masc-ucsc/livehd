@@ -47,6 +47,12 @@ run() { # run <side> <block> <cert> <rep> <pos>
       /usr/bin/time -f 'wall %e\nuser %U\nsys %S\nmaxrss %M\nexit %x' -o "$O/$nm.time" \
       taskset -c $CPU nice -n19 ionice -c3 "$bin" "$cert" 200000 2000 > "$O/$nm.log" 2>&1 &
   local tp=$!
+  # LIMITATION, recorded: this samples the scope ONCE, as soon as it appears,
+  # and then breaks.  The memory.peak and memory.events it retains are therefore
+  # a STARTUP observation, not whole-run values -- which is why sub-MB peaks sit
+  # beside ~21 MB maxrss in the retained cb3 evidence.  The coverage runner
+  # (fp_cov_run.sh) samples until the process exits and keeps the FINAL peak and
+  # events instead.  Do not read these as final resource evidence.
   # sample the delegated scope's cgroup while it exists
   for _ in $(seq 1 400); do
     local cg=/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/app.slice/$U.scope
