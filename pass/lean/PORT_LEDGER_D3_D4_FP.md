@@ -5629,10 +5629,12 @@ Same certificate `d731ee22a85e77ba…`, same runner, same fuel 200000/2000, same
 | `8d220f3fd` | **master replay** | **19,423** | 89,996 | 28,899 |
 
 and `alu_wrapper` (`209e122f54ef…`) independently: S2 **14,139** ms, master
-**19,118** ms, residual 89,961 terms in both.
+**19,118** ms, 89,961 terms recorded in both.
 
-**The residual is identical at every revision** -- same term count, same checker
-bound. So the +34.9% on `alu` and +35.2% on `alu_wrapper` cannot be explained by
+**Term count and checker bound are the same at every revision** (89,996 and
+28,899). That is consistent with an identical residual but does **not establish
+one**: two different programs can share a term count and a bound. No structural
+comparison was made across revisions, so no identity is claimed. So the +34.9% on `alu` and +35.2% on `alu_wrapper` cannot be explained by
 residual size, and the two designs agree to within 0.3 percentage points, which
 is not noise. That is a **candidate reproducible regression**, and it is only a
 candidate: `3c175a4da` is **S2**, not the FP pin. The controlled comparison is
@@ -5759,7 +5761,14 @@ generation is genuinely slow: in the original FP specializer.
 
 Across the 25 `GENERATION OK` rows, master is slower in **25 of 25** -- minimum
 +0.6%, **median +5.8%**, maximum +10.3%, and +3.0% on the summed specialization
-time. Unanimity over 25 blocks is not noise.
+time.
+
+> **NARROWED IN SECTION 57.** Every one of those pairs ran **pin first, master
+> second, unpinned**, so the unanimity cannot by itself exclude an order or
+> warm-up effect. Under a counterbalanced A-B/B-A design with shared CPU
+> affinity the sign holds on two blocks (+6.4% and +6.8%) and **reverses on
+> `alu`** (-22.9%). The delta is real on the clean case and is **not** the
+> uniform slowdown this paragraph suggests.
 
 The phase breakdown locates it exactly. Per block, pin against master:
 
@@ -5814,3 +5823,156 @@ Generation checks support (`supported_of_report` turns the observed Boolean into
 here carries kernel-checked `hproj` evidence. The runtime-shape premises are
 never reached. Nothing is discharged, nothing is kernel-certified, and no proof
 flag is claimed.
+
+## User priority update: coverage matrix before optimization
+
+Run the user-requested twelve-block/core by five-approach generation table before further optimization and performance research. Keep the stage documented in plan section15 and preserve all other acceptance obligations. Record every cell's generation time, memory, CPU, phases and artifact/evidence identities, bound to the shared hardware/software dependency record in `tests/MASTER_SIM_GENERATION_ENVIRONMENT.json`, with contemporaneous per-attempt conditions. The initial environment snapshot describes current observations, not historical identity or an idle-machine guarantee. Use the completed coverage/metric table to choose subsequent optimization targets.
+
+## 57. The queue bug, the counterbalanced result, and the first bridge lemma
+
+### 57.1 A claim I made that was false
+
+I reported the counterbalanced experiment as running. It was not. I had queued
+it behind the profile run with
+
+```bash
+while pgrep -f "root-master/nat/gen_probe" >/dev/null; do sleep 20; done; bash …/counterbalanced.sh cb3 …
+```
+
+and that `pgrep -f` pattern **matches the waiter's own command line**, so the
+guard never became false and the wrapper waited for itself. `runs/cb3` did not
+exist, no `gen_probe` process existed, and the CSR profile had already
+finished. The wrapper (pid 485264, started 17:03:22) was confirmed by argv and
+start time, its provenance retained in
+`runs/cb3_stale_queue_wrapper.log`, and only that pid was stopped. The defect
+is written into `pass/lean/scripts/fp_gen_counterbalanced.sh` so it is not
+repeated: wait on a real child pid or an exact executable, never on a substring
+that appears in your own argv.
+
+### 57.2 Counterbalanced result: the delta is real, and it is not uniform
+
+8 paired repetitions per block, repetition 1 a retained warm-up excluded from
+the summaries, alternating A-B/B-A, both sides pinned to **cpu80**, wall and CPU
+time recorded, and the cgroup guard **observed** per run -- `memory.max
+8589934592` exactly as requested, `memory.peak` recorded, `max 0 oom 0
+oom_kill 0`. That closes the requested-versus-observed gap the table carried.
+
+| block | pin median | spread | master median | spread | delta | paired |
+|---|---|---|---|---|---|---|
+| `ariane_regfile` | 1,409 ms | **1.3%** | 1,499 ms | **0.3%** | **+6.4%** | master slower 7 of 7 |
+| `alu_wrapper` | 37,353 ms | 8.1% | 39,895 ms | 16.3% | +6.8% | master slower 5 of 7 |
+| `alu` | 32,270 ms | 41.2% | 24,883 ms | 40.1% | **-22.9%** | master slower 1 of 7 |
+
+`ariane_regfile` is the clean case and it is decisive on its own terms: the two
+distributions do **not overlap** (pin max 1,422 against master min 1,498) with
+spreads under 1.5%, 7 of 7 paired. **`alu` reverses**, with 40% spreads on both
+sides. Position does not explain the sign: pin's 1st- and 2nd-position medians
+agree within a few percent, and so do master's.
+
+So the honest statement is narrower than section 56.4's. A reproducible master
+slowdown of about **6%** exists on the low-noise block and agrees in sign on a
+second. The earlier "slower in 25 of 25" was one unpinned, pin-first pass, and
+**ALU's sign is not stable** -- pinned to a shared physical core it flips. The
+absolute numbers here are higher than the unpinned sweep because cpu80's SMT
+sibling is cpu32 and other users' work lands there; that is recorded in
+`runs/cb3/CPU_CONTEXT.txt` and makes the comparison fair rather than the
+magnitudes comparable across configurations.
+
+### 57.3 The bottleneck, as the evidence supports it
+
+`perf` is unusable on this box (`kernel.perf_event_paranoid = 3`) and
+valgrind/callgrind are absent, so sampling is by gdb batch attach. **Limits,
+stated rather than buried:** each sample SIGSTOPs the process, so a profiled run
+is slower than a production one and its duration is never quoted as a timing;
+the rate is whatever the attach allows, not a fixed frequency; and `-O2` without
+frame pointers can elide frames.
+
+| profile | worker samples | `shiftGo` top | `shiftGo` anywhere | allocator top |
+|---|---|---|---|---|
+| `alu`, master | 25 | 12 (48.0%) | 19 (76.0%) | 11 (44.0%) |
+| `alu`, pin | 25 | 11 (44.0%) | 17 (68.0%) | 11 (44.0%) |
+| `csr_regfile`, master | 60 | 29 (48.3%) | 47 (78.3%) | 25 (41.6%) |
+
+These are **evidence for a common dominant shift-and-allocation bottleneck** on
+both branches and at both scales. 110 sparse samples do **not** establish that
+the full hot paths are statistically identical, and they do not rule out an
+execution-path difference behind the port delta. Likewise the near-zero
+correlation between static shift density and the measured deltas does not show
+the SHL/SRA guards cost nothing, and identical inspected source bytes between S2
+and the pin do not establish machine state as the sole cause of that gap. All
+three are recorded as unresolved. The SHL result-width, SRA source-width and
+strict-greater Sext repairs stay exactly as they are.
+
+### 57.4 `csr_regfile`, diagnosed on its own
+
+Eleven minutes of generation -- 663 s at the pin, 685 s on master -- is not
+acceptable merely because it is inherited. Its profile is the same shape as
+ALU's at 36x the size: `shiftGo` on 78.3% of stacks, allocator traffic on most
+of the rest. `csr_regfile` is 34,897 nodes with 8,077 `SHL`, and eager shifting
+is quadratic in the way the pin's own S3 commit message describes --
+*"deferred shifting removes the shift quadratic; the walk is now the cost"*.
+The cost is therefore the same defect, not a separate one, and the same bridge
+unblocks both.
+
+### 57.5 What `ProtoShift` would need, precisely
+
+`Proto/PartialEvaluatorShift.lean` is a **candidate**, not a fix. It carries
+**zero theorems** and is not imported by `Audit.lean`. It cannot be promoted
+into the covered path, because `specializeDesign_varT_correct` and
+`simSound_varT` take `hproj : mixDriver sf wf hwAPVarT [encDesign D] = .ok R`
+about the **proved** driver, and a run of an unproved fork does not produce that
+premise.
+
+The bridge it needs, concretely:
+
+1. **A representation function** `⟦·⟧ : ProtoShift.PVal → PVal` that forces
+   pending offsets, with `⟦shifted k v⟧ = PVal.shift k ⟦v⟧`, and the key lemma
+   `⟦ProtoShift.PVal.shift k v⟧ = PVal.shift k ⟦v⟧` -- offset composition
+   agreeing with eager shifting. **This rests on shift additivity, which did not
+   exist.**
+2. **Binder-offset discipline**: every site entering a binder adds the same `k`,
+   so `shift` commutes with the environment extension `mix` performs.
+3. **No variable capture**: `dyn i` under an offset becomes `dyn (i + k)`, and
+   offsets apply only to values whose indices are in scope.
+4. **Reification**: `toCodeAt` applies pending offsets during the traversal it
+   already performs, and must agree with `toCodeAt ∘ ⟦·⟧`.
+5. **The successful-specialization contract**:
+   `ProtoShift.mixDriver sf wf I args = .ok R → mixDriver sf wf I args = .ok R`,
+   without which `hproj` cannot be discharged from a fast run and none of the
+   covered-backend theorems transfer.
+
+### 57.6 One bounded lemma, kernel-checked
+
+`Projection/Proto/ShiftBridge.lean` is new and proves the arithmetic content of
+step 1 against the **proved** `PVal.shift` and `PEnv.shiftBy`:
+
+```lean
+theorem PVal_shift_add (k₁ k₂ : Nat) (v : PVal) :
+    PVal.shift k₁ (PVal.shift k₂ v) = PVal.shift (k₁ + k₂) v
+theorem PEnv_shiftBy_add (k₁ k₂ : Nat) (e : PEnv) :
+    PEnv.shiftBy k₁ (PEnv.shiftBy k₂ e) = PEnv.shiftBy (k₁ + k₂) e
+theorem PVal_shift_add_zero (k : Nat) (v : PVal) :
+    PVal.shift k (PVal.shift 0 v) = PVal.shift k v
+```
+
+`#print axioms` on all three: **"does not depend on any axioms"** -- not
+`sorryAx`, not `propext`, not `Classical.choice`, and no `native_decide`. This
+is the law that lets `shifted k₁ (shifted k₂ v)` collapse to
+`shifted (k₁ + k₂) v`; the existing file had `shift_zero`, `shiftGo_eq` and the
+`@[csimp]` `k = 0` fast path, but **no additivity**.
+
+It claims nothing further. It is not a representation function, it does not
+relate `ProtoShift` to `PartialEvaluator`, and it says nothing about the
+specializer being correct. Steps 2 to 5 remain open, and until step 5 exists the
+covered backend keeps the eager shift and generation stays as slow as measured.
+The pinned files are untouched -- this is a new module, so the five specializer
+files are still byte-identical to the FP pin.
+
+### 57.7 Still open
+
+ALU under ten seconds is **unmet**: 19.5 s unpinned, and nothing in this
+checkpoint moved it. `csr_regfile`'s eleven minutes are **unmet**. Identifying a
+prototype does not close either. Coverage stands at 25 `GENERATION OK` and 8
+unsupported refusals over the 33 frozen rows, with the eight kept in the
+denominator, and the historical DCERT1 successes stay distinct from fresh DCERT2
+support and export failures.
