@@ -1040,10 +1040,11 @@ establish complete twelve-unit support.
 
 Distinguish the old branch's RTL frontend binary (`lhd`) from its projection
 specializer. The pinned old FP specializer was already built in an isolated root
-and run on pre-existing certificates; the original repository's native frontend
-has not yet been built/run for these exact whole-unit comparisons. Neither an
-absent convenience wrapper/filelist script nor an absent `bazel-bin` proves the
-generic frontend cannot consume explicitly supplied benchmark inputs.
+and run on pre-existing certificates. The original repository's native frontend
+has now been built, and targeted whole DCache and I-cache comparisons have run;
+section 15.5 records their distinct outcomes. Neither an absent convenience
+wrapper/filelist script nor an absent `bazel-bin` proves the generic frontend
+cannot consume explicitly supplied benchmark inputs.
 
 Do not make a blanket old-branch build or twelve-unit baseline sweep a prerequisite
 to starting implementation. Use old-branch source and targeted executions when
@@ -1060,3 +1061,295 @@ preserve earlier successful phases, and do not stop at a manifest of refusals or
 proof-obligation list while implementation work can proceed. Complete FP support
 for all twelve requested units before advancing to IR-as-semantics and then
 translation validation. Periodic supervision uses the user's 20-minute interval.
+
+
+### 15.5 Detailed FP branch-to-master implementation and acceptance plan
+
+User-requested execution plan, 2026-10-12. Claude Code owns implementation on the
+current master migration branch. The supervisor independently audits source,
+proofs, artifacts and whole-unit results. Work continues without another approval
+request for the already-authorized implementation/build/coverage tasks. Local
+commits are provisional; do not push or create another git branch.
+
+#### Objective and completion boundary
+
+Finish the actual Futamura implementation on master, preserve the original
+branch's contributions and established behavior, fix port regressions, and add
+missing capabilities until **all twelve requested whole units have usable FP
+simulators**. Then finish IR-as-semantics, followed by translation validation.
+The five-approach, 60-cell table and its separate all-60-YES final checkpoint stay
+in force. FP completion alone does not discharge the independent D2/D3/D4,
+source-preservation, proof-admission or benchmark replay obligations.
+
+Use the current shared architecture: graph access/owned scan -> CertificateIR ->
+DesignCert/DCERT transport -> the projection's object-language interpreter ->
+verified specialization -> checked residual -> the projection's own step runner.
+Port needed adapters into current APIs; do not restore duplicate graph scanners,
+private certificate builders or obsolete shell interfaces. A reference
+interpreter is a comparison oracle, never the FP implementation.
+
+#### Audited starting point and fixed baselines
+
+| Item | Authoritative starting evidence / current limitation |
+| --- | --- |
+| Original FP source | Separate checkout `livehd-futamura/livehd`, branch `projection`, revision `9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6`; keep tracked source unchanged for comparisons. The master repository's similarly named ref is not this baseline. |
+| Master FP code | `23cc28da28bf874d8cc7287eda54b4c35724f589`: specializer already exists; new memory primitives, representation helpers and real `srcValM`/`applyOpM` dispatch exist. The memory-aware whole-cycle entry and generic adequacy remain missing. |
+| Existing whole FP results | CVA6 frontend and issue/scoreboard have recorded generation/checking/interpreted residual readiness. These are two whole-unit observations, not twelve-unit support or RTL equivalence. |
+| Original specializer | Pinned `gen_probe` binary already built/run on frozen certificates; SHA256 `eeada8cf4405dc36ddce6bcb1c01384860d8a174c6e37ae846b1601f6e78044e`. Matched small-certificate evidence is not old whole-unit frontend support. |
+| Original native frontend | Fresh old-source build succeeded; binary SHA256 `1c089c4edf0f817bcd5cd15833feba0967e0ab45a505778e6764c8da9b87e030`. It uses a fresh dependency closure with explicitly recorded protobuf yanked-version admission, not a reproduced historical binary closure. |
+| DCache comparison | Same frozen whole RTL/filelist/options: old frontend passes; retained master binary reproduces Concat width refusal in its second bitwidth pass. Pass sequences and reader versions differ; root cause is not yet localized. Old `single_edge` then actually refuses a memory commit under a phase divider. Neither result is old FP admission. |
+| I-cache comparison | Old and master both reject the same first ambiguous `PaSize` imports on the frozen 31-source input. This is observed shared raw-source/configuration refusal, not established master-only regression. |
+| Current table | 12 YES / 11 NO / 37 BLOCKED. FP has 2 YES / 10 BLOCKED: Pico reached memory support refusal; nine units have upstream input/frontend blockers. Every cell has a disposition, but not every emitter was reached. |
+
+The old native build and phase attempts are under
+`livehd-futamura/baseline_frontend_build_9bb41a09d_20261012/`.
+The supervisor's detailed audits are under
+`automate_workspace/master_rebase/audits/`; the ledger retains their exact paths.
+Treat section 14's original inventory/status tables as dated audit baselines,
+not statements that newly ported files are still absent.
+
+#### Phase 0 — preservation and comparison setup, alongside implementation
+
+Do not defer the next coding phase for a blanket old build or baseline sweep.
+Known baselines are sufficient to start Phase 1 immediately. Complete this
+read-only inventory and preparation alongside functional builds/proof work:
+
+1. Inventory every original FP contribution, including the recorded 67
+   Projection paths/38 Lean modules, scripts, specifications, tests, artifacts
+   and research records. Assign a master destination and disposition: unchanged,
+   API/schema adaptation, correctness repair, capability extension or explicitly
+   retained historical/deferred material. Verify actual counts from pinned git
+   trees rather than assuming the historical counts are current.
+2. Record original/master paths and raw hashes. For modified semantics/proofs,
+   state the changed premise or behavior and its preservation/compatibility
+   obligation. Preserve raw source pairs; do not hide differences by comment,
+   whitespace, rename or proof-text normalization.
+3. Preserve object-language semantics, specializer soundness, all retained
+   SHL/SRA/Sext fixes and the original memory-free route. Preserve experimental
+   source as evidence; do not promote Proto/ProtoShift into the production proof
+   chain without its independent obligations.
+4. Freeze each whole unit's RTL revision, complete component closure, top,
+   wrapper/type parameters, defines/includes, ordered sources, clock/reset
+   schedule and initial state. The certificate is the FP generation input;
+   runtime signal vectors are a separate simulator input.
+5. Bind actual tools/dependencies and private build roots. The historical master
+   frontend binary's build revision is not established merely by its location:
+   rebuild the affected current source with recorded identities before claiming
+   a native frontend code fix. Keep preparation costs separate from generation.
+6. Run targeted old phases when they resolve an implementation question; retain
+   the requested matched old comparisons for all twelve whole units as final
+   validation. Use genuine old loader/exporter dependencies explicitly. Missing
+   convenience scripts are not evidence a generic route is impossible.
+
+Deliverable: source/destination/preservation inventory and per-unit comparison
+bindings. These records do not replace coding or establish support by themselves.
+
+#### Phase 1 — implement the actual memory-aware whole-cycle interpreter NOW
+
+Continue in `formal/lean/LeanSemanticPrimitives/Projection/HardwareMem.lean`.
+The separate module is a staging boundary in the same backend, not a substitute
+implementation. Keep original `HardwareInterpreter.hwS` and its proven route
+unchanged while the memory-aware route is being proved.
+
+1. Add a memory-bearing `main` entry taking static DesignCert plus dynamic
+   edges, input and encoded StateM. Set the memory program's actual entry to it.
+   Thread both flop and memory lists; do not leave the reachable entry as the old
+   memory-free main while naming the program memory-aware.
+2. Implement `mkSourcesM` calling the existing `srcValM` with the memory list,
+   and `evalNodeM`/`evalNodesM` calling `applyOpM`. Preserve newest-first slot
+   indexing, exact dependency order, node width and opcode payload.
+3. Build outputs, flop next-state and memory next-state from the same evaluated
+   slot environment. Preserve existing scalar/flop reset, asynchronous reset,
+   enable and per-domain clock behavior. Address scalar/memory value kinds
+   explicitly; old scalar helpers do not automatically prove correctness of
+   `CertVal.asBV` coercion on a memory-valued slot.
+4. Commit each memory's real `nextImg` slot only when its declared clock fires;
+   otherwise retain its exact prior first-order image. Preserve initial words,
+   defaults, word widths, lengths and descriptor metadata. Use valid clock and
+   slot bounds or reproduce the reference defaults exactly, with premises stated.
+5. Add a first-order memory-bearing result type/codec, round trip and denotation
+   to the actual Compiler.RuntimeResult. A relation only to StateM is insufficient.
+   Re-resolve function names/indices after changes; never append unrelocated
+   numeric helper calls.
+6. Execute the whole new entry on an encoded DesignCert/state, decode its result,
+   and execute a second step using that returned state. Compare outputs and
+   memory observations against the real reference on identical inputs/edges.
+
+Required discriminating checks: initialized ROM and its out-of-contents/default
+behavior; full write/read; Pico's actual `Op_MemWriteBE 1` bit mask; separate
+8-bit byte-lane mask; disabled write; unrelated address preservation; active and
+inactive edges; distinct memory clock domains; and a second-step read observing
+committed state. Retain a negative control that fails if a quiet memory commits.
+Use the audited two-clock scenario in the supervisor's
+`memory_clock_reference_scenario_20261012_1555` directory as a ground-truth input,
+not as proof that FP executed it.
+
+Deliverable: compiling interpreter/caller/result-codec implementation and actual
+whole-entry execution evidence. This is not yet Pico admission or generic adequacy.
+Continue to Phase 2 after this local checkpoint without waiting for another plan.
+
+#### Phase 2 — prove the memory representation and hardware adequacy bridge
+
+1. State a nonvacuous representation relation between encoded first-order
+   images/states/results and real RuntimeState/RuntimeResult. Prove round trips,
+   functionality/canonicality and memory-free compatibility where required.
+   Do not claim a finite encoding round trip for arbitrary `Int -> BV` functions.
+2. Define reachable/valid memory shapes explicitly: mutable image lengths,
+   initialized contents/defaults, word/address widths and write ranges. A
+   `2^aw` mutable table covers correctly shaped aw-bit addresses; a ROM uses
+   its actual contents.size. Prove initialization and preservation of the
+   representation conditions through admitted steps.
+3. Prove memory source evaluation, ROM construction and slot-environment
+   correspondence, including absent-memory/default cases within the declared
+   theorem scope. Prove the memory operator cases by composing actual primitive
+   evaluation, encoded update and denotation/reference equality.
+4. Discharge enabled-write InRange/width/shape/byte-width conditions rather than
+   omitting them. The finite table's out-of-range no-op is not the reference's
+   enabled-write semantics; malformed/out-of-range cases must remain refused
+   wherever the soundness premises are unavailable. Disabled writes remain no-ops.
+5. Prove dense-node traversal, outputs, flop behavior and memory next-state for
+   both active and quiet branches, then whole-cycle adequacy through the same
+   Surface resolution/Eval proof framework. `stepMems_quiet` alone is not active
+   commit preservation, and executed guards are not a general theorem.
+6. Supply a memory-capable supportedness/checking policy whose true conditions
+   justify the new theorem. Preserve the original RuntimeWF and old generic
+   theorem scopes; add explicit representability/shape premises to the new route
+   where needed instead of silently narrowing the original theorem.
+7. Audit theorem axioms and trust scope. No sorry/admit/sorryAx, invented axioms,
+   unchecked reduction escape or disabled checks. Report ordinary Lean axioms
+   accurately; do not describe computational guards as kernel adequacy proofs.
+
+Deliverable: independently rebuilt source/operator/state/result/commit and
+whole-cycle correspondence theorems, a justified support policy and meaningful
+counterexamples to its refusal boundaries. Public support must stay closed until
+these obligations are discharged; simply removing `memFree` is not a solution.
+
+#### Phase 3 — connect specialization, checking and the actual FP runner
+
+1. Run BTA on the new whole-cycle program with DesignCert static and exactly
+   edges/input/state dynamic. Verify annotation well-formedness and erasure back
+   to the resolved interpreter; preserve the original specialization semantics.
+2. Generate with the proved production specializer. Preserve primitive codes and
+   mirror every added primitive in Encoding, evalPrim, the object mix primTable
+   and exhaustive proof cases. The read/write additions already have component
+   evidence; validate their use through the whole interpreter.
+3. Obtain a call-free residual with the intended three dynamic arguments and run
+   the existing checker at its returned height bound. If structural calls remain,
+   repair inlining/static information or make a separately proved checker
+   extension with real fuel/shape premises. Never apply the call-free height
+   theorem to a recursive residual or accept it by bypassing the checker.
+4. Wire the actual DCERT2 support, generation and readiness drivers to the proved
+   memory-capable route and result/state codec. Keep DCERT1 compatibility and
+   reset/clock/async format distinctions explicit; do not discard DCERT2 metadata
+   to make an old loader accept it. Keep old driver/artifact identities historical.
+5. Construct a nonvacuous initial state from the real design, preserving required
+   memory/ROM initialization. The readiness driver must execute the projection's
+   checked residual, carrying returned memory state to subsequent cycles.
+6. Use decoded encoded-memory contents and state/output observations to show
+   real transitions. Count flop, memory and output changes separately. A memory
+   header, a stable flop vector or generation-only success is not runtime motion.
+   Do not infer equality of arbitrary memory functions from a few sampled reads.
+
+Deliverable: runnable serial decode -> support -> generate/check -> readiness
+procedure with true producer exits and immutable attempts. Run whole PicoRV32
+at the frozen source/configuration, retaining exact phase metrics and genuine
+memory transitions. Update its FP cell only when all declared required phases
+actually pass. Compare with the old branch's genuine matched capabilities and
+state the difference between inherited missing memory support and a port bug.
+
+#### Phase 4 — restore frontend, wrapper and normalization support for all units
+
+Do actual targeted fixes and affected whole-unit runs; do not stop at the
+manifest. Keep a per-unit first-failure record and follow the first real
+source/semantic divergence. Old and master tools may differ: compare matching
+input artifacts before attributing a regression to one code change.
+
+| Requested unit | Current FP support work / first investigation |
+| --- | --- |
+| B01 CORE-ET DCache | Trace the real Concat/mux width change before the second master bitwidth refusal; retain old frontend pass and later old memory/phase-divider refusal. A simple signed-mux diagnostic passed both binaries and did not reproduce this failure. Fix the producer/width semantics with a reproducer, not the Concat check. |
+| B02 CVA6 HPDcache | Check exact whole wrapper/config/type bindings, old reader/lowering and actual combinational-loop provenance; recover or implement the required frontend capability. |
+| B03 CORE-ET neighborhood I-cache | Resolve the shared ambiguous package imports using a justified configuration/input adapter. Record qualification/source differences; preserve whole components and parameters. |
+| B04 CVA6 MMU/TLB/PTW | Diagnose its own loop/configuration/lowering failure using the full requested group, not a smaller MMU or isolated leaf. |
+| B05 CORE-ET ET-Link -> AXI | Restore correct declaration/file ordering and required adapter behavior for the actual group; keep failed preparation attempts distinct from configured generation. |
+| B06 CVA6 LSU | Diagnose its whole-unit combinational-loop path and memory/clock/configuration requirements; do not assume it shares another unit's root cause. |
+| B07 CORE-ET VPU | Diagnose the actual whole VPU loop/lowering stop and then implement any newly exposed FP operators/memory shapes with their proof bridge. |
+| B08 CORE-ET IntPipe/scoreboards | Preserve the complete requested group and diagnose its own loop/width/configuration failure. |
+| B09 CVA6 issue/scoreboard | Preserve the existing whole-unit FP evidence as a control; refresh only when an affected dependency/implementation changes. Preserve reset/async metadata. |
+| B10 CVA6 frontend | Preserve existing FP evidence and complete clock/reset/async behavior as a control; no blanket unchanged rerun. |
+| B11 CORE-ET TLB | Recover proper memory commits under normalization/phase scheduling, with slot enables/clock semantics proved; retain original refusals. |
+| B12 PicoRV32 whole core | Complete Phases 1-3 and real memory-enabled generation/readiness, not only the existing emitter/loader success. |
+
+For every required newly exposed FP source/operator/clock shape, implement it in
+the same backend and extend the corresponding representation/adequacy/checker
+proofs before admission. Keep each failed phase and successful earlier phase.
+Use targeted original-branch execution/configuration comparisons as validation,
+not a blanket prerequisite to implementation. Correct shared frontend APIs on
+master where a lost capability is established; if both branches lack support,
+implement the correct capability rather than declare permanent completion at NO.
+
+After each relevant code/configuration change, run the exact affected whole
+unit. First-failure fixes may expose another blocker: record it and keep coding
+while a functional next step is available. Do not map memories to untracked
+registers, remove components, erase async/clock/reset information, disable width,
+loop or single_edge checks, weaken proofs or change benchmark defaults to obtain
+an apparent pass. Any justified wrapper/source adaptation needs an explicit
+before/after binding and semantic explanation.
+
+Deliverable: every requested FP unit reaches the genuine frontend/transport,
+strict support, specialization/checking and residual readiness phases, with old
+matching support/outcome and behavioral differences recorded. No smaller subunit
+or historical third-repository census counts as this acceptance.
+
+#### Phase 5 — fresh preservation, regression and acceptance closure
+
+1. Build the complete relevant FP theorem/driver dependency closure in an
+   independently owned source/build/dependency root with exact explicit targets.
+   Verify exact-target no-build readiness after preparation; default-target
+   success or equal artifact hashes alone is insufficient. Never write a build
+   context with live importers or borrow mutable/hardlinked artifacts.
+2. Run changed semantic unit/boundary/counterexample checks, inherited FP tests
+   and required fresh16/full long validation. Reconcile inventories/two-build,
+   remaining D3/D4, freshDCERT2, integrated 447+6 obligations and all thirty exact
+   paired raw-source comparisons under their original scopes. Retain genuine
+   failures and source/proof adaptations; do not use a narrow passing test for a
+   broader gate. Sections 14-15 and the ledger define the still-independent gates.
+3. Validate all twelve FP whole units using fixed inputs and meaningful edge,
+   reset/async and memory schedules. Obtain matched old-implementation evidence
+   per unit; classify supported/rejected/blocked/undecided by actual phase.
+   Distinguish unchanged legacy behavior, an intentional correctness repair,
+   inherited missing support, configuration/transport difference and a localized
+   port regression. Explain any intentional difference with its proof/evidence.
+4. Synchronize the exact 60-cell JSON, TSV, HTML and ledger from current phase
+   evidence. Record scope: interpreted residual execution, native readiness,
+   equivalence, kernel theorem and trust boundary are different claims. Record
+   re-specialization as a new attempt when no residual was serialized.
+5. FP support is complete only with **12/12 FP YES**, required preserved behavior
+   and the declared FP proof/admission/comparison gates discharged. Then proceed
+   to IR-as-semantics and TV in that order. Retain Legacy/Verified Compiler cells
+   and the final all-60-YES/user-push condition; do not waive the wider migration.
+
+#### Execution protocol and next concrete action for Claude Code
+
+Start Phase 1 immediately from the existing `HardwareMem` dispatch. Implement
+memory-bearing main, its real source/node callers, result codec and per-domain
+commit, then run the audited two-clock whole-entry scenario. This is the next
+bounded code/result checkpoint. Continue directly through the proof and driver
+phases while runnable; a compiling checkpoint is not an instruction to stop.
+If a proof attempt fails, retain its real error, isolate a smaller necessary
+lemma and keep working rather than treating proof engineering as unavailable
+capability. Use explicit pending obligations without representing them as passes.
+
+For each checkpoint record source/config/tool/dependency identities; full
+argv/cwd and selected environment; true producer exit; wall/user/system CPU;
+raw maximum RSS in KiB plus correctly derived GiB; source/residual sizes and
+counts; checked bound; clock/reset/async/memory shape; readiness observations;
+and first failure or admission scope. Record NOT_REACHED for phases that did not
+execute. Attempts and reuse decisions must be separate and immutable, with
+content-based identity and correct propagation of pipeline producer failures.
+
+Small regression fixtures belong to the repository and must respect AGENTS.md
+runtime/dependency rules. Whole benchmark coverage belongs to separate bound
+benchmark inputs/runners. Use project-local runtime directories. Supervision
+continues at the user's 20-minute interval and sends another instruction only
+when the current one has finished or needs verified corrective guidance. No
+performance/profiling/optional native-build research before functional coverage.
