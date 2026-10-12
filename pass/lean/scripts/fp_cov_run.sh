@@ -5,11 +5,16 @@
 # metrics DURING the coverage attempt; it adds no research experiment, no
 # repetition sweep and no profiling.
 #
-# WHOLE-RUN cgroup observation, unlike fp_gen_counterbalanced.sh: the sampler
-# polls the delegated scope until the process exits and keeps the FINAL
-# memory.peak and FINAL memory.events, with memory.max read back as genuine
-# enforcement.  If the scope disappears before a sample lands, the record says
-# so rather than promoting the requested limit into observed evidence.
+# SAMPLED cgroup observation.  The sampler polls the delegated scope every 0.5 s
+# while the process lives and retains the LAST SAMPLE TAKEN BEFORE EXIT.  That is
+# bounded sampled evidence, NOT a guaranteed exact final peak or final OOM
+# counter: the scope is torn down at exit, so anything that happens between the
+# last sample and teardown is unobserved.  `memory.max` is a genuine enforcement
+# read-back.  If no sample lands at all the record says `requested-only` rather
+# than promoting the requested limit into observed evidence.
+#
+# This is still strictly better than fp_gen_counterbalanced.sh, which samples
+# ONCE at startup; but it must not be described as a final peak.
 #
 #   fp_cov_run.sh <row-id> <approach> <cell-dir> <mem-max> <timeout-s> -- <argv...>
 set -uo pipefail
@@ -50,9 +55,9 @@ date -Iseconds > "$CELL/ended_at"
 # FINAL observation = the last sample taken while the scope still existed.
 if [ "$samples" -gt 0 ]; then
   awk '/^t=/{blk=""} {blk=blk $0 "\n"} END{printf "%s", blk}' "$CELL/cgroup.samples" > "$CELL/cgroup.final"
-  echo "observation_scope=final-sample-before-exit samples=$samples" >> "$CELL/cgroup.final"
+  echo "observation_scope=LAST-SAMPLE-BEFORE-EXIT (bounded sampling at 0.5 s; NOT a guaranteed final peak or final OOM counter) samples=$samples" >> "$CELL/cgroup.final"
 else
-  echo "observation_scope=NONE: the scope never appeared to the sampler; memory.max is REQUESTED only, not observed" > "$CELL/cgroup.final"
+  echo "observation_scope=NONE (requested-only): no sample landed before exit; memory.max here is REQUESTED, not observed" > "$CELL/cgroup.final"
 fi
 echo "$rc" > "$CELL/exit"
 printf '%-26s %-22s rc=%-4s %s | cgroup samples=%s\n' "$ROW" "$APP" "$rc" \

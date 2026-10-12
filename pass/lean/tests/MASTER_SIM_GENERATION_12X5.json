@@ -977,13 +977,16 @@
     "top": "picorv32 (whole core, not a submodule)",
     "route": "lhd compile verilog -> lg; lhd pass single_edge -> lg; lhd compile lg: -> lean. single_edge is REQUIRED: a direct compile fails with \"pass.lean: unsupported certificate op(s): latch (first at n_1460). 68 node(s) ... no certificate encoding\".",
     "generator_binary": "k8-opt lhd sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b (bazel-bin/ points at k8-FASTBUILD, sha256 414d5dcbf99b37fe..., which silently omits the .dcert)",
-    "reader": "yosys-slang, yosys.setundef=zero, slang --ignore-assertions"
+    "reader": "yosys-slang, yosys.setundef=zero, slang --ignore-assertions",
+    "parameters": "FROZEN: picorv32.v default parameters as shipped at pin ef203c2b0a3f (no -D/-G overrides passed); whole core, memory preserved (cpuregs: aw 5, dw 32, next_img slot 3225, clock 0)",
+    "shape": "1302 sources, 2279 nodes, 18 outputs, 174 flops, 1 memory"
    },
    "approaches": {
     "Futamura projection": {
      "status": "BLOCKED",
      "evidence": {
-      "blocker": "master emits DCERT2 (picorv32.dcert, magic DCERT2, 1302 sources); the FP driver CertIO.V1 is DCERT1-only and refuses with \"bad magic: expected DCERT1\". Fresh DCERT2 transport for FP is the prerequisite."
+      "blocker": "master emits DCERT2 (picorv32.dcert, magic DCERT2, 1302 sources); the FP driver CertIO.V1 is DCERT1-only and refuses with \"bad magic: expected DCERT1\". Fresh DCERT2 transport for FP is the prerequisite.",
+      "second_blocker": "EVEN WITH DCERT2 TRANSPORT, support fails statically: CertLoad.supportReport requires memFree (D.memories.size == 0) and picorv32 carries 1 memory (cpuregs: aw 5, dw 32, next_img slot 3225, clock 0), plus 1 memImg source, which also fails the `sources` conjunct. Memory support is a bounded semantics/proof obligation, not an optimization experiment. The memory is preserved; memFree is not removed."
      },
      "generation_ms": null,
      "metrics": {
@@ -1001,7 +1004,41 @@
     "Verified compiler": {
      "status": "YES",
      "evidence": {
-      "cell_dir": "generated/master_port/cov12x5/B12_picorv32/vc_opt",
+      "emission": {
+       "cell_dir": "generated/master_port/cov12x5/B12_picorv32/vc_opt",
+       "wall_s": "4.01",
+       "user_cpu_s": "0.29",
+       "sys_cpu_s": "0.02",
+       "max_rss_kb": "76012",
+       "exit": "0",
+       "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\ncompile\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s2_single_edge/lg\n--top\npicorv32\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/vc_opt/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/vc_opt/result.json\n--emit-dir\nlean:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/vc_opt/lean\n--set\nformal.lean.mode=verified_compiler",
+       "cgroup_observation": "t=1791766596.991674519\nmemory.max=17179869184\nmemory.peak=7766016\nmemory.current=6225920\nevents.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0 \nobservation_scope=final-sample-before-exit samples=2",
+       "loadavg_start": "37.15 36.98 39.02",
+       "started_at": "2026-10-11T17:56:33-07:00",
+       "ended_at": "2026-10-11T17:56:38-07:00"
+      },
+      "generation_check": {
+       "cell_dir": "generated/master_port/cov12x5/B12_picorv32/checks/vc",
+       "wall_s": "39.73",
+       "user_cpu_s": "17.07",
+       "sys_cpu_s": "9.52",
+       "max_rss_kb": "6929248",
+       "exit": "0",
+       "argv": "env\nLEAN_PATH=/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Cli/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/batteries/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Qq/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/aesop/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/importGraph/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/plausible/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/mathlib/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/build/lib/lean:/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/lib/lean\n/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean\n-o\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/vc/picorv32_Lgraph.olean\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/vc_opt/lean/picorv32_Lgraph.lean",
+       "cgroup_observation": "t=1791767566.324201490\nmemory.max=34359738368\nmemory.peak=1190207488\nmemory.current=289312768\nevents.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0 \nobservation_scope=final-sample-before-exit samples=76",
+       "loadavg_start": "33.88 34.77 36.85",
+       "started_at": "2026-10-11T18:12:06-07:00",
+       "ended_at": "2026-10-11T18:12:46-07:00",
+       "what": "lean elaboration of the emitted source; the three native_decide theorems picorv32_compiles, picorv32_clock_bounds and a third RUN during elaboration and succeeded",
+       "olean": [
+        {
+         "path": "generated/master_port/cov12x5/B12_picorv32/checks/vc/picorv32_Lgraph.olean",
+         "bytes": 15542272,
+         "sha256": "eecac1e79854265e5ece529c9583d1be96fd1553b712936d5d457af24826e562"
+        }
+       ],
+       "axioms": "picorv32_compiles: [propext, picorv32_compiles._native.native_decide.ax_1_1]; picorv32_clock_bounds: [propext, Quot.sound, ..native_decide.ax_1_1]; picorv32_step_correct: [propext, Classical.choice, Quot.sound, picorv32_compiles._native.native_decide.ax_1_1]. No sorryAx. native_decide witnesses are TRUSTED native execution, not kernel proofs."
+      },
       "artifacts": [
        {
         "path": "generated/master_port/cov12x5/B12_picorv32/vc_opt/lean/picorv32_Lgraph.lean",
@@ -1019,12 +1056,7 @@
         "sha256": "6a756674e1a268b3b8409a9bae76ed40ef74c5fb2f8e84d3d8a89c73d658cd6e"
        }
       ],
-      "wall_s": "4.01",
-      "user_s": "0.29",
-      "sys_s": "0.02",
-      "maxrss_kb": "76012",
-      "exit": "0",
-      "cgroup": "t=1791766596.991674519\nmemory.max=17179869184\nmemory.peak=7766016\nmemory.current=6225920\nevents.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0 \nobservation_scope=final-sample-before-exit samples=2"
+      "remaining": "RTL equivalence, full validation and kernel certification are NOT claimed."
      },
      "generation_ms": 4010,
      "metrics": {
@@ -1063,27 +1095,64 @@
     "Legacy": {
      "status": "YES",
      "evidence": {
-      "cell_dir": "generated/master_port/cov12x5/B12_picorv32/legacy_opt",
+      "emission": {
+       "cell_dir": "generated/master_port/cov12x5/B12_picorv32/legacy_wf",
+       "wall_s": "0.32",
+       "user_cpu_s": "0.27",
+       "sys_cpu_s": "0.03",
+       "max_rss_kb": "76148",
+       "exit": "0",
+       "argv": "/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd\ncompile\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s2_single_edge/lg\n--top\npicorv32\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/legacy_wf/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/legacy_wf/result.json\n--emit-dir\nlean:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/legacy_wf/lean\n--set\nformal.lean.emit_cert=true\n--set\nformal.lean.cert_wf=eval",
+       "cgroup_observation": "observation_scope=NONE: the scope never appeared to the sampler; memory.max is REQUESTED only, not observed",
+       "loadavg_start": "33.39 34.13 36.13",
+       "started_at": "2026-10-11T18:15:58-07:00",
+       "ended_at": "2026-10-11T18:15:59-07:00"
+      },
+      "generation_check": {
+       "cell_dir": "generated/master_port/cov12x5/B12_picorv32/checks/legacy_wf",
+       "wall_s": "87.87",
+       "user_cpu_s": "133.03",
+       "sys_cpu_s": "10.87",
+       "max_rss_kb": "8414084",
+       "exit": "0",
+       "argv": "env\nLEAN_PATH=/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Cli/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/batteries/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Qq/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/aesop/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/importGraph/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/plausible/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/mathlib/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/build/lib/lean:/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/lib/lean\n/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean\n-o\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/legacy_wf/picorv32_Lgraph.olean\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/legacy_wf/lean/picorv32_Lgraph.lean",
+       "cgroup_observation": "t=1791767857.082093458\nmemory.max=51539607552\nmemory.peak=2872528896\nmemory.current=2800951296\nevents.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0 \nobservation_scope=final-sample-before-exit samples=168",
+       "loadavg_start": "33.25 34.08 36.09",
+       "started_at": "2026-10-11T18:16:09-07:00",
+       "ended_at": "2026-10-11T18:17:37-07:00",
+       "what": "re-emitted with formal.lean.cert_wf=eval (the earlier cert_wf=skip artifact carried NO wf check) and elaborated; 279 decide/guard constructs evaluated",
+       "olean": [
+        {
+         "path": "generated/master_port/cov12x5/B12_picorv32/checks/legacy_wf/picorv32_Lgraph.olean",
+         "bytes": 70343304,
+         "sha256": "f44f88a77ae827dd7923c9c3eb4154ecba7a86e24e528a05bc41bd4d7732435e"
+        }
+       ]
+      },
       "artifacts": [
        {
-        "path": "generated/master_port/cov12x5/B12_picorv32/legacy_opt/lean/picorv32_Lgraph.lean",
-        "bytes": 894027,
-        "sha256": "fb3d8c81c7659064b3cbdfa7240a3b9e52ba7a1a6f117124e7175378be8258e2"
+        "path": "generated/master_port/cov12x5/B12_picorv32/legacy_wf/lean/picorv32_Lgraph.lean",
+        "bytes": 1537011,
+        "sha256": "dfa4d5e52ad9400f11e8c870aabae252d36b7e7b216d6f44bfac84aed86b1d21"
        },
        {
-        "path": "generated/master_port/cov12x5/B12_picorv32/legacy_opt/lean/picorv32_io.json",
+        "path": "generated/master_port/cov12x5/B12_picorv32/legacy_wf/lean/picorv32_io.json",
         "bytes": 2275,
         "sha256": "6a756674e1a268b3b8409a9bae76ed40ef74c5fb2f8e84d3d8a89c73d658cd6e"
        }
       ],
-      "wall_s": "1.25",
-      "user_s": "0.36",
-      "sys_s": "0.03",
-      "maxrss_kb": "74572",
-      "exit": "0",
-      "cgroup": "t=1791766871.150937875\nmemory.max=17179869184\nmemory.peak=15929344\nmemory.current=15720448\nevents.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0 \nobservation_scope=final-sample-before-exit samples=2"
+      "superseded": {
+       "note": "cert_wf=skip emission retained as phase evidence, not a generation check",
+       "artifacts": [
+        {
+         "path": "generated/master_port/cov12x5/B12_picorv32/legacy_opt/lean/picorv32_Lgraph.lean",
+         "bytes": 894027,
+         "sha256": "fb3d8c81c7659064b3cbdfa7240a3b9e52ba7a1a6f117124e7175378be8258e2"
+        }
+       ]
+      }
      },
-     "generation_ms": 1250,
+     "generation_ms": 320,
      "metrics": {
       "generation_wall_ms": null,
       "generation_user_cpu_ms": null,
@@ -1099,7 +1168,65 @@
     "IR-as-semantics": {
      "status": "YES",
      "evidence": {
-      "cell_dir": "generated/master_port/cov12x5/B12_picorv32/ir_as_semantics",
+      "emission": {
+       "cell_dir": "generated/master_port/cov12x5/B12_picorv32/ir_as_semantics",
+       "wall_s": "0.06",
+       "user_cpu_s": "0.04",
+       "sys_cpu_s": "0.01",
+       "max_rss_kb": "13376",
+       "exit": "0",
+       "argv": "python3\n-I\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/ir_as_semantics/tree/pass/lean/scripts/make_sim_launcher.py\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/verified_compiler2/lean/picorv32_Lgraph.lean",
+       "cgroup_observation": "observation_scope=NONE: the scope never appeared to the sampler; memory.max is REQUESTED only, not observed",
+       "loadavg_start": "34.33 36.63 39.02",
+       "started_at": "2026-10-11T17:55:48-07:00",
+       "ended_at": "2026-10-11T17:55:48-07:00"
+      },
+      "generation_check": {
+       "cert": {
+        "cell_dir": "generated/master_port/cov12x5/B12_picorv32/checks/sims",
+        "wall_s": "9.13",
+        "user_cpu_s": "8.74",
+        "sys_cpu_s": "0.46",
+        "max_rss_kb": "850060",
+        "exit": "0",
+        "argv": "env\nLEAN_PATH=/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Cli/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/batteries/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Qq/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/aesop/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/importGraph/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/plausible/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/mathlib/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/build/lib/lean:/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/lib/lean\n/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean\n-o\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/sims/Sims/picorv32_Cert.olean\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/ir_as_semantics/tree/formal/lean/Sims/picorv32_Cert.lean",
+        "cgroup_observation": "t=1791767700.579465295\nmemory.max=34359738368\nmemory.peak=449781760\nmemory.current=451878912\nevents.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0 \nobservation_scope=final-sample-before-exit samples=17",
+        "loadavg_start": "33.96 34.39 36.35",
+        "started_at": "2026-10-11T18:14:51-07:00",
+        "ended_at": "2026-10-11T18:15:01-07:00"
+       },
+       "main": {
+        "cell_dir": "generated/master_port/cov12x5/B12_picorv32/checks/sims_main",
+        "wall_s": "0.84",
+        "user_cpu_s": "0.24",
+        "sys_cpu_s": "0.37",
+        "max_rss_kb": "478612",
+        "exit": "0",
+        "argv": "env\nLEAN_PATH=/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/sims:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Cli/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/batteries/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/Qq/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/aesop/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/proofwidgets/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/importGraph/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/plausible/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/packages/mathlib/.lake/build/lib/lean:/mada/users/czeng14/projects/livehd-pass-lean-master/formal/lean/.lake/build/lib/lean:/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/lib/lean\n/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean\n-o\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/sims_main/picorv32_Main.olean\n-c\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/checks/sims_main/picorv32_Main.c\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/ir_as_semantics/tree/formal/lean/Sims/picorv32_Main.lean",
+        "cgroup_observation": "t=1791767710.267452484\nmemory.max=34359738368\nmemory.peak=25206784\nmemory.current=25206784\nevents.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0 \nobservation_scope=final-sample-before-exit samples=1",
+        "loadavg_start": "33.75 34.32 36.30",
+        "started_at": "2026-10-11T18:15:09-07:00",
+        "ended_at": "2026-10-11T18:15:10-07:00"
+       },
+       "what": "both generated modules elaborate; the launcher also compiles to C, so lake exe Simpicorv32 has its inputs",
+       "olean": [
+        {
+         "path": "generated/master_port/cov12x5/B12_picorv32/checks/sims/Sims/picorv32_Cert.olean",
+         "bytes": 15514320,
+         "sha256": "63c2b898fc3374fb11f19139ef7960f0e1a98cf3f6dd21508671e0bd017ef56d"
+        },
+        {
+         "path": "generated/master_port/cov12x5/B12_picorv32/checks/sims_main/picorv32_Main.olean",
+         "bytes": 14728,
+         "sha256": "5717030f8d97900581d24a16349187ccb7dd2b161ac42d5f609385a8f7d0cdf0"
+        },
+        {
+         "path": "generated/master_port/cov12x5/B12_picorv32/checks/sims_main/picorv32_Main.c",
+         "bytes": 5094,
+         "sha256": "091cb52e522692f772d70b40837f63a1ad82e8f7789f17f2b767c2050befc81e"
+        }
+       ]
+      },
       "artifacts": [
        {
         "path": "generated/master_port/cov12x5/B12_picorv32/ir_as_semantics/tree/formal/lean/Sims/picorv32_Cert.lean",
@@ -1112,12 +1239,7 @@
         "sha256": "43db2aee9195e43d1085b1e01c239a3c050140d35551f1746853cb40aa3f5c98"
        }
       ],
-      "wall_s": "0.06",
-      "user_s": "0.04",
-      "sys_s": "0.01",
-      "maxrss_kb": "13376",
-      "exit": "0",
-      "cgroup": "observation_scope=NONE: the scope never appeared to the sampler; memory.max is REQUESTED only, not observed"
+      "remaining": "the lake exe link was not performed; elaboration plus C emission is what is claimed."
      },
      "generation_ms": 60,
      "metrics": {
@@ -1131,6 +1253,34 @@
       "environment_sha256": null,
       "attempt_record": null
      }
+    }
+   },
+   "shared_phases": {
+    "upstream_rtl_elaboration": {
+     "cell_dir": "generated/master_port/cov12x5/B12_picorv32/s1_compile",
+     "wall_s": "5.16",
+     "user_cpu_s": "4.22",
+     "sys_cpu_s": "0.24",
+     "max_rss_kb": "326032",
+     "exit": "0",
+     "argv": "/mada/users/czeng14/projects/livehd-pass-lean-master/bazel-bin/lhd/lhd\ncompile\nverilog\n/mada/users/czeng14/projects/picorv32/picorv32.v\n--reader\nyosys-slang\n--top\npicorv32\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s1_compile/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s1_compile/result.json\n--emit-dir\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s1_compile/lg\n--set\nyosys.setundef=zero\n--\n--ignore-assertions",
+     "cgroup_observation": "t=1791766392.083384750\nmemory.max=17179869184\nmemory.peak=202678272\nmemory.current=39591936\nevents.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0 \nobservation_scope=final-sample-before-exit samples=9",
+     "loadavg_start": "37.34 38.09 39.85",
+     "started_at": "2026-10-11T17:53:06-07:00",
+     "ended_at": "2026-10-11T17:53:12-07:00"
+    },
+    "single_edge": {
+     "cell_dir": "generated/master_port/cov12x5/B12_picorv32/s2_single_edge",
+     "wall_s": "1.15",
+     "user_cpu_s": "0.63",
+     "sys_cpu_s": "0.04",
+     "max_rss_kb": "148944",
+     "exit": "0",
+     "argv": "/mada/users/czeng14/projects/livehd-pass-lean-master/bazel-bin/lhd/lhd\npass\nsingle_edge\n--top\npicorv32\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s1_compile/lg\n--emit-dir\nlg:/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s2_single_edge/lg\n--workdir\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s2_single_edge/work\n--result-json\n/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B12_picorv32/s2_single_edge/result.json",
+     "cgroup_observation": "t=1791766401.187371107\nmemory.max=17179869184\nmemory.peak=18284544\nmemory.current=18284544\nevents.low=0 events.high=0 events.max=0 events.oom=0 events.oom_kill=0 events.oom_group_kill=0 \nobservation_scope=final-sample-before-exit samples=2",
+     "loadavg_start": "36.97 37.99 39.80",
+     "started_at": "2026-10-11T17:53:20-07:00",
+     "ended_at": "2026-10-11T17:53:21-07:00"
     }
    }
   }
@@ -1171,5 +1321,5 @@
  "optimization_schedule": "after coverage table runs",
  "environment_record": "pass/lean/tests/MASTER_SIM_GENERATION_ENVIRONMENT.json",
  "observed_environment_sha256": "ad186ee1424e15afa052bfa000fa50843bd954354d0f10e49256e711632edd8a",
- "provisional": "INCOMPLETE/PROVISIONAL: 3 of 60 cells YES, 1 BLOCKED, 1 RUNNING, 55 PENDING. The final checkpoint is gated on all 60 YES."
+ "provisional": "INCOMPLETE/PROVISIONAL. 60 cells: 3 YES with executed generation checks, 2 BLOCKED, 55 PENDING. A YES means the approach-native artifact was generated AND its required generation check ran and passed; it does NOT assert RTL equivalence, full validation or kernel certification. The final checkpoint is gated on all 60 YES."
 }

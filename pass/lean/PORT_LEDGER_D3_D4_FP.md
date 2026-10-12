@@ -5999,13 +5999,42 @@ RTL `/soe/czeng14/projects/picorv32/picorv32.v`, 94,657 bytes, sha256
 `0836050971b3c6cd…`, pin `ef203c2b0a3f…`, tracked tree clean. Top is
 `picorv32`, the **whole core**. Shape: 1,302 sources, 2,279 nodes.
 
-| approach | status | artifact | wall |
-|---|---|---|---|
-| Verified compiler | **YES** | `picorv32_Lgraph.lean` 279,483 B + `picorv32.dcert` 70,067 B (DCERT2) + `_io.json` | 4.01 s |
-| Legacy | **YES** | `picorv32_Lgraph.lean` 894,027 B + `_io.json` | 1.25 s |
-| IR-as-semantics | **YES** | `Sims/picorv32_Cert.lean` 277,445 B + `_Main.lean` 396 B | 0.06 s |
-| Futamura projection | **BLOCKED** | -- | -- |
-| Translation validation | **BLOCKED** | -- | -- |
+A **YES here means the artifact was generated AND its required generation check
+ran and passed** -- not RTL equivalence, not full validation, not kernel
+certification. Source emission alone is a phase, not a YES; the first version of
+this section said otherwise and was premature.
+
+| approach | status | emission | generation check | artifact |
+|---|---|---|---|---|
+| Verified compiler | **YES** | 4.01 s | **39.73 s** elaboration, olean 15,542,272 B; the three `native_decide` theorems ran and succeeded | `picorv32_Lgraph.lean` 279,483 B + `picorv32.dcert` 70,067 B + `_io.json` |
+| Legacy | **YES** | 0.32 s | **87.87 s** elaboration, olean 70,343,304 B, 279 wf constructs evaluated | `picorv32_Lgraph.lean` 1,537,011 B + `_io.json`, emitted at `cert_wf=eval` |
+| IR-as-semantics | **YES** | 0.06 s | Cert **9.13 s** olean 15,514,320 B; Main **0.84 s** olean + C 5,094 B | `Sims/picorv32_Cert.lean` 277,445 B + `_Main.lean` 396 B |
+| Futamura projection | **BLOCKED** | -- | -- | -- |
+| Translation validation | **BLOCKED** | -- | -- | -- |
+
+Two corrections went into those rows. The legacy artifact was first emitted with
+`formal.lean.cert_wf=skip`, which carries **no** well-formedness check at all;
+it is re-emitted at `cert_wf=eval` (1,537,011 B, `LegacyCertWF` imported, 279
+constructs) and that version is what elaborates. The `cert_wf=skip` artifact is
+retained as phase evidence, not retracted. And the verified-compiler witnesses
+are **trusted native execution, not kernel proofs**:
+
+```
+picorv32_compiles      [propext, picorv32_compiles._native.native_decide.ax_1_1]
+picorv32_clock_bounds  [propext, Quot.sound, …native_decide.ax_1_1]
+picorv32_step_correct  [propext, Classical.choice, Quot.sound,
+                        picorv32_compiles._native.native_decide.ax_1_1]
+```
+
+No `sorryAx`. `native_decide` discharges through a per-theorem native axiom, so
+these are checked by execution and trusted by the kernel, which is what the
+generation check establishes and no more. The `lake exe Simpicorv32` link was
+not performed; elaboration plus C emission is what is claimed for
+IR-as-semantics.
+
+Parameters are frozen: `picorv32.v` defaults as shipped at the pin, no `-D`/`-G`
+overrides, whole core, **memory preserved** -- 1,302 sources, 2,279 nodes, 18
+outputs, 174 flops, 1 memory.
 
 The three successes are genuinely different artifacts from their own routes, not
 one borrowed: legacy emits `picorv32_comb`/`_next`/`_step` plus
@@ -6043,11 +6072,21 @@ work and is queued.
 
 ### 58.4 The two blockers, precisely
 
-**Futamura projection.** The certificate master emits is **DCERT2**
+**Futamura projection -- two independent prerequisites, not one.** The
+certificate master emits is **DCERT2**
 (`picorv32.dcert`, magic `DCERT2`, 1,302 sources, sha256 `f85a2a9db8ac89ba…`).
 The FP driver refuses it: `bad magic: expected DCERT1`. The prerequisite is
 fresh DCERT2 transport for FP -- the same gap section 46.4 recorded, now
 confirmed on a requested target rather than inferred.
+
+**Transport alone would not demonstrate support.** `CertLoad.supportReport`
+requires `memFree` (`D.memories.size == 0`), and `picorv32` carries **one
+memory** -- `cpuregs`, `aw 5`, `dw 32`, next-image slot 3225, clock 0 -- plus a
+`memImg` source, which also fails the `sources` conjunct. So fixing the magic
+would leave FP unsupported on this whole core. Memory support is a bounded
+semantics and proof obligation, recorded as functional coverage work. The memory
+is preserved, `memFree` is not removed, and no adequacy is asserted outside the
+existing theorem.
 
 **Translation validation.** The route is
 `d3_sweep.py --manifest <tsv> --certs <dir> --out <dir> --jobs 1`, and it
@@ -6063,10 +6102,16 @@ run would be exploratory and is not recorded as a YES.
 
 ### 58.5 Metrics recorded during coverage, and the guard scope
 
-`pass/lean/scripts/fp_cov_run.sh` runs each cell under a delegated scope and,
-unlike the counterbalanced script, **samples the cgroup until the process
-exits**, keeping the final `memory.peak` and final `memory.events` with
-`memory.max` read back as genuine enforcement. When a cell is too fast for a
+`pass/lean/scripts/fp_cov_run.sh` runs each cell under a delegated scope and
+polls the cgroup every 0.5 s while the process lives, retaining the **last
+sample taken before exit**.
+
+> **CLAIM CORRECTION.** That is **bounded sampled evidence, not a guaranteed
+> final peak or final OOM counter** -- the scope is torn down at exit, so
+> anything between the last sample and teardown is unobserved. `memory.max` is
+> a genuine enforcement read-back. It is still strictly better than the
+> counterbalanced script's single startup sample, but it must not be called a
+> whole-run final value. When a cell is too fast for a
 sample to land it records
 `observation_scope=NONE: … memory.max is REQUESTED only, not observed` rather
 than promoting the requested limit -- which is what the 0.06 s IR-as-semantics
