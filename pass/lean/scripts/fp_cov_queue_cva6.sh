@@ -13,6 +13,7 @@ FND=$R/generated/master_port/cva6_foundation
 LOPT=/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd
 FL=$FND/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.flistplus.f
 ROW=${1:?row}; BLK=${2:?block}; APP=${3:?approach: legacy|verified_compiler}
+case "$APP" in legacy|verified_compiler) ;; *) echo "unknown approach: $APP"; exit 2 ;; esac
 # IMMUTABLE ATTEMPT ID.  The first version wrote every phase into a fixed
 # directory per row, so a retry OVERWROTE the failed attempt's logs -- which is
 # exactly what happened to the raw-top B09/B10 attempts (see
@@ -22,12 +23,20 @@ ATTEMPT=${ATTEMPT:-$(date +%Y%m%dT%H%M%S)-$$}
 TOP="${BLK}_gate"; WRAP=${WRAP:-$FND/cva6_wrappers/${TOP}.sv}   # WRAP= overrides with a prepared wrapper
 B=$COV/$ROW/attempt-$ATTEMPT
 [ -r "$WRAP" ] || { echo "$ROW: NO WRAPPER $WRAP"; exit 2; }
-[ -e "$B" ] && { echo "$ROW: ATTEMPT COLLISION, $B already exists; refusing to reuse"; exit 3; }
-mkdir -p "$B" "$COV/tmp"; export TMPDIR=$COV/tmp TMP=$COV/tmp TEMP=$COV/tmp
+# ATOMIC exclusive creation: plain mkdir fails if the directory exists, so a
+# colliding ATTEMPT is refused rather than silently reused (mkdir -p would).
+mkdir -p "$COV/tmp" "$(dirname "$B")"
+mkdir "$B" 2>/dev/null || { echo "$ROW: ATTEMPT COLLISION, $B exists; refusing to reuse"; exit 3; }; export TMPDIR=$COV/tmp TMP=$COV/tmp TEMP=$COV/tmp
 CR="bash $R/pass/lean/scripts/fp_cov_run.sh"
 # Parse the TOP-LEVEL status field, not any "pass" substring anywhere in the
 # record (a phase name or a diagnostic can contain it).
 json_status() { python3 -I -c "import json,sys;print((json.load(open(sys.argv[1])) or {}).get('status',''))" "$1" 2>/dev/null; }
+
+# PRE-LAUNCH provenance binding: written BEFORE any phase executes.
+{ echo "row=$ROW attempt=$ATTEMPT top=$TOP"; echo "wrapper=$WRAP sha256=$(sha256sum "$WRAP" | cut -d\  -f1)";
+  echo "filelist=$FL sha256=$(sha256sum "$FL" | cut -d\  -f1)"; echo "lhd=$LOPT sha256=$(sha256sum "$LOPT" | cut -d\  -f1)";
+  echo "max_width=1048576 (scripts/run_cva6_module_lean_stress.sh:175; the DEFAULT 1024 refusal is preserved and recorded)";
+} > "$B/BINDING.txt"
 
 $CR "$ROW" s1_compile_lg "$B/s1_compile" 48G 5400 -- \
   "$LOPT" compile verilog "$WRAP" --reader yosys-slang --top "$TOP" \
@@ -77,8 +86,4 @@ lg=$(cat "$B/legacy/exit" 2>/dev/null || echo 99)
 [ "$lg" = 0 ] && [ -s "$B/legacy/lean/${TOP}_Lgraph.lean" ] \
   && echo "$ROW/$ATTEMPT legacy EMITTED" || echo "$ROW/$ATTEMPT legacy NO (exit $lg)"
 fi
-{ echo "row=$ROW attempt=$ATTEMPT top=$TOP"; echo "wrapper=$WRAP sha256=$(sha256sum "$WRAP" | cut -d\  -f1)";
-  echo "filelist=$FL sha256=$(sha256sum "$FL" | cut -d\  -f1)"; echo "lhd=$LOPT sha256=$(sha256sum "$LOPT" | cut -d\  -f1)";
-  echo "max_width=1048576 (scripts/run_cva6_module_lean_stress.sh:175; the DEFAULT 1024 refusal is preserved and recorded)";
-} > "$B/BINDING.txt"
 echo "$ROW/$ATTEMPT: emission phases done"

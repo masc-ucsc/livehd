@@ -13,7 +13,15 @@
   {
    "id": "B01",
    "benchmark": "CORE-ET DCache",
-   "input_mapping": "PENDING",
+   "input_mapping": {
+    "whole_unit": "minion_dcache_top",
+    "components": "whole dv/rtlcosim unit, make-expanded NEW_RTL_FINAL",
+    "source_pin": "/mada/users/czeng14/projects/core-et @ c72b6a2",
+    "route": "coreet_filelist.sh -> anchor.sv + yosys.filelist_file",
+    "options": "yosys.setundef=zero; formal.lean.max_width=1048576; slang --ignore-assertions --relax-enum-conversions",
+    "lhd": "k8-opt sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b",
+    "note": "concrete whole-unit binding; this row is NOT input-PENDING"
+   },
    "approaches": {
     "Futamura projection": {
      "status": "PENDING",
@@ -32,8 +40,13 @@
      }
     },
     "Verified compiler": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the verified-compiler route shares the IDENTICAL upstream prerequisite with legacy -- the same RTL->LGraph compile and single_edge, same lhd binary, same options, same filelist/wrapper -- and that prerequisite FAILED at s1_compile for this row. The verified-compiler EMITTER WAS NEVER REACHED and is NOT claimed tested.",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B01_coreet_dcache/attempt-20261011T193903-2019616",
+      "shared_phases": "s1_compile, s2_single_edge",
+      "rerun_policy": "the identical failed frontend was NOT rerun merely to label a second approach"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -73,20 +86,34 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "phase_times_ms": {
+       "s1_compile": 6910
+      },
+      "peak_rss_kb": {
+       "s1_compile": 325328
+      },
+      "cpu_s": {
+       "s1_compile": {
+        "user": 6.53,
+        "sys": 0.39
+       }
+      },
+      "exit": {
+       "s1_compile": 1
+      },
+      "attempt_record": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B01_coreet_dcache/attempt-20261011T193903-2019616",
+      "source_emission": "NOT_REACHED -- the upstream phase failed; this is not zero and not the frontend time",
+      "evidence_scope": "post-run extraction from immutable retained phase logs; does not recreate missing launch-time input or environment binding",
+      "rss_units": "KiB"
      }
     },
     "IR-as-semantics": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the IR-as-semantics route consumes a generated <top>_Lgraph.lean, which only the verified-compiler emitter produces. That emitter was never reached for this row because the shared RTL->LGraph / single_edge prerequisite failed, so there is no independent usable input for this route.",
+      "independent_input_checked": "yes -- make_sim_launcher.py takes the generated certificate module and nothing else",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B01_coreet_dcache/attempt-20261011T193903-2019616"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -105,7 +132,15 @@
   {
    "id": "B02",
    "benchmark": "CVA6 HPDcache",
-   "input_mapping": "PENDING",
+   "input_mapping": {
+    "whole_unit": "cva6_hpdcache_subsystem_gate",
+    "components": "whole subsystem via the pre-existing gate wrapper",
+    "source_pin": "cva6-blockfinding @ 6cb20010 + whole-core flistplus (353 lines)",
+    "route": "generated/master_port/cva6_foundation/cva6_wrappers/cva6_hpdcache_subsystem_gate.sv",
+    "options": "yosys.setundef=zero; formal.lean.max_width=1048576; slang --ignore-assertions",
+    "lhd": "k8-opt sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b",
+    "note": "concrete whole-unit binding; this row is NOT input-PENDING"
+   },
    "approaches": {
     "Futamura projection": {
      "status": "PENDING",
@@ -124,8 +159,13 @@
      }
     },
     "Verified compiler": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the verified-compiler route shares the IDENTICAL upstream prerequisite with legacy -- the same RTL->LGraph compile and single_edge, same lhd binary, same options, same filelist/wrapper -- and that prerequisite FAILED at s1_compile for this row. The verified-compiler EMITTER WAS NEVER REACHED and is NOT claimed tested.",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B02_cva6_hpdcache/attempt-20261011T195613-2160817",
+      "shared_phases": "s1_compile, s2_single_edge",
+      "rerun_policy": "the identical failed frontend was NOT rerun merely to label a second approach"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -165,20 +205,34 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "phase_times_ms": {
+       "s1_compile": 27560
+      },
+      "peak_rss_kb": {
+       "s1_compile": 825156
+      },
+      "cpu_s": {
+       "s1_compile": {
+        "user": 24.55,
+        "sys": 1.17
+       }
+      },
+      "exit": {
+       "s1_compile": 6
+      },
+      "attempt_record": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B02_cva6_hpdcache/attempt-20261011T195613-2160817",
+      "source_emission": "NOT_REACHED -- the upstream phase failed; this is not zero and not the frontend time",
+      "evidence_scope": "post-run extraction from immutable retained phase logs; does not recreate missing launch-time input or environment binding",
+      "rss_units": "KiB"
      }
     },
     "IR-as-semantics": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the IR-as-semantics route consumes a generated <top>_Lgraph.lean, which only the verified-compiler emitter produces. That emitter was never reached for this row because the shared RTL->LGraph / single_edge prerequisite failed, so there is no independent usable input for this route.",
+      "independent_input_checked": "yes -- make_sim_launcher.py takes the generated certificate module and nothing else",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B02_cva6_hpdcache/attempt-20261011T195613-2160817"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -197,7 +251,15 @@
   {
    "id": "B03",
    "benchmark": "CORE-ET neighborhood I-cache",
-   "input_mapping": "PENDING",
+   "input_mapping": {
+    "whole_unit": "icache_top",
+    "components": "whole rtlcosim unit, 31 files",
+    "source_pin": "/mada/users/czeng14/projects/core-et @ c72b6a2",
+    "route": "coreet_filelist.sh",
+    "options": "yosys.setundef=zero; formal.lean.max_width=1048576; slang --ignore-assertions --relax-enum-conversions",
+    "lhd": "k8-opt sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b",
+    "note": "concrete whole-unit binding; this row is NOT input-PENDING"
+   },
    "approaches": {
     "Futamura projection": {
      "status": "PENDING",
@@ -216,8 +278,13 @@
      }
     },
     "Verified compiler": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the verified-compiler route shares the IDENTICAL upstream prerequisite with legacy -- the same RTL->LGraph compile and single_edge, same lhd binary, same options, same filelist/wrapper -- and that prerequisite FAILED at s1_compile for this row. The verified-compiler EMITTER WAS NEVER REACHED and is NOT claimed tested.",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B03_coreet_icache/attempt-20261011T193911-2021557",
+      "shared_phases": "s1_compile, s2_single_edge",
+      "rerun_policy": "the identical failed frontend was NOT rerun merely to label a second approach"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -257,20 +324,34 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "phase_times_ms": {
+       "s1_compile": 200
+      },
+      "peak_rss_kb": {
+       "s1_compile": 221384
+      },
+      "cpu_s": {
+       "s1_compile": {
+        "user": 0.09,
+        "sys": 0.27
+       }
+      },
+      "exit": {
+       "s1_compile": 1
+      },
+      "attempt_record": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B03_coreet_icache/attempt-20261011T193911-2021557",
+      "source_emission": "NOT_REACHED -- the upstream phase failed; this is not zero and not the frontend time",
+      "evidence_scope": "post-run extraction from immutable retained phase logs; does not recreate missing launch-time input or environment binding",
+      "rss_units": "KiB"
      }
     },
     "IR-as-semantics": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the IR-as-semantics route consumes a generated <top>_Lgraph.lean, which only the verified-compiler emitter produces. That emitter was never reached for this row because the shared RTL->LGraph / single_edge prerequisite failed, so there is no independent usable input for this route.",
+      "independent_input_checked": "yes -- make_sim_launcher.py takes the generated certificate module and nothing else",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B03_coreet_icache/attempt-20261011T193911-2021557"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -289,7 +370,15 @@
   {
    "id": "B04",
    "benchmark": "CVA6 MMU/TLB/PTW",
-   "input_mapping": "PENDING",
+   "input_mapping": {
+    "whole_unit": "cva6_mmu_gate",
+    "components": "cva6_mmu instantiating BOTH cva6_tlb instances, cva6_shared_tlb and cva6_ptw -- the whole configured group",
+    "source_pin": "cva6-blockfinding @ 6cb20010 + whole-core flistplus",
+    "route": "PREPARED wrapper reused: automate_workspace/master_rebase/audits/coverage_missing_wrappers_20261011_1944/generated_wrappers/cva6_mmu_gate.sv",
+    "options": "yosys.setundef=zero; formal.lean.max_width=1048576; slang --ignore-assertions",
+    "lhd": "k8-opt sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b",
+    "note": "concrete whole-unit binding; this row is NOT input-PENDING"
+   },
    "approaches": {
     "Futamura projection": {
      "status": "PENDING",
@@ -308,8 +397,13 @@
      }
     },
     "Verified compiler": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the verified-compiler route shares the IDENTICAL upstream prerequisite with legacy -- the same RTL->LGraph compile and single_edge, same lhd binary, same options, same filelist/wrapper -- and that prerequisite FAILED at s1_compile for this row. The verified-compiler EMITTER WAS NEVER REACHED and is NOT claimed tested.",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B04_cva6_mmu_tlb_ptw/attempt-20261011T195642-2164584",
+      "shared_phases": "s1_compile, s2_single_edge",
+      "rerun_policy": "the identical failed frontend was NOT rerun merely to label a second approach"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -349,20 +443,34 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "phase_times_ms": {
+       "s1_compile": 2260
+      },
+      "peak_rss_kb": {
+       "s1_compile": 321240
+      },
+      "cpu_s": {
+       "s1_compile": {
+        "user": 2.17,
+        "sys": 0.51
+       }
+      },
+      "exit": {
+       "s1_compile": 6
+      },
+      "attempt_record": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B04_cva6_mmu_tlb_ptw/attempt-20261011T195642-2164584",
+      "source_emission": "NOT_REACHED -- the upstream phase failed; this is not zero and not the frontend time",
+      "evidence_scope": "post-run extraction from immutable retained phase logs; does not recreate missing launch-time input or environment binding",
+      "rss_units": "KiB"
      }
     },
     "IR-as-semantics": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the IR-as-semantics route consumes a generated <top>_Lgraph.lean, which only the verified-compiler emitter produces. That emitter was never reached for this row because the shared RTL->LGraph / single_edge prerequisite failed, so there is no independent usable input for this route.",
+      "independent_input_checked": "yes -- make_sim_launcher.py takes the generated certificate module and nothing else",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B04_cva6_mmu_tlb_ptw/attempt-20261011T195642-2164584"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -381,7 +489,15 @@
   {
    "id": "B05",
    "benchmark": "CORE-ET ET-Link\u2192AXI",
-   "input_mapping": "PENDING",
+   "input_mapping": {
+    "whole_unit": "shirecache_mesh_master",
+    "components": "whole rtlcosim unit, 17 files; the axi_port modules themselves have no rtlcosim entry (attempt B05b stopped at FILELIST PREPARATION, before any compilation, and is retained as a separate failed preparation/characterisation attempt -- NOT a configured whole group)",
+    "source_pin": "/mada/users/czeng14/projects/core-et @ c72b6a2",
+    "route": "coreet_filelist.sh",
+    "options": "yosys.setundef=zero; formal.lean.max_width=1048576; slang --ignore-assertions --relax-enum-conversions",
+    "lhd": "k8-opt sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b",
+    "note": "concrete whole-unit binding; this row is NOT input-PENDING"
+   },
    "approaches": {
     "Futamura projection": {
      "status": "PENDING",
@@ -400,8 +516,13 @@
      }
     },
     "Verified compiler": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the verified-compiler route shares the IDENTICAL upstream prerequisite with legacy -- the same RTL->LGraph compile and single_edge, same lhd binary, same options, same filelist/wrapper -- and that prerequisite FAILED at s1_compile for this row. The verified-compiler EMITTER WAS NEVER REACHED and is NOT claimed tested.",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B05_coreet_etlink_axi/attempt-20261011T195828-2179242",
+      "shared_phases": "s1_compile, s2_single_edge",
+      "rerun_policy": "the identical failed frontend was NOT rerun merely to label a second approach"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -441,20 +562,34 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "phase_times_ms": {
+       "s1_compile": 180
+      },
+      "peak_rss_kb": {
+       "s1_compile": 215376
+      },
+      "cpu_s": {
+       "s1_compile": {
+        "user": 0.04,
+        "sys": 0.27
+       }
+      },
+      "exit": {
+       "s1_compile": 1
+      },
+      "attempt_record": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B05_coreet_etlink_axi/attempt-20261011T195828-2179242",
+      "source_emission": "NOT_REACHED -- the upstream phase failed; this is not zero and not the frontend time",
+      "evidence_scope": "post-run extraction from immutable retained phase logs; does not recreate missing launch-time input or environment binding",
+      "rss_units": "KiB"
      }
     },
     "IR-as-semantics": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the IR-as-semantics route consumes a generated <top>_Lgraph.lean, which only the verified-compiler emitter produces. That emitter was never reached for this row because the shared RTL->LGraph / single_edge prerequisite failed, so there is no independent usable input for this route.",
+      "independent_input_checked": "yes -- make_sim_launcher.py takes the generated certificate module and nothing else",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B05_coreet_etlink_axi/attempt-20261011T195828-2179242"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -473,7 +608,15 @@
   {
    "id": "B06",
    "benchmark": "CVA6 LSU",
-   "input_mapping": "PENDING",
+   "input_mapping": {
+    "whole_unit": "load_store_unit_gate",
+    "components": "the whole LSU, not per-component substitutes",
+    "source_pin": "cva6-blockfinding @ 6cb20010 + whole-core flistplus",
+    "route": "PREPARED wrapper reused: automate_workspace/master_rebase/audits/coverage_missing_wrappers_20261011_1944/generated_wrappers/load_store_unit_gate.sv",
+    "options": "yosys.setundef=zero; formal.lean.max_width=1048576; slang --ignore-assertions",
+    "lhd": "k8-opt sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b",
+    "note": "concrete whole-unit binding; this row is NOT input-PENDING"
+   },
    "approaches": {
     "Futamura projection": {
      "status": "PENDING",
@@ -492,8 +635,13 @@
      }
     },
     "Verified compiler": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the verified-compiler route shares the IDENTICAL upstream prerequisite with legacy -- the same RTL->LGraph compile and single_edge, same lhd binary, same options, same filelist/wrapper -- and that prerequisite FAILED at s1_compile for this row. The verified-compiler EMITTER WAS NEVER REACHED and is NOT claimed tested.",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B06_cva6_lsu/attempt-20261011T195644-2164951",
+      "shared_phases": "s1_compile, s2_single_edge",
+      "rerun_policy": "the identical failed frontend was NOT rerun merely to label a second approach"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -533,20 +681,34 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "phase_times_ms": {
+       "s1_compile": 4590
+      },
+      "peak_rss_kb": {
+       "s1_compile": 379924
+      },
+      "cpu_s": {
+       "s1_compile": {
+        "user": 4.5,
+        "sys": 0.45
+       }
+      },
+      "exit": {
+       "s1_compile": 6
+      },
+      "attempt_record": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B06_cva6_lsu/attempt-20261011T195644-2164951",
+      "source_emission": "NOT_REACHED -- the upstream phase failed; this is not zero and not the frontend time",
+      "evidence_scope": "post-run extraction from immutable retained phase logs; does not recreate missing launch-time input or environment binding",
+      "rss_units": "KiB"
      }
     },
     "IR-as-semantics": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the IR-as-semantics route consumes a generated <top>_Lgraph.lean, which only the verified-compiler emitter produces. That emitter was never reached for this row because the shared RTL->LGraph / single_edge prerequisite failed, so there is no independent usable input for this route.",
+      "independent_input_checked": "yes -- make_sim_launcher.py takes the generated certificate module and nothing else",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B06_cva6_lsu/attempt-20261011T195644-2164951"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -565,7 +727,15 @@
   {
    "id": "B07",
    "benchmark": "CORE-ET VPU",
-   "input_mapping": "PENDING",
+   "input_mapping": {
+    "whole_unit": "vpu_top",
+    "components": "whole rtlcosim unit",
+    "source_pin": "/mada/users/czeng14/projects/core-et @ c72b6a2",
+    "route": "coreet_filelist.sh",
+    "options": "yosys.setundef=zero; formal.lean.max_width=1048576; slang --ignore-assertions --relax-enum-conversions",
+    "lhd": "k8-opt sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b",
+    "note": "concrete whole-unit binding; this row is NOT input-PENDING"
+   },
    "approaches": {
     "Futamura projection": {
      "status": "PENDING",
@@ -584,8 +754,13 @@
      }
     },
     "Verified compiler": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the verified-compiler route shares the IDENTICAL upstream prerequisite with legacy -- the same RTL->LGraph compile and single_edge, same lhd binary, same options, same filelist/wrapper -- and that prerequisite FAILED at s1_compile for this row. The verified-compiler EMITTER WAS NEVER REACHED and is NOT claimed tested.",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B07_coreet_vpu/attempt-20261011T193918-2023774",
+      "shared_phases": "s1_compile, s2_single_edge",
+      "rerun_policy": "the identical failed frontend was NOT rerun merely to label a second approach"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -625,20 +800,34 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "phase_times_ms": {
+       "s1_compile": 50740
+      },
+      "peak_rss_kb": {
+       "s1_compile": 1126176
+      },
+      "cpu_s": {
+       "s1_compile": {
+        "user": 44.83,
+        "sys": 1.74
+       }
+      },
+      "exit": {
+       "s1_compile": 6
+      },
+      "attempt_record": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B07_coreet_vpu/attempt-20261011T193918-2023774",
+      "source_emission": "NOT_REACHED -- the upstream phase failed; this is not zero and not the frontend time",
+      "evidence_scope": "post-run extraction from immutable retained phase logs; does not recreate missing launch-time input or environment binding",
+      "rss_units": "KiB"
      }
     },
     "IR-as-semantics": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the IR-as-semantics route consumes a generated <top>_Lgraph.lean, which only the verified-compiler emitter produces. That emitter was never reached for this row because the shared RTL->LGraph / single_edge prerequisite failed, so there is no independent usable input for this route.",
+      "independent_input_checked": "yes -- make_sim_launcher.py takes the generated certificate module and nothing else",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B07_coreet_vpu/attempt-20261011T193918-2023774"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -657,7 +846,15 @@
   {
    "id": "B08",
    "benchmark": "CORE-ET IntPipe/scoreboards",
-   "input_mapping": "PENDING",
+   "input_mapping": {
+    "whole_unit": "intpipe_top",
+    "components": "whole rtlcosim unit",
+    "source_pin": "/mada/users/czeng14/projects/core-et @ c72b6a2",
+    "route": "coreet_filelist.sh",
+    "options": "yosys.setundef=zero; formal.lean.max_width=1048576; slang --ignore-assertions --relax-enum-conversions",
+    "lhd": "k8-opt sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b",
+    "note": "concrete whole-unit binding; this row is NOT input-PENDING"
+   },
    "approaches": {
     "Futamura projection": {
      "status": "PENDING",
@@ -676,8 +873,13 @@
      }
     },
     "Verified compiler": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the verified-compiler route shares the IDENTICAL upstream prerequisite with legacy -- the same RTL->LGraph compile and single_edge, same lhd binary, same options, same filelist/wrapper -- and that prerequisite FAILED at s1_compile for this row. The verified-compiler EMITTER WAS NEVER REACHED and is NOT claimed tested.",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B08_coreet_intpipe/attempt-20261011T193913-2022733",
+      "shared_phases": "s1_compile, s2_single_edge",
+      "rerun_policy": "the identical failed frontend was NOT rerun merely to label a second approach"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -717,20 +919,34 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "phase_times_ms": {
+       "s1_compile": 4190
+      },
+      "peak_rss_kb": {
+       "s1_compile": 249436
+      },
+      "cpu_s": {
+       "s1_compile": {
+        "user": 3.84,
+        "sys": 0.35
+       }
+      },
+      "exit": {
+       "s1_compile": 6
+      },
+      "attempt_record": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B08_coreet_intpipe/attempt-20261011T193913-2022733",
+      "source_emission": "NOT_REACHED -- the upstream phase failed; this is not zero and not the frontend time",
+      "evidence_scope": "post-run extraction from immutable retained phase logs; does not recreate missing launch-time input or environment binding",
+      "rss_units": "KiB"
      }
     },
     "IR-as-semantics": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the IR-as-semantics route consumes a generated <top>_Lgraph.lean, which only the verified-compiler emitter produces. That emitter was never reached for this row because the shared RTL->LGraph / single_edge prerequisite failed, so there is no independent usable input for this route.",
+      "independent_input_checked": "yes -- make_sim_launcher.py takes the generated certificate module and nothing else",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B08_coreet_intpipe/attempt-20261011T193913-2022733"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -898,8 +1114,24 @@
      }
     },
     "IR-as-semantics": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "RUNNING",
+     "evidence": {
+      "emission": "COMPLETE from the already-produced verified-compiler artifact; no upstream phase was rerun",
+      "artifacts": [
+       {
+        "path": "generated/master_port/cov12x5/B09_cva6_issue_scoreboard/ir_as_semantics/tree/formal/lean/Sims/issue_stage_gate_Cert.lean",
+        "bytes": 1249766,
+        "sha256": "e234e2e1622412644782b36828edc30dc8b2130330986430770cc0d1f4c00c12"
+       },
+       {
+        "path": "generated/master_port/cov12x5/B09_cva6_issue_scoreboard/ir_as_semantics/tree/formal/lean/Sims/issue_stage_gate_Main.lean",
+        "bytes": 428,
+        "sha256": "d8565f9d94575e0ec898389ef31caccace86dcc4f76547fbbc0c197ef6465b68"
+       }
+      ],
+      "pending": "the generation check (elaboration of Cert and Main) and the readiness execution are not yet run",
+      "input_reuse": "generated/master_port/cov12x5/B09_cva6_issue_scoreboard/verified_compiler_mw/lean/issue_stage_gate_Lgraph.lean, identical bound configuration"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -1103,8 +1335,24 @@
      }
     },
     "IR-as-semantics": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "RUNNING",
+     "evidence": {
+      "emission": "COMPLETE from the already-produced verified-compiler artifact; no upstream phase was rerun",
+      "artifacts": [
+       {
+        "path": "generated/master_port/cov12x5/B10_cva6_frontend/ir_as_semantics/tree/formal/lean/Sims/frontend_gate_Cert.lean",
+        "bytes": 966984,
+        "sha256": "9cb37e75a1667c72355a082323a3c73a56d6513b5cba7338d89e55f9a4efb285"
+       },
+       {
+        "path": "generated/master_port/cov12x5/B10_cva6_frontend/ir_as_semantics/tree/formal/lean/Sims/frontend_gate_Main.lean",
+        "bytes": 416,
+        "sha256": "d53caa0651f895b1256f3226e613cc5fb781f956a944d9c78d270ec269f5bb24"
+       }
+      ],
+      "pending": "the generation check (elaboration of Cert and Main) and the readiness execution are not yet run",
+      "input_reuse": "generated/master_port/cov12x5/B10_cva6_frontend/verified_compiler_mw/lean/frontend_gate_Lgraph.lean, identical bound configuration"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -1159,7 +1407,15 @@
   {
    "id": "B11",
    "benchmark": "CORE-ET TLB",
-   "input_mapping": "PENDING",
+   "input_mapping": {
+    "whole_unit": "minion_tlb",
+    "components": "whole rtlcosim unit",
+    "source_pin": "/mada/users/czeng14/projects/core-et @ c72b6a2",
+    "route": "coreet_filelist.sh",
+    "options": "yosys.setundef=zero; formal.lean.max_width=1048576; slang --ignore-assertions --relax-enum-conversions",
+    "lhd": "k8-opt sha256 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b",
+    "note": "concrete whole-unit binding; this row is NOT input-PENDING"
+   },
    "approaches": {
     "Futamura projection": {
      "status": "PENDING",
@@ -1178,8 +1434,13 @@
      }
     },
     "Verified compiler": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the verified-compiler route shares the IDENTICAL upstream prerequisite with legacy -- the same RTL->LGraph compile and single_edge, same lhd binary, same options, same filelist/wrapper -- and that prerequisite FAILED at s2_single_edge for this row. The verified-compiler EMITTER WAS NEVER REACHED and is NOT claimed tested.",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B11_coreet_tlb/attempt-20261011T193912-2022286",
+      "shared_phases": "s1_compile, s2_single_edge",
+      "rerun_policy": "the identical failed frontend was NOT rerun merely to label a second approach"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -1219,20 +1480,41 @@
      },
      "generation_ms": null,
      "metrics": {
-      "generation_wall_ms": null,
-      "generation_user_cpu_ms": null,
-      "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
-      "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
-      "environment_sha256": null,
-      "attempt_record": null
+      "phase_times_ms": {
+       "s1_compile": 270,
+       "s2_single_edge": 30
+      },
+      "peak_rss_kb": {
+       "s1_compile": 214588,
+       "s2_single_edge": 54048
+      },
+      "cpu_s": {
+       "s1_compile": {
+        "user": 0.13,
+        "sys": 0.24
+       },
+       "s2_single_edge": {
+        "user": 0.01,
+        "sys": 0.01
+       }
+      },
+      "exit": {
+       "s1_compile": 0,
+       "s2_single_edge": 7
+      },
+      "attempt_record": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B11_coreet_tlb/attempt-20261011T193912-2022286",
+      "source_emission": "NOT_REACHED -- the upstream phase failed; this is not zero and not the frontend time",
+      "evidence_scope": "post-run extraction from immutable retained phase logs; does not recreate missing launch-time input or environment binding",
+      "rss_units": "KiB"
      }
     },
     "IR-as-semantics": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "BLOCKED",
+     "evidence": {
+      "reason": "the IR-as-semantics route consumes a generated <top>_Lgraph.lean, which only the verified-compiler emitter produces. That emitter was never reached for this row because the shared RTL->LGraph / single_edge prerequisite failed, so there is no independent usable input for this route.",
+      "independent_input_checked": "yes -- make_sim_launcher.py takes the generated certificate module and nothing else",
+      "linked_failure": "/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/cov12x5/B11_coreet_tlb/attempt-20261011T193912-2022286"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -1570,7 +1852,25 @@
         "sha256": "43db2aee9195e43d1085b1e01c239a3c050140d35551f1746853cb40aa3f5c98"
        }
       ],
-      "remaining": "the lake exe link was not performed; elaboration plus C emission is what is claimed."
+      "remaining": "the lake exe link was not performed; elaboration plus C emission is what is claimed.",
+      "readiness": {
+       "phase": "EXECUTED -- the missing readiness phase, run once with nonzero simulator work",
+       "route": "INTERPRETED (lean --run Sims/picorv32_Main.lean), NOT a native link; lake exe Simpicorv32 is still not performed",
+       "argv": "lean --run .../Sims/picorv32_Main.lean picorv32 --cycles 8 --show-state",
+       "exit": 0,
+       "wall_s": 1.3,
+       "user_cpu_s": 0.78,
+       "sys_cpu_s": 0.33,
+       "max_rss_kib": 477764,
+       "output": "# lgraph-sim picorv32 sources=1302 nodes=2279 outputs=18 flops=174 mems=1 inputs=9 clocks=1, then 8 cycles of outputs and flop state, 18 lines retained",
+       "observed": "state advances across cycles (cycle 0 outputs all zero, cycle 1 carries a 1); the run exercises the memory (mems=1), which this route supports and the projection route does not",
+       "log": "generated/master_port/cov12x5/B12_picorv32/checks/sims_run8/stdout.log"
+      },
+      "usage_probe": {
+       "argv": "lean --run ... (no args)",
+       "exit": 2,
+       "note": "the launcher printed its usage, confirming the entry point loads; exit 2 is its usage code, not a failure of the simulator"
+      }
      },
      "generation_ms": 60,
      "metrics": {
@@ -1731,7 +2031,7 @@
  "optimization_schedule": "after coverage table runs",
  "environment_record": "pass/lean/tests/MASTER_SIM_GENERATION_ENVIRONMENT.json",
  "observed_environment_sha256": "ad186ee1424e15afa052bfa000fa50843bd954354d0f10e49256e711632edd8a",
- "provisional": "INCOMPLETE/PROVISIONAL, APPROACH-MAJOR. LEGACY sweep COMPLETE across all twelve rows: 1 YES (PicoRV32), 11 NO, each with a retained exact refusal. Verified compiler holds 3 YES from completed work and is the next sweep. No input-preparation gap remains in the legacy sweep.",
+ "provisional": "INCOMPLETE/PROVISIONAL, APPROACH-MAJOR. Legacy 1 YES / 11 NO. Verified compiler 3 YES / 9 BLOCKED. IR-as-semantics 1 YES (PicoRV32, readiness EXECUTED interpreted) / 2 RUNNING / 9 BLOCKED. Translation validation and Futamura follow.",
  "environment_binding": {
   "bazel_wrapper": "/soe/czeng14/.local/bin/bazel (Bazelisk), sha256 prefix 5a408715e932c025",
   "version_selector": ".bazelversion in the cwd-resolved workspace",

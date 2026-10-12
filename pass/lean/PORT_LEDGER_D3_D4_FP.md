@@ -6374,3 +6374,75 @@ grepping for a `"pass"` substring that a phase name or diagnostic could carry.
 Next sweep: verified compiler across all twelve rows, crediting the three
 already-passing checks (PicoRV32 39.73 s, frontend 80.46 s, issue/scoreboard
 91.75 s) without rerunning them.
+
+## 62. Verified-compiler and IR-as-semantics sweeps (PROVISIONAL)
+
+60 cells: **5 YES, 11 NO, 20 BLOCKED, 2 RUNNING, 22 PENDING.**
+
+### 62.1 Verified compiler: 3 credited, 9 blocked on an already-failed prerequisite
+
+`PicoRV32` (39.73 s), `CVA6 frontend` (80.46 s) and `CVA6 issue/scoreboard`
+(91.75 s) are **credited where they stand** -- not rerun.
+
+For the other nine, the verified-compiler route shares the **identical** upstream
+prerequisite with legacy: the same RTL→LGraph compile and `single_edge`, the
+same `lhd` binary, the same options, the same filelist or wrapper. That
+prerequisite already failed for each of those rows, so each is **BLOCKED**,
+linked to the exact original failure and its metrics. **The verified-compiler
+emitter was never reached and is not claimed tested**, and the identical failed
+frontend was not rerun to decorate a second approach.
+
+### 62.2 IR-as-semantics: PicoRV32's readiness phase actually executed
+
+The missing phase is done, once, with real work:
+
+```
+lean --run Sims/picorv32_Main.lean picorv32 --cycles 8 --show-state
+exit 0, wall 1.30 s, user 0.78 s, sys 0.33 s, 477,764 KiB
+# lgraph-sim picorv32 sources=1302 nodes=2279 outputs=18 flops=174 mems=1 inputs=9 clocks=1
+```
+
+18 lines retained, state advancing across cycles, and the run exercises the
+**memory** (`mems=1`) -- which this route supports and the projection route does
+not. A no-argument probe first returned the launcher's usage with exit 2,
+confirming the entry point loads.
+
+**Honestly scoped: this is the INTERPRETED route** (`lean --run`), not a native
+link. `lake exe Simpicorv32` has still not been performed, and no emission or
+elaboration was repeated to obtain the label.
+
+`CVA6 frontend` and `issue/scoreboard` IR artifacts were generated from their
+**already-produced** verified-compiler modules -- `frontend_gate_Cert.lean`
+966,984 B + `_Main.lean` 416 B, `issue_stage_gate_Cert.lean` 1,249,766 B +
+`_Main.lean` 428 B -- with no upstream rerun. Their checks and readiness are
+**RUNNING**, not credited.
+
+The nine remaining rows are **BLOCKED**: `make_sim_launcher.py` consumes a
+generated `<top>_Lgraph.lean` and nothing else, and that module exists only if
+the verified-compiler emitter ran. It did not, so this route has no independent
+usable input for them.
+
+### 62.3 Records and runner hardening
+
+The nine failed legacy phase records were taken from the supervisor's extraction
+of the retained GNU `time` logs into `phase_times_ms`, `peak_rss_kb` and
+`attempt_record`, with their scope preserved: failed upstream phases, source
+emission **NOT_REACHED** rather than zero, RSS in raw KiB, and no fabricated
+launch-time environment binding. **No row says `input_mapping=PENDING` any
+more**: all nine carry the real whole-unit, component, source-pin, route and
+option binding.
+
+Both dispatchers were fixed **before** this sweep launched: attempt directories
+are created with a plain `mkdir` so a collision is refused atomically rather
+than reused by `mkdir -p`; the provenance `BINDING.txt` is written **before** any
+phase executes; the approach argument is validated up front; and the CORE-ET
+runner now parses the **top-level** JSON `status` and confirms the **intended
+top** is in the emitted library instead of matching a substring.
+
+`B05b` (the direct `shirecache_mesh_master_axi_port` attempt) is retained as a
+**failed preparation/characterisation attempt**: it stopped before any
+compilation because `coreet_filelist.sh` found no filelist for that module, and
+it is not evidence of a successfully configured whole group.
+
+The HTML matrix was refreshed from the JSON with the supervisor's
+`refresh_coverage_matrix.py`, so JSON, TSV, HTML and ledger agree.
