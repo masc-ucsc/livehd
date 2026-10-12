@@ -7907,3 +7907,62 @@ reason.  Neither phase yields a certificate.
 — exit 1, 0.13 s.  That is an actual shared raw-source/configuration refusal; the
 fix is a proper input/configuration adapter with the qualification documented, not
 silencing the ambiguity check.
+
+### 63.29 Phase 1: the memory-aware whole-cycle entry, matched against the reference scenario
+
+**`mainM` is the reachable entry.**  `hwMemS.entry = "mainM"`, resolved to id 50
+of 51 functions — not the memory-free `main` with a memory-aware label on it.
+Everything is resolved afresh; no pre-resolved id is reused.
+
+* `mkSourcesM` (45) calls `srcValM` and **threads the memory-image list**;
+* `evalNodesM`/`evalNodeM` call `applyOpM`;
+* `memNext` (48)/`memNexts` build the per-memory next state: `m.nextImg`'s slot
+  when `firesAt edges m.clock`, the **exact prior image** when quiet;
+* `mainM` consumes `encDesign`, `encEdges`, `encInput` and the full `StateM`
+  encoding, and feeds the environment to outputs, flop next-state **and** memory
+  next-state.
+
+The scalar and flop helpers — `lenL`, `nthD`, `slot`, `nz`, `mkOutputs`,
+`flopNexts`, `firesAt`, `capture`, every operator case — are **reused unchanged**,
+so the SHL/SRA/Sext work and the clock/reset/async logic are the same code the
+memory-free route runs.  The original `hwS` and its proof chain are untouched.
+
+**The memory-bearing result codec relates to the REAL `RuntimeResult`**, not just
+`StateM`: `ResultM.denote : ResultM → RuntimeResult`, with
+`decResultM_encResultM`, `ResultRelM_functional`,
+`ResultRelM_denote_functional` (which pins the reference result an adequacy
+statement needs) and `ResultM_denote_memFree` (the memory-free case is a special
+case here too).
+
+**Executed through `mainM` and compared with the independently checked reference
+scenario** — two mutable 32-word memories on **distinct** clock domains, memory 0
+on clock 1 and memory 1 on clock 0, `Op_MemWriteBE 1` bit-enabled writes, a
+before-write read and an initialised ROM.  All thirteen agree with the reference:
+
+| stimulus | reference | `mainM` |
+|---|---|---|
+| clock-1 only, mask 8 | words 8 / 22 | **8 / 22** |
+| clock-0 only, mask 8 | words 0 / 30 | **0 / 30** |
+| both quiet | words 0 / 22 | **0 / 22**, and the whole image array identical to the prior |
+| clock-1, full enable | `0xDEADBEEF` | **`0xDEADBEEF`** |
+| clock-1, disabled write | contents preserved | **preserved** |
+| outputs, clock-1 | `[0, 22, 33]` | **`[0, 22, 33]`** |
+| second step from the **decoded returned state** | `[8, 22, 33]` | **`[8, 22, 33]`** |
+
+The inactive-domain control bites: expecting 8 for the quiet memory under
+clock-0-only fails the build.
+
+**Explicit shape premise, not assumed away.**  A memory slot carries an encoded
+image and a scalar slot a `BV`; `mkOutputs` coerces with the scalar reading, so
+an output whose slot named a **memory** would be mis-read.  That is recorded as a
+shape premise on admitted designs rather than silently relied on — and no design
+is admitted yet.
+
+**Still owed:** the source/operator/commit preservation proofs against
+`interpretDesign` with reachable shape/range/width premises; generic adequacy;
+BTA/specialization and residual checker integration for this entry (the
+production `checkResidual` wants arity 3 with edges/input/state dynamic, which is
+what `mainM` has); and real support/driver wiring.  `SourceSupported`,
+`OpSupported` and `memFree` stay untouched — support remains refused.  No
+`sorry`, no axioms, no disabled checks.  PicoRV32 stays **BLOCKED**: these are
+entry tests, not admission, equivalence or kernel certification.

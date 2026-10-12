@@ -105,11 +105,97 @@ private def fApplyOpM : SFun :=
             , R "pay" ])
           (C "applyOp" [R "op", R "w", R "deps", R "env", R "n"])))] }
 
-/-- The memory-aware program: the original `hwS` with four functions ADDED.  No
+/-! ## The whole-cycle caller layer
+
+`mkSourcesM` calls `srcValM` and threads the memory-image list; `evalNodesM`
+calls `applyOpM`; `memNexts` builds the per-memory next state, each image
+committed on ITS OWN clock -- `m.nextImg`'s slot when `firesAt edges m.clock`,
+the EXACT prior image otherwise.  `mainM` is the new entry, consuming
+`encDesign`, `encEdges`, `encInput` and the full `StateM` encoding, and producing
+the memory-bearing result.
+
+The scalar and flop helpers (`lenL`, `nthD`, `slot`, `nz`, `mkOutputs`,
+`flopNexts`, `firesAt`, `capture`, every operator case) are REUSED unchanged, so
+the SHL/SRA/Sext work and the clock/reset/async logic behind them are the same
+code the memory-free route runs.
+
+SLOT/VALUE KINDS.  A memory slot carries an encoded IMAGE, a scalar slot carries
+a `BV`.  `mkOutputs` coerces its slot with the scalar reading, so an output whose
+slot names a MEMORY would be mis-read.  That is not silently assumed away: it is
+an explicit shape premise on admitted designs, recorded in the obligations, and
+no design is admitted yet. -/
+
+private def fMkSourcesM : SFun :=
+  { name := "mkSourcesM", params := ["srcs", "inp", "fq", "ms", "acc"], inline := true
+  , body := .ite (P .isNil [R "srcs"]) (R "acc")
+              (C "mkSourcesM"
+                 [ P .tl [R "srcs"], R "inp", R "fq", R "ms"
+                 , cons (C "srcValM" [P .hd [R "srcs"], R "inp", R "fq", R "ms"])
+                        (R "acc") ]) }
+
+private def fEvalNodeM : SFun :=
+  { name := "evalNodeM", params := ["nd", "env", "n"], inline := true
+  , body := .switch (R "nd")
+              [(tagNode, ["op", "w", "deps", "org"],
+                C "applyOpM" [R "op", R "w", R "deps", R "env", R "n"])] }
+
+private def fEvalNodesM : SFun :=
+  { name := "evalNodesM", params := ["nodes", "env", "n"], inline := true
+  , body := .ite (P .isNil [R "nodes"]) (R "env")
+              (C "evalNodesM"
+                 [ P .tl [R "nodes"]
+                 , cons (C "evalNodeM" [P .hd [R "nodes"], R "env", R "n"]) (R "env")
+                 , P .addI [R "n", int 1] ]) }
+
+/-- One memory's next image: `m.nextImg`'s slot when its own clock fires, the
+exact prior image when quiet. -/
+private def fMemNext : SFun :=
+  { name := "memNext", params := ["m", "edges", "env", "n", "ms", "idx"], inline := true
+  , body := .switch (R "m")
+              [(tagMemory, ["aw", "dw", "nxt", "ck"],
+                .ite (C "firesAt" [R "edges", R "ck"])
+                     (C "slot" [R "env", R "n", R "nxt"])
+                     (C "memAt" [R "ms", R "idx"]))] }
+
+private def fMemNexts : SFun :=
+  { name := "memNexts", params := ["mems", "edges", "env", "n", "ms", "idx"], inline := true
+  , body := .ite (P .isNil [R "mems"]) nil
+              (cons (C "memNext"
+                       [P .hd [R "mems"], R "edges", R "env", R "n", R "ms", R "idx"])
+                    (C "memNexts"
+                       [P .tl [R "mems"], R "edges", R "env", R "n", R "ms",
+                        P .addI [R "idx", int 1]])) }
+
+/-- The memory-aware whole cycle. -/
+private def fMainM : SFun :=
+  { name := "mainM", params := ["d", "edges", "inp", "st"], inline := false
+  , body :=
+      .switch (R "d")
+        [(tagDesign, ["srcs", "nodes", "outs", "flops", "mems", "clks"],
+          .switch (R "st")
+            [(StateM.tagStateM, ["fq", "ms"],
+              lets
+                [ ("nsrc", C "lenL" [R "srcs"])
+                , ("nnod", C "lenL" [R "nodes"])
+                , ("nall", P .addI [R "nsrc", R "nnod"])
+                , ("env0", C "mkSourcesM" [R "srcs", R "inp", R "fq", R "ms", nil])
+                , ("env",  C "evalNodesM" [R "nodes", R "env0", R "nsrc"])
+                , ("os",   C "mkOutputs" [R "outs", R "env", R "nall"])
+                , ("nf",   C "flopNexts"
+                             [R "flops", R "edges", R "env", R "nall", R "fq", int 0])
+                , ("nm",   C "memNexts"
+                             [R "mems", R "edges", R "env", R "nall", R "ms", int 0])
+                ]
+                (.mk StateM.tagResultM
+                   [.mk StateM.tagStateM [R "nf", R "nm"], R "os"]))])] }
+
+/-- The memory-aware program: the original `hwS` with the new functions ADDED.  No
 existing function is edited, so the memory-free route is literally the same
 code, and `resolveProgram` assigns every id afresh. -/
 def hwMemS : SProgram :=
-  { hwS with funs := hwS.funs ++ [fMemAt, fRomWords, fSrcValM, fApplyOpM] }
+  { funs := hwS.funs ++ [fMemAt, fRomWords, fSrcValM, fApplyOpM,
+                         fMkSourcesM, fEvalNodeM, fEvalNodesM, fMemNext, fMemNexts, fMainM]
+  , entry := "mainM" }
 
 def hwMemResolved : Except String (Program × List Bool) := resolveProgram hwMemS
 

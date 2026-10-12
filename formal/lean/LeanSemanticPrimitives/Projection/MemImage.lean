@@ -1395,6 +1395,53 @@ it.  These agree with `getGo_sound`; they are a sanity run of it, not its proof.
 #guard evalFuel 137 MemImg.memProg [] (.call 0 [.lit (encListG ofBV (List.replicate 32 (mk_bv 32 0))),
          .lit (.int (-100)), .lit (ofBV (mk_bv 32 7))]) == .value (ofBV (mk_bv 32 7))
 
+/-! ### The memory-bearing RESULT codec, and its relation to the REAL RuntimeResult -/
+
+def tagResultM : Nat := 126
+
+/-- A result carrying a memory-bearing next state. -/
+structure ResultM where
+  nextState : StateM
+  outputs   : Array BV
+deriving Repr, Inhabited, DecidableEq
+
+/-- The REFERENCE result this denotes -- `RuntimeResult`, not `StateM`. -/
+def ResultM.denote (r : ResultM) : RuntimeResult :=
+  { nextState := StateM.denote r.nextState, outputs := r.outputs }
+
+@[inline] def encResultM (r : ResultM) : Val :=
+  .ctor tagResultM [encStateM r.nextState, encBVs r.outputs]
+
+def decResultM (v : Val) : Option ResultM :=
+  (field2 tagResultM v).bind (fun p =>
+    (decStateM p.1).bind (fun st =>
+      (decBVs p.2).map (fun os => ⟨st, os⟩)))
+
+@[simp] theorem decResultM_encResultM (r : ResultM) : decResultM (encResultM r) = some r := by
+  cases r with
+  | mk st os => simp [decResultM, encResultM, field2, decBVs_encBVs]
+
+/-- `ResultRelM v r` -- object value `v` denotes memory-bearing result `r`. -/
+def ResultRelM (v : Val) (r : ResultM) : Prop := decResultM v = some r
+
+theorem ResultRelM_encResultM (r : ResultM) : ResultRelM (encResultM r) r := decResultM_encResultM r
+
+theorem ResultRelM_functional {v : Val} {r q : ResultM}
+    (h₁ : ResultRelM v r) (h₂ : ResultRelM v q) : r = q :=
+  Option.some.inj (h₁ ▸ h₂)
+
+/-- …and it pins the REFERENCE result, which is what an adequacy statement needs. -/
+theorem ResultRelM_denote_functional {v : Val} {r q : ResultM}
+    (h₁ : ResultRelM v r) (h₂ : ResultRelM v q) : ResultM.denote r = ResultM.denote q :=
+  congrArg ResultM.denote (ResultRelM_functional h₁ h₂)
+
+/-- **Memory-free compatibility at the result level**: a result with no memory
+images denotes a `MemFree` reference next state, so the old path is a special
+case here too. -/
+theorem ResultM_denote_memFree (r : ResultM) :
+    MemFree (ResultM.denote r).nextState ↔ r.nextState.mems = #[] :=
+  StateM.denote_memFree r.nextState
+
 /- A memory-bearing state really does survive the codec, carrying a ROM's
 initial contents: this is the case `decState` cannot represent at all. -/
 #guard decStateM (encStateM ⟨#[mk_bv 3 5], #[MemImg.ofMemConst 32 #[11, 22, 33]]⟩)
