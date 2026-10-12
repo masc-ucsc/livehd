@@ -847,3 +847,46 @@ certificate data still uses defaults and preserves the all-fire procedure.
 The full 186 CORE-ET/CVA6 configurations, three DINO variants and recovered
 branch runtime procedures remain acceptance gates. Keep the user-owned matching
 Lean/Mathlib upgrade, flat schemas, native code and historical evidence intact.
+
+## 15. Final stage: simulator generation across five approaches and twelve blocks/cores
+
+User-requested table stage, appended at the end of the documented plan. The
+latest execution priority is to run this coverage table before all further
+optimization and performance-research experiments; prepare only the functional
+approach/input prerequisites needed to execute its cells. Preserve the other
+rebase and acceptance obligations without treating them as waived. The live [task and progress table](../../todo/livehd/simulator-generation-matrix.html)
+tracks benchmark rows against approach columns; the [TSV matrix](tests/MASTER_SIM_GENERATION_12X5.tsv)
+and [per-cell evidence record](tests/MASTER_SIM_GENERATION_12X5.json) retain the
+same twelve rows and five approaches (60 cells).
+
+Approaches: Futamura projection, verified compiler, translation validation,
+legacy, and IR-as-semantics. The twelve rows are CORE-ET DCache; CVA6 HPDcache;
+CORE-ET neighborhood I-cache; CVA6 MMU/TLB/PTW; CORE-ET ET-Link→AXI; CVA6 LSU;
+CORE-ET VPU; CORE-ET IntPipe/scoreboards; CVA6 issue/scoreboard; CVA6 frontend;
+CORE-ET TLB; and PicoRV32 whole core. PicoRV32 is at the user-provided
+`/soe/czeng14/projects/picorv32` (observed clean pin
+`ef203c2b0a3fb793280f5114941416c425c5b461`, source `picorv32.v`).
+
+First freeze each row's exact top(s), configuration and source inputs and each
+approach's generator/runtime. A grouped row requires its complete named unit
+or all required components, not a reduced representative. Then generate with
+every approach, keeping unsupported, missing, failed and stopped cases in the
+table. Treat standalone generation latency as the performance priority;
+measure loading/admission, generation, checking and any serialization/emission
+separately from reference validation. Retain approach-native artifact identities,
+reproducible commands, code/input/toolchain hashes, resource measurements,
+logs and the actual proof/admission status. Do not substitute another approach's
+artifact or mark sample agreement as kernel certification.
+
+When **all 60 cells are YES**, audit the evidence, complete the required
+approach-specific checks, make the final checkpoint and **commit locally**.
+The user will push. Until that condition is met, report exact progress and
+blockers; do not claim the final checkpoint complete. This addition does not
+waive or reorder the existing branch procedures, fresh DCERT2 work, integrated
+447+6 obligations, raw generated-source comparisons or deferred D3 scoreboard
+work. All 60 cells are initially PENDING; this edit adds the plan and tracking,
+not benchmark results. Record each block/approach generation time, memory, CPU
+and detailed phase/resource metrics, plus shared hardware and software
+dependency provenance, so the table supplies later optimization targets. Schedule
+profiling, optimization and performance-research experiments after the table
+runs. Generation success, validation and proof status remain separate.

@@ -6272,9 +6272,10 @@ marked `noncomputable`, no check was disabled, no backend was substituted and no
 toolchain was upgraded to turn it into a YES. The successful emissions are
 retained as phases.
 
-Five of the CORE-ET refusals are *different* from each other -- a concat lane
-width, a duplicate package import, a single-edge memory commit, and two
-combinational loops -- so they are five separate findings, not one.
+> **CORRECTED in section 61.** Those five are **not** five distinct classes:
+> two of them (`intpipe_top`, `vpu_top`) are the same combinational-loop
+> refusal, and three more rows joined that class once their inputs were
+> prepared. The classes are counted properly in 61.2.
 
 ### 60.2 Verified compiler already holds three, credited not rerun
 
@@ -6298,3 +6299,78 @@ IR-as-semantics executable readiness, translation-validation private-build
 admission from the clean detached checkout, and Futamura's fresh DCERT2 loader
 plus the inherited memory adequacy obligation all remain, each at its own sweep,
 with no predicate weakened.
+
+## 61. LEGACY sweep complete, with three of my claims corrected
+
+### 61.1 The missing wrappers were an input gap, not a hardware limit
+
+I recorded `CVA6 MMU/TLB/PTW` and `CVA6 LSU` as BLOCKED because no gate wrapper
+existed. That was an **input-preparation gap**, and the supervisor closed it:
+`scripts/gen_cva6_wrappers.py` and the already-frozen 278,287,750-byte AST
+generate `cva6_mmu`, `cva6_ptw`, `cva6_shared_tlb`, `cva6_tlb` and
+`load_store_unit` wrappers in 2.26 s. Those prepared files were **reused, not
+regenerated**. `cva6_mmu` instantiates both `cva6_tlb` instances,
+`cva6_shared_tlb` and `cva6_ptw`, so the **whole configured group** is bound,
+and `load_store_unit` is the whole LSU -- no per-component substitute.
+
+With the wrappers in place both units elaborate far enough to be **refused for a
+real reason**, which is the point: a missing wrapper file was never a hardware
+support limitation.
+
+### 61.2 The refusal classes, counted properly
+
+| class | instances | rows |
+|---|---|---|
+| **combinational loop** | **5** | CORE-ET IntPipe, CORE-ET VPU, CVA6 HPDcache, CVA6 MMU/TLB/PTW, CVA6 LSU |
+| compiler IR, too many fields | 2 | CVA6 frontend (**409**), CVA6 issue/scoreboard (**334**) |
+| concat window inconsistency | 1 | CORE-ET DCache |
+| package imports | 1 | CORE-ET I-cache (`PaSize`) |
+| declaration before use | 1 | CORE-ET ET-Link→AXI (`shirecache_pkg.sv`) |
+| single-edge memory restriction | 1 | CORE-ET TLB (`rf_q` commits on every sub-step) |
+
+Two corrections are embedded here. I called the first five CORE-ET refusals
+"five separate findings"; they are **two** combinational loops plus three
+others, and the loop class has since grown to five. And I reported
+`issue_stage` as 409 fields; it is **334** -- only `frontend` is 409.
+
+### 61.3 ET-Link→AXI: the unit exists
+
+I wrote that no synthesizable ET-Link unit exists in the checkout. **Wrong.**
+`shirecache_mesh_master_axi_port.sv` and `shirecache_mesh_slave_axi_port.sv`
+import `etlink_pkg` and expose AXI channels, and `dv/rtlcosim` carries
+`shirecache_mesh_master`, `shirecache_mesh_slave` and
+`shirecache_l3_to_sys_bridge`. Running `shirecache_mesh_master` resolves a
+17-file list and is refused by slang:
+
+```
+shirecache_pkg.sv:65:58  error: identifier 'TagDataSize' used before its declaration
+shirecache_pkg.sv:105:64 error: identifier 'L3ShireIdSize' used before its declaration
+```
+
+a **declaration-before-use** defect -- the same class `coreet_patch_srcs.py`
+already repairs for four other files with a pure decl reorder. That is the
+precise bounded prerequisite; it is not an absent unit, and no unrelated AXI
+block was substituted to close the cell. `shirecache_mesh_master_axi_port` has
+no `rtlcosim` entry of its own, so no filelist resolves for it directly.
+
+### 61.4 LEGACY is closed: 1 YES, 11 NO
+
+Every one of the twelve rows now has a retained result from a real attempt.
+PicoRV32 is the single YES. The other eleven are NO with an exact refusal
+each -- no input-preparation gap remains in this sweep, and no refusal was
+turned into a YES by weakening anything. The two field-limit failures are left
+**unchanged and unretried**.
+
+### 61.5 Dispatcher fixes made before this sweep ran
+
+`fp_cov_queue_cva6.sh` always emitted verified-compiler first and legacy second,
+which contradicts the user's approach order and would have rerun completed work.
+It now takes the approach as an argument and runs **only** that one; `WRAP=`
+overrides the wrapper path so prepared inputs are reused in place; an explicit
+`ATTEMPT` collision is **refused** rather than reusing the directory; and the
+phase gate parses the **top-level** `status` field with a JSON parser instead of
+grepping for a `"pass"` substring that a phase name or diagnostic could carry.
+
+Next sweep: verified compiler across all twelve rows, crediting the three
+already-passing checks (PicoRV32 39.73 s, frontend 80.46 s, issue/scoreboard
+91.75 s) without rerunning them.

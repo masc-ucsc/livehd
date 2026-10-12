@@ -156,12 +156,12 @@
      }
     },
     "Legacy": {
-     "status": "PENDING",
+     "status": "NO",
      "evidence": {
       "row_id": "B02",
       "top": "cva6_hpdcache_subsystem_gate",
-      "reason": "wrapper exists and the route is bound; not yet attempted",
-      "route": "gate wrapper + whole-core filelist"
+      "reason": "s1 compile refused, exit 6, wall 27.56 s, user 24.55 s, RSS 825,156 KiB: combinational loop in 'cva6_hpdcache_subsystem_gate': concat -> get_mask -> concat -> lt -> get_mask -> concat -> lt -> eq -> and -> get_mas...",
+      "input_note": "pre-existing wrapper generated/master_port/cva6_foundation/cva6_wrappers/cva6_hpdcache_subsystem_gate.sv"
      },
      "generation_ms": null,
      "metrics": {
@@ -340,12 +340,12 @@
      }
     },
     "Legacy": {
-     "status": "BLOCKED",
+     "status": "NO",
      "evidence": {
       "row_id": "B04",
-      "top": "(partial)",
-      "reason": "only cva6_ptw has a gate wrapper; the MMU and TLB components of the named group do not, so the WHOLE unit cannot be bound without generating them",
-      "route": "gate wrapper + whole-core filelist"
+      "top": "cva6_mmu_gate",
+      "reason": "s1 compile refused, exit 6, wall 2.26 s, user 2.17 s, RSS 321,240 KiB: combinational loop in 'cva6_mmu_gate': sext -> get_mask -> sra -> sext -> get_mask -> shl -> sra -> ...",
+      "input_note": "PREPARED wrapper reused, not regenerated: automate_workspace/master_rebase/audits/coverage_missing_wrappers_20261011_1944/generated_wrappers/cva6_mmu_gate.sv. The pinned cva6_mmu instantiates both cva6_tlb instances, cva6_shared_tlb and cva6_ptw, so the WHOLE configured group is bound."
      },
      "generation_ms": null,
      "metrics": {
@@ -432,12 +432,12 @@
      }
     },
     "Legacy": {
-     "status": "BLOCKED",
+     "status": "NO",
      "evidence": {
       "row_id": "B05",
-      "top": "(none)",
-      "reason": "no synthesizable unit: hw/ip/etlink/rtl holds only etlink_pkg.sv and there is no dv/rtlcosim entry, so no whole unit can be bound in this checkout",
-      "route": "coreet_filelist.sh whole unit -> lhd compile verilog (anchor + yosys.filelist_file) -> pass single_edge -> legacy emit"
+      "top": "shirecache_mesh_master",
+      "reason": "s1 compile refused, exit 1, wall 0.18 s: slang -- shirecache_pkg.sv:65:58 \"identifier 'TagDataSize' used before its declaration\", also L3ShireIdSize at :105 and :106",
+      "input_note": "CORRECTED: modules DO exist. shirecache_mesh_master_axi_port.sv and shirecache_mesh_slave_axi_port.sv import etlink_pkg and expose AXI channels, and dv/rtlcosim carries shirecache_mesh_master, shirecache_mesh_slave and shirecache_l3_to_sys_bridge. The earlier 'no synthesizable unit in this checkout' was WRONG. The stop is a DECLARATION-BEFORE-USE defect in shirecache_pkg.sv -- the same class coreet_patch_srcs.py already repairs for four other files with a pure decl reorder. shirecache_mesh_master_axi_port has no rtlcosim entry of its own, so no filelist resolves for it directly."
      },
      "generation_ms": null,
      "metrics": {
@@ -524,12 +524,12 @@
      }
     },
     "Legacy": {
-     "status": "BLOCKED",
+     "status": "NO",
      "evidence": {
       "row_id": "B06",
-      "top": "load_store_unit",
-      "reason": "no gate wrapper: cva6_wrappers has load_unit/store_unit/store_buffer individually but no load_store_unit; the grouped unit needs its own AST-derived wrapper (scripts/gen_cva6_wrappers.py). A per-component substitute is NOT accepted.",
-      "route": "gate wrapper + whole-core filelist"
+      "top": "load_store_unit_gate",
+      "reason": "s1 compile refused, exit 6, wall 4.59 s, user 4.50 s, RSS 379,924 KiB: combinational loop in 'load_store_unit_gate': sext -> get_mask -> sra -> sext -> get_mask -> shl -> sra -> ...",
+      "input_note": "PREPARED wrapper reused, not regenerated: automate_workspace/master_rebase/audits/coverage_missing_wrappers_20261011_1944/generated_wrappers/load_store_unit_gate.sv -- the WHOLE LSU, not per-component substitutes."
      },
      "generation_ms": null,
      "metrics": {
@@ -1731,7 +1731,7 @@
  "optimization_schedule": "after coverage table runs",
  "environment_record": "pass/lean/tests/MASTER_SIM_GENERATION_ENVIRONMENT.json",
  "observed_environment_sha256": "ad186ee1424e15afa052bfa000fa50843bd954354d0f10e49256e711632edd8a",
- "provisional": "INCOMPLETE/PROVISIONAL, APPROACH-MAJOR. Legacy sweep closed on 11 of 12 rows: 1 YES (PicoRV32), 7 NO with exact refusals, 3 BLOCKED on bindable prerequisites, 1 PENDING (CVA6 HPDcache). Verified compiler already holds 3 YES from work completed earlier and is credited, not rerun.",
+ "provisional": "INCOMPLETE/PROVISIONAL, APPROACH-MAJOR. LEGACY sweep COMPLETE across all twelve rows: 1 YES (PicoRV32), 11 NO, each with a retained exact refusal. Verified compiler holds 3 YES from completed work and is the next sweep. No input-preparation gap remains in the legacy sweep.",
  "environment_binding": {
   "bazel_wrapper": "/soe/czeng14/.local/bin/bazel (Bazelisk), sha256 prefix 5a408715e932c025",
   "version_selector": ".bazelversion in the cwd-resolved workspace",
@@ -1755,5 +1755,50 @@
   "Translation validation",
   "Futamura projection"
  ],
- "sweep_policy": "APPROACH-MAJOR: complete one approach across all twelve rows before starting the next, in the order above. Completed phases are credited, never rerun to repair a table label."
+ "sweep_policy": "APPROACH-MAJOR: complete one approach across all twelve rows before starting the next, in the order above. Completed phases are credited, never rerun to repair a table label.",
+ "refusal_classes": {
+  "combinational_loop": {
+   "count": 5,
+   "rows": [
+    "CORE-ET IntPipe/scoreboards",
+    "CORE-ET VPU",
+    "CVA6 HPDcache",
+    "CVA6 MMU/TLB/PTW",
+    "CVA6 LSU"
+   ],
+   "note": "ONE class with five instances. An earlier record called the CORE-ET refusals five distinct root-cause classes; that was wrong."
+  },
+  "compiler_IR_too_many_fields": {
+   "count": 2,
+   "rows": [
+    "CVA6 frontend (409 fields)",
+    "CVA6 issue/scoreboard (334 fields)"
+   ],
+   "note": "CORRECTED: issue_stage has 334 fields, not 409. Both are failed executable generation checks, skipped unchanged."
+  },
+  "concat_window": {
+   "count": 1,
+   "rows": [
+    "CORE-ET DCache"
+   ]
+  },
+  "package_imports": {
+   "count": 1,
+   "rows": [
+    "CORE-ET neighborhood I-cache (multiple imports of PaSize)"
+   ]
+  },
+  "decl_before_use": {
+   "count": 1,
+   "rows": [
+    "CORE-ET ET-Link\u2192AXI (shirecache_pkg.sv)"
+   ]
+  },
+  "single_edge_memory": {
+   "count": 1,
+   "rows": [
+    "CORE-ET TLB (rf_q would commit on every sub-step)"
+   ]
+  }
+ }
 }

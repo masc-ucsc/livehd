@@ -12,18 +12,22 @@ COV=$R/generated/master_port/cov12x5
 FND=$R/generated/master_port/cva6_foundation
 LOPT=/var/tmp/bazel_czeng14/_bazel_czeng14/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd
 FL=$FND/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.flistplus.f
-ROW=${1:?row}; BLK=${2:?block}
+ROW=${1:?row}; BLK=${2:?block}; APP=${3:?approach: legacy|verified_compiler}
 # IMMUTABLE ATTEMPT ID.  The first version wrote every phase into a fixed
 # directory per row, so a retry OVERWROTE the failed attempt's logs -- which is
 # exactly what happened to the raw-top B09/B10 attempts (see
 # generated/master_port/cov12x5/ATTEMPT_LOSS_RECORD.txt).  Each attempt now gets
 # its own directory and nothing is ever reused.
 ATTEMPT=${ATTEMPT:-$(date +%Y%m%dT%H%M%S)-$$}
-TOP="${BLK}_gate"; WRAP=$FND/cva6_wrappers/${TOP}.sv
+TOP="${BLK}_gate"; WRAP=${WRAP:-$FND/cva6_wrappers/${TOP}.sv}   # WRAP= overrides with a prepared wrapper
 B=$COV/$ROW/attempt-$ATTEMPT
 [ -r "$WRAP" ] || { echo "$ROW: NO WRAPPER $WRAP"; exit 2; }
+[ -e "$B" ] && { echo "$ROW: ATTEMPT COLLISION, $B already exists; refusing to reuse"; exit 3; }
 mkdir -p "$B" "$COV/tmp"; export TMPDIR=$COV/tmp TMP=$COV/tmp TEMP=$COV/tmp
 CR="bash $R/pass/lean/scripts/fp_cov_run.sh"
+# Parse the TOP-LEVEL status field, not any "pass" substring anywhere in the
+# record (a phase name or a diagnostic can contain it).
+json_status() { python3 -I -c "import json,sys;print((json.load(open(sys.argv[1])) or {}).get('status',''))" "$1" 2>/dev/null; }
 
 $CR "$ROW" s1_compile_lg "$B/s1_compile" 48G 5400 -- \
   "$LOPT" compile verilog "$WRAP" --reader yosys-slang --top "$TOP" \
@@ -35,7 +39,7 @@ s1=$(cat "$B/s1_compile/exit" 2>/dev/null || echo 99)
 # still creates the lg: directory, so `-d` admitted a broken phase.  The result
 # record must also say pass and the library must actually hold a graph.
 ok1=0
-[ "$s1" = 0 ] && grep -q '"status":"pass"' "$B/s1_compile/result.json" 2>/dev/null \
+[ "$s1" = 0 ] && [ "$(json_status "$B/s1_compile/result.json")" = pass ] \
   && [ -s "$B/s1_compile/lg/library.txt" ] && ok1=1
 [ "$ok1" = 1 ] || { echo "$ROW/$ATTEMPT: STOP after s1 (exit $s1)"; exit 1; }
 
@@ -45,10 +49,11 @@ $CR "$ROW" s2_single_edge "$B/s2_single_edge" 48G 5400 -- \
   --result-json "$B/s2_single_edge/result.json"
 s2=$(cat "$B/s2_single_edge/exit" 2>/dev/null || echo 99)
 ok2=0
-[ "$s2" = 0 ] && grep -q '"status":"pass"' "$B/s2_single_edge/result.json" 2>/dev/null \
+[ "$s2" = 0 ] && [ "$(json_status "$B/s2_single_edge/result.json")" = pass ] \
   && [ -s "$B/s2_single_edge/lg/library.txt" ] && ok2=1
 [ "$ok2" = 1 ] || { echo "$ROW/$ATTEMPT: STOP after single_edge (exit $s2)"; exit 1; }
 
+if [ "$APP" = verified_compiler ]; then
 $CR "$ROW" verified_compiler "$B/verified_compiler" 48G 5400 -- \
   "$LOPT" compile lg:"$B/s2_single_edge/lg" --top "$TOP" \
   --workdir "$B/verified_compiler/work" --result-json "$B/verified_compiler/result.json" \
@@ -60,7 +65,9 @@ if [ "$vc" = 0 ] && [ -s "$B/verified_compiler/lean/${TOP}_Lgraph.lean" ]; then
 else
   echo "$ROW/$ATTEMPT verified_compiler NO (exit $vc)"
 fi
+fi
 
+if [ "$APP" = legacy ]; then
 $CR "$ROW" legacy "$B/legacy" 48G 5400 -- \
   "$LOPT" compile lg:"$B/s2_single_edge/lg" --top "$TOP" \
   --workdir "$B/legacy/work" --result-json "$B/legacy/result.json" \
@@ -69,6 +76,7 @@ $CR "$ROW" legacy "$B/legacy" 48G 5400 -- \
 lg=$(cat "$B/legacy/exit" 2>/dev/null || echo 99)
 [ "$lg" = 0 ] && [ -s "$B/legacy/lean/${TOP}_Lgraph.lean" ] \
   && echo "$ROW/$ATTEMPT legacy EMITTED" || echo "$ROW/$ATTEMPT legacy NO (exit $lg)"
+fi
 { echo "row=$ROW attempt=$ATTEMPT top=$TOP"; echo "wrapper=$WRAP sha256=$(sha256sum "$WRAP" | cut -d\  -f1)";
   echo "filelist=$FL sha256=$(sha256sum "$FL" | cut -d\  -f1)"; echo "lhd=$LOPT sha256=$(sha256sum "$LOPT" | cut -d\  -f1)";
   echo "max_width=1048576 (scripts/run_cva6_module_lean_stress.sh:175; the DEFAULT 1024 refusal is preserved and recorded)";
