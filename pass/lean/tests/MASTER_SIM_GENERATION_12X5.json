@@ -709,7 +709,19 @@
   {
    "id": "B09",
    "benchmark": "CVA6 issue/scoreboard",
-   "input_mapping": "PENDING",
+   "input_mapping": {
+    "route": "gate wrapper + WHOLE-CORE filelist, not a per-top bender slice",
+    "filelist": "generated/master_port/cva6_foundation/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.flistplus.f (353 lines, sha256 9ae886ff867dcfd630b59204123491c379d2362e3fc533710d3438bd68850882)",
+    "cva6_checkout": "/mada/users/czeng14/projects/cva6-blockfinding @ 6cb200105fb9441d170e45786125a737fab98e91 (1 untracked/dirty entry recorded, not altered)",
+    "wrapper_generator": "scripts/gen_cva6_wrappers.py sha256 0dee9c9765b5a7869eabb6cb7defda2910decc8cb5c8d856fcda8875ca4301fa, from slang AST sha256 3699e6f5738217c442cd427f6a8dd9e150c55db5a918f91099882177040dd3c1",
+    "options": "--set yosys.setundef=zero --set formal.lean.max_width=1048576 -- --ignore-assertions",
+    "why_not_bender_slice": "bender --top <block> elaboration fails: invalid member access for type 'fetch_entry_t'/'x_register_t' (aka 'logic'); the struct typedefs need the whole-core config context",
+    "lhd": "k8-opt 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b",
+    "row": "B09_cva6_issue_scoreboard",
+    "block": "issue_stage",
+    "top": "issue_stage_gate",
+    "components": "issue_read_operands scoreboard raw_checker ariane_regfile_ff ariane_regfile_fpga cvxif_issue_register_commit_if_driver (whole named unit)"
+   },
    "approaches": {
     "Futamura projection": {
      "status": "PENDING",
@@ -728,8 +740,11 @@
      }
     },
     "Verified compiler": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "RUNNING",
+     "evidence": {
+      "phase": "emission COMPLETE, generation check (elaboration) RUNNING",
+      "cell_dir": "generated/master_port/cov12x5/B09_cva6_issue_scoreboard"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -760,8 +775,11 @@
      }
     },
     "Legacy": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "RUNNING",
+     "evidence": {
+      "phase": "emission COMPLETE, generation check (elaboration) RUNNING",
+      "cell_dir": "generated/master_port/cov12x5/B09_cva6_issue_scoreboard"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -796,7 +814,19 @@
   {
    "id": "B10",
    "benchmark": "CVA6 frontend",
-   "input_mapping": "PENDING",
+   "input_mapping": {
+    "route": "gate wrapper + WHOLE-CORE filelist, not a per-top bender slice",
+    "filelist": "generated/master_port/cva6_foundation/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.flistplus.f (353 lines, sha256 9ae886ff867dcfd630b59204123491c379d2362e3fc533710d3438bd68850882)",
+    "cva6_checkout": "/mada/users/czeng14/projects/cva6-blockfinding @ 6cb200105fb9441d170e45786125a737fab98e91 (1 untracked/dirty entry recorded, not altered)",
+    "wrapper_generator": "scripts/gen_cva6_wrappers.py sha256 0dee9c9765b5a7869eabb6cb7defda2910decc8cb5c8d856fcda8875ca4301fa, from slang AST sha256 3699e6f5738217c442cd427f6a8dd9e150c55db5a918f91099882177040dd3c1",
+    "options": "--set yosys.setundef=zero --set formal.lean.max_width=1048576 -- --ignore-assertions",
+    "why_not_bender_slice": "bender --top <block> elaboration fails: invalid member access for type 'fetch_entry_t'/'x_register_t' (aka 'logic'); the struct typedefs need the whole-core config context",
+    "lhd": "k8-opt 9cdba78e6b236e8c4f051ec85d24bf53d8960f8b8b2d6750d337895f131b613b",
+    "row": "B10_cva6_frontend",
+    "block": "frontend",
+    "top": "frontend_gate",
+    "components": "btb bht bht2lvl ras instr_scan instr_queue instr_realign cva6_fifo_v3 cf_math_pkg popcount unread lzc (whole named unit)"
+   },
    "approaches": {
     "Futamura projection": {
      "status": "PENDING",
@@ -815,8 +845,11 @@
      }
     },
     "Verified compiler": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "RUNNING",
+     "evidence": {
+      "phase": "emission COMPLETE, generation check (elaboration) RUNNING",
+      "cell_dir": "generated/master_port/cov12x5/B10_cva6_frontend"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -847,8 +880,11 @@
      }
     },
     "Legacy": {
-     "status": "PENDING",
-     "evidence": null,
+     "status": "RUNNING",
+     "evidence": {
+      "phase": "emission COMPLETE, generation check (elaboration) RUNNING",
+      "cell_dir": "generated/master_port/cov12x5/B10_cva6_frontend"
+     },
      "generation_ms": null,
      "metrics": {
       "generation_wall_ms": null,
@@ -1321,5 +1357,5 @@
  "optimization_schedule": "after coverage table runs",
  "environment_record": "pass/lean/tests/MASTER_SIM_GENERATION_ENVIRONMENT.json",
  "observed_environment_sha256": "ad186ee1424e15afa052bfa000fa50843bd954354d0f10e49256e711632edd8a",
- "provisional": "INCOMPLETE/PROVISIONAL. 60 cells: 3 YES with executed generation checks, 2 BLOCKED, 55 PENDING. A YES means the approach-native artifact was generated AND its required generation check ran and passed; it does NOT assert RTL equivalence, full validation or kernel certification. The final checkpoint is gated on all 60 YES."
+ "provisional": "INCOMPLETE/PROVISIONAL. 60 cells: 3 YES (PicoRV32, check-backed), 4 RUNNING (CVA6 frontend and issue/scoreboard emissions complete, elaboration checks in flight), 2 BLOCKED, 51 PENDING. A YES needs the approach-native artifact AND its declared generation check; emission alone is a phase."
 }

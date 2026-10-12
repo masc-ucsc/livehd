@@ -6006,7 +6006,7 @@ this section said otherwise and was premature.
 
 | approach | status | emission | generation check | artifact |
 |---|---|---|---|---|
-| Verified compiler | **YES** | 4.01 s | **39.73 s** elaboration, olean 15,542,272 B; the three `native_decide` theorems ran and succeeded | `picorv32_Lgraph.lean` 279,483 B + `picorv32.dcert` 70,067 B + `_io.json` |
+| Verified compiler | **YES** | 4.01 s | **39.73 s** elaboration, olean 15,542,272 B; its **two** `native_decide` theorems ran and succeeded | `picorv32_Lgraph.lean` 279,483 B + `picorv32.dcert` 70,067 B + `_io.json` |
 | Legacy | **YES** | 0.32 s | **87.87 s** elaboration, olean 70,343,304 B, 279 wf constructs evaluated | `picorv32_Lgraph.lean` 1,537,011 B + `_io.json`, emitted at `cert_wf=eval` |
 | IR-as-semantics | **YES** | 0.06 s | Cert **9.13 s** olean 15,514,320 B; Main **0.84 s** olean + C 5,094 B | `Sims/picorv32_Cert.lean` 277,445 B + `_Main.lean` 396 B |
 | Futamura projection | **BLOCKED** | -- | -- | -- |
@@ -6131,3 +6131,91 @@ from section 54. Nothing in this section discharges the migration gates, the
 fresh-16 or full validation, DCERT2 transport, the branch inventories, the
 remaining D3/D4 work, the 447+6 jobs or the thirty raw-source comparisons.
 Deferred D3 scoreboard timing and refactoring stay last.
+
+## 59. The CVA6 route, resolved by running it wrong first (PROVISIONAL)
+
+### 59.1 Corrections to section 58
+
+**Two `native_decide` uses, not three.** The verified-compiler artifact uses
+`native_decide` at lines 3815 and 3821; the third grep hit was prose in a
+comment. Corrected above.
+
+**`maxrss_kb` is KiB.** GNU `time`'s `%M` is KiB on this platform, so the
+verified-compiler check's 6,929,248 is **6.61 GiB (7.10 GB)**, not 6.93 GB.
+Raw KiB is what the records retain.
+
+**IR-as-semantics readiness is elaboration plus C emission, not a link.** The
+`lake exe Simpicorv32` link was not performed and is not claimed.
+
+### 59.2 A per-top bender slice is the wrong CVA6 binding
+
+Binding `CVA6 issue/scoreboard` and `CVA6 frontend` to `bender script
+flist-plus --top <block>` produced complete-looking component lists --
+`issue_stage` with `issue_read_operands`, `scoreboard`, `raw_checker`,
+`ariane_regfile_ff/_fpga`; `frontend` with `btb`, `bht`, `bht2lvl`, `ras`,
+`instr_scan`, `instr_queue`, `instr_realign` -- and then **failed to
+elaborate**:
+
+```
+instr_queue.sv:392:23: error: invalid member access for type 'fetch_entry_t' (aka 'logic')
+cvxif_issue_register_commit_if_driver.sv:44:20: error: invalid member access for type 'x_register_t' (aka 'logic')
+```
+
+21 errors on `frontend`, more on `issue_stage`. Elaborating a submodule as its
+own top degrades the config's struct typedefs to bare `logic`.
+
+### 59.3 The real route, read off the existing corpus
+
+`generated/master_port/cva6_foundation/.../provenance.txt` records what actually
+produced the `<block>_gate` corpus, and it is three things I was not using:
+
+* the **whole-core** filelist `cv64a6_imafdc_sv39_hpdcache_wb.flistplus.f`,
+  353 lines, sha256 `9ae886ff867dcfd6…`, over **`cva6-blockfinding` @
+  `6cb20010`** -- a different checkout from the `cva6-clean` @ `bc510437` I had
+  been using;
+* a per-block **gate wrapper** from `scripts/gen_cva6_wrappers.py`
+  (sha256 `0dee9c9765b5a786…`), generated from slang's elaborated AST
+  (278,287,750 B, sha256 `3699e6f57382…`); 28 generated, 0 not-in-config,
+  2 failed; 29 wrappers on disk, including `frontend_gate.sv` and
+  `issue_stage_gate.sv`;
+* `formal.lean.max_width=1048576`, which the historical CVA6 runner sets and I
+  had omitted.
+
+With the wrapper and the whole-core filelist, elaboration and `single_edge`
+pass. The emit then refused for a reason worth keeping:
+
+```
+[ERROR] pass.lean: node n_10692 (node) has width 2080 > max_width=1024
+[ERROR] pass.lean: node n_684  (node) has width 3536 > max_width=1024
+```
+
+which is the documented `max_width` option, not a weakened predicate.
+
+### 59.4 First non-Pico emissions
+
+| row | approach | emission | artifact |
+|---|---|---|---|
+| B10 CVA6 frontend | verified compiler | 1.46 s | `frontend_gate_Lgraph.lean` 5,422,167 B + `frontend_gate.dcert` 274,052 B |
+| B10 CVA6 frontend | legacy (`cert_wf=eval`) | 1.64 s | `frontend_gate_Lgraph.lean` 969,162 B |
+| B09 CVA6 issue/scoreboard | verified compiler | 0.77 s | `issue_stage_gate_Lgraph.lean` 6,393,936 B + `issue_stage_gate.dcert` 530,496 B |
+| B09 CVA6 issue/scoreboard | legacy (`cert_wf=eval`) | 1.25 s | `issue_stage_gate_Lgraph.lean` 1,252,028 B |
+
+Upstream phases are separate measurements, not folded in: `frontend` elaborated
+to an LGraph in 1.60 s and `single_edge` in 0.33 s; `issue_stage` in 9.64 s and
+0.06 s.
+
+**These are emissions, not YES.** Their generation checks -- elaboration of the
+emitted Lean -- are **RUNNING**; the cells stay RUNNING until those pass.
+
+### 59.5 Still open
+
+The clean detached worktree at
+`generated/master_port/cov12x5/sources/master_clean_3d8bb696c` (pin
+`3d8bb696ce3cd712…`, status empty) is in place for translation-validation
+admission; its private `.lake` is not yet prepared. FP keeps both prerequisites:
+DCERT2 transport, and the memory gap -- `HardwareInterpreter.lean` is
+byte-identical to the original `9bb41a09d`
+(`58b8b9a4e5dc37ad3cb4ca6ed8eaff5b952ae7e54d4cd8b20b04d42bf584c572`), rejects
+`memImg`/`memConst` and requires empty memories. That memory is preserved and
+the restriction is not removed; the memory-interpreter adequacy obligation stays
+open.
