@@ -7424,3 +7424,54 @@ real `RuntimeState`/`RuntimeResult` rather than only to `StateM`; clock-controll
 commit with reset/async metadata; and the residual/checker and adequacy premises.
 
 PicoRV32 stays **BLOCKED**.
+
+### 63.20 The update path is proved; the range counterexample is kept as a control; and `checkResidual` rules out the helper program
+
+**`setGo_body` is proved** for every list, every run-time address and every fuel
+at or above `5 · length + 14` — a looser bound than the walk's because the
+rebuild nests one level deeper, and stated separately rather than folded into the
+others.  `cons_set_step` carries the index arithmetic, with the same three-way
+split: a negative address and an address past the end both rebuild the list
+**unchanged**, which is also what `List.set` does past the end, and the
+`if 0 ≤ x` is what stops a negative address being read as index 0.
+
+**The range counterexample is now a retained control in the module.**  A 32-word
+`aw = 5` image given a deliberately **8-bit** address 255: the reference
+`cert_mem_write_be` writes there and reads `0xDEADBEEF` back, while the finite
+table has no such address, so our write is a no-op and the read gives 0.  Two
+`#guard`s pin both sides and a kernel-checked `example` proves they **differ**, so
+the control cannot rot into a no-op.  A second `example` proves
+`¬ InRange imgW (bv_uint wideAddr)` — the premise that excludes the shape is
+decidable and false here, which is the whole point.  This is a correctly refused
+**operand shape**, not a defect in the guarded lemmas and not a statement about a
+correctly shaped whole core: `zeroImg_inRange` discharges `InRange` exactly when
+the address width matches the table.
+
+**A structural prerequisite I verified at source, not from the summary.**
+`ResidualFragment.checkResidual` accepts `R.funs = [fd]` — **one** function —
+with `R.entry = 0`, `fd.arity = 3` and `fragB 3 fd.body`; and `fragB` answers
+**`false` on `.call _ _`**, so an accepted residual is entirely **call-free**.
+Its soundness theorem excludes `.outOfFuel` at `height + 1` for arbitrary `Val`
+arguments, while `.typeError` stays possible.
+
+So the six-function `memProg` is **not admissible as a residual**, and it was
+never going to be: `memProg` is the *interpreter* side, and the residual is what
+`mixDriver` produces by specializing against a design.  Because a design's table
+length is static, a specializer can unroll the walk into a call-free residual —
+that is the "proved call-free construction" route, and whether `mix` actually
+unrolls these recursive calls is now the concrete open question.  The alternative
+is a proved checker extension with explicit sufficient-fuel and valid-shape
+premises.  **What is not available** is reusing the call-free height theorem for
+recursive helpers, or claiming the design-dependent table-length bound covers
+arbitrary malformed values without a guard or a typed runtime premise.
+
+Axioms: `cons_set_step` uses `propext`/`Quot.sound`; `setGo_body` adds
+`Classical.choice` like its siblings.  No `sorryAx`, no `Lean.ofReduceBool`, and
+no `sorry` anywhere in the file.  Exit 0 in 6.08 s, 753,912 KiB.
+
+**Still owed:** `maskGo`/`writeBE` general correspondence and the composed
+`memFuel` bound — `memFuel` stays labelled a **proposal**; the `I_hw` source and
+operator cases with the function-identity bridge; the memory-bearing result codec
+and a relation to the real `RuntimeResult`; clock-controlled commit with
+reset/async metadata; and the checker/adequacy premises above.  PicoRV32 stays
+**BLOCKED**.

@@ -616,6 +616,156 @@ theorem memGet_sound (m : MemImg) (x : Int) (ρ : Env) (n : Nat)
     rw [getGo_body m.words x m.dflt (j + 2) (by omega)]
     simp [MemImg.get, hpos]
 
+/-! ### The update path -/
+
+/-- The `set` analogue of `cons_index_step`.  Out of range -- negative, or past
+the end -- the walk rebuilds the list unchanged, which is also what `List.set`
+does past the end; the `if 0 ≤ x` is what keeps a negative address from being
+read as index 0. -/
+theorem cons_set_step (a : BV) (t : List BV) (v : BV) {x : Int} (hx : x ≠ 0) :
+    (if 0 ≤ x then ((a :: t).set x.toNat v) else (a :: t))
+      = a :: (if 0 ≤ x - 1 then (t.set (x - 1).toNat v) else t) := by
+  by_cases hpos : 0 ≤ x
+  · have h2 : (0:Int) ≤ x - 1 := by omega
+    have hnat : x.toNat = (x - 1).toNat + 1 := by omega
+    rw [if_pos hpos, if_pos h2, hnat, List.set_cons_succ]
+  · have h2 : ¬ (0:Int) ≤ x - 1 := by omega
+    rw [if_neg hpos, if_neg h2]
+
+/-- **The object-language table UPDATE is correct for every list and every
+run-time address.**  Same shape and same method as `getGo_body`; the bound is
+looser (`5 * length + 14`) because the rebuild nests one level deeper. -/
+theorem setGo_body : ∀ (ws : List BV) (x : Int) (v : BV) (n : Nat),
+    5 * ws.length + 14 ≤ n →
+    evalFuel n memProg [encListG ofBV ws, Val.int x, ofBV v] fSetGo.body
+      = .value (encListG ofBV (if 0 ≤ x then (ws.set x.toNat v) else ws)) := by
+  intro ws
+  induction ws with
+  | nil =>
+    intro x v n hn
+    simp only [List.length_nil] at hn
+    rcases n with _ | _ | _ | k
+    · omega
+    · omega
+    · omega
+    have hc : evalFuel (k + 2) memProg [encListG ofBV ([] : List BV), Val.int x, ofBV v]
+                (.prim .isNil [.var 0]) = .value (.bool true) :=
+      eval_prim_succ (k + 1) _ _
+        (evalList_cons_eq _ _ _ (eval_var_succ k 0 rfl) (evalList_nil_eq _))
+        (by simp [evalPrim, encListG])
+    show evalFuel (k + 3) memProg _ (Term.ite _ _ _) = _
+    rw [eval_ite_true_succ (k + 2) _ _ hc, eval_lit_succ (k + 1) _]
+    simp [encListG]
+  | cons a t ih =>
+    intro x v n hn
+    simp only [List.length_cons] at hn
+    rcases n with _ | _ | _ | _ | _ | _ | _ | k
+    · omega
+    · omega
+    · omega
+    · omega
+    · omega
+    · omega
+    · omega
+    have hL : encListG ofBV (a :: t) = .cons (ofBV a) (encListG ofBV t) := rfl
+    have hc1 : evalFuel (k + 6) memProg [encListG ofBV (a :: t), Val.int x, ofBV v]
+                 (.prim .isNil [.var 0]) = .value (.bool false) :=
+      eval_prim_succ (k + 5) _ _
+        (evalList_cons_eq _ _ _ (eval_var_succ (k + 4) 0 rfl) (evalList_nil_eq _))
+        (by rw [hL]; simp [evalPrim])
+    show evalFuel (k + 7) memProg _ (Term.ite _ _ _) = _
+    rw [eval_ite_false_succ (k + 6) _ _ hc1]
+    by_cases hx0 : x = 0
+    · subst hx0
+      have hc2 : evalFuel (k + 5) memProg [encListG ofBV (a :: t), Val.int 0, ofBV v]
+                   (.prim .eqI [.var 1, .lit (.int 0)]) = .value (.bool true) :=
+        eval_prim_succ (k + 4) _ _
+          (evalList_cons_eq (k + 4) _ _ (eval_var_succ (k + 3) 1 rfl)
+            (evalList_cons_eq (k + 4) _ _ (eval_lit_succ (k + 3) _) (evalList_nil_eq (k + 4))))
+          (by simp [evalPrim])
+      rw [eval_ite_true_succ (k + 5) _ _ hc2]
+      rw [eval_prim_succ (k + 4) .consP [.var 2, .prim .tl [.var 0]]
+            (r := .cons (ofBV v) (encListG ofBV t))
+            (evalList_cons_eq (k + 4) _ _ (eval_var_succ (k + 3) 2 rfl)
+              (evalList_cons_eq (k + 4) _ _
+                (eval_prim_succ (k + 3) .tl [.var 0] (r := encListG ofBV t)
+                  (evalList_cons_eq _ _ _ (eval_var_succ (k + 2) 0 rfl) (evalList_nil_eq _))
+                  (by rw [hL]; simp [evalPrim]))
+                (evalList_nil_eq (k + 4))))
+            (by simp [evalPrim])]
+      simp [encListG]
+    · have hc2 : evalFuel (k + 5) memProg [encListG ofBV (a :: t), Val.int x, ofBV v]
+                   (.prim .eqI [.var 1, .lit (.int 0)]) = .value (.bool false) :=
+        eval_prim_succ (k + 4) _ _
+          (evalList_cons_eq (k + 4) _ _ (eval_var_succ (k + 3) 1 rfl)
+            (evalList_cons_eq (k + 4) _ _ (eval_lit_succ (k + 3) _) (evalList_nil_eq (k + 4))))
+          (by simp [evalPrim, hx0])
+      rw [eval_ite_false_succ (k + 5) _ _ hc2]
+      have hargs : evalFuelList (k + 3) memProg [encListG ofBV (a :: t), Val.int x, ofBV v]
+          [.prim .tl [.var 0], .prim .subI [.var 1, .lit (.int 1)], .var 2]
+          = .inl [encListG ofBV t, Val.int (x - 1), ofBV v] :=
+        evalList_cons_eq _ _ _
+          (eval_prim_succ (k + 2) .tl [.var 0] (r := encListG ofBV t)
+            (evalList_cons_eq _ _ _ (eval_var_succ (k + 1) 0 rfl) (evalList_nil_eq _))
+            (by rw [hL]; simp [evalPrim]))
+          (evalList_cons_eq _ _ _
+            (eval_prim_succ (k + 2) .subI [.var 1, .lit (.int 1)]
+              (evalList_cons_eq (k + 2) _ _ (eval_var_succ (k + 1) 1 rfl)
+                (evalList_cons_eq (k + 2) _ _ (eval_lit_succ (k + 1) _) (evalList_nil_eq (k + 2))))
+              (by simp [evalPrim]))
+            (evalList_cons_eq _ _ _ (eval_var_succ (k + 2) 2 rfl) (evalList_nil_eq _)))
+      rw [cons_set_step a t v hx0]
+      rw [eval_prim_succ (k + 4) .consP
+            [.prim .hd [.var 0],
+             .call 2 [.prim .tl [.var 0], .prim .subI [.var 1, .lit (.int 1)], .var 2]]
+            (r := .cons (ofBV a)
+                    (encListG ofBV (if 0 ≤ x - 1 then (t.set (x - 1).toNat v) else t)))
+            (evalList_cons_eq (k + 4) _ _
+              (eval_prim_succ (k + 3) .hd [.var 0] (r := ofBV a)
+                (evalList_cons_eq _ _ _ (eval_var_succ (k + 2) 0 rfl) (evalList_nil_eq _))
+                (by rw [hL]; simp [evalPrim]))
+              (evalList_cons_eq (k + 4) _ _
+                (by rw [eval_call_succ (k + 3) 2 _ hargs rfl rfl]
+                    exact ih (x - 1) v (k + 3) (by omega))
+                (evalList_nil_eq (k + 4))))
+            (by simp [evalPrim])]
+      simp [encListG]
+
+/-! ### An unsupported operand shape, kept as a CONTROL
+
+This is why `InRange` is a premise and not decoration.  A 32-word `aw = 5` image
+given a deliberately WIDER 8-bit address 255: the reference `cert_mem_write_be`
+writes at 255 and reads `0xDEADBEEF` back, while the finite table has no such
+address, so our write is a no-op and the read gives the default 0.  They DIFFER.
+
+That is a correctly-refused operand shape, not a defect in the guarded lemmas and
+not a statement about a correctly shaped whole core: `denote_writeEn` and
+`denote_writeBE` both carry `InRange`, and `zeroImg_inRange` discharges it
+exactly when the address width matches the table. -/
+
+private def wideAddr : BV := mk_bv 8 255
+private def imgW    : MemImg := zeroImg 5 32
+private def datW    : BV := mk_bv 32 0xDEADBEEF
+
+#guard cert_mem_read 32
+         (cert_mem_write_be 32 (denote imgW) wideAddr datW (mk_bv 4 0xF) 8)
+         wideAddr (mk_bv 1 1) == datW
+
+#guard readEn 32 (writeBE 32 imgW wideAddr datW (mk_bv 4 0xF) 8) wideAddr (mk_bv 1 1)
+       == mk_bv 32 0
+
+/-- The two really do disagree on this shape -- kernel-checked, so the control
+cannot rot into a no-op. -/
+example :
+    cert_mem_read 32 (cert_mem_write_be 32 (denote imgW) wideAddr datW (mk_bv 4 0xF) 8)
+      wideAddr (mk_bv 1 1)
+    ≠ readEn 32 (writeBE 32 imgW wideAddr datW (mk_bv 4 0xF) 8) wideAddr (mk_bv 1 1) := by
+  decide
+
+/-- …and the premise that excludes it is decidable and FALSE here, which is the
+point: the guarded theorems never applied to this shape. -/
+example : ¬ InRange imgW (bv_uint wideAddr) := by decide
+
 /-! ### Worked runs at PicoRV32's shape (`aw 5, dw 32`) -/
 
 /-- A 32-entry, 32-bit register file, all zero -- `cpuregs`'s shape. -/
@@ -814,6 +964,8 @@ end StateM
 
 section Audit
 #print axioms Projection.MemImg.memGet_sound
+#print axioms Projection.MemImg.setGo_body
+#print axioms Projection.MemImg.cons_set_step
 #print axioms Projection.MemImg.getGo_body
 #print axioms Projection.MemImg.getGo_sound
 #print axioms Projection.MemImg.cons_index_step
