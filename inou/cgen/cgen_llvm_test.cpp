@@ -938,7 +938,8 @@ TEST(CgenLlvm, ObjectOwnedStateIsPrivateAndIndependentAcrossInstances) {
         if ((*flags & llvm::object::BasicSymbolRef::SF_Global) != 0) {
           auto name = symbol.getName();
           ASSERT_TRUE(name) << llvm::toString(name.takeError());
-          EXPECT_EQ(name->str(), "counter_image_" + std::to_string(i));
+          const std::string prefix = object->getBinary()->isMachO() ? "_" : "";
+          EXPECT_EQ(name->str(), prefix + "counter_image_" + std::to_string(i));
           EXPECT_EQ(*flags & llvm::object::BasicSymbolRef::SF_Undefined, 0u);
           ++exports;
         }

@@ -97,7 +97,7 @@ struct Range_set {
 // ARC view (the callee's port_reach summary).
 class Comb_deps {
 public:
-  Comb_deps(port_reach::Cache& reach, port_reach::Cache& slices) : reach_(reach), slices_(slices) {}
+  explicit Comb_deps(port_reach::Cache& reach) : reach_(reach) {}
 
   // The refined view is port-level (each instance output on its port_reach
   // row) unless `bits` is on; bit-level walks are only needed inside the
@@ -781,7 +781,6 @@ private:
   static constexpr int kAtomBudget = 1 << 20;
 
   port_reach::Cache&                                             reach_;
-  port_reach::Cache&                                             slices_;
   absl::node_hash_map<hhds::Node_class, port_reach::Memory_deps> memories_;
   int                                                            budget_ = kRangeBudget;
   bool                                                           bits_   = false;
@@ -951,9 +950,6 @@ private:
 // entry outlives its graph.
 struct Scan_ctx {
   port_reach::Cache reach{port_reach::Callee_reach{}, /*slices=*/false};
-  // Slice summaries, consulted only for instance outputs a field select reads
-  // on a candidate cycle (each def's slices are computed on first such use).
-  port_reach::Cache slices{port_reach::Callee_reach{}, /*slices=*/true};
   State_free        state_free;
 };
 
@@ -971,7 +967,7 @@ struct Scc_scan {
 };
 
 Scc_scan scan(hhds::Graph* g, Scan_ctx& ctx) {
-  Comb_deps                    comb(ctx.reach, ctx.slices);
+  Comb_deps                    comb(ctx.reach);
   std::vector<hhds::Pin_class> roots;
   for (auto node : g->body().nodes()) {
     for (auto drv : node.out_sorted_pins()) {

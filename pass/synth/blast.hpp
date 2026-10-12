@@ -193,36 +193,34 @@ public:
   }
 };
 
-// GCC 14 -O2 false positive: the by-value copy of Blast_options below lets the
-// optimizer see a caller's disengaged std::optional<Adder_kind> payload and flag
-// its (engaged-only) read in value_or. The payload is never read unless engaged.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 template <class Ops, class ReadBit, class Slots, class Refuse, class RefuseShift>
 void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops, const ReadBit& abc_bit,
                 const Blast_options& defaults, const livehd::partition::Region_body& rb,
                 const absl::flat_hash_set<hhds::Node_class>& region, const Refuse& refuse, const RefuseShift& refuse_shift_amount) {
+  // Resolve optional choices from the original options: copying disengaged
+  // optional payloads before value_or triggers GCC's uninitialized analysis.
+  auto       sum_adder        = defaults.sum_adder.value_or(defaults.adder);
+  auto       comparator_adder = defaults.comparator_adder.value_or(defaults.adder);
+  auto       multiplier_adder = defaults.multiplier_adder.value_or(defaults.adder);
   auto       opts_            = defaults;
   const auto policy_attribute = n.attr(livehd::attrs::synth_policy);
   const auto node_policy = policy_attribute.has() ? livehd::synth_attr::read(policy_attribute.get()) : livehd::synth_attr::Policy{};
-  if (opts_.inherited_adder && livehd::synth_attr::get(node_policy, "adder") != "auto") {
-    opts_.adder     = *opts_.inherited_adder;
-    opts_.sum_adder = opts_.comparator_adder = opts_.multiplier_adder = opts_.adder;
+  if (defaults.inherited_adder && livehd::synth_attr::get(node_policy, "adder") != "auto") {
+    opts_.adder = *defaults.inherited_adder;
+    sum_adder = comparator_adder = multiplier_adder = opts_.adder;
     opts_.sum_adder_min_width = opts_.comparator_adder_min_width = 0;
   }
-  if (opts_.inherited_multiplier && livehd::synth_attr::get(node_policy, "multiplier") != "auto") {
-    opts_.multiplier = *opts_.inherited_multiplier;
+  if (defaults.inherited_multiplier && livehd::synth_attr::get(node_policy, "multiplier") != "auto") {
+    opts_.multiplier = *defaults.inherited_multiplier;
   }
-  if (opts_.inherited_barrel && livehd::synth_attr::get(node_policy, "barrel") != "auto") {
-    opts_.reverse_barrel = *opts_.inherited_barrel;
+  if (defaults.inherited_barrel && livehd::synth_attr::get(node_policy, "barrel") != "auto") {
+    opts_.reverse_barrel = *defaults.inherited_barrel;
   }
   if (policy_attribute.has()) {
     const auto adder = livehd::synth_attr::get(node_policy, "adder");
     if (opts_.source_adder && !adder.empty() && adder != "auto") {
-      opts_.adder               = *arith::parse_adder_kind(adder);
-      opts_.sum_adder           = opts_.adder;
-      opts_.comparator_adder    = opts_.adder;
-      opts_.multiplier_adder    = opts_.adder;
+      opts_.adder = *arith::parse_adder_kind(adder);
+      sum_adder = comparator_adder = multiplier_adder = opts_.adder;
       opts_.sum_adder_min_width = opts_.comparator_adder_min_width = 0;
     }
     const auto mult = livehd::synth_attr::get(node_policy, "multiplier");
@@ -615,7 +613,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       operands.push_back(std::move(operand));
     }
     const int  bs   = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(out_bits);
-    const auto kind = out_bits >= opts_.sum_adder_min_width ? opts_.sum_adder.value_or(opts_.adder) : opts_.adder;
+    const auto kind = out_bits >= opts_.sum_adder_min_width ? sum_adder : opts_.adder;
     auto       acc  = arith::build_sum(kind, bs, ops, operands, out_bits);
     for (int b = 0; b < out_bits; ++b) {
       slots[b] = acc[b];
@@ -649,7 +647,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
           av[i] = abc_eff_bit(a, i);
           bv[i] = abc_eff_bit(b, i);
         }
-        const auto kind = w >= opts_.comparator_adder_min_width ? opts_.comparator_adder.value_or(opts_.adder) : opts_.adder;
+        const auto kind = w >= opts_.comparator_adder_min_width ? comparator_adder : opts_.adder;
         auto pair = op == Ntype_op::LT ? arith::build_lt(kind, bs, ops, av, bv, uns) : arith::build_lt(kind, bs, ops, bv, av, uns);
         result    = ops.and_(result, pair);
       }
@@ -1024,7 +1022,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
           } else if (terms.size() == 1 && !terms[0].subtract) {
             constant_product = std::move(terms[0].bits);
           } else {
-            constant_product = arith::build_sum(opts_.multiplier_adder.value_or(opts_.adder), bs, ops, terms, out_w);
+            constant_product = arith::build_sum(multiplier_adder, bs, ops, terms, out_w);
           }
         }
       }
@@ -1058,7 +1056,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
           // A full-width unsigned intermediate keeps a zero sign guard when
           // multiplied by another signed operand; each stage remains modulo W.
           acc                   = arith::build_mul(opts_.multiplier,
-                                 opts_.multiplier_adder.value_or(opts_.adder),
+                                 multiplier_adder,
                                  bs,
                                  ops,
                                  acc,
@@ -1073,7 +1071,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         acc = extend(ds[0]);
         for (size_t k = 1; k < ds.size(); ++k) {
           acc = arith::build_mul(opts_.multiplier,
-                                 opts_.multiplier_adder.value_or(opts_.adder),
+                                 multiplier_adder,
                                  bs,
                                  ops,
                                  acc,
@@ -1097,5 +1095,4 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
            "wiring, resolved per demanded bit");
   }
 }
-#pragma GCC diagnostic pop
 }  // namespace livehd::synth
