@@ -948,6 +948,102 @@ example :
 point: the guarded theorems never applied to this shape. -/
 example : ¬ InRange imgW (bv_uint wideAddr) := by decide
 
+/-! ## The memory PRIMITIVE, and its reference bridge
+
+`Prim.memRead` evaluates an encoded image directly, with no call and no recursion
+in the term, so an application of it is inside `fragB`'s fragment.  The walker it
+uses lives in `ObjectLanguageSemantics` -- importing `MemImg` there would be a
+cycle -- and operates on the ENCODED form: a cons chain of `BV`s plus a default
+word, both inside the value.  Nothing in it indexes an external `Int → BV` table.
+
+The three theorems below are the bridge: the tag the two sides agree on, the
+walker against `MemImg.get`, and the primitive against `cert_mem_read`. -/
+
+theorem tagMemImg_eq_memImgTag : tagMemImg = memImgTag := rfl
+
+/-- The low-level walker computes exactly the image lookup, for every list and
+every run-time address. -/
+theorem valMemWalk_eq : ∀ (ws : List BV) (d : BV) (x : Int),
+    valMemWalk (encListG ofBV ws) d x = (if 0 ≤ x then (ws[x.toNat]?.getD d) else d) := by
+  intro ws
+  induction ws with
+  | nil => intro d x; simp [valMemWalk, encListG]
+  | cons a t ih =>
+    intro d x
+    by_cases hx : x = 0
+    · subst hx; simp [valMemWalk, encListG]
+    · have : encListG ofBV (a :: t) = .cons (ofBV a) (encListG ofBV t) := rfl
+      rw [this]
+      simp only [valMemWalk, if_neg hx, ih]
+      exact (cons_index_step a t d hx).symm
+
+/-- **The primitive is the reference read.**  For every image, address and
+enable, on valid operands. -/
+theorem valMemRead_eq (w : Nat) (m : MemImg) (a en : BV) :
+    valMemRead w (encMemImg m) (ofBV a) (ofBV en)
+      = some (cert_mem_read w (denote m) a en) := by
+  unfold valMemRead encMemImg cert_mem_read
+  simp only [asBV_ofBV, memImgTag, tagMemImg, if_true, Option.map_some]
+  by_cases hen : bv_nonzero en
+  · simp only [hen, if_true]
+    rw [valMemWalk_eq m.words m.dflt (bv_uint a)]
+    rfl
+  · simp [hen]
+
+/-- …and therefore so is the evaluator case. -/
+theorem evalPrim_memRead (w : Nat) (m : MemImg) (a en : BV) :
+    evalPrim .memRead [.int (Int.ofNat w), encMemImg m, ofBV a, ofBV en]
+      = .ok (ofBV (cert_mem_read w (denote m) a en)) := by
+  simp [evalPrim, widthOf, valMemRead_eq w m a en]
+
+/-! ### Arity, encoding and malformed-operand behaviour
+
+Totality matters as much as the happy path: the evaluator must ANSWER on junk,
+not get stuck. -/
+
+/- the declared arity -/
+#guard Prim.arity .memRead == 4
+/- the code round trip, with no existing primitive renumbered -/
+#guard decPrim (encPrim .memRead) == some .memRead
+#guard primCode .memRead == 32
+#guard primCode .bvShl == 31
+/- a malformed image is an error, not a wrong answer -/
+#guard (match evalPrim .memRead [.int 32, .nil, ofBV (mk_bv 5 1), ofBV (mk_bv 1 1)] with | .error _ => true | _ => false)
+/- a wrong tag is an error -/
+#guard (evalPrim .memRead
+          [.int 32, .ctor 99 [.nil, ofBV (mk_bv 32 0)], ofBV (mk_bv 5 1), ofBV (mk_bv 1 1)]).isOk
+       == false
+/- the wrong operand count is an error -/
+#guard (match evalPrim .memRead [.int 32, encMemImg (zeroImg 5 32)] with | .error _ => true | _ => false)
+/- a non-BV address is an error -/
+#guard (evalPrim .memRead
+          [.int 32, encMemImg (zeroImg 5 32), .nil, ofBV (mk_bv 1 1)]).isOk == false
+
+/-! ### Discriminating runs of the PRIMITIVE on encoded data -/
+
+/- a ROM read returns its INITIALISED word, through the primitive -/
+#guard (match evalPrim .memRead
+          [.int 32, encMemImg (ofMemConst 32 #[11, 22, 33]), ofBV (mk_bv 5 1), ofBV (mk_bv 1 1)] with
+        | .ok v => v == ofBV (mk_bv 32 22)
+        | _     => false)
+/- above the contents it reads the default -/
+#guard (match evalPrim .memRead
+          [.int 32, encMemImg (ofMemConst 32 #[11, 22, 33]), ofBV (mk_bv 5 9), ofBV (mk_bv 1 1)] with
+        | .ok v => v == ofBV (mk_bv 32 0)
+        | _     => false)
+/- a DISABLED read is zero, whatever the contents -/
+#guard (match evalPrim .memRead
+          [.int 32, encMemImg (ofMemConst 32 #[11, 22, 33]), ofBV (mk_bv 5 1), ofBV (mk_bv 1 0)] with
+        | .ok v => v == ofBV (mk_bv 32 0)
+        | _     => false)
+/- a write through the checked host helper is visible to the PRIMITIVE -/
+#guard (match writeChecked 32 (zeroImg 5 32) (mk_bv 5 7) (mk_bv 32 0xBEEF) (mk_bv 4 0xF) 8 with
+        | some m' => (match evalPrim .memRead
+                             [.int 32, encMemImg m', ofBV (mk_bv 5 7), ofBV (mk_bv 1 1)] with
+                      | .ok v => v == ofBV (mk_bv 32 0xBEEF)
+                      | _     => false)
+        | none    => false)
+
 /-! ### Worked runs at PicoRV32's shape (`aw 5, dw 32`) -/
 
 /-- A 32-entry, 32-bit register file, all zero -- `cpuregs`'s shape. -/
@@ -1155,6 +1251,9 @@ end StateM
 
 section Audit
 #print axioms Projection.MemImg.memGet_sound
+#print axioms Projection.MemImg.valMemWalk_eq
+#print axioms Projection.MemImg.valMemRead_eq
+#print axioms Projection.MemImg.evalPrim_memRead
 #print axioms Projection.MemImg.memSet_sound
 #print axioms Projection.MemImg.writeChecked_sound
 #print axioms Projection.MemImg.writeAdmissible_iff

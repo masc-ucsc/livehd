@@ -69,6 +69,35 @@ a `Nat`, so a negative one is junk in `Val`, not a bit vector of some width. -/
 this is the single place it becomes the `Nat` the hardware model wants. -/
 @[inline] def widthOf (w : Int) : Nat := w.toNat
 
+/-! ## Finite memory images, as first-order data
+
+The tag and the two-field shape are shared with `Projection.MemImg`, which cannot
+be imported here without a cycle -- `MemImage` sits above this file.  The walker
+below therefore works on the ENCODED form directly: a cons chain of `BV` values
+and a default word, both inside the value.  There is no index into an external
+`Int → BV` table anywhere in it. -/
+
+/-- Constructor tag of an encoded memory image.  Kept equal to
+`Projection.MemImg.tagMemImg`, and `MemImage.lean` proves the two agree. -/
+def memImgTag : Nat := 124
+
+/-- Walk an encoded word list.  Stops at the end of the chain, so a negative or
+out-of-range address terminates and yields the default. -/
+def valMemWalk : Val → BV → Int → BV
+  | .cons a rest, d, x => if x = 0 then (asBV a).getD d else valMemWalk rest d (x - 1)
+  | _,            d, _ => d
+
+/-- The read, on an encoded image.  `none` is a genuine malformed-operand
+answer: a wrong tag, a wrong field count, or a non-`BV` where one is required. -/
+def valMemRead (w : Nat) (img a en : Val) : Option BV :=
+  match img, asBV a, asBV en with
+  | .ctor t [ws, dv], some av, some env =>
+      if t = memImgTag then
+        (asBV dv).map (fun d =>
+          if bv_nonzero env then bv_resize w (valMemWalk ws d (bv_uint av)) else mk_bv w 0)
+      else none
+  | _, _, _ => none
+
 /-! ## Primitive evaluation
 
 The ONLY place a primitive is interpreted.  Adding a primitive touches this
@@ -114,6 +143,10 @@ def evalPrim (p : Prim) (vs : List Val) : Except String Val :=
       else .error "mkCtor: negative tag"
   | .ctorTagP,    [.ctor t _]  => .ok (.int (Int.ofNat t))
   | .ctorFieldsP, [.ctor _ fs] => .ok (listVal fs)
+  | .memRead, [.int w, img, a, en] =>
+      match valMemRead (widthOf w) img a en with
+      | some b => .ok (ofBV b)
+      | none   => .error "memRead: malformed image or operand"
   | .bvMk,    [.int w, .int v] => .ok (ofBV (mk_bv (widthOf w) v))
   | .bvWidth, [v] => match asBV v with
                      | some b => .ok (.int (Int.ofNat b.width))

@@ -176,11 +176,17 @@ inductive Prim where
   | bvSra | bvGetMask
   -- the SIGNED reading of a bit vector; `bv_uint` has `bvUint` already
   | bvSint | bvShl
+  -- FINITE MEMORY IMAGES.  `memRead w img a en` reads an ENCODED image: `img` is
+  -- a two-field record holding the word list and the default word, both
+  -- first-order, so nothing here reaches outside the encoding for a base image.
+  -- Appended at the end so no existing primitive is renumbered.
+  | memRead
   deriving DecidableEq, Inhabited, Repr
 
 /-- Arity of a primitive.  `evalPrim` rejects any other operand count, so this is
 the single source of truth for primitive shape. -/
 def Prim.arity : Prim → Nat
+  | .memRead                              => 4
   | .addI | .subI | .mulI | .divI | .modI => 2
   | .ltI  | .leI  | .eqI                  => 2
   | .andB | .orB                          => 2

@@ -141,6 +141,7 @@ binding-time analysis has to be offline. -/
 private def pA : SExp := hd_ (R "vs")
 private def pB : SExp := hd_ (tl_ (R "vs"))
 private def pC : SExp := hd_ (tl_ (tl_ (R "vs")))
+private def pD : SExp := hd_ (tl_ (tl_ (tl_ (R "vs"))))
 
 private def primTable : List (Int × SExp) :=
   [ (0,  .prim .addI [pA, pB]), (1,  .prim .subI [pA, pB])
@@ -160,7 +161,12 @@ private def primTable : List (Int × SExp) :=
   , (25, .prim .mkCtorP [pA, pB]), (26, .prim .ctorTagP [pA])
   , (27, .prim .ctorFieldsP [pA])
   , (28, .prim .bvSra [pA, pB, pC]), (29, .prim .bvGetMask [pA, pB, pC])
-  , (30, .prim .bvSint [pA]), (31, .prim .bvShl [pA, pB, pC]) ]
+  , (30, .prim .bvSint [pA]), (31, .prim .bvShl [pA, pB, pC])
+  -- The memory read's MIRROR.  Without this entry a STATIC application of the
+  -- primitive has no term to fold to and the specializer answers typeError;
+  -- a DYNAMIC application still residualises generically.  Both paths are
+  -- validated in MemImage.lean rather than assumed.
+  , (32, .prim .memRead [pA, pB, pC, pD]) ]
 
 /-- An unrecognised code falls through to `hd nil`, a `typeError`. -/
 private def evalPrimBody : SExp :=

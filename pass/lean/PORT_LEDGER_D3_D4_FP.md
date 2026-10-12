@@ -7568,3 +7568,65 @@ integration landed.  I am not going to start a partial `Prim` addition that
 leaves the development unbuildable; the next step is the specialization
 experiment above, which decides which of the two routes is actually open.
 PicoRV32 stays **BLOCKED**, and nothing in the 60-cell table changes.
+
+### 63.23 The memory READ primitive is implemented, proved and validated on both mix paths
+
+**Two of my claims are corrected first.**
+
+*"Cannot be specialized at all."*  Too strong.  The independent control shows
+that removing a `primTable` mirror makes **static** object-mix generation
+`typeError`, while **dynamic** object-mix still generates the code and executes.
+Static evaluation needs the mirror; dynamic residualisation is generic.
+
+*"Helper calls survive into the residual."*  Not an observed result.  `fragB`
+rejecting `.call` is a **conditional** limitation on what the checker accepts; it
+says nothing about the structure of a residual nobody has generated.
+
+**My costed blast radius was also wrong — four sites, actually six.**  The build
+found the two I missed: `PartialEvaluatorCorrect.lean:1630` (`primStruct_ok`) and
+`:3569` (`primStruct_sound`), both exhaustive `cases p with` splits **inside
+proofs**.  I had grepped for `def` sites only.  `primStruct` returns `none` for
+`memRead` through its catch-all, so it joins the alternation that already
+discharges 28 other primitives with `simp [primStruct] at hps`.
+
+**`Prim.memRead` is implemented across all six sites, nothing renumbered**
+(`bvShl` is still 31, `memRead` is 32):
+
+| site | change |
+|---|---|
+| `ObjectLanguage.lean` | the constructor, arity **4** |
+| `ObjectLanguageSemantics.lean` | `memImgTag`, `valMemWalk`, `valMemRead`, the `evalPrim` case |
+| `Encoding.lean` | `primCode = 32`, `primOfCode 32` |
+| `MixProgram.lean` | the `primTable` mirror, plus a new `pD` operand accessor |
+| `PartialEvaluatorCorrect.lean` ×2 | the `memRead` alternative in both proof splits |
+
+The walker sits in `ObjectLanguageSemantics` on purpose — importing `MemImg`
+there is a cycle — and works on the **encoded** form: a cons chain of `BV`s and a
+default word, both inside the value.  No index into an external `Int → BV`, no
+oracle.
+
+**The reference bridge is proved**, all with `propext`/`Quot.sound` only:
+`tagMemImg_eq_memImgTag`; `valMemWalk_eq` — the walker equals the image lookup
+for every list and run-time address; `valMemRead_eq` and `evalPrim_memRead` — the
+primitive **is** `cert_mem_read` on valid operands, enabled and disabled.
+
+**Totality and encoding are checked, not assumed:** a malformed image, a wrong
+tag, the wrong operand count and a non-`BV` address each give `.error`; the code
+round trip holds and `bvShl` keeps 31.  Discriminating runs: a ROM reads its
+**initialised** word, reads the default above its contents, a disabled read is
+zero, and a `writeChecked` result is visible to the primitive.
+
+**Both mix paths validated against the actual `PartialEvaluator` code**
+(`Projection/MemPrimChecks.lean`): `.stat` folds through `evalPrim` to the ROM's
+word; `.dyn` has no `primStruct` rule so mix residualises an opaque
+`.prim .memRead` node; and that node **passes `fragB 4`** — no call, no
+recursion, so unlike the six-function helper program a primitive application is
+inside the checker's fragment.  `fragB` also rejects it at the wrong arity.  The
+guards bite: flipping the dynamic expectation to `.isSome` fails the build.
+
+Built in an independently owned context (`generated/memprim`, the repo's own
+`build-opt.sh`): 38 oleans, probe linked, exit 0; `MemImage.lean` 8.40 s.
+
+**What this does not do:** `I_hw` does not yet call the primitive, there is no
+`Op_MemRead`/`Op_MemWriteBE` wiring, no memory-bearing result relation and no
+clock-controlled commit.  `memFree` is untouched.  PicoRV32 stays **BLOCKED**.
