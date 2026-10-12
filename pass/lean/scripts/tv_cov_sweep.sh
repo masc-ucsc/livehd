@@ -24,10 +24,18 @@
 #   D3_ARTIFACT_DIR        changes what is HASHED without changing what is LOADED
 #   --prove                a separate obligation; the proof gate reads `na` here
 #
-#   tv_cov_sweep.sh <private-checkout> <manifest.tsv> <certs-dir> <out-dir> [timeout_s] [kill_rss_kib]
+# A CAPPED ROW IS UNDECIDED.  `--timeout` is part of the sidecar config, so
+# `--resume` refuses when it changes -- deliberately: a different budget is a
+# different experiment, not a continuation.  Re-attempting a timed-out target at
+# a larger budget therefore uses a NEW attempt root and `[only_regex]`, and the
+# capped attempt is retained untouched as evidence of what that budget did.
+#
+#   tv_cov_sweep.sh <private-checkout> <manifest.tsv> <certs-dir> <out-dir> \
+#                   [timeout_s] [kill_rss_kib] [only_regex]
 set -uo pipefail
 P=${1:?private checkout root}; MAN=${2:?manifest}; CERTS=${3:?certs dir}; OUT=${4:?out dir}
 TMO=${5:-1800}; KILL=${6:-16000000}       # KILL is KiB, as --kill-over-rss-kb expects
+ONLY=${7:-}
 
 case "$TMO"  in ''|*[!0-9]*) echo "REFUSING: timeout $TMO is not a number"; exit 2 ;; esac
 case "$KILL" in ''|*[!0-9]*) echo "REFUSING: kill_rss_kib $KILL is not a number"; exit 2 ;; esac
@@ -71,15 +79,18 @@ pick a new one rather than overwriting a retained attempt"; exit 3; }
   echo "lean_toolchain=$(cat "$P/formal/lean/lean-toolchain" 2>/dev/null)"
   echo "reifier=legacy (default) prove=NOT REQUESTED -- generation/admission sweep only"
   echo "enforce=cgroup kill_over_rss_kb=$KILL (KiB) jobs=1 timeout=${TMO}s"
+  echo "only=${ONLY:-<all manifest targets>}"
 } > "$OUT/BINDING.txt"
 
 cd "$P" || exit 2
+D3ARGS=(--manifest "$MAN" --certs "$CERTS" --out "$OUT/sweep.tsv"
+        --jobs 1 --timeout "$TMO" --enforce cgroup --kill-over-rss-kb "$KILL")
+[ -n "$ONLY" ] && D3ARGS+=(--only "$ONLY")
+printf '%s\n' "python3 -I $D3" "${D3ARGS[@]}" > "$OUT/argv.txt"
 systemd-run --user --scope --quiet --unit="tvsweep-$(date +%s)" \
   /usr/bin/time -f 'wall %e\nuser %U\nsys %S\nmaxrss_kib %M\nexit %x' -o "$OUT/time.txt" \
   nice -n19 ionice -c3 env D3_LEAN_ROOT="$P/formal/lean" LEAN_NUM_THREADS=4 \
-  python3 -I "$D3" \
-    --manifest "$MAN" --certs "$CERTS" --out "$OUT/sweep.tsv" \
-    --jobs 1 --timeout "$TMO" --enforce cgroup --kill-over-rss-kb "$KILL" \
+  python3 -I "$D3" "${D3ARGS[@]}" \
   > "$OUT/stdout.log" 2> "$OUT/stderr.log"
 rc=$?
 echo "$rc" > "$OUT/exit"

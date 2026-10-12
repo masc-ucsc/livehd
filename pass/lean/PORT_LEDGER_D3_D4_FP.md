@@ -6827,3 +6827,46 @@ Both readiness drivers' source identities are kept: the frontend result was
 produced by `dc7ec7d5…` (pre-guard), the issue-stage attempt runs
 `93761c10…` (post-guard).  The guards reject `cycles=0` and malformed
 configuration only; the 8-cycle path is unchanged between them.
+
+### 63.10 All twelve TV and all twelve FP dispositions are now recorded
+
+The TV sweep reached a terminal result: **exit 0, wall 3130.87 s, user 1339.49,
+sys 36.77, maxrss 8,171,064 KiB = 7.79 GiB**, aggregate RSS peak 8,227,316 KiB =
+7.85 GiB against the 20,000,000 KiB cap.
+
+| target | verdict | wall | maxrss |
+|---|---|---|---|
+| `picorv32` | **agree**, all seven gates | 62.77 s | 2,389,304 KiB = 2.28 GiB |
+| `frontend_gate` | **agree**, all seven gates | 1260.38 s | 8,171,064 KiB = 7.79 GiB |
+| `issue_stage_gate` | **timeout** at the 1800 s cap (ran 1803.11 s) | — | — |
+
+`proof` reads `0/3 (3 na, 0 failed)` — `--prove` was not requested, so the gate
+is *not applicable*, not failed.  PicoRV32's controls are worth stating
+precisely: `selftest_base=1`, `mut_out` rejected, `mut_flop` rejected and
+**`mut_mem` rejected** with `mutable_mem=1` — its memory was **validated, not
+bypassed**, which is the exact opposite of the FP column's position on the same
+design.  32 samples, 32 distinct observables.  This is admission of the
+generated certificate: **not standalone emission latency and not a full kernel
+proof.**
+
+**A cap is UNDECIDED.**  `d3_sweep` classifies a timeout as NONTERMINAL and says
+so in its own summary — *"resumable, and NOT a gate failure"*.  So
+`issue_stage_gate` is neither a pass nor a capability `NO`.  `--timeout` is part
+of the sidecar config and `--resume` refuses when it changes — deliberately, a
+different budget being a different experiment — so the re-attempt runs in a
+**new attempt root** (`tv12x5/run_issue_7200`, `--only issue_stage_gate
+--timeout 7200`), and the capped attempt is retained untouched.  That re-attempt
+was launched **by `pass/lean/scripts/tv_cov_sweep.sh` itself**, which therefore
+is no longer only a reconstruction for this attempt: its `argv.txt` and
+`BINDING.txt` were written by the run.
+
+**The nine unavailable rows carry the same inherited common-input blocker in
+both columns** — no `<top>_Lgraph.lean`, because the verified-compiler emitter
+was never reached when the shared RTL→LGraph / `single_edge` prerequisite failed
+— each linked to its exact upstream stop, and **no identical failed RTL
+elaboration was replayed** to establish any of them.
+
+Matrix state across JSON, TSV, HTML and this ledger: **10 YES, 11 NO, 37
+BLOCKED, 2 RUNNING — 60 cells, none PENDING.**  The two RUNNING cells are
+`B09`'s TV re-attempt and `B09`'s FP readiness, both with live PIDs recorded.
+The all-60-YES gate is **not** met and nothing is pushed.
