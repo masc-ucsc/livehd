@@ -1057,7 +1057,7 @@
       "generation_wall_ms": null,
       "generation_user_cpu_ms": null,
       "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
+      "peak_rss_kb": 6809596,
       "observed_cgroup_peak_bytes": null,
       "phase_times_ms": {
        "generate": {
@@ -1395,7 +1395,7 @@
       "generation_wall_ms": null,
       "generation_user_cpu_ms": null,
       "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
+      "peak_rss_kb": 6707540,
       "observed_cgroup_peak_bytes": null,
       "phase_times_ms": {
        "generate": {
@@ -1489,7 +1489,7 @@
       "generation_wall_ms": null,
       "generation_user_cpu_ms": null,
       "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
+      "peak_rss_kb": 8171064,
       "observed_cgroup_peak_bytes": null,
       "phase_times_ms": {
        "combined_gates": {
@@ -1866,7 +1866,7 @@
       "generation_wall_ms": null,
       "generation_user_cpu_ms": null,
       "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
+      "peak_rss_kb": 6452072,
       "observed_cgroup_peak_bytes": null,
       "phase_times_ms": {
        "support_refusal": {
@@ -1995,7 +1995,7 @@
       "generation_wall_ms": null,
       "generation_user_cpu_ms": null,
       "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
+      "peak_rss_kb": 2389304,
       "observed_cgroup_peak_bytes": null,
       "phase_times_ms": {
        "combined_gates": {
