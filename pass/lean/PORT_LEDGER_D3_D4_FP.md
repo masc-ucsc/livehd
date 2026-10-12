@@ -7736,3 +7736,53 @@ either primitive.  No `memImg`/`memConst` source cases, no
 `RuntimeResult` relation, no clock-controlled commit and no inactive-clock case.
 `memFree` is untouched and PicoRV32 stays **BLOCKED**.  Both primitives being
 inside `fragB`'s fragment (§63.23) is what makes that integration reachable.
+
+### 63.26 The hardware memory source and clock-controlled commit
+
+**Scope note carried forward, as the audit asked.**  `valMemWriteBE_eq` gives the
+encoded **host `writeBE`** update; the reference equality comes from
+`denote_writeBE` **under `InRange`**.  The composed bridge is
+`primitive → encoded writeBE → (InRange) → cert_mem_write_be`, and it is stated
+that way rather than collapsed into one claim.
+
+**`Projection.Hardware` implements the source and commit layer**, each matched to
+its reference counterpart by a theorem rather than by resemblance:
+
+| definition | theorem | reference it denotes |
+|---|---|---|
+| `absentImg` | `absentImg_denote` | the zero-width-zero image an absent memory reads |
+| `srcMemImg` | `srcMemImg_denote` | `sourceValue .memImg` — the **state** image, absent ⇒ zero |
+| `ofMemConst` | `ofMemConst_denote` | `sourceValue .memConst` — bound by **`contents.size`**, default 0, initial contents preserved |
+| `memCommit` | `memCommit_denote` | `srcMemNext` — commit on `fires e m.clock`, otherwise hold the prior image |
+| `stepMems` | `stepMems_quiet` | the per-memory array, each committed on **its own** clock |
+
+`memCommit_inactive` and `stepMems_quiet` are the ones that matter for metadata:
+with the clock quiet the prior image is returned **exactly**, not rebuilt, so
+contents, defaults and sizes survive a step in which nothing fires.
+
+**A discriminating state transition through this path**, not a standalone
+primitive run — the image comes out of a `StateM` via `srcMemImg`, the write goes
+through the `memWriteBE` **primitive**, the result is committed by `memCommit` on
+the memory's own clock, and the read comes back through the `memRead` primitive
+from the committed state:
+
+* **active** clock → the write commits and the read sees `0xDEADBEEF`;
+* **inactive** clock → the same write does **not** commit, the read sees 0, and
+  `st'.mems` is identical to the prior array image-for-image;
+* a **partial** mask at PicoRV32's 1-bit-per-byte enable → `0x000000FF`;
+* a neighbour untouched;
+* an enabled **out-of-range** write refused by the primitive, so no step happens;
+* a ROM's initial contents surviving the **state codec** round trip.
+
+The inactive-clock control bites: expecting `0xDEADBEEF` there fails the build.
+
+Axioms: `ofMemConst_denote` `propext`; the other three add `Quot.sound`.  No
+`sorryAx`, no `Lean.ofReduceBool`.  `MemImage.lean` 8.48 s, 827,188 KiB, exit 0
+against the independently built chain.
+
+**What is still missing, precisely.**  This is the memory layer `I_hw` needs, and
+it is proved — but `I_hw` itself is not yet rewired: `SourceSupported` still
+answers `false` for `memImg`/`memConst`, `OpSupported` still excludes
+`Op_MemRead`/`Op_MemWriteBE`, and `supportReport.memFree` is untouched.  There is
+no memory-bearing `RuntimeResult` relation yet and no generic step/adequacy
+theorem over it.  PicoRV32 stays **BLOCKED**; these controls are not a YES.

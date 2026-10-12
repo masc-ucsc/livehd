@@ -1402,8 +1402,177 @@ initial contents: this is the case `decState` cannot represent at all. -/
 
 end StateM
 
+/-! ## The HARDWARE memory path: sources, commit, and the reference bridge
+
+This is the layer `I_hw` needs, over the finite representation and the two
+primitives.  Every definition is matched to its reference counterpart by a
+theorem, so nothing here is "like" the reference -- it denotes it.
+
+Reference, for the record (`Compiler/Runtime.lean`, `Compiler/DesignSemantics.lean`):
+
+    sourceValue .memImg idx _ _        = .mem (s.mems[idx]?.getD (fun _ => mk_bv 0 0))
+    sourceValue .memConst _ dw cs      = .mem (fun x => if 0 ≤ x ∧ x.toNat < cs.size
+                                                       then mk_bv dw cs[x.toNat]! else mk_bv dw 0)
+    srcMemNext rho e s idx m           = if fires e m.clock then (rho m.nextImg).asMem
+                                         else s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+
+The `memConst` bound is `contents.size`, NOT `2 ^ aw`, and the default is zero --
+which is exactly how `ofMemConst` was already defined. -/
+
+namespace Hardware
+
+/-- The empty image: no words, zero-width zero default.  This is what the
+reference reads for an absent memory. -/
+def absentImg : MemImg := ⟨[], mk_bv 0 0⟩
+
+@[simp] theorem absentImg_denote : MemImg.denote absentImg = (fun _ => mk_bv 0 0) := by
+  funext x
+  by_cases h : 0 ≤ x <;> simp [MemImg.denote, MemImg.get, absentImg, h]
+
+/-- `memImg idx`: the state's image, or the absent image. -/
+def srcMemImg (s : StateM) (idx : Nat) : MemImg := s.mems[idx]?.getD absentImg
+
+/-- **The source denotes the reference source.** -/
+theorem srcMemImg_denote (s : StateM) (idx : Nat) :
+    MemImg.denote (srcMemImg s idx)
+      = ((StateM.denote s).mems[idx]?.getD (fun _ => mk_bv 0 0)) := by
+  unfold srcMemImg StateM.denote
+  simp only [Array.getElem?_map]
+  cases h : s.mems[idx]? with
+  | none     => simpa [h] using absentImg_denote
+  | some img => simp [h, MemImg.denote]
+
+/-- **`memConst` denotes the reference ROM**, with `contents.size` as the bound
+and zero as the default -- initial contents preserved, not re-derived. -/
+theorem ofMemConst_denote (dw : Nat) (contents : Array Int) (x : Int) :
+    MemImg.denote (MemImg.ofMemConst dw contents) x
+      = (if 0 ≤ x ∧ x.toNat < contents.size
+         then mk_bv dw (contents[x.toNat]!) else mk_bv dw 0) := by
+  unfold MemImg.denote MemImg.get MemImg.ofMemConst
+  by_cases h0 : 0 ≤ x
+  · by_cases hs : x.toNat < contents.size
+    · simp [h0, hs, Array.getElem!_eq_getD, Array.getD]
+    · simp [h0, hs, List.getElem?_eq_none]
+  · simp [h0]
+
+/-- The clock-controlled commit: on an edge the new image, otherwise the prior
+image EXACTLY -- not a rebuilt one. -/
+def memCommit (fired : Bool) (newImg prior : MemImg) : MemImg :=
+  if fired then newImg else prior
+
+/-- **An inactive clock holds the prior image, word for word.** -/
+@[simp] theorem memCommit_inactive (newImg prior : MemImg) :
+    memCommit false newImg prior = prior := by simp [memCommit]
+
+@[simp] theorem memCommit_active (newImg prior : MemImg) :
+    memCommit true newImg prior = newImg := by simp [memCommit]
+
+/-- **The commit denotes `srcMemNext`.**  Given that the committed image denotes
+what the reference's `rho m.nextImg` does, the two agree on BOTH branches --
+including the inactive one, where both hold the prior state image. -/
+theorem memCommit_denote (e : ClockEdges) (s : StateM) (idx : Nat) (m : MemoryDesc)
+    (newImg : MemImg) (nextMem : Int → BV) (hnew : MemImg.denote newImg = nextMem) :
+    MemImg.denote (memCommit (fires e m.clock) newImg (srcMemImg s idx))
+      = (if fires e m.clock then nextMem
+         else ((StateM.denote s).mems[idx]?.getD (fun _ => mk_bv 0 0))) := by
+  unfold memCommit
+  cases h : fires e m.clock
+  · simpa using srcMemImg_denote s idx
+  · simpa using hnew
+
+/-- The whole memory array for one step, each image committed on ITS OWN clock. -/
+def stepMems (e : ClockEdges) (D : DesignCert) (s : StateM) (newImgs : Array MemImg) :
+    Array MemImg :=
+  D.memories.mapIdx fun idx m =>
+    memCommit (fires e m.clock) (newImgs[idx]?.getD (srcMemImg s idx)) (srcMemImg s idx)
+
+@[simp] theorem stepMems_size (e : ClockEdges) (D : DesignCert) (s : StateM)
+    (newImgs : Array MemImg) : (stepMems e D s newImgs).size = D.memories.size := by
+  simp [stepMems]
+
+/-- **No clock fires, no commit**: every image is the prior one, exactly.  Stated
+with the quiet-edge condition as a hypothesis, which is what a caller actually
+establishes from `e`. -/
+theorem stepMems_quiet (e : ClockEdges) (D : DesignCert) (s : StateM) (newImgs : Array MemImg)
+    (hq : ∀ m ∈ D.memories, fires e m.clock = false) (idx : Nat)
+    (h : idx < D.memories.size) :
+    (stepMems e D s newImgs)[idx]! = srcMemImg s idx := by
+  have hmem : D.memories[idx] ∈ D.memories := Array.getElem_mem h
+  have hf : fires e (D.memories[idx]).clock = false := hq _ hmem
+  simp [stepMems, Array.getElem!_eq_getD, Array.getD, h, hf, memCommit]
+
+/-! ### A discriminating state transition through THIS path
+
+Not a standalone primitive run: the image comes out of a `StateM` through
+`srcMemImg`, the write goes through the `memWriteBE` PRIMITIVE, the result is
+committed by `memCommit` on the memory's OWN clock, and the read comes back
+through the `memRead` primitive from the committed state. -/
+
+private def picoState : StateM := ⟨#[mk_bv 32 0], #[MemImg.zeroImg 5 32]⟩
+private def picoMem : MemoryDesc := { aw := 5, dw := 32, nextImg := 0, clock := 0 }
+
+/-- One step: read the image out of the state, write through the primitive,
+commit on `clock 0`, and hand back the new state. -/
+private def stepOnce (e : ClockEdges) (st : StateM) (a d bev : BV) : Option StateM :=
+  let prior := srcMemImg st 0
+  match evalPrim .memWriteBE
+          [.int 32, MemImg.encMemImg prior, ofBV a, ofBV d, ofBV bev, .int 8] with
+  | .ok v =>
+      match MemImg.decMemImg v with
+      | some img' => some { st with mems := #[memCommit (fires e picoMem.clock) img' prior] }
+      | none      => none
+  | _ => none
+
+private def readBack (st : StateM) (a : BV) : Option Val :=
+  match evalPrim .memRead
+          [.int 32, MemImg.encMemImg (srcMemImg st 0), ofBV a, ofBV (mk_bv 1 1)] with
+  | .ok v => some v
+  | _     => none
+
+/- ACTIVE clock: the write commits and the read sees it. -/
+#guard (match stepOnce #[true] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) with
+        | some st' => readBack st' (mk_bv 5 7) == some (ofBV (mk_bv 32 0xDEADBEEF))
+        | none     => false)
+
+/- INACTIVE clock: the same write does NOT commit; memory is unchanged. -/
+#guard (match stepOnce #[false] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) with
+        | some st' => readBack st' (mk_bv 5 7) == some (ofBV (mk_bv 32 0))
+        | none     => false)
+
+/- …and the whole image is identical, not merely that one word. -/
+#guard (match stepOnce #[false] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) with
+        | some st' => st'.mems == picoState.mems
+        | none     => false)
+
+/- PARTIAL mask through the same path, at PicoRV32's 1-bit-per-byte enable. -/
+#guard (match stepOnce #[true] picoState (mk_bv 5 7) (mk_bv 32 0xFFFFFFFF) (mk_bv 4 1) with
+        | some st' => readBack st' (mk_bv 5 7) == some (ofBV (mk_bv 32 0x000000FF))
+        | none     => false)
+
+/- a NEIGHBOUR is untouched by the committed write -/
+#guard (match stepOnce #[true] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) with
+        | some st' => readBack st' (mk_bv 5 8) == some (ofBV (mk_bv 32 0))
+        | none     => false)
+
+/- an ENABLED OUT-OF-RANGE write is refused by the primitive, so no step happens -/
+#guard (stepOnce #[true] picoState (mk_bv 8 255) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF)).isNone
+
+/- a ROM's initial contents survive the round trip through the state codec -/
+#guard (match StateM.decStateM (StateM.encStateM ⟨#[], #[MemImg.ofMemConst 32 #[11,22,33]]⟩) with
+        | some st => (match evalPrim .memRead
+                        [.int 32, MemImg.encMemImg (srcMemImg st 0),
+                         ofBV (mk_bv 5 2), ofBV (mk_bv 1 1)] with
+                      | .ok v => v == ofBV (mk_bv 32 33) | _ => false)
+        | none    => false)
+
+end Hardware
+
 section Audit
 #print axioms Projection.MemImg.memGet_sound
+#print axioms Projection.Hardware.srcMemImg_denote
+#print axioms Projection.Hardware.ofMemConst_denote
+#print axioms Projection.Hardware.memCommit_denote
+#print axioms Projection.Hardware.stepMems_quiet
 #print axioms Projection.MemImg.valMemWriteBE_eq
 #print axioms Projection.MemImg.valMemWriteBE_disabled
 #print axioms Projection.MemImg.valMemWriteBE_refuses_outOfRange
