@@ -1353,3 +1353,53 @@ benchmark inputs/runners. Use project-local runtime directories. Supervision
 continues at the user's 20-minute interval and sends another instruction only
 when the current one has finished or needs verified corrective guidance. No
 performance/profiling/optional native-build research before functional coverage.
+
+
+### 15.6 Authorized final upstream rebase and push
+
+Latest user instruction, 2026-10-12: finish the ongoing work, including FP
+support and the final acceptance gates, then rebase and push the commits to
+master. This explicitly authorizes the final rebase and push after their
+prerequisites pass. It supersedes the earlier **user will push / no push**
+wording only for that final action; there is no authorization to push an
+incomplete intermediate checkpoint. Do not ask for renewed permission for the
+already-authorized final action.
+
+1. Complete the implementation, all required whole-unit support and all original
+   final acceptance gates. Keep the five-approach/all-60-YES condition and
+   separate preservation/admission/proof/replay obligations intact. A Phase 1
+   entry test, 12/12 FP alone, a cached result or a provisional commit is not
+   final acceptance.
+2. Before integration, retain recoverable identities for the accepted local
+   commit stack and exact artifacts/evidence. Verify a clean worktree and no
+   live consumers of build contexts that integration or rebuilding would alter.
+   Do not rewrite unrelated user work or discard conflicting implementation.
+3. Read/fetch the latest remote master and rebase the local unpublished stack
+   onto that actual revision. At the 2026-10-12 audit, local master had 177
+   commits absent from live remote history, and remote master
+   `5385554b8c64ed48e30fbd7ba3512e4c76434d53` had 56 commits absent locally;
+   their merge base was `94c5967c664e5089c204a857a8db06a8f2f7c43e`.
+   These are dated observations, not a permanent integration pin. The tracking
+   ref was stale, so never infer current divergence only from origin/master.
+4. Resolve rebase conflicts against the actual source/preservation/semantic
+   requirements. Preserve upstream fixes, benchmark contracts, all FP and
+   D2/D3/D4 functionality, clock/reset/memory metadata and required proof/trust
+   boundaries. Record intentional adaptations and their justification.
+5. Rebuild affected source/dependency closures and rerun all checks and whole
+   benchmark phases invalidated by the upstream/rebase changes. Reconcile
+   source inventories, exact raw-source comparisons and table evidence to the
+   final integrated revision. Retain pre-rebase observations as historical;
+   do not label them fresh final evidence. Final acceptance must still hold
+   after integration, not merely before it.
+6. Audit every required final gate against the actual integrated state, refresh
+   the remote-tip check and perform a normal fast-forward push to remote
+   master when all pass. If remote advances again, integrate it and repeat
+   affected validation. Do not force-push, bypass checks, drop commits or push
+   through an unresolved blocker. The user's push authorization persists.
+7. Report the final local/remote revision, validation scope, reconciliation and
+   actual push result. Mark the supervision goal complete only when the full
+   original objective and final post-rebase acceptance/push requirements are
+   achieved and verified.
+
+Continue implementing section 15.5 now; this final integration stage does not
+replace or delay the currently runnable FP memory proof/support work.
