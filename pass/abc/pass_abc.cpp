@@ -852,8 +852,11 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     const char* b = s.data();
     const char* e = s.data() + s.size();
     auto [p, ec]  = std::from_chars(b, e, icg_fanout);
-    if (ec != std::errc{} || p != e || icg_fanout > std::numeric_limits<uint32_t>::max()) {
-      livehd::diag::err("pass.abc", "bad-icg-fanout", "syntax").msg("pass.abc.icg_fanout '{}' is not an integer", s).fatal();
+    // 1 would never shrink a level (one buffer per sink): 0 disables, a tree needs >= 2.
+    if (ec != std::errc{} || p != e || icg_fanout == 1 || icg_fanout > std::numeric_limits<uint32_t>::max()) {
+      livehd::diag::err("pass.abc", "bad-icg-fanout", "syntax")
+          .msg("pass.abc.icg_fanout '{}' must be 0 (off) or an integer >= 2", s)
+          .fatal();
     }
   }
   uint64_t input_clock_min = 8192;

@@ -118,9 +118,14 @@ void Pass_opentimer::prepare_critical_targets() {
       }
       output_clocks_[pin] = timing_targets_.begin()->first;
     }
+    const auto target = timing_targets_.find(output_clocks_.at(pin));
+    if (target == timing_targets_.end()) {
+      invalid("critical-target-missing", std::format("output '{}' references SDC clock '{}', which is not defined", pin, output_clocks_.at(pin)));
+      continue;
+    }
     for (auto tran : {ot::RISE, ot::FALL}) {
       if ((output_max_constraints_[pin] & (1U << tran)) == 0) {
-        timer.set_rat(pin, ot::MAX, tran, timing_targets_.at(output_clocks_.at(pin)).period);
+        timer.set_rat(pin, ot::MAX, tran, target->second.period);
       }
     }
   }
@@ -201,14 +206,55 @@ void Pass_opentimer::annotate_critical(const std::shared_ptr<hhds::Graph>& g) {
             std::format("no timing target binds clock net '{}' (known targets:{})", wire, known));
     return {};
   };
+  // First combinational fanin of each pin, and the driver of each net: a clock
+  // pin is traced back through buffer trees and clock gates to the pin that
+  // names a target port. One resolver serves launch, capture and native state.
+  std::map<const ot::Pin*, const ot::Pin*> upstream;
+  std::map<std::string, const ot::Pin*>    net_driver;
+  for (const auto& feed : timer.arcs()) {
+    const auto fv = feed.timing_view();
+    if (!fv[ot::MAX] || !fv[ot::MAX]->is_constraint()) {
+      upstream.emplace(&feed.to(), &feed.from());
+    }
+    if (feed.from().net() != nullptr && feed.from().net() == feed.to().net()) {
+      net_driver.emplace(feed.from().net()->name(), &feed.from());
+    }
+  }
+  std::set<std::string> port_names;
+  for (const auto& [tname, target] : timing_targets_) {
+    port_names.insert(target.ports.begin(), target.ports.end());
+  }
+  std::map<const ot::Pin*, std::string> pin_clock;
+  auto clock_of_pin = [&](const ot::Pin* start) -> std::string {
+    if (auto it = pin_clock.find(start); it != pin_clock.end()) {
+      return it->second;
+    }
+    std::string wire = start->net() ? start->net()->name() : start->name();
+    for (const ot::Pin* up = start; up != nullptr; ) {
+      if (port_names.contains(up->name())) {
+        wire = up->name();
+        break;
+      }
+      auto it = upstream.find(up);
+      up      = it == upstream.end() ? nullptr : it->second;
+      if (up == start) {
+        break;
+      }
+    }
+    return pin_clock[start] = clock_for_net(wire);
+  };
+  auto clock_of_wire = [&](const std::string& wire) -> std::string {
+    auto it = net_driver.find(wire);
+    return it == net_driver.end() ? clock_for_net(wire) : clock_of_pin(it->second);
+  };
   for (const auto& [pin, wire] : native_end_clocks_) {
-    output_clocks_[pin] = clock_for_net(wire);
+    output_clocks_[pin] = clock_of_wire(wire);
     for (auto tran : {ot::RISE, ot::FALL}) {
       timer.set_rat(pin, ot::MAX, tran, timing_targets_.at(output_clocks_[pin]).period);
     }
   }
   for (const auto& [pin, wire] : native_start_clocks_) {
-    input_clocks_[pin] = clock_for_net(wire);
+    input_clocks_[pin] = clock_of_wire(wire);
   }
   timer.update_timing();
 
@@ -216,6 +262,11 @@ void Pass_opentimer::annotate_critical(const std::shared_ptr<hhds::Graph>& g) {
   // input. Both must participate in clock-domain validation.
   std::set<const ot::Gate*> sequential_gates;
   std::set<const ot::Pin*>  clock_pins, setup_pins;
+  const auto non_seq = [](const ot::Test& test) {
+    const auto view = test.arc().timing_view();
+    const auto type = view[ot::MAX] ? view[ot::MAX]->type : std::nullopt;
+    return type && (*type == ot::TimingType::NON_SEQ_SETUP_RISING || *type == ot::TimingType::NON_SEQ_SETUP_FALLING);
+  };
   const auto                setup_constraint = [](const ot::Test& test, ot::Tran tran) -> std::optional<float> {
     const auto view = test.arc().timing_view();
     if (!view[ot::MAX]) {
@@ -228,38 +279,11 @@ void Pass_opentimer::annotate_critical(const std::shared_ptr<hhds::Graph>& g) {
     // cached Test::constraint. Evaluate the Liberty table with current slews.
     return clock_slew && data_slew ? view[ot::MAX]->constraint(edge, tran, *clock_slew, *data_slew) : std::nullopt;
   };
-  // First combinational fanin of each pin: lets clock lookup see through buffer trees and gates.
-  std::map<const ot::Pin*, const ot::Pin*> upstream;
-  for (const auto& feed : timer.arcs()) {
-    const auto fv = feed.timing_view();
-    if (!fv[ot::MAX] || !fv[ot::MAX]->is_constraint()) {
-      upstream.emplace(&feed.to(), &feed.from());
-    }
-  }
   for (const auto& arc : timer.arcs()) {
     const auto view = arc.timing_view();
     if (view[ot::MAX] && !view[ot::MAX]->is_constraint()
         && (view[ot::MAX]->is_rising_edge_triggered() || view[ot::MAX]->is_falling_edge_triggered())) {
-      // Walk upstream through buffer-tree/gating arcs to the pin that names a target port.
-      std::string wire;
-      if (auto net = arc.from().net(); net) {
-        wire = net->name();
-      }
-      const ot::Pin* up = &arc.from();
-      for (size_t hops = 0; up && hops < 64; ++hops) {
-        bool named = false;
-        for (const auto& [tname, target] : timing_targets_) {
-          named = named || std::find(target.ports.begin(), target.ports.end(), up->name()) != target.ports.end();
-        }
-        if (named) {
-          wire = up->name();
-          break;
-        }
-        auto it = upstream.find(up);
-        const ot::Pin* next = it == upstream.end() ? nullptr : it->second;
-        up = next;
-      }
-      input_clocks_[arc.to().name()] = clock_for_net(wire);
+      input_clocks_[arc.to().name()] = clock_of_pin(&arc.from());
       sequential_gates.insert(arc.to().gate());
       clock_pins.insert(&arc.from());
     }
@@ -269,23 +293,25 @@ void Pass_opentimer::annotate_critical(const std::shared_ptr<hhds::Graph>& g) {
     if (!view[ot::MAX]) {
       continue;
     }
-    setup_pins.insert(&test.constrained_pin());
-    if (const auto type = view[ot::MAX]->type;
-        type && (*type == ot::TimingType::NON_SEQ_SETUP_RISING || *type == ot::TimingType::NON_SEQ_SETUP_FALLING)) {
+    if (non_seq(test)) {
       continue;  // between two asynchronous pins of one cell: not launched by a clock edge
     }
+    setup_pins.insert(&test.constrained_pin());
     const auto edge = view[ot::MAX]->is_rising_edge_triggered() ? ot::RISE : ot::FALL;
-    // A recovery check (async set/reset) is characterized for one data transition only;
-    // a missing table for the other transition is not a gap. Some transition must be
-    // constrained wherever data arrives.
-    bool arrives = false, constrained = false;
+    // A recovery check (async set/reset release) is characterized for one data
+    // transition only; every other check must constrain each arriving transition.
+    const auto type     = view[ot::MAX]->type;
+    const bool recovery = type && (*type == ot::TimingType::RECOVERY_RISING || *type == ot::TimingType::RECOVERY_FALLING);
+    bool       arrives = false, constrained = false, gap = false;
     for (auto tran : {ot::RISE, ot::FALL}) {
       if (test.constrained_pin().at(ot::MAX, tran)) {
-        arrives     = true;
-        constrained = constrained || (setup_constraint(test, tran) && test.related_pin().at(ot::MIN, edge));
+        arrives       = true;
+        const bool ok = setup_constraint(test, tran) && test.related_pin().at(ot::MIN, edge);
+        constrained   = constrained || ok;
+        gap           = gap || !ok;
       }
     }
-    if (arrives && !constrained) {
+    if (arrives && (!constrained || (gap && !recovery))) {
       invalid("critical-coverage", std::format("missing setup timing at '{}'", test.constrained_pin().name()));
     }
   }
@@ -366,8 +392,7 @@ void Pass_opentimer::annotate_critical(const std::shared_ptr<hhds::Graph>& g) {
       }
     }
     for (const auto& test : timer.tests()) {
-      const auto* net = test.related_pin().net();
-      if (net == nullptr || clock_for_net(net->name()) != clock) {
+      if (non_seq(test) || test.related_pin().net() == nullptr || clock_of_pin(&test.related_pin()) != clock) {
         continue;
       }
       const auto view = test.arc().timing_view();

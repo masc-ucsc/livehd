@@ -61,6 +61,10 @@ assert query(net, 'src=design.v')
 summary = run('tool', 'sta', f'lg:{net}', '--top', 'top', 'paths=2').stdout.splitlines()
 assert 1 <= len(summary) <= 2 and all(l.startswith('slack ') and ' cells ' in l for l in summary), summary
 run('tool', 'sta', f'lg:{net}', '--top', 'top', 'paths=many', success=False)
+# --emit-dir wipes its target first: a directory holding the input is refused.
+run('pass', 'opentimer', f'lg:{net}', LIB, '--top', 'top', '--workdir', W/'wipe',
+    '--set', 'pass.opentimer.targets=virtual:0.01ns', '--emit-dir', f'lg:{W}', success=False)
+assert net.exists() and any(net.iterdir())
 assert not query(net, 'clock=absent')
 # Queries inspect persisted data, including definition ownership, not scratch
 # flattened nodes. A color remains independently visible to the generic tool.

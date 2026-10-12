@@ -26,7 +26,6 @@
 #include "json_util.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
-#include "node_util.hpp"
 #include "pass_opentimer.hpp"
 #include "pass_partition.hpp"
 #include "pin_tracker.hpp"
@@ -451,7 +450,14 @@ void Pass_opentimer::time_work(Eprp_var& var) {
       // copy_from retains body indices. Record those identities before compact
       // instances are replaced; each new replica maps back to its source node.
       for (const auto& copy : occurrence_graphs) {
-        const auto                           source = lib->find_io(copy->get_name())->get_graph();
+        const auto source_io = copy ? lib->find_io(copy->get_name()) : nullptr;
+        const auto source    = source_io ? source_io->get_graph() : std::shared_ptr<hhds::Graph>{};
+        if (!source) {
+          livehd::diag::err("pass.opentimer", "scratch-copy", "internal")
+              .msg("could not map a copied definition back to its source for critical annotations")
+              .emit();
+          return;
+        }
         std::map<uint64_t, hhds::Node_class> originals;
         for (auto n : source->body().nodes()) {
           originals.emplace(n.get_debug_nid(), n);
@@ -1648,8 +1654,11 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   };
   if (critical_) {
     for (const auto& node : nodes) {
+      // One entry per driver pin, not per edge: a W-bit driver with fanout F
+      // would otherwise list the node W x F times.
+      absl::flat_hash_set<hhds::Occurrence_index> drivers;
       for (const auto& edge : node.out_edges()) {
-        if (edge.driver.is_invalid() || edge.driver.is_const()) {
+        if (edge.driver.is_invalid() || edge.driver.is_const() || !drivers.insert(edge.driver.get_occurrence_index()).second) {
           continue;
         }
         const auto& values = pin_tracker.get_pin_vector(trk_id(edge.driver));
@@ -1683,18 +1692,18 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           .msg("critical annotations require a timing model for native {}", Ntype::get_name(op))
           .fatal();
     }
-    auto launch_clock = critical_ ? state_clock(node) : std::string{};
-    if (critical_ && launch_clock.empty()) {
-      livehd::diag::err("pass.opentimer", "critical-clock-unresolved", "io")
-          .msg("native {} '{}' has no resolvable clock net", Ntype::get_name(op), livehd::graph_util::node_name_of(node.base_node()))
-          .fatal();
-    }
+    auto launch_clock = critical_ && op != Ntype_op::Memory ? state_clock(node) : std::string{};
     if (critical_ && op == Ntype_op::Memory) {
+      // A port without a clock (asynchronous read, constant clock pin) does not
+      // vote: the memory launches in the one clock its clocked ports share.
       for (auto sink : node.inp_sorted_pins()) {
         if (sink.get_port_id() % Ntype::Memory_port_stride != 2) {
           continue;
         }
         const auto clock = state_clock(node, sink.get_port_id());
+        if (clock.empty()) {
+          continue;
+        }
         if (!launch_clock.empty() && clock != launch_clock) {
           livehd::diag::err("pass.opentimer", "critical-memory-clock", "unsupported")
               .msg("critical annotations require a Liberty timing model for a native memory with multiple clocks")
@@ -1702,6 +1711,11 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         }
         launch_clock = clock;
       }
+    }
+    if (critical_ && launch_clock.empty()) {
+      livehd::diag::err("pass.opentimer", "critical-clock-unresolved", "io")
+          .msg("native {} '{}' has no resolvable clock net", Ntype::get_name(op), livehd::graph_util::node_name_of(node.base_node()))
+          .fatal();
     }
     ++native_state_nodes_;
     // Path boundary, not a cell (2opt-freq D): pass.abc keeps flops, latches,

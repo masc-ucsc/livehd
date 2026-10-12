@@ -1702,7 +1702,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     }
   }
   if (registers.icg_fanout != 0 && clock_buf.has_value()) {
-    const size_t cap = registers.icg_fanout;
+    const size_t cap = std::max<size_t>(2, registers.icg_fanout);  // 1 would never shrink a level
     // Deterministic order: the minted names must not depend on hash iteration.
     std::vector<hhds::Pin_class> drivers;
     for (const auto& kv : clock_sinks) {
@@ -1712,12 +1712,14 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       return std::make_pair(a.get_master_node().get_debug_nid(), a.get_port_id())
              < std::make_pair(b.get_master_node().get_debug_nid(), b.get_port_id());
     });
-    const auto& desc = lib.decl(*outlib_, *clock_buf);
+    const Cell_decl* desc = nullptr;  // declared on the first tree only: no unused buffer decl
     for (const auto& driver : drivers) {
       // A net fed straight from the design's primary clock port is ideal in
       // every timer (CTS owns it): a tree there only adds latency. A derived
       // clock is bounded here: a gate's or inverter's output this region drives,
-      // or a region input another region's gate drives.
+      // or a region input another region's gate drives. Per-module mapping sees
+      // only the module's own clock port, so a clock a PARENT gates is treated
+      // like the primary one (bounded past icg_input_min).
       if (gu::is_graph_input_pin(driver)) {
         bool primary = true;
         for (size_t idx = 0; idx < rb.inputs.size(); ++idx) {
@@ -1736,17 +1738,20 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       int   level = 0;
       while (sinks.size() > cap) {
         std::vector<hhds::Pin_class> next;
+        if (desc == nullptr) {
+          desc = &lib.decl(*outlib_, *clock_buf);
+        }
         for (size_t g = 0; g * cap < sinks.size(); ++g) {
           auto buf = gu::create_typed_node(*body, Ntype_op::Sub);
-          buf.set_subnode(desc.io);
+          buf.set_subnode(desc->io);
           buf.attr(hhds::attrs::name).set(std::format("{}__clkbuf{}_{}", rb.module_name, level, clock_tree_cells));
-          auto out = buf.create_driver_pin(desc.output_name);
+          auto out = buf.create_driver_pin(desc->output_name);
           gu::set_ubits(out, 1);
           for (size_t i = g * cap; i < std::min(sinks.size(), (g + 1) * cap); ++i) {
             sinks[i].del_sink();
             out.connect_sink(sinks[i]);
           }
-          next.push_back(buf.create_sink_pin(desc.input_names.front()));
+          next.push_back(buf.create_sink_pin(desc->input_names.front()));
           ++clock_tree_cells;
           clock_tree_area += lib.type(*clock_buf).area;
         }

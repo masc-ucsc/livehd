@@ -45,7 +45,7 @@ public:
     // the blaster planned onto cells (Bbox::latch); null = none.
     using Latch_ladders                     = std::vector<liberty::Dff_cell>[2][3];
     const Latch_ladders*                    latch   = nullptr;
-    // Max sinks per clock-gate cell (0: one cell per recognized gate).
+    // Clock buffer-tree fan-out cap: register clock pins per buffer (0: no tree).
     uint32_t                                icg_fanout = 0;
     // The design is large enough that a primary clock net is also bounded
     // (Driver_options::input_clock_min).

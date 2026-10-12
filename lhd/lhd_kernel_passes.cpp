@@ -1060,6 +1060,11 @@ void pass_command(Options& opts, Result& res) {
     run_step("pass.opentimer", var, labels, opts, res);
     const bool critical = labels["critical"] == "true" || labels["critical"] == "1";
     if (graph_out && fs::weakly_canonical(graph_out->path) != fs::weakly_canonical(lg_in)) {
+      // The output is wiped first: it must not contain the input library.
+      const auto out_dir = fs::weakly_canonical(graph_out->path).string() + "/";
+      if (fs::weakly_canonical(lg_in).string().starts_with(out_dir)) {
+        throw Lhd_error{"usage", std::format("--emit-dir lg:{} contains the input lg:{}", graph_out->path, lg_in), "pick a separate directory"};
+      }
       std::error_code ec;
       fs::remove_all(graph_out->path, ec);
       ensure_dir(graph_out->path);

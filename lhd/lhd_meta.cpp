@@ -529,7 +529,7 @@ const Help_doc* tool_help_doc(std::string_view name) {
       {},
         {"lhd tool sta lg:net --top cpu",
         "lhd tool sta clock=clk 'slack<0' lg:net --diag-fmt json", "lhd tool sta src=alu.prp lg:net",
-        "lhd tool sta critical=false lg:net", "lhd tool sta paths=5 'slack<0' lg:net --top cpu   # the 5 worst paths: slack, cells, start -> end"},
+        "lhd tool sta critical=false lg:net", "lhd tool sta paths=5 'slack<0' lg:net --top cpu   # the 5 worst equal-slack groups: slack, cells, start -> end"},
       {"lg"},
       {"stdout"}
   };

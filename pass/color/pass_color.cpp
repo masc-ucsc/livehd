@@ -789,10 +789,14 @@ void Pass_color::color(Eprp_var& var) {
         fine   += part == "fine";
       }
     }
-    if (coarse == 0 && fine == 0) {
+    // The graph-wide traits (ctrl_cones, flop_to_flop) follow the scope only when
+    // every pinned cell agrees (a module attribute, or a virtual-flat design whose
+    // pins say one thing). Mixed pins leave the run profile, and only the per-cell
+    // stop_* resolution (color_common) applies.
+    if ((coarse == 0) == (fine == 0)) {
       return;
     }
-    const bool usyn_profile = coarse >= fine;
+    const bool usyn_profile = coarse != 0;
     const auto set_default  = [&](std::string_view key, bool value, bool& field) {
       if (var.get(key, "").empty()) {
         field = value;

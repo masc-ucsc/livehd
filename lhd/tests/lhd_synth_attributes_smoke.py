@@ -395,6 +395,10 @@ for mapper in ("abc", "usyn"):
 bad_doc, _ = run("synth", pre_ok, "--top", "pre_ok", "--workdir", work / "pre_cli", "--set", "synth.liberty=" + lib,
                  "--set", "synth.abc_pre=dc2; system ls", ok=False)
 assert "allow-listed" in json.dumps(bad_doc), bad_doc
+# Logic-network-only ABC commands fail on the strashed region: not offered.
+sweep_doc, _ = run("synth", pre_ok, "--top", "pre_ok", "--workdir", work / "pre_sweep", "--set", "synth.liberty=" + lib,
+                   "--set", "synth.abc_pre=sweep", ok=False)
+assert "allow-listed" in json.dumps(sweep_doc), sweep_doc
 # Two exclusive adders merged by cprop into one Sum behind operand muxes keep the
 # source pin (the retyped Mux root used to fall back to the run default).
 def merged_sum(name, attrs, *settings):
@@ -423,4 +427,11 @@ tree_doc, _ = run("synth", wide, "--top", "wide_clk", "--workdir", work / "wide_
 gates = lambda d: d["qor"]["abc"]["total"]["gates"]
 assert gates(small_doc) == gates(flat_doc), (gates(small_doc), gates(flat_doc))
 assert gates(tree_doc) > gates(flat_doc), (gates(tree_doc), gates(flat_doc))
+# A fan-out cap of 1 would never shrink a tree level: refused, not looped on.
+one_doc, _ = run("synth", wide, "--top", "wide_clk", "--workdir", work / "wide_clk_one", "--set", "synth.liberty=" + lib,
+                 "--set", "synth.opentimer=false", "--set", "pass.abc.icg_fanout=1", ok=False)
+assert "icg_fanout" in json.dumps(one_doc), one_doc
+two_doc, _ = run("synth", wide, "--top", "wide_clk", "--workdir", work / "wide_clk_two", "--set", "synth.liberty=" + lib,
+                 "--set", "synth.opentimer=false", "--set", "pass.abc.icg_fanout=2", "--set", "pass.abc.icg_input_min=1")
+assert gates(two_doc) > gates(tree_doc), (gates(two_doc), gates(tree_doc))
 print("region contraction A -> B -> A and module-scope isolation passed")

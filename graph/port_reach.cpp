@@ -115,6 +115,25 @@ bool Memory_deps::deps(hhds::Port_id want_pid, const std::function<void(const hh
 }
 
 namespace {
+// A body-less cell's output declared loop_break (a mapped flop/latch Q) is last
+// period's value. Per pin: a blackbox mixing registered and combinational
+// outputs keeps its combinational paths.
+bool state_output(const hhds::Node_class& m, const hhds::Pin_class& d) {
+  if (!m.is_loop_break()) {
+    return false;
+  }
+  const auto io = m.get_subnode_io();
+  if (!io) {
+    return false;
+  }
+  for (const auto& decl : io->get_output_pin_decls()) {
+    if (decl.port_id == d.get_port_id()) {
+      return decl.loop_break;
+    }
+  }
+  return false;
+}
+
 
 // Decompose a packed-output driver into disjoint (lo, leaf) ranges when it is
 // the concat idiom a packed struct lowers to: an `Or` tree whose operands are
@@ -523,7 +542,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         }
         if (op == Ntype_op::Sub) {
           auto cg = m.get_subnode_graph();
-          if (!cg && m.is_loop_break()) {
+          if (!cg && state_output(m, d)) {
             continue;  // a body-less SEQUENTIAL cell (mapped flop/latch): last period's value
           }
           if (!cg) {
@@ -641,7 +660,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         }
         if (op == Ntype_op::Sub) {
           auto cg = m.get_subnode_graph();
-          if (!cg && m.is_loop_break()) {
+          if (!cg && state_output(m, d)) {
             return;  // a body-less SEQUENTIAL cell (mapped flop/latch): last period's value
           }
           if (!cg) {

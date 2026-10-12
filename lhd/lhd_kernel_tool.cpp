@@ -1622,21 +1622,27 @@ std::string tool_input_kind(const std::string& t) {
 // the worst occurrence per clock. Queries never require Liberty or re-run STA.
 struct Sta_path {
   double                      slack = 0;
-  std::string                 clock, unit, start, end, module;
+  std::string                 clock, unit, module;
+  std::set<std::string>       starts, ends;
   size_t                      cells = 0;
   std::map<std::string, size_t> sources;
 };
 
 // Cells of one critical path share one slack value (STA slack is constant
-// along a path), so equal-slack rows of a clock are one path. Reports the
-// `limit` worst: slack, cell count, launching/capturing state and the source
-// lines the cells carry.
+// along a path), so equal-slack rows of a clock form a slack GROUP: one path,
+// or parallel slices of equal slack (bits of one adder) folded together. Reports
+// the `limit` worst groups: slack, cell count, launching/capturing states (first
+// plus how many more) and the source lines the cells carry.
 std::string tool_sta_paths(const std::map<std::pair<std::string, std::string>, Sta_path>& groups, size_t limit) {
   std::vector<const Sta_path*> order;
   for (const auto& [key, path] : groups) {
     order.push_back(&path);
   }
-  std::sort(order.begin(), order.end(), [](const Sta_path* a, const Sta_path* b) { return a->slack < b->slack; });
+  std::stable_sort(order.begin(), order.end(), [](const Sta_path* a, const Sta_path* b) { return a->slack < b->slack; });
+  const auto names = [](const std::set<std::string>& set) {
+    return set.empty() ? std::string{"?"}
+                       : set.size() == 1 ? *set.begin() : std::format("{} (+{})", *set.begin(), set.size() - 1);
+  };
   std::string out;
   for (size_t i = 0; i < order.size() && i < limit; ++i) {
     const auto&                                  p = *order[i];
@@ -1654,8 +1660,8 @@ std::string tool_sta_paths(const std::map<std::pair<std::string, std::string>, S
                        p.unit,
                        p.clock,
                        p.cells,
-                       p.start.empty() ? "?" : p.start,
-                       p.end.empty() ? "?" : p.end,
+                       names(p.starts),
+                       names(p.ends),
                        p.module,
                        where);
   }
@@ -1733,7 +1739,9 @@ void tool_sta(Options& opts, const std::vector<std::string>& dirs, std::vector<T
               path.slack        = std::stod(slack ? *slack : "0");
               path.clock        = key.first;
               path.unit         = unit ? *unit : std::string{};
-              path.module       = graph->get_name().substr(0, 48);
+              if (path.module.empty()) {
+                path.module = graph->get_name().substr(0, 48);
+              }
               ++path.cells;
               if (src && *src != "nil" && !src->empty()) {
                 ++path.sources[*src];
@@ -1746,9 +1754,9 @@ void tool_sta(Options& opts, const std::vector<std::string>& dirs, std::vector<T
                 state = where_pin.substr(0, cut);
               }
               if (where_pin.ends_with(":Q") || where_pin.ends_with(":QN")) {
-                path.start = state;
+                path.starts.insert(state);
               } else if (where_pin.ends_with(":D")) {
-                path.end = state;
+                path.ends.insert(state);
               }
               continue;
             }
