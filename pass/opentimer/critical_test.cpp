@@ -4,6 +4,7 @@
 #include <fstream>
 
 #include "gtest/gtest.h"
+#include "critical_identity.hpp"
 #include "node_util.hpp"
 #include "pass_opentimer.hpp"
 
@@ -194,5 +195,15 @@ TEST_F(Critical, ConfigurableMarginIncludesTheBoundaryAndViolations) {
   EXPECT_TRUE(slow.attr(livehd::attrs::critical).has());
   EXPECT_TRUE(near.attr(livehd::attrs::critical).has());
   EXPECT_FALSE(fast.attr(livehd::attrs::critical).has());
+}
+TEST_F(Critical, SummaryCarriesTheIdentityAnEditInvalidates) {
+  Critical_probe pass(options());
+  network(pass);
+  pass.analyze(graph);
+  const std::string summary{graph->get_input_node().attr(livehd::attrs::sta).get()};
+  const auto        stamped = livehd::opentimer::critical_identity(graph);
+  EXPECT_NE(summary.find("\"identity\":\"" + stamped + "\""), std::string::npos) << summary;
+  (void)livehd::graph_util::create_typed_node(*graph, Ntype_op::And);  // the graph changes after annotation
+  EXPECT_NE(livehd::opentimer::critical_identity(graph), stamped);
 }
 }  // namespace

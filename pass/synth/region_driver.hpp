@@ -7,6 +7,7 @@
 // (region_blast.hpp), hands it to its backend (region_backend.hpp) and writes
 // the mapped cells back (region_writer.hpp). Across regions it schedules
 // parallel lanes under memory admission, and it runs the ware trials.
+#include <set>
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -205,6 +206,8 @@ private:
   // module can produce hundreds of regions, so reparsing its JSON in every
   // apply_region_overrides call is needlessly quadratic in metadata size.
   std::map<const hhds::Graph*, Ware_policy>     graph_ware_policy_;
+  // (module, input port) a parent drives from a cell: a derived clock inside the module.
+  std::set<std::pair<hhds::Gid, std::string>>   derived_ports_;
   uint64_t                                      design_state_bits_ = 0;  // register bits under the largest graph (primary-clock fanout)
   // rewrite_trivial_rems scans and rewrites a whole source def. A def is shared
   // by all of its colored Region_body callbacks, so doing it once per region is

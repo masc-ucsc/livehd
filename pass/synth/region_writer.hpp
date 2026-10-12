@@ -6,6 +6,7 @@
 // DFF-cell Subs or native flops under their source names, native boundaries
 // are rebuilt and reconnected, and multi-bit ports are reassembled. Backend
 // neutral: the backend only converts its mapped network (abc_cells.cpp).
+#include <set>
 #include <functional>
 #include <optional>
 #include <string_view>
@@ -50,6 +51,8 @@ public:
     // The design is large enough that a primary clock net is also bounded
     // (Driver_options::input_clock_min).
     bool                                    primary_clock_tree = false;
+    // (module gid, input port) driven from a cell in some parent: a derived clock.
+    const std::set<std::pair<hhds::Gid, std::string>>* derived_ports = nullptr;
   };
 
   void set_outlib(hhds::GraphLibrary* outlib) { outlib_ = outlib; }

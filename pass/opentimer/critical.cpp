@@ -10,6 +10,7 @@
 #include "hash_util.hpp"
 #include "json_util.hpp"
 #include "node_util.hpp"
+#include "critical_identity.hpp"
 #include "pass_opentimer.hpp"
 #include "rapidjson/document.h"
 
@@ -132,9 +133,10 @@ void Pass_opentimer::prepare_critical_targets() {
 }
 
 std::string Pass_opentimer::annotation_identity(const std::shared_ptr<hhds::Graph>& g) const {
-  if (!critical_) {
-    return {};
-  }
+  return critical_ ? livehd::opentimer::critical_identity(g) : std::string{};
+}
+
+std::string livehd::opentimer::critical_identity(const std::shared_ptr<hhds::Graph>& g) {
   // Canonical timing digests deliberately ignore local node ids/provenance.
   // Annotation replay additionally requires those identities to match.
   std::vector<std::string> nodes;
@@ -581,6 +583,13 @@ bool Pass_opentimer::apply_annotations(const std::shared_ptr<hhds::Graph>& g, st
       node.attr(livehd::attrs::critical).set();
     }
   }
-  g->get_input_node().attr(livehd::attrs::sta).set(std::string{summary});
+  // The summary carries the identity it was computed for: a later edit of the
+  // graph (or a copy of another run's library) shows up as a mismatch.
+  std::string stamped{summary};
+  if (!stamped.empty() && stamped.back() == '}') {
+    stamped.pop_back();
+    stamped += std::format(R"(,"identity":"{}"}})", livehd::opentimer::critical_identity(g));
+  }
+  g->get_input_node().attr(livehd::attrs::sta).set(stamped);
   return true;
 }

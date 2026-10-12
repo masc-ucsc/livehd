@@ -17,6 +17,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "color_common.hpp"
+#include "critical_identity.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "lhd_kernel_internal.hpp"
@@ -1688,7 +1689,18 @@ void tool_sta(Options& opts, const std::vector<std::string>& dirs, std::vector<T
         if (!seen.insert(graph->get_gid()).second) {
           continue;
         }
-        annotated |= graph->get_input_node().attr(livehd::attrs::sta).has();
+        if (auto summary = graph->get_input_node().attr(livehd::attrs::sta); summary.has()) {
+          annotated = true;
+          rapidjson::Document doc;
+          const std::string   text{summary.get()};
+          doc.Parse(text.c_str());
+          if (!doc.HasParseError() && doc.IsObject() && doc.HasMember("identity") && doc["identity"].IsString()
+              && doc["identity"].GetString() != livehd::opentimer::critical_identity(graph)) {
+            throw Lhd_error{"config",
+                            std::format("STA annotations on '{}' are stale: the graph changed after pass opentimer", graph->get_name()),
+                            "rerun pass opentimer with --set pass.opentimer.critical=true"};
+          }
+        }
         for (auto node : graph->body().nodes()) {
           auto attribute = node.attr(livehd::attrs::sta);
           if (!attribute.has()) {

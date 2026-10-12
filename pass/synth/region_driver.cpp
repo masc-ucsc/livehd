@@ -341,6 +341,48 @@ void Region_driver::prepare_region_opts(const std::vector<std::shared_ptr<hhds::
       design_state_bits_ = std::max(design_state_bits_, count(g, 0));
     }
   }
+  // Module input ports some instance drives from a cell (a parent's clock gate),
+  // directly or through the parent's own derived port: inside that module the
+  // port is a derived clock, not the primary one (region_writer clock tree).
+  absl::flat_hash_map<std::pair<hhds::Gid, std::string>, std::vector<std::pair<hhds::Gid, std::string>>> feeds;
+  std::vector<std::pair<hhds::Gid, std::string>>                                                     work;
+  for (const auto& g : graphs) {
+    if (!g) {
+      continue;
+    }
+    for (auto n : g->body().nodes()) {
+      if (!livehd::graph_util::is_type_sub(n)) {
+        continue;
+      }
+      const auto child = n.get_subnode_graph();
+      if (child == nullptr) {
+        continue;
+      }
+      for (auto sink : n.inp_sorted_pins()) {
+        const std::pair<hhds::Gid, std::string> port{child->get_gid(), std::string{sink.get_pin_name()}};
+        for (const auto& drv : sink.get_driver_pins()) {
+          if (drv.is_invalid() || drv.is_const()) {
+            continue;
+          }
+          if (livehd::graph_util::is_graph_input_pin(drv)) {
+            feeds[{g->get_gid(), std::string{drv.get_pin_name()}}].push_back(port);
+          } else {
+            work.push_back(port);
+          }
+        }
+      }
+    }
+  }
+  while (!work.empty()) {
+    auto port = std::move(work.back());
+    work.pop_back();
+    if (!derived_ports_.insert(port).second) {
+      continue;
+    }
+    if (auto it = feeds.find(port); it != feeds.end()) {
+      work.insert(work.end(), it->second.begin(), it->second.end());
+    }
+  }
   for (const auto& g : graphs) {
     if (!g || graph_region_opts_.contains(g.get())) {
       continue;
@@ -823,6 +865,7 @@ void Region_driver::map_regions(std::span<const livehd::partition::Region_body> 
           worker->graph_region_opts_ = graph_region_opts_;
           worker->graph_ware_policy_ = graph_ware_policy_;
           worker->design_state_bits_ = design_state_bits_;
+          worker->derived_ports_     = derived_ports_;
           worker->dff_               = dff_;
           worker->dff_ladder_        = dff_ladder_;
           worker->areset_ladder_[0]  = areset_ladder_[0];
@@ -1282,6 +1325,12 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
       += std::format("|source={}/{}/{}/{}", opts_.source_adder, opts_.source_multiplier, opts_.source_barrel, opts_.source_block);
   // The clock tree is written after mapping and cached with the body.
   recipe += std::format("|clktree={}/{}", opts_.icg_fanout, design_state_bits_ >= opts_.input_clock_min ? 1 : 0);
+  for (const auto& port : rb.inputs) {  // module ports a parent's gate drives
+    if (!port.src_driver.is_invalid() && gu::is_graph_input_pin(port.src_driver)
+        && derived_ports_.contains({rb.src->get_gid(), std::string{port.src_driver.get_pin_name()}})) {
+      recipe += "|derived=" + port.name;
+    }
+  }
   std::vector<std::string> local_hints;
   for (const auto& node : rb.nodes) {
     if (auto a = node.attr(attrs::synth_policy); a.has()) {
@@ -1569,7 +1618,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // --- read back: the mapped cells -> the region body ---
   Region_writer::Counts counts{qor_.back().gates, qor_.back().area, qor_.back().bypassed};
   const Region_writer::Registers
-      registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1], &icg_ladder_, &latch_ladder_, opts_.icg_fanout, design_state_bits_ >= opts_.input_clock_min};
+      registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1], &icg_ladder_, &latch_ladder_, opts_.icg_fanout, design_state_bits_ >= opts_.input_clock_min, &derived_ports_};
   writer_.set_outlib(outlib_);
   writer_.set_flat(flat_);
   if (!writer_.write(rb, blast, *cells, backend_->cells(), registers, counts, trace_stage)) {

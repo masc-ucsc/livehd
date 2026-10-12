@@ -1717,14 +1717,17 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       // A net fed straight from the design's primary clock port is ideal in
       // every timer (CTS owns it): a tree there only adds latency. A derived
       // clock is bounded here: a gate's or inverter's output this region drives,
-      // or a region input another region's gate drives. Per-module mapping sees
-      // only the module's own clock port, so a clock a PARENT gates is treated
-      // like the primary one (bounded past icg_input_min).
+      // or a region input another region's gate drives, or a module port some
+      // parent drives from a gate (Registers::derived_ports).
       if (gu::is_graph_input_pin(driver)) {
         bool primary = true;
         for (size_t idx = 0; idx < rb.inputs.size(); ++idx) {
           if (body_input_pin[idx] == driver) {
-            primary = rb.inputs[idx].src_driver.is_invalid() || gu::is_graph_input_pin(rb.inputs[idx].src_driver);
+            const auto& src = rb.inputs[idx].src_driver;
+            primary         = src.is_invalid()
+                      || (gu::is_graph_input_pin(src)
+                          && (registers.derived_ports == nullptr
+                              || !registers.derived_ports->contains({rb.src->get_gid(), std::string{src.get_pin_name()}})));
             break;
           }
         }
