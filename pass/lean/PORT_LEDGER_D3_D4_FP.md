@@ -7966,3 +7966,58 @@ what `mainM` has); and real support/driver wiring.  `SourceSupported`,
 `OpSupported` and `memFree` stay untouched — support remains refused.  No
 `sorry`, no axioms, no disabled checks.  PicoRV32 stays **BLOCKED**: these are
 entry tests, not admission, equivalence or kernel certification.
+
+### 63.30 Phase 2 begins: the runtime denotation relation to the REAL reference
+
+**Scope correction, and it was a real gap.**  `StateRelM v s` has `s : StateM`
+and says only `decStateM v = some s`; `ResultRelM` is the same shape.  Those pin
+the decoded **witness**, not the independent reference value, so
+`ResultRelM_denote_functional` was **not** the bridge an adequacy statement
+needs, and describing it as a relation "to the real `RuntimeResult`" overstated
+it.  The relations that are now defined and proved:
+
+```
+StateRelR  v s  :=  ∃ sm, decStateM  v = some sm ∧ StateM.denote  sm = s
+ResultRelR v r  :=  ∃ rm, decResultM v = some rm ∧ ResultM.denote rm = r
+```
+
+— a representable witness **plus equality of its denotation** to the real
+`RuntimeState`/`RuntimeResult`.
+
+| theorem | content |
+|---|---|
+| `StateRelR_encStateM`, `ResultRelR_encResultM` | round trip: an encoded state/result denotes exactly what it came from |
+| `StateRelR_functional`, `ResultRelR_functional` | **one value denotes at most one reference value** — the property adequacy needs, derived from the codec rather than postulated |
+| `StateRelR_memFree` | a value denoting a `MemFree` reference state has no images in its witness, so the memory-free path is a special case of this relation |
+
+**No finite codec for an arbitrary `Int → BV` state is claimed.**
+`Representable s := ∃ sm, StateM.denote sm = s` is exactly the condition under
+which one exists, and it is carried as a **premise**, never assumed.
+
+**Canonicality is deferred, and said so in the file**: proving that a related
+value *is* its witness's encoding needs a `Canonical encMemImg decMemImg` lemma
+that does not exist yet.  It is listed as an obligation rather than asserted.
+
+**Axiom reporting, corrected.**  I have been writing "no axioms", which is loose.
+Precisely: the new codec and relation lemmas depend on `propext` and, where
+`funext`/`simp` are involved, `Quot.sound` — Lean's own axioms.  What is absent,
+and what I actually check for, is any **new unsafe** axiom: no `sorryAx` and no
+`Lean.ofReduceBool` anywhere in the module (verified, 0 matches).  The whole-cycle
+checks still pass unchanged.
+
+**Still owed on this chain**, and the next code rather than a list: object-level
+`memAt`/`romWords`/`srcValM` preservation via `evalFuel` on the resolved program
+(the same explicit-lemma method that worked for `getGo_body`/`memGet_sound`);
+`applyOpM` preservation through the existing
+primitive → encoded host update → `denote_writeBE` bridge, discharging `InRange`
+and the width/address/byte-mask conditions; a typed slot/value relation through
+`mkSourcesM`/`evalNodesM`; `mkOutputs`/`flopNexts`/`memNext` on active **and**
+quiet domains; then generic `mainM` adequacy against `interpretDesign`.
+
+**The slot/value kind policy is still prose and must not stay that way.**  A
+memory-valued output or operand cannot be silently coerced; the admission policy
+has to be defined and checked, together with mutable image shapes, initial memory
+contents, ROM `contents.size`/defaults, address and slot bounds, and per-domain
+clock/reset/async metadata.  Until that holds, support stays refused:
+`SourceSupported`, `OpSupported` and `memFree` are untouched.  PicoRV32 stays
+**BLOCKED**.

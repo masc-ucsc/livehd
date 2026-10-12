@@ -1442,6 +1442,75 @@ theorem ResultM_denote_memFree (r : ResultM) :
     MemFree (ResultM.denote r).nextState ↔ r.nextState.mems = #[] :=
   StateM.denote_memFree r.nextState
 
+/-! ### The RUNTIME denotation relation -- to the real `RuntimeState`/`RuntimeResult`
+
+SCOPE CORRECTION.  `StateRelM v s` has `s : StateM` and says only
+`decStateM v = some s`; `ResultRelM` is the same shape for `ResultM`.  Those pin
+the decoded WITNESS, not the independent reference value, so neither is the
+relation an adequacy statement needs.  The relations below are, and they are the
+ones the bridge must use:
+
+    StateRelR  v s  :=  ∃ sm, decStateM  v = some sm ∧ StateM.denote  sm = s
+    ResultRelR v r  :=  ∃ rm, decResultM v = some rm ∧ ResultM.denote rm = r
+
+A representable witness plus equality of its denotation.  No finite codec for an
+arbitrary `Int → BV` state is claimed -- `Representable` below is exactly the
+condition under which one exists, and it is a hypothesis, never an assumption. -/
+
+/-- `v` denotes the reference state `s`. -/
+def StateRelR (v : Val) (s : RuntimeState) : Prop :=
+  ∃ sm : StateM, decStateM v = some sm ∧ StateM.denote sm = s
+
+/-- `v` denotes the reference result `r`. -/
+def ResultRelR (v : Val) (r : RuntimeResult) : Prop :=
+  ∃ rm : ResultM, decResultM v = some rm ∧ ResultM.denote rm = r
+
+/-- A reference state is REPRESENTABLE when some finite `StateM` denotes it.
+This is the honest form of "the state has a finite representation": an arbitrary
+`Int → BV` memory has none, and every theorem below carries this as a premise
+rather than assuming it. -/
+def Representable (s : RuntimeState) : Prop := ∃ sm : StateM, StateM.denote sm = s
+
+/-- Round trip: an encoded representable state denotes exactly what it came from. -/
+theorem StateRelR_encStateM (sm : StateM) : StateRelR (encStateM sm) (StateM.denote sm) :=
+  ⟨sm, decStateM_encStateM sm, rfl⟩
+
+theorem ResultRelR_encResultM (rm : ResultM) : ResultRelR (encResultM rm) (ResultM.denote rm) :=
+  ⟨rm, decResultM_encResultM rm, rfl⟩
+
+/-- **One value denotes at most one reference state.**  This is the property the
+relation has to have to be usable in adequacy, and it follows from the codec's
+functionality rather than being postulated. -/
+theorem StateRelR_functional {v : Val} {s t : RuntimeState}
+    (h₁ : StateRelR v s) (h₂ : StateRelR v t) : s = t := by
+  obtain ⟨a, ha, rfl⟩ := h₁
+  obtain ⟨b, hb, rfl⟩ := h₂
+  exact congrArg StateM.denote (Option.some.inj (ha ▸ hb))
+
+theorem ResultRelR_functional {v : Val} {r q : RuntimeResult}
+    (h₁ : ResultRelR v r) (h₂ : ResultRelR v q) : r = q := by
+  obtain ⟨a, ha, rfl⟩ := h₁
+  obtain ⟨b, hb, rfl⟩ := h₂
+  exact congrArg ResultM.denote (Option.some.inj (ha ▸ hb))
+
+/- Canonicality of this relation -- that a related value IS its witness's
+   encoding -- needs a `Canonical encMemImg decMemImg` lemma, which does not
+   exist yet.  It is listed in the obligations rather than asserted here. -/
+
+/-- **Memory-free compatibility of the runtime relation.**  A value that denotes
+a `MemFree` reference state has no images in its witness, so the old memory-free
+path is a special case of this relation rather than something beside it. -/
+theorem StateRelR_memFree {v : Val} {s : RuntimeState} (h : StateRelR v s) :
+    MemFree s ↔ ∃ sm, decStateM v = some sm ∧ sm.mems = #[] ∧ StateM.denote sm = s := by
+  obtain ⟨sm, hdec, hden⟩ := h
+  constructor
+  · intro hmf
+    exact ⟨sm, hdec, (StateM.denote_memFree sm).mp (hden ▸ hmf), hden⟩
+  · rintro ⟨sm', hdec', hmf', hden'⟩
+    have heq : sm' = sm := Option.some.inj (hdec' ▸ hdec)
+    have hm : sm.mems = #[] := heq ▸ hmf'
+    exact hden ▸ (StateM.denote_memFree sm).mpr hm
+
 /- A memory-bearing state really does survive the codec, carrying a ROM's
 initial contents: this is the case `decState` cannot represent at all. -/
 #guard decStateM (encStateM ⟨#[mk_bv 3 5], #[MemImg.ofMemConst 32 #[11, 22, 33]]⟩)
@@ -1638,6 +1707,12 @@ end Hardware
 
 section Audit
 #print axioms Projection.MemImg.memGet_sound
+#print axioms Projection.StateM.StateRelR_functional
+#print axioms Projection.StateM.ResultRelR_functional
+#print axioms Projection.StateM.StateRelR_encStateM
+#print axioms Projection.StateM.ResultRelR_encResultM
+#print axioms Projection.StateM.StateRelR_memFree
+#print axioms Projection.StateM.decResultM_encResultM
 #print axioms Projection.Hardware.srcMemImg_denote
 #print axioms Projection.Hardware.ofMemConst_denote
 #print axioms Projection.Hardware.memCommit_denote
