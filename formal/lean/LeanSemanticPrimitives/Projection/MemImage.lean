@@ -731,17 +731,183 @@ theorem setGo_body : ∀ (ws : List BV) (x : Int) (v : BV) (n : Nat),
             (by simp [evalPrim])]
       simp [encListG]
 
-/-! ### An unsupported operand shape, kept as a CONTROL
+/-- **The ENCODED-IMAGE update wrapper is correct.**  `call 3` on an `encMemImg`
+equals `encMemImg` of `setAt`, for every image, every run-time address and every
+value.  A negative address returns the image untouched; an address past the
+contents rebuilds it unchanged, which is `setAt`'s out-of-range no-op. -/
+theorem memSet_sound (m : MemImg) (x : Int) (v : BV) (ρ : Env) (n : Nat)
+    (hn : 5 * m.words.length + 24 ≤ n) :
+    evalFuel n memProg ρ
+      (.call 3 [.lit (encMemImg m), .lit (.int x), .lit (ofBV v)])
+      = .value (encMemImg (setAt m x v)) := by
+  rcases n with _|_|_|_|_|_|_|_|_|_|j
+  · omega
+  · omega
+  · omega
+  · omega
+  · omega
+  · omega
+  · omega
+  · omega
+  · omega
+  · omega
+  have hargs : evalFuelList (j + 9) memProg ρ
+      [.lit (encMemImg m), .lit (.int x), .lit (ofBV v)]
+      = .inl [encMemImg m, Val.int x, ofBV v] :=
+    evalList_cons_eq (j + 9) _ _ (eval_lit_succ (j + 8) _)
+      (evalList_cons_eq (j + 9) _ _ (eval_lit_succ (j + 8) _)
+        (evalList_cons_eq (j + 9) _ _ (eval_lit_succ (j + 8) _) (evalList_nil_eq (j + 9))))
+  rw [eval_call_succ (j + 9) 3 _ hargs rfl rfl]
+  have hf : evalFuel (j + 8) memProg [encMemImg m, Val.int x, ofBV v]
+      (.prim .ctorFieldsP [.var 0])
+      = .value (.cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil)) :=
+    eval_prim_succ (j + 7) _ _
+      (evalList_cons_eq (j + 7) _ _ (eval_var_succ (j + 6) 0 rfl) (evalList_nil_eq (j + 7)))
+      (by simp [evalPrim, encMemImg, listVal])
+  show evalFuel (j + 9) memProg _ (Term.letIn _ _) = _
+  rw [eval_letIn_succ (j + 8) _ hf]
+  have hw : evalFuel (j + 7) memProg
+      [.cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil), encMemImg m, Val.int x, ofBV v]
+      (.prim .hd [.var 0]) = .value (encListG ofBV m.words) :=
+    eval_prim_succ (j + 6) _ _
+      (evalList_cons_eq (j + 6) _ _ (eval_var_succ (j + 5) 0 rfl) (evalList_nil_eq (j + 6)))
+      (by simp [evalPrim])
+  rw [eval_letIn_succ (j + 7) _ hw]
+  have hdf : evalFuel (j + 6) memProg
+      [encListG ofBV m.words, .cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil),
+       encMemImg m, Val.int x, ofBV v]
+      (.prim .hd [.prim .tl [.var 1]]) = .value (ofBV m.dflt) :=
+    eval_prim_succ (j + 5) _ _
+      (evalList_cons_eq (j + 5) _ _
+        (eval_prim_succ (j + 4) .tl [.var 1] (r := .cons (ofBV m.dflt) .nil)
+          (evalList_cons_eq (j + 4) _ _ (eval_var_succ (j + 3) 1 rfl) (evalList_nil_eq (j + 4)))
+          (by simp [evalPrim]))
+        (evalList_nil_eq (j + 5)))
+      (by simp [evalPrim])
+  rw [eval_letIn_succ (j + 6) _ hdf]
+  by_cases hneg : x < 0
+  · have hc : evalFuel (j + 5) memProg
+        [ofBV m.dflt, encListG ofBV m.words,
+         .cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil), encMemImg m,
+         Val.int x, ofBV v]
+        (.prim .ltI [.var 4, .lit (.int 0)]) = .value (.bool true) :=
+      eval_prim_succ (j + 4) _ _
+        (evalList_cons_eq (j + 4) _ _ (eval_var_succ (j + 3) 4 rfl)
+          (evalList_cons_eq (j + 4) _ _ (eval_lit_succ (j + 3) _) (evalList_nil_eq (j + 4))))
+        (by simp [evalPrim, hneg])
+    rw [eval_ite_true_succ (j + 5) _ _ hc, eval_var_succ (j + 4) 3 rfl]
+    have : setAt m x v = m := setAt_outOfRange m (by unfold InRange; omega) v
+    rw [this]
+  · have hc : evalFuel (j + 5) memProg
+        [ofBV m.dflt, encListG ofBV m.words,
+         .cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil), encMemImg m,
+         Val.int x, ofBV v]
+        (.prim .ltI [.var 4, .lit (.int 0)]) = .value (.bool false) :=
+      eval_prim_succ (j + 4) _ _
+        (evalList_cons_eq (j + 4) _ _ (eval_var_succ (j + 3) 4 rfl)
+          (evalList_cons_eq (j + 4) _ _ (eval_lit_succ (j + 3) _) (evalList_nil_eq (j + 4))))
+        (by simp [evalPrim, hneg])
+    rw [eval_ite_false_succ (j + 5) _ _ hc]
+    have hpos : (0:Int) ≤ x := by omega
+    have hcargs : evalFuelList (j + 2) memProg
+        [ofBV m.dflt, encListG ofBV m.words,
+         .cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil), encMemImg m,
+         Val.int x, ofBV v]
+        [.var 1, .var 4, .var 5]
+        = .inl [encListG ofBV m.words, Val.int x, ofBV v] :=
+      evalList_cons_eq (j + 2) _ _ (eval_var_succ (j + 1) 1 rfl)
+        (evalList_cons_eq (j + 2) _ _ (eval_var_succ (j + 1) 4 rfl)
+          (evalList_cons_eq (j + 2) _ _ (eval_var_succ (j + 1) 5 rfl) (evalList_nil_eq (j + 2))))
+    have hinner : evalFuel (j + 3) memProg
+        [ofBV m.dflt, encListG ofBV m.words,
+         .cons (encListG ofBV m.words) (.cons (ofBV m.dflt) .nil), encMemImg m,
+         Val.int x, ofBV v]
+        (.call 2 [.var 1, .var 4, .var 5])
+        = .value (encListG ofBV (m.words.set x.toNat v)) := by
+      rw [eval_call_succ (j + 2) 2 _ hcargs rfl rfl]
+      rw [setGo_body m.words x v (j + 2) (by omega)]
+      rw [if_pos hpos]
+    rw [eval_prim_succ (j + 4) .mkCtorP
+          [.lit (.int 124),
+           .prim .consP [.call 2 [.var 1, .var 4, .var 5], .prim .consP [.var 0, .lit .nil]]]
+          (r := encMemImg (setAt m x v))
+          (evalList_cons_eq (j + 4) _ _ (eval_lit_succ (j + 3) _)
+            (evalList_cons_eq (j + 4) _ _
+              (eval_prim_succ (j + 3) .consP
+                [.call 2 [.var 1, .var 4, .var 5], .prim .consP [.var 0, .lit .nil]]
+                (r := .cons (encListG ofBV (m.words.set x.toNat v))
+                        (.cons (ofBV m.dflt) .nil))
+                (evalList_cons_eq (j + 3) _ _ hinner
+                  (evalList_cons_eq (j + 3) _ _
+                    (eval_prim_succ (j + 2) .consP [.var 0, .lit .nil]
+                      (r := .cons (ofBV m.dflt) .nil)
+                      (evalList_cons_eq (j + 2) _ _ (eval_var_succ (j + 1) 0 rfl)
+                        (evalList_cons_eq (j + 2) _ _ (eval_lit_succ (j + 1) _)
+                          (evalList_nil_eq (j + 2))))
+                      (by simp [evalPrim]))
+                    (evalList_nil_eq (j + 3))))
+                (by simp [evalPrim]))
+              (evalList_nil_eq (j + 4))))
+          (by
+            by_cases hin : x.toNat < m.words.length
+            · simp [evalPrim, encMemImg, setAt, tagMemImg, hpos, hin, valList]
+            · rw [List.set_eq_of_length_le (by omega)]
+              simp [evalPrim, encMemImg, setAt, tagMemImg, hpos, hin, valList])]
 
-This is why `InRange` is a premise and not decoration.  A 32-word `aw = 5` image
-given a deliberately WIDER 8-bit address 255: the reference `cert_mem_write_be`
-writes at 255 and reads `0xDEADBEEF` back, while the finite table has no such
-address, so our write is a no-op and the read gives the default 0.  They DIFFER.
+/-! ### An unsupported operand shape, and an ACTUAL admission check
 
-That is a correctly-refused operand shape, not a defect in the guarded lemmas and
-not a statement about a correctly shaped whole core: `denote_writeEn` and
-`denote_writeBE` both carry `InRange`, and `zeroImg_inRange` discharges it
-exactly when the address width matches the table. -/
+A 32-word `aw = 5` image given a deliberately WIDER 8-bit address 255: the
+reference `cert_mem_write_be` writes at 255 and reads `0xDEADBEEF` back, while the
+finite table has no such address, so the unguarded update leaves it unchanged and
+the read gives the default 0.  They DIFFER.
+
+**Scope, corrected.**  An earlier note here called that "a correctly refused
+operand shape".  It was not refused by anything: the example merely falsifies the
+`InRange` premise, so the guarded theorems never applied, and the executed helper
+silently left the table alone.  A premise being false is not a producer
+rejecting an input.  `writeChecked` below is the actual admission check -- it is
+decidable, it **returns `none`** on this shape, and its `some` case carries the
+reference correspondence.  Only with that in place is the word "refused" earned,
+and the control below now exercises the check rather than the premise alone. -/
+
+/-- The operand-shape condition an enabled write must satisfy: the address the
+table is indexed by has to be one the table HOLDS. -/
+def writeAdmissible (m : MemImg) (a : BV) : Bool :=
+  decide (0 ≤ bv_uint a) && decide ((bv_uint a).toNat < m.words.length)
+
+theorem writeAdmissible_iff (m : MemImg) (a : BV) :
+    writeAdmissible m a = true ↔ InRange m (bv_uint a) := by
+  unfold writeAdmissible InRange
+  simp
+
+/-- The CHECKED byte-enabled write: a disabled write is a no-op and always
+admitted; an enabled write is admitted only when the address is in range, and is
+**refused** otherwise rather than silently dropped. -/
+def writeChecked (w : Nat) (m : MemImg) (a d bev : BV) (byte_w : Nat) : Option MemImg :=
+  if bv_nonzero bev then
+    (if writeAdmissible m a then some (writeBE w m a d bev byte_w) else none)
+  else some m
+
+/-- **Every admitted write agrees with the reference.**  This is the theorem that
+makes `writeChecked` an admission check rather than a filter: nothing it accepts
+can disagree with `cert_mem_write_be`. -/
+theorem writeChecked_sound (w : Nat) (m m' : MemImg) (a d bev : BV) (byte_w : Nat)
+    (h : writeChecked w m a d bev byte_w = some m') :
+    denote m' = cert_mem_write_be w (denote m) a d bev byte_w := by
+  unfold writeChecked at h
+  by_cases hb : bv_nonzero bev
+  · rw [if_pos hb] at h
+    by_cases ha : writeAdmissible m a
+    · rw [if_pos ha] at h
+      cases h
+      exact denote_writeBE w m a d bev byte_w ((writeAdmissible_iff m a).mp ha)
+    · rw [if_neg ha] at h; exact absurd h (by simp)
+  · rw [if_neg hb] at h
+    cases h
+    unfold cert_mem_write_be
+    rw [if_neg hb]
+
+
 
 private def wideAddr : BV := mk_bv 8 255
 private def imgW    : MemImg := zeroImg 5 32
@@ -753,6 +919,18 @@ private def datW    : BV := mk_bv 32 0xDEADBEEF
 
 #guard readEn 32 (writeBE 32 imgW wideAddr datW (mk_bv 4 0xF) 8) wideAddr (mk_bv 1 1)
        == mk_bv 32 0
+
+/-- **The admission check actually REFUSES this shape.**  This is the difference
+between a premise being false and a producer rejecting an input: `writeChecked`
+answers `none`, so nothing downstream ever sees the disagreeing table. -/
+example : writeChecked 32 imgW wideAddr datW (mk_bv 4 0xF) 8 = none := by decide
+
+/-- …and it ADMITS the correctly shaped PicoRV32 write, so the check is not
+merely conservative. -/
+example : (writeChecked 32 imgW (mk_bv 5 7) datW (mk_bv 4 0xF) 8).isSome := by decide
+
+/-- A disabled write is admitted and is a no-op, as the reference says. -/
+example : writeChecked 32 imgW (mk_bv 5 7) datW (mk_bv 4 0) 8 = some imgW := by decide
 
 /-- The two really do disagree on this shape -- kernel-checked, so the control
 cannot rot into a no-op. -/
@@ -936,6 +1114,15 @@ theorem StateRelM_denote_functional {v : Val} {s t : StateM}
     (h₁ : StateRelM v s) (h₂ : StateRelM v t) : denote s = denote t :=
   congrArg denote (StateRelM_functional h₁ h₂)
 
+/- The PROVED UPDATE-wrapper bound at PicoRV32's table size: 5*32+24 = 184 fuel.
+Writing word 7 and reading it back, both through the object language. -/
+#guard (match evalFuel 184 MemImg.memProg []
+          (.call 3 [.lit (MemImg.encMemImg (MemImg.zeroImg 5 32)), .lit (.int 7),
+                    .lit (ofBV (mk_bv 32 0xC0FFEE))]) with
+        | .value img => evalFuel 143 MemImg.memProg [] (.call 1 [.lit img, .lit (.int 7)])
+        | r          => r)
+       == .value (ofBV (mk_bv 32 0xC0FFEE))
+
 /- The PROVED WRAPPER bound at PicoRV32's table size: 4*32+15 = 143 fuel, on an
 encoded image, inside the table and past it. -/
 #guard evalFuel 143 MemImg.memProg []
@@ -964,6 +1151,9 @@ end StateM
 
 section Audit
 #print axioms Projection.MemImg.memGet_sound
+#print axioms Projection.MemImg.memSet_sound
+#print axioms Projection.MemImg.writeChecked_sound
+#print axioms Projection.MemImg.writeAdmissible_iff
 #print axioms Projection.MemImg.setGo_body
 #print axioms Projection.MemImg.cons_set_step
 #print axioms Projection.MemImg.getGo_body

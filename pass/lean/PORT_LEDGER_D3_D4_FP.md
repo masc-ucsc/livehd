@@ -7475,3 +7475,52 @@ operator cases with the function-identity bridge; the memory-bearing result code
 and a relation to the real `RuntimeResult`; clock-controlled commit with
 reset/async metadata; and the checker/adequacy premises above.  PicoRV32 stays
 **BLOCKED**.
+
+### 63.21 An actual admission check, and the encoded update wrapper
+
+**Correction: "a correctly refused operand shape" was wrong.**  Nothing refused
+it.  The wide-address example merely **falsifies the `InRange` premise**, so the
+guarded theorems never applied, and the unguarded helper **silently left the
+table unchanged**.  A false premise is not a producer rejecting an input, and I
+should not have used the word "refused" for it.
+
+So the check now exists.  `writeAdmissible` is decidable;
+`writeAdmissible_iff` proves it is exactly `InRange`; and `writeChecked` is the
+real admission path — a disabled write is admitted as a no-op, an enabled write
+is admitted **only** in range and answers `none` otherwise.
+`writeChecked_sound` proves **every admitted write agrees with
+`cert_mem_write_be`**, which is what makes it an admission check rather than a
+filter.  The controls now exercise the check rather than the premise:
+
+* `writeChecked 32 imgW wideAddr … = none` — **actually refused**, kernel-checked
+* `(writeChecked 32 imgW (mk_bv 5 7) …).isSome` — the correctly shaped PicoRV32
+  write is **admitted**, so the check is not merely conservative
+* `writeChecked 32 imgW (mk_bv 5 7) … (bev := 0) … = some imgW` — a disabled
+  write is admitted and is a no-op, as the reference says
+
+and the earlier disagreement example is kept beside them, so the reason the shape
+must be refused is still visible.
+
+**`memSet_sound` is proved**: `call 3` on an `encMemImg` equals `encMemImg` of
+`setAt`, for every image, address and value, at fuel ≥ `5 · length + 24`.  A
+negative address returns the image untouched; an address past the contents
+rebuilds it unchanged, which is `setAt`'s out-of-range no-op.  A `#guard`
+exercises the proved bound at PicoRV32's table size (184 fuel): write `0xC0FFEE`
+to word 7 and read it back, both through the object language.
+
+**Five different bounds, all stated separately** — `4·len+8` (walk body),
+`4·len+9` (walk, literal args), `4·len+15` (read wrapper), `5·len+14` (update
+body), `5·len+24` (update wrapper).  `memFuel` remains labelled a **proposal**;
+it is not any of these and is not yet a theorem.
+
+Axioms: `writeAdmissible_iff` `propext`; `writeChecked_sound` `propext`/
+`Quot.sound`; `memSet_sound` adds `Classical.choice`.  No `sorryAx`, no
+`Lean.ofReduceBool`, no `sorry`.  Exit 0 in 7.03 s, 769,136 KiB.
+
+**Still owed:** `maskGo`/`writeBE` general correspondence (the byte mask has no
+general theorem yet, only executed `#guard`s) and the composed bound; the `I_hw`
+source and operator cases with the function-identity bridge; the memory-bearing
+result codec and a relation to the real `RuntimeResult`; clock-controlled commit
+with reset/async metadata; and — the structural one from §63.20 — a call-free
+residual construction or a proved checker extension, since `fragB` rejects every
+`.call`.  PicoRV32 stays **BLOCKED**.
