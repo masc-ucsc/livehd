@@ -51,12 +51,17 @@ induction on the table, and the worked examples at PicoRV32's shape are
 
 ## Fuel, honestly
 
-The lookup walks the table, so its cost is the ADDRESS, not the syntax height:
-the old height bound does not cover it.  It is still bounded statically, because
-the table length is fixed by the design (`2 ^ aw`, or `contents.size` for a ROM)
-and is known when the design is specialized -- not by run-time data.  `memFuel`
-states that bound and `memGet_sound` is proved from it.  Wiring it into
-`Hw.checkResidual` is an open obligation, listed at the end and not assumed here.
+The lookup walks the table, so the old syntax-height bound does not cover it.
+
+CORRECTION to an earlier note here: the bound is the TABLE LENGTH, not "the
+address, fixed by the design".  The address is RUN-TIME data and is fixed by
+nothing.  The walk does not need it to be: `getGo` stops at `nil`, so a negative
+or huge address terminates there and yields the default.  What is
+design-determined is the LENGTH (`2 ^ aw`, or `contents.size` for a ROM), and
+that is what makes the bound design-dependent rather than data-dependent.
+`memFuel` RECORDS a proposed bound; it is not yet a proved one -- see the
+obligations at the end.  Wiring any bound into `Hw.checkResidual` is separately
+open and is not assumed here.
 -/
 import LeanSemanticPrimitives.Projection.RuntimeEncoding
 
@@ -168,7 +173,13 @@ theorem denote_writeBE (w : Nat) (m : MemImg) (a d bev : BV) (byte_w : Nat)
     · simpa [hx] using get_setAt_other m (bv_uint a) x _ hx
   · simp [hb]
 
-/-- Out of range the write is a NO-OP, and that is recorded rather than hidden. -/
+/-- Out of range OUR table update is a no-op.  The REFERENCE write is NOT: a
+`cert_mem_write` at an address the table does not hold takes effect on the
+function-valued memory, which is exactly why `InRange` is a real premise of
+`denote_writeEn`/`denote_writeBE` and must be ESTABLISHED for a supported
+source/state/operand path, never assumed from a label.  `zeroImg_inRange`
+establishes it for a `2 ^ aw` read/write table; a ROM is read-only, so no write
+premise arises there. -/
 theorem setAt_outOfRange (m : MemImg) {x : Int} (h : ¬ InRange m x) (d : BV) :
     setAt m x d = m := by
   unfold setAt InRange at *; simp [h]
@@ -338,8 +349,10 @@ word width.  Both are fixed by the design -- `2 ^ aw` or `contents.size`, and
 NOT cover these traversals, and wiring this bound into the checker is an open
 obligation; nothing here assumes the old bound suffices. -/
 
-/-- Static fuel bound: address walk, plus one pass per bit, plus a constant. -/
-def memFuel (addr width : Nat) : Nat := 4 * addr + 6 * width + 32
+/-- PROPOSED fuel bound -- in the table LENGTH (the walk stops at `nil`, so the
+run-time address does not enter it) and the word width (one mask pass per bit).
+This is a recorded proposal, NOT a theorem: nothing below proves it. -/
+def memFuel (len width : Nat) : Nat := 4 * len + 6 * width + 32
 
 /-! ### Worked runs at PicoRV32's shape (`aw 5, dw 32`) -/
 
@@ -430,5 +443,105 @@ gives against an image never written there. -/
        == .value (ofBV (mk_bv 32 0))
 
 end MemImg
+
+/-! ## A memory-aware runtime state, as first-order data
+
+`RuntimeState` holds `mems : Array (Int → BV)`, which no first-order encoding can
+carry.  `StateM` is the representable counterpart: the same flops, and one
+`MemImg` per memory.  `denote` maps it onto the reference `RuntimeState`, so the
+two are related by a FUNCTION rather than by an assumption.
+
+The existing memory-free path is UNTOUCHED.  `encState`/`decState` and `StateRel`
+keep their meaning and their theorems; `denote_memFree` below says exactly how
+this codec extends the old one, so the memory-free case is a special case rather
+than something replaced. -/
+
+structure StateM where
+  flops : Array BV
+  mems  : Array MemImg
+deriving Repr, Inhabited, DecidableEq
+
+namespace StateM
+
+/-- The reference state this denotes: each finite image becomes the
+function-valued memory it means. -/
+def denote (s : StateM) : RuntimeState :=
+  { flops := s.flops, mems := s.mems.map MemImg.denote }
+
+@[simp] theorem denote_flops (s : StateM) : (denote s).flops = s.flops := rfl
+
+@[simp] theorem denote_mems_size (s : StateM) : (denote s).mems.size = s.mems.size := by
+  simp [denote]
+
+/-- **Memory-free compatibility.**  A state with no images denotes a `MemFree`
+reference state, and conversely -- which is what makes the existing memory-free
+path a special case of this one rather than something it replaces. -/
+theorem denote_memFree (s : StateM) : MemFree (denote s) ↔ s.mems = #[] := by
+  constructor
+  · intro h
+    have hs : s.mems.size = 0 := by
+      have := congrArg Array.size h
+      simpa [denote] using this
+    exact Array.eq_empty_of_size_eq_zero hs
+  · intro h; simp [MemFree, denote, h]
+
+theorem denote_of_memFree (s : StateM) (h : s.mems = #[]) :
+    denote s = { flops := s.flops, mems := #[] } := by
+  simp [denote, h]
+
+def tagStateM : Nat := 125
+
+@[inline] def encStateM (s : StateM) : Val :=
+  .ctor tagStateM [encBVs s.flops, encArr MemImg.encMemImg s.mems]
+
+def decStateM (v : Val) : Option StateM :=
+  (field2 tagStateM v).bind (fun p =>
+    (decBVs p.1).bind (fun fs =>
+      (decArr MemImg.decMemImg p.2).map (fun ms => ⟨fs, ms⟩)))
+
+/-- The round trip: flops AND every memory image survive. -/
+@[simp] theorem decStateM_encStateM (s : StateM) : decStateM (encStateM s) = some s := by
+  cases s with
+  | mk fs ms =>
+    simp [decStateM, encStateM, field2, decBVs_encBVs,
+          decArr_encArr (e := MemImg.encMemImg) (d := MemImg.decMemImg)
+            MemImg.decMemImg_encMemImg]
+
+/-- `StateRelM v s` -- object value `v` denotes memory-aware state `s`. -/
+def StateRelM (v : Val) (s : StateM) : Prop := decStateM v = some s
+
+theorem StateRelM_encStateM (s : StateM) : StateRelM (encStateM s) s := decStateM_encStateM s
+
+/-- One value denotes at most one state -- the obligation `StateRel_functional`
+carries on the memory-free side. -/
+theorem StateRelM_functional {v : Val} {s t : StateM}
+    (h₁ : StateRelM v s) (h₂ : StateRelM v t) : s = t :=
+  Option.some.inj (h₁ ▸ h₂)
+
+/-- …and it pins the REFERENCE state too, which is what a runtime relation built
+on this will need. -/
+theorem StateRelM_denote_functional {v : Val} {s t : StateM}
+    (h₁ : StateRelM v s) (h₂ : StateRelM v t) : denote s = denote t :=
+  congrArg denote (StateRelM_functional h₁ h₂)
+
+/- A memory-bearing state really does survive the codec, carrying a ROM's
+initial contents: this is the case `decState` cannot represent at all. -/
+#guard decStateM (encStateM ⟨#[mk_bv 3 5], #[MemImg.ofMemConst 32 #[11, 22, 33]]⟩)
+       == some ⟨#[mk_bv 3 5], #[MemImg.ofMemConst 32 #[11, 22, 33]]⟩
+
+end StateM
+
+section Audit
+#print axioms Projection.MemImg.denote_writeEn
+#print axioms Projection.MemImg.denote_writeBE
+#print axioms Projection.MemImg.setAt_outOfRange
+#print axioms Projection.MemImg.zeroImg_inRange
+#print axioms Projection.MemImg.ofMemConst_above
+#print axioms Projection.MemImg.decMemImg_encMemImg
+#print axioms Projection.StateM.decStateM_encStateM
+#print axioms Projection.StateM.denote_memFree
+#print axioms Projection.StateM.StateRelM_functional
+#print axioms Projection.StateM.StateRelM_denote_functional
+end Audit
 
 end Projection

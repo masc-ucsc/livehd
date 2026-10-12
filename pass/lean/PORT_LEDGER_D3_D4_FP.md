@@ -7267,3 +7267,64 @@ Both modules elaborate exit 0 (`MemLog` 1.59 s / 533,768 KiB, `MemImage` 1.84 s 
 529,260 KiB).  PicoRV32 remains refused: `memFree` is untouched, no memory is
 erased, no predicate weakened, `RuntimeState` unchanged, and nothing is wired into
 `I_hw` yet.
+
+### 63.17 Memory-aware state codec; and a fuel proof attempted and not landed
+
+**Correction to my own fuel claim.**  I wrote that the table walk's cost is "the
+ADDRESS, fixed by the design".  That is wrong twice: the address is **run-time
+data** and is fixed by nothing, and the walk does not need it to be — `getGo`
+stops at `nil`, so a negative or huge address terminates there and returns the
+default.  The bound is the **table LENGTH**, which *is* design-determined
+(`2 ^ aw`, or `contents.size`).  `memFuel` is renamed to take the length and is
+labelled in the file as a **recorded proposal, not a theorem**.
+
+**Correction on `InRange`.**  `setAt_outOfRange` says *our table update* is a
+no-op out of range.  The **reference** write is not: `cert_mem_write` at an
+address the table lacks does take effect on the function-valued memory.  That is
+exactly why `InRange` is a real premise of `denote_writeEn`/`denote_writeBE` and
+must be **established** for a supported source/state/operand path, never assumed
+from a label.  `zeroImg_inRange` establishes it for a `2 ^ aw` read/write table;
+a ROM is read-only, so no write premise arises there.  The file now says this.
+
+**New: the memory-aware state codec.**  `RuntimeState.mems : Array (Int → BV)` is
+not first-order, so `StateM` is the representable counterpart — the same flops,
+one `MemImg` per memory — with `denote` mapping it onto the reference state by a
+**function**, not an assumption:
+
+| theorem | content |
+|---|---|
+| `decStateM_encStateM` | round trip: flops **and** every memory image survive |
+| `StateRelM_functional` | one value denotes at most one state |
+| `StateRelM_denote_functional` | …and pins the reference state a runtime relation needs |
+| `denote_memFree` | `MemFree (denote s) ↔ s.mems = #[]` — the **memory-free compatibility** result |
+
+`denote_memFree` is what makes the existing memory-free path a *special case*
+rather than something replaced: `encState`/`decState`/`StateRel` and their
+theorems are untouched.  A `#guard` round-trips a memory-bearing state carrying a
+**ROM's initial contents** — the case `decState` cannot represent at all.
+
+Axioms across all ten audited theorems: `propext` and `Quot.sound` only.  No
+`sorryAx`, no `Classical.choice`, no `Lean.ofReduceBool`.  File elaborates exit 0
+in 1.43 s, 535,680 KiB.
+
+**The general evaluator bridge was attempted and did NOT land.**  I restructured
+`getGo_sound` the right way — about the function **body** with a value
+environment, because the recursive `call`'s arguments are computed terms and an
+induction hypothesis phrased about a `call` with literal arguments does not apply
+to it — and the repository already has `evalFuel_mono`, which is the other half.
+The induction on the list and the fuel arithmetic (`4·len + 8`, three fuel per
+step) are right.  What did not land is the tactic plumbing: `simp` does not drive
+the nested `evalFuel`/`evalFuelList` match reduction to completion in the `cons`
+case, and the index lemma relating `(a :: t)[x.toNat]?` to `t[(x-1).toNat]?`
+needs more care than a one-line `simp`.  Rather than commit a file that does not
+compile, the attempt is retained verbatim at
+`generated/memlog/attempts/MemImage.getGo_sound.attempt.lean` and the committed
+module is the one that builds.  This is a proof-engineering debt with a known
+shape, not a blocked capability and not a request for a decision.
+
+Still open and unchanged: the `I_hw` `memImg`/`memConst` source cases and the
+`Op_MemRead`/`Op_MemWriteBE` operator paths; the clock-controlled commit and
+reset/async metadata carried through; `Hw.checkResidual`'s bound for these
+traversals; and `SupportedByProjection` replacing `memFree` with the real
+conditions.  PicoRV32 stays **BLOCKED**: nothing is wired into `I_hw`, no
+predicate is weakened, no memory or metadata erased.
