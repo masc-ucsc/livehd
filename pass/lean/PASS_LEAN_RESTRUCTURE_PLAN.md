@@ -890,3 +890,142 @@ and detailed phase/resource metrics, plus shared hardware and software
 dependency provenance, so the table supplies later optimization targets. Schedule
 profiling, optimization and performance-research experiments after the table
 runs. Generation success, validation and proof status remain separate.
+
+### 15.1 What the coverage statuses mean
+
+| Status | Meaning |
+| --- | --- |
+| PENDING | No current attempt or established prerequisite disposition yet. |
+| RUNNING | An actual generation/check job is live, with its process identity recorded. |
+| YES | Approach-native generation and its declared generation/readiness checks succeeded, within their recorded scope. |
+| NO | A recorded attempt failed or was refused. Source emission may have succeeded before a later required check failed. |
+| BLOCKED | A known required input, capability or preparation step prevents generation from completing. The emitter may never have been reached, or an earlier support check may have established the blocker. |
+
+`BLOCKED` does not mean simply “not run yet,” and it does not establish that the
+block can never be supported. Record which phase actually ran and which was not
+reached. For example, a failed shared RTL-to-LGraph frontend leaves other
+approaches without their required generated input; those emitters have not been
+tested independently. PicoRV32's projection route, in contrast, was loaded and
+its support checks rejected memory-related features. A timeout or fuel cap is an
+undecided result at that budget, not evidence of a semantic capability rejection.
+Preserve all attempts and successful earlier phases.
+
+### 15.2 Diagnose rejected or blocked cells against the original branches
+
+After the initial sweep has recorded a real attempt or a precise prerequisite
+disposition for every one of the 60 cells and its live coverage jobs are terminal,
+debug the rejection and blocking reasons. This diagnostic stage does **not** wait
+for all 60 cells to become YES; the separate final successful-coverage checkpoint
+condition above remains unchanged. Finish the initial approach-major sweep in
+the user's order: legacy, verified compiler, IR-as-semantics, translation
+validation, Futamura projection. Do not replay completed unchanged phases.
+
+Start with the **Futamura projection branch**, whose existing coverage provides
+the first baseline. Use the original checkout
+`/mada/users/czeng14/projects/livehd-futamura/livehd`, branch `projection`, pinned
+at `9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6`. This is a separate repository;
+the similarly named ref in the master repository is not this baseline. Freeze
+the compared master revision and both sides' actual build/tool/dependency
+identities before the comparison.
+
+For each affected requested block, **run the old branch's own implementation to
+confirm whether it supports that exact block**. Historical moderate coverage,
+an existing artifact, a smaller submodule or a source inspection does not prove
+support for the requested whole unit. Use the same external RTL revision, full
+component list, top, parameters, filelist, defines and includes as the table.
+Cover all twelve requested units on the original FP implementation, prioritizing
+rejected/blocked cells and retaining successful units as behavioral comparison
+controls. Reuse already-completed matching old-branch evidence where its exact
+input, configuration, implementation and required checks are established.
+Retain each branch's genuine frontend, emitter, loader and simulator procedures
+and declare any required differences in their dependencies or options. Bind
+fuel, stack/resource limits, clocks, resets, asynchronous metadata and memory
+contents; a resource stop remains undecided. Keep build preparation costs separate
+from simulator-generation and execution metrics.
+
+Compare both **functionality and behavior**: frontend acceptance and normalized
+graph contents, certificate format and admitted design, every support predicate,
+residual generation/checking, and simulator state/output transitions under the
+same inputs and edge/reset schedule. Identify the first phase where the results
+differ. A common graph or certificate handoff may help isolate that phase only
+when format compatibility and complete metadata are verified; retain the
+same-external-input pipeline comparison as well. Do not erase memory, weaken
+support/proof predicates, discard metadata, replace the approach's backend, or
+revert the established SHL/SRA/Sext correctness repairs to manufacture agreement.
+
+Record old-branch support as observed **supported / rejected / blocked /
+undecided**, separately from the master cell status. Extend the evidence record
+with both revisions, input/build identities, commands, artifacts, timings and
+resource metrics, old/master outcomes, observed transition differences, first
+divergent phase, root cause and a reproducer. Classify findings as an inherited
+limitation, port regression/bug, intentional semantic or correctness change,
+frontend/configuration/transport difference, or unresolved result. Old-pass /
+master-fail is a regression candidate until matching inputs and the cause are
+established; failure on both sides alone does not prove the same cause. Diagnose
+and make justified fixes with retained before/after evidence, preserving the
+original independent proof and admission obligations.
+
+**Finish this Futamura comparison and its findings before investigating the
+other branches, and resolve the findings until every requested FP unit is
+supported.** Then do the same for IR-as-semantics, followed by translation
+validation, using their original implementations as baselines. Keep capability
+debugging ahead of optional optimization/profiling research. Intermediate local
+records remain provisional; the user pushes only after the separately required
+final checkpoint is achieved.
+
+### 15.3 Restore full support, including the shared frontend
+
+The user's completion target is support for **all twelve requested units** in
+Futamura projection, then IR-as-semantics, then translation validation. A recorded
+NO or BLOCKED cell is a diagnostic finding, not completion of this support work.
+Complete each approach's support before moving to the next:
+
+| Support stage | Completion evidence |
+| --- | --- |
+| Futamura projection | All 12 whole units reach approach-native generation and declared readiness checks; original-branch support and any old/master differences are recorded; demonstrated port/frontend bugs are fixed and necessary missing capabilities implemented. |
+| IR-as-semantics | All 12 units have usable generated simulators and their required checks/execution, with old-branch comparison and justified fixes. |
+| Translation validation | All 12 units pass their declared generation/admission gates with valid private source/build/dependency closure; no missing input, capability or undecided cap is counted as support. |
+
+Keep all five approaches and all 60 cells in the original table. The existing
+all-60-YES final checkpoint condition and other migration obligations remain;
+the three-stage support priority does not remove legacy or verified-compiler
+cells from the denominator.
+
+**What input FP requires.** Its generation input is the hardware design
+certificate (`DesignCert`, transported as `.dcert`), produced from the full RTL
+with its top, wrapper/types/parameters, ordered filelist, defines and includes:
+RTL elaboration → LGraph → required normalization/`single_edge` → certificate
+emission → FP specialization → residual simulator. Per-cycle input signals,
+clocks, resets and initial state are inputs to the resulting simulator, and are
+recorded separately. An upstream frontend refusal prevents the certificate from
+being produced; it is not evidence the FP specializer itself rejects that unit.
+The old implementation must use its own genuine certificate/loader route, with
+DCERT1/DCERT2 and metadata differences explicit.
+
+Compare the old branch's actual frontend and wrapper recipe with master for
+every upstream failure: configuration/type bindings, wrapper dependencies and
+file ordering, source adaptations, reader/plugin/dependency versions, synthesis
+options, lowering, graph construction, normalization and certificate emission.
+Run the old end-to-end route to establish support; examine matching phase
+artifacts and localize the failure. Source differences alone do not establish
+causation or historical whole-unit support.
+
+**Rebase the needed frontend support too.** The work is not limited to the Lean
+projection modules. Where a correct capability or adapter in the old route was
+lost, port it into master's current frontend/graph APIs and verify it on the exact
+affected units. If a master frontend or wrapper bug causes the refusal, fix it
+with a reproducer and appropriate semantic/regression checks. If both branches
+lack a required feature, implement that support rather than leave the block
+permanently rejected. Preserve original failures and rerun affected phases only
+after a relevant input/configuration/implementation change; do not rerun
+unchanged completed cells or modify unrelated benchmark RTL to obtain a pass.
+
+Whole-Pico memory support is a concrete required FP extension: implement the
+memory/source/operator semantics, runtime relation and necessary adequacy/checker
+proof bridge before admitting that design. Do not simply remove `memFree`, erase
+memory, ignore clocks/resets or weaken any other support predicate. Similarly,
+resolve the actual causes of frontend concat-width, package/configuration,
+combinational-loop and `single_edge` refusals; a rejection must not be disabled
+without establishing correct behavior. Keep established correctness repairs and
+the existing proof/admission obligations intact. Functional support restoration
+and demonstrated bug fixes precede performance optimization.
