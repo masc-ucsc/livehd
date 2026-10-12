@@ -7042,3 +7042,62 @@ and no `pgrep` pattern anywhere:
 B and D are precisely the two the argv grep got wrong in opposite directions, and
 all four are descendants of the invoking shell — which the ancestor walk would
 have excluded wholesale, reporting a clean context with three live readers.
+
+### 63.14 The initial sweep is terminal, and the 14-target closure exposed a stale artifact
+
+**`issue_stage_gate` translation validation reached `agree`** at the larger
+budget: all seven gates 1/1, probe wall 4391.42 s, run wall 4572.56 s, maxrss
+8,208,144 KiB = 7.83 GiB, exit 0.  The 1800 s cap was simply too small — the row
+needed 4391 s — which is what "a cap is undecided, not a capability refusal"
+means in practice.  The capped attempt is retained untouched.  Every one of the
+60 cells now has a real attempt or a precise prerequisite disposition.
+
+**The owed 14-target prerequisite is discharged, and it was not a formality.**
+`lake build --no-cache` over the fourteen named `Compiler` targets ran **8,576
+jobs** — against the **7** the default target covers — exit 0, wall 261.55 s,
+user 120.16, sys 61.78, maxrss 6,953,728 KiB = 6.63 GiB; the explicit 14-target
+`lake --no-build build` then exited **0** (wall 14.51 s).  That is the
+validation; neither default-target success nor artifact hash equality discharges
+it, as this run shows.
+
+**Two of the fourteen artifacts changed, and the two changes are NOT the same
+kind of thing.**
+
+* `CompileDesign` 511,120 → 511,184 bytes.  The difference found is the
+  **embedded absolute source path**: the old object carries
+  `…/livehd-pass-lean-master/formal/lean/…/CompileDesign.lean`, the new one the
+  private checkout's path, one occurrence each, and the size delta is exactly
+  that one string's growth (64 bytes).
+* `ReifyProof` 13,904,184 → 13,993,824 bytes, **+89,640** — which one path
+  cannot explain, and does not.  Its live-tree `.olean` was built
+  **2026-10-10 13:11:21** while `ReifyProof.lean` was last changed
+  **2026-10-11 00:04:47** (commit `7914776a5`, *"d3: a search budget is not a
+  refusal; the transport repair"*).  The artifact was **stale with respect to
+  its own source by about eleven hours**, it was copied into the private root in
+  that state, and the three TV runs loaded it.
+
+So my earlier reading — that the out-of-date verdict was a path-keying artifact
+of copying — was right for `CompileDesign` and **wrong for `ReifyProof`.**  The
+explicit check is what distinguishes them, and that is precisely why it is owed.
+
+**Which prior results actually depended on the changed artifacts**, established
+rather than assumed.  The transitive import closure of the four FP drivers
+contains `CompileDesign`, `CompileGraph`, `CompileOp`, `Runtime`, `DesignCert`,
+`ResidualIR`, `ResidualSemantics` and the three `*Defs` — and **not**
+`ReifyProof`, `Reify`, `ReifyGen` or `D3Harness`.  Therefore:
+
+* the **FP** results are unaffected by the semantic change: they never load
+  `ReifyProof`, and the only `CompileDesign` difference is the embedded path;
+* the **TV** results loaded the stale `ReifyProof`, which is in `CRITICAL_OLEANS`
+  and is the D3 reifier/proof module.  They stand as **historical observations
+  under the closure they actually loaded** and are not evidence about the
+  validated closure;
+* the **IR-as-semantics** results used the live tree's `LEAN_PATH`, not the
+  private root, so the private rebuild does not reach them;
+* **legacy** and **verified compiler** are C++ `lhd` emission with no Lean
+  closure at all.
+
+The three TV cells are therefore `RUNNING` with their historical records
+retained, and the affected fresh evidence — and only that — is being obtained:
+one sweep over the same three certificates at `--timeout 7200`, against the
+freshly validated closure.

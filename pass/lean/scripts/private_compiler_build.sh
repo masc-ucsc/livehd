@@ -206,6 +206,11 @@ if [ -n "$live" ]; then
 fi
 
 mkdir "$OUT" 2>/dev/null || { echo "REFUSING: attempt root $OUT already exists"; exit 3; }
+# The build runs in a subshell that cd's into the Lean root, so every output
+# path must be ABSOLUTE.  A relative OUT silently sent GNU time's -o into the
+# wrong directory, which surfaced -- correctly -- as `MISSING build producer
+# status (wrapper rc=125)` rather than as a pass.
+OUT=$(readlink -f "$OUT") || { echo "REFUSING: cannot resolve $OUT"; exit 2; }
 
 # ---- identities BEFORE the build -----------------------------------------
 { echo "started_at=$(date -Iseconds)"
