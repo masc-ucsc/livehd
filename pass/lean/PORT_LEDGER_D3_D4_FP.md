@@ -7101,3 +7101,102 @@ The three TV cells are therefore `RUNNING` with their historical records
 retained, and the affected fresh evidence — and only that — is being obtained:
 one sweep over the same three certificates at `--timeout 7200`, against the
 freshly validated closure.
+
+### 63.15 Fresh closure results reconciled after overnight completion
+
+Audited on 2026-10-12 from retained producer logs, GNU time exit records,
+certificate hashes and the results hash in the run metadata; no benchmark rerun.
+The three-target sweep `tv12x5/run_fresh14_20261011-234035` completed at
+2026-10-12 01:16:29 PDT, producer exit 0. All three targets passed all seven
+generation/admission gates with 32 distinct sampled observations agreeing.
+
+| Target | Combined probe wall (s) | User / system CPU (s) | Max RSS (KiB) | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| picorv32 | 71.88 | 62.98 / 3.34 | 2,407,192 | agree |
+| frontend_gate | 1369.71 | 1347.42 / 25.96 | 8,167,072 | agree |
+| issue_stage_gate | 4301.77 | 4109.33 / 56.21 | 8,203,020 | agree |
+
+The validated artifact digest is
+`705ffd6c754bc22a85447d51acd372d2178d4db04f2d3cb9c54dafe1b34cf2be`;
+the result digest is
+`44980dafa44d00da9d0a9182a01d9edf3989953c5e4c47d1b2f7e8951c7272ac`.
+Both explicit private build exit records remain 0. Earlier stale-closure results
+and the 1800-second undecided cap are retained as historical attempts.
+These are interpreted generation/admission results; proof was not requested.
+Probe timing excludes upstream RTL/emission and generic dependency preparation.
+
+JSON/TSV/HTML now record **12 YES, 11 NO, 37 BLOCKED, zero RUNNING or PENDING**.
+Every cell has an attempted or prerequisite disposition; 12/60 successful cells
+is not full support. The next stage is plan sections 15.2-15.3: run matching
+whole units on the old FP implementation, compare with master, and repair needed
+frontend/projection support before IR-as-semantics and translation validation.
+The untracked FP support manifest is source inspection, not old-branch execution.
+This reconciliation is provisional and does not discharge the independent
+migration, proof, validation or final all-60-YES gates.
+
+### 63.15 Corrections, and the first real piece of FP memory support
+
+**Two of my own claims are withdrawn.**
+
+*"The old branch is not built."*  That conflated two components.  The old FP
+**specializer** was built and run: `generated/master_port/fp/genprobe/root-pin/
+nat/gen_probe`, sha256 `eeada8cf4405dc36…`, and §56 records 33 frozen rows run
+matched against master — 25 `GENERATION OK`, 8 refused, 0 failures, 0 fuel stops.
+What has not been built is the old repository's native RTL **frontend** (`lhd`),
+which is a different component.
+
+*"no-old-route" for five units.*  Absence of a convenience wrapper or filelist
+script does not show the generic old `lhd` reader cannot consume explicitly
+supplied sources.  The old stress runner already accepts `CVA6_FILELIST` and
+`CVA6_WRAPPER_FILE`, and wrappers and filelists are benchmark **input data**, not
+branch implementation.  Those rows are relabelled `helpers-absent`: the generic
+route is **unattempted**, not unavailable.  B11's matching TLB refusal likewise
+comes from the third-repo census and is **not** a matched old-FP-frontend
+execution; it supports an inherited *source-gap* claim and nothing more.
+
+**Implementation: `Projection/MemLog.lean`.**  PicoRV32 is the one requested unit
+whose FP route actually reaches the specializer and is refused there, so it is
+where FP implementation can start without any frontend work.  Its refusal is three
+distinct gaps — `memFree` (1 memory, aw 5, dw 32), `sources` (`memImg(idx 0, aw 5,
+dw 32)`), `ops` (`Op_MemRead` ×2, `Op_MemWriteBE 1` ×1).
+
+`memFree` is not a gate that could be deleted; it is load-bearing for a
+**representation** reason.  `RuntimeState.mems : Array (Int → BV)` holds memories
+as *functions*, `Val` is first-order, and `decState` therefore rebuilds
+`mems := #[]` unconditionally — `StateRel_memFree` states exactly that as a
+theorem.  So the first missing piece is a memory image `Val` can carry whose
+denotation is the reference's.
+
+A memory reachable in a run is never an arbitrary `Int → BV`: it is a base image
+plus the finite writes performed so far.  `MemLog` is that — a base index and an
+override list, newest first, so last-write-wins is the definition rather than an
+invariant.  The content is three equalities against the reference operators in
+`Translation/LGraphModel.lean`, not resemblances:
+
+| theorem | statement |
+|---|---|
+| `denote_writeEn` | `denote bs (writeEn m a d en) = cert_mem_write (denote bs m) a d en` |
+| `denote_writeBE` | `denote bs (writeBE w bs m a d bev byte_w) = cert_mem_write_be w (denote bs m) a d bev byte_w` |
+| `readEn_eq` | `readEn w bs m a en = cert_mem_read w (denote bs m) a en` |
+
+plus last-write-wins, non-interference at other addresses, the `Val` round trip
+and relational functionality.  The file elaborates **exit 0 in 1.78 s**, and its
+axiom audit prints `propext` / `Quot.sound` only — Lean's own kernel axioms,
+arriving through `funext` and `simp`.  What is **absent** is what matters: no
+`sorryAx`, no `Classical.choice`, no `Lean.ofReduceBool`; `decide` is used for the
+worked example rather than `native_decide` to keep the last of those absent.
+
+Non-vacuity is checked at PicoRV32's real shape (`aw 5, dw 32`): a write of
+`0xDEADBEEF` to address 7 reads back through `cert_mem_read`, a neighbouring
+address is untouched, a disabled read is zero, a disabled write is a no-op on the
+log itself, and the log holds exactly one override after one write.
+
+**This does not admit PicoRV32, and nothing here pretends otherwise.**  `memFree`
+is untouched, no memory is erased, no predicate is weakened, `RuntimeState` is
+unchanged and nothing is yet wired into `I_hw`.  The remaining obligations are
+enumerated in the file as `MEMORY_BRIDGE_OBLIGATIONS`: the `I_hw` source and
+operator cases; a memory-carrying `encState`/`decState` with its `StateRel` chain
+reproved; the `HardwareAdequacy` runtime relation generalised off `memFree`;
+`Hw.checkResidual` accepting the new operator shapes with a sound bound; and
+`SupportedByProjection` replacing `memFree` with the real conditions.  Those are
+the next implementation steps, not a reason to stop.

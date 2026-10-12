@@ -1029,3 +1029,34 @@ combinational-loop and `single_edge` refusals; a rejection must not be disabled
 without establishing correct behavior. Keep established correctness repairs and
 the existing proof/admission obligations intact. Functional support restoration
 and demonstrated bug fixes precede performance optimization.
+
+### 15.4 Implementation first: master FP must support all twelve units
+
+The latest user priority is to **finish the rebased FP implementation on master
+first**, including its required frontend/certificate support and missing
+projection capabilities. The existing implementation already generated and
+executed the frontend and issue/scoreboard simulators; these two results do not
+establish complete twelve-unit support.
+
+Distinguish the old branch's RTL frontend binary (`lhd`) from its projection
+specializer. The pinned old FP specializer was already built in an isolated root
+and run on pre-existing certificates; the original repository's native frontend
+has not yet been built/run for these exact whole-unit comparisons. Neither an
+absent convenience wrapper/filelist script nor an absent `bazel-bin` proves the
+generic frontend cannot consume explicitly supplied benchmark inputs.
+
+Do not make a blanket old-branch build or twelve-unit baseline sweep a prerequisite
+to starting implementation. Use old-branch source and targeted executions when
+they help establish correct wrapper/configuration/frontend behavior or diagnose a
+specific regression. Retain the requested old-implementation confirmation and
+matched comparisons as validation work; they do not replace or delay concrete
+master support work. Restore a missing helper as an input adapter when appropriate,
+without modifying the old tracked implementation or claiming historical support.
+
+Advance through actual implementation changes, meaningful semantic/regression
+checks and affected whole-unit runs. Inherited limitations require correct feature
+extensions as well as port fixes. Keep the complete table and evidence current,
+preserve earlier successful phases, and do not stop at a manifest of refusals or a
+proof-obligation list while implementation work can proceed. Complete FP support
+for all twelve requested units before advancing to IR-as-semantics and then
+translation validation. Periodic supervision uses the user's 20-minute interval.
