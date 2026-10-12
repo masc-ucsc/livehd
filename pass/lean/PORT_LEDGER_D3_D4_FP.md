@@ -6455,3 +6455,177 @@ it is not evidence of a successfully configured whole group.
 
 The HTML matrix was refreshed from the JSON with the supervisor's
 `refresh_coverage_matrix.py`, so JSON, TSV, HTML and ledger agree.
+
+## 63. IR-as-semantics closed; the private TV root validated and the TV sweep launched
+
+### 63.1 The two CVA6 IR checks reached a terminal, successful result
+
+`fp_cov_ir_check.sh` ran the two retained rows serially and both finished with
+every phase exiting 0.  Read back from the retained cells rather than from the
+worker's own summary line:
+
+| row | Cert | Main | 8-cycle interpreted run |
+|---|---|---|---|
+| B10 `frontend_gate` | exit 0, wall 53.50 s, user 52.58, sys 1.68, RSS 1,796,308 KiB | exit 0, wall 0.88 s | exit 0, wall 49.55 s, user 48.97, sys 0.33, RSS 492,372 KiB |
+| B09 `issue_stage_gate` | exit 0, wall 56.29 s, user 55.94, sys 1.23, RSS 1,734,812 KiB | exit 0, wall 0.68 s | exit 0, wall 269.56 s, user 268.91, sys 0.36, RSS 492,452 KiB |
+
+What that is and is not: **usable INTERPRETED generation** — `lean --run` on the
+generated launcher, not a native `lake exe` link, not comprehensive validation
+and not kernel certification.  The 49.55 s and 269.56 s are **eight-cycle
+execution time, not source-generation latency**; they belong to no generation
+metric.  The phases and their artifact identities are preserved and were not
+re-run to produce this record.
+
+All twelve IR dispositions are now present: **3 YES, 9 BLOCKED** on the
+previously verified missing input — the nine rows have no `<top>_Lgraph.lean`
+because the verified-compiler emitter was never reached, which §62.1 already
+established from the shared upstream stop.
+
+### 63.2 The worker's exit propagation was wrong, and is now fixed and self-tested
+
+`fp_cov_ir_check.sh` ended in `echo "$ROW IR readiness exit=$e ..."`, so **the
+wrapper returned 0 even when the run exited nonzero** — a cap or a refusal would
+have been handed to its launcher as success.  The retained procedure now reads
+each phase's true producer exit from both the cell's `exit` file and GNU `time`'s
+`exit %x`, requires the two to agree, and exits with the real code.  Outcomes are
+classified rather than collapsed:
+
+| label | meaning | propagated exit |
+|---|---|---|
+| `OK` | producer exited 0 | 0 |
+| `CAP` | `timeout` fired — partial, neither pass nor refusal | 124 |
+| `REFUSED` | the producer itself failed | its own code |
+| `MISSING` | no exit record was retained for that phase | 97 |
+| `DISAGREE` | wrapper rc and measured producer rc differ | 96 |
+
+Self-tested against synthetic cells for all four non-OK classes; the `DISAGREE`
+case (wrapper 0, producer 1) is the one that matters, and it is now reported as a
+failure instead of a pass.  A read-only `--classify <row>` mode re-derives a
+retained tree's disposition **without running anything**, and it reproduces
+`exit=0` for B09 and B10 from their retained artifacts — so the already-passed
+jobs were not re-run to validate the fix.
+
+### 63.3 The private TV root: what was actually checked
+
+The supervisor's independent `cp -a --reflink=auto` (pid 2730281) finished:
+`wall 713.95 s, user 0.85, sys 32.31, exit 0`.  I started no duplicate copy and
+removed nothing.  Validation of the destination, all of it measured:
+
+* **14/14 critical artifacts** under
+  `.lake/build/lib/lean/LeanSemanticPrimitives/Compiler/` are **hash-equal to
+  the canonical audited values**, on **distinct inodes**, each with
+  **`nlink=1`** — no hard-link alias to the live compiler.
+* `formal/lean/.lake` is a **real directory, not a symlink**; `build_root()`
+  therefore resolves inside the private `ROOT` and `build_root_is_external()`
+  returns false.
+* **134,380 files / 13 GB in both trees**; **3 symlinks**, all relative and
+  internal to `packages/` (batteries' `docs/README.md`, two mathlib `scripts/`
+  entries).  None escapes the private root.
+* `lake env` resolves **every** `LEAN_PATH` entry under the private checkout,
+  plus the shared read-only elan toolchain lib.  No live-tree path leaks in.
+* The private checkout is at `3d8bb696ce3cd712240368c9a82c434f8ba31e18` with an
+  **empty `git status --porcelain`**, before and after the build.
+
+**Copied traces are not valid traces in a new root, and that had to be fixed.**
+Lake records the **absolute source path** as a trace input, so in the private
+root every local module keyed differently and `lake build --no-build` reported
+`target is out-of-date` for all 14 critical modules.  Artifact equality alone
+would therefore have been exactly the "preparation, not proof" the checkpoint
+warns about.  A private canonical `lake build --no-cache` fixed it:
+**exit 0, wall 18.20 s, user 14.72, sys 4.50, RSS 800,444 KiB**, after which
+`lake build --no-build` reports `All targets up-to-date` (rc 0).  The build
+**re-validated traces and did not re-elaborate**: all 14 critical artifacts hash
+**unchanged**.  `--no-cache` was passed so nothing was downloaded.
+
+No shared mutable build-root alias, no hard link to the live compiler, no
+`--allow-dirty`, no `D3_ARTIFACT_DIR` test seam.
+
+### 63.4 The TV manifest carries all twelve rows, including the nine with nothing to run
+
+`generated/master_port/cov12x5/tv12x5/manifest.tsv` has **one row per required
+benchmark**.  Three carry `cert_available=1` with the exact certificate hash and
+node count, independently cross-checked:
+
+| module | bytes | sources | nodes | outputs | flops | mems | cross-check |
+|---|---|---|---|---|---|---|---|
+| `picorv32` | 279,483 | 1,302 | 2,279 | 18 | 174 | 1 | sources match the `DCERT2` header; nodes match the pre-existing manifest row |
+| `frontend_gate` | 969,162 | 6,585 | 6,503 | 3 | 409 | 0 | every field matches the IR run's own header line |
+| `issue_stage_gate` | 1,252,028 | 6,896 | 6,947 | 40 | 334 | 0 | flops match the §62 count correction |
+
+The other nine carry `cert_available=0` and a **linked** `blocked_cause` naming
+the exact upstream stop already on record — eight `s1_compile` refusals (one
+concat-lane width, two slang declaration errors, five combinational loops) and
+CORE-ET TLB's `pass.single_edge` exit 7.  **No identical failed RTL compilation
+was replayed**, no tiny stand-in was substituted and no component was erased.
+
+### 63.5 The TV sweep itself
+
+`cgroup v2 delegation is unavailable from this session's shell` — the session
+sits in `session-886.scope`, whose `cgroup.subtree_control` is empty, and
+migrating into the `user@.service` subtree crosses a root-owned common ancestor.
+`--enforce cgroup` correctly refused rather than silently downgrading to the
+sampled advisory limit.  The fix is to launch the sweep **inside** a
+`systemd-run --user --scope`, where the delegated preflight passes; the memory
+guard is therefore real and kernel-backed, not sampled.
+
+Launched from the private checkout, with `ROOT` that clean source and
+`D3_LEAN_ROOT` its private `formal/lean`: driver
+`d3_sweep.py sha256=5e3f7cdc…`, manifest digest `70395ea8138ef29a`, selection
+`faeaa352b8af0b25`, reifier `legacy` (the default), `--jobs 1 --timeout 1800
+--enforce cgroup --kill-over-rss-kb 16000000`.  `--prove` was **not** requested:
+this is the generation/admission sweep, and the proof gate is a separate
+obligation.  The dry run resolved 3 targets to run and 9 manifest rows without a
+certificate, which the sweep deliberately does not write — the join owns them.
+
+### 63.6 Futamura: the DCERT2 loader prerequisite, established as an observation
+
+The FP generation driver `gen_probe.lean` loads through `CertIO.V1.loadCert` —
+FP's **DCERT1** codec.  Every certificate the current C++ pass emits is
+**DCERT2**, so that driver cannot read any of them.  That, and not a projection
+limitation, is the FP column's missing functional prerequisite.
+
+`formal/lean/scripts/gen_probe_v2.lean` is the DCERT2-capable driver.  It is
+`gen_probe.lean` with one substitution — `Compiler.CertIO.admitAny` in place of
+`CertIO.V1.loadCert` — and `gen_probe.lean` itself is **byte-unchanged**, so the
+existing native generation-latency procedure and its paired numbers stay
+comparable.  `admitAny` routes on the magic and then applies **each format's own
+admission**: DCERT2 through `readCertChecked` (parse, then `certWfError`), DCERT1
+through FP's parse-then-`asyncOK`.  No policy is widened, narrowed or replaced
+with a third, and `magics_are_exclusive` proves the routing cannot mis-route.
+
+`formal/lean/scripts/dcert2_loadcheck.lean` answers the narrower question —
+*can the DCERT2 bytes be admitted at all* — by importing only `CertIOFacade`.
+Run against the three real certificates (`lean --run`, wall 89.06 s, user 5.01,
+sys 7.81, maxrss 6,288,540 KiB ≈ 6.0 GiB, exit 0):
+
+| certificate | bytes | detect | admitted | sources/nodes/outputs/flops/mems/clocks | `asyncReset` flops |
+|---|---|---|---|---|---|
+| `picorv32` | 70,067 | `v2` | under v2's own policy | 1302 / 2279 / 18 / 174 / 1 / 1 | 0 |
+| `frontend_gate` | 274,052 | `v2` | under v2's own policy | 6585 / 6503 / 3 / 409 / 0 / 1 | **409** |
+| `issue_stage_gate` | 530,496 | `v2` | under v2's own policy | 6896 / 6947 / 40 / 334 / 0 / 1 | **333** |
+
+Two things this establishes rather than asserts.  First, every parsed shape
+**matches the field counts computed independently from the emitted
+`<top>_Lgraph.lean`** — two unrelated artifact formats agreeing field by field.
+Second, the metadata DCERT1 **structurally cannot carry** is present and
+non-trivial: 409 of 409 frontend flops and 333 of 334 issue-stage flops carry
+`FlopDesc.asyncReset`, and PicoRV32's single memory carries a
+`MemoryDesc.clock`.  The support predicate is therefore evaluated on real
+clock/reset metadata, not on a defaulted one-clock table.
+
+**What is still missing, stated precisely.**  `scripts/build-opt.sh` — the
+standalone native route the FP probes are built by — deliberately builds
+`Compiler/CertIOV1` and **not** `Compiler/CertIO`, because the DCERT2 codec
+reaches `Compiler/CompileDesign`, which does `import Mathlib`.  So
+`gen_probe_v2.lean` cannot be built by that route as it stands; it needs the
+Projection chain built where Mathlib is available, and the private lake root has
+Mathlib but has **no** `Projection/*` oleans (the lake default target closes over
+the library root only — 7 jobs).  Building that chain under lake is the next
+prerequisite, and it is a real build cost, not a generation measurement.
+
+**And the memory gap is unchanged.**  `SupportedByProjection` still has six
+conjuncts including `memFree`, so PicoRV32 — the one whole-core row, with
+`memories = 1` — remains refused as unsupported.  That is the inherited
+projection semantics / runtime-relation / adequacy gap.  `memFree` was not
+removed, no memory was erased from any design, and no design is claimed
+supported that is not.
