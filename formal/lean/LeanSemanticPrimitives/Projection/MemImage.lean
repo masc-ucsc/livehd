@@ -1402,10 +1402,13 @@ initial contents: this is the case `decState` cannot represent at all. -/
 
 end StateM
 
-/-! ## The HARDWARE memory path: sources, commit, and the reference bridge
+/-! ## The memory source/commit layer -- HOST functions, not yet `I_hw`
 
-This is the layer `I_hw` needs, over the finite representation and the two
-primitives.  Every definition is matched to its reference counterpart by a
+SCOPE, stated first because the namespace name invites a stronger reading:
+everything in `Projection.Hardware` is a HOST Lean function.  `I_hw`'s encoded
+source dispatch, its operator dispatch and its state/result shape are UNCHANGED
+by this section.  What is built here is the layer `I_hw` will need -- matched to
+the reference by theorems -- not the rewiring itself.  Every definition is matched to its reference counterpart by a
 theorem, so nothing here is "like" the reference -- it denotes it.
 
 Reference, for the record (`Compiler/Runtime.lean`, `Compiler/DesignSemantics.lean`):
@@ -1490,9 +1493,11 @@ def stepMems (e : ClockEdges) (D : DesignCert) (s : StateM) (newImgs : Array Mem
     (newImgs : Array MemImg) : (stepMems e D s newImgs).size = D.memories.size := by
   simp [stepMems]
 
-/-- **No clock fires, no commit**: every image is the prior one, exactly.  Stated
-with the quiet-edge condition as a hypothesis, which is what a caller actually
-establishes from `e`. -/
+/-- **No clock fires, no commit**: every image is the prior one, exactly.
+
+This is a QUIET-BRANCH lemma only.  It is not an unconditional preservation
+theorem for `stepMems` against `srcMemNext`: the active branch needs the actual
+next-image correspondence (`rho m.nextImg`), which is not established here. -/
 theorem stepMems_quiet (e : ClockEdges) (D : DesignCert) (s : StateM) (newImgs : Array MemImg)
     (hq : ∀ m ∈ D.memories, fires e m.clock = false) (idx : Nat)
     (h : idx < D.memories.size) :
@@ -1513,10 +1518,10 @@ private def picoMem : MemoryDesc := { aw := 5, dw := 32, nextImg := 0, clock := 
 
 /-- One step: read the image out of the state, write through the primitive,
 commit on `clock 0`, and hand back the new state. -/
-private def stepOnce (e : ClockEdges) (st : StateM) (a d bev : BV) : Option StateM :=
+private def stepOnce (e : ClockEdges) (st : StateM) (a d bev : BV) (bw : Nat) : Option StateM :=
   let prior := srcMemImg st 0
   match evalPrim .memWriteBE
-          [.int 32, MemImg.encMemImg prior, ofBV a, ofBV d, ofBV bev, .int 8] with
+          [.int 32, MemImg.encMemImg prior, ofBV a, ofBV d, ofBV bev, .int (Int.ofNat bw)] with
   | .ok v =>
       match MemImg.decMemImg v with
       | some img' => some { st with mems := #[memCommit (fires e picoMem.clock) img' prior] }
@@ -1530,32 +1535,49 @@ private def readBack (st : StateM) (a : BV) : Option Val :=
   | _     => none
 
 /- ACTIVE clock: the write commits and the read sees it. -/
-#guard (match stepOnce #[true] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) with
+#guard (match stepOnce #[true] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) 8 with
         | some st' => readBack st' (mk_bv 5 7) == some (ofBV (mk_bv 32 0xDEADBEEF))
         | none     => false)
 
 /- INACTIVE clock: the same write does NOT commit; memory is unchanged. -/
-#guard (match stepOnce #[false] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) with
+#guard (match stepOnce #[false] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) 8 with
         | some st' => readBack st' (mk_bv 5 7) == some (ofBV (mk_bv 32 0))
         | none     => false)
 
 /- …and the whole image is identical, not merely that one word. -/
-#guard (match stepOnce #[false] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) with
+#guard (match stepOnce #[false] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) 8 with
         | some st' => st'.mems == picoState.mems
         | none     => false)
 
-/- PARTIAL mask through the same path, at PicoRV32's 1-bit-per-byte enable. -/
-#guard (match stepOnce #[true] picoState (mk_bv 5 7) (mk_bv 32 0xFFFFFFFF) (mk_bv 4 1) with
+/- PARTIAL mask through the same path at byte_w = 8 -- EIGHT-BIT BYTE LANES.
+
+   CORRECTION: this was labelled "PicoRV32's 1-bit-per-byte enable".  It is not.
+   `stepOnce` passes `.int 8`, so each enable bit covers an 8-bit lane.  Pico's
+   emitted operator is `Op_MemWriteBE 1`, where each enable bit covers ONE BIT.
+   The byte-lane case below is valid and kept; the bit-enable case follows it. -/
+#guard (match stepOnce #[true] picoState (mk_bv 5 7) (mk_bv 32 0xFFFFFFFF) (mk_bv 4 1) 8 with
         | some st' => readBack st' (mk_bv 5 7) == some (ofBV (mk_bv 32 0x000000FF))
         | none     => false)
 
 /- a NEIGHBOUR is untouched by the committed write -/
-#guard (match stepOnce #[true] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) with
+#guard (match stepOnce #[true] picoState (mk_bv 5 7) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) 8 with
         | some st' => readBack st' (mk_bv 5 8) == some (ofBV (mk_bv 32 0))
         | none     => false)
 
 /- an ENABLED OUT-OF-RANGE write is refused by the primitive, so no step happens -/
-#guard (stepOnce #[true] picoState (mk_bv 8 255) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF)).isNone
+#guard (stepOnce #[true] picoState (mk_bv 8 255) (mk_bv 32 0xDEADBEEF) (mk_bv 4 0xF) 8).isNone
+
+/- PicoRV32's ACTUAL operand shape: `Op_MemWriteBE 1`, one enable BIT per data
+   bit.  Mask 8 (bit 3 only) over a zero word must leave exactly 8, not 0xFF and
+   not 0xFFFFFFFF -- the case that discriminates bit-enable from byte-lane. -/
+#guard (match stepOnce #[true] picoState (mk_bv 5 7) (mk_bv 32 0xFFFFFFFF) (mk_bv 32 8) 1 with
+        | some st' => readBack st' (mk_bv 5 7) == some (ofBV (mk_bv 32 8))
+        | none     => false)
+
+/- …and at byte_w = 1 an inactive clock still commits nothing. -/
+#guard (match stepOnce #[false] picoState (mk_bv 5 7) (mk_bv 32 0xFFFFFFFF) (mk_bv 32 8) 1 with
+        | some st' => st'.mems == picoState.mems
+        | none     => false)
 
 /- a ROM's initial contents survive the round trip through the state codec -/
 #guard (match StateM.decStateM (StateM.encStateM ⟨#[], #[MemImg.ofMemConst 32 #[11,22,33]]⟩) with

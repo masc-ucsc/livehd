@@ -14,6 +14,26 @@
 #   A stop anywhere in the first three arrows means NO CERTIFICATE EXISTS, so the
 #   specializer was never offered the design.  That is not a specializer refusal.
 #
+# UPDATE 2026-10-12: THE OLD GENERIC ROUTE HAS NOW BEEN EXECUTED, so the
+# helpers-absent/unbuilt framing below is superseded for B01.  The supervisor's
+# 9bb frontend build is terminal (exit 0, 3992.44 s, 2,500,512 KiB) and the WHOLE
+# minion_dcache_top compile on the frozen 40-source input PASSED: exit 0, 8.79 s,
+# 356,016 KiB, top-level JSON pass, graph_io 198087696323 minion_dcache_top.
+#
+# Fresh MASTER on the SAME frozen RTL/filelist/top/reader options reproduces the
+# concat-lane-width refusal at mux_94508: exit 1, 6.14 s, 327,140 KiB, in the
+# SECOND pass.bitwidth, after import/cprop/bitwidth/legalize/enableopt/cprop.
+# Old default O1 is import/cprop/formal; master O1 has a DIFFERENT pass sequence,
+# and reader/plugin/importer versions differ.
+#
+# So B01 is a REAL WHOLE-FRONTEND BEHAVIOUR DIFFERENCE -- old passes, master
+# refuses, same input.  It is NOT yet a localised code regression and NOT old FP
+# admission: a passing frontend compile is not a certificate, and the pass
+# sequence and reader versions differ.  The first semantic/width divergence has
+# to be traced without disabling the Concat, single_edge or support checks.
+# Evidence: livehd-futamura/baseline_frontend_build_9bb41a09d_20261012/
+#           whole_dcache_comparison_20261012_1535.json
+#
 # CORRECTION -- "the old branch is not built" was MISLEADING and is withdrawn.
 # Two different components must not be conflated:
 #   * the old FP SPECIALIZER was built and run.  `generated/master_port/fp/
@@ -70,7 +90,7 @@
 # 0.60 vs built-in, master's added `--ignore-timing`).
 #
 row	benchmark	top	master_route	master_status_fp	master_first_stop	old_branch_route	historical_verdict	historical_stop	classification
-B01	CORE-ET DCache	minion_dcache_top	coreet_filelist.sh -> anchor.sv + yosys.filelist_file	BLOCKED	s1_compile exit 1 (6.91 s): Concat lane 0 (of 2, MSB-first) driver 'mux_94508' occupies 2 bits but its declared window is 1	none (no CORE-ET route in the old branch)	FAIL	single_edge: memory `memory_111348:gen_offload_reduce.u_reduce.u_ba_alloc_fif...` 	unknown
+B01	CORE-ET DCache	minion_dcache_top	coreet_filelist.sh -> anchor.sv + yosys.filelist_file	BLOCKED	s1_compile exit 1 (6.91 s): Concat lane 0 (of 2, MSB-first) driver 'mux_94508' occupies 2 bits but its declared window is 1	GENERIC ROUTE EXECUTED 2026-10-12: whole-unit compile PASSED exit 0 (8.79 s, 356,016 KiB, graph_io 198087696323)	OLD COMPILE PASSED (not a certificate; no FP admission claimed)	master refuses at concat-lane-width mux_94508 in the SECOND pass.bitwidth; old O1 is import/cprop/formal, master O1 differs, reader/plugin versions differ	frontend-behaviour-difference (old passes, master refuses, same frozen input)
 B02	CVA6 HPDcache	cva6_hpdcache_subsystem_gate	gate wrapper + whole-core filelist	BLOCKED	s1_compile exit 6 (27.56 s, 825,156 KiB): combinational loop in 'cva6_hpdcache_subsystem_gate'	none (no wrapper or generator in the old branch)	-	-	helpers-absent
 B03	CORE-ET neighborhood I-cache	icache_top	coreet_filelist.sh	BLOCKED	s1_compile exit 1 (0.20 s): slang icache_pkg.sv:21:50 multiple imports found for identifier 'PaSize'	none	NOT IN THE HISTORICAL CENSUS	-	unknown
 B04	CVA6 MMU/TLB/PTW	cva6_mmu_gate	prepared wrapper + whole-core filelist	BLOCKED	s1_compile exit 6 (2.26 s, 321,240 KiB): combinational loop in 'cva6_mmu_gate'	none	-	-	helpers-absent

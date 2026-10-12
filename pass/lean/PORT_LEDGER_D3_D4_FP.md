@@ -7786,3 +7786,56 @@ answers `false` for `memImg`/`memConst`, `OpSupported` still excludes
 `Op_MemRead`/`Op_MemWriteBE`, and `supportReport.memFree` is untouched.  There is
 no memory-bearing `RuntimeResult` relation yet and no generic step/adequacy
 theorem over it.  PicoRV32 stays **BLOCKED**; these controls are not a YES.
+
+### 63.27 Two mislabels corrected, a bit-enable control added, and B01's old route has now run
+
+**Correction 1 — the mask control was labelled wrong.**  I called it "PicoRV32's
+1-bit-per-byte enable".  It is not: `stepOnce` passed `.int 8`, so each enable
+bit covered an **8-bit lane**.  PicoRV32's emitted operator is
+`Op_MemWriteBE 1` — one enable bit per **data bit**.  The byte-lane case is valid
+and is kept, now labelled as such, and `stepOnce` takes `byte_w` as a parameter
+so the real shape can be exercised.
+
+The **bit-enable** case is now there: `byte_w = 1`, mask `8` (bit 3 only) over a
+zero word must leave exactly **8** — not `0xFF`, not `0xFFFFFFFF`.  That is the
+case which discriminates bit-enable from byte-lane, and it passes.  Its mutation
+(expecting `0xFF`) fails the build.  An inactive clock at `byte_w = 1` still
+commits nothing.
+
+**Correction 2 — scope of §63.26.**  Everything in `Projection.Hardware`,
+including `stepOnce`, is a **HOST Lean function**.  `I_hw`'s encoded source
+dispatch, its operator dispatch and its state/result shape are **unchanged**.
+The commit title said "implement the hardware memory source and commit", which
+reads as more than was done; the module now states the scope in its own header.
+`stepMems_quiet` is likewise a **quiet-branch** lemma — not an unconditional
+`stepMems`/`srcMemNext` preservation theorem, whose active branch needs the
+actual `rho m.nextImg` correspondence that is not established.
+
+**B01: the old generic route has now been executed, and the old/master claims
+change accordingly.**  The supervisor's 9bb frontend build is terminal (exit 0,
+3992.44 s, 2,500,512 KiB) and the **whole `minion_dcache_top` compile on the
+frozen 40-source input PASSED**: exit 0, 8.79 s, 356,016 KiB, top-level JSON
+pass, `graph_io 198087696323 minion_dcache_top`.
+
+Fresh **master** on the **same** frozen RTL, filelist, top and reader options
+reproduces the concat-lane-width refusal at `mux_94508`: exit 1, 6.14 s, 327,140
+KiB, in the **second** `pass.bitwidth`, after
+`import/cprop/bitwidth/legalize/enableopt/cprop`.  Old default O1 is
+`import/cprop/formal`; master's O1 has a **different pass sequence**, and
+reader/plugin/importer versions differ.
+
+So B01 is a **real whole-frontend behaviour difference** — old passes, master
+refuses, same input.  It is **not** yet a localised code regression, and it is
+**not** old FP admission: a passing frontend compile is not a certificate, and
+the pass sequences and reader versions differ.  The manifest is updated, my
+earlier `unknown`/helpers-absent framing for B01 is superseded, and the next
+frontend step is to trace the first semantic/width divergence **without**
+disabling the Concat, `single_edge` or support checks.
+
+**Still not done:** the `I_hw` rewiring itself — encoded memory-carrying state
+and result in the interpreter, `memImg`/`memConst` through source evaluation,
+`Op_MemRead`/`Op_MemWriteBE` through the real operator cases, per-memory
+next-image selection inside the emitted interpreter.  `SourceSupported`,
+`OpSupported` and `memFree` are untouched, deliberately: broadening them ahead of
+the soundness bridge is the one thing that must not happen.  PicoRV32 stays
+**BLOCKED**.
