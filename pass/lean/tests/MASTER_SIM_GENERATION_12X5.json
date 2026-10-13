@@ -2886,7 +2886,7 @@
  },
  "execution_priority": "Coverage-table runs before all further optimization/performance research; prepare needed functional dependencies, preserve original acceptance scope",
  "optimization_schedule": "after coverage table runs",
- "environment_record": "pass/lean/tests/MASTER_SIM_GENERATION_ENVIRONMENT.json",
+ "environment_record": "HELD OUTSIDE THE REPOSITORY: the machine profile (CPU model, NUMA/cache topology, RAM, kernel, mounts) was moved to a local directory and is deliberately not published",
  "observed_environment_sha256": "ad186ee1424e15afa052bfa000fa50843bd954354d0f10e49256e711632edd8a",
  "provisional": "INCOMPLETE/PROVISIONAL, APPROACH-MAJOR. Legacy 1 YES / 11 NO. Verified compiler 3 YES / 9 BLOCKED. IR-as-semantics 1 YES (PicoRV32, readiness EXECUTED interpreted) / 2 RUNNING / 9 BLOCKED. Translation validation and Futamura follow.",
  "environment_binding": {
