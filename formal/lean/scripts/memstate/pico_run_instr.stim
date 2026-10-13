@@ -1,16 +1,20 @@
 # SUPPLIED stimulus for the whole PicoRV32 unit.
-# Ordinals from picorv32_io.json: 2 mem_rdata, 3 mem_ready, 8 resetn.
-# resetn deasserted (1), the memory interface always ready, and mem_rdata held
-# at `addi x1, x0, 1` (0x00100093) so the core fetches and retires an
-# instruction that WRITES the 32x32 register file -- which is the aw5/dw32
-# memory this certificate declares.
+# Input ordinals (picorv32_io.json): 2 mem_rdata, 3 mem_ready, 8 resetn.
+# Output ordinal 8 is mem_valid.
+#
+# `react 3 8` wires mem_ready to the PREVIOUS cycle's mem_valid, which is the
+# zero-latency memory handshake the core actually needs -- holding mem_ready
+# high unconditionally acknowledges transactions the core never started.
+# mem_rdata is held at `addi x1, x0, 1` (0x00100093), so every fetch retires an
+# instruction that WRITES the 32x32 register file -- the aw5/dw32 memory this
+# certificate declares.
 stim v1
 in 0 1 0
 in 1 32 0
 in 2 32 1048723
-in 3 1 1
 in 4 32 0
 in 5 1 0
 in 6 1 0
 in 7 1 0
 in 8 1 1
+react 3 8

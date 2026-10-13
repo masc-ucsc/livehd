@@ -10017,3 +10017,58 @@ fail-closed pass is the one thing its comment warns against.
 Recorded as the next concrete candidate in the memory area, with the finding
 that it does not require extending the IR.  B11 stays BLOCKED; nothing is
 claimed for it, and no component is erased.
+
+## §63.57 — Pico on the FRESH certificate, and the handshake the stimulus needed
+
+Twelve cycles on the freshly emitted `picorv32.dcert` (`ef77dfab…`, the
+source-bound emitter), with the supplied image and a supplied CONSTANT
+stimulus:
+
+```
+state survives encStateM/decStateM unchanged (words, defaults and flops)
+initial memory 0 words [19088743,2309737967,305419896,2882400001,4294967295,4294967295]
+stimulus: SUPPLIED file …pico_run_instr.stim, 9 input(s) pinned, applied every cycle
+step outcomes: ok × 12
+reference comparison: COMPLETE (array length, every table word, default and out-of-range)
+distinct output vectors 2 of 12; distinct flop vectors 8 of 12
+memory 0: 0 word(s) differ from the initial image
+final returned-state policy: stateFullOKB true
+ms: support 85  specialize 676099  check 2565  execute 2077290
+```
+
+producer exit 0, 46:14 wall, 2756.8 s user, peak RSS 7,003,828 KiB.
+
+**The core advances — 8 distinct flop vectors of 12 — and the register file
+still does not commit.**  Reported as it happened, not described as motion.
+
+### Why, and what was added
+
+Holding `mem_ready` high unconditionally is not the picorv32 handshake: it
+acknowledges transactions the core never started.  The core's own `mem_valid`
+is output ordinal 8 and `mem_ready` is input ordinal 3, so the stimulus needs a
+REACTIVE input, not a constant.  Added:
+
+```
+react <input-ordinal> <output-ordinal>
+```
+
+The named input takes the PREVIOUS cycle's value of that output (0 on the first
+cycle, where there is no previous one).  It is the only part of a stimulus that
+is not a constant, and the provenance line counts it separately:
+`8 input(s) pinned, 1 reactive (from the previous cycle's outputs)`.
+
+The retained stimulus now carries `react 3 8` — `mem_ready := mem_valid` — with
+`mem_rdata` held at `0x00100093` (`addi x1, x0, 1`), the instruction that writes
+the 32×32 register file this certificate declares as its aw5/dw32 memory.
+
+### Standing
+
+Nothing about the route changed: whole Pico is admitted, specializes, passes
+the unchanged production residual checker, and executes at its returned bound
+with a COMPLETE reference comparison on both certificates.  What is still open
+is a stimulus that makes the register file commit, and a longer run is under
+way at 24 cycles.  Until a transition is observed, **no claim of "meaningful
+initialized memory transitions" is made for Pico** — `tiny_byte_ram` (§63.50)
+remains the real certificate where the route moved memory, at 2 words.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
