@@ -483,6 +483,140 @@ private def eAll : ClockEdges := #[true,  true]
              | none    => false)
         | none    => false)
 
+/-! ## 6. The declared-flop-width refinement, on this fixture
+
+Both of `fullDesign`'s flops declare width 32.  `fullNarrowFlops` gives them
+7-bit values instead — a state `stateOKB` accepts, because it pins the flop
+vector's LENGTH and not the widths of the values in it.  The gap is observable,
+not hypothetical: with both clocks quiet the HOLD branch copies the narrow value
+straight into the returned state. -/
+
+private def fullNarrowFlops : StateM :=
+  { flops := #[mk_bv 7 0, mk_bv 7 0], mems := #[initTable] }
+
+/- the OLD policy accepts it, exactly as reported -/
+#guard runtimeOKB fullDesign inRun fullNarrowFlops eOff == true
+/- …and a decoded run shows the narrow value really does survive the step -/
+#guard (match runMain fullNarrowFlops inRun eOff with
+        | some r => (r.nextState.flops[0]!).width == 7
+                    && (r.nextState.flops[1]!).width == 7
+        | none   => false)
+/- the REFINEMENT rejects it -/
+#guard flopShapeOKB fullDesign fullNarrowFlops == false
+#guard stateFullOKB fullDesign fullNarrowFlops == false
+#guard runtimeFullOKB fullDesign inRun fullNarrowFlops eOff == false
+/- …while the fixture's own state and the canonical one pass -/
+#guard runtimeFullOKB fullDesign inRun fullState eAll == true
+#guard runtimeFullOKB fullDesign inRun fullState eOff == true
+#guard stateFullOKB fullDesign (initStateOf fullDesign) == true
+
+/-! ### Decoded: from a LEGAL state the widths survive every edge pattern
+
+Flop 0 is synchronously reset and enabled from slot 5; flop 1 is
+ASYNCHRONOUSLY reset and always enabled, on the other clock.  So these five
+runs cover hold-on-a-quiet-clock, capture on either domain, a synchronous reset
+that must NOT act while its clock is quiet, and an asynchronous one that must. -/
+
+#guard (match runMain fullState inRun eOff with
+        | some r => (r.nextState.flops[0]!).width == 32
+                    && (r.nextState.flops[1]!).width == 32
+        | none   => false)
+#guard (match runMain fullState inRun eA with
+        | some r => (r.nextState.flops[0]!).width == 32
+                    && (r.nextState.flops[1]!).width == 32
+        | none   => false)
+#guard (match runMain fullState inRun eB with
+        | some r => (r.nextState.flops[0]!).width == 32
+                    && (r.nextState.flops[1]!).width == 32
+        | none   => false)
+#guard (match runMain fullState inReset eAll with
+        | some r => (r.nextState.flops[0]!).width == 32
+                    && (r.nextState.flops[1]!).width == 32
+        | none   => false)
+/- the ASYNCHRONOUS reset acts on a QUIET clock, and still at the declared
+   width: flop 1 takes its reset value 255 with both edges low -/
+#guard (match runMain fullState inReset eOff with
+        | some r => (r.nextState.flops[1]!) == mk_bv 32 255
+                    && (r.nextState.flops[0]!).width == 32
+        | none   => false)
+/- …while the SYNCHRONOUS one holds instead of resetting, on the same step -/
+#guard (match runMain fullState inReset eOff with
+        | some r => (r.nextState.flops[0]!) == mk_bv 32 0
+        | none   => false)
+
+/-! ### Decoded TWO steps at the strengthened policy
+
+The second step runs on the state the first returned: the memory really changes
+(word 1 goes 2 -> 10 -> 2) and both flops keep their declared width. -/
+
+#guard (match runMain fullState inRun eA with
+        | some r1 =>
+            runtimeFullOKB fullDesign inRun r1.nextState eA
+            && (match runMain r1.nextState inRun eA with
+                | some r2 =>
+                    r2.outputs == #[mk_bv 32 2]
+                    && (r2.nextState.mems[0]!).get 1 == mk_bv 32 2
+                    && (r2.nextState.flops[0]!).width == 32
+                    && (r2.nextState.flops[1]!).width == 32
+                    && stateFullOKB fullDesign r2.nextState
+                | none    => false)
+        | none    => false)
+
+/-- The strengthened route, as a theorem: two Booleans, and the returned state
+passes the SAME strengthened check. -/
+theorem fullRunFull (i : RuntimeInput) (st : StateM) (e : ClockEdges)
+    (hR : runtimeFullOKB fullDesign i st e = true) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign fullDesign, encEdges e, encInput i,
+            StateM.encStateM st].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign fullDesign e i (StateM.denote st)
+      ∧ stateFullOKB fullDesign r.nextState = true :=
+  admits_run_full fullDesign_admits hR
+
+theorem fullRunFullInit (i : RuntimeInput) (e : ClockEdges)
+    (hin : inputOKB fullDesign i.size = true)
+    (hed : edgesOKB fullDesign e = true) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign fullDesign, encEdges e, encInput i,
+            StateM.encStateM (initStateOf fullDesign)].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign fullDesign e i
+                     (StateM.denote (initStateOf fullDesign))
+      ∧ stateFullOKB fullDesign r.nextState = true :=
+  admits_run_full_init fullDesign_admits hin hed
+
+/-- …and two steps, with only the second step's input and edge vector left to
+check. -/
+theorem fullRunFullTwo (i₁ i₂ : RuntimeInput) (e₁ e₂ : ClockEdges) (st : StateM)
+    (hR : runtimeFullOKB fullDesign i₁ st e₁ = true)
+    (hin : inputOKB fullDesign i₂.size = true)
+    (hed : edgesOKB fullDesign e₂ = true) :
+    ∃ r₁ r₂ : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign fullDesign, encEdges e₁, encInput i₁,
+            StateM.encStateM st].map Term.lit)) (StateM.encResultM r₁)
+      ∧ r₁.denote = Compiler.interpretDesign fullDesign e₁ i₁ (StateM.denote st)
+      ∧ Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign fullDesign, encEdges e₂, encInput i₂,
+            StateM.encStateM r₁.nextState].map Term.lit)) (StateM.encResultM r₂)
+      ∧ r₂.denote
+          = Compiler.interpretDesign fullDesign e₂ i₂ (StateM.denote r₁.nextState)
+      ∧ stateFullOKB fullDesign r₂.nextState = true := by
+  obtain ⟨r₁, hev, hden, hnext⟩ := admits_run_full_two fullDesign_admits hR
+  obtain ⟨r₂, hev2, hden2, hok2⟩ := hnext hin hed
+  exact ⟨r₁, r₂, hev, hden, hev2, hden2, hok2⟩
+
+#print axioms fullRunFull
+#print axioms fullRunFullInit
+#print axioms fullRunFullTwo
+
 #print axioms fullDesign_admits
 #print axioms fullDesign_static
 #print axioms fullDesign_semwf

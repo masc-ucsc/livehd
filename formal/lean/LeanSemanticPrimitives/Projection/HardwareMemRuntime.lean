@@ -20,13 +20,17 @@ still implies the length statement every existing proof consumes.
 
 ## What is NOT claimed here
 
-Returned-state preservation at the WORD level is the next increment: it needs
-the shape of a `tbl` slot across the dense order, which — unlike the scalar
-width lift of §63.43 — is a genuine recurrence, because a write's result shape
-depends on the shape of the image it wrote into.  `admits_run` below therefore
-still concludes the LENGTH-level `StateShapeOK` for the next state, exactly as
-`admits_mainM_resolved` does.  `SourceSupported`, `OpSupported` and `memFree`
-are untouched and the public route still refuses memory-bearing designs.
+Word-level preservation IS proved, in §7: `admits_run_pres` concludes
+`stateOKB D r.nextState = true`, not merely the length-level `StateShapeOK`.
+`admits_run` itself is left at the weaker conclusion on purpose, so the theorem
+earlier call sites consume keeps its exact meaning.
+
+§9 closes the remaining policy-scope gap: `stateOKB` pins the flop VECTOR's
+length but not the WIDTH of the values in it, so on its own it accepts a 7-bit
+value against a 32-bit flop descriptor.  That was a gap in what the policy SAYS,
+never a contradiction of the adequacy equation, and `flopShapeOKB` closes it
+without altering any existing predicate.  `SourceSupported`, `OpSupported` and
+`memFree` are untouched and the public route still refuses memory-bearing designs.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemSlotTy
 
@@ -764,6 +768,315 @@ theorem StateRelR_initStateOf (D : DesignCert) :
 #print axioms initStateOf_ok
 #print axioms admits_run_init
 #print axioms initStateOf_codec
+
+
+/-! ## 9. The DECLARED FLOP WIDTH, which the size check does not see
+
+`stateOKB` pins the flop vector's LENGTH and the memories' word widths; it says
+nothing about the width of the values IN the flop vector, so on its own it
+accepts a 7-bit value against a 32-bit flop descriptor.  That is a gap in what
+the policy states, not a contradiction of anything proved above: the adequacy
+equation holds either way.  This section states the missing fact and proves it
+preserved, leaving every existing predicate and theorem exactly as it was.
+
+### Why the RAW INPUT widths are a different matter, and stay unchecked
+
+Every source read RESIZES to the width its descriptor declares:
+
+* `sourceValue (.input idx w)` is `bv_resize w (i[idx]?.getD (mk_bv w 0))`;
+* `sourceValue (.flopQ idx w)` is `bv_resize w (s.flops[idx]?.getD (mk_bv w 0))`;
+* both branches of `.flopQAsync` resize too — the reset value is `mk_bv w rv`;
+* and `srcFlopNext`'s CAPTURE branch is `bv_resize f.width (rho f.din).asBV`.
+
+So a raw input vector whose entries have the "wrong" widths cannot be observed
+at all.  `inputOKB` therefore requires `idx < i.size` and NOTHING about
+`i[idx].width`, and it stays that way: asserting declared widths on the raw
+vector would be a demand the semantics never makes, and it would reject inputs
+the reference accepts.
+
+The STORED FLOP width is not like that, and that asymmetry is the whole point:
+`srcFlopNext`'s HOLD branch — a quiet clock, or an edge with the enable low —
+is `s.flops[idx]?.getD (mk_bv f.width 0)`, which copies the stored value into
+the next state VERBATIM, with no resize.  A narrow value therefore survives the
+step, and its encoding, so the policy has to pin it. -/
+
+def FlopShapeOK (D : DesignCert) (st : StateM) : Prop :=
+  ∀ (idx : Nat) (f : FlopDesc), D.flops[idx]? = some f →
+    ∃ b, st.flops[idx]? = some b ∧ b.width = f.width
+
+def flopShapeOKB (D : DesignCert) (st : StateM) : Bool :=
+  (List.range D.flops.size).all (fun idx =>
+    match D.flops[idx]?, st.flops[idx]? with
+    | some f, some b => b.width == f.width
+    | _,      _      => false)
+
+theorem flopShapeOKB_sound {D : DesignCert} {st : StateM}
+    (h : flopShapeOKB D st = true) : FlopShapeOK D st := by
+  unfold flopShapeOKB at h
+  simp only [List.all_eq_true] at h
+  intro idx f hf
+  have hlt : idx < D.flops.size := mem_lt_of_getElem? hf
+  have := h idx (List.mem_range.mpr hlt)
+  rw [hf] at this
+  cases hb : st.flops[idx]? with
+  | none   => rw [hb] at this; simp at this
+  | some b => rw [hb] at this; exact ⟨b, rfl, by simpa using this⟩
+
+theorem flopShapeOKB_complete {D : DesignCert} {st : StateM}
+    (h : FlopShapeOK D st) : flopShapeOKB D st = true := by
+  unfold flopShapeOKB
+  simp only [List.all_eq_true]
+  intro idx hidx
+  have hlt : idx < D.flops.size := List.mem_range.mp hidx
+  obtain ⟨b, hb, hw⟩ := h idx _ (by rw [Array.getElem?_eq_getElem hlt])
+  rw [Array.getElem?_eq_getElem hlt, hb]
+  simpa using hw
+
+/-- The refinement.  `stateOKB` and `runtimeOKB` are untouched; these are their
+conjunction with the flop-width fact, so every theorem stated about the old
+predicates keeps its exact meaning. -/
+def stateFullOKB (D : DesignCert) (st : StateM) : Bool :=
+  stateOKB D st && flopShapeOKB D st
+
+def runtimeFullOKB (D : DesignCert) (i : RuntimeInput) (st : StateM)
+    (e : ClockEdges) : Bool :=
+  runtimeOKB D i st e && flopShapeOKB D st
+
+/-! ### The width holds on every branch of the commit rule
+
+Stated branch by branch against the ACTUAL reference rule — each branch's
+VALUE first, then its width — so reset (synchronous and asynchronous),
+capture-with-enable and hold-on-a-quiet-clock are each discharged on their own
+terms rather than by one opaque case split. -/
+
+/-- The reset pin's asserted value, as `srcFlopNext` computes it. -/
+def resetAsserted (rho : Nat → CertVal) (f : FlopDesc) : Bool :=
+  match f.resetPin with
+  | none   => false
+  | some r => xor f.resetActiveLow (bv_nonzero (rho r).asBV)
+
+/-- The enable's value, as `srcFlopNext` computes it. -/
+def flopEnabled (rho : Nat → CertVal) (f : FlopDesc) : Bool :=
+  match f.enable with
+  | none    => true
+  | some en => bv_nonzero (rho en).asBV
+
+/-- The rule, with its two guards named.  `rfl`: the `let`s are definitional. -/
+theorem srcFlopNext_unfold (rho : Nat → CertVal) (e : ClockEdges)
+    (s : RuntimeState) (idx : Nat) (f : FlopDesc) :
+    Compiler.srcFlopNext rho e s idx f
+      = (if (resetAsserted rho f && (fires e f.clock || f.asyncReset)) = true then
+           mk_bv f.width f.resetValue
+         else if (fires e f.clock && flopEnabled rho f) = true then
+           bv_resize f.width (rho f.din).asBV
+         else s.flops[idx]?.getD (mk_bv f.width 0)) := rfl
+
+/-- RESET: asserted, and either this flop's clock fires or the reset is
+ASYNCHRONOUS — the one case where a quiet clock still changes the flop. -/
+theorem srcFlopNext_reset {rho : Nat → CertVal} {e : ClockEdges}
+    {s : RuntimeState} {idx : Nat} {f : FlopDesc}
+    (hr : resetAsserted rho f = true)
+    (he : (fires e f.clock || f.asyncReset) = true) :
+    Compiler.srcFlopNext rho e s idx f = mk_bv f.width f.resetValue := by
+  rw [srcFlopNext_unfold, if_pos (by rw [hr, he]; rfl)]
+
+/-- CAPTURE: no reset, the clock fires, the enable is high.  The value is
+`bv_resize`d to the declared width, so the `din` slot's own width is
+irrelevant. -/
+theorem srcFlopNext_capture {rho : Nat → CertVal} {e : ClockEdges}
+    {s : RuntimeState} {idx : Nat} {f : FlopDesc}
+    (hr : resetAsserted rho f = false) (hed : fires e f.clock = true)
+    (hen : flopEnabled rho f = true) :
+    Compiler.srcFlopNext rho e s idx f = bv_resize f.width (rho f.din).asBV := by
+  rw [srcFlopNext_unfold, if_neg (by rw [hr]; simp), if_pos (by rw [hed, hen]; rfl)]
+
+/-- HOLD: no reset, and either a quiet clock or a low enable.  The stored value
+is copied VERBATIM — no resize — which is why the policy must pin its width. -/
+theorem srcFlopNext_hold {rho : Nat → CertVal} {e : ClockEdges}
+    {s : RuntimeState} {idx : Nat} {f : FlopDesc}
+    (hr : resetAsserted rho f = false)
+    (hq : fires e f.clock = false ∨ flopEnabled rho f = false) :
+    Compiler.srcFlopNext rho e s idx f = s.flops[idx]?.getD (mk_bv f.width 0) := by
+  have hcond : (fires e f.clock && flopEnabled rho f) = false := by
+    rcases hq with h | h
+    · rw [h]; rfl
+    · rw [h]; simp
+  rw [srcFlopNext_unfold, if_neg (by rw [hr]; simp), if_neg (by rw [hcond]; simp)]
+
+theorem srcFlopNext_width_reset {rho : Nat → CertVal} {e : ClockEdges}
+    {s : RuntimeState} {idx : Nat} {f : FlopDesc}
+    (hr : resetAsserted rho f = true)
+    (he : (fires e f.clock || f.asyncReset) = true) :
+    (Compiler.srcFlopNext rho e s idx f).width = f.width := by
+  rw [srcFlopNext_reset hr he]; rfl
+
+theorem srcFlopNext_width_capture {rho : Nat → CertVal} {e : ClockEdges}
+    {s : RuntimeState} {idx : Nat} {f : FlopDesc}
+    (hr : resetAsserted rho f = false) (hed : fires e f.clock = true)
+    (hen : flopEnabled rho f = true) :
+    (Compiler.srcFlopNext rho e s idx f).width = f.width := by
+  rw [srcFlopNext_capture hr hed hen]; rfl
+
+theorem srcFlopNext_width_hold {rho : Nat → CertVal} {e : ClockEdges}
+    {s : RuntimeState} {idx : Nat} {f : FlopDesc}
+    (hr : resetAsserted rho f = false)
+    (hq : fires e f.clock = false ∨ flopEnabled rho f = false)
+    (hs : ∀ b, s.flops[idx]? = some b → b.width = f.width) :
+    (Compiler.srcFlopNext rho e s idx f).width = f.width := by
+  rw [srcFlopNext_hold hr hq]
+  cases hb : s.flops[idx]? with
+  | none   => simp [mk_bv]
+  | some b => simpa using hs b hb
+
+/-- The three branches together: the only premise any of them needs is the
+policy's own, and only the HOLD branch needs it. -/
+theorem srcFlopNext_width {rho : Nat → CertVal} {e : ClockEdges}
+    {s : RuntimeState} {idx : Nat} {f : FlopDesc}
+    (hs : ∀ b, s.flops[idx]? = some b → b.width = f.width) :
+    (Compiler.srcFlopNext rho e s idx f).width = f.width := by
+  rw [srcFlopNext_unfold]
+  split
+  · rfl
+  · split
+    · rfl
+    · cases hb : s.flops[idx]? with
+      | none   => simp [mk_bv]
+      | some b => simpa using hs b hb
+
+/-! ### Preservation, and the strengthened route
+
+`StateM.denote` carries the flop array VERBATIM, so the returned state's flop
+widths are read straight off the adequacy equation — the same move §7 made for
+the memories, and for the same reason. -/
+
+theorem admits_run_full {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {e : ClockEdges} (hA : admitsB D = true)
+    (hR : runtimeFullOKB D i st e = true) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign D, encEdges e, encInput i, StateM.encStateM st].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ stateFullOKB D r.nextState = true := by
+  unfold runtimeFullOKB at hR
+  simp only [Bool.and_eq_true] at hR
+  obtain ⟨hR0, hflop⟩ := hR
+  obtain ⟨r, hev, hden, hok⟩ := admits_run_pres hA hR0
+  refine ⟨r, hev, hden, ?_⟩
+  unfold stateFullOKB
+  simp only [Bool.and_eq_true]
+  refine ⟨hok, flopShapeOKB_complete ?_⟩
+  intro idx f hf
+  have hlt : idx < D.flops.size := mem_lt_of_getElem? hf
+  have hf' : D.flops[idx] = f := by
+    rw [Array.getElem?_eq_getElem hlt] at hf; exact Option.some.inj hf
+  -- the returned flop array IS the reference's, verbatim
+  have hx := congrArg (fun z => z.nextState.flops) hden
+  simp only [StateM.ResultM.denote] at hx
+  have hfl : r.nextState.flops
+      = D.flops.mapIdx (fun idx f =>
+          Compiler.srcFlopNext (slotValM D i st) e (StateM.denote st) idx f) := by
+    have : (StateM.denote r.nextState).flops = r.nextState.flops := rfl
+    rw [← this, hx]
+    unfold Compiler.interpretDesign
+    simp
+    all_goals (first | rfl | (funext k; rfl))
+  refine ⟨Compiler.srcFlopNext (slotValM D i st) e (StateM.denote st) idx f, ?_, ?_⟩
+  · rw [hfl, Array.getElem?_eq_getElem (by simpa using hlt), Array.getElem_mapIdx, hf']
+  · refine srcFlopNext_width ?_
+    intro b hb
+    obtain ⟨b', hb', hw⟩ := flopShapeOKB_sound hflop idx f hf
+    have : b = b' := by
+      have hd : (StateM.denote st).flops = st.flops := rfl
+      rw [hd, hb'] at hb; exact (Option.some.inj hb).symm
+    rw [this]; exact hw
+
+/-- The canonical state carries the declared flop widths too: its values are
+`mk_bv f.width f.resetValue`. -/
+theorem initStateOf_flopShape (D : DesignCert) : FlopShapeOK D (initStateOf D) := by
+  intro idx f hf
+  have hlt : idx < D.flops.size := mem_lt_of_getElem? hf
+  have hf' : D.flops[idx] = f := by
+    rw [Array.getElem?_eq_getElem hlt] at hf; exact Option.some.inj hf
+  refine ⟨mk_bv f.width f.resetValue, ?_, rfl⟩
+  simp [initStateOf, initFlopsOf, hlt, hf']
+
+theorem initStateOf_full_ok (D : DesignCert) :
+    stateFullOKB D (initStateOf D) = true := by
+  unfold stateFullOKB
+  simp only [Bool.and_eq_true]
+  exact ⟨initStateOf_ok D, flopShapeOKB_complete (initStateOf_flopShape D)⟩
+
+theorem admits_run_full_init {D : DesignCert} {i : RuntimeInput} {e : ClockEdges}
+    (hA : admitsB D = true) (hin : inputOKB D i.size = true)
+    (hed : edgesOKB D e = true) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign D, encEdges e, encInput i,
+            StateM.encStateM (initStateOf D)].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote
+          = Compiler.interpretDesign D e i (StateM.denote (initStateOf D))
+      ∧ stateFullOKB D r.nextState = true := by
+  refine admits_run_full hA ?_
+  unfold runtimeFullOKB runtimeOKB
+  simp only [Bool.and_eq_true]
+  refine ⟨⟨⟨⟨initStateOf_ok D, hin⟩, ?_⟩, hed⟩, ?_⟩
+  · exact flopBoundOKB_of_flopSize (admits_semwf hA) (by simp)
+  · exact flopShapeOKB_complete (initStateOf_flopShape D)
+
+/-- **Two steps at the strengthened policy**, the second on the state the first
+returned — the flop widths are preserved, so nothing about the state has to be
+re-checked. -/
+theorem admits_run_full_two {D : DesignCert} {i₁ i₂ : RuntimeInput} {st : StateM}
+    {e₁ e₂ : ClockEdges} (hA : admitsB D = true)
+    (hR : runtimeFullOKB D i₁ st e₁ = true) :
+    ∃ r₁ : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign D, encEdges e₁, encInput i₁, StateM.encStateM st].map Term.lit))
+        (StateM.encResultM r₁)
+      ∧ r₁.denote = Compiler.interpretDesign D e₁ i₁ (StateM.denote st)
+      ∧ (inputOKB D i₂.size = true → edgesOKB D e₂ = true →
+          ∃ r₂ : StateM.ResultM,
+            Eval hwMemP []
+              (.call hwMemP.entry
+                ([encDesign D, encEdges e₂, encInput i₂,
+                  StateM.encStateM r₁.nextState].map Term.lit))
+              (StateM.encResultM r₂)
+            ∧ r₂.denote
+                = Compiler.interpretDesign D e₂ i₂ (StateM.denote r₁.nextState)
+            ∧ stateFullOKB D r₂.nextState = true) := by
+  obtain ⟨r₁, hev, hden, hok⟩ := admits_run_full hA hR
+  refine ⟨r₁, hev, hden, ?_⟩
+  intro hin hed
+  have hok' : stateOKB D r₁.nextState = true ∧ flopShapeOKB D r₁.nextState = true := by
+    unfold stateFullOKB at hok; simpa only [Bool.and_eq_true] using hok
+  refine admits_run_full hA ?_
+  unfold runtimeFullOKB runtimeOKB
+  simp only [Bool.and_eq_true]
+  refine ⟨⟨⟨⟨hok'.1, hin⟩, ?_⟩, hed⟩, hok'.2⟩
+  exact flopBoundOKB_of_flopSize (admits_semwf hA) (stateOKB_flopSize hok'.1)
+
+/-! ### Executed: the refinement bites exactly where the size check did not
+
+`mixedDesign`, `twoMemDesign` and `laneDesign` declare no flops, so the flop
+refinement is vacuous for them and the canonical state passes either way —
+including `laneDesign`, which is the `byte_w = 8` design, so the strengthened
+route carries the lane distinction too. -/
+
+#guard stateFullOKB mixedDesign (initStateOf mixedDesign) == true
+#guard stateFullOKB twoMemDesign (initStateOf twoMemDesign) == true
+#guard stateFullOKB laneDesign (initStateOf laneDesign) == true
+#guard flopShapeOKB mixedDesign zeroState == true
+#guard flopShapeOKB mixedDesign initState == true
+
+#print axioms srcFlopNext_width
+#print axioms admits_run_full
+#print axioms admits_run_full_init
+#print axioms admits_run_full_two
 
 #print axioms memImgOKB_sound
 #print axioms stateOKB_shape

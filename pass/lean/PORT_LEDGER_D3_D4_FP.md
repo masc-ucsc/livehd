@@ -9246,3 +9246,95 @@ bound; whole PicoRV32 execution with genuine memory transitions and phase
 metrics.  `SourceSupported`, `OpSupported` and `memFree` untouched; the public
 route still refuses memory-bearing designs.  PicoRV32 **BLOCKED**; matrix
 **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.47 — the declared flop width, and the strengthened route
+
+`HardwareMemRuntime` §9; `HardwareMemFixture` §6.  Reported gap: `stateOKB`
+checks the flop VECTOR's size but no declared flop WIDTHS, so `runtimeOKB`
+accepts `fullDesign` with two 7-bit values against 32-bit descriptors even with
+both clocks quiet.  Confirmed, closed, and the confirmation is executed here:
+
+| control | result |
+|---|---|
+| `runtimeOKB fullDesign inRun fullNarrowFlops eOff` | `true` — the reported gap |
+| decoded `runMain fullNarrowFlops inRun eOff` | returns flops of width **7** — the gap is observable, not hypothetical |
+| `flopShapeOKB` / `stateFullOKB` / `runtimeFullOKB` on the same state | `false` |
+
+It was a gap in what the policy SAYS, never a contradiction of the adequacy
+equation.  `stateOKB`, `runtimeOKB` and every theorem about them are unchanged;
+`stateFullOKB`/`runtimeFullOKB` are their conjunction with `flopShapeOKB`.
+
+### Why the raw INPUT widths stay unchecked — stated, not assumed away
+
+Every source read RESIZES to the width its descriptor declares: `sourceValue`
+of `.input idx w` and of `.flopQ idx w` is `bv_resize w …`, both `.flopQAsync`
+branches resize, and `srcFlopNext`'s CAPTURE branch is
+`bv_resize f.width (rho f.din).asBV`.  So a raw input vector whose entries have
+the "wrong" widths cannot be observed, and `inputOKB` deliberately requires
+`idx < i.size` and NOTHING about `i[idx].width` — asserting declared widths on
+the raw vector would be a demand the semantics never makes and would reject
+inputs the reference accepts.
+
+The STORED FLOP width is not like that, and that asymmetry is the whole point:
+`srcFlopNext`'s HOLD branch is `s.flops[idx]?.getD (mk_bv f.width 0)`, which
+copies the stored value into the next state VERBATIM, with no resize.
+
+### The commit rule, branch by branch
+
+`srcFlopNext_unfold` names the two guards (`resetAsserted`, `flopEnabled`);
+each branch is then given its exact VALUE and its width:
+
+| branch | condition | value | premise |
+|---|---|---|---|
+| `srcFlopNext_reset` | reset asserted and (edge **or** `asyncReset`) | `mk_bv f.width f.resetValue` | none |
+| `srcFlopNext_capture` | no reset, edge, enable high | `bv_resize f.width (rho f.din).asBV` | none — `din`'s own width is irrelevant |
+| `srcFlopNext_hold` | no reset, quiet clock **or** low enable | `s.flops[idx]?.getD (mk_bv f.width 0)` | the policy's, and only here |
+
+### Preservation and composition
+
+`StateM.denote` carries the flop array VERBATIM, so the returned widths come
+straight off the adequacy equation — the same move §7 made for the memories.
+`admits_run_full` concludes `stateFullOKB D r.nextState = true`;
+`admits_run_full_init` runs from `initStateOf` with no state hypothesis at all;
+`admits_run_full_two` composes two steps with only the second step's input and
+edge vector left to check.  `fullRunFull`, `fullRunFullInit` and
+`fullRunFullTwo` instantiate them.
+
+### Controls retained and added
+
+The decoded two-step changing-memory control (word 1: 2 → 10 → 2), the
+disabled-write control, the quiet-clock controls and the reset/polarity
+controls are all unchanged.  Added, decoded on `fullDesign`: the widths survive
+`eOff`/`eA`/`eB`/`eAll`; the ASYNCHRONOUS reset acts on a quiet clock and still
+at width 32 (flop 1 takes 255 with both edges low) while the SYNCHRONOUS one
+holds on the same step; and the two-step now also checks
+`runtimeFullOKB`/`stateFullOKB` on the intermediate and final states.
+`laneDesign` (`byte_w = 8`) and the `byte_w = 1` refusal beside it are retained
+and carried into the strengthened route by
+`stateFullOKB laneDesign (initStateOf laneDesign)`.
+
+The module header is reconciled: word-level preservation is no longer described
+as future work, and the one remaining scope limit named there is the one §9
+closes.
+
+### Scope of `initStateOf`
+
+It is a legal-state / non-vacuity witness — zero mutable tables and
+reset-valued flops — and nothing more.  It does **not** establish an arbitrary
+RTL startup contract, and the drivers must use the supplied dynamic state or a
+justified initialisation adapter, preserving imported initialised contents,
+actual-size ROM bounds and defaults, and reset/async/clock/component metadata,
+refusing unsupported initialisation rather than silently zeroing it.
+
+Axioms: `propext`, `Classical.choice`, `Quot.sound` — no `sorryAx`.
+
+### Still open
+
+Public support / DCERT2 generation and the readiness drivers under this
+admission policy; BTA with the design static and exactly edges/input/state
+dynamic; annotation erasure and proved specialisation; production arity-3
+residual checking at its returned bound; whole PicoRV32 generation and
+execution with genuine transitions and phase metrics.  `SourceSupported`,
+`OpSupported` and `memFree` untouched; the public route still refuses
+memory-bearing designs.  PicoRV32 **BLOCKED**; matrix
+**12 YES / 11 NO / 37 BLOCKED**.
