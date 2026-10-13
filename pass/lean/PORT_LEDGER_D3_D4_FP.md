@@ -8596,3 +8596,88 @@ generic `mainM` adequacy against `StateRelR`/`ResultRelR`.  Public support stays
 refused: `SourceSupported`, `OpSupported` and `memFree` are untouched and
 `Op_MemWrite`/`Op_Sub` remain refused.  PicoRV32 stays **BLOCKED**; matrix
 unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.37 — Clock-controlled memory commit, general and instantiated
+
+New module `formal/lean/LeanSemanticPrimitives/Projection/HardwareMemCommit.lean`
+(641 lines), `PRODUCER_EXIT=0`, 0 errors, **14 `#guard`s**, 0 matches for
+`sorryAx`/`Lean.ofReduceBool`/`Lean.trustCompiler`.
+
+### The general lemmas
+
+* `memNext_agree` — on an **active** declared clock the memory's own
+  `MemoryDesc.nextImg` slot is selected out of the typed final `PrefixRelM` as
+  the ACTUAL image that slot holds (`slotImg`, `memSlot_img`); on a **quiet**
+  clock the EXACT prior first-order image comes back through `memAt` on the
+  incoming state's image list.  `firesAt_agree` supplies the edge test, and the
+  clock ordinal bound, the slot bound and the slot KIND are taken from the real
+  records — `Direct.DesignSemWF.memKinds`, `memClocks`,
+  `DesignCertWF.slotsInRange` — never assumed.
+* `memNexts_agree` — the whole array, for every suffix and every starting
+  index, matching the object's own index increment (`memNextsOf`).
+* `memNextOf_denote` / `memNextsOf_denote` — correspondence with
+  `Compiler.srcMemNext`, stated as an equality of `MemImg.denote`, i.e. of
+  `Int → BV` **functions**.  That is every address at once; **no read is
+  sampled anywhere in the statement**.
+* `memNextOf_FullTable` / `stepState_shape` — the committed array again
+  satisfies `StateShapeOK`, from the invariant's geometry on the active branch
+  and from the incoming state's shape on the quiet one, so the design can take
+  another step.
+
+The old denotation-universal claim is not reintroduced anywhere: every
+obligation is stated over the actual witness image, as §63.36 established.
+
+### `NextImgGeomOK`, and how a checker is meant to establish it
+
+`NextImgGeomOK D G` says each memory's `nextImg` slot carries that memory's
+declared address width.  `checkDesign` already establishes the KIND half
+(`memKinds`).  The geometry half is the natural refinement — propagate a slot's
+address width the way `WritePropagates` does at a write node and compare with
+`MemoryDesc.aw`, a static walk over the dense slot order.  It is carried as a
+**premise**; the checker extension is **not** claimed to exist.
+
+### What `StateShapeOK` is not
+
+It constrains **table length only**.  The module header names what remains
+explicit and owed: **word and default widths** (`dw` bits), **data and mask
+widths** at a write beyond the address width `WriteAddrFits` already pins, and
+**ROM initialisation** — a `memConst` keeps its actual `contents.size` and its
+own default, is assigned no mutable geometry, and is therefore never a write
+target.  `FullTable` is not complete admission and is not described as such.
+
+### Instantiated on two memories with DISTINCT clocks
+
+`twoMemDesign`: six sources (two mutable images, address, byte-enable mask,
+read enable, scalar), four nodes (read → intervening scalar `Op_And` → one
+byte-enabled write per memory), two memories on clock ordinals **0** and **1**.
+`Direct.acceptsDesign` accepts it; `twoMem_commit` discharges every premise and
+delivers the fold, the commit and the preserved shape together.
+
+Executed controls, with memory 0 holding 21 at address 20 and memory 1 holding
+120:
+
+| edges | memory 0 | memory 1 |
+|---|---|---|
+| `#[true, false]` | commits → 5 | **exactly** `imgB` |
+| `#[false, true]` | **exactly** `imgA` | commits → 5 |
+| `#[false, false]` | **exactly** `imgA` | **exactly** `imgB` |
+| `#[true, true]` | commits → 5 | commits → 5 |
+| `#[true, true]`, zero byte-enable | **exactly** `imgA` | **exactly** `imgB` |
+
+The both-quiet row is a genuine control, not a tautology: a `#guard` records
+that the held values (21, 120) **differ** from the committed value (5), so a
+proof that ignored the clock would be wrong there.  A further guard confirms
+both tables are still 32 words after the commit.
+
+### Still owed
+
+Mixed-environment `mkOutputs` and `flopNexts` — where local scalar dependencies
+must suffice and the old global `SlotVals` cannot be assumed — then generic
+`mainM` adequacy through `StateRelR`/`ResultRelR`, composing the ACTUAL
+`mkSourcesM` evaluation with the node fold rather than starting from
+host-created source slots.  Public support stays refused:
+`SourceSupported`, `OpSupported` and `memFree` are untouched and
+`Op_MemWrite`/`Op_Sub` remain refused.  PicoRV32 stays **BLOCKED**; matrix
+unchanged at **12 YES / 11 NO / 37 BLOCKED**.
