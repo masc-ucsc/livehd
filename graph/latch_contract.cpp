@@ -2691,20 +2691,27 @@ int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_por
   return done;
 }
 
-std::optional<Commit_class> commit_class_of(const hhds::Node_class& n, const Design_clocks* clocks) {
-  const auto op = gu::type_op_of(n);
-  if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
-    return std::nullopt;
-  }
+// Classify a CLOCK DRIVER PIN against an explicit edge policy.
+//
+// This IS the flop branch of `commit_class_of`, factored out rather than
+// transcribed, so a cell whose clock lives PER PORT -- a `Memory` -- resolves
+// its root net, its ICG gating and its cone inversion through exactly the same
+// code a flop does.  `rising_policy` is the cell's own edge declaration
+// (`!posclk_is_false(n)` for a flop); an inversion in the cone or an inverted
+// ICG clock flips it, as it does for a flop.
+std::optional<Commit_class> commit_class_of_clock(const hhds::Pin_class& clk_in, bool rising_policy,
+                                                  const Design_clocks* clocks) {
   std::optional<Design_clocks> owned;
   if (clocks == nullptr) {
-    owned.emplace(n.get_graph());
+    if (clk_in.is_invalid()) {
+      return std::nullopt;  // no node to take a graph from
+    }
+    owned.emplace(clk_in.get_graph());
     clocks = &*owned;
   }
-
-  if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+  {
     Commit_class cc;
-    auto         clk          = gu::get_driver_of_sink_name(n, "clock_pin");
+    auto         clk          = clk_in;
     bool         clk_inverted = false;
     if (clk.is_invalid()) {
       // Implicitly clocked: a real class on the module clock, NOT "unresolvable".
@@ -2719,7 +2726,7 @@ std::optional<Commit_class> commit_class_of(const hhds::Node_class& n, const Des
       if (auto icg = resolve_icg(clk, *clocks)) {
         cc.net    = icg->clock;
         cc.role   = Net_role::Clock;
-        cc.rising = !posclk_is_false(n);
+        cc.rising = rising_policy;
         if (icg->clock_inverted) {
           cc.rising = !cc.rising;  // `~clk & en`: gated, and on the FALLING edge
         }
@@ -2747,11 +2754,27 @@ std::optional<Commit_class> commit_class_of(const hhds::Node_class& n, const Des
       // derived one (an ICG output). The role says "this is timing, not data".
       cc.role      = Net_role::Clock;
     }
-    cc.rising = !posclk_is_false(n);  // known-false => negedge flop
+    cc.rising = rising_policy;  // the cell's edge policy (a flop's `posclk`)
     if (clk_inverted) {
       cc.rising = !cc.rising;  // ...and an inverted clock flips it again
     }
     return cc;
+  }
+}
+
+std::optional<Commit_class> commit_class_of(const hhds::Node_class& n, const Design_clocks* clocks) {
+  const auto op = gu::type_op_of(n);
+  if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
+    return std::nullopt;
+  }
+  std::optional<Design_clocks> owned;
+  if (clocks == nullptr) {
+    owned.emplace(n.get_graph());
+    clocks = &*owned;
+  }
+
+  if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+    return commit_class_of_clock(gu::get_driver_of_sink_name(n, "clock_pin"), !posclk_is_false(n), clocks);
   }
 
   // A latch gated by `<clock> & <data>` -- minion's prim_phase_pair shape,

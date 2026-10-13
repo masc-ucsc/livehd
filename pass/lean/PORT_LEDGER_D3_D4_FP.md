@@ -11579,3 +11579,135 @@ neither emits a certificate — and the counts are unchanged at
 pass is not a whole-unit YES.  What changed is that the lowering gap is closed
 and three of the nine remaining FP blockers now share one named stage and one
 named class, which is where the next work goes.
+
+## §63.76 — the memory gate's shared-constant mutation, and three corrections I owe
+
+### 1. WITHDRAWN: B03/B11's Concat failures were MINE
+
+§63.75 recorded B03's and B11's `pass.bitwidth` Concat refusals as "the same
+class as B01's recorded blocker" and treated them as independent, pre-existing.
+**That is wrong and is withdrawn.**  They were introduced by the §63.75 rewrite
+itself.
+
+`gu::create_const` delegates to `Graph::create_constant`, which returns a
+CANONICAL pin deduplicated by value representation
+(`graph/node_util.hpp:326`; pinned HHDS `hhds/graph.hpp:1815`), and
+`gu::set_bits` (`node_util.hpp:838`) writes that pin's own attribute.  The gate
+minted a zero for the quiet arm and stamped `wensize` onto it, so the ONE zero
+pin the whole graph shares was restamped.  Read from the retained graphs:
+
+| | shared zero, before | after | Concat lane |
+|---|---|---|---|
+| B11 node 3600 pid 2 | raw width 0 | **69** | 9 |
+| B03 node 27400 pids 2, 6 | raw width 0 | **27** | 1 |
+
+69 is B11's write-enable width; 27 is B03's last.  Those are exactly the
+operands the failed generation logs named, and the names `unused_dft` /
+`unused_ok` belong to constant pins, not to widened variable inputs.
+**B01's cause remains separate and is not established by any of this.**
+
+Removing the explicit `set_bits` was NOT sufficient — re-measured, the shared
+zero still reached width 69, because CONNECTING it to a `wensize`-wide consumer
+carries the width too.  The fix mints no wide constant at all and uses the
+repository's own sizing idiom (`pass/abc`'s `a AND Sext(c, 1)`):
+
+```
+enable' = enable AND sext(phase == slot, 1)
+```
+
+Active: the original vector bit for bit, so every high lane survives.  Quiet: a
+width-correct all-zero vector.  Every pin stamped is this gate's own driver
+pin.  The strict Concat check, the lane windows and the constant pool's
+contract are untouched.
+
+**Result on the retained inputs**: B11's shared zero stays at raw width 0 (122
+operands, was 123 at width 69) and **B11 now emits a certificate** — 13,285 B,
+sha256 `1f83897e…`.  B03's zeros are clean too.
+
+### 2. The instruction-132 defects, fixed
+
+* **`commit_class_of` returns `nullopt` for a Memory.**  `latch_contract.cpp`
+  gates on Flop/Fflop/Latch, so the class was ALWAYS empty and the slot fell
+  back to 0 regardless of the port's clock or `posclk`.  My comment claiming
+  the slot came "from the same commit model" was **false**.  Fixed by factoring
+  the flop branch into `commit_class_of_clock(clk, rising_policy, clocks)` —
+  one implementation, not a transcription — and classifying each port's own
+  clock driver.  Measured on the negedge fixture: the emission went from
+  `eq_36 = (single_edge_phase == 0); and_44 = eq_36 & we;` (slot 0) to
+  `and_44 = single_edge_phase & we;` (slot 1).
+* **Port discovery.**  `mem_shape_of` found ports only from explicit `rdport`
+  pins; `graph_access.cpp` discovers them from ANY driven field with `rdport`
+  defaulting to FALSE.  A port carrying `addr`/`din`/`enable`/`clock` and no
+  `rdport` was invisible, and a writable cell could be mistaken for a ROM and
+  left ungated.  Fixed.  (On B03/B11 every port does carry `rdport`, so their
+  counts are unchanged — 19 memories / 11 writable / 519 ports for B03, and
+  **1 memory, 1 writable, 1 write port, 69-bit enable, size 8** for B11, which
+  is B11's OWN shape and not B03's.)
+
+Named refusals added, each before any mutation: a **whole-array** cell
+(`update`/`update_enable`/`reset` driven, judged BEFORE any ROM
+classification), **mixed polarity** (`posclk == Ntype::Memory_posclk_mixed`,
+compared explicitly rather than reading "nonzero = rising"), a **gated** clock
+(`commit_class_of_clock` resolves an ICG to its root and drops the enable
+conditions, which this pass does not fold into a memory enable), a **different
+bit of the clock bus** (`clock_bit_on` against `plan.ref_clk_bit`), an
+**absent enable** (not given an invented default), and a **falling committing
+edge** (a Memory has no retype here, so gating alone would leave an inverted
+memory clock in a single-edge design).
+
+### 3. Differential evidence, reported precisely
+
+* The **unchanged** `single_edge_memory_slot_test` **FAILS** at its original
+  epoch (`errs=78`), and that log is retained.  §63.75 said the retained test
+  passed; it did not.  What passes is a **private EPOCH=5 variant**, whose
+  wrong-time-base control still fails.  The mapping is from the
+  implementation: the phase counter is a free-running 1-bit flop on the
+  reference clock with a concrete initial 0 and **deliberately no reset**, so
+  which sub-step is "slot 0" depends on where that counter sits when reset
+  releases — a property of the harness's clock origin, not of the design.
+* `single_edge_four_classes_test` **skipped its external-simulator leg**
+  (`note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)`), so it is
+  NOT an independent no-memory differential baseline, and §63.75 should not
+  have leaned on it.
+* `pre_lhd_abc_memory_test.log` reads `lhd/tests/lhd_abc_memory_test.sh: line
+  68: lhd/lhd: No such file or directory` — a **harness invocation failure
+  before either binary was exercised**, not evidence of pre-existing behaviour.
+  The pre-existing claim for that test is withdrawn; `single_edge_multi_clock`
+  remains unmeasured by that run for the same reason.
+
+### 4. The regression
+
+`lhd/tests/rtl/mem_slot_constant_alias.v` puts a shared zero in a **1-bit
+Concat lane** and gives two memories write-enable widths **4 and 9**.
+`single_edge_memory_constant_alias_test.sh` lowers it, runs the generation
+gate, and checks no constant-zero operand was widened.  **Verified to reject
+the b6b0a5cb6 behaviour**: with the stamping reconstructed it exits 1 —
+*"a constant ZERO operand is now wider than 8 bits (36 of them)"*.  Note the
+generation leg alone still passed on that small fixture, which is why the
+metadata leg exists; an isolated mux equality would have seen nothing.
+
+### 5. Where B03 and B11 now stand
+
+| row | `single_edge` | generation | next |
+|---|---|---|---|
+| B11 `minion_tlb` | exit 0 | **exit 0, certificate emitted** | FP chain below |
+| B03 `icache_top` | exit 0 | exit 1 | a GENUINE `pass.lean` limit, newly reached |
+
+B03's new stop is not a Concat error and not mine: *"memory node n_50820
+bits=27 size=128 … wrports=128. the `fwd` matrix needs 256 bits (reads x
+writes), which does not fit"* — a real emitter limit on a 128-write-port
+memory.
+
+**B11's full chain, on its own certificate** (`dcert2_memroute`, 4 cycles,
+`init=zero`): scalar route refused (memFree/sources/ops), **memory route
+ADMITTED**; specialized `hwMemAP` with the design static and exactly
+edges/input/state dynamic; residual **258,278 terms, arity [3]**, checker bound
+**1127**; 4 cycles executed **at the returned bound**, all ok; **COMPLETE**
+reference comparison; `stateFullOKB true`; producer exit **0**.
+
+Stated plainly: the initial image is the SYNTHETIC zero table and the stimulus
+is generated, so **no memory word changed** (0 of 6 differ).  This is
+generation and readiness, not a changing-memory demonstration.
+
+**Counts are unchanged: 13 YES / 11 NO / 36 BLOCKED, FP 3 YES / 9 BLOCKED.**
+No row credit before its required gates pass.

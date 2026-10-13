@@ -107,30 +107,75 @@ hhds::Pin_class sink_driver(const hhds::Node_class& n, std::string_view pin) { r
 // Memory ports under a phase divider.
 //
 // A `Memory` cell's pins are PER PORT: raw_pid = base + port * stride, which is
-// how `parse_memory_info` recovers the port id.  The blanket refusal this
-// replaces fired on the FIRST Memory node of any design at P>1, and on the
-// retained B03/B11 graph that node is a ROM -- `rdport=1`, no write port, no
-// `din`, `type=0` -- which commits NOTHING on any sub-step.  So the shape has
-// to be read before anything is decided about it.
+// how `parse_memory_info` recovers the port id.
+//
+// PORT DISCOVERY FOLLOWS THE NATIVE CONTRACT.  A port exists when ANY of its
+// fields is driven -- `addr`, `din`, `enable`, `clock_pin` -- and `rdport`
+// DEFAULTS TO FALSE, i.e. a write port (`Memory_port_info::rdport = false` in
+// pass/lean/graph_access.hpp, which cgen and the Lean scanner both rely on).
+// Discovering ports from `rdport` pins alone would make a port that carries
+// `addr`/`din`/`enable` but no explicit `rdport` INVISIBLE, and a writable cell
+// would then be mistaken for a ROM and left ungated.  That is a correctness
+// hole, not a cosmetic one.
+struct Mem_port {
+  uint32_t        port      = 0;
+  bool            rdport    = false;  // native default: a WRITE port
+  bool            has_rdpin = false;
+  hhds::Pin_class enable;
+  hhds::Pin_class clock;
+  bool            has_addr = false;
+  bool            has_din  = false;
+};
+
 struct Mem_shape {
-  bool                  parsed    = true;   // every consulted pin was a constant
-  bool                  sync_read = false;  // `type != 0`: a REGISTERED read
-  uint32_t              wensize   = 0;
-  std::vector<uint32_t> write_ports;        // ports whose `rdport` const is 0
-  std::vector<uint32_t> read_ports;
+  bool                  parsed      = true;   // every consulted policy pin was constant
+  bool                  sync_read   = false;  // `type != 0`: a REGISTERED read
+  bool                  rising      = true;   // `posclk == 1`
+  bool                  mixed_edge  = false;  // `posclk == Ntype::Memory_posclk_mixed`
+  bool                  whole_array = false;  // `update`/`update_enable`/`reset` driven
+  uint32_t              wensize     = 0;
+  std::vector<Mem_port> ports;
 };
 
 Mem_shape mem_shape_of(const hhds::Node_class& n) {
-  Mem_shape                                    ms;
-  const auto                                   stride = static_cast<uint32_t>(Ntype::Memory_port_stride);
-  absl::flat_hash_map<uint32_t, int64_t>       rdport;   // port -> rdport const
+  Mem_shape                                   ms;
+  const auto                                  stride = static_cast<uint32_t>(Ntype::Memory_port_stride);
+  absl::flat_hash_map<uint32_t, Mem_port>     byport;
+  auto at = [&](uint32_t port) -> Mem_port& {
+    auto& p = byport[port];
+    p.port  = port;
+    return p;
+  };
   for (const auto& e : gu::inp_sink_drivers(n)) {
     const auto raw   = static_cast<uint32_t>(e.get_port_id());
     const auto pname = std::string(Ntype::get_sink_name(Ntype_op::Memory, raw % stride));
     const auto port  = raw / stride;
-    if (pname == "type" || pname == "wensize" || pname == "rdport") {
+    if (pname == "addr") {
+      at(port).has_addr = true;
+    } else if (pname == "din") {
+      at(port).has_din = true;
+    } else if (pname == "enable") {
+      at(port).enable = e.driver;
+    } else if (pname == "clock_pin") {
+      at(port).clock = e.driver;
+    } else if (pname == "rdport") {
       if (!e.driver.is_const() || !gu::const_of(e.driver).is_just_i64()) {
-        ms.parsed = false;   // a non-constant policy pin: decide nothing from it
+        ms.parsed = false;
+        continue;
+      }
+      auto& p     = at(port);
+      p.rdport    = gu::const_of(e.driver).to_just_i64() != 0;
+      p.has_rdpin = true;
+    } else if (pname == "update" || pname == "update_enable" || pname == "reset") {
+      // A WHOLE-ARRAY cell: one bulk next-state bus instead of per-entry write
+      // ports, and `reset` restores `init` at RUNTIME.  cgen_verilog and
+      // pass/lean/graph_access.cpp classify these pins independently of the
+      // per-entry write ports, so their presence must be recorded on its own
+      // and NOT inferred from whether a write port exists.
+      ms.whole_array = true;
+    } else if (pname == "type" || pname == "wensize" || pname == "posclk") {
+      if (!e.driver.is_const() || !gu::const_of(e.driver).is_just_i64()) {
+        ms.parsed = false;
         continue;
       }
       const auto v = gu::const_of(e.driver).to_just_i64();
@@ -139,16 +184,41 @@ Mem_shape mem_shape_of(const hhds::Node_class& n) {
       } else if (pname == "wensize") {
         ms.wensize = v > 0 ? static_cast<uint32_t>(v) : 0;
       } else {
-        rdport[port] = v;
+        // `posclk` is TRISTATE: 1 = rising, 0 = falling, and
+        // `Ntype::Memory_posclk_mixed` = the ports do not share an edge.
+        // Reading "nonzero == rising" would silently call a MIXED cell rising.
+        ms.mixed_edge = v == Ntype::Memory_posclk_mixed;
+        ms.rising     = v == 1;
       }
     }
   }
-  for (const auto& [port, v] : rdport) {
-    (v == 0 ? ms.write_ports : ms.read_ports).push_back(port);
+  for (auto& [port, p] : byport) {
+    // A block carrying only scalar policy pins is not a port.
+    if (p.has_addr || p.has_din || !p.enable.is_invalid() || !p.clock.is_invalid() || p.has_rdpin) {
+      ms.ports.push_back(p);
+    }
   }
-  std::sort(ms.write_ports.begin(), ms.write_ports.end());
-  std::sort(ms.read_ports.begin(), ms.read_ports.end());
+  std::sort(ms.ports.begin(), ms.ports.end(), [](const Mem_port& a, const Mem_port& b) { return a.port < b.port; });
   return ms;
+}
+
+// A cell with no committing port: an immutable asynchronous ROM.  `update`,
+// `update_enable` and whole-array reset cells all carry a write port and are
+// NOT this.
+bool mem_is_immutable_rom(const Mem_shape& ms) {
+  if (ms.sync_read || ms.whole_array) {
+    // A registered read commits whatever the write side is, and a whole-array
+    // cell commits through its bulk bus even with no per-entry write port --
+    // so neither is an immutable ROM, and `update`/`update_enable`/`reset`
+    // must be judged BEFORE any ROM classification.
+    return false;
+  }
+  for (const auto& p : ms.ports) {
+    if (!p.rdport) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // The per-port sink pin, by name, at a given port.
@@ -176,6 +246,8 @@ void mem_drop_port_sink(const hhds::Node_class& n, std::string_view pin, uint32_
     sink.del_sink();
   }
 }
+
+
 
 void drop_sink(const hhds::Node_class& n, std::string_view pin) {
   const auto pid = Ntype::get_sink_pid(gu::type_op_of(n), pin);
@@ -727,8 +799,44 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
 // share a slot by construction. So refuse (M3 rule 4's "explicit rejection"
 // arm); rewriting the latch to a buffer is the other legal answer and is left
 // for when a real design needs it.
-bool check_rule4(const Plan& plan, bool quiet) {
+bool check_rule4(const Plan& plan, hhds::Graph* g, const lc::Design_clocks& clocks, bool quiet) {
   bool ok = true;
+  // MEMORY WRITE PORTS ARE READERS TOO.
+  //
+  // `plan.elems` holds flops and latches, so when memories were refused
+  // outright they could not be on either side of this rule.  Now that a write
+  // port is admitted and slotted it reads `addr`, `din` and `enable`
+  // combinationally, and if one of those cones reaches a latch that closes on
+  // the SAME edge the port commits on, it is the identical L1 hazard: the real
+  // hardware samples the latch's D, the lowering gives it the held Q.  Leaving
+  // Memory out of the candidate list would bypass rule 4 exactly where the new
+  // support created the exposure.
+  struct Mem_reader {
+    hhds::Node_class node;
+    lc::Commit_class cc;
+    uint32_t         port = 0;
+  };
+  std::vector<Mem_reader> mem_readers;
+  if (g != nullptr) {
+    for (auto n : g->body().nodes()) {
+      if (gu::type_op_of(n) != Ntype_op::Memory) {
+        continue;
+      }
+      const auto ms = mem_shape_of(n);
+      if (!ms.parsed || mem_is_immutable_rom(ms)) {
+        continue;
+      }
+      for (const auto& mp : ms.ports) {
+        if (mp.rdport) {
+          continue;
+        }
+        auto cc = lc::commit_class_of_clock(mp.clock.is_invalid() ? plan.ref_clk_pin : mp.clock, ms.rising, &clocks);
+        if (cc && cc->role == lc::Net_role::Clock) {
+          mem_readers.push_back({n, *cc, mp.port});
+        }
+      }
+    }
+  }
   for (const auto& l : plan.elems) {
     if (!l.is_latch) {
       continue;
@@ -769,6 +877,35 @@ bool check_rule4(const Plan& plan, bool quiet) {
               "the latch is still transparent at that edge, so the real hardware samples its D while the "
               "commit-at-closing-edge model samples its held Q — a persistent full-cycle error. Move the two onto "
               "opposite phases (a master/slave pair), or replace the latch with a buffer if it is meant to be one")
+          .emit();
+      break;
+    }
+    // ...and the same test against every admitted memory write port.
+    for (const auto& mr : mem_readers) {
+      if (mr.cc.key() != l.cc.key()) {
+        continue;
+      }
+      absl::flat_hash_set<hhds::Class_index> hit;
+      for (const char* field : {"addr", "din", "enable"}) {
+        comb_state_reach(mem_port_driver(mr.node, field, mr.port), hit);
+      }
+      if (!hit.contains(l.node.get_class_index())) {
+        continue;
+      }
+      ok = false;
+      if (quiet) {
+        return false;
+      }
+      livehd::diag::err(kPass, "coincident-commit-edge", "unsupported")
+          .msg("latch `{}` and memory `{}` write port {} commit at the SAME edge, and the port reads the latch "
+               "combinationally",
+               label_of(l.node),
+               label_of(mr.node),
+               mr.port)
+          .hint(
+              "the latch is still transparent at that edge, so the real hardware writes its D while the "
+              "commit-at-closing-edge model writes its held Q. Move the latch and the memory onto opposite phases, "
+              "or replace the latch with a buffer if it is meant to be one")
           .emit();
       break;
     }
@@ -940,7 +1077,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     return r;
   }
   plan.slots = std::max(plan.slots, opts.force_slots);
-  if (!check_rule4(plan, quiet)) {
+  if (!check_rule4(plan, g, clocks, quiet)) {
     r.error  = true;
     r.reason = "coincident commit edges between a latch and another state element";
     return r;
@@ -975,25 +1112,37 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     if (op == Ntype_op::Memory && plan.slots > 1) {
       // The blanket refusal this replaces fired on EVERY Memory at P>1.  What
       // actually mis-times under a phase divider is a port that COMMITS on a
-      // sub-step it does not own, so the shape decides:
+      // sub-step it does not own, so the shape and the CLOCK decide.
       //
-      //   * no write port  -> nothing commits; a ROM's contents are the same at
-      //     every sub-step, and its (combinational) read is re-evaluated each
-      //     step anyway.  Not refused.  On the retained B03/B11 graph 8 of the
-      //     19 memories are exactly this, and the first one the old refusal hit
-      //     was one of them.
-      //   * write ports    -> gated below, per port, over the WHOLE enable
-      //     vector.
-      //   * a SYNCHRONOUS read (`type != 0`) -> its read register commits too,
-      //     and rebinding that without changing read latency is not validated
-      //     here.  STILL REFUSED, precisely.
+      // Every refusal here happens BEFORE any mutation: the plan is built and
+      // validated first, and a design that cannot be lowered is returned
+      // untouched rather than half-rewritten.
       const auto ms = mem_shape_of(n);
       if (!ms.parsed) {
         r.error  = true;
-        r.reason = "memory `" + label_of(n) + "` has a non-constant type/wensize/rdport pin";
+        r.reason = "memory `" + label_of(n) + "` has a non-constant type/wensize/posclk/rdport pin";
         refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
                "the port shape must be constant before a slot gate can be placed");
         return r;
+      }
+      // JUDGED BEFORE ANY ROM CLASSIFICATION.
+      if (ms.whole_array) {
+        r.error  = true;
+        r.reason = "memory `" + label_of(n) + "` is a WHOLE-ARRAY cell (`update`/`update_enable`/`reset` driven)";
+        refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+               "one bulk next-state bus instead of per-entry write ports; this pass gates per-entry write "
+               "enables and has no model for the bulk commit");
+        return r;
+      }
+      if (ms.mixed_edge) {
+        r.error  = true;
+        r.reason = "memory `" + label_of(n) + "` declares MIXED port polarity (posclk == Memory_posclk_mixed)";
+        refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+               "its ports do not share a committing edge, so one slot cannot describe the cell");
+        return r;
+      }
+      if (mem_is_immutable_rom(ms)) {
+        continue;  // nothing commits: an immutable asynchronous ROM
       }
       if (ms.sync_read) {
         r.error  = true;
@@ -1002,12 +1151,104 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
                "synchronous read-port timing is not preserved by the slot gate yet");
         return r;
       }
-      if (!ms.write_ports.empty() && ms.wensize == 0) {
+      if (ms.wensize == 0) {
         r.error  = true;
-        r.reason = "memory `" + label_of(n) + "` has a write port but no positive wensize";
+        r.reason = "memory `" + label_of(n) + "` has a committing port but no positive wensize";
         refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
                "the write-enable width must be known to gate the whole vector");
         return r;
+      }
+      // THE CLOCK, per committing port, through the SAME classifier a flop
+      // uses.  `commit_class_of` returns nullopt for a Memory by contract, so
+      // calling it here would have silently yielded slot 0 for every port
+      // whatever its clock or `posclk` was.
+      for (const auto& port : ms.ports) {
+        if (port.rdport) {
+          continue;  // an async read is combinational: re-evaluated every sub-step
+        }
+        // A committing port with NO enable: refused rather than given an
+        // invented default.  The native contract does not say "absent means
+        // always", and minting an all-ones vector here would be this pass
+        // deciding a semantics it does not own.
+        if (port.enable.is_invalid()) {
+          r.error  = true;
+          r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port) + " has no enable";
+          refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                 "a slot gate needs an enable to gate; an absent one is not given a default here");
+          return r;
+        }
+        const auto clk_pin = port.clock.is_invalid() ? plan.ref_clk_pin : port.clock;
+        // A GATED clock is refused.  `commit_class_of_clock` resolves an ICG to
+        // its ROOT net and drops the gate's enable conditions -- which the flop
+        // path then re-introduces by folding them into the element's `enable`.
+        // This pass does no such folding for a Memory, so accepting a gated
+        // memory clock would silently discard the gate.
+        if (!clk_pin.is_invalid() && lc::resolve_icg(clk_pin, clocks)) {
+          r.error  = true;
+          r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port) + " has a GATED clock";
+          refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                 "the gate's enable conditions are not folded into a memory's write enable by this pass, so "
+                 "accepting it would drop the gate");
+          return r;
+        }
+        auto cc = lc::commit_class_of_clock(clk_pin, ms.rising, &clocks);
+        if (!cc || cc->role != lc::Net_role::Clock) {
+          r.error  = true;
+          r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
+                     + " has a clock cone that does not resolve to a root net";
+          refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                 "the committing edge must be classified before the port can be slotted");
+          return r;
+        }
+        if (!cc->implicit_clock && cc->net_key() != plan.ref_net) {
+          r.error  = true;
+          r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
+                     + " commits on a net that is not the reference clock";
+          refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                 "an off-reference memory clock is not rebound by this pass");
+          return r;
+        }
+        // TWO BITS OF ONE CLOCK BUS ARE DIFFERENT CLOCKS.  `build_plan` already
+        // tracks this with `clock_bit_on`/`ref_clk_bit`; comparing `net_key()`
+        // alone would accept a memory clocked by a DIFFERENT bit of the same
+        // multi-bit input and then gate it against the reference bit's phase.
+        if (!cc->implicit_clock && !cc->net.is_invalid() && gu::is_graph_input_pin(cc->net)
+            && gu::bits_of(cc->net) > 1) {
+          const auto bit = clock_bit_on(clk_pin, cc->net, 0, 0);
+          if (!bit || (plan.ref_clk_bit >= 0 && *bit != plan.ref_clk_bit)) {
+            r.error  = true;
+            r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
+                       + " commits on a different bit of the clock bus than the reference";
+            refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                   "two bits of one clock bus are two clocks; this pass rebinds only the reference bit");
+            return r;
+          }
+        }
+        // A FALLING committing edge is REFUSED, not slotted.
+        //
+        // A negedge flop is lowered by RETYPING it to posedge and gating it to
+        // the fall slot; the two together are what make the result
+        // single-edge.  A Memory has no equivalent retype here yet -- this pass
+        // does not touch `clock_pin` or `posclk` on a Memory -- so gating alone
+        // would leave the cell still committing on the fall while ALSO being
+        // slot-gated, i.e. a half-lowering whose emission still carries an
+        // inverted memory clock.  Refuse it by name until the rebinding is
+        // implemented and validated, rather than emit that.
+        //
+        // This is also what makes the per-port classification load-bearing in
+        // this increment: its job here is to DECIDE ADMISSIBILITY.  Before it,
+        // `commit_class_of` returned nullopt for every Memory and a falling
+        // memory was silently gated to slot 0.
+        if (!cc->rising) {
+          r.error  = true;
+          r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
+                     + " commits on the FALLING edge";
+          refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                 "a falling-edge memory would need its clock rebound and its polarity retyped, which this pass "
+                 "does not yet do for a Memory; gating alone would leave an inverted memory clock in a "
+                 "single-edge design");
+          return r;
+        }
       }
       // everything else is handled by the slot gate below
     }
@@ -1214,45 +1455,69 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         continue;
       }
       const auto ms = mem_shape_of(n);
-      if (ms.write_ports.empty()) {
-        continue;  // a ROM commits nothing; the refusal above already let it through
+      if (mem_is_immutable_rom(ms)) {
+        continue;  // an immutable ROM commits nothing; the plan above let it through
       }
-      // The memory's slot comes from the SAME commit model the flops use: its
-      // write clock is classified by `lc::commit_class_of`, and the slot is the
-      // one that class was already assigned.  Nothing new is invented here.
-      auto cc = lc::commit_class_of(n, &clocks);
-      int  slot = 0;
-      if (cc) {
-        if (auto it = plan.slot_of_key.find(cc->key()); it != plan.slot_of_key.end()) {
-          slot = it->second;
-        } else if (cc->role == lc::Net_role::Clock) {
-          slot = cc->rising ? 0 : 1;
+      for (const auto& mport : ms.ports) {
+        if (mport.rdport) {
+          continue;  // an async read is combinational and is deliberately NOT gated
         }
-      }
-      for (const auto port : ms.write_ports) {
+        const auto port = mport.port;
+        // THE SLOT IS THE PORT'S OWN COMMITTING EDGE.
+        //
+        // `commit_class_of` returns nullopt for a Memory by contract, so asking
+        // it here would hard-code slot 0 for every port whatever its clock or
+        // `posclk` said -- a falling-edge write would have been gated to the
+        // RISING slot and committed half a period early.  The per-port clock
+        // driver goes through `commit_class_of_clock`, the SAME root-net /
+        // inversion / ICG resolution a flop gets, with the cell's own `posclk`
+        // as the edge policy.  The refusal pass above already proved this
+        // resolves and is on the reference net.
+        auto cc = lc::commit_class_of_clock(mport.clock.is_invalid() ? plan.ref_clk_pin : mport.clock, ms.rising,
+                                            &clocks);
+        int  slot = 0;
+        if (cc) {
+          if (auto it = plan.slot_of_key.find(cc->key()); it != plan.slot_of_key.end()) {
+            slot = it->second;
+          } else {
+            slot = cc->rising ? 0 : 1;  // the same rise=0 / fall=1 map build_plan uses
+          }
+        }
         auto old_en = mem_port_driver(n, "enable", port);
         auto pred   = slot_pred[slot];
-        auto mux    = gu::create_typed_node(*g, Ntype_op::Mux);
-        // pid 0 = selector, pid 1 = the arm taken when the selector is 0.
-        pred.connect_sink(livehd::graph_util::setup_sink_pid(mux, 0));
-        auto zero = gu::create_const(*g, *Dlop::create_integer(0));
-        gu::set_bits(zero, ms.wensize);
-        gu::set_unsign(zero);
-        zero.connect_sink(livehd::graph_util::setup_sink_pid(mux, 1));
-        if (old_en.is_invalid()) {
-          // An absent enable means "always write".  Its width-correct spelling
-          // is an all-ones vector of `wensize` bits -- NOT a single 1, which
-          // would enable only lane 0 once the gate makes the pin explicit.
-          auto ones = gu::create_const(*g, *Dlop::create_integer((ms.wensize >= 63)
-                                              ? -1
-                                              : ((int64_t{1} << ms.wensize) - 1)));
-          gu::set_bits(ones, ms.wensize);
-          gu::set_unsign(ones);
-          ones.connect_sink(livehd::graph_util::setup_sink_pid(mux, 2));
-        } else {
-          old_en.connect_sink(livehd::graph_util::setup_sink_pid(mux, 2));
-        }
-        auto mq = mux.create_driver_pin(0);
+        // NO WIDE CONSTANT IS MINTED HERE.
+        //
+        // `gu::create_const` returns a CANONICAL SHARED pin (`create_constant`
+        // deduplicates by value representation; graph/node_util.hpp:326 and
+        // pinned HHDS hhds/graph.hpp:1815), and widths written onto it -- by
+        // `gu::set_bits` or by feeding it to a wide consumer -- change the ONE
+        // pin every other reader shares.  Measured at b6b0a5cb6: a `wensize`
+        // zero arm drove B11's shared zero from raw width 0 to 69 and B03's to
+        // 27, and unrelated narrow Concat lanes reading that pin were refused
+        // by pass.bitwidth.  Removing the explicit `set_bits` was NOT enough;
+        // the connection itself carried the width.
+        //
+        // So the mask is built from the predicate with the repository's own
+        // sizing idiom (pass/abc/abc_satopt.cpp's `a AND Sext(c, 1)`): a SIGNED
+        // sign-extension of the 1-bit predicate is all-ones when it holds and
+        // all-zeros when it does not, at whatever width its driver declares.
+        // Every pin stamped below is this gate's OWN driver pin.
+        //
+        //     enable' = enable AND sext(phase == slot, 1)
+        //
+        // Active: the ORIGINAL vector, bit for bit, so every high lane
+        // survives.  Quiet: a width-correct all-zero vector, so no lane
+        // commits.  An absent enable was refused in the plan above, so there is
+        // always a vector to AND with.
+        auto sx = gu::create_typed_node(*g, Ntype_op::Sext);
+        pred.connect_sink(sx.create_sink_pin(0));
+        gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(sx.create_sink_pin(1));
+        auto sxq = sx.create_driver_pin(0);
+        gu::set_sbits(sxq, ms.wensize);
+        auto andn = gu::create_typed_node(*g, Ntype_op::And);
+        old_en.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
+        sxq.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
+        auto mq = andn.create_driver_pin(0);
         gu::set_bits(mq, ms.wensize);
         gu::set_unsign(mq);
         mem_drop_port_sink(n, "enable", port);
