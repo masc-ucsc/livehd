@@ -74,6 +74,7 @@ rejected / 6 memory route refuses admission / 7 runtime policy refuses the
 state, input or edge vector / 8 parse/load failure.
 -/
 import LeanSemanticPrimitives.Projection.MemProjection
+import LeanSemanticPrimitives.Projection.HardwareMemWriteAdmit
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Compiler.CertIOFacade
 
@@ -469,6 +470,12 @@ structure Cfg where
   /-- stop after the support report -- used to compare two certificates'
   admission without paying for specialization -/
   supportOnly : Bool := false
+  /-- run the EXTENDED route, which additionally admits ordinary `Op_MemWrite`.
+  OFF by default: the default route is the original one, unchanged, and it
+  still refuses a plain write.  When on, admission is `admitsWB` and the bundle
+  is built by `mkMemSimOfW`; the specialization function, the production
+  residual checker and the execution function are the SAME ones. -/
+  plainWrite : Bool := false
 
 def say (s : String) : IO Unit := IO.println s
 
@@ -504,8 +511,19 @@ nextImgs {mr.nextImgs} | ADMITTED {mr.admitOK}"
   say s!"  verdict: {MemSupport.verdict D}"
   unless mr.typed && mr.sized do
     say s!"  memory route typing FALSE: {untypedReport D}"
+  -- the EXTENDED route, reported separately so the two answers never merge
+  let plainN := D.nodes.toList.foldl
+    (fun n c => if c.op == .Op_MemWrite then n + 1 else n) 0
+  let admW := HwMem.admitsWB D
+  if cfg.plainWrite then
+    say s!"  EXTENDED route requested: Op_MemWrite nodes {plainN}, \
+admitsB {HwMem.admitsB D}, admitsWB {admW}"
+    if plainN == 0 && HwMem.admitsB D != admW then
+      IO.eprintln "  the extension changed an answer on a design with NO plain write"
+      return 7
+  let admitted := if cfg.plainWrite then admW else mr.admitOK
   let t1 ← IO.monoMsNow
-  unless mr.admitOK do
+  unless admitted do
     IO.eprintln "  MEMORY ROUTE REFUSES ADMISSION -- no generation attempted"
     say s!"  ms: support {t1 - t0}"
     say "  RESULT: MEMROUTE ADMISSION REFUSED"
@@ -539,7 +557,7 @@ edges, input, state dynamic) at fuel {cfg.stepFuel}/{cfg.workFuel}"
     -- The residual is already in hand.  `mkMemSimOf` BINDS it -- admission plus
     -- the production residual check, and NO second specialization -- so the
     -- check metric below is a check and not a hidden re-specialization.
-    match mkMemSimOf D R with
+    match (if cfg.plainWrite then HwMem.mkMemSimOfW D R else mkMemSimOf D R) with
     | none =>
         let t4 ← IO.monoMsNow
         IO.eprintln "  checkResidual REJECTED the residual -- failing closed, \
@@ -731,11 +749,12 @@ contents or use init=zero, which is a legal-state witness only."
     let tl := more.drop 2
     let cmp := !(tl.contains "nocompare")
     let sup := tl.contains "support-only"
+    let pw  := tl.contains "plain-write"
     let stimTok := tl.find? (fun t => t.startsWith "stim:")
     let prov := match stimTok with
                 | some t => s!"PENDING {t}"
                 | none   => "generated: mkInputFor (synthetic, width-derived)"
-    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup⟩
+    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, pw⟩
   | _ => .error usage
 
 /-! ## Comparison self-test

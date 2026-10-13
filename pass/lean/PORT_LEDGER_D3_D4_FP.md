@@ -11380,3 +11380,80 @@ REFUSED there.  What remains: the checked specialization — `projectMemDesignAt
 and `mkMemSimOf` gate on `admitsB` inside their own definitions, so the W route
 needs its own specialization entry before any plain-write design is RUN through
 the production arity-3 checker at its returned bound.
+
+## §63.74 — the checked specialization lands, and the five retained certificates RUN
+
+The last link of the ordinary-write chain.  The module is now ≈1,900 lines with
+**56 `#guard`s**; every theorem reports only `propext`, `Quot.sound` and
+`Classical.choice`.  Producer exit **0**, `errors: 0  sorry: 0`.
+
+### What was keyed on the checker, and what was not
+
+`projectMemDesignAt` is **REUSED UNCHANGED**.  It is
+`mixDriver sf wf hwMemAP [encDesign D]` — the design STATIC and exactly the
+edge vector, the input vector and the state DYNAMIC — and it never consulted a
+checker.  So is `checkResidual`, so is `runMemSim`.  What was keyed on
+`admitsB` is only the BUNDLE and the theorems that consume it, and those get
+extended forms:
+
+| extended | mirrors |
+|---|---|
+| `memEntry_uniqueW` | `memEntry_unique` |
+| `projectMemDesignAtW_correct` | `projectMemDesignAt_correct` |
+| `MemSimWFAtW`, `mkMemSimAtW`, `mkMemSimOfW` | the originals, untouched |
+| `runMemSimW_correct` | `runMemSim_correct` |
+
+`MemSimWFAt_toW` proves an originally-honest bundle is honest on the extended
+route too, so the extension never un-admits anything.
+
+### Executed through the RESIDUAL, on the fixture
+
+`plainRamSim = mkMemSimAtW 20000 200 plainRamDesign` is `isSome`, its residual
+has **arity `[3]`** — the unchanged production shape — and it is bound to that
+design.  Through it, at the bound `checkResidual` returned:
+
+* ENABLED: `[11,22,33,44] → [11,99,33,44]`, default `7` survives, widths `[8,8,8,8]`;
+* DISABLED enable with the clock FIRING: the whole ENCODED image returns identical;
+* QUIET clock: likewise, for the other reason;
+* TWO STEPS, the second on the state the first returned: the write lands, the
+  quiet step preserves it exactly.
+
+`plainRamSim_runs` states the whole production shape as a theorem.
+
+### The five retained certificates, through the PRODUCTION driver
+
+`dcert2_memroute` gained a `plain-write` token.  **Off by default**, and the
+default route is unchanged: `tiny_ram` on the default route still exits **6**,
+`MEMORY ROUTE REFUSES ADMISSION`, naming the reason — *"the memory route
+implements Op_MemWriteBE and Op_MemRead"*.  With the token, admission is
+`admitsWB` and the bundle is `mkMemSimOfW`; the specialization function, the
+production residual checker and the execution function are the SAME ones.
+
+All five, two cycles each, `init=zero`:
+
+| certificate | `admitsB` | `admitsWB` | residual | arity | bound | words changed | comparison | exit |
+|---|---|---|---|---|---|---|---|---|
+| `tiny_ram` | false | **true** | 176 terms | `[3]` | 24 | 1 | COMPLETE | 0 |
+| `tiny_sync_ram` | false | **true** | 287 terms | `[3]` | 26 | 1 | COMPLETE | 0 |
+| `mem_domain` | false | **true** | 769 terms | `[3]` | 36 | 1 | COMPLETE | 0 |
+| `mem_nondefault` | false | **true** | 772 terms | `[3]` | 36 | 1 | COMPLETE | 0 |
+| `memfix_b` | false | **true** | 772 terms | `[3]` | 36 | 1 | COMPLETE | 0 |
+
+Every one ends `stateFullOKB true` and `RESULT: MEMROUTE OK (admitted,
+specialized, checked, executed at the returned bound, returned state passes the
+policy, and the reference comparison is COMPLETE)`.  `tiny_ram`'s word 3 goes
+`0 → 171` — a real transition taken through the residual, not a shape argument.
+
+The driver also fails closed on the one thing `admitsWB_eq` forbids: if a
+design has NO plain write and the two checkers disagree, it exits 7 rather than
+continuing.
+
+### Scope
+
+This is **§63.58's operator gap closed**: the census found exactly one missing
+operator across the retained corpus, and those five certificates were refused
+for exactly that reason.  It is NOT whole-unit credit — none of these is one of
+the twelve FP units, and the matrix is unchanged at **13 YES / 11 NO / 36
+BLOCKED**, FP **3 YES / 9 BLOCKED**.  Whole Pico was NOT re-run: it contains no
+plain write, `admitsWB_eq` proves its answer cannot change, and the census
+confirms both routes agree on it.

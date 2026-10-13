@@ -39,11 +39,14 @@ the WHOLE vector and its datum is stored RAW, so:
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemWrite
 import LeanSemanticPrimitives.Projection.HardwareMemSlotTy
+import LeanSemanticPrimitives.Projection.MemProjection
 
 namespace Projection
 namespace HwMem
 
 open Surface Compiler Projection.Hw
+-- the specialization layer lives in `Projection.MemProjection`; §3i reuses it
+open MemProjection
 
 set_option maxHeartbeats 4000000
 set_option maxRecDepth 100000
@@ -1326,6 +1329,150 @@ theorem admits_runW_full_two {D : DesignCert} {i₁ i₂ : RuntimeInput} {st : S
   refine ⟨⟨⟨⟨hok₁, hin⟩, ?_⟩, hed⟩, hflop₁⟩
   exact flopBoundOKB_of_flopSize (admitsW_semwf hA) (stateOKB_flopSize hok₁)
 
+/-! ## 3i. The CHECKED SPECIALIZATION, on the extended route
+
+`projectMemDesignAt` is REUSED UNCHANGED: it is `mixDriver sf wf hwMemAP
+[encDesign D]`, i.e. the design STATIC and exactly the edge vector, the input
+vector and the state DYNAMIC, and it never consulted a checker.  What was
+keyed on `admitsB` is the BUNDLE — `MemSimWFAt`, `mkMemSimAt`, `mkMemSimOf` —
+and the correctness theorems that consume it.  Those get extended forms here;
+the production residual checker `checkResidual` and the arity-3 residual it
+checks are untouched, and execution is still at the bound it returns. -/
+
+/-- The memory entry's answer is unique, on the extended route. -/
+theorem memEntry_uniqueW {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {e : ClockEdges} (hA : admitsWB D = true)
+    (hR : runtimeFullOKB D i st e = true) :
+    ∃ r : StateM.ResultM,
+      r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ stateFullOKB D r.nextState = true
+      ∧ ∀ v : Val,
+          Eval hwMemP []
+            (.call hwMemP.entry
+              ([encDesign D, encEdges e, encInput i,
+                StateM.encStateM st].map Term.lit)) v
+          ↔ v = StateM.encResultM r := by
+  obtain ⟨r, hev, hden, hok⟩ := admits_runW_full hA hR
+  exact ⟨r, hden, hok, fun v => ⟨fun hv => Eval_det hv hev, fun hv => hv ▸ hev⟩⟩
+
+/-- **The first Futamura projection on the memory entry, for a design with
+ordinary writes.**  Same specialization function, same division. -/
+theorem projectMemDesignAtW_correct {sf wf : Nat} {D : DesignCert} {R : Program}
+    {i : RuntimeInput} {st : StateM} {e : ClockEdges}
+    (hproj : projectMemDesignAt sf wf D = .ok R)
+    (hA : admitsWB D = true) (hR : runtimeFullOKB D i st e = true) :
+    ∃ r : StateM.ResultM,
+      r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ stateFullOKB D r.nextState = true
+      ∧ ∀ v : Val,
+          Eval R [] (.call R.entry
+            ([encEdges e, encInput i, StateM.encStateM st].map Term.lit)) v
+          ↔ v = StateM.encResultM r := by
+  obtain ⟨r, hden, hok, hiff⟩ := memEntry_uniqueW hA hR
+  exact ⟨r, hden, hok,
+    fun v => specializeFour_correct_of hwMemAP_entry hwMemAP_erases hiff hproj v⟩
+
+/-- The honest bundle, on the extended route.  The ONLY field that differs from
+`MemSimWFAt` is which checker admitted the design; the residual and the bound
+are the same artefacts, checked by the same `checkResidual`. -/
+structure MemSimWFAtW (sf wf : Nat) (sim : MemSimulator) : Prop where
+  proj  : projectMemDesignAt sf wf sim.design = .ok sim.prog
+  chk   : checkResidual sim.prog = some sim.bound
+  admit : admitsWB sim.design = true
+
+/-- An originally-honest bundle is honest on the extended route too — the
+extension never un-admits anything. -/
+theorem MemSimWFAt_toW {sf wf : Nat} {sim : MemSimulator} (h : MemSimWFAt sf wf sim)
+    (hne : ∀ c ∈ sim.design.nodes.toList, c.op ≠ .Op_MemWrite) :
+    MemSimWFAtW sf wf sim :=
+  ⟨h.proj, h.chk, by rw [admitsWB_eq hne]; exact h.admit⟩
+
+def mkMemSimAtW (sf wf : Nat) (D : DesignCert) : Option MemSimulator :=
+  if admitsWB D then
+    match projectMemDesignAt sf wf D with
+    | .error _ => none
+    | .ok R    =>
+        match checkResidual R with
+        | none   => none
+        | some b => some ⟨D, R, b⟩
+  else none
+
+/-- Bind an ALREADY-PRODUCED residual, so a driver's "check" metric is a check
+and not a second specialization. -/
+def mkMemSimOfW (D : DesignCert) (R : Program) : Option MemSimulator :=
+  if admitsWB D then
+    match checkResidual R with
+    | none   => none
+    | some b => some ⟨D, R, b⟩
+  else none
+
+theorem mkMemSimAtW_design {sf wf : Nat} {D : DesignCert} {sim : MemSimulator}
+    (h : mkMemSimAtW sf wf D = some sim) : sim.design = D := by
+  unfold mkMemSimAtW at h
+  split at h
+  · split at h <;> try simp at h
+    split at h <;> try simp at h
+    cases h; rfl
+  · simp at h
+
+theorem mkMemSimAtW_wf {sf wf : Nat} {D : DesignCert} {sim : MemSimulator}
+    (h : mkMemSimAtW sf wf D = some sim) : MemSimWFAtW sf wf sim := by
+  unfold mkMemSimAtW at h
+  split at h
+  · rename_i hadm
+    split at h <;> try simp at h
+    rename_i R hR
+    split at h <;> try simp at h
+    rename_i b hb
+    cases h
+    exact ⟨hR, hb, hadm⟩
+  · simp at h
+
+theorem mkMemSimOfW_parts {D : DesignCert} {R : Program} {sim : MemSimulator}
+    (h : mkMemSimOfW D R = some sim) :
+    sim.design = D ∧ sim.prog = R
+      ∧ checkResidual R = some sim.bound ∧ admitsWB D = true := by
+  unfold mkMemSimOfW at h
+  split at h
+  · rename_i hadm
+    split at h <;> try simp at h
+    rename_i b hb
+    cases h
+    exact ⟨rfl, rfl, hb, hadm⟩
+  · simp at h
+
+theorem mkMemSimOfW_wf {sf wf : Nat} {D : DesignCert} {R : Program}
+    {sim : MemSimulator} (hproj : projectMemDesignAt sf wf D = .ok R)
+    (h : mkMemSimOfW D R = some sim) : MemSimWFAtW sf wf sim := by
+  obtain ⟨hd, hp, hchk, hadm⟩ := mkMemSimOfW_parts h
+  exact ⟨by rw [hd, hp]; exact hproj, by rw [hp]; exact hchk, by rw [hd]; exact hadm⟩
+
+/-- **At the returned bound.**  For an honest extended bundle on a state, input
+and edge vector the runtime policy accepts, the residual's run TERMINATES
+within `sim.bound` — `.outOfFuel` is unreachable — decodes through the real
+result codec, agrees with the shared reference semantics, and leaves a state
+that passes the same policy, so the next cycle needs no new state check.
+
+`runMemSim` itself is REUSED: the execution function does not change, only the
+proof that this design's residual is one it may be applied to. -/
+theorem runMemSimW_correct {sf wf : Nat} {sim : MemSimulator}
+    (hw : MemSimWFAtW sf wf sim)
+    {i : RuntimeInput} {st : StateM} {e : ClockEdges}
+    (hR : runtimeFullOKB sim.design i st e = true) :
+    ∃ r : StateM.ResultM,
+      runMemSim sim e i st = some r
+      ∧ r.denote = Compiler.interpretDesign sim.design e i (StateM.denote st)
+      ∧ stateFullOKB sim.design r.nextState = true := by
+  obtain ⟨r, hden, hok, hiff⟩ := projectMemDesignAtW_correct hw.proj hw.admit hR
+  have hev : Eval sim.prog [] (.call sim.prog.entry
+      [.lit (encEdges e), .lit (encInput i), .lit (StateM.encStateM st)])
+      (StateM.encResultM r) := (hiff _).mpr rfl
+  have hfuel := checkResidual_complete hw.chk hev
+  refine ⟨r, ?_, hden, hok⟩
+  unfold runMemSim
+  rw [hfuel]
+  exact StateM.decResultM_encResultM r
+
 /-! ## 4. Controls
 
 The distinctions the plain write must keep, as executable checks on the
@@ -1630,6 +1777,85 @@ private def refImg (e : ClockEdges) (i : RuntimeInput) (st : StateM) : MemImg :=
 #guard stateFullOKB plainRamDesign ⟨#[], #[refImg pwActive pwIn pwState]⟩ = true
 
 #print axioms plainRamDesign_two_steps
+
+/-! ### Executed: the ordinary write, through the RESIDUAL
+
+`plainRamDesign` specialized, checked by the UNCHANGED production
+`checkResidual`, and run at the bound it returned. -/
+
+def plainRamSim : Option MemSimulator := mkMemSimAtW 20000 200 plainRamDesign
+
+#guard plainRamSim.isSome
+/- the production residual is the arity-3 one, unchanged -/
+#guard (match plainRamSim with
+        | some sim => sim.prog.funs.map FunDef.arity == [3]
+        | none     => false)
+/- it is bound to THIS design -/
+#guard (match plainRamSim with
+        | some sim => sim.design == plainRamDesign
+        | none     => false)
+
+/- ENABLED, through the residual: word 1 becomes 99 and nothing else moves -/
+#guard (match plainRamSim with
+        | some sim =>
+            (match runMemSim sim pwActive pwIn pwState with
+             | some r => (r.nextState.mems[0]!).words.map (fun v => v.value) == [11, 99, 33, 44]
+             | none   => false)
+        | none => false)
+/- …the default survives, and so do the word widths -/
+#guard (match plainRamSim with
+        | some sim =>
+            (match runMemSim sim pwActive pwIn pwState with
+             | some r => (r.nextState.mems[0]!).dflt.value == 7
+                         && (r.nextState.mems[0]!).words.map (fun v => v.width) == [8,8,8,8]
+             | none   => false)
+        | none => false)
+/- DISABLED enable, clock firing: the WHOLE encoded image comes back identical -/
+#guard (match plainRamSim with
+        | some sim =>
+            (match runMemSim sim pwActive pwInOff pwState with
+             | some r => MemImg.encMemImg (r.nextState.mems[0]!)
+                         == MemImg.encMemImg pwState.mems[0]!
+             | none   => false)
+        | none => false)
+/- QUIET clock: likewise, for the other reason -/
+#guard (match plainRamSim with
+        | some sim =>
+            (match runMemSim sim pwQuiet pwIn pwState with
+             | some r => MemImg.encMemImg (r.nextState.mems[0]!)
+                         == MemImg.encMemImg pwState.mems[0]!
+             | none   => false)
+        | none => false)
+/- TWO STEPS through the residual, the second on the state the first returned:
+   the write lands, then the quiet step preserves it exactly -/
+#guard (match plainRamSim with
+        | some sim =>
+            (match runMemSim sim pwActive pwIn pwState with
+             | some r₁ =>
+                 (match runMemSim sim pwQuiet pwIn r₁.nextState with
+                  | some r₂ => MemImg.encMemImg (r₂.nextState.mems[0]!)
+                               == MemImg.encMemImg (r₁.nextState.mems[0]!)
+                               && (r₂.nextState.mems[0]!).words.map (fun v => v.value)
+                                  == [11, 99, 33, 44]
+                  | none => false)
+             | none => false)
+        | none => false)
+
+/-- **The whole production shape, as a theorem**: specialize, check, run — the
+design static and exactly edges/input/state dynamic, at the checked bound. -/
+theorem plainRamSim_runs {sim : MemSimulator} (h : plainRamSim = some sim)
+    (i : RuntimeInput) (st : StateM) (e : ClockEdges)
+    (hR : runtimeFullOKB plainRamDesign i st e = true) :
+    ∃ r : StateM.ResultM,
+      runMemSim sim e i st = some r
+      ∧ r.denote = Compiler.interpretDesign plainRamDesign e i (StateM.denote st)
+      ∧ stateFullOKB plainRamDesign r.nextState = true := by
+  have hd : sim.design = plainRamDesign := mkMemSimAtW_design h
+  have hw : MemSimWFAtW 20000 200 sim := mkMemSimAtW_wf h
+  have := runMemSimW_correct hw (i := i) (st := st) (e := e) (by rw [hd]; exact hR)
+  rw [hd] at this
+  exact this
+
 #print axioms plainRamDesign_admitsW
 #print axioms nodeTy_memWrite_none
 #print axioms nodeTyW_eq_of_ne
@@ -1662,6 +1888,13 @@ private def refImg (e : ClockEdges) (i : RuntimeInput) (st : StateM) : MemImg :=
 #print axioms admits_runW_pres
 #print axioms admits_runW_full
 #print axioms admits_runW_full_two
+#print axioms memEntry_uniqueW
+#print axioms projectMemDesignAtW_correct
+#print axioms mkMemSimAtW_wf
+#print axioms mkMemSimOfW_wf
+#print axioms MemSimWFAt_toW
+#print axioms runMemSimW_correct
+#print axioms plainRamSim_runs
 
 end HwMem
 end Projection
