@@ -8812,3 +8812,44 @@ address-fit DERIVED from checked shape and typing.  Until then
 `SourceSupported`, `OpSupported` and `memFree` stay untouched and
 `Op_MemWrite`/`Op_Sub` stay refused.  PicoRV32 remains **BLOCKED**; matrix
 unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.40 — The width discipline, so `WriteAddrFits` can be DERIVED
+
+New `formal/lean/LeanSemanticPrimitives/Projection/HardwareMemWidth.lean`
+(115 lines), `PRODUCER_EXIT=0`, 0 errors, no unsafe axioms.
+
+### Why this first
+
+Instruction 119 requires the checked admission policy to **derive** the enabled
+write's address fit from checked shape and typing, not to take `WriteAddrFits`
+as the checker's own premise.  Deriving it needs a fact the repository did not
+have: that a slot's runtime value has the width the certificate declares.  That
+is what this module proves, and it is the foundation the static checker is
+built on — not the checker itself.
+
+### What is proved
+
+* `eval_op_width : (eval_op op w l).width = w` — for **every** operator, by case
+  analysis over `LGraphOp`.  The supporting helper widths (`mk_bv`, `bv_resize`,
+  `bv_bitwise`, `bv_not`, `bv_sdiv`, `bv_sra`, `bv_get_mask`, `bv_set_mask`) and
+  the two folds (`Op_And`/`Op_Or`/`Op_Xor` and `Op_SHL`) are proved alongside,
+  the folds by induction on the operand list.
+* `cert_mem_read_width` — the memory READ returns the node width on **both**
+  branches, enabled and disabled.
+* `eval_op_cert_width_of_supported` and `eval_op_cert_width_memRead` — the same
+  at `CertVal` level, which is the form the node fold produces.
+* `sourceValue_width_input/_const/_flopQ/_flopQAsync` — every SCALAR source
+  returns its declared width, the asynchronous-reset source on both its reset
+  and its hold branch.
+
+### Scope, stated exactly
+
+This is the width half only.  **The executable static admission checker, its
+soundness theorem, the runtime state/input/edge policy, the
+initialization/preservation lemmas, the admission-to-resolved-main composition
+and the rejection controls are NOT in this commit.**  `StateShapeOK` still
+proves table length only; `SourceSupported`, `OpSupported` and `memFree` are
+untouched; `Op_MemWrite` and `Op_Sub` stay refused.  PicoRV32 remains
+**BLOCKED**; matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
