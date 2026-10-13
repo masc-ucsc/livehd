@@ -1350,7 +1350,7 @@ content-based identity and correct propagation of pipeline producer failures.
 Small regression fixtures belong to the repository and must respect AGENTS.md
 runtime/dependency rules. Whole benchmark coverage belongs to separate bound
 benchmark inputs/runners. Use project-local runtime directories. Supervision
-continues at the user's 20-minute interval and sends another instruction only
+continues at the user's 15-minute interval and sends another instruction only
 when the current one has finished or needs verified corrective guidance. No
 performance/profiling/optional native-build research before functional coverage.
 
