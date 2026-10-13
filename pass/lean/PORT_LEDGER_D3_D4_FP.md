@@ -9681,3 +9681,165 @@ at all, so they are untouched here.
 Matrix unchanged: **12 YES / 11 NO / 37 BLOCKED**.  B09 and B10 advance from a
 generation refusal to a generation PASS awaiting the guarded build; B12 stays
 BLOCKED on `pass.lean: latch`.
+
+## §63.52 — CORRECTIONS to §63.50 and §63.51
+
+Both sections overstated what their evidence showed.  Reconciled against the
+retained artifacts.
+
+### §63.50's Pico conclusion was out of scope
+
+The raw-Verilog recipe I ran really does exit 1 on 68 latches, and that
+observation stands **for that recipe**.  What it does NOT establish is anything
+about the whole unit, because it **omits the retained single-edge
+normalization stage**.  The retained evidence says the opposite of what §63.50
+implied:
+
+| stage | exit |
+|---|---|
+| `B12_picorv32/s1_compile` | **0** |
+| `B12_picorv32/s2_single_edge` | **0** |
+| `B12_picorv32/vc_opt` | **0** |
+
+and `vc_opt/lean/picorv32.dcert` exists: **70,067 bytes**, sha256
+`f85a2a9db8ac89ba71adac23ccbefac9bf290301974733545c0f939d3abf49c9`, format v2.
+
+So whole Pico **does** have a DCERT2 certificate, and the claim "PicoRV32
+remains BLOCKED on `pass.lean: latch`" was wrong as a statement about the unit.
+The correct statement: the **raw-Verilog route** refuses on latches; the
+**normalized route** produces a certificate.  Both are kept; neither is erased,
+and normalization is not irrelevant.
+
+### §63.51's B09/B10 conclusion was wrong
+
+B09 and B10 already have FP YES and verified-compiler YES, including generation
+checks and eight-cycle readiness, and both already have a retained
+`verified_compiler_mw` attempt at exit 0.  My "newly unblocked" modules are
+**byte-identical** to those retained artifacts:
+
+* B09 `4afcfb504459d9a787b5e2e5b730ea7d4f36f79680fab9d1326af21fb4fca461`
+* B10 `cb73b273cb7aba6d15eaefaba6758171ec221f4a22ff24afd99eea2d9eca8d4e`
+
+They were **not** newly unblocked and were **not** awaiting a first build.  What
+§63.51 actually recorded was a duplicate of an already-passing gate.  The
+`d3_guarded_build.py` refusal is retained as an honest observation about that
+duplicate attempt, and it is **not** a task-wide blocker.
+
+### Emitter provenance
+
+The binary I used, `bazel-bin/lhd/lhd` sha256
+`414d5dcbf99b37fea2ceac2b81c131401c9bef2a7e580613f5b388199af63f2a`, is dated
+before the current source: the retained `verified_compiler_mw/lean/` carries a
+`.dcert` sidecar and **my new directories do not**, although the current
+`pass/lean/pass_lean.cpp` emits one in `verified_compiler` mode.  A path does
+not establish a source revision.  Fresh emission must use a source-bound
+current functional build; the retained certificates and this binary observation
+are kept separately.
+
+### Standing
+
+The reporting fixes of §63.50 (actual scalar failure fields; the withdrawn
+width claim), the configurable-fuel proof, and every audited memory semantic
+are unaffected by these corrections.  Matrix stays **12 YES / 11 NO /
+37 BLOCKED**.
+
+## §63.53 — whole Pico on the memory route, and the driver's production contract
+
+### Whole PicoRV32, on the NORMALIZED route
+
+The retained `vc_opt/lean/picorv32.dcert` (70,067 bytes, sha256
+`f85a2a9d…`, format v2) was run through the memory route end to end.
+
+```
+shape: sources 1302  nodes 2279  outputs 18  flops 174  memories 1  clocks 1
+memory 0: aw 5 dw 32 nextImg slot 3488 clock 0 (table 32 words)
+scalar support: wf true memFree false sources false ops false arities true
+                flopClocks true | ALL false
+scalar refused on: memFree,sources,ops
+memory route: accepts true typed true sized true nextImgs true | ADMITTED true
+```
+
+**Whole Pico is ADMITTED by the checked memory route** — exactly the
+aw5/dw32 memory, the `MemRead` nodes and the `MemWriteBE 1` the matrix records.
+The run then specialized, passed the unchanged production residual checker,
+and executed at its returned bound with the reference agreeing on every cycle:
+`step outcomes ok,ok,ok,ok`, producer exit 0.
+
+A resource note, kept separate from any refusal: the first attempt died in
+`mixDriver` with `deep recursion ... increase --tstack`.  That is a STACK cap,
+not a semantic refusal — the production harness already runs
+`ulimit -s unlimited` and the standalone runner did not.  With the limit raised
+the same input succeeds.
+
+### The double specialization the timing hid
+
+That run reported `specialize 676932 ms  check 659085 ms`.  The "check" was a
+**second full specialization**: the driver called `projectMemDesignAt` and then
+`mkMemSimAt`, which specializes again.  Fixed by a new constructor that binds
+the residual already in hand:
+
+* `MemProjection.mkMemSimOf D R` — admission plus the production residual check,
+  and no specialization;
+* `mkMemSimOf_parts` / `mkMemSimOf_wf` — the bundle is honest exactly when the
+  caller can EXHIBIT the specialization that produced `R`, so this is not a way
+  to launder an arbitrary `Program` into a checked one.
+
+### The supplied-state contract
+
+`init=ramp` was called "caller-supplied" in §63.50.  It is not: it is an
+internally generated pattern.  Corrected — `zero`, `ramp` and `narrow` are now
+labelled SYNTHETIC controls, and a real loader was added:
+
+```
+memstate v1
+flops reset            # explicit: use the design's DECLARED reset values
+flop <width> <value>
+mem  <aw> <dw> <default>
+word <addr> <value>
+```
+
+The supplied state is read, used AS IT IS, carried through the production codec
+(`encStateM`/`decStateM` round-trip CHECKED, not assumed) and gated by
+`stateFullOKB` before any cycle runs.  Nothing is defaulted and nothing is
+manufactured; `flops reset` is the file's explicit request and the provenance
+line says that part is synthetic.  Malformed input is refused by line:
+
+```
+REFUSING: …malformed_word_before_mem.memstate: line 2: `word` before any `mem`
+```
+
+Executed control (`scripts/memstate/full_nonzero_default.memstate`): a NONZERO
+default of 255 and non-ramp words 11/22/33 survive the driver —
+`initial memory 0 words [11,22,255,255,255,255]` — the codec round trip holds,
+one word changes over six cycles, and the comparison is COMPLETE.
+
+### Comparison is a STATUS, not a boolean
+
+`agreement=true` was printed even when `aw > 12` skipped the memory check, and
+`nocompare` still claimed agreement.  Both fixed.  The status is now
+`COMPLETE` / `PARTIAL (what was skipped)` / `DISABLED` / `FAILED (what)`, only
+`COMPLETE` earns credit, and the final verdict says which it was:
+
+```
+RESULT: MEMROUTE EXECUTED … -- reference comparison DISABLED by nocompare
+        -- NOT full credit; nothing was compared …
+```
+
+`COMPLETE` now means the memory **array length**, **every** admitted table word,
+the **default** (read at `-1`) and the **out-of-range** read above the table, as
+well as outputs and flops.  `CmpStatus.meet` keeps the weakest status, so one
+skipped cycle cannot be reported as a complete comparison.
+
+The **returned-state policy is a gate**, not an informational line: a run whose
+returned state fails `stateFullOKB` exits 7.
+
+### `--selftest`: 22 controls, all PASS
+
+Including the ones this instruction asked for: a **default-only** mismatch is
+rejected (every word equal, only `dflt` differs), a length mismatch is rejected,
+an over-large table is reported SKIPPED rather than passed, a memory-array
+length mismatch FAILS rather than skips, `DISABLED`/`PARTIAL` do not earn
+credit, and the state parser refuses a missing header, a bad keyword, a
+non-numeric field, a `word` before any `mem` and an out-of-table address.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.

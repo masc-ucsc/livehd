@@ -218,6 +218,42 @@ theorem mkMemSimAt_wf {sf wf : Nat} {D : DesignCert} {sim : MemSimulator}
     exact ⟨hR, hb, hadm⟩
   · simp at h
 
+/-- **Bind an ALREADY-PRODUCED residual.**  `mkMemSimAt` specializes; a driver
+that has just specialized would otherwise pay for it twice, and a "check" phase
+timed around `mkMemSimAt` would be measuring a second specialization.  This
+constructor takes the residual the caller already holds and does only the
+admission check and the production residual check -- so the caller's check
+metric is a check.
+
+It is still not a way to launder an arbitrary `Program`: `mkMemSimOf_wf`
+requires the caller to EXHIBIT the specialization that produced `R`, so the
+bundle is honest exactly when the residual really is this design's. -/
+def mkMemSimOf (D : DesignCert) (R : Program) : Option MemSimulator :=
+  if admitsB D then
+    match checkResidual R with
+    | none   => none
+    | some b => some ⟨D, R, b⟩
+  else none
+
+theorem mkMemSimOf_parts {D : DesignCert} {R : Program} {sim : MemSimulator}
+    (h : mkMemSimOf D R = some sim) :
+    sim.design = D ∧ sim.prog = R
+      ∧ checkResidual R = some sim.bound ∧ admitsB D = true := by
+  unfold mkMemSimOf at h
+  split at h
+  · rename_i hadm
+    split at h <;> try simp at h
+    rename_i b hb
+    cases h
+    exact ⟨rfl, rfl, hb, hadm⟩
+  · simp at h
+
+theorem mkMemSimOf_wf {sf wf : Nat} {D : DesignCert} {R : Program}
+    {sim : MemSimulator} (hproj : projectMemDesignAt sf wf D = .ok R)
+    (h : mkMemSimOf D R = some sim) : MemSimWFAt sf wf sim := by
+  obtain ⟨hd, hp, hchk, hadm⟩ := mkMemSimOf_parts h
+  exact ⟨by rw [hd, hp]; exact hproj, by rw [hp]; exact hchk, by rw [hd]; exact hadm⟩
+
 /-- One cycle, through the residual, at the bound the checker returned. -/
 def runMemSim (sim : MemSimulator) (e : ClockEdges) (i : RuntimeInput)
     (st : StateM) : Option StateM.ResultM :=
@@ -337,6 +373,7 @@ private def mQuiet : ClockEdges   := #[false]
 #print axioms memEntry_unique
 #print axioms projectMemDesignAt_correct
 #print axioms mkMemSimAt_design
+#print axioms mkMemSimOf_wf
 #print axioms projectMemDesign_correct
 #print axioms runMemSim_correct
 

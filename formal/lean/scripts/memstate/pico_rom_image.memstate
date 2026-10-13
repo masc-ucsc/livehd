@@ -1,0 +1,14 @@
+# A SUPPLIED initial memory image for the whole PicoRV32 unit.
+# The flops are taken from the design's DECLARED RESET VALUES, which the file
+# asks for explicitly -- that part is synthetic and the driver says so.
+# The memory image is supplied: a nonzero default and non-ramp words, so a
+# substituted zero table or generated pattern would be visible.
+memstate v1
+flops reset
+mem 5 32 4294967295
+word 0 19088743
+word 1 2309737967
+word 2 305419896
+word 3 2882400001
+word 17 48879
+word 31 3735928559

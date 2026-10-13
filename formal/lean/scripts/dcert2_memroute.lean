@@ -108,6 +108,18 @@ def diffWords (a b : MemImg) : Nat :=
   (List.range (max a.words.length b.words.length)).countP
     (fun k => a.get (Int.ofNat k) != b.get (Int.ofNat k))
 
+/-- `(key, count)` tallies, insertion-ordered -- the same shape
+`dcert2_support` uses, so a large design reports its metadata as counts rather
+than as one line per element. -/
+def tally (xs : List String) : List (String × Nat) :=
+  xs.foldl (fun acc k =>
+    if acc.any (fun p => p.1 == k)
+    then acc.map (fun p => if p.1 == k then (p.1, p.2 + 1) else p)
+    else acc ++ [(k, 1)]) []
+
+def render (t : List (String × Nat)) : String :=
+  String.intercalate ", " (t.map (fun p => s!"{p.1} x{p.2}"))
+
 /-! ## Retained DCERT2 metadata, reported rather than dropped -/
 
 def flopLine (k : Nat) (f : FlopDesc) : String :=
@@ -153,40 +165,182 @@ and every scalar operator OpSupported admits"
 
 /-! ## Comparison against the independent reference
 
-Exhaustive over the table when it is small enough to enumerate, and SAID to be
-skipped otherwise -- never a sample reported as a comparison. -/
+The status is REPORTED, never implied.  `COMPLETE` means the memory array
+length, EVERY admitted table word, the default and the out-of-range reads were
+all compared; `PARTIAL` names what was skipped; `DISABLED` means the caller
+turned it off; `FAILED` names what disagreed.  Only `COMPLETE` earns
+reference-comparison credit, and the final verdict says which one it was. -/
 
-def memAgreesAt (img : MemImg) (ref : Int → BV) (aw : Nat) : Bool :=
-  (List.range (2 ^ aw)).all (fun x => img.get (Int.ofNat x) == ref (Int.ofNat x))
+inductive CmpStatus where
+  | complete
+  | skipped  (what : String)
+  | disabled
+  | failed   (what : String)
+  deriving Inhabited
 
-def memsAgree (D : DesignCert) (st : StateM) (ref : RuntimeState) : Option Bool :=
-  if D.memories.all (fun m => m.aw ≤ 12) then
-    some ((List.range D.memories.size).all (fun k =>
-      match st.mems[k]?, ref.mems[k]? with
-      | some img, some f => memAgreesAt img f (D.memories[k]!).aw
-      | _, _             => false))
-  else none
+def CmpStatus.label : CmpStatus → String
+  | .complete   => "COMPLETE (array length, every table word, default and out-of-range)"
+  | .skipped w  => s!"PARTIAL -- NOT full credit; skipped: {w}"
+  | .disabled   => "DISABLED by nocompare -- NOT full credit; nothing was compared"
+  | .failed w   => s!"FAILED: {w}"
 
-/-! ## The driver -/
+def CmpStatus.isComplete : CmpStatus → Bool
+  | .complete => true
+  | _         => false
+
+def CmpStatus.isFailure : CmpStatus → Bool
+  | .failed _ => true
+  | _         => false
+
+/-- ONE memory, exhaustively: the table length, every address it holds, the
+default (read at `-1`, which no table holds) and the first address ABOVE the
+table.  A default-only difference is caught by the `-1` read, which is why it
+is here and not left to the word loop. -/
+def memOneOK (aw : Nat) (img : MemImg) (ref : Int → BV) : Bool :=
+  (img.words.length == 2 ^ aw)
+  && (List.range (2 ^ aw)).all (fun x => img.get (Int.ofNat x) == ref (Int.ofNat x))
+  && (img.get (-1) == ref (-1))
+  && (img.get (Int.ofNat (2 ^ aw)) == ref (Int.ofNat (2 ^ aw)))
+
+/-- The largest table this driver will enumerate.  Above it the memory part of
+the comparison is SKIPPED and said to be. -/
+def awEnumLimit : Nat := 16
+
+def memsCheck (D : DesignCert) (st : StateM) (ref : RuntimeState) : CmpStatus :=
+  if st.mems.size != D.memories.size then
+    .failed s!"state memory array length {st.mems.size} != declared {D.memories.size}"
+  else if st.mems.size != ref.mems.size then
+    .failed s!"memory array length {st.mems.size} != reference {ref.mems.size}"
+  else
+    match (List.range D.memories.size).find?
+            (fun k => (D.memories[k]!).aw > awEnumLimit) with
+    | some k => .skipped s!"memory {k} has aw {(D.memories[k]!).aw} > {awEnumLimit}"
+    | none   =>
+        match (List.range D.memories.size).find? (fun k =>
+                match st.mems[k]?, ref.mems[k]? with
+                | some img, some f => !(memOneOK (D.memories[k]!).aw img f)
+                | _, _             => true) with
+        | some k => .failed s!"memory {k} disagrees with the reference"
+        | none   => .complete
+
+def cycleCheck (D : DesignCert) (r : StateM.ResultM) (ref : RuntimeResult) : CmpStatus :=
+  if r.outputs != ref.outputs then .failed "outputs"
+  else if r.nextState.flops != ref.nextState.flops then .failed "flops"
+  else memsCheck D r.nextState ref.nextState
+
+/-- The weakest status seen, so one skipped cycle cannot be reported as a
+complete comparison. -/
+def CmpStatus.meet : CmpStatus → CmpStatus → CmpStatus
+  | .failed w, _ => .failed w
+  | _, .failed w => .failed w
+  | .disabled, _ => .disabled
+  | _, .disabled => .disabled
+  | .skipped w, _ => .skipped w
+  | _, .skipped w => .skipped w
+  | .complete, .complete => .complete
+
+/-! ## The driver -//-! ## The driver -/
 
 inductive InitMode where
-  /-- `initStateOf`: zero tables, reset-valued flops.  A LEGAL-STATE WITNESS. -/
+  /-- `initStateOf`: zero tables, reset-valued flops.  A SYNTHETIC control and a
+  legal-state witness; NOT a startup contract. -/
   | zeroWitness
-  /-- SUPPLIED contents, chosen by the caller: word `k` holds `k + 1` in every
-  declared memory.  The driver does not invent it from the design, and it must
-  still pass the policy, so an illegal supply is refused by the first cycle's
-  gate rather than quietly corrected. -/
-  | rampSupplied
-  /-- A DELIBERATELY ILLEGAL supply: flop values narrower than the descriptors
-  declare.  The gate must refuse it rather than run on it. -/
+  /-- An internally generated SYNTHETIC pattern (word `k` holds `k + 1`).  It is
+  a control, not a loader: nothing about it comes from the caller. -/
+  | rampSynthetic
+  /-- A deliberately illegal synthetic control: flop values narrower than
+  declared.  The gate must refuse it. -/
   | narrowControl
-  deriving Repr
+  /-- The real thing: initial flops and memory images READ FROM A FILE, carried
+  through the production codec unchanged. -/
+  | suppliedFile (path : String)
 
 def parseInit (s : String) : Option InitMode :=
   if s == "zero" then some .zeroWitness
-  else if s == "ramp" then some .rampSupplied
+  else if s == "ramp" then some .rampSynthetic
   else if s == "narrow" then some .narrowControl
+  else if s.startsWith "file:" then some (.suppliedFile (s.drop 5).toString)
   else none
+
+def InitMode.label : InitMode → String
+  | .zeroWitness    => "zero (SYNTHETIC control: zero tables, reset-valued flops; \
+a legal-state witness, NOT an RTL startup contract)"
+  | .rampSynthetic  => "ramp (SYNTHETIC control: an internally generated pattern, \
+NOT caller-supplied contents)"
+  | .narrowControl  => "narrow (SYNTHETIC negative control: under-width flops)"
+  | .suppliedFile p => s!"file:{p} (SUPPLIED initial state, read from the file)"
+
+/-! ### The supplied-state format
+
+```
+memstate v1
+flop <width> <value>
+mem  <aw> <dw> <default-value>
+word <addr> <value>
+```
+
+`word` applies to the most recent `mem`.  Anything else -- a bad keyword, a
+non-numeric field, a `word` before any `mem`, an address outside the declared
+table -- is a REFUSAL naming the line.  Nothing is defaulted and nothing is
+invented; a field that is not in the file is not supplied. -/
+
+structure SuppliedState where
+  flops : Array BV
+  mems  : Array MemImg
+  /-- the file asked for the design's DECLARED reset values instead of listing
+  every flop.  That is synthetic and is labelled as such; it is still the
+  file's explicit request, not something the driver decided. -/
+  flopsFromReset : Bool := false
+
+def emptyTable (aw dw : Nat) (dflt : Int) : MemImg :=
+  ⟨List.replicate (2 ^ aw) (mk_bv dw dflt), mk_bv dw dflt⟩
+
+def setWord (m : MemImg) (a : Nat) (v : Int) : MemImg :=
+  { m with words := m.words.set a (mk_bv m.dflt.width v) }
+
+def parseState (txt : String) : Except String SuppliedState := do
+  let lines := (txt.splitOn "\n").map (fun l => (l.splitOn "\r").headD "")
+  let body := lines.filter (fun l => l != "" && !l.startsWith "#")
+  match body with
+  | [] => .error "empty state file"
+  | hdr :: rest =>
+    if hdr != "memstate v1" then
+      .error s!"line 1: expected header \"memstate v1\", got {repr hdr}"
+    else
+      let mut fs : Array BV := #[]
+      let mut ms : Array MemImg := #[]
+      let mut fromReset := false
+      let mut n := 1
+      for l in rest do
+        n := n + 1
+        let ws := (l.splitOn " ").filter (fun w => w != "")
+        match ws with
+        | ["flops", "reset"] => fromReset := true
+        | ["flop", w, v] =>
+            let some w' := w.toNat? | throw s!"line {n}: flop width {repr w} is not a number"
+            let some v' := v.toInt? | throw s!"line {n}: flop value {repr v} is not an integer"
+            fs := fs.push (mk_bv w' v')
+        | ["mem", aw, dw, d] =>
+            let some aw' := aw.toNat? | throw s!"line {n}: aw {repr aw} is not a number"
+            let some dw' := dw.toNat? | throw s!"line {n}: dw {repr dw} is not a number"
+            let some d'  := d.toInt?  | throw s!"line {n}: default {repr d} is not an integer"
+            if aw' > awEnumLimit then
+              throw s!"line {n}: aw {aw'} exceeds this driver's table limit {awEnumLimit}"
+            ms := ms.push (emptyTable aw' dw' d')
+        | ["word", a, v] =>
+            let some a' := a.toNat? | throw s!"line {n}: address {repr a} is not a number"
+            let some v' := v.toInt? | throw s!"line {n}: word value {repr v} is not an integer"
+            if ms.size = 0 then throw s!"line {n}: `word` before any `mem`"
+            else
+              let k := ms.size - 1
+              let m := ms[k]!
+              if a' >= m.words.length then
+                throw s!"line {n}: address {a'} is outside the {m.words.length}-word table"
+              ms := ms.set! k (setWord m a' v')
+        | _ => throw s!"line {n}: unrecognised {repr l}"
+      if fromReset && fs.size > 0 then
+        .error "a file may use `flops reset` or list `flop` lines, not both"
+      else .ok ⟨fs, ms, fromReset⟩
 
 /-- Caller-supplied initial contents, at the declared geometry. -/
 def rampImg (aw dw : Nat) : MemImg :=
@@ -211,8 +365,8 @@ structure Cfg where
 
 def say (s : String) : IO Unit := IO.println s
 
-def runRoute (label : String) (certHash : String) (D : DesignCert) (cfg : Cfg) :
-    IO UInt32 := do
+def runRoute (label : String) (certHash : String) (D : DesignCert) (cfg : Cfg)
+    (st0 : StateM) (stateProv : String) : IO UInt32 := do
   let t0 ← IO.monoMsNow
   say s!"{label}"
   say s!"  certificate fnv1a {certHash}"
@@ -220,7 +374,14 @@ def runRoute (label : String) (certHash : String) (D : DesignCert) (cfg : Cfg) :
 flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
   -- 1. retained metadata
   say s!"  clocks: {String.intercalate ", " (D.clocks.toList.map (fun c => c.name))}"
-  for (f, k) in D.flops.toList.zipIdx do say (flopLine k f)
+  -- every flop's metadata is RETAINED; the per-flop dump is capped so a
+  -- 174-flop design reports a tally and a sample instead of 174 lines.
+  say s!"  flops: {render (tally (D.flops.toList.map (fun f =>
+      let en := if f.enable.isSome then "en" else "noen"
+      let rp := if f.resetPin.isSome then (if f.resetActiveLow then "rst(lo)" else "rst(hi)") else "norst"
+      s!"w{f.width} clk{f.clock} {if f.asyncReset then "async" else "sync"} {rp} {en}")))}"
+  for (f, k) in (D.flops.toList.take 6).zipIdx do say (flopLine k f)
+  if D.flops.size > 6 then say s!"    ... {D.flops.size - 6} more flop(s), tallied above"
   for (m, k) in D.memories.toList.zipIdx do say (memLine k m)
   for (sd, k) in D.sources.toList.zipIdx do
     match romLine k sd with | some l => say l | none => pure ()
@@ -264,7 +425,10 @@ edges, input, state dynamic) at fuel {cfg.stepFuel}/{cfg.workFuel}"
       return 4
   | .ok R =>
     let t3 ← IO.monoMsNow
-    match mkMemSimAt cfg.stepFuel cfg.workFuel D with
+    -- The residual is already in hand.  `mkMemSimOf` BINDS it -- admission plus
+    -- the production residual check, and NO second specialization -- so the
+    -- check metric below is a check and not a hidden re-specialization.
+    match mkMemSimOf D R with
     | none =>
         let t4 ← IO.monoMsNow
         IO.eprintln "  checkResidual REJECTED the residual -- failing closed, \
@@ -277,21 +441,22 @@ no execution at a fallback bound"
       let sz := (R.funs.map (fun fd => CertLoad.tsize fd.body)).foldl (·+·) 0
       say s!"  residual {sz} terms, {R.funs.length} function(s), \
 arity {R.funs.map FunDef.arity}, checker bound {sim.bound}"
-      -- 5. execute, gated by the runtime policy
-      let st0 : StateM := match cfg.init with
-                          | .zeroWitness  => initStateOf D
-                          | .rampSupplied => rampStateOf D
-                          | .narrowControl => narrowStateOf D
-      match cfg.init with
-      | .zeroWitness  =>
-          say "  init=zero: zero tables and reset-valued flops -- a LEGAL-STATE \
-WITNESS, not an RTL startup contract"
-      | .rampSupplied =>
-          say "  init=ramp: SUPPLIED initial contents (word k holds k+1), not \
-invented from the design and not an RTL startup contract either"
-      | .narrowControl =>
-          say "  init=narrow: NEGATIVE CONTROL -- 7-bit flop values against the \
-declared widths; the runtime gate must refuse this"
+      -- the supplied or synthetic state, and the policy gate on it
+      say s!"  init: {cfg.init.label}"
+      say s!"  state provenance: {stateProv}"
+      say s!"  state shape: {st0.flops.size} flop value(s), {st0.mems.size} image(s)"
+      -- PRESERVATION through the production codec, checked rather than assumed
+      if StateM.decStateM (StateM.encStateM st0) != some st0 then
+        IO.eprintln "  the supplied state does NOT survive the production codec \
+unchanged -- refusing rather than running on a state the encoder altered"
+        say "  RESULT: MEMROUTE STATE CODEC REFUSED"
+        return 7
+      say "  state survives encStateM/decStateM unchanged (words, defaults and flops)"
+      unless stateFullOKB D st0 do
+        IO.eprintln "  the initial state does NOT satisfy the design's policy \
+-- refusing rather than zeroing or repairing it"
+        say "  RESULT: MEMROUTE RUNTIME POLICY REFUSED (initial state)"
+        return 7
       say s!"  initial memory 0 words [{(match st0.mems[0]? with
              | some m => preview m 6 | none => "-")}]"
       say s!"  executing {cfg.cycles} cycle(s) of the residual at the checked bound"
@@ -301,10 +466,9 @@ declared widths; the runtime gate must refuse this"
       let mut tags : List String := []
       let mut outs : List (Array BV) := []
       let mut flops : List (Array BV) := []
-      let mut memTags : List String := []
       let mut bad := false
       let mut policyBad := false
-      let mut refBad := false
+      let mut cmp : CmpStatus := if cfg.compare then .complete else .disabled
       for k in List.range cfg.cycles do
         let e := edgeSchedule D k
         let i := mkInputFor D k
@@ -320,23 +484,14 @@ declared widths; the runtime gate must refuse this"
               flops := r.nextState.flops :: flops
               if cfg.compare then
                 let ref := Compiler.interpretDesign D e i (StateM.denote st)
-                let oOK := r.outputs == ref.outputs
-                let fOK := r.nextState.flops == ref.nextState.flops
-                let mOK := memsAgree D r.nextState ref.nextState
-                match mOK with
-                | some true  => memTags := "mem=" :: memTags
-                | some false => refBad := true; memTags := "MEM-DISAGREE" :: memTags
-                | none       => memTags := "mem-skipped(aw>12)" :: memTags
-                unless oOK && fOK do refBad := true
+                cmp := cmp.meet (cycleCheck D r ref)
               -- the DECODED next state is what the following cycle runs on
               st := r.nextState
       let t6 ← IO.monoMsNow
       let rss ← peakRSS
       let cpu ← cpuTicks
       say s!"  step outcomes: {String.intercalate "," tags.reverse}"
-      if cfg.compare then
-        say s!"  reference comparison: outputs/flops/memories agree = {!refBad} \
-({String.intercalate "," memTags.reverse})"
+      say s!"  reference comparison: {cmp.label}"
       say s!"  distinct output vectors {(outs.eraseDups).length} of {outs.length}; \
 distinct flop vectors {(flops.eraseDups).length} of {flops.length}"
       say s!"  final memory 0 words [{(match st.mems[0]? with
@@ -346,7 +501,8 @@ distinct flop vectors {(flops.eraseDups).length} of {flops.length}"
         | some a, some b =>
             say s!"  memory {k}: {diffWords a b} word(s) differ from the initial image"
         | _, _ => pure ()
-      say s!"  final policy: stateFullOKB {stateFullOKB D st}"
+      let finalOK := stateFullOKB D st
+      say s!"  final returned-state policy: stateFullOKB {finalOK}"
       say s!"  ms: support {t1 - t0}  specialize {t3 - t2}  check {t4 - t3}  \
 execute {t6 - t5}   cpu_ticks {cpu}  peak_rss {rss}"
       if policyBad then
@@ -358,12 +514,23 @@ execute {t6 - t5}   cpu_ticks {cpu}  peak_rss {rss}"
         IO.eprintln "  at least one cycle did not step -- failing closed"
         say "  RESULT: MEMROUTE EXECUTION FAILED"
         return 1
-      if refBad then
+      if cmp.isFailure then
         IO.eprintln "  the residual DISAGREED with the reference -- failing closed"
-        say "  RESULT: MEMROUTE REFERENCE DISAGREEMENT"
+        say s!"  RESULT: MEMROUTE REFERENCE DISAGREEMENT -- {cmp.label}"
         return 1
-      say "  RESULT: MEMROUTE OK (admitted, specialized, checked, executed at the \
-returned bound, and agreeing with the reference)"
+      unless finalOK do
+        IO.eprintln "  the RETURNED state does not satisfy the policy -- the run \
+is not ready to continue, failing closed"
+        say "  RESULT: MEMROUTE RETURNED-STATE POLICY FAILED"
+        return 7
+      if cmp.isComplete then
+        say "  RESULT: MEMROUTE OK (admitted, specialized, checked, executed at \
+the returned bound, returned state passes the policy, and the reference \
+comparison is COMPLETE)"
+      else
+        say s!"  RESULT: MEMROUTE EXECUTED (admitted, specialized, checked, \
+returned state passes the policy) -- reference comparison {cmp.label}, so this \
+does NOT earn full reference-comparison credit"
       return 0
 
 def fixtureOf (n : String) : Option DesignCert :=
@@ -378,9 +545,36 @@ def fixtureOf (n : String) : Option DesignCert :=
                        , .input 2 1, .input 3 32 ] }
   else none
 
+/-- Build the initial state.  Synthetic modes are generated here and SAID to be
+synthetic; a supplied file is read, parsed and used AS IT IS -- no field is
+defaulted and nothing is manufactured. -/
+def buildState (D : DesignCert) (im : InitMode) : IO (Except String (StateM × String)) := do
+  match im with
+  | .zeroWitness   => pure (.ok (initStateOf D, "generated: initStateOf (synthetic)"))
+  | .rampSynthetic => pure (.ok (rampStateOf D, "generated: ramp pattern (synthetic)"))
+  | .narrowControl => pure (.ok (narrowStateOf D, "generated: narrow control (synthetic)"))
+  | .suppliedFile path => do
+      let bytes? ← try (do let b ← IO.FS.readBinFile path; pure (some b))
+                    catch e => do IO.eprintln s!"state file unreadable: {e}"; pure none
+      match bytes? with
+      | none => pure (.error s!"cannot read state file {path}")
+      | some bytes =>
+        match String.fromUTF8? bytes with
+        | none => pure (.error s!"{path}: not valid UTF-8")
+        | some txt =>
+        match parseState txt with
+        | .error e => pure (.error s!"{path}: {e}")
+        | .ok ss   =>
+            let fl := if ss.flopsFromReset then initFlopsOf D else ss.flops
+            let note := if ss.flopsFromReset then
+              " ; flops: the design's DECLARED RESET VALUES, as the file requested (synthetic, not supplied)" else " ; flops: supplied"
+            pure (.ok (⟨fl, ss.mems⟩,
+              s!"supplied file {path}, {bytes.size} bytes, fnv1a {fnv1a bytes}{note}"))
+
 def usage : String :=
-  "usage: dcert2_memroute (<cert.dcert>|--fixture <name>) <stepFuel> <workFuel> \
-[cycles] [init] [nocompare]\n  fixtures: full mixed twomem lane\n  fixtures (negative): romwrite\n  init: zero | ramp | narrow"
+  "usage: dcert2_memroute (<cert.dcert>|--fixture <name>|--selftest) <stepFuel> \
+<workFuel> [cycles] [init] [nocompare]\n  fixtures: full mixed twomem lane\n\
+  fixtures (negative): romwrite\n  init: zero | ramp | narrow | file:<path>"
 
 def parseCfg (rest : List String) : Except String Cfg := do
   match rest with
@@ -401,13 +595,88 @@ contents or use init=zero, which is a legal-state witness only."
     .ok ⟨sf, wf, cyc, im, cmp⟩
   | _ => .error usage
 
+/-! ## Comparison self-test
+
+The comparison is only worth its label if it CATCHES things.  These controls run
+without a certificate and report PASS/FAIL for each. -/
+
+def selftest : IO UInt32 := do
+  let dw := 8
+  let aw := 2
+  let words := (List.range (2 ^ aw)).map (fun k => mk_bv dw (Int.ofNat k))
+  let good : MemImg := ⟨words, mk_bv dw 0⟩
+  let dfltOnly : MemImg := ⟨words, mk_bv dw 7⟩          -- EVERY word equal, default differs
+  let shortOne : MemImg := ⟨words.take 2, mk_bv dw 0⟩   -- right words, wrong length
+  let oneWord : MemImg := ⟨words.set 1 (mk_bv dw 99), mk_bv dw 0⟩
+  let ref : Int → BV := good.denote
+  let mut ok := true
+  let check (name : String) (got want : Bool) : IO Bool := do
+    IO.println s!"  {if got == want then "PASS" else "FAIL"}  {name} (got {got}, want {want})"
+    pure (got == want)
+  ok := (← check "matching image accepted" (memOneOK aw good ref) true) && ok
+  ok := (← check "DEFAULT-ONLY mismatch rejected" (memOneOK aw dfltOnly ref) false) && ok
+  ok := (← check "length mismatch rejected" (memOneOK aw shortOne ref) false) && ok
+  ok := (← check "single-word mismatch rejected" (memOneOK aw oneWord ref) false) && ok
+  -- the status values themselves
+  ok := (← check "complete earns credit" (CmpStatus.complete.isComplete) true) && ok
+  ok := (← check "disabled does NOT earn credit" (CmpStatus.disabled.isComplete) false) && ok
+  ok := (← check "partial does NOT earn credit"
+            ((CmpStatus.skipped "x").isComplete) false) && ok
+  ok := (← check "meet keeps the weakest (complete+partial)"
+            ((CmpStatus.complete.meet (CmpStatus.skipped "x")).isComplete) false) && ok
+  ok := (← check "meet keeps a failure"
+            ((CmpStatus.complete.meet (CmpStatus.failed "x")).isFailure) true) && ok
+  -- an over-large table is SKIPPED and said to be, not silently passed
+  let bigD : DesignCert :=
+    { sources := #[], nodes := #[], outputs := #[], flops := #[]
+    , memories := #[{ aw := 20, dw := 8, nextImg := 0, clock := 0 }]
+    , clocks := #[{ name := "clk" }] }
+  let bigSt : StateM := { flops := #[], mems := #[good] }
+  let bigRef : RuntimeState := { flops := #[], mems := #[ref] }
+  ok := (← check "over-large table is SKIPPED, not passed"
+            ((memsCheck bigD bigSt bigRef).isComplete) false) && ok
+  ok := (← check "...and a cycle meeting it loses complete"
+            ((CmpStatus.complete.meet (memsCheck bigD bigSt bigRef)).isComplete) false) && ok
+  -- a memory-array length mismatch is a FAILURE, not a skip
+  ok := (← check "memory array length mismatch FAILS"
+            ((memsCheck bigD { flops := #[], mems := #[] } bigRef).isFailure) true) && ok
+  -- the state parser refuses malformed input rather than defaulting it
+  let bad : List (String × String) :=
+    [ ("no header",        "flop 8 1")
+    , ("bad keyword",      "memstate v1\nfrob 1 2")
+    , ("non-numeric",      "memstate v1\nflop eight 1")
+    , ("word before mem",  "memstate v1\nword 0 1")
+    , ("address past end", "memstate v1\nmem 1 8 0\nword 9 1") ]
+  for (name, txt) in bad do
+    let got := (parseState txt).toOption.isNone
+    ok := (← check s!"state parser refuses: {name}" got true) && ok
+  let goodTxt := "memstate v1\nflop 8 3\nmem 1 8 5\nword 0 1\nword 1 2"
+  ok := (← check "state parser accepts a well-formed file"
+            ((parseState goodTxt).toOption.isSome) true) && ok
+  match parseState goodTxt with
+  | .ok ss =>
+      ok := (← check "supplied NONZERO default is kept"
+                ((ss.mems[0]!).dflt == mk_bv 8 5) true) && ok
+      ok := (← check "supplied words are kept"
+                ((ss.mems[0]!).get 1 == mk_bv 8 2) true) && ok
+      ok := (← check "supplied flop is kept" (ss.flops[0]! == mk_bv 8 3) true) && ok
+      ok := (← check "out-of-range read returns the SUPPLIED default"
+                ((ss.mems[0]!).get 99 == mk_bv 8 5) true) && ok
+  | .error _ => ok := false
+  IO.println s!"  SELFTEST {if ok then "PASS" else "FAIL"}"
+  pure (if ok then 0 else 1)
+
 def main (args : List String) : IO UInt32 := do
   match args with
+  | "--selftest" :: _ => selftest
   | "--fixture" :: name :: rest =>
       match fixtureOf name, parseCfg rest with
       | none, _ => do IO.eprintln s!"REFUSING: unknown fixture {repr name}"; return 2
       | _, .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
-      | some D, .ok cfg => runRoute s!"fixture:{name}" "n/a(in-repo fixture)" D cfg
+      | some D, .ok cfg => do
+          match ← buildState D cfg.init with
+          | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
+          | .ok (st0, prov) => runRoute s!"fixture:{name}" "n/a(in-repo fixture)" D cfg st0 prov
   | path :: rest =>
       match parseCfg rest with
       | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
@@ -423,5 +692,7 @@ def main (args : List String) : IO UInt32 := do
           | .ok (fmt, D) => do
               IO.println s!"  format {repr fmt} (routed by magic; admitted under \
 that format's own policy)"
-              runRoute path (toString (fnv1a bytes)) D cfg
+              match ← buildState D cfg.init with
+              | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
+              | .ok (st0, prov) => runRoute path (toString (fnv1a bytes)) D cfg st0 prov
   | _ => do IO.eprintln usage; return 2

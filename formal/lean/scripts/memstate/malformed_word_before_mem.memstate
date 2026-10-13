@@ -1,0 +1,3 @@
+# NEGATIVE CONTROL: a `word` before any `mem`. Must be refused, not defaulted.
+memstate v1
+word 0 1
