@@ -11888,3 +11888,80 @@ reusing native `Dlop.bit_test(r*n_wr+w)` per read/write pair across
 `graph_access`, `DesignScan` and lowering, preserving write priority and the
 unknown/undef refusals rather than deleting the guard around the i64 shift or
 adopting the FP pin's global `fwd==1` shortcut.
+
+## §63.79 — the emitted slot mask was narrowed to one bit; repaired
+
+### 1. The defect, in the retained certificate
+
+The §63.75 gate built its mask as `Sext(phase == slot, 1)` and stamped
+`wensize` on that driver.  **The stamp did not survive.**
+`Bitwidth::process_sext` recomputes the range from the POSITION operand —
+`bw.set_sbits_range(sign_max)` with `sign_max = 1` — so the emitted node is
+`Op_Sext width 1`.  The certificate's `Op_And` does not sign-extend, so the
+emitted gate was
+
+```
+Op_And w69 [enable_69, mask_1]
+```
+
+and **lanes 1..68 could never be enabled**.  Read directly out of the retained
+v4 certificate `1f83897e…` at origin 6792/6796.
+
+This is a static consequence of the emitted graph — it is NOT a claim that any
+write was observed, reachable or attempted.  And the earlier COMPLETE
+comparison stands only for what it was: certificate-versus-reference agreement,
+where both sides compute the same narrowed thing.  It was never high-lane
+acceptance.
+
+**My normalize-time gtest could not see it**: it inspects the graph the pass
+leaves, before bitwidth/cprop.  Those three tests are now labelled
+STRUCTURE ONLY in the file itself.
+
+### 2. The repair reuses this design's own widening adapter
+
+The same certificate already widens a 1-bit value to a 69-bit mask at origin
+5268: `Op_GetMask w69 [Op_Sext w69, const70 2^69-1]`.  The gate now does the
+same — `Get_mask` over the sign-extended predicate, window `[0, wensize)`,
+built with `connect_mask_operands` so the `lo`/`hi` endpoints `bit_range`
+requires are present (without them `pass.lean` refuses the node, which is how
+the first attempt failed).
+
+No BV or `Sext` semantics were changed and no unsigned operand was blindly
+widened.  The only new value is the gate's own window constant, built by
+`mask_window_const` at arbitrary width.
+
+Emitted cone, fresh:
+
+```
+slot 357: Op_And     w69 [356, 337]
+  slot 337: Op_GetMask w69 [336, const70 2^69-1]      <- the slot mask
+    slot 336: Op_Sext  w69 [335, 1]
+      slot 335: Op_Sext w1 [334, 1]
+        slot 334: Op_EQ  w1 [const 0, flopQ 29]       <- phase == 0
+```
+
+### 3. Values, on real certificates, with failure exits
+
+`formal/lean/scripts/slot_mask_check.lean` locates the write node's enable
+gate, overrides the phase source and the gate's other operand, and evaluates.
+It exits 3 on a value mismatch and 2 on a shape failure.
+
+| certificate | active / full enable | quiet | active / high lane only | exit |
+|---|---|---|---|---|
+| **fresh emission** | **2^69-1** | **0** | **2^68** | **0** |
+| retained v4 `1f83897e…` | **1** | 0 | **0** | **3** |
+
+The retained certificate is the negative control and fails exactly as the audit
+predicted: *"the mask does not pass every lane"* and *"lane 68 cannot be
+enabled"*.  It overrides the phase and the enable, so it reports what the gate
+WOULD pass and asserts nothing about reachability.
+
+### 4. Scope, unchanged
+
+B03 re-normalizes (exit 0) with the repaired mask.  B11's **four-cycle
+synthetic-zero run keeps only its recorded scope and is not re-credited** — its
+certificate has changed, so that run no longer describes the current emission
+at all.  The initialized-transition acceptance is still **not done**, and the
+three structural gtests do not stand in for it.
+
+Counts unchanged: **13 YES / 11 NO / 36 BLOCKED**, FP **3 YES / 9 BLOCKED**.

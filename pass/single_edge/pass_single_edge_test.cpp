@@ -184,6 +184,13 @@ TEST(SingleEdgeMemoryGate, NarrowConcatLaneOfTheSharedZeroIsUntouched) {
   EXPECT_EQ(gu::const_of(window).to_just_i64(), kLane) << "the lane window itself was altered";
 }
 
+// STRUCTURE ONLY.  The next three tests inspect the graph the pass LEAVES; they
+// do not execute a memory transition, and they are not dynamic acceptance.
+// They also run BEFORE bitwidth/cprop, so a width that is correct here can
+// still be narrowed on the way to emission -- which is exactly what happened to
+// the first version of this gate.  The emitted VALUE is checked separately by
+// `formal/lean/scripts/slot_mask_check.lean` against a real certificate.
+//
 // EVERY HIGH LANE SURVIVES the active step: the gated enable is the ORIGINAL
 // vector ANDed with the mask, at the full `wensize`.
 TEST(SingleEdgeMemoryGate, ActiveStepKeepsTheWholeEnableVector) {
@@ -206,7 +213,7 @@ TEST(SingleEdgeMemoryGate, ActiveStepKeepsTheWholeEnableVector) {
     if (e.driver.get_class_index() == we.get_class_index()) {
       keeps_original = true;
     } else if (!e.driver.is_invalid() && !e.driver.is_const()
-               && gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Sext) {
+               && gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Get_mask) {
       has_mask = true;
       EXPECT_EQ(gu::bits_of(e.driver), kWen) << "the slot mask is not the full lane width";
     }
@@ -218,7 +225,7 @@ TEST(SingleEdgeMemoryGate, ActiveStepKeepsTheWholeEnableVector) {
 // THE QUIET STEP: the mask is a sign-extension of a ONE-BIT slot predicate, so
 // when the predicate is low every one of the `wensize` lanes is zero.  No wide
 // constant is minted for it.
-TEST(SingleEdgeMemoryGate, QuietStepMaskIsAWidthCorrectSignExtension) {
+TEST(SingleEdgeMemoryGate, QuietStepMaskIsAWidthCorrectWindowOverASignExtension) {
   hhds::GraphLibrary lib;
   auto               f = build(lib, "quiet_mem", /*with_enable=*/true, /*with_concat=*/false);
 
@@ -230,15 +237,20 @@ TEST(SingleEdgeMemoryGate, QuietStepMaskIsAWidthCorrectSignExtension) {
   hhds::Pin_class mask;
   for (const auto& e : gu::inp_sink_drivers(gated.get_master_node())) {
     if (!e.driver.is_invalid() && !e.driver.is_const()
-        && gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Sext) {
+        && gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Get_mask) {
       mask = e.driver;
     }
   }
-  ASSERT_FALSE(mask.is_invalid()) << "no sign-extended mask";
+  ASSERT_FALSE(mask.is_invalid()) << "no Get_mask-widened slot mask";
   EXPECT_EQ(gu::bits_of(mask), kWen) << "a quiet step would not zero every lane";
-  auto src = driver_at(mask.get_master_node(), 0);
-  ASSERT_FALSE(src.is_invalid());
-  EXPECT_EQ(gu::bits_of(src), 1) << "the slot predicate is not one bit, so the mask is not all-ones/all-zeros";
+  // the mask's VALUE source is a Sext of a one-bit predicate
+  auto sx = driver_at(mask.get_master_node(), Ntype::get_sink_pid(Ntype_op::Get_mask, "a"));
+  ASSERT_FALSE(sx.is_invalid()) << "the mask has no value operand";
+  EXPECT_EQ(gu::type_op_of(sx.get_master_node()), Ntype_op::Sext) << "the mask is not a sign-extended predicate";
+  // …and the window really covers every lane
+  auto hi = driver_at(mask.get_master_node(), Ntype::get_sink_pid(Ntype_op::Get_mask, "hi"));
+  ASSERT_TRUE(hi.is_const()) << "the mask window has no constant high endpoint";
+  EXPECT_EQ(gu::const_of(hi).to_just_i64(), kWen) << "the mask window does not reach the top lane";
 }
 
 // AN ABSENT ENABLE MEANS ALL LANES WRITE -- the native contract
@@ -255,8 +267,8 @@ TEST(SingleEdgeMemoryGate, AbsentEnableWritesEveryLaneOnTheActiveStep) {
   auto gated = driver_at(f.mem, mpid(0, 4));
   ASSERT_FALSE(gated.is_invalid()) << "no enable was installed for the absent-enable port";
   EXPECT_EQ(gu::bits_of(gated), kWen) << "the all-lanes default is not the full lane width";
-  EXPECT_EQ(gu::type_op_of(gated.get_master_node()), Ntype_op::Sext)
-      << "the all-lanes default should be the slot mask itself, with no AND and no wide constant";
+  EXPECT_EQ(gu::type_op_of(gated.get_master_node()), Ntype_op::Get_mask)
+      << "the all-lanes default should be the slot mask itself, with no AND";
 }
 
 }  // namespace

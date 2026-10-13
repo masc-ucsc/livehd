@@ -1500,19 +1500,49 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   // EVERY FACT HERE IS FROZEN.  `mem_gate_plans` was filled during the refusal
   // scan; nothing is reclassified here and there is no slot fallback.
   for (const auto& mp : mem_gate_plans) {
+    // THE MASK MUST SURVIVE BITWIDTH, NOT JUST LEAVE THIS PASS WIDE.
+    //
+    // `Sext(pred, 1)` is a ONE-BIT SIGNED value (0 or -1).  Stamping 69 bits on
+    // its driver here does NOT stick: `Bitwidth::process_sext` recomputes the
+    // range from the POSITION operand -- `bw.set_sbits_range(sign_max)` with
+    // `sign_max = 1` -- so the emitted node came out `Op_Sext width 1`, and the
+    // certificate's `Op_And` does not sign-extend its operands.  The emitted
+    // gate was therefore `And(enable_69, mask_1)`, which can only ever enable
+    // bit 0: lanes 1..68 could never be written.  Measured in the retained v4
+    // certificate at origin 6792.
+    //
+    // The widening idiom this design ALREADY uses is `Get_mask` against an
+    // all-ones constant -- see origin 5268 in the same certificate,
+    // `Op_GetMask w69 [Op_Sext w69, const70 2^69-1]`.  `mask_window_const`
+    // builds that constant at any width, so the mask becomes a genuine
+    // `wensize`-wide all-ones (predicate high) or all-zeros (predicate low),
+    // and `Get_mask`'s own result width is what carries it through bitwidth.
+    //
+    // No BV or Sext semantics are changed and no unsigned operand is widened:
+    // the only new value is this gate's own mask constant.
     auto sx = gu::create_typed_node(*g, Ntype_op::Sext);
     slot_pred[mp.slot].connect_sink(sx.create_sink_pin(0));
     gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(sx.create_sink_pin(1));
     auto sxq = sx.create_driver_pin(0);
     gu::set_sbits(sxq, mp.wensize);
 
+    auto gm = gu::create_typed_node(*g, Ntype_op::Get_mask);
+    // `connect_mask_operands` installs the value AND the `lo`/`hi` endpoint
+    // constants the readers require: `graph_util::bit_range` reads those pins,
+    // and `pass.lean` refuses a Get_mask without them.  The window is
+    // [0, wensize): every lane of the sign-extended predicate.
+    livehd::graph_util::connect_mask_operands(gm, sxq, 0, static_cast<int>(mp.wensize));
+    auto mask = gm.create_driver_pin(0);
+    gu::set_bits(mask, mp.wensize);
+    gu::set_unsign(mask);
+
     hhds::Pin_class gated;
     if (mp.enable.is_invalid()) {
-      gated = sxq;  // the native all-lanes default, already the right width
+      gated = mask;  // the native all-lanes default, at full width
     } else {
       auto andn = gu::create_typed_node(*g, Ntype_op::And);
       mp.enable.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
-      sxq.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
+      mask.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
       gated = andn.create_driver_pin(0);
       gu::set_bits(gated, mp.wensize);
       gu::set_unsign(gated);
