@@ -9843,3 +9843,50 @@ credit, and the state parser refuses a missing header, a bad keyword, a
 non-numeric field, a `word` before any `mem` and an out-of-table address.
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.54 — the ten blocked FP units, by their ACTUAL refusal
+
+Instruction 125 directs attention to the ten blocked units.  Surveyed from the
+retained attempt records, not re-run: each one's first failing stage, its exit,
+the class the tool assigned it, and its message.
+
+| unit | first failing stage | exit | class | refusal |
+|---|---|---|---|---|
+| B01 `coreet_dcache` | `s1_compile` | 1 | internal | `Concat lane 0 (of 2, MSB-first) driver 'mux_94508' occupies 2 bits but its declared window is 1` |
+| B02 `cva6_hpdcache` | `s1_compile` | 6 | syntax | combinational loop in `cva6_hpdcache_subsystem_gate` |
+| B03 `coreet_icache` | `s1_compile` | 1 | internal | `read_slang` failed on the icache filelist |
+| B04 `cva6_mmu_tlb_ptw` | `s1_compile` | 6 | syntax | combinational loop in `cva6_mmu_gate` |
+| B05 `coreet_etlink_axi` | `s1_compile` | 1 | internal | `read_slang` failed on `shirecache_mesh_master` |
+| B05b `coreet_etlink_axiport` | — | — | — | **no attempt recorded at all** |
+| B06 `cva6_lsu` | `s1_compile` | 6 | syntax | combinational loop in `load_store_unit_gate` |
+| B07 `coreet_vpu` | `s1_compile` | 6 | syntax | combinational loop in `vpu_top` |
+| B08 `coreet_intpipe` | `s1_compile` | 6 | syntax | combinational loop in `intpipe_top` |
+| B11 `coreet_tlb` | `s2_single_edge` | 7 | unsupported | `memory memory_1660:u_tlb_cache_rf.rf_q would commit on every sub-step under a phase divider` |
+
+Three groupings, and they are not the same problem:
+
+1. **Front-end (B03, B05)** — `read_slang` does not get as far as an LGraph.
+2. **Combinational loops (B02, B04, B06, B07, B08)** — five units, all reported
+   as `syntax`/exit 6 at `s1_compile`.  Four of the five chains are
+   `sext -> get_mask -> sra -> sext -> …`.  That is the SHL/SRA/Sext area, and
+   the repairs there are **not** to be rolled back; whether these are real
+   loops or an artefact of how the loop detector walks those chains is an open
+   question and is NOT answered here.
+3. **Structural (B01)** — a concat lane driver wider than its declared window.
+
+**B11 is the only one blocked inside the memory area, and it is the closest to
+the gate it fails.** It passes `s1_compile` and is refused by
+`pass.single_edge`, whose own hint names the gap:
+
+```
+code: memory-unsupported
+hint: slot enables are not wired into the Memory cell yet
+```
+
+So B11 is an implementation gap in the normalization pass — a memory whose
+commit cannot currently be qualified by a slot enable under a phase divider —
+and not a statement that the design cannot be certified.  It is recorded here
+as the next candidate in this area; nothing is claimed for it yet, and no
+component is erased to get past it.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
