@@ -10329,3 +10329,68 @@ way; and an out-of-range write is a no-op that does not extend the table.
 
 Axioms: `propext`, `Quot.sound` only.  Matrix stays **12 YES / 11 NO /
 37 BLOCKED**.
+
+## §63.62 — what the Pico transition question actually is, and where it stops
+
+### The reference probe
+
+`scripts/pico_stim_probe.lean`, 40 cycles, reference only:
+
+```
+mem_addr over 40 cycles: 0,0,0,0,0,0,0,0,4,4,4,4,8,8,8,8,12,12,12,12,16,16,16,16
+register file NEVER commits in 40 cycles
+```
+
+**The core executes.**  The fetch address advances 0 → 4 → 8 → 12 → 16, one
+instruction every four cycles, which is picorv32's normal rate under a
+one-cycle-lagged `mem_ready`.  That is established on the REFERENCE semantics,
+independently of the residual.
+
+A correction about this probe, since §63.60 justified it on cost: it was built
+on the assumption that the reference alone would be far cheaper than the
+driver's residual-plus-reference.  It is not — 83 minutes for 40 cycles against
+the driver's 70 for 20.  The idea (validate a stimulus before paying for
+specialization) is sound; the cost model behind it was wrong, and it saved no
+time on this pass.  What it did buy is the `mem_addr` trace, which no driver
+run reports.
+
+### The write node, statically
+
+`scripts/pico_write_trace.lean` — structure only, no simulation, no cost:
+
+```
+memory 0: aw 5 dw 32 clock 0 nextImg slot 3209
+  node 1917: Op_MemWriteBE 1 w32 deps [1077, 3206, 3207, 3208]
+    mem    -> source memImg 0 (aw 5 dw 32)
+    addr   -> Op_Or w5
+    data   -> Op_Or w32
+    ENABLE -> Op_Or w32 -> Op_GetMask w32 [cond, const 0xFFFFFFFF]
+                             cond = Op_MuxBool w1 [Op_GetMask w1 [...], const 0, const -1]
+```
+
+With `byte_w = 1` a 32-bit byte-enable is a per-BIT write mask, and this one is
+`0xFFFFFFFF` exactly when its condition holds and `0` otherwise — the correct
+shape for a whole-word register-file write.  **The write is structured
+correctly; its condition simply does not assert within 40 cycles under this
+stimulus.**
+
+### Where this stops, and why
+
+What is established: the memory route runs whole Pico (four runs, producer exit
+0, COMPLETE reference comparison, returned-state policy passing); the core
+executes under the supplied reset pulse and handshake; and the declared memory's
+write is correctly formed.
+
+What is NOT established: which input or internal condition makes that write's
+gate assert.  Answering it means debugging a third-party core's
+microarchitecture at roughly 100-170 s per simulated cycle, and each further
+guess at a stimulus would be an expensive repeat of a run whose route result is
+already known.  That is not verified-compiler work and it is not continued here.
+
+**`tiny_byte_ram` remains the real certificate on which this route MOVED
+memory** — 2 words, §63.50 — so "the route commits memory on a real
+certificate" is demonstrated; what is open for Pico is a stimulus question, not
+a route question.  No claim of meaningful initialized memory transitions is
+made for PicoRV32.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
