@@ -1103,6 +1103,55 @@ interpreter is a comparison oracle, never the FP implementation.
 
 The old native build and phase attempts are under
 `livehd-futamura/baseline_frontend_build_9bb41a09d_20261012/`.
+
+#### Deferred item: does the OLD projection branch clear the nine FP blockers?
+
+Raised because the nine remaining FP blockers are upstream front-end refusals,
+not projection gaps.  If the old branch's front end clears them, the right move
+is to rebase and integrate that stage rather than re-derive it.  **Recorded as
+a finding and a plan; not executed in this checkpoint.**
+
+What the RETAINED evidence already answers — two of the nine:
+
+| row | old branch | master | reading |
+| --- | --- | --- | --- |
+| B01 CORE-ET DCache | front end **passes** | refuses: Concat lane width, second bitwidth pass | a real asymmetry, but root cause NOT localized, and pass sequences and reader versions differ |
+| B03 CORE-ET I-cache | **rejects** | rejects | the SAME ambiguous `PaSize` imports — a shared raw-source/configuration refusal, NOT a master-only regression |
+
+So the hypothesis is already half-refuted: it holds for B01 and fails for B03.
+And B01 shows that clearing the front end is **not** the same as unblocking the
+row — old then refuses at `single_edge` on a memory commit under a phase
+divider, so neither result is old FP admission.
+
+**Unmeasured against the old branch: seven rows** — B02, B04, B05, B06, B07,
+B08 and B11.  Nothing retained says how the old front end behaves on them, and
+no claim should be made until it is measured.
+
+One observation worth testing, stated as a HYPOTHESIS and not a conclusion:
+five of the blockers are combinational loops (B02, B04, B06, B07, B08) and
+their reported cycles run through the SAME operator family this port has been
+working in — `sra → sext → get_mask → sra → …` for IntPipe,
+`mux → mux → sext → sext → sext → mux` for VPU, `sext → get_mask → sra → …`
+for the MMU and LSU.  Whether that is a loop-detection difference, a lowering
+difference, or a genuine source loop is unknown.
+
+Plan, to execute AFTER the current twelve-unit FP work reaches its next
+checkpoint:
+
+1. Run the retained pinned old front end (`1c089c4e…`) on the seven unmeasured
+   rows, on the SAME frozen inputs and options the master attempts used.  This
+   is a measurement pass; it produces a per-row asymmetry table, not a rebase.
+2. Classify each row: shared refusal (like B03 — nothing to integrate),
+   master-only regression (like B01 — a candidate), or old-only failure.
+3. For candidates only, localize the actual differing stage before porting
+   anything.  "Old passes" is not a root cause.
+4. Any integration must respect the constraints already in this document: no
+   duplicate graph scanners, no private certificate builders, no obsolete shell
+   interfaces, and no rollback of the SHL/SRA/Sext meanings or the mask-endpoint
+   and signed-mask work.
+
+Upstream refusals remain inside the end-to-end twelve-unit FP objective; they
+are not out of scope merely because they precede projection.
 The supervisor's detailed audits are under
 `automate_workspace/master_rebase/audits/`; the ledger retains their exact paths.
 Treat section 14's original inventory/status tables as dated audit baselines,
