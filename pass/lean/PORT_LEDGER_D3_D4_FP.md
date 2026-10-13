@@ -9969,3 +9969,51 @@ and both are admitted by the memory route with the same memory geometry.
   admission can be compared without paying for specialization.
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.56 — B11's blocker, assessed: no new IR component is needed
+
+`pass/single_edge/pass_single_edge.cpp:901` refuses any design containing a
+`Ntype_op::Memory` once the slot plan needs more than one slot:
+
+```cpp
+if (op == Ntype_op::Memory && plan.slots > 1) {
+  r.reason = "memory `" + label_of(n) + "` would commit on every sub-step under a phase divider";
+  refuse(quiet, "memory-unsupported", …, "slot enables are not wired into the Memory cell yet");
+```
+
+The pass fails closed on purpose — its own comment is *"edge normalization
+declines rather than half-transform: a partial lowering is a silent full-cycle
+error"* — so the refusal is correct behaviour for a gap, not a bug to delete.
+
+### What the gap is, and what it is NOT
+
+It is a **lowering** gap: under a phase divider the Memory cell has no
+slot-qualified commit, so the pass cannot guarantee the write lands only on its
+own sub-step.
+
+It is **not** a certificate-language gap, and this is worth recording because
+the obvious assumption is the opposite.  DCERT2 and the proofs already express
+a memory that commits on an edge WITHOUT changing: a byte-enable of zero leaves
+the image EXACTLY alone, proved, not sampled —
+
+* `MemImg.writeBE_disabled_eq : ¬ bv_nonzero bev → writeBE w m a d bev bw = m`
+* `applyOpM_memWriteBE_disabled` — the same at the object level
+* `memNextOf_quiet` — the prior image, exactly, when the clock does not fire
+
+and the executed fixture control (`inNoWr` / the `mask 0` rows of §63.49) shows
+the image unchanged on a FIRING edge with the write disabled.
+
+So a slot-gated memory write is expressible today by ANDing the slot predicate
+into the existing byte-enable operand: no new `MemoryDesc` field, no new
+component on the shared `DesignCert`, and no change to the memory semantics
+already proved.  The work is in `pass.single_edge`'s lowering, where the slot
+machinery lives (`plan.slots`, the per-element `e.slot` assignment at
+`pass_single_edge.cpp:613-641`), and it is NOT attempted here: the pass assigns
+slots by retyping elements onto slot-specific clocks rather than by building an
+enable predicate, so the right shape of the change needs that machinery
+understood rather than guessed at.  A half-understood edit to a deliberately
+fail-closed pass is the one thing its comment warns against.
+
+Recorded as the next concrete candidate in the memory area, with the finding
+that it does not require extending the IR.  B11 stays BLOCKED; nothing is
+claimed for it, and no component is erased.
