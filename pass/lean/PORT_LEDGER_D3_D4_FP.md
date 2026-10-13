@@ -10498,3 +10498,56 @@ specific candidate instead of a stimulus guess.  No further speculative
 stimulus runs.
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.65 — `Op_MemWrite` in the object language; admission deliberately unchanged
+
+Whole chain rebuilt in topological order: **102 / 102 modules, all exit 0**,
+with the memory-route driver and its 22-control self-test still passing and the
+full fixture still reporting a COMPLETE reference comparison.
+
+### Landed
+
+| layer | what |
+|---|---|
+| `ObjectLanguage` | a `memWrite` PRIMITIVE, arity 4, appended last so nothing is renumbered |
+| `ObjectLanguageSemantics` | `valMemWrite`: disabled → the EXACT prior image value; enabled in range → `valMemSet` of the RAW datum; enabled OUT OF RANGE → `none`, which `evalPrim` turns into an error |
+| `Encoding` | `primCode`/`primOfCode` extended to 34; the round trip still `cases <;> rfl` |
+| `MemImage` | `valMemWrite_eq` (= `MemImg.writeEn` on an admitted operand), `valMemWrite_disabled`, `valMemWrite_refuses_outOfRange` |
+| `HardwareMem` | `applyOpM` dispatches opcode **27** to that primitive |
+| `HardwareMemOp`, `HardwareMemSlots` | the scalar and mixed-environment delegations step past 27; `OpSupported_code_ne27` is a NEW theorem so `OpSupported_code_ne` keeps its exact statement |
+| `PartialEvaluatorCorrect` | two exhaustive `Prim` case lists gain `memWrite` (additive; the file is not otherwise touched) |
+
+It is a primitive in its own right, not a call into `memWriteBE`, and the
+difference is observable: the enable is tested whole by `bv_nonzero`, so a
+4-bit enable of value 8 — NONZERO with bit 0 clear — enables this write and
+would enable no byte of a byte-enabled one; and the datum is stored RAW, so an
+unnormalised `BV(8,300)` is stored as it is where the byte-enabled write would
+return `mk_bv` of it.  Reducing one operator to the other would owe exactly the
+one-bit-enable and normalised-datum obligations §63.58's addendum identified;
+the direct primitive does not incur them.
+
+### Admission is UNCHANGED, on purpose
+
+An earlier draft of this work broadened `NodeAdmitted` and replaced
+`NodeAdmitted_ne_memWrite`.  That is withdrawn.  `NodeAdmitted`,
+`nodeAdmittedB`, `NodeAdmitted_ne_memWrite` and their guards are byte-identical
+to before — including `#guard nodeAdmittedB {op := .Op_MemWrite, …} = false` —
+so every theorem stated about them still says what it said.
+
+The extension is defined BESIDE them and is not yet wired in:
+
+* `NodeAdmittedW c := NodeAdmitted c ∨ c.op = .Op_MemWrite`
+* `nodeAdmittedWB`, with `nodeAdmittedWB_iff`
+* `NodeAdmitted_toW`, and `NodeAdmittedW_ne_sub` — the extension is EXACTLY the
+  plain write; `Op_Sub`, `Op_UDiv` and the rest are still refused.
+
+`nodeTy` is still gated on the ORIGINAL `nodeAdmittedB`, so no design's
+admission changes and `admitsB` accepts exactly what it accepted before.  That
+is deliberate rather than unfinished bookkeeping: typing the operator before the
+node-step, fold-preservation and `WriteAddrFits` lemmas exist would let the
+checker accept a design the fold cannot prove, which is the one thing a
+soundness gate must not do.  Those lemmas, and the fixture, are the next
+increment.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.  No fixture or compile here is
+whole-unit credit.

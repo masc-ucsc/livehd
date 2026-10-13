@@ -192,16 +192,13 @@ theorem nodeSlot_slotIsMem {D : DesignCert} {j : Nat} {c : DenseNodeCert}
 has no primitive and no `applyOpM` case, so it is refused rather than given a
 defined-and-unproved answer. -/
 def NodeAdmitted (c : DenseNodeCert) : Prop :=
-  OpSupported c.op = true ∨ c.op = .Op_MemRead ∨ c.op = .Op_MemWrite
-    ∨ ∃ bw, c.op = .Op_MemWriteBE bw
+  OpSupported c.op = true ∨ c.op = .Op_MemRead ∨ ∃ bw, c.op = .Op_MemWriteBE bw
 
 /-- The same policy as a decidable CHECK, so admission can be run, not just
-stated.  Everything outside the three memory operators falls through to
-`OpSupported`, which still refuses it. -/
+stated.  `Op_MemWrite` falls through to `OpSupported`, which refuses it. -/
 def nodeAdmittedB (c : DenseNodeCert) : Bool :=
   match c.op with
   | .Op_MemRead      => true
-  | .Op_MemWrite     => true
   | .Op_MemWriteBE _ => true
   | op               => OpSupported op
 
@@ -209,35 +206,20 @@ theorem nodeAdmittedB_iff (c : DenseNodeCert) : nodeAdmittedB c = true ↔ NodeA
   unfold nodeAdmittedB NodeAdmitted
   cases c.op <;> simp [OpSupported]
 
-/- the plain write is now ADMITTED -- it has an object primitive, an `applyOpM`
-   case and the proofs below.  Every operator that still has none is refused. -/
-#guard nodeAdmittedB { op := .Op_MemWrite, width := 32, deps := #[0,1,2,3], origin := 0 } = true
-#guard nodeAdmittedB { op := .Op_Sub, width := 32, deps := #[0,1], origin := 0 } = false
-#guard nodeAdmittedB { op := .Op_UDiv, width := 32, deps := #[0,1], origin := 0 } = false
+/- the checker refuses plain `Op_MemWrite` -/
+#guard nodeAdmittedB { op := .Op_MemWrite, width := 32, deps := #[0,1,2,3], origin := 0 } = false
 #guard nodeAdmittedB { op := .Op_MemRead, width := 32, deps := #[0,1,2], origin := 0 } = true
 #guard nodeAdmittedB { op := .Op_MemWriteBE 1, width := 32, deps := #[0,1,2,3], origin := 0 } = true
 #guard nodeAdmittedB { op := .Op_SRA, width := 32, deps := #[0,1], origin := 0 } = true
 #guard nodeAdmittedB { op := .Op_Sub, width := 32, deps := #[0,1], origin := 0 } = false
 
 /-- **`Op_MemWrite` is refused.** -/
-/-- **Successor to `NodeAdmitted_ne_memWrite`.**  That theorem said an admitted
-node is never a plain `Op_MemWrite`, and it was true while the operator had no
-object primitive and no `applyOpM` case.  Both now exist and are proved, so the
-exclusion is WITHDRAWN -- not relaxed: what replaced it is this classification,
-which is what the exclusion was ever used for.  Its one consumer,
-`admits_slot_width`, needs "a node whose RESULT is scalar is not a write", and
-that is now read off the TYPING (`nodeTy_bv_ne_write`), which is a stronger
-place to get it from than admission.
-
-Every operator outside these four is still refused, by `OpSupported`. -/
-theorem NodeAdmitted_classify {c : DenseNodeCert} (h : NodeAdmitted c) :
-    OpSupported c.op = true ∨ c.op = .Op_MemRead ∨ c.op = .Op_MemWrite
-      ∨ ∃ bw, c.op = .Op_MemWriteBE bw := h
-
-/-- The plain write really is admitted now, which is the statement the old
-exclusion theorem denied. -/
-theorem NodeAdmitted_memWrite {c : DenseNodeCert} (h : c.op = .Op_MemWrite) :
-    NodeAdmitted c := Or.inr (Or.inr (Or.inl h))
+theorem NodeAdmitted_ne_memWrite {c : DenseNodeCert} (h : NodeAdmitted c) :
+    c.op ≠ .Op_MemWrite := by
+  rcases h with h | h | ⟨bw, h⟩
+  · intro hc; rw [hc] at h; simp [OpSupported] at h
+  · intro hc; rw [hc] at h; exact absurd h (by simp)
+  · intro hc; rw [hc] at h; exact absurd h (by simp)
 
 /-- …and so are the five refused scalar operators, by `OpSupported`. -/
 theorem NodeAdmitted_ne_sub {c : DenseNodeCert} (h : NodeAdmitted c) :
@@ -283,8 +265,51 @@ theorem rom_not_admitted_write : ¬ MemImg.FullTable 5 (MemImg.ofMemConst 32 #[1
 #print axioms depIsMem_false_of_supported
 #print axioms opKind_isMem_of_supported
 #print axioms nodeSlot_slotIsMem
-#print axioms NodeAdmitted_classify
-#print axioms NodeAdmitted_memWrite
+/-! ### The EXTENDED admission, for the route that implements the plain write
+
+`NodeAdmitted`, `nodeAdmittedB` and `NodeAdmitted_ne_memWrite` above are
+UNCHANGED and keep their exact meanings: an operator with no object primitive
+and no `applyOpM` case is still excluded by them, and every theorem stated about
+them still says what it said.
+
+`Op_MemWrite` now HAS both, so a strictly larger predicate is defined beside the
+original rather than in place of it.  Nothing is renamed away: a caller that
+wants the original contract asks for `NodeAdmitted` and gets the original
+exclusion with it. -/
+
+def NodeAdmittedW (c : DenseNodeCert) : Prop :=
+  NodeAdmitted c ∨ c.op = .Op_MemWrite
+
+def nodeAdmittedWB (c : DenseNodeCert) : Bool :=
+  match c.op with
+  | .Op_MemWrite => true
+  | _            => nodeAdmittedB c
+
+theorem NodeAdmitted_toW {c : DenseNodeCert} (h : NodeAdmitted c) :
+    NodeAdmittedW c := Or.inl h
+
+theorem nodeAdmittedWB_iff (c : DenseNodeCert) :
+    nodeAdmittedWB c = true ↔ NodeAdmittedW c := by
+  unfold nodeAdmittedWB NodeAdmittedW NodeAdmitted nodeAdmittedB
+  cases c.op <;> simp [OpSupported]
+
+/-- The extension is EXACTLY the plain write: everything else that was refused
+still is. -/
+theorem NodeAdmittedW_ne_sub {c : DenseNodeCert} (h : NodeAdmittedW c) :
+    c.op ≠ .Op_Sub := by
+  rcases h with h | h
+  · exact NodeAdmitted_ne_sub h
+  · intro hc; rw [hc] at h; exact absurd h (by simp)
+
+#guard nodeAdmittedWB { op := .Op_MemWrite, width := 32, deps := #[0,1,2,3], origin := 0 } = true
+#guard nodeAdmittedWB { op := .Op_Sub, width := 32, deps := #[0,1], origin := 0 } = false
+#guard nodeAdmittedWB { op := .Op_UDiv, width := 32, deps := #[0,1], origin := 0 } = false
+/- and the ORIGINAL predicate still refuses the plain write -/
+#guard nodeAdmittedB { op := .Op_MemWrite, width := 32, deps := #[0,1,2,3], origin := 0 } = false
+
+#print axioms NodeAdmitted_ne_memWrite
+#print axioms nodeAdmittedWB_iff
+#print axioms NodeAdmittedW_ne_sub
 #print axioms nodeAdmittedB_iff
 #print axioms writeInRange_of_FullTable
 #print axioms writeInRange_pico
