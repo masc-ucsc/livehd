@@ -9413,3 +9413,83 @@ BTA with the design static and exactly edges/input/state dynamic; annotation
 erasure and proved specialisation; production arity-3 residual checking at its
 returned bound; whole PicoRV32 generation and execution with genuine transitions
 and phase metrics.  PicoRV32 **BLOCKED**; matrix **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.49 — BTA, proved specialization and the arity-3 residual, on the MEMORY entry
+
+`LeanSemanticPrimitives/Projection/MemProjection.lean` (new, builds clean,
+12 executed guards).
+
+### Binding time: design static, exactly edges/input/state dynamic
+
+```
+hwMemA = bta hwMemP hwMemInl [.stat, .dyn, .dyn, .dyn] 200
+```
+
+the same division the scalar route uses, on the memory entry.  Proved, not
+guarded:
+
+* `hwMemAP_entry_params` / `hwMemAP_entry` — the entry's division really is
+  `[.stat, .dyn, .dyn, .dyn]`: ONE static argument (the certificate) and three
+  dynamic ones (edges, input, state), in that order;
+* `hwMemAP_erases : eraseProgram hwMemAP = hwMemP` — **annotation erasure**, via
+  `bta_erases`: the annotated program is the memory interpreter with annotations
+  ON it, not a different program;
+* `hwMemAP_wf` — via `bta_sound`.
+
+Both kernel reductions need the raised heartbeat budget, as the scalar ones do.
+
+### Proved specialization
+
+`Hw.specialize_correct_of` bakes in `encState`/`ResultRel`, which are the
+memory-FREE codecs, so it cannot be instantiated here.
+`specializeFour_correct_of` is the same proof with the static value, the three
+dynamic values and the answer left as `Val`s — the source/dynamic SPLIT is
+preserved exactly, pinned by the same `[.stat, .dyn, .dyn, .dyn]`.  The original
+is untouched.
+
+`memEntry_unique` turns `admits_run_full`'s existence statement into the `iff`
+the specializer consumes: `Eval_det` makes the value the memory entry produces
+the ONLY one.
+
+* **`projectMemDesign_correct` — the first Futamura projection on the memory
+  entry.**  Specializing the memory interpreter to a design yields a residual
+  that, run on the three dynamic arguments of one cycle, computes exactly what
+  the shared reference semantics computes, as an `iff` over `Eval` with no fuel
+  in the conclusion.  The specialization fuel enters only through
+  `projectMemDesign D = .ok R`.
+
+### Production arity-3 residual checking, at its returned bound
+
+The residual passes the **same** production checker, `Hw.checkResidual`,
+unchanged: one function, entry 0, **arity 3**, in the fragment, with the bound
+it returns.  `MemSimulator`/`MemSimWF`/`mkMemSim` mirror the scalar bundle, with
+`memFree` replaced by `admitsB`.
+
+* `runMemSim_correct` — for an honest bundle on a `runtimeFullOKB`-accepted
+  state, the run TERMINATES within `sim.bound` (`.outOfFuel` unreachable, via
+  `checkResidual_complete`), decodes through `StateM.decResultM`, agrees with
+  `Compiler.interpretDesign`, and leaves a state passing the same policy.
+
+### Executed, with genuine memory transitions through the RESIDUAL
+
+`mixedDesign` at `initState` (word `k` holds `k + 1`): address 20 holds 21,
+ANDed with `0xF` is 5, and the enabled write stores 5.
+
+| control | result |
+|---|---|
+| one cycle, clock firing, mask `0xFFFFFFFF` | word 20: **21 → 5** |
+| same edge, mask 0 | image EXACTLY unchanged |
+| quiet clock, write enabled | image EXACTLY unchanged |
+| two cycles, second on the state the first returned | word 20 stays 5, and `stateFullOKB` holds on BOTH returned states |
+| the residual itself | `funs.map arity == [3]` — the design is gone |
+
+Axioms: `propext`, `Classical.choice`, `Quot.sound` — no `sorryAx`.
+
+### Still open
+
+Whole PicoRV32 generation and execution with phase metrics; wiring the
+readiness lines into a production DCERT2 driver that preserves imported
+initialised contents, actual-size ROM bounds/defaults and
+reset/async/clock/component metadata and refuses unsupported initialisation.
+PicoRV32 **BLOCKED**; matrix **12 YES / 11 NO / 37 BLOCKED**.  No whole-unit
+admission credit follows from any fixture or proof compile here.
