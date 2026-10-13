@@ -35,7 +35,12 @@ admitted node is never it.  Nothing is admitted by default; `OpSupported`,
 
 ## The write's range obligation
 
-`WriteInRange` names it rather than assuming it away, and
+`WriteInRange` is a STANDALONE shape lemma about one image and one address: it
+names the obligation and `writeInRange_of_FullTable` discharges it from the
+admitted shape.  It is NOT the premise the node fold carries — that is
+`HwMem.WriteAddrFits`, which is stated over the geometry of the witness the
+interpreter actually holds and is required only where an ENABLED write needs
+it.  Nothing here claims the obligation is discharged for a traversal.
 `writeInRange_of_FullTable` discharges it from the admitted shape:
 a `FullTable aw` image with an `aw`-bit address.  That is the real PicoRV32
 shape (`aw = 5`, `dw = 32`), and `MemImg.writeBE_FullTable` shows it survives
@@ -225,8 +230,10 @@ theorem NodeAdmitted_ne_sub {c : DenseNodeCert} (h : NodeAdmitted c) :
 /-! ## 4. The write's range obligation, named and discharged from shapes -/
 
 /-- The obligation an admitted WRITE node carries: the image it updates holds
-the address it is given.  Named here so it is visible, and discharged below
-from the admitted table shape rather than assumed. -/
+the address it is given.  Stated for ONE image and ONE address, and discharged
+below from that image's admitted table shape.  The fold's own premise is
+`HwMem.WriteAddrFits`; this lemma is what makes that premise dischargeable, not
+a claim that any traversal has discharged it. -/
 def WriteInRange (m : MemImg) (a : BV) : Prop := MemImg.InRange m (bv_uint a)
 
 /-- **Discharged from the admitted shape**: a full `2 ^ aw` table and an

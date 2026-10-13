@@ -83,6 +83,71 @@ theorem InRange_of_FullTable {aw : Nat} {m : MemImg} (h : FullTable aw m)
 @[simp] theorem zeroImg_FullTable (aw dw : Nat) : FullTable aw (zeroImg aw dw) := by
   simp [FullTable, zeroImg]
 
+/-- The same, for an address NO WIDER than the table's: `2 ^ a.width ≤ 2 ^ aw`.
+This is the form the node fold needs, because a certificate may legitimately
+drive a narrow address into a wider table. -/
+theorem InRange_of_FullTable_le {aw : Nat} {m : MemImg} (h : FullTable aw m)
+    {a : BV} (hw : a.width ≤ aw) : InRange m (bv_uint a) := by
+  have hnn : 0 ≤ bv_uint a := Hw.bv_uint_nonneg a
+  have hlt : bv_uint a < 2 ^ a.width := by
+    unfold bv_uint
+    exact Int.emod_lt_of_pos _ (Hw.two_pow_pos a.width)
+  refine ⟨hnn, ?_⟩
+  rw [h]
+  have hc : ((bv_uint a).toNat : Int) < ((2 ^ a.width : Nat) : Int) := by
+    rw [Int.toNat_of_nonneg hnn, natCast_two_pow]
+    exact hlt
+  have hmono : (2 : Nat) ^ a.width ≤ 2 ^ aw := Nat.pow_le_pow_right (by omega) hw
+  omega
+
+/-! ### Denotation does NOT determine geometry
+
+The reason the write-range obligation must be stated over the ACTUAL witness
+image and never over "every image with this denotation": two images can denote
+exactly the same function and still disagree about which addresses they hold. -/
+
+/-- No words at all, with a 32-bit zero default. -/
+def emptyZero : MemImg := ⟨[], mk_bv 32 0⟩
+
+/-- An image whose default and every word are the same value reads that value
+at EVERY address, in range or not. -/
+private theorem get_const {m : MemImg} {z : BV} (hd : m.dflt = z)
+    (hw : ∀ w ∈ m.words, w = z) (x : Int) : get m x = z := by
+  unfold get
+  split
+  · cases h : m.words[x.toNat]? with
+    | none   => simpa using hd
+    | some v =>
+        have hmem : v ∈ m.words := by
+          obtain ⟨hlt, hv⟩ := List.getElem?_eq_some_iff.mp h
+          exact hv ▸ List.getElem_mem hlt
+        simpa using hw v hmem
+  · exact hd
+
+/-- It denotes exactly the full 32-word zero table — both are constantly zero. -/
+theorem emptyZero_denote : denote emptyZero = denote (zeroImg 5 32) := by
+  funext x
+  show get emptyZero x = get (zeroImg 5 32) x
+  rw [get_const (z := mk_bv 32 0) rfl (by simp [emptyZero]) x,
+      get_const (z := mk_bv 32 0) rfl (fun w hw => List.eq_of_mem_replicate hw) x]
+
+/-- …yet it holds NO address. -/
+theorem emptyZero_no_inRange (x : Int) : ¬ InRange emptyZero x := by
+  intro h
+  obtain ⟨-, hlt⟩ := h
+  simp [emptyZero] at hlt
+
+/-- **The counterexample, as a theorem.**  Equal denotation, opposite geometry.
+Any premise quantified over every image with a given denotation therefore fails
+for the empty one, however well shaped the image the interpreter actually
+holds. -/
+theorem denote_does_not_determine_geometry :
+    ∃ m₁ m₂ : MemImg,
+      denote m₁ = denote m₂ ∧ FullTable 5 m₂ ∧ ¬ FullTable 5 m₁
+      ∧ ∀ x, ¬ InRange m₁ x :=
+  ⟨emptyZero, zeroImg 5 32, emptyZero_denote, zeroImg_FullTable 5 32,
+   by simp [FullTable, emptyZero], emptyZero_no_inRange⟩
+
 /-! ## 2. A ROM is not a mutable table
 
 `ofMemConst` is `contents.size` long — the bound the reference itself uses — so
@@ -185,6 +250,9 @@ example : get (writeBE 32 picoImg (mk_bv 5 7) (mk_bv 32 0xFFFFFFFF) (mk_bv 4 1) 
     (bv_uint (mk_bv 5 7)) = mk_bv 32 0xFF := by decide
 
 #print axioms InRange_of_FullTable
+#print axioms InRange_of_FullTable_le
+#print axioms emptyZero_denote
+#print axioms denote_does_not_determine_geometry
 #print axioms ofMemConst_FullTable_iff
 #print axioms romNotFull_example
 #print axioms rom_write_outOfRange_refused

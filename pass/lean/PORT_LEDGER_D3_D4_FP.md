@@ -8503,3 +8503,96 @@ generic `mainM` adequacy against `StateRelR`/`ResultRelR`.  Public support stays
 refused — `SourceSupported`, `OpSupported` and `memFree` are untouched and no
 design is admitted by the public route.  PicoRV32 stays **BLOCKED**; matrix
 unchanged at **12 YES / 11 NO / 37 BLOCKED** (FP 2 YES / 10 BLOCKED).
+
+---
+
+## §63.36 — The write-range premise was vacuous; geometry now rides the actual witness
+
+### The defect, as a theorem
+
+`NodeWriteRange` quantified over **every** `MemImg` with a given DENOTATION.
+Denotation does not determine table length, so that premise was strictly
+stronger than anything the interpreter's own image supplies — and it was FALSE
+at the very design the module instantiated.  `MemImg.emptyZero` (no words,
+32-bit zero default) denotes **exactly** `zeroImg 5 32` and holds no address at
+all.  `evalNodesM_agree` and `sourcesThenNodes[_resolved]` assumed it for every
+node, so the fold was **vacuous** on `mixedDesign`.  Checker acceptance,
+`nodeAdmittedB` and the kind guards did not instantiate it, and I had presented
+them as if they did.
+
+That is no longer prose: `MemImg.denote_does_not_determine_geometry` proves
+
+```
+∃ m₁ m₂, denote m₁ = denote m₂ ∧ FullTable 5 m₂ ∧ ¬ FullTable 5 m₁
+         ∧ ∀ x, ¬ InRange m₁ x
+```
+
+A second defect went with it: the range premise was imposed on reads, scalars
+and DISABLED writes, none of whose proofs need it.
+
+### The fix — geometry on the ACTUAL witness
+
+`PrefixRelM` gains a slot assignment `G : Nat → Option Nat` and a fourth field
+
+```
+geom : ∀ k h g, (ss[k]'h) = .img g → ∀ aw, G k = some aw → MemImg.FullTable aw g
+```
+
+`G k = some aw` means slot `k` holds a MUTABLE table covering every `aw`-bit
+address; `G k = none` means no such claim — a scalar slot, or a **ROM**, whose
+table is its actual `contents.size` and which therefore cannot be written at
+all, because the write step needs `G d0 = some aw` to reach `FullTable`.
+
+* **Initialised at the sources.**  `srcGeomOf` reads the geometry off the
+  source descriptors; `StateShapeOK` is an explicit premise that the incoming
+  state's images have the geometry the certificate declares; and
+  `memDesc_of_sourceOK` extracts from `checkSource` — the real checker — that a
+  `memImg` source's `aw` **is** the declared memory's.  `srcGeom_of_StateShape`
+  joins them.
+* **Preserved at each node.**  Scalars and reads produce `.bv`, so the field is
+  vacuous; the write produces `.img` and `MemImg.writeBE_FullTable` carries the
+  shape across it.  `prefixRelM_snoc` re-establishes all four fields.
+* **Split by need.**  `WritePropagates` (every write: the output slot inherits
+  dep 0's geometry) is static.  `WriteAddrFits` — the only part mentioning an
+  address — is **gated on `bv_nonzero` of the byte-enable**, so reads, scalars
+  and disabled writes neither consume nor must satisfy it.  The disabled branch
+  is proved without any range condition and returns the image exactly.
+* `MemImg.InRange_of_FullTable_le` supplies the range from `a.width ≤ aw`, the
+  form a certificate driving a narrow address into a wider table needs.
+
+### Instantiated, not merely stated
+
+`mixed_fold_resolved` discharges **every** premise on the checker-accepted
+`mixedDesign` and produces the resolved `Eval` on `hwMemP`:
+`designCertWF_of_semwf` from the checker, `StateShapeOK` from the state,
+`mixedG_src` against the sources, `mixedG_prop` across the write, and
+`mixedG_fits` from `mixed_addr_width` (the address is `input 0` at width 5, for
+every input and state).  `mixed_fold_resolved_zero` is the full Pico-shaped
+all-zero state — the one the broken premise could not be satisfied at — and
+`mixed_fold_resolved_init` the initialised one.
+
+Twelve `#guard`s execute it.  On an initialised table (word `k` holds `k+1`):
+address 20 reads 21, the intervening scalar `Op_And` with `0xF` gives 5, and
+the ENABLED byte-enabled write stores 5 — so **the word at 20 changes from 21
+to 5**, address 19 still holds 20, and the table is still 32 words.  With a
+zero byte-enable the image comes back **exactly** equal to the original.
+
+### Headers corrected
+
+The fold's header now records the defect and the split premise.  The nodes
+module no longer implies its `WriteInRange` discharges a traversal's
+obligation: it is a standalone one-image/one-address shape lemma, and the
+fold's premise is `WriteAddrFits`.
+
+### Axioms
+
+`propext`, `Quot.sound`, `Classical.choice` — Lean's own.  No **new unsafe**
+axiom in any module.
+
+### Still owed
+
+`mkOutputs`, `flopNexts` and `memNext(s)` on active **and** quiet domains, then
+generic `mainM` adequacy against `StateRelR`/`ResultRelR`.  Public support stays
+refused: `SourceSupported`, `OpSupported` and `memFree` are untouched and
+`Op_MemWrite`/`Op_Sub` remain refused.  PicoRV32 stays **BLOCKED**; matrix
+unchanged at **12 YES / 11 NO / 37 BLOCKED**.
