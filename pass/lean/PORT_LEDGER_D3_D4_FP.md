@@ -8148,3 +8148,71 @@ clock/reset/async metadata is still undefined.  Until it holds, support stays
 refused: `SourceSupported`, `OpSupported` and `memFree` are untouched, the
 public route still refuses memory-bearing designs, and PicoRV32 stays
 **BLOCKED**.  Matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.32 — Operator preservation: `applyOpM` against `eval_op_cert`
+
+New module `formal/lean/LeanSemanticPrimitives/Projection/HardwareMemOp.lean`
+(311 lines), built clean, 2 `#guard`s, **0 errors**, no `sorry`/admit/new axiom.
+Three disjoint obligations, kept apart because they rest on different premises.
+
+**Delegation.**  `OpSupported_code_ne` decides, over the operator type, that no
+supported operator has opcode 26 or 28, so both guards in `applyOpM` take their
+false branch and `applyOp_agree` is replayed in the extended program by `lift`.
+The scalar work behind it — SHL/SRA/Sext, the mux family, the comparison widths
+— is **not re-proved and not re-stated**; it is the same code running.
+`applyOpM_scalar_cert` then restates the result against the reference's single
+`eval_op_cert` via `eval_op_cert_bv`.
+
+**`Op_MemRead` (26).**  `applyOpM_memRead` composes three slot reads with
+`MemImg.evalPrim_memRead`.  The result is a BIT VECTOR, which is what
+`DirectCheck.opKind` says: only the write operators produce an image.
+
+**`Op_MemWriteBE` (28).**  `applyOpM_memWriteBE` composes four slot reads and
+the certificate payload `byte_w` with `MemImg.evalPrim_memWriteBE`;
+`applyOpM_memWriteBE_denote` supplies the reference equality through
+`denote_writeBE`.  `applyOpM_memWriteBE_disabled` covers the disabled write
+**without** a range premise and shows the reference memory is unchanged too.
+
+### The premises, stated rather than discharged
+
+* **`InRange m (bv_uint a)` is a real premise of the ENABLED write.**  Out of
+  range the finite table is deliberately not reference-equal: `cert_mem_write_be`
+  updates the function at any address, while the primitive REFUSES
+  (`valMemWriteBE_refuses_outOfRange`, executed in `HardwareMemChecks`).  A
+  refusal is sound — it cannot answer wrongly — but it **is not agreement**, so
+  the admission policy still owes this bound.  Nothing here weakens that.
+* **Operand kinds are premises, in the shape `DirectCheck.depIsMem` already
+  fixes**: position 0 of a memory operator is an image, every other position a
+  bit vector.  They are stated as equations on the slot list, not assumed
+  through a coercion, so a memory-valued operand in a scalar position cannot be
+  silently read as a `BV`.  `DirectCheck` does already carry `sourceKind`,
+  `opKind`, `slotKind`, `slotIsMem` and `depIsMem` — so the kind discipline is
+  **not** purely prose on the certificate side; what is still missing is the
+  check that binds it to the interpreter's slot list, which is the next step.
+* `OpSupported`, `SourceSupported` and `memFree` are untouched; no design is
+  admitted.
+
+### Execution
+
+`HardwareMemChecks` already runs both memory opcodes through `hwMemP` — enabled
+and disabled reads, `byte_w = 1` (PicoRV32's bit-enable shape) and `byte_w = 8`
+(byte lanes) writes read back through the same dispatch, the enabled
+out-of-range refusal, and the malformed image.  What it did not run is OPERATOR
+delegation, so two guards here pin that: `Op_And` (code 7) and `Op_SRA` (code
+20, the operator whose correctness repair must not be lost) both reach the
+original `applyOp` through `applyOpM` and answer `eval_op`.
+
+### Axioms
+
+`propext`, `Quot.sound` — Lean's own.  No **new unsafe** axiom: no `sorryAx`,
+no `Lean.ofReduceBool`, no `Lean.trustCompiler`.
+
+### Next
+
+The typed slot relation carried through `mkSourcesM`/`evalNodesM` (which is
+where `SlotValsM`/`DirectCheck.slotKind` must be tied together and the kind
+policy stops being prose); `mkOutputs`/`flopNexts`/`memNext(s)` on active **and**
+quiet domains; generic `mainM` adequacy against `interpretDesign`.  PicoRV32
+stays **BLOCKED**; matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
