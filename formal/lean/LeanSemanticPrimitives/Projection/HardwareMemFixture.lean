@@ -14,7 +14,7 @@ theorem's premises DISCHARGED rather than merely computed against:
 The returned `ResultM` is decoded and its state fed to a SECOND `mainM` step,
 with reachable-state preservation supplied by the theorem itself.
 -/
-import LeanSemanticPrimitives.Projection.HardwareMemMain
+import LeanSemanticPrimitives.Projection.HardwareMemAdmit
 
 namespace Projection
 namespace HwMem
@@ -60,6 +60,35 @@ def fullDesign : DesignCert :=
 /- the ROM keeps its ACTUAL contents.size, which is not a full 2^2 table -/
 #guard (MemImg.ofMemConst 32 #[7, 8, 9]).words.length == 3
 #guard !(decide (MemImg.FullTable 2 (MemImg.ofMemConst 32 #[7, 8, 9])))
+
+/-! ## 1b. …and through the NEW static admission checker
+
+`fullDesign` is admitted by `admitsB`, and the general soundness lemmas are
+APPLIED to it — theorems, not `#guard` evaluations.  The geometry the checker
+infers is exactly the `fullG` used below, so the hand-written assignment and
+the checked one agree. -/
+
+theorem fullDesign_admits : admitsB fullDesign = true := by decide +kernel
+
+theorem fullDesign_semwf' : Direct.DesignSemWF fullDesign :=
+  admits_semwf fullDesign_admits
+
+theorem fullDesign_nextImgGeom : NextImgGeomOK fullDesign (geomAt fullDesign) :=
+  admits_nextImgGeom fullDesign_admits
+
+theorem fullDesign_geom_src :
+    ∀ k, k < fullDesign.sources.size → geomAt fullDesign k = srcGeomOf fullDesign k :=
+  admits_geom_src fullDesign_admits
+
+/-- The whole static bundle for `fullDesign`, from the checker. -/
+theorem fullDesign_static : StaticPremises fullDesign :=
+  admits_static_premises fullDesign_admits
+
+/- the CHECKER's geometry is the one the fixture uses: a mutable table at slot
+   0, nothing claimed for the ROM at slot 1, and the write's result at slot 11 -/
+#guard geomAt fullDesign 0 == some 5
+#guard geomAt fullDesign 1 == none
+#guard geomAt fullDesign 11 == some 5
 
 /-! ## 2. Discharging the theorem's premises
 
@@ -341,6 +370,8 @@ private def eAll : ClockEdges := #[true,  true]
              | none    => false)
         | none    => false)
 
+#print axioms fullDesign_admits
+#print axioms fullDesign_static
 #print axioms fullDesign_semwf
 #print axioms fullG_src
 #print axioms fullG_nextImg

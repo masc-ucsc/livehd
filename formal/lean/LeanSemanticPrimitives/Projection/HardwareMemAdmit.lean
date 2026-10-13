@@ -76,28 +76,29 @@ def bvWidthOf : Option SlotTy → Nat
   | some (.bv w) => w
   | _            => 0
 
-/-- One node's type, from its dependencies' types. -/
+/-- One node's type, from its dependencies' types.  The lookup is consulted
+ONLY through `c.deps.toList.map ty`, which makes congruence immediate. -/
 def nodeTy (ty : Nat → Option SlotTy) (c : DenseNodeCert) : Option SlotTy :=
-  match c.op, c.deps.toList with
-  | .Op_MemRead, [m, a, en] =>
-      if isBvTy (ty a) && isBvTy (ty en) then
-        match ty m with
-        | some (.tbl aw _) => if bvWidthOf (ty a) ≤ aw then some (.bv c.width) else none
+  if !nodeAdmittedB c then none else
+  match c.op, c.deps.toList.map ty with
+  | .Op_MemRead, [tm, ta, ten] =>
+      if isBvTy ta && isBvTy ten then
+        match tm with
+        | some (.tbl aw _) => if bvWidthOf ta ≤ aw then some (.bv c.width) else none
         | some (.rom _ _)  => some (.bv c.width)
         | _                => none
       else none
-  | .Op_MemWriteBE bw, [m, a, d, be] =>
-      if isBvTy (ty a) && isBvTy (ty d) && isBvTy (ty be) then
-        match ty m with
+  | .Op_MemWriteBE bw, [tm, ta, td, tbe] =>
+      if isBvTy ta && isBvTy td && isBvTy tbe then
+        match tm with
         | some (.tbl aw dw) =>
-            if bvWidthOf (ty a) ≤ aw && c.width == dw && bvWidthOf (ty d) == dw
-               && 0 < bw && dw ≤ bvWidthOf (ty be) * bw
+            if bvWidthOf ta ≤ aw && c.width == dw && bvWidthOf td == dw
+               && 0 < bw && dw ≤ bvWidthOf tbe * bw
             then some (.tbl aw dw) else none
         | _ => none
       else none
-  | op, ds =>
-      if OpSupported op && ds.all (fun d => isBvTy (ty d))
-      then some (.bv c.width) else none
+  | op, tys =>
+      if OpSupported op && tys.all isBvTy then some (.bv c.width) else none
 
 /-- One node's step: type it from the slots already inferred, then APPEND.
 Structural in the node list, so the checker reduces in the kernel. -/
@@ -258,6 +259,227 @@ theorem admits_nextImgGeom {D : DesignCert} (h : admitsB D = true) :
           simp only [Bool.and_eq_true, beq_iff_eq] at hthis
           rw [hthis.1]
 
+/-! ### The per-node recurrence
+
+`nodeTy` reads only its own dependencies, so the lookup it was given during the
+walk and the finished array agree on everything it consults.  That is what
+turns the fold into a per-node equation. -/
+
+theorem nodeTy_congr {ty ty' : Nat → Option SlotTy} {c : DenseNodeCert}
+    (h : ∀ d ∈ c.deps.toList, ty d = ty' d) : nodeTy ty c = nodeTy ty' c := by
+  unfold nodeTy
+  rw [List.map_congr_left h]
+
+theorem inferStep_size {ts ts' : Array SlotTy} {c : DenseNodeCert}
+    (h : inferStep ts c = some ts') : ts'.size = ts.size + 1 := by
+  unfold inferStep at h
+  cases hn : nodeTy (fun d => ts[d]?) c with
+  | none   => rw [hn] at h; simp at h
+  | some t =>
+      rw [hn] at h
+      simp only [Option.map_some, Option.some.injEq] at h
+      subst h; simp
+
+theorem infer_foldl_size :
+    ∀ (ns : List DenseNodeCert) (init ts : Array SlotTy),
+      ns.foldl (fun acc c => acc.bind (fun t => inferStep t c)) (some init) = some ts →
+      ts.size = init.size + ns.length
+  | [],      init, ts, h => by
+      simp only [List.foldl_nil, Option.some.injEq] at h; subst h; simp
+  | c :: cs, init, ts, h => by
+      simp only [List.foldl_cons, Option.bind_some] at h
+      cases hs : inferStep init c with
+      | none   => rw [hs, infer_foldl_none] at h; simp at h
+      | some t =>
+          rw [hs] at h
+          have hsz := inferStep_size hs
+          rw [infer_foldl_size cs t ts h, hsz, List.length_cons]
+          omega
+
+/-- **The per-node equation.**  Node `j`'s inferred type is `nodeTy` applied to
+it against the FINISHED array, provided its dependencies name earlier slots. -/
+theorem infer_foldl_node :
+    ∀ (ns : List DenseNodeCert) (init ts : Array SlotTy),
+      ns.foldl (fun acc c => acc.bind (fun t => inferStep t c)) (some init) = some ts →
+      ∀ (j : Nat) (c : DenseNodeCert), ns[j]? = some c →
+        (∀ d ∈ c.deps.toList, d < init.size + j) →
+        nodeTy (fun d => ts[d]?) c = ts[init.size + j]?
+  | [],       _,    _,  _, j, _, hj, _ => by simp at hj
+  | c0 :: cs, init, ts, h, j, c, hj, hb => by
+      simp only [List.foldl_cons, Option.bind_some] at h
+      cases hs : inferStep init c0 with
+      | none   => rw [hs, infer_foldl_none] at h; simp at h
+      | some t =>
+          rw [hs] at h
+          have hsz := inferStep_size hs
+          have hpre := infer_foldl_prefix cs t ts h
+          cases j with
+          | zero =>
+              have hc0 : c0 = c := by simpa using hj
+              subst hc0
+              -- the pushed entry IS `nodeTy` against the accumulator
+              have hx : nodeTy (fun d => init[d]?) c0 = t[init.size]? := by
+                unfold inferStep at hs
+                cases hn : nodeTy (fun d => init[d]?) c0 with
+                | none   => rw [hn] at hs; simp at hs
+                | some x =>
+                    rw [hn] at hs
+                    simp only [Option.map_some, Option.some.injEq] at hs
+                    subst hs
+                    simp
+              have hcong : nodeTy (fun d => ts[d]?) c0 = nodeTy (fun d => init[d]?) c0 := by
+                refine nodeTy_congr ?_
+                intro d hd
+                have hdlt : d < init.size := by simpa using hb d hd
+                rw [hpre d (by omega), (inferStep_prefix hs).2 d hdlt]
+              rw [hcong, hx, Nat.add_zero]
+              exact (hpre init.size (by omega)).symm
+          | succ q =>
+              have hq : cs[q]? = some c := by simpa using hj
+              have hb' : ∀ d ∈ c.deps.toList, d < t.size + q := by
+                intro d hd
+                have := hb d hd
+                omega
+              have := infer_foldl_node cs t ts h q c hq hb'
+              rw [this]
+              congr 1
+              omega
+
+/-- …specialised to the real design: `init` is the source types, so the index
+is the node's own slot. -/
+theorem admits_node_ty {D : DesignCert} {ts : Array SlotTy}
+    (hts : inferTys D = some ts) (hwf : DesignCert.DesignCertWF D)
+    {j : Nat} {c : DenseNodeCert} (hc : D.nodes[j]? = some c) :
+    nodeTy (fun d => ts[d]?) c = ts[D.sources.size + j]? := by
+  have hlist : D.nodes.toList[j]? = some c := by rw [← hc]; simp
+  have hb : ∀ d ∈ c.deps.toList, d < (D.sources.map srcTy).size + j := by
+    intro d hd
+    simpa using hwf.depsBounded j c hc d hd
+  simpa using infer_foldl_node D.nodes.toList _ ts hts j c hlist hb
+
+/-! ### From a successful type to the static premises -/
+
+/-- A node that TYPES is an admitted node — `nodeTy` refuses anything
+`nodeAdmittedB` refuses, which is `Op_MemWrite`, `Op_Sub` and every other
+operator without an implementation. -/
+theorem nodeTy_admits {ty : Nat → Option SlotTy} {c : DenseNodeCert} {t : SlotTy}
+    (h : nodeTy ty c = some t) : NodeAdmitted c := by
+  cases hb : nodeAdmittedB c with
+  | false =>
+      exfalso
+      unfold nodeTy at h
+      rw [hb] at h
+      simp at h
+  | true => exact (nodeAdmittedB_iff c).mp hb
+
+/-- A WRITE that types consumed a MUTABLE image at operand 0 and returns that
+image's own geometry — which is what `WritePropagates` needs. -/
+theorem nodeTy_write_geom {ty : Nat → Option SlotTy} {c : DenseNodeCert}
+    {bw d0 d1 d2 d3 : Nat} {t : SlotTy}
+    (hop : c.op = .Op_MemWriteBE bw) (hdeps : c.deps.toList = [d0, d1, d2, d3])
+    (h : nodeTy ty c = some t) :
+    ∃ aw dw, t = .tbl aw dw ∧ ty d0 = some (.tbl aw dw) := by
+  have hb : nodeAdmittedB c = true := by
+    cases hbb : nodeAdmittedB c with
+    | false => exfalso; unfold nodeTy at h; rw [hbb] at h; simp at h
+    | true  => rfl
+  unfold nodeTy at h
+  rw [hb] at h
+  simp only [Bool.not_true, Bool.false_eq_true, if_false] at h
+  rw [hop, hdeps] at h
+  simp only [List.map_cons, List.map_nil] at h
+  split at h
+  · split at h
+    · rename_i aw' dw' heq
+      split at h
+      · simp only [Option.some.injEq] at h
+        exact ⟨aw', dw', h.symm, heq⟩
+      · simp at h
+    · simp at h
+  · simp at h
+
+/-! ### The general checker-to-static-premises theorems -/
+
+theorem admitsB_size {D : DesignCert} {ts : Array SlotTy}
+    (h : admitsB D = true) (hts : inferTys D = some ts) : ts.size = D.numSlots := by
+  unfold admitsB at h
+  rw [hts] at h
+  simp only [Bool.and_eq_true, beq_iff_eq] at h
+  exact h.2.1
+
+/-- **Every node of an admitted design is an admitted node.** -/
+theorem admits_nodeAdmitted {D : DesignCert} (h : admitsB D = true) :
+    ∀ c ∈ D.nodes.toList, NodeAdmitted c := by
+  intro c hc
+  obtain ⟨ts, hts⟩ := admitsB_infer h
+  obtain ⟨j, hj⟩ := array_mem_getElem? hc
+  have hjlt : j < D.nodes.size := Direct.lt_of_getElem?_some hj
+  have hlt : D.sources.size + j < ts.size := by
+    rw [admitsB_size h hts]; unfold DesignCert.numSlots; omega
+  have hty := admits_node_ty hts (admits_wf h) hj
+  rw [Array.getElem?_eq_getElem hlt] at hty
+  exact nodeTy_admits hty
+
+/-- **A write's output slot inherits the image's geometry**, which is
+`WritePropagates` for the geometry the checker itself produced. -/
+theorem admits_writePropagates {D : DesignCert} (h : admitsB D = true) :
+    ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c →
+      WritePropagates D (geomAt D) j c := by
+  intro j c hc bw hop d0 hd0
+  obtain ⟨ts, hts⟩ := admitsB_infer h
+  have hsem := admits_semwf h
+  obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWriteBE_deps hsem hc hop
+  have hjlt : j < D.nodes.size := Direct.lt_of_getElem?_some hc
+  have hlt : D.sources.size + j < ts.size := by
+    rw [admitsB_size h hts]; unfold DesignCert.numSlots; omega
+  have hty := admits_node_ty hts (admits_wf h) hc
+  rw [Array.getElem?_eq_getElem hlt] at hty
+  obtain ⟨aw, dw, hres, hop0⟩ := nodeTy_write_geom hop hdeps hty
+  have he0 : e0 = d0 := by
+    have : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
+    rw [this] at hd0
+    exact (Option.some.inj hd0)
+  subst he0
+  unfold geomAt tyAt
+  rw [hts]
+  simp only [Option.bind_some]
+  rw [hop0, Array.getElem?_eq_getElem hlt, hres]
+
+/-- **The arity the interpreter requires follows from the arity the CHECKER
+already verified.**  `Direct.opArity` and `Hw.RequiredArity` agree wherever the
+latter demands anything, which is the nine fixed-arity operators. -/
+theorem arityOK_of_opArity {op : LGraphOp} {ds : List Nat}
+    (h : Direct.opArity op ds.length = true) : ArityOK op ds := by
+  unfold ArityOK
+  cases op <;> simp_all [Direct.opArity, RequiredArity]
+
+theorem admits_arity {D : DesignCert} (h : admitsB D = true) :
+    ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList := by
+  intro c hc
+  obtain ⟨j, hj⟩ := array_mem_getElem? hc
+  have hsh := opArity_of_semwf (admits_semwf h) hj
+  refine arityOK_of_opArity ?_
+  simpa using hsh
+
+/-- Everything `mainM_adequate_resolved` needs that is STATIC.  Only
+`WriteAddrFits` is absent: it is a runtime condition, derived from the inferred
+widths in the next increment and not asserted here. -/
+def StaticPremises (D : DesignCert) : Prop :=
+  DesignCert.DesignCertWF D
+  ∧ Direct.DesignSemWF D
+  ∧ (∀ k, k < D.sources.size → geomAt D k = srcGeomOf D k)
+  ∧ (∀ c ∈ D.nodes.toList, NodeAdmitted c)
+  ∧ (∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList)
+  ∧ (∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c →
+       WritePropagates D (geomAt D) j c)
+  ∧ NextImgGeomOK D (geomAt D)
+
+/-- **The static premises, from one Boolean check.** -/
+theorem admits_static_premises {D : DesignCert} (h : admitsB D = true) :
+    StaticPremises D :=
+  ⟨admits_wf h, admits_semwf h, admits_geom_src h, admits_nodeAdmitted h,
+   admits_arity h, admits_writePropagates h, admits_nextImgGeom h⟩
+
 /-! ## 4. The retained designs pass, and the refusals bite
 
 `mixedDesign` (§63.36) and `twoMemDesign` (§63.37) go through the NEW checker
@@ -355,23 +577,78 @@ def laneDesign : DesignCert :=
 #guard geomAt twoMemDesign 8 == some 5
 #guard geomAt twoMemDesign 9 == some 5
 
-/-! ### Soundness, and where it is NOT yet applied
+/-! ### Soundness, APPLIED to the retained designs
 
-The soundness theorems above are general and proved.  Applying them to a
-CONCRETE design needs `admitsB D = true` as a theorem, and neither `decide` nor
-`rfl` reduces `admitsB` to a literal — the fold over the node list does not
-evaluate in the kernel here.  So the concrete designs are currently carried by
-`#guard` (compiler evaluation), which is executed evidence but **not** a
-theorem.  Closing that is the first item of the next increment; it is not
-claimed now, and no theorem below depends on it.
+`admitsB` DOES reduce in the kernel — `decide +kernel` evaluates the structural
+fold.  An earlier version of this module said the fold "does not evaluate in
+the kernel"; that was wrong.  What had failed was default `decide`/`rfl`, which
+is a different thing and does not license the stronger claim. -/
 
-`#guard` evidence for the retained designs is above; the geometry the checker
-produces is below. -/
+theorem mixedDesign_admits : admitsB mixedDesign = true := by decide +kernel
+theorem twoMemDesign_admits : admitsB twoMemDesign = true := by decide +kernel
+theorem laneDesign_admits : admitsB laneDesign = true := by decide +kernel
+
+/-- The general soundness lemmas, applied — these are theorems about the
+designs, not `#guard` evaluations. -/
+theorem mixedDesign_semwf' : Direct.DesignSemWF mixedDesign :=
+  admits_semwf mixedDesign_admits
+
+theorem mixedDesign_nextImgGeom : NextImgGeomOK mixedDesign (geomAt mixedDesign) :=
+  admits_nextImgGeom mixedDesign_admits
+
+theorem mixedDesign_geom_src :
+    ∀ k, k < mixedDesign.sources.size → geomAt mixedDesign k = srcGeomOf mixedDesign k :=
+  admits_geom_src mixedDesign_admits
+
+theorem twoMemDesign_semwf' : Direct.DesignSemWF twoMemDesign :=
+  admits_semwf twoMemDesign_admits
+
+theorem twoMemDesign_nextImgGeom : NextImgGeomOK twoMemDesign (geomAt twoMemDesign) :=
+  admits_nextImgGeom twoMemDesign_admits
+
+theorem twoMemDesign_geom_src :
+    ∀ k, k < twoMemDesign.sources.size → geomAt twoMemDesign k = srcGeomOf twoMemDesign k :=
+  admits_geom_src twoMemDesign_admits
+
+theorem laneDesign_semwf : Direct.DesignSemWF laneDesign :=
+  admits_semwf laneDesign_admits
+
+theorem laneDesign_nextImgGeom : NextImgGeomOK laneDesign (geomAt laneDesign) :=
+  admits_nextImgGeom laneDesign_admits
+
+/-- **The whole static bundle, instantiated.**  Not a `#guard`: these are the
+premises `mainM_adequate_resolved` consumes, obtained from the checker. -/
+theorem mixedDesign_static : StaticPremises mixedDesign :=
+  admits_static_premises mixedDesign_admits
+theorem twoMemDesign_static : StaticPremises twoMemDesign :=
+  admits_static_premises twoMemDesign_admits
+theorem laneDesign_static : StaticPremises laneDesign :=
+  admits_static_premises laneDesign_admits
 
 #print axioms admits_semwf
 #print axioms admits_wf
 #print axioms admits_geom_src
 #print axioms admits_nextImgGeom
+#print axioms nodeTy_congr
+#print axioms infer_foldl_node
+#print axioms admits_node_ty
+#print axioms nodeTy_admits
+#print axioms nodeTy_write_geom
+#print axioms admits_nodeAdmitted
+#print axioms admits_writePropagates
+#print axioms arityOK_of_opArity
+#print axioms admits_arity
+#print axioms admits_static_premises
+#print axioms mixedDesign_static
+#print axioms twoMemDesign_static
+#print axioms laneDesign_static
+#print axioms mixedDesign_admits
+#print axioms twoMemDesign_admits
+#print axioms laneDesign_admits
+#print axioms mixedDesign_nextImgGeom
+#print axioms mixedDesign_geom_src
+#print axioms twoMemDesign_nextImgGeom
+#print axioms laneDesign_nextImgGeom
 
 end HwMem
 end Projection

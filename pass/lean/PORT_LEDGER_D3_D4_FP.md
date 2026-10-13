@@ -8925,3 +8925,57 @@ design with `byte_w = 1`, where a 4-bit mask cannot cover 32 data bits.
 `FullTable`/`StateShapeOK` still prove table length only.  `SourceSupported`,
 `OpSupported` and `memFree` are untouched.  PicoRV32 stays **BLOCKED**; matrix
 unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.42 — Kernel acceptance integrated, and the checker-to-static-premises bridge
+
+`HardwareMemAdmit.lean` and `HardwareMemFixture.lean` extended; both
+`PRODUCER_EXIT=0`, 0 errors, no unsafe axioms.
+
+### Two corrections
+
+* **`admitsB` DOES reduce in the kernel.**  §63.41 said "the fold over the node
+  list does not evaluate in the kernel".  That was wrong: `decide +kernel`
+  evaluates it.  What had failed was default `decide`/`rfl`, which is a
+  different thing and does not license the stronger claim.  The module text is
+  corrected and the acceptance lemmas are now THEOREMS:
+  `mixedDesign_admits`, `twoMemDesign_admits`, `laneDesign_admits`,
+  `fullDesign_admits`, each `propext` only.
+* **The `#guard` count in §63.41 was 24; the executable count is 22.**  Two of
+  the 24 were prose mentions, not commands.  Corrected.
+
+### The per-node recurrence
+
+`nodeTy` now consults its lookup ONLY through `c.deps.toList.map ty`, which
+makes `nodeTy_congr` immediate.  With `inferStep_size`, `infer_foldl_size`,
+`infer_foldl_prefix` and `infer_foldl_none`, `infer_foldl_node` turns the fold
+into a per-node equation, and `admits_node_ty` specialises it to the real
+design using `DepsBounded` for the topological bound.
+
+### `StaticPremises`, from one Boolean check
+
+`admits_static_premises : admitsB D = true → StaticPremises D` delivers **all
+seven** static antecedents of `mainM_adequate_resolved`:
+
+| premise | source |
+|---|---|
+| `DesignCertWF` / `DesignSemWF` | retained `Direct.checkDesign` |
+| source-consistent `geomAt` | `infer_foldl_prefix` |
+| `NodeAdmitted` | `nodeTy_admits` — `nodeTy` refuses whatever `nodeAdmittedB` refuses, so `Op_MemWrite` and `Op_Sub` cannot type |
+| `ArityOK` | `arityOK_of_opArity`, bridging `Direct.opArity` to `Hw.RequiredArity` |
+| `WritePropagates` | `nodeTy_write_geom` — a typing write consumed a MUTABLE image and returns its geometry |
+| `NextImgGeomOK` | the `nextImg` check |
+
+Instantiated as theorems on all four designs: `mixedDesign_static`,
+`twoMemDesign_static`, `laneDesign_static`, `fullDesign_static`.
+
+### Still open
+
+**`WriteAddrFits` is NOT derived yet** — it is a runtime condition and needs the
+`slotValM` kind/width induction over the dense order, using §63.40's operator
+and source width lemmas.  That is the next increment, together with the runtime
+state/input/edge policy, its codec correspondence and preservation, and the
+admission-to-resolved-main composition.  `FullTable`/`StateShapeOK` still prove
+length only.  `SourceSupported`, `OpSupported` and `memFree` untouched.
+PicoRV32 **BLOCKED**; matrix **12 YES / 11 NO / 37 BLOCKED**.
