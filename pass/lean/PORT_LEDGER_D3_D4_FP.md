@@ -8216,3 +8216,87 @@ where `SlotValsM`/`DirectCheck.slotKind` must be tied together and the kind
 policy stops being prose); `mkOutputs`/`flopNexts`/`memNext(s)` on active **and**
 quiet domains; generic `mainM` adequacy against `interpretDesign`.  PicoRV32
 stays **BLOCKED**; matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.33 — The mixed scalar/memory slot gap, closed
+
+Instruction 113's first required item.  New module
+`formal/lean/LeanSemanticPrimitives/Projection/HardwareMemSlots.lean` (1084
+lines), built clean, 2 `#guard`s, **0 errors**, no `sorry`/admit/new axiom.
+
+### The gap, as the audit stated it — and it is real
+
+`Hw.applyOp_agree` and all 27 per-operator lemmas behind it take the **global**
+premise `SlotVals vals arg`, i.e. `∀ k < vals.length, vals[k] = encBV (arg k)`.
+A memory-bearing design's slot environment contains `encMemImg` values, and
+`encMemImg m = encBV b` is false for every `m` and `b`.  So the premise is
+**unsatisfiable** in the environment the memory route actually runs in, and
+§63.32's `applyOpM_scalar[_cert]` could not be instantiated there.  Runtime
+behaviour was fine; the theorem was not usable.  That is now a theorem in the
+module rather than a remark: `mixed_not_SlotVals` **proves** `SlotVals` false
+for a three-slot list whose slot 0 is a Pico-shaped `encMemImg`.
+
+### How it is closed, without weakening anything
+
+`SlotVals` is **unchanged**, and so is every theorem stated with it —
+`Hw.SlotVals`, `Hw.slot_read` and the whole `Hw.*_agree` family keep their exact
+statements and remain what the memory-free route uses.  What is added is the
+local condition on the dependencies actually read:
+
+```
+SlotHere vals arg d  :=  ∃ h : d < vals.length, vals[d]'h = encBV (arg d)
+```
+
+`SlotHere` carries the bound **and** the scalar reading together, so it replaces
+each existing `d < vals.length` premise **one for one**: same name, same
+position, same weakening step.  No premise was dropped — the old bound is
+`SlotHere.bound`.  `SlotVals_SlotHere` proves the global premise gives the local
+one at every dependency, and `applyOp_agree_of_On` derives `applyOp_agree`'s
+**exact statement** from the mirrored version, so the mirror subsumes the
+original and no meaning is lost.
+
+**No scalar view of the environment is constructed and no proof-only
+substitution is made**, so there is nothing to bridge observationally: the
+mirrored lemmas run in the unmodified interpreter environment `objEnv vals`,
+images and all.  That is possible because `Hw.slot_agree` is **kind-agnostic** —
+it answers `vals[d]` whatever that slot holds — so the scalar premise was only
+ever used to convert the read slot's value, which is exactly what `SlotHere`
+provides.  **No memory image is dropped or replaced** anywhere.
+
+### Coverage
+
+All 27 operator lemmas mirrored, hence all seventeen `OpSupported` operators:
+the folds (`Op_And`/`Op_Or`/`Op_Xor`/`Op_SHL`), the reductions
+(`Op_Ror`/`Op_EQ`), `Op_Sum`'s payload split, `Op_MuxN`'s direct pick, the
+fixed-arity `Op_Not`/`Op_SRA`/`Op_GetMask`/`Op_MuxBool`/`Op_Sext` and the four
+comparisons.  SHL, SRA and Sext are covered with the rest.  The BV-level
+correctness is **reused, not restated**: each mirrored proof is the original
+proof with the slot read localized, so `evalOp_Ror`, `muxAt`, `cmpBool`,
+`cmpLt_agree`, `nz_agree`, `slot_agree` and the `OperatorBridge` equations are
+the same facts in the same places.
+
+### The bridge, and non-vacuity on a genuinely mixed environment
+
+`applyOpM_scalar_mixed` is the replacement for `applyOpM_scalar`: premises are
+`OpSupported`, the arity, and `SlotHere` at each dependency, with `vals`
+otherwise unrestricted.  `applyOpM_scalar_mixed_cert` restates it against
+`eval_op_cert` with `SrcRel` carrying the kind.  Two `example`s then instantiate
+it at a list holding a 32-word 32-bit `encMemImg` at slot 0 — `Op_And` and
+`Op_SRA` over the two scalar slots, with the image **still present** — and two
+`#guard`s confirm `hwMemP` answers the same on the same environment.
+
+### Axioms
+
+`propext`, `Quot.sound` — Lean's own; `SlotVals_SlotHere` depends on none.  No
+**new unsafe** axiom.
+
+### Still owed on this chain
+
+The `DirectCheck.sourceKind`/`opKind`/`slotKind`/`slotIsMem`/`depIsMem` tie-in
+and the general `mkSourcesM`/`evalNodeM`/`evalNodesM` invariant (source order,
+reversed object environment, bounds, arity, topological prefix) — next.  Then
+the enabled-write range obligation against real admitted shapes (including Pico
+`aw=5`/`dw=32` and `byte_w=1`), outputs/flops/per-memory active-and-quiet
+commits, and generic `mainM` adequacy through `StateRelR`/`ResultRelR`.
+PicoRV32 stays **BLOCKED**; matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
