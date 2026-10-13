@@ -1,0 +1,151 @@
+{
+  "schema": 1,
+  "source_pin": "c72b6a2fe4aaad5a9eef437776864ff71f4b55d7",
+  "snapshot_file_count": 944,
+  "snapshot_digest_sha256": "908992e147397d8fd9aad3ae04b508b6d37c7e181501714e725d6e57a9cbf8a8",
+  "ordered_sources": [
+    "hw/ip/tech_generic/prim_write_preview_en/rtl/prim_write_preview_en.sv",
+    "hw/ip/tech_generic/prim_write_commit_en/rtl/prim_write_commit_en.sv",
+    "hw/ip/tech_generic/prim_write_commit_rst_en/rtl/prim_write_commit_rst_en.sv",
+    "hw/ip/dft/rtl/dft_pkg.sv",
+    "hw/ip/etlink/rtl/etlink_pkg.sv",
+    "hw/ip/minion/rtl/minion_pkg.sv",
+    "hw/ip/minion/tlb/rtl/tlb_pkg.sv",
+    "hw/ip/minion/dcache/rtl/minion_dcache_pkg.sv",
+    "hw/ip/minion/frontend/rtl/minion_frontend_pkg.sv",
+    "hw/ip/icache_pkg/rtl/icache_geom_pkg.sv",
+    "hw/ip/icache_pkg/rtl/icache_pkg.sv",
+    "hw/ip/tech_generic/prim_clk_gate/rtl/prim_clk_gate.sv",
+    "hw/ip/tech_generic/prim_rf_2r1w_preview/rtl/prim_rf_2r1w_preview.sv",
+    "hw/ip/tech_generic/prim_rf_1r1w_preview/rtl/prim_rf_1r1w_preview.sv",
+    "hw/ip/tech_generic/prim_rf_1r1w_par_preview/rtl/prim_rf_1r1w_par_preview.sv",
+    "hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv",
+    "hw/ip/tech_generic/prim_rf_1r1w_dec_preview/rtl/prim_rf_1r1w_dec_preview.sv",
+    "hw/ip/prim_ecc/rtl/prim_ecc_enc.sv",
+    "hw/ip/prim_ecc/rtl/prim_ecc_dec.sv",
+    "hw/ip/prim_arb_rr/rtl/prim_arb_rr.sv",
+    "hw/ip/minion/tlb/rtl/minion_tlb.sv",
+    "hw/ip/icache_tlb_array/rtl/icache_tlb_array.sv",
+    "hw/ip/icache_micro_tag_array/rtl/icache_micro_tag_array.sv",
+    "hw/ip/icache_micro_data_array/rtl/icache_micro_data_array.sv",
+    "hw/ip/icache_pma_unit/rtl/icache_pma_unit.sv",
+    "hw/ip/lru_sel/rtl/lru_sel.sv",
+    "hw/ip/icache_micro_cache/rtl/icache_micro_cache.sv",
+    "hw/ip/icache_tag_array/rtl/icache_tag_array.sv",
+    "hw/ip/icache_lru_array/rtl/icache_lru_array.sv",
+    "hw/ip/icache_data_array/rtl/icache_data_array.sv",
+    "hw/ip/icache_top/rtl/icache_top.sv"
+  ],
+  "bindings": {
+    "PaSize": {
+      "type": "int unsigned",
+      "rhs": "40",
+      "declaration_paths": [
+        "hw/ip/etlink/rtl/etlink_pkg.sv",
+        "hw/ip/minion/rtl/minion_pkg.sv",
+        "hw/ip/minion/dcache/rtl/minion_dcache_pkg.sv"
+      ]
+    },
+    "VaSize": {
+      "type": "int unsigned",
+      "rhs": "48",
+      "declaration_paths": [
+        "hw/ip/minion/rtl/minion_pkg.sv",
+        "hw/ip/minion/dcache/rtl/minion_dcache_pkg.sv"
+      ]
+    },
+    "PrvU": {
+      "type": "logic [1:0]",
+      "rhs": "2'd0",
+      "declaration_paths": [
+        "hw/ip/minion/rtl/minion_pkg.sv",
+        "hw/ip/minion/dcache/rtl/minion_dcache_pkg.sv"
+      ]
+    },
+    "PrvS": {
+      "type": "logic [1:0]",
+      "rhs": "2'd1",
+      "declaration_paths": [
+        "hw/ip/minion/rtl/minion_pkg.sv",
+        "hw/ip/minion/dcache/rtl/minion_dcache_pkg.sv"
+      ]
+    },
+    "PrvM": {
+      "type": "logic [1:0]",
+      "rhs": "2'd3",
+      "declaration_paths": [
+        "hw/ip/minion/rtl/minion_pkg.sv",
+        "hw/ip/minion/dcache/rtl/minion_dcache_pkg.sv"
+      ]
+    },
+    "VaUntransSize": {
+      "type": "int unsigned",
+      "rhs": "12",
+      "declaration_paths": [
+        "hw/ip/minion/rtl/minion_pkg.sv",
+        "hw/ip/minion/dcache/rtl/minion_dcache_pkg.sv"
+      ]
+    },
+    "PaUntransSize": {
+      "type": "int unsigned",
+      "rhs": "12",
+      "declaration_paths": [
+        "hw/ip/minion/rtl/minion_pkg.sv",
+        "hw/ip/minion/dcache/rtl/minion_dcache_pkg.sv"
+      ]
+    }
+  },
+  "changes": [
+    {
+      "path": "hw/ip/icache_pkg/rtl/icache_pkg.sv",
+      "explicit_bindings": [
+        "PaSize"
+      ],
+      "original_sha256": "ce7f98e6eef8f809ad91f482b48c70a09cdb18f16646fa9f87c1c2aa7a841f85",
+      "adapted_sha256": "730642a450b6c988cc1c4fe39716841add81d2996e29cfdc5ff7b8373e8befaf"
+    },
+    {
+      "path": "hw/ip/icache_pma_unit/rtl/icache_pma_unit.sv",
+      "explicit_bindings": [
+        "PaSize",
+        "VaSize",
+        "PrvU",
+        "PrvS",
+        "PrvM",
+        "VaUntransSize",
+        "PaUntransSize"
+      ],
+      "original_sha256": "631d3471bab8053b22e53d83cd5cc62c3c8f6af814230ac850bc9e79fc2569f7",
+      "adapted_sha256": "9b466f5ee9c278901d87b6cf3eeaa1758e73fbac669f8317df96377867f3c1d3"
+    },
+    {
+      "path": "hw/ip/icache_micro_cache/rtl/icache_micro_cache.sv",
+      "explicit_bindings": [
+        "PaSize",
+        "VaSize",
+        "PrvU",
+        "PrvS",
+        "PrvM",
+        "VaUntransSize",
+        "PaUntransSize"
+      ],
+      "original_sha256": "cc5cbbb6896e65aef5cd801013f8a4b76475bf42f8621c8c4edce3decaf54a1e",
+      "adapted_sha256": "fa9e3ac27e4ef8901ff98e36d1adc1fe71096b4e93e0f2c69e62ac2ab9107fbc"
+    },
+    {
+      "path": "hw/ip/icache_top/rtl/icache_top.sv",
+      "explicit_bindings": [
+        "PaSize",
+        "VaSize",
+        "PrvU",
+        "PrvS",
+        "PrvM",
+        "VaUntransSize",
+        "PaUntransSize"
+      ],
+      "original_sha256": "e0433b1438eddffef27e5fc8bf8e188c957bfc73d6cc356646b48bc8b3aae761",
+      "adapted_sha256": "2814b8acc784c4f2486abaee881d6059dd56dd40eacd08f33b38ba8268d776ed"
+    }
+  ],
+  "scope": "Pinned CORE-ET whole icache_top input adapter. Full hw snapshot and ordered 31-source input authenticated; only four explicit import scopes are changed. Frontend preparation, not a certificate or FP admission."
+}
