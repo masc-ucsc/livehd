@@ -9128,3 +9128,73 @@ the codec/`RuntimeState` correspondence for the strengthened shape.
 `SourceSupported`, `OpSupported` and `memFree` untouched; the public route still
 refuses memory-bearing designs.  PicoRV32 **BLOCKED**; matrix
 **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.45 — word-level returned-state preservation
+
+`HardwareMemRuntime` §§6–7 (same module, extended); `HardwareMemFixture` gains
+`fullRunTwo`.
+
+### Why the shape is recoverable without touching `PrefixRelM`
+
+The object side of a memory is a `MemImg` — a word list and a default.  The
+reference side is a FUNCTION `Int → BV`, which has neither, and §63.42's
+`denote_does_not_determine_geometry` says the LENGTH genuinely is lost in
+between.  The WIDTHS are not: a full table's every address is in range, so each
+word is the denotation at its own index, and the default is the denotation at
+any negative address.  Hence
+
+* `memShape_denote_width` — shape gives pointwise width, and
+* `memShape_of_denote` — `FullTable` plus pointwise width gives shape back.
+
+That is the whole reason this increment needed **no** change to `PrefixRelM`,
+`sourcesThenNodes`, `mainM_adequate` or any of their call sites: the missing
+facts are recovered from the reference function, which the adequacy equation
+already pins.
+
+### The induction
+
+`admits_slot_memwidth`: under `admitsB` and the word-level state check, a slot
+inferred `tbl aw dw` or `rom dw n` has a reference value returning `dw`-wide
+words at EVERY address.  Unlike §63.43's scalar lift this IS a recurrence — a
+written table's values are the values of the image it wrote into, everywhere the
+write did not land — so it is a strong induction on the slot index, with the
+memory operand reached through `DepsBounded`.  It is still not circular: every
+statement is about `slotValM`, the reference side, so none of the fold lemmas
+that assume `WriteAddrFits` is involved.
+
+Supporting checker facts, both read off `nodeTy`/`admitsB` rather than assumed:
+
+* `nodeTy_tbl_op` — only a byte-enabled write can type as a TABLE; every other
+  arm of `nodeTy` returns `.bv` or nothing;
+* `nodeTy_write_dw` — the write's NODE WIDTH equals the table's data width
+  (`nodeTy_write_geom` gives the address fit, this gives the word width);
+* `admits_nextImgTy` — the checker pins the next-image slot's FULL type, both
+  widths, to the memory it commits;
+* `memDesc_dw_of_sourceOK` — `checkSource` pins BOTH of a `memImg` source's
+  declared widths, not just the address width.
+
+### Preservation, and the loop
+
+* `admits_run_pres` — `admitsB` and `runtimeOKB` give the resolved cycle AND
+  `stateOKB D r.nextState = true`: the written branch from the induction, the
+  quiet branch from the incoming state.
+* `flopBoundOKB_of_flopSize` — the flop-vector bound is not independent;
+  `checkSource` already pins every `flopQ`/`flopQAsync` source to a declared
+  flop.
+* `admits_run_two` — two steps, the second on the state the first returned.
+  Only the second step's INPUT and EDGE vectors need checking; its state does
+  not, because the policy is preserved.  `fullRunTwo` instantiates it.
+
+So `runtimeOKB` is now a loop invariant, not a one-off precondition, and
+`FullTable`/`StateShapeOK` are no longer the only thing proved about a state.
+
+Axioms: `propext`, `Classical.choice`, `Quot.sound` — no `sorryAx`.
+
+### Still open
+
+Memory INITIALISATION (building a legal `StateM` for a design, rather than
+checking one) and the codec/`RuntimeState` correspondence for the strengthened
+shape are the next increment, then the public support/DCERT2 generation and
+readiness drivers.  `SourceSupported`, `OpSupported` and `memFree` untouched;
+the public route still refuses memory-bearing designs.  PicoRV32 **BLOCKED**;
+matrix **12 YES / 11 NO / 37 BLOCKED**.

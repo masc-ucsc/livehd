@@ -310,6 +310,35 @@ near misses do not. -/
          , mems := #[⟨(List.range 32).map (fun k => mk_bv 7 (Int.ofNat k)), mk_bv 32 0⟩] }
          #[true, true] == false
 
+/-- **Two steps at the strengthened shape.**  Only the SECOND step's input and
+edge vector have to be checked: its state is the one the first step returned,
+and `admits_run_pres` already showed that state passes the policy. -/
+theorem fullRunTwo (i₁ i₂ : RuntimeInput) (e₁ e₂ : ClockEdges) (st : StateM)
+    (hR : runtimeOKB fullDesign i₁ st e₁ = true)
+    (hin : inputOKB fullDesign i₂.size = true)
+    (hed : edgesOKB fullDesign e₂ = true) :
+    ∃ r₁ r₂ : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign fullDesign, encEdges e₁, encInput i₁,
+            StateM.encStateM st].map Term.lit)) (StateM.encResultM r₁)
+      ∧ r₁.denote = Compiler.interpretDesign fullDesign e₁ i₁ (StateM.denote st)
+      ∧ Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign fullDesign, encEdges e₂, encInput i₂,
+            StateM.encStateM r₁.nextState].map Term.lit)) (StateM.encResultM r₂)
+      ∧ r₂.denote
+          = Compiler.interpretDesign fullDesign e₂ i₂ (StateM.denote r₁.nextState)
+      ∧ stateOKB fullDesign r₂.nextState = true := by
+  obtain ⟨r₁, hev, hden, hnext⟩ := admits_run_two fullDesign_admits hR
+  obtain ⟨r₂, hev2, hden2, hok2⟩ := hnext hin hed
+  exact ⟨r₁, r₂, hev, hden, hev2, hden2, hok2⟩
+
+#guard inputOKB fullDesign 5 == true
+#guard edgesOKB fullDesign #[true, true] == true
+
+#print axioms fullRunTwo
+
 #print axioms fullRun
 
 /-- The returned state has as many flops as the design declares — read off the
