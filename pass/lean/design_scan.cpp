@@ -962,7 +962,17 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
                 // Unsigned sources are untouched: the positions above an
                 // unsigned value are zero, which the existing zero-extending
                 // read already reproduces, and the native code says so.
-                // Constants are untouched: their value carries their own sign.
+                // Constants need no Sext HERE, but NOT because a raw value
+                // carries its own sign: it carries it only at a width that
+                // reaches the window.  The native lowering materializes a
+                // constant AT THE TARGET WIDTH -- `Slop<target_bits>::
+                // create_integer(v)` in inou/cgen/cgen_sim.cpp operand() --
+                // while a certificate source is normalized at its own narrow
+                // width, where the positions above it read ZERO, not sign.
+                // That gap is closed in the CertificateBuilder instead, by
+                // declaring a NEGATIVE constant value operand at the window
+                // carrier (certificate_ir.cpp, ScanOp::GetMask), which needs
+                // no new node and preserves the raw value.
                 // `Set_mask` is untouched: this is the value-READ rule.
                 //
                 // The mask here is always a FINITE window synthesized from

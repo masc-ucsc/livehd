@@ -10916,3 +10916,164 @@ mask-constant width derivation above.  All twelve master FP whole units first,
 then IR-as-semantics, then translation validation.  All 60 dispositions and
 every original acceptance gate preserved.  Matrix **12 YES / 11 NO / 37
 BLOCKED**.
+
+## §63.70 — the constant-mask width defect closed, the control scopes corrected, and B12's FP entry reconciled
+
+### 1. The defect, fixed where it is
+
+`CertificateBuilder`'s `ScanOp::GetMask` case passed `max(src_width, node.width)`
+straight to `add` for the mask operand.  `pin_width` is where the strict fit
+check lives, so handing `add` a width directly BYPASSED it: a mask whose value
+needs more bits than that join was emitted at the join and silently truncated.
+
+The rule is the one `getmask_const_width_regress.sh` already states — the
+mask's own checked width JOINS the maximum instead of being overridden by it.
+`pin_width` is now called unconditionally on the mask (so its fit and
+`max_width` checks run on every mask), and only the JOIN is conditional.
+Taking a maximum can only widen, so this line cannot truncate.
+
+The **`mask == -1` convention is DISTINCT and untouched**: -1 is all-ones at
+every width, `pin_width` deliberately does not fit-check a negative literal, and
+widening it would change how many bits the window selects.  It has no checked
+own width to join, so it keeps the previous two-way join.
+`CertificateIR.GetMaskWidensMaskAndPreservesSourceWidth` passes unchanged.
+
+Not claimed: the pinned old `9bb41a09d6b5` has the SAME two-way max at
+`pass_lean.cpp:1317`, so no complete fix exists at that pin.  This is new.
+
+### 2. The signed-negative-constant exclusion, settled by source comparison
+
+The adapter excluded constants because "their value carries their own sign".
+That is insufficient, and the sources say why:
+
+* native `inou/cgen/cgen_sim.cpp` `operand()` materializes a constant AT THE
+  TARGET WIDTH — `Slop<target_bits>::create_integer(v)` — so a negative value's
+  sign occupies every position the window can select;
+* a certificate source is normalized at its OWN narrow width, where the
+  positions above it read ZERO, not sign.
+
+For a window reaching above that width the two disagree.  Closed in the
+builder, not with another node: a NEGATIVE constant value operand is declared at
+the window carrier (the mask's declared width).  The raw value is unchanged,
+widening cannot truncate, and GetMask reads only bits the mask names, so sign
+bits above the window are never selected.  POSITIVE constants are untouched —
+zero-fill above them is already what both sides do.  The stale comment at
+`design_scan.cpp:965` is corrected to say this.
+
+### 3. Controls, in the SUPPORTED harness
+
+Four tests added to `pass/lean/certificate_ir_test.cpp`, which builds
+`DesignScan` structures directly — the right home, because constant folding
+removes these shapes from any tiny RTL module before the scan sees them.  This
+is also why the requested **one-bit source under a 32-bit window** is stated
+here rather than as RTL: the emitted `gm_unsigned_onebit.v` fixture was an
+8-bit input with one bit set, which is NOT that case.
+
+| test | asserts |
+|---|---|
+| `GetMaskOneBitSourceUnderWideWindowKeepsSourceWidthAndFitsMask` | source width stays 1; mask declared 32 holding 4294967295 |
+| `GetMaskMaskWidthJoinsItsOwnCheckedWidthInsteadOfBeingOverridden` | mask 4080 lands at 12, source width 8 preserved |
+| `GetMaskNegativeConstantValueIsDeclaredAtTheWindowCarrier` | `-3` kept verbatim, declared at 12 |
+| `GetMaskPositiveConstantValueKeepsItsOwnNarrowWidth` | `5` keeps width 3 |
+
+**Both defect controls were confirmed to FAIL against the unfixed builder** and
+pass with it; the two preservation controls hold either way, which is what a
+preservation control should do.  All four emitter suites pass
+(`certificate_ir`, `design_scan`, `emit_dcert`, `legacy_model`).
+
+### 4. A SCOPE ERROR in my own control, corrected
+
+`cert_cone_eval.findMux` returned the mux's RESULT slot and `evalSlot`
+overrode it.  That is RESULT INJECTION; §63.68 described it as forcing the
+selector.  Those are different things — result injection bypasses the arms
+entirely.  **The claim as worded was wrong and is withdrawn.**
+
+Corrected: the script now forces the mux's SELECTOR DEPENDENCY, `deps[0]`, the
+slot the certificate itself names, and EVALUATES the mux from its own declared
+arms.  Re-measured on the emitted certificate:
+
+```
+enable slot 3272, MuxBool at slot 3248 (w1)
+  selector dependency slot 3247 = LGraphOp.Op_GetMask w1
+  arms [const1 0, const1 -1]          <- checked, not assumed
+  selector forced to 1 -> mux EVALUATES to 1   ENABLE = 4294967295
+  selector forced to 0 -> mux EVALUATES to 0   ENABLE = 0
+```
+
+The downstream values are unchanged, and now correctly justified: at width 1
+the real arms are `mk_bv 1 0 = 0` and `mk_bv 1 (-1) = 1`, exactly the two
+values the old injection happened to supply.  The arms are now CHECKED under
+`--expect-arms`, so the two can never again be confused.  The standing scope
+limit is unchanged: this overrides the selector rather than observing it.
+
+**Both evaluators returned 0 on wrong values or missing nodes.**  Fixed, with
+distinct exits, each demonstrated:
+
+| condition | exit | demonstrated |
+|---|---|---|
+| wrong `--expect` value | 3 | yes, on both scripts |
+| no declared memory (cone) | 2 | yes |
+| no `Op_GetMask` node (mask) | 2 | — |
+| `--require-fit` on the retained failing artifact | 5 | yes |
+| wrong `--expect-sext` width | 6 | yes |
+
+### 5. Re-emission, and the signed/unsigned contrast preserved
+
+Both tiny controls re-emitted with the fixed builder; the pre-fix artifacts are
+retained separately under `maskctl_failing_retained_20261013/`.
+
+| | mask constant | result | set bits |
+|---|---|---|---|
+| signed `gm_offset_above` | `const 12 4080` — fits | **248** | 5 |
+| unsigned `gm_unsigned_onebit` | `const 12 4080` — fits (was `const 8 4080`) | **8** | **1** |
+
+The useful contrast is preserved exactly: signed 248 versus unsigned 8.  The
+unsigned mask now reads 4080 rather than the truncated 240, and the RESULT is
+unchanged — bits 8..11 of an 8-bit unsigned source are zero either way, so the
+defect was in the declared width, not in which bits were selected.  Both
+artifacts now give `ALL CONTROLS PASS`, planted pre-fix shape still rejected.
+
+### 6. Pico: BOUND, not re-run
+
+Re-emitted with the fixed builder (`lhd d49f2f12…`): `picorv32.dcert` is
+**byte-identical** to the audited `ba5aee83…`, 71,703 bytes, and
+`picorv32_Lgraph.lean` is byte-identical too.  The completed 20-cycle run is
+therefore bound to the current emitter **without being repeated**.  Its raw log
+(sha256 `7f48d90b…`, matching the independently verified value) and GNU-time
+record are retained project-local under
+`memroute_pico_sext_20261013/acceptance_run/`, with the pre-adapter paired
+control beside them.
+
+### 7. B12's FP entry, reconciled
+
+Moved **BLOCKED → YES** on the Futamura projection approach, under the SAME
+interpreted generation/readiness standard as B09/B10:
+
+* **decode** DCERT2 under `readCertChecked`;
+* **support** scalar REFUSED (memFree/sources/ops) — retained verbatim under
+  `prior_attempts.scalar_support_refusal` and still the correct scalar answer —
+  MEMORY route ADMITTED on its own separately proved predicate;
+* **generate** residual 4,977,427 terms, arity [3], checker bound 106126;
+* **readiness** 20 cycles at the checked bound, all ok, 12/20 distinct output
+  and 13/20 distinct flop vectors, decoded returned-state reuse,
+  `stateFullOKB true`, and a COMPLETE reference comparison that B09/B10 do not
+  carry;
+* **no respecialization** — `mkMemSimOf` binds the already-produced residual.
+
+Certificate, emitter, source LGraph, driver, both supplied input files, the raw
+log and the GNU-time record are all bound by sha256 in the entry.  The
+standalone per-phase CPU split is recorded **explicitly unavailable**, because
+generation and readiness share one process here; only whole-run GNU time is
+measured.
+
+`entry_specific_gates_remaining: NONE` for this cell, with two adjacent items
+named so they are not misread as gates: the plain `Op_MemWrite` route is still
+unproved and REFUSED, but picorv32 lowers to `Op_MemWriteBE` and never reaches
+it; and this is one cell of sixty, not project acceptance.
+
+Counts move **12 YES / 11 NO / 37 BLOCKED → 13 YES / 11 NO / 36 BLOCKED**, FP
+column **2 YES / 10 BLOCKED → 3 YES / 9 BLOCKED**.  Verified mechanically that
+`B12/Futamura projection` is the ONLY changed cell and that the historical
+refusal is retained verbatim.  The nine remaining FP blockers are upstream
+refusals — eight never emit a certificate, B11 emits then fails `single_edge` —
+and they remain in scope for the twelve-unit objective.

@@ -48,6 +48,64 @@ TEST(CertificateIR, GetMaskWidensMaskAndPreservesSourceWidth) {
   EXPECT_EQ(c.sources[0].const_int, "-1");
   EXPECT_EQ(c.sources[1].width, 8);
 }
+TEST(CertificateIR, GetMaskOneBitSourceUnderWideWindowKeepsSourceWidthAndFitsMask) {
+  // The EXACT one-bit-source-under-a-32-bit-window case.  It is stated here
+  // rather than as an RTL fixture because constant folding removes it from any
+  // tiny module before the scan ever sees it.
+  //
+  // The source keeps its own width 1 -- nothing widens an unsigned value -- and
+  // the mask is declared wide enough to HOLD its value, which is the property
+  // `pass/lean/tests/d4/getmask_const_width_regress.sh` checks on emitted
+  // artifacts.
+  auto       d = binary(ScanOp::GetMask, 32, input(2000000000, 1), constant("4294967295", 32, 32));
+  const auto c = build_certificate(d, {});
+  EXPECT_EQ(c.sources[0].width, 32);
+  EXPECT_EQ(c.sources[0].const_int, "4294967295");
+  EXPECT_EQ(c.sources[1].width, 1);
+}
+TEST(CertificateIR, GetMaskMaskWidthJoinsItsOwnCheckedWidthInsteadOfBeingOverridden) {
+  // THE DEFECT.  `max(src_width, node.width)` was written as an OVERRIDE, so a
+  // mask whose value needs more bits than that join was emitted at the join and
+  // silently truncated: `mask_window_const(4, 12) = 4080` landed at width 8 and
+  // read back as 240 -- window [4,8) instead of [4,12).
+  //
+  // Here src_width is 8 and node.width is 4, so the old two-way join is 8 and
+  // the mask's own checked width 12 must win.
+  auto       d = binary(ScanOp::GetMask, 4, input(2000000000, 8), constant("4080", 12, 12));
+  const auto c = build_certificate(d, {});
+  EXPECT_EQ(c.sources[0].width, 12) << "the mask must not be truncated below its own value";
+  EXPECT_EQ(c.sources[0].const_int, "4080");
+  EXPECT_EQ(c.sources[1].width, 8) << "the SOURCE width is preserved, not widened by the mask";
+}
+TEST(CertificateIR, GetMaskNegativeConstantValueIsDeclaredAtTheWindowCarrier) {
+  // SIGNED NEGATIVE CONSTANTS ARE NOT SELF-SUFFICIENT.
+  //
+  // The native lowering materializes a constant at the TARGET width
+  // (`Slop<target_bits>::create_integer(v)` in inou/cgen/cgen_sim.cpp
+  // operand()), so the sign occupies every position the window can select.  A
+  // certificate source normalized at its own narrow width reads ZERO above it.
+  // For a window reaching above that width the two disagree, so excluding
+  // constants on the grounds that "a raw value carries its own sign" is not
+  // sufficient on its own.
+  //
+  // -3 needs 3 bits; the window carrier here is 12.
+  auto       d = binary(ScanOp::GetMask, 4, constant("-3", 3), constant("4080", 12, 12));
+  const auto c = build_certificate(d, {});
+  ASSERT_EQ(c.sources.size(), 2);
+  const auto& value = c.sources[0].const_int == "-3" ? c.sources[0] : c.sources[1];
+  const auto& mask  = c.sources[0].const_int == "-3" ? c.sources[1] : c.sources[0];
+  EXPECT_EQ(value.const_int, "-3") << "the raw value is preserved, only its declared width changes";
+  EXPECT_EQ(value.width, 12) << "a negative constant must reach the window carrier";
+  EXPECT_EQ(mask.width, 12);
+}
+TEST(CertificateIR, GetMaskPositiveConstantValueKeepsItsOwnNarrowWidth) {
+  // The counterpart: a POSITIVE constant is untouched.  Zero-fill above it is
+  // already what both sides do, so widening it would be an unneeded change.
+  auto       d = binary(ScanOp::GetMask, 4, constant("5", 3), constant("4080", 12, 12));
+  const auto c = build_certificate(d, {});
+  const auto& value = c.sources[0].const_int == "5" ? c.sources[0] : c.sources[1];
+  EXPECT_EQ(value.width, 3);
+}
 TEST(CertificateIR, ComparisonAndSextWidths) {
   auto d               = binary(ScanOp::LT, 1, input(2000000000, 8), constant("256", 9));
   d.nodes[0].is_signed = true;

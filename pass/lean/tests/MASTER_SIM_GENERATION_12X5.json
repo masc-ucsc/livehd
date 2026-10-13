@@ -2250,34 +2250,101 @@
    },
    "approaches": {
     "Futamura projection": {
-     "status": "BLOCKED",
+     "status": "YES",
      "evidence": {
-      "decode_now_works": "The DCERT1-only blocker is RESOLVED as a transport question: CertIO.admitAny routes by magic and admits picorv32.dcert as DCERT2 under readCertChecked. Confirmed by execution that the retained NATIVE DCERT1 driver (sha256 b7abe8e056b589cb439b0cf65a657d7d57d0f049f1ed942897a74909e4e2d01f) still refuses it with 'bad magic: expected DCERT1'.",
-      "blocker": "gen_probe_v2 exits 2 at support: wf true, arities true, flopClocks true, but memFree FALSE, sources FALSE and ops FALSE. THREE DISTINCT GAPS, named concretely by dcert2_support.lean: memFree -- 1 memory (aw 5, dw 32, nextImg 3225, clock 0); sources -- 1 unsupported SourceDesc, memImg(idx 0, aw 5, dw 32); ops -- 3 nodes on operators outside the seventeen OpSupported admits, LGraphOp.Op_MemRead x2 and LGraphOp.Op_MemWriteBE 1 x1.",
-      "scope": "Inherited projection semantics / runtime-relation / adequacy gap. memFree was NOT removed, no memory was erased, no predicate was weakened, and no design is claimed supported that is not."
+      "decode": "DCERT2, admitted under readCertChecked: CertIO.admitAny routes by magic and admits picorv32.dcert under that format's own policy. The decode driver evaluates NO support predicate.",
+      "support": "SCALAR ROUTE REFUSED, MEMORY ROUTE ADMITTED. The six scalar conjuncts are wf true, arities true, flopClocks true, memFree FALSE, sources FALSE, ops FALSE -- the historical refusal, retained verbatim under `prior_attempts.scalar_support_refusal`, and still the correct answer for a design with memory. The memory route answers its OWN predicate: accepts true, typed true, sized true, nextImgs true -> ADMITTED true. This is a DIFFERENT, separately proved admission predicate, not a relaxation of the scalar one: memFree was not removed, no memory was erased, no predicate was weakened.",
+      "generate": "dcert2_memroute specializes hwMemAP at fuel 20000/200 with division [.stat,.dyn,.dyn,.dyn] (design static; edges, input, state dynamic). Residual 4,977,427 terms, 1 function, arity [3], checker bound 106126. Hw.checkResidual accepted it in 2,654 ms.",
+      "readiness": "20 cycles of the residual executed AT THE CHECKED BOUND, step outcomes all ok; 12 distinct output vectors of 20 and 13 distinct flop vectors of 20, so the state genuinely advances (counted, not asserted). The returned state is DECODED and reused on the next cycle, survives encStateM/decStateM unchanged (words, defaults and flops), and the final returned state satisfies stateFullOKB. Memory 0 is initialized from a SUPPLIED file and CHANGES: word 1 goes 2309737967 -> 1, 1 word differing from the initial image.",
+      "reference_comparison": "COMPLETE -- array length, every table word, the default and out-of-range. B09 and B10 carry NO reference comparison, so this row is stronger than the standard on this point, not weaker.",
+      "respecialization": "NONE. Unlike B09/B10, readiness here does not re-specialize: mkMemSimOf binds the residual already produced in this process, so one specialization serves both check and execution. The phase times below are therefore a single run, not two.",
+      "paired_control": "The same driver, the same supplied state file and the same supplied stimulus file over the same 20 cycles on the PRE-ADAPTER certificate (fnv1a 9018002480722012621) leave the image unchanged (0 words differing). The certificate is the only changed input.",
+      "scope": "INTERPRETED (lean --run, ulimit -s unlimited, --tstack=1048576). NOT equivalence, NOT acceptance, NOT a reference comparison of the DESIGN against RTL, NOT kernel certification. The COMPLETE comparison above is of the residual's returned memory image against the reference image the driver computes, not an RTL equivalence result. hproj is TRUSTED: mixDriver does not kernel-reduce at nontrivial fuel. The run observes the FINAL image against the INITIAL one, so it does not observe which cycle wrote, nor the runtime gate, address or datum.",
+      "entry_specific_gates_remaining": "NONE for this cell under the B09/B10 interpreted generation/readiness standard. Two adjacent items are deliberately NOT gates here and must not be read as such: (1) the plain Op_MemWrite route is still unproved and its support remains REFUSED, but picorv32 lowers to Op_MemWriteBE and never reaches it; (2) whole-project acceptance is unaffected -- this is one cell of sixty.",
+      "artifact_gates": "The bound certificate's emitted Lgraph passes vc_gates.py (rc 0), cert_lgraph_diff.py (rc 0) and getmask_const_width_regress.sh (ALL CONTROLS PASS, 180 Op_GetMask nodes, 0 violations, planted pre-fix shape still rejected by both gates)."
      },
-     "generation_ms": null,
+     "generation_ms": 702788,
      "metrics": {
       "generation_wall_ms": null,
       "generation_user_cpu_ms": null,
       "generation_system_cpu_ms": null,
-      "peak_rss_kb": 6452072,
+      "unavailable_note": "The standalone per-phase CPU split is UNAVAILABLE: this row runs generation and readiness in ONE process (no re-specialization), so only the whole-run GNU time below is measured. Left explicitly unavailable rather than apportioned.",
+      "peak_rss_kb": 6945088,
       "observed_cgroup_peak_bytes": null,
       "phase_times_ms": {
-       "support_refusal": {
-        "load_ms": 105,
-        "support_ms": 7,
-        "measured_total_ms": 112,
-        "wall_ms": 23100,
-        "peak_rss_kib": 6452072,
-        "exit_code": 2
+       "memroute_single_run": {
+        "support_ms": 86,
+        "specialize_ms": 702788,
+        "check_ms": 2654,
+        "execute_ms": 4514582,
+        "driver_cpu_ticks": 523646,
+        "driver_peak_rss_kib": 6947016,
+        "wall_ms": 5243000,
+        "gnu_user_cpu_ms": 5218520,
+        "gnu_system_cpu_ms": 18310,
+        "gnu_peak_rss_kib": 6945088,
+        "exit_code": 0
        }
       },
-      "artifact_bytes": null,
+      "artifact_bytes": 71703,
       "environment_sha256": null,
-      "attempt_record": "fp/dcert2/genv2/pico + fp/dcert2/support",
-      "peak_rss_kib": 6452072,
-      "peak_rss_gib": 6.15
+      "attempt_record": "fp/dcert2/memroute/pico (this run) + fp/dcert2/genv2/pico + fp/dcert2/support (retained scalar refusal)",
+      "peak_rss_kib": 6945088,
+      "peak_rss_gib": 6.62
+     },
+     "prior_attempts": {
+      "scalar_support_refusal": {
+       "status": "BLOCKED",
+       "evidence": {
+        "decode_now_works": "The DCERT1-only blocker is RESOLVED as a transport question: CertIO.admitAny routes by magic and admits picorv32.dcert as DCERT2 under readCertChecked. Confirmed by execution that the retained NATIVE DCERT1 driver (sha256 b7abe8e056b589cb439b0cf65a657d7d57d0f049f1ed942897a74909e4e2d01f) still refuses it with 'bad magic: expected DCERT1'.",
+        "blocker": "gen_probe_v2 exits 2 at support: wf true, arities true, flopClocks true, but memFree FALSE, sources FALSE and ops FALSE. THREE DISTINCT GAPS, named concretely by dcert2_support.lean: memFree -- 1 memory (aw 5, dw 32, nextImg 3225, clock 0); sources -- 1 unsupported SourceDesc, memImg(idx 0, aw 5, dw 32); ops -- 3 nodes on operators outside the seventeen OpSupported admits, LGraphOp.Op_MemRead x2 and LGraphOp.Op_MemWriteBE 1 x1.",
+        "scope": "Inherited projection semantics / runtime-relation / adequacy gap. memFree was NOT removed, no memory was erased, no predicate was weakened, and no design is claimed supported that is not."
+       },
+       "generation_ms": null,
+       "metrics": {
+        "generation_wall_ms": null,
+        "generation_user_cpu_ms": null,
+        "generation_system_cpu_ms": null,
+        "peak_rss_kb": 6452072,
+        "observed_cgroup_peak_bytes": null,
+        "phase_times_ms": {
+         "support_refusal": {
+          "load_ms": 105,
+          "support_ms": 7,
+          "measured_total_ms": 112,
+          "wall_ms": 23100,
+          "peak_rss_kib": 6452072,
+          "exit_code": 2
+         }
+        },
+        "artifact_bytes": null,
+        "environment_sha256": null,
+        "attempt_record": "fp/dcert2/genv2/pico + fp/dcert2/support",
+        "peak_rss_kib": 6452072,
+        "peak_rss_gib": 6.15
+       }
+      },
+      "note": "Retained verbatim. It remains the TRUE answer for the scalar route and is not superseded by the memory route; it is no longer the whole description of this cell."
+     },
+     "bound_identities": {
+      "certificate_sha256": "ba5aee8322288d0dc7d781113599a5d937ee0e3746fb6cb9a4c5ea8a8697ee2d",
+      "certificate_bytes": 71703,
+      "certificate_fnv1a": "9014279324719788780",
+      "certificate_shape": "sources 1355, nodes 2332, outputs 18, flops 174, memories 1 (aw 5, dw 32), clocks 1",
+      "emitter_lhd_sha256": "d49f2f12ff375402beed01da64f92db3465e3fb7aa80ebdc78302ef0bb3c2ef9",
+      "emitter_note": "The run executed against the certificate emitted by lhd 8dec9066fb8f33f1b261f464adcea40345ce2466654983f2c9c1fe4711d64717. The later mask-width/negative-constant builder fix re-emits this row BYTE-IDENTICALLY (same sha256, same 71,703 bytes, Lgraph.lean also byte-identical), so the completed run is bound to the current emitter without being repeated.",
+      "source_lgraph": "generated/master_port/cov12x5/B12_picorv32/s2_single_edge/lg",
+      "driver": "formal/lean/scripts/dcert2_memroute.lean",
+      "driver_sha256": "2cf9f5553470695d83db7dd5629cc43a0f0b43856a40d06a5cc5d4e15c9110e0",
+      "initial_state_file": "formal/lean/scripts/memstate/pico_rom_image.memstate",
+      "initial_state_sha256": "2b670c3bd0601fa0f6c36c5b74de1fd402ebad90e05c5782ccaab7e787e6ded5",
+      "initial_state_note": "SUPPLIED initial memory contents, 498 bytes, fnv1a 1213049153655308483. Flop values are the design's DECLARED RESET VALUES as the file requested -- synthetic, NOT supplied.",
+      "stimulus_file": "formal/lean/scripts/memstate/pico_run_instr.stim",
+      "stimulus_sha256": "febe56a6277a2ac246d01222171cb4b46299864287da753af1fe3cd678843575",
+      "stimulus_note": "SUPPLIED, 1046 bytes, fnv1a 9873059989712225821, 8 constants, 2 per-cycle overrides, 1 reactive from the previous cycle's outputs.",
+      "raw_log": "generated/master_port/memroute_pico_sext_20261013/acceptance_run/pico_mem7.log",
+      "raw_log_sha256": "7f48d90b353af64457ed56f5e96950dd0220d3f5a15a551eba62ebb6343cfe92",
+      "gnu_time_record": "generated/master_port/memroute_pico_sext_20261013/acceptance_run/pico7_time.txt"
      }
     },
     "Verified compiler": {

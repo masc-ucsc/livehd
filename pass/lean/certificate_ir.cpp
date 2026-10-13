@@ -220,8 +220,66 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
       case ScanOp::GetMask: {
         c.op.kind            = Operation::GetMask;
         const auto src_width = n.operands.empty() ? n.width : b.pin_width(n.operands[0].driver);
+        // The mask's declared width is the WINDOW CARRIER, so it is computed
+        // first: the value operand below needs it.
+        uint32_t mask_width = 0;
+        if (n.operands.size() > 1) {
+          const auto& mk  = n.operands[1].driver;
+          const auto  own = b.pin_width(mk);
+          const bool  neg = mk.kind == PinKind::Constant && mk.value.starts_with('-');
+          mask_width      = neg ? std::max(src_width, n.width) : std::max(std::max(src_width, n.width), own);
+        }
         for (size_t i = 0; i < n.operands.size(); ++i) {
-          add(n.operands[i], i == 1 ? std::max(src_width, n.width) : b.pin_width(n.operands[i].driver));
+          if (i == 0) {
+            // A NEGATIVE CONSTANT VALUE OPERAND IS DECLARED AT THE CARRIER.
+            //
+            // The native lowering materializes a constant AT THE TARGET WIDTH
+            // -- `Slop<target_bits>::create_integer(v)` in
+            // inou/cgen/cgen_sim.cpp operand() -- so a negative value's sign
+            // occupies every position the window can select.  The certificate
+            // normalizes a source at its OWN narrow width, where the positions
+            // above it read ZERO, not sign.  For a window reaching above that
+            // width the two disagree, so "a raw value carries its own sign" is
+            // not sufficient on its own: it carries it only at a width that
+            // reaches the window.
+            //
+            // Widening is value-preserving here (`const_int` is unchanged and
+            // -v sign-fills), it cannot truncate, and GetMask selects only bits
+            // the mask names, so sign bits above the window are never read.
+            // POSITIVE constants are untouched -- zero-fill above them is
+            // already what both sides do.
+            const auto& val = n.operands[i].driver;
+            auto        w   = b.pin_width(val);
+            if (val.kind == PinKind::Constant && val.value.starts_with('-') && w < mask_width) {
+              w = mask_width;
+            }
+            add(n.operands[i], w);
+            continue;
+          }
+          if (i != 1) {
+            add(n.operands[i], b.pin_width(n.operands[i].driver));
+            continue;
+          }
+          // THE MASK PIN'S OWN WIDTH JOINS THE MAXIMUM -- it is not overridden
+          // by it.
+          //
+          // `max(src_width, n.width)` is the widening `Get_mask(a, -1)` needs.
+          // Written as an override it also REPLACED the mask's own width, and
+          // because `pin_width` is where the strict fit check lives, passing a
+          // width straight to `add` skipped that check: a mask whose value
+          // needs more bits than the join was emitted at the join anyway and
+          // silently truncated.  `mask_window_const(4, 12) = 4080` declared at
+          // width 8 reads back as 240 -- window [4,8) instead of [4,12).
+          //
+          // `pin_width` is called unconditionally, so its fit and `max_width`
+          // checks run on every mask; only the JOIN is conditional.  Taking the
+          // maximum can only widen, so no mask can be truncated by this line.
+          // The `mask == -1` convention is DISTINCT and is left exactly as it
+          // was: -1 is all-ones at every width, `pin_width` deliberately does
+          // not fit-check a negative literal, and widening it here would change
+          // how many bits the window selects.  It has no checked own width to
+          // join, so `mask_width` above keeps the previous two-way join for it.
+          add(n.operands[i], mask_width);
         }
         break;
       }

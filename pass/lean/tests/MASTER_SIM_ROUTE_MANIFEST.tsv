@@ -22,7 +22,7 @@
 # byte-identical between the two builds; only the .dcert differed.
 #
 approach	generator	invocation	input_type	artifact	verified_on
-Futamura projection	gen_probe (Projection.mixDriver + hwAPVarT)	gen_probe <cert.dcert> 200000 2000	DCERT1 certificate	in-memory Program (NOT emitted source; no file is written)	blocked on PicoRV32: master emits DCERT2 and the loader is DCERT1-only
+Futamura projection	gen_probe (Projection.mixDriver + hwAPVarT); dcert2_memroute (Projection.mixDriver + hwMemAP) for a design WITH memory	gen_probe <cert.dcert> 200000 2000; dcert2_memroute <cert.dcert> 20000 200 <cycles> [init] [stim]	DCERT1 certificate; DCERT2 via CertIO.admitAny for the memory route	in-memory Program (NOT emitted source; no file is written)	PicoRV32: YES on the MEMORY route. The DCERT1-only loader note is retained history -- admitAny routes by magic. The SCALAR route still refuses picorv32 (memFree/sources/ops), which remains correct for a design with memory.
 Verified compiler	pass.lean mode:verified_compiler	lhd compile lg:<dir> --top <T> --emit-dir lean:<dir> --set formal.lean.mode=verified_compiler	LGraph	<T>_Lgraph.lean + <T>.dcert (DCERT2) + <T>_io.json, one publish_group	PicoRV32: YES
 Translation validation	d3_sweep.py	python3 pass/lean/scripts/d3_sweep.py --manifest <tsv> --certs <dir> --out <dir> --jobs 1	generated <T>_Lgraph.lean indexed from a directory, selected by a manifest row	D3 reified probes and sweep rows	PicoRV32: manifest resolves, run refused from a dirty worktree
 Legacy	pass.lean legacy emitter	lhd compile lg:<dir> --top <T> --emit-dir lean:<dir> --set formal.lean.emit_cert=true	LGraph	<T>_Lgraph.lean (fast model: <T>_comb/_next/_step plus <T>_node/_source/_graph) + <T>_io.json	PicoRV32: YES
