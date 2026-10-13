@@ -10072,3 +10072,62 @@ initialized memory transitions" is made for Pico** — `tiny_byte_ram` (§63.50)
 remains the real certificate where the route moved memory, at 2 words.
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.58 — admission census: ONE operator gap remains, and it reduces
+
+`support-only` over the named retained certificates, so the census costs a
+support report and not a specialization.
+
+| certificate | memories | admitted | reason |
+|---|---|---|---|
+| `memfix_a` | 0 | **yes** | — |
+| `tiny_async` | 0 | **yes** | — |
+| `SingleCycleCPU` (810 src / 1113 nodes) | 0 | **yes** | — |
+| `PipelinedCPU` (1007 / 1533) | 0 | **yes** | — |
+| `PipelinedDualIssueCPU` (2087 / 3561) | 0 | **yes** | — |
+| `two_domain` | 0 | **yes** | — |
+| `tiny_byte_ram` | 1 | **yes** | runs; 2 words changed |
+| `picorv32` (both certificates) | 1 | **yes** | runs |
+| `memfix_b` | 1 | no | `node 7 Op_MemWrite` has no slot type |
+| `tiny_ram` | 1 | no | `node 6 Op_MemWrite` |
+| `tiny_sync_ram` | 1 | no | `node 7 Op_MemWrite` |
+| `mem_domain` | 1 | no | `node 7 Op_MemWrite` |
+| `mem_nondefault` | 1 | no | `node 7 Op_MemWrite` |
+
+The memory route admits **everything the scalar route admits** — it subsumes
+the memory-free case — plus every memory-bearing certificate that uses
+`Op_MemWriteBE`.  **Exactly one operator gap remains across the whole retained
+corpus: `Op_MemWrite`, the non-byte-enabled write**, and it is the sole reason
+for all five refusals.
+
+### It reduces to the write already implemented
+
+Recorded because it changes what that gap costs.  The reference definitions:
+
+```lean
+cert_mem_write m a d en =
+  if bv_nonzero en then (fun x => if x = bv_uint a then d else m x) else m
+
+cert_masked_update w old new bev byte_w =
+  mk_bv w (bits_to_int w (fun i => if bv_bit bev (i / byte_w) then bv_bit new i else bv_bit old i))
+```
+
+Take `byte_w := w` and a one-bit `bev := en`.  Then `i / byte_w = 0` for every
+`i < w`, so each bit comes from `new` exactly when `en` is set, and the masked
+update is `bv_resize w d` — which is `d` itself precisely when `d.width = w`.
+`nodeTy`'s `Op_MemWriteBE` case ALREADY requires `bvWidthOf td == dw` and
+`c.width == dw`, and its payload conditions `0 < bw` and
+`dw ≤ bvWidthOf tbe * bw` hold at `bw = dw` with a one-bit enable.
+
+So `Op_MemWrite` is `Op_MemWriteBE w` with the enable as the byte-enable, under
+the checker's own typing — **no new object primitive and no new reference
+operator**.
+
+What it is NOT is free.  `NodeAdmitted_ne_memWrite` is a theorem the current
+chain USES (`admits_slot_width` excludes a write when it concludes `.bv`), and
+`Direct`'s `opKind`/`opArity`/`nodeAdmittedB` name `Op_MemWrite` as refused.
+Admitting it means re-proving those, not deleting them, and re-running the two
+kernel reductions that pin `hwMemAP`.  That is the next checkpoint in this
+area, and it is not started here.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
