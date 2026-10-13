@@ -864,7 +864,7 @@ legacy, and IR-as-semantics. The twelve rows are CORE-ET DCache; CVA6 HPDcache;
 CORE-ET neighborhood I-cache; CVA6 MMU/TLB/PTW; CORE-ET ET-Link→AXI; CVA6 LSU;
 CORE-ET VPU; CORE-ET IntPipe/scoreboards; CVA6 issue/scoreboard; CVA6 frontend;
 CORE-ET TLB; and PicoRV32 whole core. PicoRV32 is at the user-provided
-`/soe/czeng14/projects/picorv32` (observed clean pin
+`/HOMEROOT/projects/picorv32` (observed clean pin
 `ef203c2b0a3fb793280f5114941416c425c5b461`, source `picorv32.v`).
 
 First freeze each row's exact top(s), configuration and source inputs and each
@@ -922,7 +922,7 @@ validation, Futamura projection. Do not replay completed unchanged phases.
 
 Start with the **Futamura projection branch**, whose existing coverage provides
 the first baseline. Use the original checkout
-`/mada/users/czeng14/projects/livehd-futamura/livehd`, branch `projection`, pinned
+`/WORKROOT/projects/livehd-futamura/livehd`, branch `projection`, pinned
 at `9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6`. This is a separate repository;
 the similarly named ref in the master repository is not this baseline. Freeze
 the compared master revision and both sides' actual build/tool/dependency
@@ -1403,3 +1403,204 @@ already-authorized final action.
 
 Continue implementing section 15.5 now; this final integration stage does not
 replace or delay the currently runnable FP memory proof/support work.
+
+
+### 15.7 Low-memory Ubuntu experiment execution, after functional acceptance
+
+User-requested extension, 2026-10-12: make the complete experiment suite runnable
+on Ubuntu machines with less than 16 GB or less than 24 GB RAM, including machines
+with stronger CPUs/more cores. Implement this phase after the preceding functional
+support and original acceptance work; it must not interrupt the current FP proof
+and support implementation. An intermediate user-requested rebase/push does not
+make those unfinished functional gates complete.
+
+#### What can trade CPU time for memory
+
+Extra cores do not replace the live working set of an unchanged algorithm.
+Concurrent compiler/experiment processes usually add their memory requirements.
+Use additional compute for recomputation instead of retaining large caches,
+compression, and independently checkable bounded pieces. Parallelize only pieces
+whose combined measured memory fits. A faster CPU may offset added work; neither
+speedup nor successful execution below a particular RAM limit is guaranteed.
+A single memory-heavy specialization or theorem requires its own memory reduction;
+setting a scheduler to one job cannot shrink that process's working set.
+
+#### One configurable launch interface
+
+Implement the resource runner as a single entry point that orchestrates the
+existing `lhd` CLI and proved backend drivers. It must not replace their semantics
+or become a second graph/certificate implementation. The following is the planned
+interface for this final phase, **not a command already implemented today**:
+
+```bash
+python3 pass/lean/scripts/run_experiments.py \
+  --suite acceptance \
+  --resource-profile lowmem12 \
+  --memory-high 7GiB --memory-max 8GiB \
+  --threads 2 --build-jobs 2 --workers 1 \
+  --swap-max 0 \
+  --memory-saving auto \
+  --resume
+```
+
+Provide shipped portable profiles for `lowmem8`, `lowmem12`, `lowmem16` and
+`lowmem24`, plus a user-supplied configuration file. Resolve explicit command-line
+overrides over the configuration file, then profile defaults. Print and retain
+that resolved configuration, its hash and the actual applied limits for every
+attempt. Keep host-specific identities/paths in local run records; do not bake
+personal machine profiles into shipped configuration.
+
+The options have distinct, enforced meanings:
+
+- `memory-high` / `memory-max`: aggregate experiment process-tree reclaim and hard
+  budgets, with all children and owned build daemons accounted for.
+- `threads`: per-process thread allowance; `build-jobs`: concurrent compiler/build
+  actions using the selected tool's verified interface; `workers`: concurrent
+  experiment tasks. Do not treat these three as interchangeable or forward an
+  unsupported jobs flag to Lake. Resource profiles include the Bazel heap/cache
+  settings and a conservative scheduler allowance within the aggregate budget.
+- `swap-max`: allowed swap usage, default zero. An optional compressed-swap mode
+  can select a verified, already configured target-machine zswap or zram setup;
+  it cannot create physical RAM or silently reconfigure the host. Report when
+  requested compression or cgroup controls are unavailable.
+- `memory-saving`: `off`, `auto`, or an explicit set of implemented backend
+  features, such as bounded caches, recomputation, validated streaming and
+  residual reuse. `auto` selects only the features whose proof/compatibility
+  obligations have passed for that backend and input. Advertise the supported
+  feature table and reject explicit unsupported selections. The launcher may
+  enforce resource limits before algorithmic features exist, but must not claim
+  that resource limits implement those features or guarantee successful fit.
+- `resume`: reuse only completed, identity-matched artifacts/checkpoints whose
+  dependencies still validate. Preserve attempt histories and report reused
+  phases separately from newly executed ones.
+
+Add `--print-config` and `--dry-run` for reviewable configuration and execution
+plans. Preserve real exit codes, original required experiment coverage and strict
+support/checking under every profile. Validation must cover option precedence,
+invalid budgets, missing enforcement, unsupported features, process-tree and
+concurrency limits, safe resume invalidation and identical functional results.
+Use small local fixtures for launcher checks; run complete benchmark acceptance
+under the selected budgets in the separate experiment phase below.
+
+#### Implementation sequence and required deliverables
+
+1. **Bind the target and all experiments.** Record actual Ubuntu/kernel/systemd,
+   cgroup version/controllers, CPU/core counts, physical `MemTotal`, local SSD
+   capacity, swap configuration and pinned tools/dependencies. Distinguish decimal
+   GB from GiB. Inventory every required build, proof, generation/checking,
+   readiness, replay and comparison from sections 15.5–15.6, including all five
+   approaches and the independent D2/D3/D4 gates. Preserve complete whole-unit
+   inputs, metadata, theorem meanings and acceptance scope. The deliverable is
+   the complete suite on the smaller machine, not a reduced benchmark subset.
+
+2. **Add project-local resource profiles and a bounded runner.** Start with these
+   planning budgets, then reduce them if actual available RAM needs more reserve:
+
+   | Nominal machine RAM | Experiment `MemoryHigh` | Experiment `MemoryMax` | Heavy jobs initially |
+   | --- | --- | --- | --- |
+   | 8 GB | 4 GiB | 5 GiB | 1 |
+   | 12 GB (below 16 GB target) | 7 GiB | 8 GiB | 1 |
+   | 16 GB | 10 GiB | 11 GiB | 1 |
+   | 24 GB | 16 GiB | 18 GiB | 1 |
+
+   These are proposed aggregate process-tree budgets, not observed passes.
+   Select from actual memory, rather than rounding a sub-24-GB host up to 24 GB.
+   Reserve RAM for Ubuntu, the editor and background services. Use cgroup v2/
+   systemd to contain the whole runner and its children; keep already-running
+   build daemons outside the group from escaping accounting by using a dedicated
+   owned daemon/output root inside it. `MemoryHigh` causes reclaim/throttling;
+   `MemoryMax` is a hard boundary and can result in OOM. Neither is a memory
+   optimization. Verify controller delegation before running; never silently
+   accept a resource profile whose limits were not applied. See the
+   [systemd resource-control definitions](https://github.com/systemd/systemd/blob/main/man/systemd.resource-control.xml)
+   and [kernel cgroup v2 memory controls](https://docs.kernel.org/admin-guide/cgroup-v2.html).
+
+3. **Limit concurrency independently at each layer.** Run whole benchmarks and
+   large proof/generation phases serially first. Build only exact needed targets
+   and prepare the dependency closure once; preserve exact-target no-build checks.
+   Start Bazel with few actions and an explicit scheduler RAM allowance. Verify
+   `--jobs` and the supported RAM resource flag against the pinned Bazel version;
+   scheduler resource estimates are not enforced RSS limits. Evaluate a smaller
+   Bazel JVM heap, `--discard_analysis_cache`, `--nokeep_state_after_build` and
+   `--notrack_incremental_state` where needed, recording extra rebuild cost.
+   `--nokeep_state_after_build` alone does not reduce the current build's peak.
+   These documented options trade incremental reuse for memory; see
+   [Bazel's memory guidance](https://bazel.build/advanced/performance/memory).
+
+   Lean 4.31.0's installed help verifies `--threads=N`, `--memory=MB` and
+   `--tstack=KB`. Calibrate one heavy process at one/two threads before increasing
+   threads. Lean's internal memory option is not a cap on the complete process
+   tree; enforce the OS budget separately. `LEAN_NUM_THREADS` is not evidence
+   that Lake launches only one compiler. Verify Lake's actual supported controls
+   or schedule compiler invocations over a prepared dependency DAG explicitly;
+   do not invent a `lake -j` flag. Preserve necessary stack/fuel bounds rather
+   than reducing them until valid designs fail. Permit concurrent small jobs
+   only after conservative measured peaks plus runner/cache overhead fit the
+   aggregate budget. More available cores are not a reason to raise job count.
+
+4. **Reduce the largest individual working sets.** Measure phase peaks and live
+   allocations only when this final phase begins. First remove avoidable copies
+   and retention of certificates, decoded graphs, environments, residual ASTs
+   and proof data. Release each phase's transient structures before the next;
+   share immutable DAG data where semantics permit. Evaluate bounded memoization,
+   recomputation, streaming validated transport and disk-backed intermediate
+   artifacts. Split a large proof/check into composable pieces only with a proved
+   bridge back to the same whole result. Whole FP specialization must retain its
+   static design, complete state and proved semantics. Any change to encoding,
+   traversal, checking or specialization needs its affected correctness proofs
+   and regression/admission checks before use; no host-simulator replacement,
+   erased memories/components/clock/reset/async metadata or weaker checker.
+
+   Where generation currently produces only an ephemeral residual, implement
+   serialization/loading with the required round-trip/validation bridge and
+   artifact identity before using it to avoid readiness re-specialization.
+   Keep generation, serialization, checking, loading and readiness costs separate;
+   cached/reused artifacts are not fresh generation evidence. Store artifacts and
+   temporary files on project-local SSD paths, not RAM-backed filesystems or
+   root-level temporary directories. Local storage can avoid the observed NFS
+   import stalls; it does not by itself establish lower algorithmic RAM usage.
+
+5. **Evaluate compressed swap as a separate mode.** After a no-swap baseline,
+   test zswap with SSD-backed swap, or a separately configured zram mode, using
+   compression supported by that target kernel. Zswap trades CPU work for reduced
+   swap I/O; its compressed pool still occupies RAM and incompressible/hot data
+   may benefit little. Zram also consumes physical RAM; its configured logical
+   capacity is not additional installed memory. Do not stack both blindly or
+   describe compression as a guaranteed RAM multiplier. Keep a bounded swap
+   allowance and label swap-assisted passes separately from no-swap passes.
+   Record host-wide compression backing memory as well as cgroup/process usage,
+   because compressed-device accounting need not equal task RSS. Setup commands
+   belong to the target-machine runbook; this plan does not change the current
+   shared host's swap/kernel configuration. See the kernel's
+   [zswap](https://docs.kernel.org/admin-guide/mm/zswap.html) and
+   [zram](https://docs.kernel.org/admin-guide/blockdev/zram.html) documentation.
+
+6. **Validate actual fit and results.** Calibrate on a small representative set
+   plus the largest known working set, then select a configuration per relevant
+   budget and run the entire required suite. Begin with the below-24-GB profile,
+   then the below-16-GB profile; attempt smaller profiles after that. Record one
+   controlled thread comparison rather than repeating every benchmark for every
+   core count. Collect true producer exits, wall/user/system CPU, aggregate
+   `memory.peak` (or a documented sampled fallback), per-process raw RSS KiB,
+   swap peak, page faults, memory pressure and OOM events. Sum of unrelated
+   process RSS maxima is not an observed aggregate peak. Separate build/preparation
+   from runtime, and distinguish cold versus warm/cached execution.
+
+   Check the same outputs, proof/admission results, residual bounds, edge/reset
+   schedules and real state/memory transitions against the accepted baseline.
+   Validate on the actual smaller Ubuntu machine: an isolated cgroup on a larger
+   host is useful preparation but does not reproduce its CPU, disk, page cache
+   and complete host pressure. Preserve original time caps; any additionally
+   authorized slower low-memory run is a separately labelled configuration, not
+   a rewrite of an earlier capped attempt. Classify OOM, timeout and I/O waits
+   as resource outcomes, not semantic refusals or proof failures. Retain every
+   failed attempt and report which experiments still exceed the target budget.
+
+7. **Publish a reproducible low-memory runbook and results.** Deliver versioned
+   profiles/runner commands, exact hardware/software/artifact bindings, resume
+   checkpoints with revalidated dependencies, and per-experiment memory/time/
+   swap/result tables. Report the lowest *demonstrated* budget for each phase and
+   for the complete suite. Declare a target supported only after all required
+   experiments and unchanged acceptance checks pass within its measured aggregate
+   memory limit. If one job still needs more RAM, continue its proved memory
+   reduction or report the exact limitation; unused CPU cores do not close it.
