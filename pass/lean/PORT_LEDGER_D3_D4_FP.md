@@ -10754,3 +10754,165 @@ rather than closed, and it is not turned into an old-Pico rebuild prerequisite.
 
 The original certificates and their records are retained separately and
 untouched.  Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.69 — the changed-source whole-Pico acceptance run, and the two remaining emitted-certificate controls
+
+### 1. The acceptance run (instruction 127's single changed-source run)
+
+One run, on the adapter certificate `ba5aee83…`, 20 cycles, with the SUPPLIED
+initial image and the SUPPLIED stimulus.  True producer exit **0**.
+
+```
+init: file:scripts/memstate/pico_rom_image.memstate (SUPPLIED initial state, read from the file)
+  state provenance: supplied file …, 498 bytes, fnv1a 1213049153655308483
+  flops: the design's DECLARED RESET VALUES, as the file requested (synthetic, not supplied)
+state survives encStateM/decStateM unchanged (words, defaults and flops)
+initial memory 0 words [19088743,2309737967,305419896,2882400001,4294967295,4294967295]
+stimulus: SUPPLIED file scripts/memstate/pico_run_instr.stim, 1046 bytes,
+  fnv1a 9873059989712225821, 8 constant(s), 2 per-cycle override(s), 1 reactive
+executing 20 cycle(s) of the residual at the checked bound
+step outcomes: ok x20
+reference comparison: COMPLETE (array length, every table word, default and out-of-range)
+final memory 0 words [19088743,1,305419896,2882400001,4294967295,4294967295]
+memory 0: 1 word(s) differ from the initial image
+final returned-state policy: stateFullOKB true
+ms: support 86  specialize 702788  check 2654  execute 4514582
+cpu_ticks 523646  peak_rss 6947016 kB
+RESULT: MEMROUTE OK
+```
+
+All three requirements of instruction 127 are met by the log itself:
+
+* **actual initialized changing-memory evidence** — the image is read from the
+  supplied file (not synthesized), and word 1 goes `2309737967 → 1`;
+* **decoded returned-state reuse** — `stateFullOKB true` on the returned state,
+  which survives `encStateM`/`decStateM` unchanged and is fed to the next cycle;
+* **COMPLETE reference comparison**, at the residual's own returned bound
+  (checker bound 106126), over array length, every table word, the default and
+  out-of-range.
+
+This is the FIRST actual changing-memory observation for whole Pico on the
+memory route.  **No whole-unit credit follows**; matrix stays
+**12 YES / 11 NO / 37 BLOCKED**.
+
+### 1a. It is a PAIRED run, and the certificate is the only changed input
+
+`pico_mem6` (pre-adapter `9018002480722012621`) and `pico_mem7` (adapter
+`9014279324719788780`) used the SAME state file (`fnv1a 1213049153655308483`)
+and the SAME stimulus file (`fnv1a 9873059989712225821`) for the same 20
+cycles.  A whole-log diff differs ONLY in: the path and certificate hash, the
+shape (`sources 1292→1355`, `nodes 2269→2332` — the adapter's 63 insertions),
+the slot numbers those shift, the residual size, the timings, and:
+
+| | pre-adapter | with adapter |
+|---|---|---|
+| final word 1 | `2309737967` | **`1`** |
+| words differing | `0` | **`1`** |
+
+`step outcomes`, `reference comparison`, `distinct output vectors 12 of 20` and
+`distinct flop vectors 13 of 20` are textually IDENTICAL in both logs.  Those
+are distinct-vector COUNTS, not the vectors themselves — the logs do not record
+per-cycle vectors, so this says the summary statistics match and does NOT
+establish identical trajectories.
+
+### 1b. What the run does and does not observe
+
+The driver compares the FINAL image against the INITIAL one.  It therefore
+observes that exactly one word changed and what it changed to.  It does NOT
+observe which cycle wrote, nor the runtime gate, address or datum.  §63.67's
+withdrawal stands in both directions: nothing here asserts the gate asserted,
+and nothing here asserts it did not.
+
+Recorded as an observation, not as a derivation: the changed word is at index
+**1** and its value is **1**, and the stimulus supplies `mem_rdata = 1048723`
+= `addi x1, x0, 1`, whose destination register is x1 and whose immediate is 1.
+The memory is the `cpuregs` file (`aw 5 dw 32`, 32 words), reached through the
+full-word assignment at `picorv32.v:1344`.  The index and value coincide with
+that instruction's register and immediate.  This is a coincidence of observed
+numbers; it is not a proof that the datapath computed it that way.
+
+### 2. The two remaining controls, on ACTUALLY EMITTED certificates
+
+Instruction 127 asked for three small controls.  The signed one-bit on/off
+under a 32-bit window was delivered in §63.68 (on `4294967295`, off `0`).  The
+other two are delivered here, as a MATCHED PAIR: two modules in
+`pass/lean/tests/d4/maskctl/` that are identical except for the word `signed`,
+each emitted through the real `lhd compile … pass.lean mode:verified_compiler`
+path into `generated/master_port/maskctl_20261013/`.
+
+The window is `[4,12)` on an 8-bit source: **lo = 4 is nonzero** and **hi = 12
+is above the source width 8**.  This is instruction 127's third case, and it
+is also where the endpoint rule bites — the `Op_GetMask` RESULT width is 8,
+while the sign has to reach bit 11.
+
+Evaluated on the emitted `.dcert` files with the input forced to `0x80`
+(`formal/lean/scripts/cert_mask_eval.lean`, which reads every width, constant
+and operator from the file):
+
+| certificate | Sext inserted | mask constant | result | set bits |
+|---|---|---|---|---|
+| `gm_offset_above` signed, **pre-adapter** | none | `const 8 4080` — **does not fit** | `8` | 1 |
+| `gm_offset_above` signed, **with adapter** | `Op_Sext width 12` | `const 12 4080` — fits | **`248`** | **5** |
+| `gm_unsigned_onebit` unsigned, pre = post | none | `const 8 4080` — does not fit | `8` | **1** |
+
+Three things are established, each on an emitted artifact:
+
+* **The endpoint, not the result width.**  The inserted `Op_Sext` has width
+  **12** — the window's high endpoint — while the `Op_GetMask` result width is
+  **8**.  Extending to the result width would have left the source at 8 bits
+  and read zeros at bits 8..11.
+* **Pre-adapter, a signed source was read as unsigned above its width.**  The
+  pre-adapter signed result is `8`, which is BIT-FOR-BIT the unsigned twin's
+  answer.  With the adapter it is `248`, five set bits, the sign filling
+  bits 8..11.
+* **Unsigned behaviour is preserved, exactly.**  The unsigned twin's emitted
+  Lean file is **byte-identical** pre- and post-adapter (`cmp` clean), and its
+  result keeps **exactly one remaining 1** — instruction 127's "unsigned
+  one-bit one remaining 1".
+
+The pre-adapter binary used for the comparison was built by reverting
+`pass/lean/design_scan.cpp` to `HEAD~1` (`sha256 9ea9245e…`); the adapter
+source and binary were restored afterwards and the binary re-verified at
+`sha256 8dec9066…`, the exact build that produced `ba5aee83…`.
+
+### 3. A PRE-EXISTING unsigned-path defect, exposed by the control and NOT fixed
+
+`getmask_const_width_regress.sh`, run unchanged on the new artifacts:
+
+* `gm_offset_above` **with the adapter** — `ALL CONTROLS PASS`;
+* `gm_offset_above` **pre-adapter** — `2 CONTROL(S) FAILED`;
+* `gm_unsigned_onebit` — `2 CONTROL(S) FAILED`, pre- and post-adapter alike.
+
+Both failures are the same shape: `mask const declared width 8 cannot hold
+4080 (needs 12 bits)`, and BOTH existing gates reject it (`vc_gates.py` rc=1,
+`cert_lgraph_diff.py` rc=1).
+
+Scope, stated exactly:
+
+* The adapter **removes** this violation on the signed path, as a side effect
+  of widening the source to the endpoint — the mask constant then lands at
+  width 12 and fits.  This was not its stated purpose and is reported as
+  measured, not as designed.
+* On the **unsigned** path the violation is **pre-existing and untouched** —
+  proved by the byte-identical pre/post artifacts.  The mask's VALUE as read at
+  the declared width (`240`) is the semantically right window for an 8-bit
+  unsigned source, since bits 8..11 are zero anyway; it is the DECLARED width
+  that is wrong, and the gates reject the artifact for it.
+* I have **not** fixed it.  Instruction 127 says to preserve unsigned
+  behaviour, and this is a separate defect in the mask-constant width
+  derivation, not in the signed widening.  It is recorded as **required next
+  work**, alongside the unfinished plain-write integration and B11.
+
+This did not weaken any check: the gate that catches it is the existing
+immutable one, run unchanged, and it is still catching the planted pre-fix
+shape on every artifact.
+
+### 4. Standing
+
+Still required next work, unchanged: the plain-`Op_MemWrite` fold/main/runtime
+admission chain (route support remains REFUSED until it is proved), B11's
+slot-qualified memory lowering in `pass.single_edge`, and now the unsigned
+mask-constant width derivation above.  All twelve master FP whole units first,
+then IR-as-semantics, then translation validation.  All 60 dispositions and
+every original acceptance gate preserved.  Matrix **12 YES / 11 NO / 37
+BLOCKED**.
