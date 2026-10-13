@@ -10131,3 +10131,32 @@ kernel reductions that pin `hwMemAP`.  That is the next checkpoint in this
 area, and it is not started here.
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+### §63.58 addendum — the reduction's two side conditions
+
+Working the equivalence out rather than asserting it turns up two conditions
+that the one-line statement above hides.  Both are recorded now so the next
+checkpoint does not discover them late.
+
+`cert_mem_write` writes `d` RAW; the byte-enable form writes
+`cert_masked_update w (m a) d en w`.  For those to agree:
+
+1. **The enable must be one bit, not merely nonzero.**  `cert_mem_write` tests
+   `bv_nonzero en`, while `cert_masked_update` tests `bv_bit en (i / byte_w)`,
+   which at `byte_w = w` is `bv_bit en 0` for every `i < w`.  Those coincide
+   only when `en` is 1 bit wide — a 4-bit enable of value 8 is NONZERO with bit
+   0 CLEAR, and the two definitions then disagree.  So the normalization must
+   CHECK `bvWidthOf ten = 1`, and refuse otherwise rather than assume it.
+
+2. **The data must be normalized.**  `cert_masked_update` ends in
+   `mk_bv w (bits_to_int w …)`, so it yields `bv_resize w d`, whereas
+   `cert_mem_write` yields `d` itself.  `bv_resize w d = d` needs
+   `d.value = d.value % 2 ^ w`, which is not a consequence of `d.width = w` —
+   a `BV` is a (width, value) pair and nothing in the type normalizes it.  It
+   IS true of every value `eval_op` produces, since those all go through
+   `mk_bv`, so the next increment needs a slot-normalization lemma in the shape
+   of `admits_slot_width`: *every admitted slot's value is `mk_bv`-normalized*.
+
+Neither condition weakens anything; they are two obligations the next
+checkpoint owes, and stating them is why the reduction is worth recording
+before it is attempted.
