@@ -11275,3 +11275,108 @@ correspondence at the returned state, and the checked specialization.
 `StateShapeOK` here is still LENGTH-ONLY, so `admitsW_mainM_resolved` is a
 conditional admission-to-main theorem, exactly as `admits_mainM_resolved` is
 for the byte-enabled route — not full production admission.
+
+## §63.73 — the full runtime policy on the ordinary write, and the control gaps closed
+
+### 1. Producer accounting, fixed before anything was claimed on it
+
+`lakeb.sh` piped `lake` into `tail` with neither `pipefail` nor `PIPESTATUS`,
+so the status it reported was the TAIL's.  A build whose Lean exit was 1 was
+reported as an outer exit 0 — a module that failed to compile looked like a
+success.  Rewritten: the producer writes a COMPLETE log to a file, its own
+status is captured directly, the tail is only a view, and the script exits with
+the producer's status.  The log ends with measured metrics and
+`PRODUCER_EXIT=<n>`, so a reader of the log alone sees the true status.
+
+Demonstrated in both directions before use: exit **0** with `errors: 0` on a
+good target, exit **1** with `errors: 2` on a bad one.  Every build reported
+below went through it.  The already-compiling checkpoints are supported by
+their `.trace` and axiom reports and were NOT replayed to repair historical
+reporting.
+
+Stale waiter shells from this session were stopped **by PID** (six of them); no
+producer and no other session was touched.
+
+### 2. The full runtime policy, extended
+
+| theorem | what it adds |
+|---|---|
+| `nodeTyW_tbl_op` | a table result means a write — now EITHER write |
+| `admits_slot_memwidthW` | **every word of every table slot has the declared data width** |
+| `admitsW_nextImgTy` | the next-image slot's FULL type is the declared memory's |
+| `admits_runW` | one step at the length level |
+| `admits_runW_pres` | word and default preservation, both branches |
+| `admits_runW_full` | the strengthened policy, declared flop widths included |
+| `admits_runW_full_two` | **two steps, the second on the DECODED returned state** |
+
+`admits_slot_memwidthW`'s plain-write branch is where
+`HardwareMemWrite`'s recorded side condition is finally discharged.  The
+reference write stores its datum RAW, so the image stays `dw`-wide only because
+the CHECKER demanded `bvWidthOf td == dw`; `admits_slot_widthW` turns that
+demand into the runtime width, and `cert_mem_write_width` consumes it.  The
+quiet branch needs nothing: its image comes from the incoming state.
+
+Everything in the executable policy — `stateOKB`, `memImgOKB`,
+`flopShapeOKB`, `stateOKB_codec`, `flopBoundOKB_of_flopSize` — is stated
+without reference to a checker and is **reused verbatim**, not duplicated.
+
+### 3. Two steps on the real fixture, with a COMPLETE comparison
+
+`plainRamDesign_two_steps` instantiates `admits_runW_full_two` at
+`plainRamDesign`, with the runtime policy **decided in the kernel**
+(`by decide +kernel`), not assumed.  Step 1 fires the clock with a WIDE enable
+(`mk_bv 4 8`, zero in bit 0); step 2 runs on the state step 1 returned, decoded
+through the codec, with the clock QUIET.
+
+The comparison is complete — length, every word's value, every word's width,
+and the default:
+
+* enabled: `4` words, `[11,99,33,44]`, widths `[8,8,8,8]`, default `7` at width 8;
+* **quiet clock** on the returned state: the whole ENCODED image comes back identical;
+* **disabled enable with the clock FIRING**: the image comes back identical too
+  — a different reason from the quiet clock, and both hold;
+* the committed image still passes `memImgOKB` and `stateFullOKB`, so the run
+  composes.
+
+### 4. Three control gaps, closed
+
+* **The raw-datum control could not detect a resize.**  `mk_bv 8 255` is
+  already normalized, so a raw store and a resizing store both answer 255.
+  Replaced with `rawDatum : BV := { width := 8, value := 300 }` — width 8, raw
+  value OUTSIDE that width.  `bv_uint rawDatum = 44` is what a resize would
+  produce; the control requires the stored word to be **300**, and separately
+  requires its width to still be 8, so a raw value does not break `MemShapeOK`.
+  Also run through the PRIMITIVE, not only the image function.
+* **The disabled control compared only `words`**, which cannot see the default
+  or the widths.  Replaced with a comparison of the ENCODED images, on a
+  fixture whose default is **nonzero** (7), so default preservation is
+  observable; the nonzero default is also checked to survive an ENABLED write.
+* **`plainWriteDesign` is a ROM-backed node-typing fixture.**  Its `tbl` lookup
+  is supplied by hand, so it says nothing about whole-design admission; the
+  header now says so.  `plainRomWriteDesign` records the whole-design
+  rejection: a `memConst` types `.rom 8 4`, not `.tbl`, and both checkers
+  refuse the design.
+
+### 5. `plainwrite_admit` no longer passes a refusal
+
+It returned `ALL CONTROLS PASS` even when `admitsWB` was false on a plain-write
+design, so its exit 0 could not distinguish admission from refusal.  Now two
+modes: **CENSUS** (default — reports both answers, checks only what must hold
+regardless) and **`--expect-admitted`** (ACCEPTANCE — additionally REQUIRES
+`admitsWB = true` on every plain-write design and fails on an unexpected
+refusal).  A `--selftest` builds an admitted design and a refused one (datum
+narrower than `dw`) and checks the decision itself: acceptance mode **fails**
+on the refused design, passes the admitted one, and census mode tolerates both.
+`SELFTEST PASS`, exit 0.
+
+Acceptance run on the five retained certificates: exit **0**,
+`5 with a plain write, 5 of those admitted by the extended checker`,
+`ALL ACCEPTANCE CONTROLS PASS`.
+
+### 6. Still refused in production
+
+`dcert2_memroute` still runs `admitsB`, and plain-write support is still
+REFUSED there.  What remains: the checked specialization — `projectMemDesignAt`
+and `mkMemSimOf` gate on `admitsB` inside their own definitions, so the W route
+needs its own specialization entry before any plain-write design is RUN through
+the production arity-3 checker at its returned bound.

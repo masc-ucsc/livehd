@@ -998,12 +998,348 @@ theorem admitsW_mainM_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM}
       hin hstb hfclk hmclk hfsize
   exact ⟨r, hev, hden, hpres hpol⟩
 
+/-! ## 3h. The FULL runtime policy on the extended route
+
+`admits_run*` are thin over `admits_mainM_resolved` plus the executable policy,
+and everything in that policy — `stateOKB`, `memImgOKB`, `flopShapeOKB`, the
+codec — is already stated without reference to a checker, so it is REUSED
+verbatim.  What needs a new proof is the one place that reads the typing: word
+width preservation through a write. -/
+
+/-- `HardwareMemRuntime`'s copy is `private`, so the same one-liner is proved
+here rather than reached into. -/
+theorem mem_lt_of_getElem?' {α : Type _} {a : Array α} {idx : Nat} {v : α}
+    (h : a[idx]? = some v) : idx < a.size := by
+  rcases Nat.lt_or_ge idx a.size with hlt | hge
+  · exact hlt
+  · rw [Array.getElem?_eq_none hge] at h; exact absurd h (by simp)
+
+/-- A TABLE result means the operator is a write — now EITHER write. -/
+theorem nodeTyW_tbl_op {ty : Nat → Option SlotTy} {c : DenseNodeCert} {aw dw : Nat}
+    (h : nodeTyW ty c = some (.tbl aw dw)) :
+    (∃ bw, c.op = .Op_MemWriteBE bw) ∨ c.op = .Op_MemWrite := by
+  by_cases hop : c.op = .Op_MemWrite
+  · exact Or.inr hop
+  · rw [nodeTyW_eq_of_ne hop] at h
+    exact Or.inl (nodeTy_tbl_op h)
+
+/-- **Every word of every table slot has the declared data width**, on the
+extended route.
+
+The plain write's branch is where `cert_mem_write_width`'s side condition is
+finally discharged: the reference write stores its datum RAW, so the image only
+stays `dw`-wide because the CHECKER demanded `bvWidthOf td == dw`, and
+`admits_slot_widthW` turns that demand into the runtime width.  This is the
+obligation `HardwareMemWrite` recorded and left open. -/
+theorem admits_slot_memwidthW {D : DesignCert} (h : admitsWB D = true)
+    {st : StateM} (hW : StateWordOK D st) (i : RuntimeInput) :
+    ∀ (k : Nat), k < D.numSlots → ∀ (t : SlotTy) (dw : Nat),
+      tyAtW D k = some t → tyDW t = some dw →
+      ∀ x : Int, ((slotValM D i st k).asMem x).width = dw := by
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  intro k
+  induction k using Nat.strongRecOn with
+  | _ k ih =>
+    intro hk t dw hty hdw x
+    by_cases hs : k < D.sources.size
+    · -- a SOURCE: identical to the original route, since sources do not differ
+      rw [tyAtW_source hs hts] at hty
+      rw [slotValM_source hs]
+      have hsd : D.sources[k]? = some (D.sources[k]'hs) := by
+        rw [Array.getElem?_eq_getElem hs]
+      have hty' : srcTy (D.sources[k]'hs) = t := Option.some.inj hty
+      cases hsrc : D.sources[k]'hs with
+      | input _ _ => rw [hsrc] at hty'; subst hty'; simp [srcTy, tyDW] at hdw
+      | const _ _ => rw [hsrc] at hty'; subst hty'; simp [srcTy, tyDW] at hdw
+      | flopQ _ _ => rw [hsrc] at hty'; subst hty'; simp [srcTy, tyDW] at hdw
+      | flopQAsync _ _ _ _ _ => rw [hsrc] at hty'; subst hty'; simp [srcTy, tyDW] at hdw
+      | memImg idx aw dw' =>
+          rw [hsrc] at hty'
+          have hdw' : dw' = dw := by
+            rw [← hty'] at hdw; simpa [srcTy, tyDW] using hdw
+          subst hdw'
+          rw [hsrc] at hsd
+          obtain ⟨md, hmd, -, hmddw⟩ := memDesc_dw_of_sourceOK (admitsW_semwf h) hsd
+          obtain ⟨m, hm, hshape⟩ := hW idx md hmd
+          have : (StateM.denote st).mems[idx]? = some m.denote := by
+            simp [StateM.denote, Array.getElem?_map, hm]
+          simp only [Compiler.sourceValue, this, Option.getD_some, CertVal.asMem]
+          rw [← hmddw]; exact memShape_denote_width hshape x
+      | memConst aw dw' ct =>
+          rw [hsrc] at hty'
+          have hdw' : dw' = dw := by
+            rw [← hty'] at hdw; simpa [srcTy, tyDW] using hdw
+          subst hdw'
+          simp only [Compiler.sourceValue, CertVal.asMem]
+          split <;> simp [mk_bv]
+    · -- a NODE
+      have hj : k - D.sources.size < D.nodes.size := by
+        unfold DesignCert.numSlots at hk; omega
+      have hk' : k = D.sources.size + (k - D.sources.size) := by omega
+      obtain ⟨c, hc⟩ : ∃ c, D.nodes[k - D.sources.size]? = some c :=
+        ⟨D.nodes[k - D.sources.size], by rw [Array.getElem?_eq_getElem hj]⟩
+      have hlt : D.sources.size + (k - D.sources.size) < ts.size := by
+        rw [admitsWB_size h hts]; unfold DesignCert.numSlots; omega
+      have hnode := admits_node_tyW hts (admitsW_wf h) hc
+      rw [Array.getElem?_eq_getElem hlt] at hnode
+      have htyk : tyAtW D (D.sources.size + (k - D.sources.size)) = some t := by
+        rw [← hk']; exact hty
+      unfold tyAtW at htyk
+      rw [hts] at htyk
+      simp only [Option.bind_some] at htyk
+      rw [Array.getElem?_eq_getElem hlt] at htyk
+      have hres : nodeTyW (fun d => ts[d]?) c = some t := by rw [hnode]; exact htyk
+      obtain ⟨aw0, dw0, hteq⟩ : ∃ aw0 dw0, t = .tbl aw0 dw0 := by
+        rcases nodeTyW_result hres with hbv | hx
+        · exfalso; rw [hbv] at hdw; simp [tyDW] at hdw
+        · exact hx
+      subst hteq
+      have hdw0 : dw0 = dw := by simpa [tyDW] using hdw
+      rcases nodeTyW_tbl_op hres with ⟨bw, hop⟩ | hop
+      · -- the BYTE-ENABLED write: the original argument, unchanged
+        have hne : c.op ≠ .Op_MemWrite := by rw [hop]; simp
+        rw [nodeTyW_eq_of_ne hne] at hres
+        obtain ⟨d0, d1, d2, d3, hdeps⟩ := memWriteBE_deps (admitsW_semwf h) hc hop
+        obtain ⟨aw1, dw1, htbl, hd0ty, hwid⟩ := nodeTy_write_dw hop hdeps hres
+        have hx : aw0 = aw1 ∧ dw0 = dw1 := by simpa [SlotTy.tbl.injEq] using htbl
+        have hwid' : c.width = dw := by rw [hwid, ← hx.2]; exact hdw0
+        have hd0lt : d0 < D.sources.size + (k - D.sources.size) :=
+          (admitsW_wf h).depsBounded _ _ hc d0 (by rw [hdeps]; simp)
+        have hd0k : d0 < k := by omega
+        have hd0num : d0 < D.numSlots := by unfold DesignCert.numSlots; omega
+        have hd0tyAt : tyAtW D d0 = some (.tbl aw1 dw1) := by
+          unfold tyAtW; rw [hts]; simpa using hd0ty
+        have hIH := ih d0 hd0k hd0num (.tbl aw1 dw1) dw1 hd0tyAt (by simp [tyDW])
+        have hIH' : ∀ y : Int, ((slotValM D i st d0).asMem y).width = dw := by
+          intro y; rw [← hdw0, hx.2]; exact hIH y
+        rw [hk', ← nodeValM_rec (i := i) (st := st) (admitsW_wf h) hj hc, hop]
+        simp only [hdeps, List.map_cons, List.map_nil, eval_op_cert, CertVal.asMem]
+        exact cert_mem_write_be_width hwid' hIH' x
+      · -- the PLAIN write
+        obtain ⟨d0, d1, d2, d3, hdeps⟩ := memWrite_deps (admitsW_semwf h) hc hop
+        obtain ⟨aw1, dw1, wa, htbl, hd0ty, hd1ty, hwle, hd2ty, hwid⟩ :=
+          nodeTyW_write_geom hop hdeps hres
+        have hx : aw0 = aw1 ∧ dw0 = dw1 := by simpa [SlotTy.tbl.injEq] using htbl
+        -- the IMAGE operand, by the induction hypothesis
+        have hd0lt : d0 < D.sources.size + (k - D.sources.size) :=
+          (admitsW_wf h).depsBounded _ _ hc d0 (by rw [hdeps]; simp)
+        have hd0k : d0 < k := by omega
+        have hd0num : d0 < D.numSlots := by unfold DesignCert.numSlots; omega
+        have hd0tyAt : tyAtW D d0 = some (.tbl aw1 dw1) := by
+          unfold tyAtW; rw [hts]; simpa using hd0ty
+        have hIH := ih d0 hd0k hd0num (.tbl aw1 dw1) dw1 hd0tyAt (by simp [tyDW])
+        have hIH' : ∀ y : Int, ((slotValM D i st d0).asMem y).width = dw := by
+          intro y; rw [← hdw0, hx.2]; exact hIH y
+        -- the DATUM, from the checker's EQUALITY demand on its width
+        have hd2lt : d2 < D.sources.size + (k - D.sources.size) :=
+          (admitsW_wf h).depsBounded _ _ hc d2 (by rw [hdeps]; simp)
+        have hd2num : d2 < D.numSlots := by unfold DesignCert.numSlots; omega
+        have hd2tyAt : tyAtW D d2 = some (.bv dw1) := by
+          unfold tyAtW; rw [hts]; simpa using hd2ty
+        have hd2w : (slotValM D i st d2).asBV.width = dw := by
+          rw [← hdw0, hx.2]; exact admits_slot_widthW h i st d2 dw1 hd2num hd2tyAt
+        rw [hk', ← nodeValM_rec (i := i) (st := st) (admitsW_wf h) hj hc, hop]
+        simp only [hdeps, List.map_cons, List.map_nil, eval_op_cert, CertVal.asMem]
+        exact cert_mem_write_width hIH' hd2w x
+
+theorem admitsW_nextImgTy {D : DesignCert} (h : admitsWB D = true)
+    {idx : Nat} {md : MemoryDesc} (hmd : D.memories[idx]? = some md) :
+    tyAtW D md.nextImg = some (.tbl md.aw md.dw) ∧ md.nextImg < D.numSlots := by
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  have hmem : md ∈ D.memories.toList := by
+    obtain ⟨h1, h2⟩ := List.getElem?_eq_some_iff.mp
+      (show D.memories.toList[idx]? = some md by rw [← hmd]; simp)
+    exact h2 ▸ List.getElem_mem h1
+  have hsz := admitsWB_size h hts
+  unfold admitsWB at h
+  rw [hts] at h
+  simp only [tysOK, Bool.and_eq_true] at h
+  have hthis := List.all_eq_true.mp h.2.2 md hmem
+  cases hty : ts[md.nextImg]? with
+  | none   => rw [hty] at hthis; simp at hthis
+  | some t =>
+      cases t with
+      | bv w     => rw [hty] at hthis; simp at hthis
+      | rom dw n => rw [hty] at hthis; simp at hthis
+      | tbl aw dw =>
+          rw [hty] at hthis
+          simp only [Bool.and_eq_true, beq_iff_eq] at hthis
+          constructor
+          · unfold tyAtW; rw [hts]
+            simp only [Option.bind_some, hty, hthis.1, hthis.2]
+          · rw [← hsz]; exact mem_lt_of_getElem?' hty
+
+/-- One step under the length-level policy. -/
+theorem admits_runW {D : DesignCert} {i : RuntimeInput} {st : StateM} {e : ClockEdges}
+    (hA : admitsWB D = true) (hR : runtimeOKB D i st e = true) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign D, encEdges e, encInput i, StateM.encStateM st].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ StateShapeOK D r.nextState := by
+  unfold runtimeOKB at hR
+  simp only [Bool.and_eq_true] at hR
+  obtain ⟨⟨⟨hst, hin⟩, hfb⟩, hed⟩ := hR
+  exact admitsW_mainM_resolved hA (stateOKB_shape hst) (inputOKB_sound hin)
+    (flopBoundOKB_sound hfb) (edgesOKB_flops hed) (edgesOKB_mems hed)
+    (stateOKB_flopSize hst)
+
+/-- **The word/default policy is preserved**, through an ordinary write too. -/
+theorem admits_runW_pres {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {e : ClockEdges} (hA : admitsWB D = true) (hR : runtimeOKB D i st e = true) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign D, encEdges e, encInput i, StateM.encStateM st].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ stateOKB D r.nextState = true := by
+  have hst : stateOKB D st = true := by
+    unfold runtimeOKB at hR
+    simp only [Bool.and_eq_true] at hR
+    exact hR.1.1.1
+  obtain ⟨r, hev, hden, hsh⟩ := admits_runW hA hR
+  refine ⟨r, hev, hden, ?_⟩
+  have hfl : r.nextState.flops.size = D.flops.size := by
+    have hx := congrArg (fun z => z.nextState.flops.size) hden
+    simpa [StateM.ResultM.denote, StateM.denote, Compiler.interpretDesign] using hx
+  refine stateOKB_complete (by omega) ?_
+  intro idx md hmd
+  obtain ⟨m, hm, hfull⟩ := hsh idx md hmd
+  refine ⟨m, hm, memShape_of_denote hfull ?_⟩
+  intro x
+  have hidx : idx < D.memories.size := mem_lt_of_getElem?' hmd
+  have hlhs : (StateM.denote r.nextState).mems[idx]? = some m.denote := by
+    simp [StateM.denote, Array.getElem?_map, hm]
+  have hrhs : (Compiler.interpretDesign D e i (StateM.denote st)).nextState.mems[idx]?
+      = some (Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) idx md) := by
+    have hmd' : D.memories[idx] = md := by
+      rw [Array.getElem?_eq_getElem hidx] at hmd; exact Option.some.inj hmd
+    unfold Compiler.interpretDesign
+    simp [hidx, hmd']
+    all_goals (first | rfl | (funext k; rfl))
+  have hx := congrArg (fun z => z.nextState.mems[idx]?) hden
+  simp only [StateM.ResultM.denote] at hx
+  rw [hlhs, hrhs] at hx
+  have hmden : m.denote
+      = Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) idx md :=
+    Option.some.inj hx
+  rw [hmden]
+  unfold Compiler.srcMemNext
+  by_cases hf : fires e md.clock
+  · simp only [hf, if_true]
+    obtain ⟨hty, hnum⟩ := admitsW_nextImgTy hA hmd
+    exact admits_slot_memwidthW hA (stateOKB_word hst) i md.nextImg hnum
+      (.tbl md.aw md.dw) md.dw hty (by simp [tyDW]) x
+  · -- the QUIET memory: its image comes from the incoming state, untouched
+    simp only [hf, Bool.false_eq_true, if_false]
+    obtain ⟨m0, hm0, hsh0⟩ := stateOKB_word hst idx md hmd
+    have hq : (StateM.denote st).mems[idx]? = some m0.denote := by
+      simp [StateM.denote, Array.getElem?_map, hm0]
+    rw [hq, Option.getD_some]
+    exact memShape_denote_width hsh0 x
+
+/-- **The strengthened policy**, including declared flop widths. -/
+theorem admits_runW_full {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {e : ClockEdges} (hA : admitsWB D = true)
+    (hR : runtimeFullOKB D i st e = true) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign D, encEdges e, encInput i, StateM.encStateM st].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ stateFullOKB D r.nextState = true := by
+  unfold runtimeFullOKB at hR
+  simp only [Bool.and_eq_true] at hR
+  obtain ⟨hR0, hflop⟩ := hR
+  obtain ⟨r, hev, hden, hok⟩ := admits_runW_pres hA hR0
+  refine ⟨r, hev, hden, ?_⟩
+  unfold stateFullOKB
+  simp only [Bool.and_eq_true]
+  refine ⟨hok, flopShapeOKB_complete ?_⟩
+  intro idx f hf
+  have hlt : idx < D.flops.size := mem_lt_of_getElem?' hf
+  have hf' : D.flops[idx] = f := by
+    rw [Array.getElem?_eq_getElem hlt] at hf; exact Option.some.inj hf
+  have hx := congrArg (fun z => z.nextState.flops) hden
+  simp only [StateM.ResultM.denote] at hx
+  have hfl : r.nextState.flops
+      = D.flops.mapIdx (fun idx f =>
+          Compiler.srcFlopNext (slotValM D i st) e (StateM.denote st) idx f) := by
+    have : (StateM.denote r.nextState).flops = r.nextState.flops := rfl
+    rw [← this, hx]
+    unfold Compiler.interpretDesign
+    simp
+    all_goals (first | rfl | (funext k; rfl))
+  refine ⟨Compiler.srcFlopNext (slotValM D i st) e (StateM.denote st) idx f, ?_, ?_⟩
+  · rw [hfl, Array.getElem?_eq_getElem (by simpa using hlt), Array.getElem_mapIdx, hf']
+  · refine srcFlopNext_width ?_
+    intro b hb
+    obtain ⟨b', hb', hw⟩ := flopShapeOKB_sound hflop idx f hf
+    have : b = b' := by
+      have hd : (StateM.denote st).flops = st.flops := rfl
+      rw [hd, hb'] at hb; exact (Option.some.inj hb).symm
+    rw [this]; exact hw
+
+/-- **Two steps, the second on the state the first RETURNED**, decoded through
+the codec and still passing the strengthened policy. -/
+theorem admits_runW_full_two {D : DesignCert} {i₁ i₂ : RuntimeInput} {st : StateM}
+    {e₁ e₂ : ClockEdges} (hA : admitsWB D = true)
+    (hR : runtimeFullOKB D i₁ st e₁ = true) :
+    ∃ r₁ : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign D, encEdges e₁, encInput i₁, StateM.encStateM st].map Term.lit))
+        (StateM.encResultM r₁)
+      ∧ r₁.denote = Compiler.interpretDesign D e₁ i₁ (StateM.denote st)
+      ∧ (inputOKB D i₂.size = true → edgesOKB D e₂ = true →
+          -- the returned state DECODES, and the decoded one is what step two runs on
+          ∃ st₁, StateM.decStateM (StateM.encStateM r₁.nextState) = some st₁
+            ∧ StateM.denote st₁ = StateM.denote r₁.nextState
+            ∧ ∃ r₂ : StateM.ResultM,
+                Eval hwMemP []
+                  (.call hwMemP.entry
+                    ([encDesign D, encEdges e₂, encInput i₂,
+                      StateM.encStateM st₁].map Term.lit))
+                  (StateM.encResultM r₂)
+                ∧ r₂.denote
+                    = Compiler.interpretDesign D e₂ i₂ (StateM.denote st₁)
+                ∧ stateFullOKB D r₂.nextState = true) := by
+  obtain ⟨r₁, hev, hden, hok⟩ := admits_runW_full hA hR
+  refine ⟨r₁, hev, hden, ?_⟩
+  intro hin hed
+  have hok' : stateOKB D r₁.nextState = true ∧ flopShapeOKB D r₁.nextState = true := by
+    unfold stateFullOKB at hok; simpa only [Bool.and_eq_true] using hok
+  obtain ⟨st₁, hdec, hok₁, hden₁⟩ := stateOKB_codec hok'.1
+  refine ⟨st₁, hdec, hden₁, ?_⟩
+  have hflop₁ : flopShapeOKB D st₁ = true := by
+    have : st₁ = r₁.nextState := by
+      have hx := StateM.decStateM_encStateM r₁.nextState
+      rw [hx] at hdec; exact (Option.some.inj hdec).symm
+    rw [this]; exact hok'.2
+  refine admits_runW_full hA ?_
+  unfold runtimeFullOKB runtimeOKB
+  simp only [Bool.and_eq_true]
+  refine ⟨⟨⟨⟨hok₁, hin⟩, ?_⟩, hed⟩, hflop₁⟩
+  exact flopBoundOKB_of_flopSize (admitsW_semwf hA) (stateOKB_flopSize hok₁)
+
 /-! ## 4. Controls
 
 The distinctions the plain write must keep, as executable checks on the
 extended checker itself. -/
 
-/-- A one-word table, written by an ordinary `Op_MemWrite` with a WIDE enable.
+/-- A LOCAL NODE-TYPING fixture only.
+
+Its `tbl` lookup is supplied BY HAND in the `#guard`s below, so these exercise
+`nodeTyW` at one node and **say nothing about whole-design admission**.  Its
+source 0 is a `memConst`, i.e. a ROM, which types `.rom` and NOT `.tbl` — so
+the whole design built from it is REJECTED, and `plainRomWriteDesign` below
+records that rejection rather than leaving it implicit.  `plainRamDesign` is
+the real mutable-memory positive fixture.
+
 `byte_w` does not appear anywhere: there are no lanes. -/
 def plainWriteDesign : DesignCert :=
   { sources  := #[ .memConst 1 8 #[7, 9]      -- 0 : the table, aw 1, dw 8
@@ -1124,6 +1460,23 @@ def plainRamDesign_badMem : DesignCert :=
   { plainRamDesign with memories := #[ { aw := 3, dw := 8, nextImg := 4, clock := 0 } ] }
 #guard admitsWB plainRamDesign_badMem = false
 
+/- **A whole design that writes to a ROM is REJECTED.**  `plainWriteDesign`'s
+   `tbl` lookup is supplied by hand; here the source table is consulted for
+   real, a `memConst` types `.rom`, and the extended checker refuses it.  This
+   is the rejection `plainWriteDesign` must not be mistaken for admitting. -/
+def plainRomWriteDesign : DesignCert :=
+  { plainRamDesign with
+      sources := #[ .memConst 2 8 #[7, 9, 11, 13], .input 0 2, .input 1 8, .input 2 4 ] }
+#guard admitsWB plainRomWriteDesign = false
+#guard admitsB plainRomWriteDesign = false
+/- and it is refused for the ROM reason: the source types `.rom`, not `.tbl` -/
+#guard srcTy (.memConst 2 8 #[7, 9, 11, 13]) = .rom 8 4
+#guard nodeTyW (fun d => if d == 0 then some (.rom 8 4)
+                         else if d == 1 then some (.bv 2)
+                         else if d == 2 then some (.bv 8)
+                         else some (.bv 4)) plainRamDesign.nodes[0]!
+       = none
+
 /-! ### Disabled and quiet preservation, at the image
 
 `writeEn_disabled_eq` proves a disabled write returns the EXACT image.  These
@@ -1134,20 +1487,45 @@ run it. -/
           (mk_bv 2 1) (mk_bv 8 99) (mk_bv 4 8)).words.map (fun v => v.value)
        = [11, 99, 33, 44]
 
-/- DISABLED with a zero enable: every word survives, including the default -/
-#guard (MemImg.writeEn (MemImg.ofMemConst 8 #[11, 22, 33, 44])
-          (mk_bv 2 1) (mk_bv 8 99) (mk_bv 4 0)).words.map (fun v => v.value)
-       = [11, 22, 33, 44]
+/- **DISABLED: the WHOLE image survives, not merely its words.**  The previous
+   control compared `words` only, which cannot see the default or the widths.
+   This compares the ENCODED images, which carry both. -/
+private def dImg : MemImg := ⟨[mk_bv 8 11, mk_bv 8 22, mk_bv 8 33, mk_bv 8 44], mk_bv 8 7⟩
+#guard MemImg.encMemImg (MemImg.writeEn dImg (mk_bv 2 1) (mk_bv 8 99) (mk_bv 4 0))
+       == MemImg.encMemImg dImg
+/- a NONZERO default is carried through an ENABLED write too -/
+#guard (MemImg.writeEn dImg (mk_bv 2 1) (mk_bv 8 99) (mk_bv 4 1)).dflt.value = 7
+#guard (MemImg.writeEn dImg (mk_bv 2 1) (mk_bv 8 99) (mk_bv 4 1)).words.map (fun v => v.value)
+       = [11, 99, 33, 44]
 
 /- the WHOLE enable operand is read: value 8 is zero in bit 0 but nonzero as a
    vector, so the write fires.  A one-bit-enable reading would have dropped it. -/
 #guard bv_nonzero (mk_bv 4 8) = true
 #guard bv_nonzero (mk_bv 4 0) = false
 
-/- the datum is stored RAW: a datum at dw lands unchanged, with no resize -/
+/- **The datum is stored RAW.**  `mk_bv 8 255` is ALREADY normalized, so it
+   cannot tell a raw store from a resizing one -- both answer 255.  This datum
+   has width 8 and raw value 300, which is OUTSIDE that width: a raw store
+   keeps 300, while any `mk_bv`/`bv_resize` on the way in would answer
+   `300 % 256 = 44`.  The control requires 300. -/
+private def rawDatum : BV := { width := 8, value := 300 }
+#guard rawDatum.width = 8
+#guard bv_uint rawDatum = 44          -- what a RESIZE would have produced
 #guard (MemImg.writeEn (MemImg.ofMemConst 8 #[11, 22, 33, 44])
-          (mk_bv 2 3) (mk_bv 8 255) (mk_bv 4 1)).words.map (fun v => v.value)
-       = [11, 22, 33, 255]
+          (mk_bv 2 3) rawDatum (mk_bv 4 1)).words.map (fun v => v.value)
+       = [11, 22, 33, 300]
+/- …and the stored word still has the DECLARED width, which is what the runtime
+   policy reads -- so a raw value does not break `MemShapeOK`. -/
+#guard (MemImg.writeEn (MemImg.ofMemConst 8 #[11, 22, 33, 44])
+          (mk_bv 2 3) rawDatum (mk_bv 4 1)).words.map (fun v => v.width)
+       = [8, 8, 8, 8]
+/- the same raw datum through the PRIMITIVE, not just the image function -/
+#guard (match evalPrim .memWrite
+              [MemImg.encMemImg (MemImg.ofMemConst 8 #[11, 22, 33, 44]),
+               ofBV (mk_bv 2 3), ofBV rawDatum, ofBV (mk_bv 4 1)] with
+        | .ok v => v == MemImg.encMemImg (MemImg.writeEn
+                     (MemImg.ofMemConst 8 #[11, 22, 33, 44]) (mk_bv 2 3) rawDatum (mk_bv 4 1))
+        | _     => false)
 
 /- an ENABLED write out of range is REFUSED by the primitive, not dropped -/
 #guard (evalPrim .memWrite
@@ -1160,6 +1538,98 @@ run it. -/
           [MemImg.encMemImg (MemImg.ofMemConst 8 #[11, 22]), ofBV (mk_bv 4 9),
            ofBV (mk_bv 8 1), ofBV (mk_bv 4 0)]).isOk = true
 
+/-! ## 6. TWO STEPS on `plainRamDesign`, decoded, with a complete comparison
+
+The soundness theorem instantiated at the real mutable-memory fixture, with the
+runtime policy decided rather than assumed, and the resulting images compared
+COMPLETELY — length, every word, every word's width, and the default — against
+the reference the write is supposed to produce.
+
+Step 1 fires the clock with a WIDE enable (`mk_bv 4 8`, zero in bit 0).
+Step 2 runs on the state step 1 RETURNED, with the clock QUIET, so the image
+must come back exactly. -/
+
+/-- A state with a NONZERO default, so default preservation is observable. -/
+def pwState : StateM :=
+  ⟨#[], #[⟨[mk_bv 8 11, mk_bv 8 22, mk_bv 8 33, mk_bv 8 44], mk_bv 8 7⟩]⟩
+
+/-- address 1, datum 99, enable 8 — wide, and zero in bit 0. -/
+def pwIn : RuntimeInput := #[mk_bv 2 1, mk_bv 8 99, mk_bv 4 8]
+/-- the same, with the enable ZERO. -/
+def pwInOff : RuntimeInput := #[mk_bv 2 1, mk_bv 8 99, mk_bv 4 0]
+
+def pwActive : ClockEdges := #[true]
+def pwQuiet  : ClockEdges := #[false]
+
+/- the policy ACCEPTS this state, input and edge vector -/
+#guard stateFullOKB plainRamDesign pwState = true
+#guard runtimeFullOKB plainRamDesign pwIn pwState pwActive = true
+#guard runtimeFullOKB plainRamDesign pwIn pwState pwQuiet = true
+
+/-- **The chain, instantiated.**  Hypotheses discharged by the checker and the
+policy, not assumed: a two-step run whose second step is on the state the first
+returned, decoded through the codec, both steps agreeing with
+`interpretDesign`, and the strengthened policy holding at the end. -/
+theorem plainRamDesign_two_steps :
+    ∃ r₁ : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign plainRamDesign, encEdges pwActive, encInput pwIn,
+            StateM.encStateM pwState].map Term.lit))
+        (StateM.encResultM r₁)
+      ∧ r₁.denote = Compiler.interpretDesign plainRamDesign pwActive pwIn
+                      (StateM.denote pwState)
+      ∧ (inputOKB plainRamDesign pwIn.size = true → edgesOKB plainRamDesign pwQuiet = true →
+          ∃ st₁, StateM.decStateM (StateM.encStateM r₁.nextState) = some st₁
+            ∧ StateM.denote st₁ = StateM.denote r₁.nextState
+            ∧ ∃ r₂ : StateM.ResultM,
+                Eval hwMemP []
+                  (.call hwMemP.entry
+                    ([encDesign plainRamDesign, encEdges pwQuiet, encInput pwIn,
+                      StateM.encStateM st₁].map Term.lit))
+                  (StateM.encResultM r₂)
+                ∧ r₂.denote = Compiler.interpretDesign plainRamDesign pwQuiet pwIn
+                                (StateM.denote st₁)
+                ∧ stateFullOKB plainRamDesign r₂.nextState = true) :=
+  admits_runW_full_two plainRamDesign_admitsW (by decide +kernel)
+
+/-! ### The COMPLETE comparison, executed
+
+`interpretDesign` is the reference.  These compare the committed image against
+what the ordinary write is supposed to produce, in full: the array length,
+every word's VALUE, every word's WIDTH, and the DEFAULT.  Nothing is sampled. -/
+
+/-- The image the reference commits for memory 0 after one step. -/
+private def refImg (e : ClockEdges) (i : RuntimeInput) (st : StateM) : MemImg :=
+  match (plainRamDesign.memories[0]?) with
+  | none    => ⟨[], mk_bv 0 0⟩
+  | some md =>
+      if fires e md.clock then
+        MemImg.writeEn (st.mems[0]!) (i[0]!) (i[1]!) (i[2]!)
+      else st.mems[0]!
+
+/- ENABLED step: exactly one word changes, widths and default survive -/
+#guard (refImg pwActive pwIn pwState).words.length = 4
+#guard (refImg pwActive pwIn pwState).words.map (fun v => v.value) = [11, 99, 33, 44]
+#guard (refImg pwActive pwIn pwState).words.map (fun v => v.width) = [8, 8, 8, 8]
+#guard (refImg pwActive pwIn pwState).dflt.value = 7
+#guard (refImg pwActive pwIn pwState).dflt.width = 8
+
+/- QUIET step on the state the enabled step returned: the WHOLE image, encoded,
+   comes back identical — words, widths and default together -/
+#guard MemImg.encMemImg (refImg pwQuiet pwIn ⟨#[], #[refImg pwActive pwIn pwState]⟩)
+       == MemImg.encMemImg (refImg pwActive pwIn pwState)
+
+/- DISABLED step with the clock FIRING: the enable is zero, so the image is
+   returned exactly — a different reason from the quiet clock, and both hold -/
+#guard MemImg.encMemImg (refImg pwActive pwInOff pwState) == MemImg.encMemImg pwState.mems[0]!
+
+/- and the policy still accepts the committed image, so the run composes -/
+#guard memImgOKB { aw := 2, dw := 8, nextImg := 4, clock := 0 }
+         (refImg pwActive pwIn pwState) = true
+#guard stateFullOKB plainRamDesign ⟨#[], #[refImg pwActive pwIn pwState]⟩ = true
+
+#print axioms plainRamDesign_two_steps
 #print axioms plainRamDesign_admitsW
 #print axioms nodeTy_memWrite_none
 #print axioms nodeTyW_eq_of_ne
@@ -1185,6 +1655,13 @@ run it. -/
 #print axioms admits_slot_widthW
 #print axioms admits_writeAddrFitsW
 #print axioms admitsW_mainM_resolved
+#print axioms nodeTyW_tbl_op
+#print axioms admits_slot_memwidthW
+#print axioms admitsW_nextImgTy
+#print axioms admits_runW
+#print axioms admits_runW_pres
+#print axioms admits_runW_full
+#print axioms admits_runW_full_two
 
 end HwMem
 end Projection
