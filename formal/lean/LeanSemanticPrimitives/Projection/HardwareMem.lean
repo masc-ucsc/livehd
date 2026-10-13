@@ -45,12 +45,12 @@ open Surface Compiler Projection.Hw
 @[inline] private def P (p : Prim) (as : List SExp) : SExp := .prim p as
 
 /-- The absent image, as an SExp: no words, zero-width zero default. -/
-private def absentImgE : SExp := .mk memImgTag [nil, P .bvMk [int 0, int 0]]
+def absentImgE : SExp := .mk memImgTag [nil, P .bvMk [int 0, int 0]]
 
 /-- `memAt(ms, i)` -- the i-th image, or the absent image when the list is
 shorter.  This is `s.mems[idx]?.getD (fun _ => mk_bv 0 0)` in the object
 language. -/
-private def fMemAt : SFun :=
+def fMemAt : SFun :=
   { name := "memAt", params := ["ms", "i"], inline := true
   , body := .ite (P .isNil [R "ms"]) absentImgE
               (.ite (P .eqI [R "i", int 0])
@@ -59,7 +59,7 @@ private def fMemAt : SFun :=
 
 /-- `romWords(ct, dw)` -- the ROM's initialised words, one `BV` per content
 entry.  The length is the CONTENT count, so `contents.size` is preserved. -/
-private def fRomWords : SFun :=
+def fRomWords : SFun :=
   { name := "romWords", params := ["ct", "dw"], inline := true
   , body := .ite (P .isNil [R "ct"]) nil
               (cons (P .bvMk [R "dw", P .hd [R "ct"]])
@@ -67,7 +67,7 @@ private def fRomWords : SFun :=
 
 /-- `srcValM(sd, inp, fq, ms)` -- the two memory source forms, everything else
 delegated to the original `srcVal`. -/
-private def fSrcValM : SFun :=
+def fSrcValM : SFun :=
   { name := "srcValM", params := ["sd", "inp", "fq", "ms"], inline := true
   , body :=
       .switch (R "sd")
@@ -200,6 +200,7 @@ def hwMemS : SProgram :=
 def hwMemResolved : Except String (Program × List Bool) := resolveProgram hwMemS
 
 def hwMemP : Program := match hwMemResolved with | .ok (p, _) => p | .error _ => ⟨[], 0⟩
+def hwMemInl : List Bool := match hwMemResolved with | .ok (_, i) => i | .error _ => []
 
 /-- The resolved index of a function, by name -- used to call the new dispatch
 entries directly.  `none` would mean the program failed to resolve. -/

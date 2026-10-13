@@ -8021,3 +8021,130 @@ contents, ROM `contents.size`/defaults, address and slot bounds, and per-domain
 clock/reset/async metadata.  Until that holds, support stays refused:
 `SourceSupported`, `OpSupported` and `memFree` are untouched.  PicoRV32 stays
 **BLOCKED**.
+
+---
+
+## §63.31 — General source-layer preservation, on the ACTUAL `hwMemS` / `hwMemP`
+
+Instruction 112's checkpoint. New module
+`formal/lean/LeanSemanticPrimitives/Projection/HardwareMemSource.lean` (547
+lines), built clean, 6 `#guard`s, **0 errors**, no `sorry`/admit/new axiom.
+`hwMemInl` was added to `HardwareMem.lean` so the resolution equation can be
+stated; nothing else in that file changed.
+
+### Method, and a correction to §63.30's stated plan
+
+§63.30 said the next step would be "object-level `memAt`/`romWords`/`srcValM`
+preservation **via `evalFuel` on the resolved program** (the same explicit-lemma
+method that worked for `getGo_body`)".  That is not what landed, and the change
+is deliberate: the user's steer was to use the repository's production method,
+`Surface.SEval` + `SEval_sound`, where it avoids de Bruijn and fuel plumbing.
+It does — the fuel-counting route needs an exact bound per function and per call
+depth, which `getGo_body`'s `4·len+8` shows is a whole proof each time — so the
+per-function reasoning is over the NAMED program and crosses to `hwMemP` once.
+`SEval` is defined without mentioning `resolve` or `Eval`, so the crossing is a
+real check of binder order, not a restatement.
+
+### What is proved
+
+**Fresh resolution.**  `hwMemResolved_ok : hwMemResolved = .ok (hwMemP, hwMemInl)`
+and `hwMemP_resolves : resolveProgram hwMemS = .ok (hwMemP, hwMemInl)`.  One
+kernel reduction excludes the error branch; every id in `hwMemP` is assigned by
+that call.
+
+**Name/function correspondence, not preserved numbers.**  This was called out
+explicitly: a preserved numeric id would not establish semantic preservation.
+`sFn` routes through `idxOf` on the NAME list, and
+
+```
+sFn_of_prefix : (∃ ext, Q.funs = P.funs ++ ext) → sFn P f = some fd → sFn Q f = some fd
+```
+
+concludes with the SAME `SFun` record `fd`, from `idxOf_append` (a name found in
+a prefix is found at the same position) and `List.getElem?_append_left` (that
+position still indexes the same record).  It is stated over an ARBITRARY
+extension, so it is the program shape that carries it, not the particular ten
+functions.  `hwMemS_prefix` is `⟨_, rfl⟩`; `sFn_lift` is the instance.
+
+**Transport of the whole old lemma set, recursive callees included.**
+`SEval P` mentions `P` in exactly one place — the `call` rule's `sFn P f` — so
+
+```
+SEval_mono : (∀ f fd, sFn P f = some fd → sFn Q f = some fd) → SEval P σ e v → SEval Q σ e v
+```
+
+(mutual with `SEvalList_mono`, structural on the derivation) replays any
+`hwS` derivation in `hwMemS`.  `lift` is the instance.  This is what carries
+`srcVal` **and its callees `nthD` and `nz`** across, rather than re-proving them
+or asserting that the ids still line up.
+
+**`memAt` preserves the memory list** — `memAt_sound`, quantified over EVERY
+encoded image list and EVERY `Int` index:
+
+```
+SEval hwMemS σ (.call "memAt" [eml, ei])
+  (encMemImg (if 0 ≤ x then ms[x.toNat]?.getD absentImg else absentImg))
+```
+
+the exact selected image when present, the exact absent image (`[]`,
+zero-width zero — matching `sourceValue`'s `fun _ => mk_bv 0 0`, via the
+already-proved `absentImg_denote`) when absent.  **Negative indices are in
+scope**: the object walks to `nil`, which is the absent image.
+
+**`romWords` preserves ROM contents** — `romWords_sound`, quantified over every
+content list: one word per entry, in order, each `mk_bv dw c`.  With
+`romWords_ofMemConst` and `romWords_length` this pins the table at
+`contents.size`, **not** `2 ^ aw`.
+
+**`srcValM` on all six source forms** — `srcValM_agree`:
+
+```
+∃ v, SEval hwMemS σ (.call "srcValM" [esd, einp, efq, ems]) v
+   ∧ SrcRel v (sourceValue i (StateM.denote st) sd)
+```
+
+with `SrcRel v (.bv b) := v = encBV b` and
+`SrcRel v (.mem f) := ∃ m, v = encMemImg m ∧ MemImg.denote m = f` — the typed
+slot relation at the source boundary.  Premises are the ORIGINAL bounds alone
+(`SourceInputBound`, `SourceFlopBound`).  **`SourceSupported` is deliberately
+not a premise**: answering the two memory forms is the point.  The memory cases
+go through `srcMemImg_denote` and `ofMemConst_denote`; the four scalar cases,
+asynchronous reset with its polarity included, are the original `srcVal` lemmas
+lifted.  In `srcValM_memImg` the input and flop arguments are quantified over
+ARBITRARY values — which is what proves the memory form does not consult them.
+
+**Crossed to the resolved program, unconditionally.**  `srcValM_agree_resolved`
+leaves no `resolve` hypothesis to the caller: `resolve_call_lits` pins the
+resolved term for a literal argument list, and `srcValM_id : idOf "srcValM" =
+some 43` is checked by reduction — the SAME id `HardwareMemChecks` executes.
+
+### Non-vacuity, at the real shape
+
+`srcValM_agree_lits` discharges every hypothesis with `SEval.lit`, so none is a
+hidden unsatisfiable side condition.  Two `example`s then instantiate the
+theorem at a Pico-shaped state (3-word 32-bit ROM, 32-word 32-bit image, 32-bit
+flop, 1-bit reset) — one on `.memImg 1 5 32`, which `SourceSupported` would
+refuse, and one on `.flopQAsync 0 32 0 0 false`.  Five `#guard`s then execute
+the same call through `hwMemP` and confirm the selected image, the ROM's
+initialised words, the exact absent image, and BOTH reset polarities.
+
+### Axioms, stated precisely
+
+`propext`, `Quot.sound` and (via `simp`/`Classical` in the crossing)
+`Classical.choice` — Lean's own.  `srcValM_id` depends on none.  What is checked
+for and absent: any **new unsafe** axiom — no `sorryAx`, no `Lean.ofReduceBool`,
+no `Lean.trustCompiler` (verified over all 57 audit lines, 0 matches).
+
+### Still owed, in order
+
+`applyOpM` preservation through primitive → encoded host update →
+`denote_writeBE`, discharging `InRange` and the width/address/byte-mask
+conditions; the typed slot relation carried through `mkSourcesM`/`evalNodesM`;
+`mkOutputs`/`flopNexts`/`memNext(s)` on active **and** quiet domains; generic
+`mainM` adequacy against `interpretDesign`.  **The slot/value kind policy is
+still prose** and the admission policy for mutable image shapes, ROM
+`contents.size`/defaults, address and slot bounds and per-domain
+clock/reset/async metadata is still undefined.  Until it holds, support stays
+refused: `SourceSupported`, `OpSupported` and `memFree` are untouched, the
+public route still refuses memory-bearing designs, and PicoRV32 stays
+**BLOCKED**.  Matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
