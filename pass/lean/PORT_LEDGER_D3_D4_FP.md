@@ -10551,3 +10551,81 @@ increment.
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.  No fixture or compile here is
 whole-unit credit.
+
+## §63.66 — old/master cone comparison, and a validated candidate adaptation
+
+### Old-source reuse, as verified
+
+From `audits/old_fp_reuse_user_steering_20261013_1058/comparison.json`
+(old `livehd-futamura/livehd` @ `9bb41a09d`):
+
+| file | old vs master |
+|---|---|
+| `Projection/PartialEvaluator.lean` | **byte-identical** |
+| `Projection/HardwareInterpreter.lean` | **byte-identical** |
+| `Projection/HardwareAdequacy.lean` | **byte-identical** |
+| `Projection/PartialEvaluatorCorrect.lean` | differs (already, before this work) |
+| `Translation/LGraphModel.lean` | differs (already) |
+
+That reuse is PRESERVED: none of the three identical files is touched by any of
+this work.  `PartialEvaluatorCorrect.lean`, which already differed, gains two
+`memWrite` alternatives in exhaustive `Prim` case lists — additive and required
+for exhaustiveness, not a rewrite.
+
+Recorded with it, from the same evidence: **the old scalar FP route explicitly
+requires `memFree` and refuses `memImg`/`memConst`, so there is no complete old
+memory FP route to copy** — only its reference semantics, specializer and
+proofs, which master already reuses.
+
+### The GetMask cone: old and master AGREE, so copying is not the fix
+
+The old GetMask emitter widens the mask and preserves the source width, and so
+does master's `certificate_ir` — which has an explicit test saying so,
+`CertificateIR.GetMaskWidensMaskAndPreservesSourceWidth`.  So the divergence is
+NOT between old and master.
+
+It is between the CERTIFICATE path and the NATIVE lowering, and the native code
+states its own rule:
+
+```
+// A window that reaches past the value's declared width selects its SIGN bits.
+// For an UNSIGNED value those are all zero, so a zero-extended read already
+// reproduces them; only a signed value needs the sign actually replicated.
+if (!in_width && !is_unsign(e[0].get_driver_pin())) { … }
+```
+
+The certificate path cannot make that test.  `design_scan.cpp`'s `capture_pin`
+records a pin's `kind`, `id`, `port` and `width` — and **no signedness** — so
+Pico's signed one-bit mux reaches Lean as a width-1 `BV` and `bv_get_mask`
+reads the one bit it is.
+
+### Controls, kernel-checked (`scripts/pico_mask_signed.lean`, propext only)
+
+| control | result |
+|---|---|
+| `cert_narrow` | `GetMask 32 [bv 1 1, 0xffffffff] = 1` — what the certificate computes today |
+| `native_signed` | `GetMask 32 [bv 32 (-1), 0xffffffff] = 0xffffffff` — what the native read produces |
+| `unsigned_agrees` | `GetMask 32 [bv 32 1, 0xffffffff] = 1` — the two paths AGREE when the operand is unsigned |
+| `sext_reproduces_native` | `GetMask 32 [Sext 32 [bv 1 1, 32], 0xffffffff] = 0xffffffff` |
+| `sext_inert_on_zero` | the same widening on a zero operand changes nothing |
+
+So the divergence is exactly SIGN extension, and the existing, already proved
+`Op_Sext` reproduces the native value from the certificate's own operators.
+
+### The candidate, and what it is not
+
+**Candidate:** at the scan boundary, when a `Get_mask` window reaches past a
+SIGNED operand's declared width, emit an `Op_Sext` widening that operand to the
+window before the mask.  It changes the meaning of NO operator — `GetMask`,
+`SHL`, `SRA` and `Sext` all keep theirs — and adds no field to the certificate
+IR.
+
+**Not established:** that this is the fault layer.  The native path could be
+the one that is wrong, the normalized graph's signedness could itself be
+suspect, and the matched old/master graph has not been compared yet.  Nothing
+is changed on this basis; the controls say only that IF the certificate should
+reproduce the native value, this is the smallest way to get it, and that it is
+inert where the native code says no extension is needed.
+
+Pico's initialized changing-memory transition remains OPEN.  Matrix stays
+**12 YES / 11 NO / 37 BLOCKED**.
