@@ -788,11 +788,19 @@ Every source read RESIZES to the width its descriptor declares:
 * both branches of `.flopQAsync` resize too — the reset value is `mk_bv w rv`;
 * and `srcFlopNext`'s CAPTURE branch is `bv_resize f.width (rho f.din).asBV`.
 
-So a raw input vector whose entries have the "wrong" widths cannot be observed
-at all.  `inputOKB` therefore requires `idx < i.size` and NOTHING about
-`i[idx].width`, and it stays that way: asserting declared widths on the raw
-vector would be a demand the semantics never makes, and it would reject inputs
-the reference accepts.
+What that buys is the RESULT width, and only that.  It is NOT width
+noninterference, and nothing here claims it is: `bv_resize w x` is
+`mk_bv w (bv_uint x)` and `bv_uint x` is `x.value % 2 ^ x.width`, so the SOURCE
+width is read, and a raw entry of a different width can change the resulting
+VALUE.
+
+`inputOKB` nevertheless requires `idx < i.size` and NOTHING about
+`i[idx].width`, because the theorem does not need it: `admits_run_full` is an
+AGREEMENT statement, and the object route and `Compiler.interpretDesign` are
+applied to the SAME input vector `i`, so whatever widths that vector carries,
+both sides read them identically.  Demanding declared widths on the raw vector
+would be a hypothesis the agreement never uses, and it would refuse inputs the
+reference accepts.
 
 The STORED FLOP width is not like that, and that asymmetry is the whole point:
 `srcFlopNext`'s HOLD branch — a quiet clock, or an edge with the enable low —

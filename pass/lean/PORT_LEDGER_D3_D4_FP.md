@@ -9269,11 +9269,18 @@ equation.  `stateOKB`, `runtimeOKB` and every theorem about them are unchanged;
 Every source read RESIZES to the width its descriptor declares: `sourceValue`
 of `.input idx w` and of `.flopQ idx w` is `bv_resize w …`, both `.flopQAsync`
 branches resize, and `srcFlopNext`'s CAPTURE branch is
-`bv_resize f.width (rho f.din).asBV`.  So a raw input vector whose entries have
-the "wrong" widths cannot be observed, and `inputOKB` deliberately requires
-`idx < i.size` and NOTHING about `i[idx].width` — asserting declared widths on
-the raw vector would be a demand the semantics never makes and would reject
-inputs the reference accepts.
+`bv_resize f.width (rho f.din).asBV`.
+
+**Corrected in §63.50.**  This section originally said a raw vector's widths
+"cannot be observed".  That is wrong: resizing fixes the RESULT width, but
+`bv_resize w x = mk_bv w (bv_uint x)` and `bv_uint x = x.value % 2 ^ x.width`
+reads the SOURCE width, so a differently-wide raw entry can change the VALUE.
+Width noninterference is neither proved nor claimed.  What is true, and what
+`inputOKB` rests on, is that raw input widths are UNNECESSARY here:
+`admits_run_full` is an AGREEMENT statement and both sides are applied to the
+same vector `i`, so whatever widths it carries they are read identically.
+Asserting declared widths on the raw vector would be a hypothesis the agreement
+never uses, and would reject inputs the reference accepts.
 
 The STORED FLOP width is not like that, and that asymmetry is the whole point:
 `srcFlopNext`'s HOLD branch is `s.flops[idx]?.getD (mk_bv f.width 0)`, which
@@ -9493,3 +9500,124 @@ initialised contents, actual-size ROM bounds/defaults and
 reset/async/clock/component metadata and refuses unsupported initialisation.
 PicoRV32 **BLOCKED**; matrix **12 YES / 11 NO / 37 BLOCKED**.  No whole-unit
 admission credit follows from any fixture or proof compile here.
+
+## §63.50 — two reporting corrections, the production memory-route driver, and Pico
+
+### Correction 1: the scalar refusal reason was INFERRED
+
+`MemSupport.verdict` printed `refused (memFree)` for every design the memory
+route admitted.  The audit's control is decisive: a ROM-only design has **no
+declared memories**, so `memFree` is TRUE and the scalar refusal is `sources`.
+Fixed by reading the reason off the scalar report:
+
+* `scalarFailures D` lists the fields that are actually `false`;
+* `memFree_mem_scalarFailures` / `sources_mem_scalarFailures` — when a field is
+  false, the list NAMES it;
+* `scalarFailures_ne_nil` — a scalar refusal always names at least one.
+
+Executed on the control: `memFree == true`, `scalarFailures` contains
+`"sources"` and does NOT contain `"memFree"`, and the verdict is no longer the
+string the audit caught.  On `fullDesign` the actual fields are
+`memFree,sources,ops` — `ops` because `Op_MemRead` is not in `OpSupported`,
+which the old wording never showed.
+
+### Correction 2: "raw input widths cannot be observed" was FALSE
+
+Withdrawn in `HardwareMemRuntime`'s §9 and in §63.47 above.  `bv_resize w x` is
+`mk_bv w (bv_uint x)` and `bv_uint x` is `x.value % 2 ^ x.width`, so resizing
+fixes the RESULT width while READING the source width: a differently-wide raw
+entry can change the VALUE.  **Width noninterference is neither proved nor
+claimed.**  The accurate statement, and the one `inputOKB` actually rests on, is
+that raw input widths are UNNECESSARY here: `admits_run_full` is an AGREEMENT
+statement and both sides are applied to the same vector, so whatever widths it
+carries are read identically by both.
+
+Neither correction touches a proof.
+
+### The production driver
+
+`formal/lean/scripts/dcert2_memroute.lean`, wired into
+`pass/lean/scripts/fp_cov_dcert2.sh` as the `memroute` phase.
+
+| phase | what runs | distinct exit |
+|---|---|---|
+| parse | `CertIO.admitAny`, under the format's own policy | 8 |
+| support | scalar report VERBATIM + the fields that failed + the memory report | 6 (memory route refuses) |
+| specialize | `mixDriver` on `hwMemAP` at the requested budget | 3 out of fuel / 4 failed |
+| check | `Projection.Hw.checkResidual`, unchanged, at its RETURNED bound | 5 |
+| execute | gated by `runtimeFullOKB`, decoded by `StateM.decResultM` | 1 / 7 policy refused |
+
+* Metadata is RETAINED and reported, not dropped: clock names, per-flop width /
+  din / enable / resetPin / resetValue / polarity / clock ordinal / async flag,
+  per-memory aw/dw/nextImg/clock, and for every `memConst` the actual contents,
+  the `contents.size` table bound (printed beside `2 ^ aw` so the difference is
+  visible), the default's value AND width, and an out-of-contents read.
+* The DECODED next state is what the following cycle runs on.
+* The bundle is built only by `mkMemSimAt`, and `mkMemSimAt_design` (new) proves
+  the result is bound to the design it was handed; `projectMemDesignAt` /
+  `MemSimWFAt` generalise the fixed-fuel forms so the driver's budget is the one
+  that was checked.  An arbitrary `MemSimulator` cannot be handed to it.
+* The certificate's own bytes are digested (FNV-1a) and printed; the harness
+  additionally binds cert/driver/lean/LEAN_PATH content hashes per attempt.
+* `init=zero` is `initStateOf` and is printed as a **legal-state witness, not an
+  RTL startup contract**; `init=ramp` is caller-SUPPLIED contents; **any other
+  startup contract is refused, not replaced** (exit 2).
+* Scalar behaviour is preserved: `memroute` is NOT in `--only all`, because a
+  memory-bearing certificate currently stops the scalar row at `support`, and
+  folding in a sixth phase would change that row's disposition.
+
+### Exercised
+
+Fixtures, `init=ramp`, 6 cycles, all agreeing with `Compiler.interpretDesign`
+(outputs, flops, and memories compared EXHAUSTIVELY over the table, never
+sampled):
+
+| fixture | residual | bound | transitions |
+|---|---|---|---|
+| `full` (2 clocks, sync+async reset, ROM, `byte_w=1`) | 427 terms, arity [3] | 22 | 1 word, 3 distinct outputs, 2 distinct flop vectors |
+| `mixed` (`byte_w=1`) | 181 terms | 15 | 1 word |
+| `twomem` (two memories, distinct clocks) | 271 terms | 17 | 1 word in EACH |
+| `lane` (`byte_w=8`) | 181 terms | 15 | 1 word |
+
+Real retained DCERT2 certificates: `tiny_byte_ram` **admitted and executed** —
+178 terms, bound 24, 2 words changed, reference agreement — and `two_domain`
+(memory-free) likewise.  `tiny_ram`, `tiny_sync_ram`, `mem_domain` and
+`mem_nondefault` are REFUSED with the exact reason now named:
+`node N (Op_MemWrite, width 8, 4 operands) has no slot type` — the memory route
+implements `Op_MemWriteBE`, not the non-byte-enabled write.
+
+Negative controls, each with its own exit: ROM write target → 6; narrow flops →
+**7, all four cycles `policy-refused`, none run on an unchecked state**;
+unsupported startup contract → 2; fuel 5/5 → 3, reported as a failure AT THAT
+BUDGET.
+
+Through the harness: `tiny_byte_ram memroute exit=0` (producer status 0, wall
+17.21 s, maxrss 6,621,352 KiB), `tiny_ram memroute exit=6`.  `--only support`
+on the same certificate still reports exit 0, unchanged.
+
+### Whole PicoRV32, at the pinned source and configuration
+
+Fresh generation attempted, not reused.
+
+* source `picorv32.v` sha256 `0836050971b3c6cdd28ac3b1e5719a67fb645161912bef1e472e63995ceb0622`, upstream rev `ef203c2`
+* compiler `bazel-bin/lhd/lhd` sha256 `414d5dcbf99b37fea2ceac2b81c131401c9bef2a7e580613f5b388199af63f2a`
+* configuration: `--reader yosys-slang --top picorv32 --set formal.lean.mode=verified_compiler --set yosys.setundef=zero -- --ignore-assertions`
+* **producer exit 1**; wall 4.01 s, user 3.91 s, sys 0.21 s, peak RSS 324,480 KiB
+* phases: `inou.yosys.tolg` 2094.8 ms … `pass.lean` **45.6 ms**
+
+```
+[ERROR] pass.lean: unsupported certificate op(s): latch (first at n_1460).
+68 node(s) in this design have no certificate encoding.
+```
+
+The LGraph was produced; the `lean/` emit directory is **empty**.  So there is
+no DCERT2 for this unit, and support, BTA, specialization, residual check and
+execution are **not applicable** — not refused, not attempted.  This is a
+SEMANTIC refusal, an unencodable component, **not** a fuel or resource cap: the
+certificate encoder has no latch form, and 68 nodes need one.  Supplying one
+means a new component in the SHARED `DesignCert`, its reference semantics, its
+checker case and its interpreter case — it is not a driver change and nothing
+here fakes it.  **PicoRV32 remains BLOCKED on `pass.lean: latch`.**
+
+Matrix unchanged: **12 YES / 11 NO / 37 BLOCKED**.  No whole-unit admission
+credit is taken from any fixture, certificate or compile above.

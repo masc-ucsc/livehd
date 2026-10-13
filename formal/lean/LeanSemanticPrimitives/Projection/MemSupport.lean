@@ -155,12 +155,52 @@ def Report.line (r : Report) : String :=
   s!"  memroute: accepts {r.accepts}  typed {r.typed}  sized {r.sized} \
 nextImgs {r.nextImgs}  -> admitted {r.admitOK}"
 
+/-- The scalar fields that ACTUALLY failed, read off the scalar report itself.
+A memory-bearing design fails `memFree`, but a design with a `memConst` SOURCE
+and no declared memories has `memFree = true` and fails `sources` instead — so
+the reason is reported, never inferred from the memory route's success. -/
+def scalarFailures (D : DesignCert) : List String :=
+  let r := CertLoad.supportReport D
+  (if r.wf then [] else ["wf"])
+    ++ (if r.memFree then [] else ["memFree"])
+    ++ (if r.sources then [] else ["sources"])
+    ++ (if r.ops then [] else ["ops"])
+    ++ (if r.arities then [] else ["arities"])
+    ++ (if r.flopClocks then [] else ["flopClocks"])
+
+/-- When a field really is `false`, the report NAMES it — so the reason is read
+off the scalar report, never inferred. -/
+theorem memFree_mem_scalarFailures {D : DesignCert}
+    (h : (CertLoad.supportReport D).memFree = false) :
+    "memFree" ∈ scalarFailures D := by
+  unfold scalarFailures; simp [h]
+
+theorem sources_mem_scalarFailures {D : DesignCert}
+    (h : (CertLoad.supportReport D).sources = false) :
+    "sources" ∈ scalarFailures D := by
+  unfold scalarFailures; simp [h]
+
+/-- …and when the scalar route refuses, it names at least one. -/
+theorem scalarFailures_ne_nil {D : DesignCert}
+    (h : (CertLoad.supportReport D).allOK = false) : scalarFailures D ≠ [] := by
+  unfold scalarFailures
+  intro hnil
+  apply absurd h
+  simp only [CertLoad.SupportReport.allOK, ne_eq, Bool.not_eq_false]
+  simp only [List.append_eq_nil_iff] at hnil
+  obtain ⟨⟨⟨⟨⟨h1, h2⟩, h3⟩, h4⟩, h5⟩, h6⟩ := hnil
+  have g : ∀ (b : Bool) (n : String), (if b then ([] : List String) else [n]) = [] → b = true := by
+    intro b n hb; cases b with | false => simp at hb | true => rfl
+  rw [g _ _ h1, g _ _ h2, g _ _ h3, g _ _ h4, g _ _ h5, g _ _ h6]
+  rfl
+
 def verdict (D : DesignCert) : String :=
   let r := report D
   if r.scalar then "SCALAR ROUTE: supported"
-  else if r.admitOK then
-    "SCALAR ROUTE: refused (memFree) -- MEMORY ROUTE: admitted"
-  else "REFUSED BY BOTH ROUTES"
+  else
+    let f := String.intercalate "," (scalarFailures D)
+    if r.admitOK then s!"SCALAR ROUTE: refused ({f}) -- MEMORY ROUTE: admitted"
+    else s!"REFUSED BY BOTH ROUTES (scalar: {f})"
 
 def sayReport (D : DesignCert) : IO Unit := do
   CertLoad.say (report D).line
@@ -192,15 +232,39 @@ private def scalarDesign : DesignCert :=
 #guard (report scalarDesign).scalar == true
 #guard (report scalarDesign).admitOK == true
 
-#guard verdict fullDesign == "SCALAR ROUTE: refused (memFree) -- MEMORY ROUTE: admitted"
+#guard (scalarFailures fullDesign).contains "memFree"
 #guard verdict scalarDesign == "SCALAR ROUTE: supported"
+#guard scalarFailures scalarDesign == []
 
 /- a design the MEMORY route refuses too: the write target is a ROM -/
-#guard verdict { mixedDesign with
-                 sources := #[ .memConst 5 32 #[1, 2, 3], .input 0 5, .input 1 32
-                             , .input 2 1, .input 3 32 ] }
-        == "REFUSED BY BOTH ROUTES"
+#guard (verdict { mixedDesign with
+                  sources := #[ .memConst 5 32 #[1, 2, 3], .input 0 5, .input 1 32
+                              , .input 2 1, .input 3 32 ] }).startsWith
+       "REFUSED BY BOTH ROUTES"
 
+/- the control the audit asked for: a ROM-only design has NO declared memories,
+   so `memFree` is TRUE and the scalar refusal is `sources` -- the verdict must
+   not infer the reason from the memory route's success -/
+private def romOnlyDesign : DesignCert :=
+  { sources  := #[.memConst 2 32 #[7, 8, 9], .input 0 2, .input 1 1]
+  , nodes    := #[{ op := .Op_MemRead, width := 32, deps := #[0, 1, 2] }]
+  , outputs  := #[{ slot := 3, width := 32 }]
+  , flops    := #[]
+  , memories := #[]
+  , clocks   := #[{ name := "clk" }] }
+
+#guard (report romOnlyDesign).memFree == true
+#guard (report romOnlyDesign).scalar == false
+#guard (report romOnlyDesign).admitOK == true
+/- the refusal is `sources`, and `memFree` is NOT named -/
+#guard (scalarFailures romOnlyDesign).contains "sources"
+#guard !((scalarFailures romOnlyDesign).contains "memFree")
+/- …so the verdict can no longer be the one the audit caught -/
+#guard verdict romOnlyDesign != "SCALAR ROUTE: refused (memFree) -- MEMORY ROUTE: admitted"
+
+#print axioms memFree_mem_scalarFailures
+#print axioms sources_mem_scalarFailures
+#print axioms scalarFailures_ne_nil
 #print axioms admitOK_eq
 #print axioms scalar_refuses_memory
 #print axioms run_of_report

@@ -25,8 +25,14 @@ def hwMemAP : AProgram := match hwMemA with | .ok a => a | .error _ => ⟨[], 0�
 
 /-! ## Stage 2: specialization, and the arity-3 residual -/
 
+/-- Specialization at a CONFIGURABLE budget: the production driver takes its
+fuel from the command line, so the fixed-fuel form below is one instance of it
+rather than the only route. -/
+def projectMemDesignAt (sf wf : Nat) (D : DesignCert) : Except MixError Program :=
+  mixDriver sf wf hwMemAP [encDesign D]
+
 def projectMemDesign (D : DesignCert) : Except MixError Program :=
-  mixDriver 20000 200 hwMemAP [encDesign D]
+  projectMemDesignAt 20000 200 D
 
 def mixedR : Program :=
   match projectMemDesign mixedDesign with | .ok p => p | .error _ => ⟨[], 0⟩
@@ -137,9 +143,9 @@ vector, the input vector and the state DYNAMIC — yields a residual that, run o
 those three arguments, computes exactly what the shared reference semantics
 computes for that cycle, as an `iff` over `Eval` with no fuel in the
 conclusion. -/
-theorem projectMemDesign_correct {D : DesignCert} {R : Program}
+theorem projectMemDesignAt_correct {sf wf : Nat} {D : DesignCert} {R : Program}
     {i : RuntimeInput} {st : StateM} {e : ClockEdges}
-    (hproj : projectMemDesign D = .ok R)
+    (hproj : projectMemDesignAt sf wf D = .ok R)
     (hA : admitsB D = true) (hR : runtimeFullOKB D i st e = true) :
     ∃ r : StateM.ResultM,
       r.denote = Compiler.interpretDesign D e i (StateM.denote st)
@@ -166,15 +172,19 @@ deriving Inhabited
 /-- The bundle is honest: the residual really is this design's memory-route
 projection, it passed the SAME production residual checker with this bound, and
 the design is admitted by the memory route. -/
-structure MemSimWF (sim : MemSimulator) : Prop where
-  proj  : projectMemDesign sim.design = .ok sim.prog
+structure MemSimWFAt (sf wf : Nat) (sim : MemSimulator) : Prop where
+  proj  : projectMemDesignAt sf wf sim.design = .ok sim.prog
   chk   : checkResidual sim.prog = some sim.bound
   admit : admitsB sim.design = true
 
-/-- Specialize once, check once. -/
-def mkMemSim (D : DesignCert) : Option MemSimulator :=
+abbrev MemSimWF (sim : MemSimulator) : Prop := MemSimWFAt 20000 200 sim
+
+/-- Specialize once, check once.  **This is the only constructor a driver may
+use**: it re-derives the residual and the bound from the design it is given, so
+an arbitrary `MemSimulator` value is not a checked one. -/
+def mkMemSimAt (sf wf : Nat) (D : DesignCert) : Option MemSimulator :=
   if admitsB D then
-    match projectMemDesign D with
+    match projectMemDesignAt sf wf D with
     | .error _ => none
     | .ok R    =>
         match checkResidual R with
@@ -182,9 +192,22 @@ def mkMemSim (D : DesignCert) : Option MemSimulator :=
         | some b => some ⟨D, R, b⟩
   else none
 
-theorem mkMemSim_wf {D : DesignCert} {sim : MemSimulator}
-    (h : mkMemSim D = some sim) : MemSimWF sim := by
-  unfold mkMemSim at h
+def mkMemSim (D : DesignCert) : Option MemSimulator := mkMemSimAt 20000 200 D
+
+/-- The bundle is BOUND to the design it was built from — the driver cannot
+report a residual for one certificate while holding another. -/
+theorem mkMemSimAt_design {sf wf : Nat} {D : DesignCert} {sim : MemSimulator}
+    (h : mkMemSimAt sf wf D = some sim) : sim.design = D := by
+  unfold mkMemSimAt at h
+  split at h
+  · split at h <;> try simp at h
+    split at h <;> try simp at h
+    cases h; rfl
+  · simp at h
+
+theorem mkMemSimAt_wf {sf wf : Nat} {D : DesignCert} {sim : MemSimulator}
+    (h : mkMemSimAt sf wf D = some sim) : MemSimWFAt sf wf sim := by
+  unfold mkMemSimAt at h
   split at h
   · rename_i hadm
     split at h <;> try simp at h
@@ -209,14 +232,14 @@ vector the runtime policy accepts, the residual's run TERMINATES within
 `sim.bound` — `.outOfFuel` is unreachable — decodes through the real result
 codec, agrees with the shared reference semantics, and leaves a state that
 passes the same policy, so the next cycle needs no new state check. -/
-theorem runMemSim_correct {sim : MemSimulator} (hw : MemSimWF sim)
+theorem runMemSim_correct {sf wf : Nat} {sim : MemSimulator} (hw : MemSimWFAt sf wf sim)
     {i : RuntimeInput} {st : StateM} {e : ClockEdges}
     (hR : runtimeFullOKB sim.design i st e = true) :
     ∃ r : StateM.ResultM,
       runMemSim sim e i st = some r
       ∧ r.denote = Compiler.interpretDesign sim.design e i (StateM.denote st)
       ∧ stateFullOKB sim.design r.nextState = true := by
-  obtain ⟨r, hden, hok, hiff⟩ := projectMemDesign_correct hw.proj hw.admit hR
+  obtain ⟨r, hden, hok, hiff⟩ := projectMemDesignAt_correct hw.proj hw.admit hR
   have hev : Eval sim.prog [] (.call sim.prog.entry
       [.lit (encEdges e), .lit (encInput i), .lit (StateM.encStateM st)])
       (StateM.encResultM r) := (hiff _).mpr rfl
@@ -235,6 +258,26 @@ with `0xF` that is 5, and the enabled write stores 5 — a real transition, take
 through the RESIDUAL, at the bound the checker returned. -/
 
 def mixedSim : Option MemSimulator := mkMemSim mixedDesign
+
+/-- The fixed-fuel correctness statement, as an instance of the general one. -/
+theorem projectMemDesign_correct {D : DesignCert} {R : Program}
+    {i : RuntimeInput} {st : StateM} {e : ClockEdges}
+    (hproj : projectMemDesign D = .ok R)
+    (hA : admitsB D = true) (hR : runtimeFullOKB D i st e = true) :
+    ∃ r : StateM.ResultM,
+      r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ stateFullOKB D r.nextState = true
+      ∧ ∀ v : Val,
+          Eval R [] (.call R.entry
+            ([encEdges e, encInput i, StateM.encStateM st].map Term.lit)) v
+          ↔ v = StateM.encResultM r :=
+  projectMemDesignAt_correct hproj hA hR
+
+theorem mkMemSim_wf {D : DesignCert} {sim : MemSimulator}
+    (h : mkMemSim D = some sim) : MemSimWF sim := mkMemSimAt_wf h
+
+theorem mkMemSim_design {D : DesignCert} {sim : MemSimulator}
+    (h : mkMemSim D = some sim) : sim.design = D := mkMemSimAt_design h
 
 private def mIn    : RuntimeInput := #[mk_bv 5 20, mk_bv 32 0xFFFFFFFF, mk_bv 1 1, mk_bv 32 0xF]
 private def mInOff : RuntimeInput := #[mk_bv 5 20, mk_bv 32 0,          mk_bv 1 1, mk_bv 32 0xF]
@@ -292,6 +335,8 @@ private def mQuiet : ClockEdges   := #[false]
 #print axioms hwMemAP_erases
 #print axioms specializeFour_correct_of
 #print axioms memEntry_unique
+#print axioms projectMemDesignAt_correct
+#print axioms mkMemSimAt_design
 #print axioms projectMemDesign_correct
 #print axioms runMemSim_correct
 

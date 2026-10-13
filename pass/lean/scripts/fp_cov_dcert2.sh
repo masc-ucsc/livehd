@@ -58,18 +58,25 @@
 #   fp_cov_dcert2.sh [--only PHASE] [--force] <private-checkout> <out-dir> \
 #                    <stepFuel> <workFuel> <cycles> <cert.dcert>...
 set -uo pipefail
-ONLY=all; FORCE=0
+ONLY=all; FORCE=0; MEMINIT=zero
 while [ $# -gt 0 ]; do
   case "$1" in
     --only)  ONLY=${2:?--only needs a phase}; shift 2 ;;
+    # The memory route's initial state.  `zero` is a LEGAL-STATE WITNESS, not an
+    # RTL startup contract; `ramp` is caller-SUPPLIED contents.  Any other value
+    # is refused by the driver rather than silently replaced.
+    --meminit) MEMINIT=${2:?--meminit needs a mode}; shift 2 ;;
     --force) FORCE=1; shift ;;
     --) shift; break ;;
     -*) echo "REFUSING: unknown option $1"; exit 2 ;;
     *) break ;;
   esac
 done
-case "$ONLY" in all|decode|support|generate|readiness) : ;;
-  *) echo "REFUSING: --only must be all|decode|support|generate|readiness, got '$ONLY'"; exit 2 ;;
+case "$ONLY" in all|decode|support|generate|readiness|memroute) : ;;
+  *) echo "REFUSING: --only must be all|decode|support|generate|readiness|memroute, got '$ONLY'"; exit 2 ;;
+esac
+case "$MEMINIT" in zero|ramp|narrow) : ;;
+  *) echo "REFUSING: --meminit must be zero|ramp|narrow, got '$MEMINIT'"; exit 2 ;;
 esac
 P=${1:?private checkout root}; OUT=${2:?out dir}
 SF=${3:?stepFuel}; WF=${4:?workFuel}; CYC=${5:?cycles}; shift 5
@@ -138,7 +145,12 @@ DRV_DECODE=$R/formal/lean/scripts/dcert2_loadcheck.lean
 DRV_SUPPORT=$R/formal/lean/scripts/dcert2_support.lean
 DRV_GEN=$R/formal/lean/scripts/gen_probe_v2.lean
 DRV_READY=$R/formal/lean/scripts/gen_readiness_v2.lean
-for f in "$DRV_DECODE" "$DRV_SUPPORT" "$DRV_GEN" "$DRV_READY"; do
+# The MEMORY route. Deliberately NOT part of `--only all`: a memory-bearing
+# certificate currently stops the scalar row at `support` with exit 2, and
+# folding a sixth phase into the default sweep would change that disposition
+# for every such row. Select it explicitly with `--only memroute`.
+DRV_MEMROUTE=$R/formal/lean/scripts/dcert2_memroute.lean
+for f in "$DRV_DECODE" "$DRV_SUPPORT" "$DRV_GEN" "$DRV_READY" "$DRV_MEMROUTE"; do
   [ -f "$f" ] || { echo "REFUSING: missing driver $f"; exit 2; }
 done
 
@@ -294,12 +306,22 @@ for cert in "$@"; do
     echo "private_root=$PABS"
     echo "private_head=$(git -C "$PABS" rev-parse HEAD 2>/dev/null)"
     echo "host=$(uname -n) kernel=$(uname -r)"
-    echo "fuel=$SF/$WF cycles=$CYC only=$ONLY force=$FORCE"
+    echo "fuel=$SF/$WF cycles=$CYC only=$ONLY force=$FORCE meminit=$MEMINIT"
     echo "lean_bin=$LEANBIN version=$LEANVER sha256=$LEANSHA"
     echo "lean_path_closure_sha256=$LPCLOSURE"
     echo "route=INTERPRETED (lean --run, ulimit -s unlimited, --tstack=1048576); NOT native linking"
   } > "$d/requests/REQUEST-$TS.txt"
 
+  # THE MEMORY ROUTE, when it is the selected phase.  It runs BEFORE the scalar
+  # support phase and independently of it, because that is the whole point: the
+  # question it answers is about designs the scalar route refuses. Its exits are
+  # real dispositions for the certificate (6 = not admitted by the memory route,
+  # 7 = the runtime policy refuses the supplied state), not harness failures.
+  if [ "$ONLY" = memroute ]; then
+    phase "$d/memroute" 5400 "$DRV_MEMROUTE" "$cert" "$SF" "$WF" "$CYC" "$MEMINIT"; e=$?
+    echo "$m memroute  exit=$e"; [ "$e" = 0 ] || note "$e"
+    continue
+  fi
   if want decode; then
     phase "$d/decode" 600 "$DRV_DECODE" "$cert"; e=$?
     echo "$m decode    exit=$e"; [ "$e" = 0 ] || { note "$e"; continue; }
