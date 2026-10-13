@@ -10629,3 +10629,45 @@ inert where the native code says no extension is needed.
 
 Pico's initialized changing-memory transition remains OPEN.  Matrix stays
 **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.67 — CORRECTIONS to §63.64 and §63.66
+
+### "the gate asserted and the write executed" is withdrawn
+
+`fda2c1643`/§63.64 said the Pico write's gate ASSERTED and the write EXECUTED.
+The controls do not show that.  What `enabled_no_change` proves is a
+conditional: *an enabled write of datum 1 under the selected mask leaves that
+particular odd word unchanged.*  It observes no runtime gate value, no runtime
+address and no runtime datum — the cone control says so itself ("this
+conditional cone control does not assert its selector is reached at runtime").
+
+So the correct statement is the negative one only: **an unchanged image does
+NOT establish that the gate never asserted**, because a write that did execute
+could leave this word identical.  Whether it asserted at runtime is UNKNOWN and
+is not replaced here by the opposite unobserved claim.  §63.62's "does not
+assert" and §63.64's "asserted and executed" are BOTH withdrawn.
+
+### The enable-8 comparison was over-general
+
+§63.65 said a 4-bit enable of value 8 "would enable no byte of a byte-enabled
+one".  That depends on the word and lane geometry: bit 3 selects lane 3, and if
+that lane exists — `byte_w` small enough that the datum has four or more lanes
+— value 8 DOES enable a byte.  It enables no lane only when no lane 3 exists.
+
+The distinction that holds without qualification is the one that was the point:
+the plain write tests the enable WHOLE, by `bv_nonzero`, while a byte-enabled
+write tests individual mask BITS at `i / byte_w`.  That is a difference in
+semantics, not a claim about any particular value.
+
+### What the new controls prove, exactly
+
+`scripts/pico_mask_signed.lean` proves **explicit `BV` equalities** about
+`eval_op`.  It does NOT execute the native emitter, the certificate emitter, or
+any design; it compares two closed terms.  Its value is bounding the candidate,
+not confirming a fault.
+
+`sext_inert_on_zero` establishes inertness **at zero only**.  It is not a
+statement about arbitrary unsigned inputs, and §63.66's "inert where the native
+path says no extension is needed" overstates it.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
