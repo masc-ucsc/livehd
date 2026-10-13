@@ -11475,3 +11475,107 @@ the twelve FP units, and the matrix is unchanged at **13 YES / 11 NO / 36
 BLOCKED**, FP **3 YES / 9 BLOCKED**.  Whole Pico was NOT re-run: it contains no
 plain write, `admitsWB_eq` proves its answer cannot change, and the census
 confirms both routes agree on it.
+
+## §63.75 — the B03/B11 memory-slot lowering, implemented
+
+`pass.single_edge` refused EVERY design holding a `Memory` cell at P>1, with
+the hint *"slot enables are not wired into the Memory cell yet"*.  That is the
+gap B03 and B11 sit behind.  `MASTER_INTEGRATION` R34.4 named it "Gap 2" and
+recorded that master does not carry the capability; the pinned old checkout
+refuses identically.  **There was no old lowering to copy.**
+
+### The inspection came first, and it changed the design
+
+Read from the ACTUAL retained graph with the existing `lean_graph_census`,
+cross-checked against the retained RTLIL inventory — 19 memories, old and
+master identical:
+
+| write ports | read ports | `type` | count |
+|---|---|---|---|
+| 0 | 1 | 0 (async) | **8** |
+| 1 | 1 | 0 | 5 |
+| 1 | 16 | 0 | 2 |
+| 128 | 2 | 0 | 4 |
+
+Two facts decided everything:
+
+* **the memory the refusal named — `$auto$proc_rom.cc:155:do_switch$10` — has
+  `WR_PORTS = 0`.**  No writable port, asynchronous read.  It commits nothing
+  on any sub-step, so the refusal was firing on a cell that cannot be
+  mis-timed.  Instruction 131 warned against assuming that memory was writable;
+  the data says it is not.
+* write-enable widths are **16, 27, 34, 70 and 8224 — never 1**.  The flop form
+  `enable &= (phase == slot)` is a ONE-BIT AND; applied here it would keep lane
+  0 and silently drop every higher lane.
+
+All 19 have `type = 0`, so this design has **no synchronous read port**.
+
+### What landed
+
+* `mem_shape_of` reads the per-port pins (`raw_pid % stride` → name,
+  `raw_pid / stride` → port) — the same decoding `parse_memory_info` uses.
+* The refusal is **narrowed, not removed**.  Still refused, each with its own
+  message: a **synchronous read port** (its read register would commit on every
+  sub-step, and rebinding it without changing read latency is not validated
+  here), a non-constant `type`/`wensize`/`rdport` pin, and a write port with no
+  positive `wensize`.  A memory with **no write port** is no longer refused.
+* The gate is a width-preserving SELECT, per write port:
+  `enable' = (phase == slot) ? enable : 0^wensize`.  Active: the ORIGINAL
+  vector bit for bit, so byte-lane meaning is untouched.  Quiet: a
+  width-correct zero.  An ABSENT enable becomes all-ones at `wensize`, never a
+  single 1.
+* The slot comes from the **same commit model the flops use** —
+  `lc::commit_class_of` then `plan.slot_of_key`.  Nothing new is invented.
+* Untouched: geometry, `initial`/default contents, `fwd`, `posclk`, read
+  latency, and every clock pin.  No shared-IR field was added and no component
+  erased.
+
+### Validated on the retained independent reference machinery
+
+`lhd/tests/single_edge_memory_slot_test.sh` is the ported D2 fixture R34.4
+recorded as blocked by this exact gap — the procedure this work had to satisfy,
+not a new one:
+
+* structural legs PASS: `1 memory(ies) slotted`, no `negedge` left;
+* the independent **iverilog** differential (retained project-local v13_0
+  build): source versus normalized **agree over 39 periods, memory read
+  included**;
+* the **P=1 negative control still FAILS**, so the harness discriminates.
+
+An epoch sweep of the normalized clock's start gives OK at 5 and 10 and
+`errs=78` at 0 and 15.  Every mismatch is on `qp`/`qn` — the flops — and
+**never on `rd`**, with the normalized side lagging exactly one period.  The
+divider is deliberately reset-independent, so where its phase sits at reset
+release is a property of the HARNESS; this is R34.3's already characterized
+"epoch/phase conflict with a reset-independent divider", not a memory-gate
+defect.
+
+Regressions all exit 0: `single_edge_four_classes`, `single_edge_icg`,
+`single_edge_hier_latch`, `single_edge_scope`, `latch_fail_closed`,
+`lhd_memory_hierarchy`.  `single_edge_multi_clock_test` and
+`lhd_abc_memory_test` fail and were **verified pre-existing** — the pass was
+reverted to `HEAD`, rebuilt, and both failed identically.
+
+### The retained B03/B11 inputs now normalize
+
+| row | top | before | after |
+|---|---|---|---|
+| B03 | `icache_top` | exit 7 refused | **exit 0**: P=2, 8 latch(es), 504 element(s), **11 memory(ies) over 519 write port(s)** |
+| B11 | `minion_tlb` | exit 7 refused | **exit 0**: P=2, 1 latch, 29 element(s), **1 memory over 1 write port** |
+
+519 = 5×1 + 2×1 + 4×128, exactly the inventory; the 8 ROMs are neither refused
+nor gated.
+
+### …and then fail at the NEXT stage
+
+Both reach `pass.lean` certificate emission and stop there, in the same class:
+
+* B03: `Concat lane 1 (of 4, MSB-first) driver '…unused_ok' occupies 27 bits but its declared window is 1`
+* B11: `Concat lane 1 (of 2, MSB-first) driver 'unused_dft' occupies 69 bits but its declared window is 9`
+
+That is **B01's recorded blocker class**.  So B03 and B11 remain **BLOCKED** —
+neither emits a certificate — and the counts are unchanged at
+**13 YES / 11 NO / 36 BLOCKED**, FP **3 YES / 9 BLOCKED**.  A normalization
+pass is not a whole-unit YES.  What changed is that the lowering gap is closed
+and three of the nine remaining FP blockers now share one named stage and one
+named class, which is where the next work goes.

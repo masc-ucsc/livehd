@@ -52,6 +52,10 @@ struct Result {
   int  slots   = 1;      // P: sub-steps per source clock period after the rewrite
   int  latches_retyped = 0;
   int  flops_slotted   = 0;
+  // write ports gated to their memory's slot (a whole-vector select, not a
+  // 1-bit AND: a write enable is `wensize` bits, one per lane)
+  int  mem_ports_slotted = 0;
+  int  mems_slotted      = 0;  // memories with at least one gated write port
   int  icg_folded      = 0;  // gated clocks rewritten into a flop enable
   // Identity of the REFERENCE clock the slots are expressed against (a graph
   // input's name when there is one; "" when the design has no clock at all).
