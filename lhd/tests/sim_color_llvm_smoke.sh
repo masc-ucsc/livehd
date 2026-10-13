@@ -9,6 +9,7 @@ PRPS=(
   "inou/prp/tests/sim/color_kernel_multiwrite.prp"
   "inou/prp/tests/sim/color_kernel_llvm_scalar.prp"
   "inou/prp/tests/sim/color_kernel_llvm_reg.prp"
+  "inou/prp/tests/sim/ordered_state.prp"
   "inou/prp/tests/sim/color_kernel_llvm_reg_const.prp"
   "inou/prp/tests/sim/color_kernel_llvm_wide.prp"
   "inou/prp/tests/sim/color_kernel_llvm_mem_whole.prp"
@@ -135,8 +136,10 @@ PYCODE
 wide_objects=("$work"/llvm/sim/smoke.llvm_wide.color-kernel-*.llvm.o)
 [ -f "${wide_objects[0]}" ] || fail "sim.tune.backend=llvm did not emit the wide kernel in LLVM"
 
-grep -q '__state_commit.*= true' "$work"/llvm/sim/smoke.llvm_reg.cpp \
-  || fail "LLVM register kernel did not retain the phase-barrier commit"
+grep -q 'in-place-state registers=1 ' "$work"/llvm/sim/smoke.llvm_reg.color-plan.txt \
+  || fail "LLVM register kernel lost the proven in-place schedule"
+! grep -q 'state_din' "$work"/llvm/sim/smoke.llvm_reg.{cpp,hpp} \
+  || fail "in-place register retained a persistent pending value"
 
 adapters=("$work"/llvm*/sim/*.color-kernel-*.cpp)
 [ ! -e "${adapters[0]}" ] \

@@ -335,7 +335,12 @@ struct Result {
   //   unknown   the solver gave up / timed out / could not decide
   struct Lec_verdict {
     bool        present{false};
-    std::string verdict{};       // proven | refuted | unknown
+    std::string verdict{};  // proven | refuted | unknown | tested (sampled effort preset)
+    std::string effort{};          // requested formal.effort preset ("" = legacy)
+    bool        sampled{false};    // the sampled leg ran (proof attempt inconclusive)
+    std::string effort_reached{};  // highest preset the sampled vectors satisfy ("" = none)
+    uint64_t    sample_vectors{0}, sample_traces{0}, sample_partial{0}, sample_queries{0}, sample_unknown{0};
+    uint64_t    sample_solve_us{0};
     std::string solver{};        // cvc5 | bitwuzla | lgyosys | …
     bool        bounded{false};  // proven only to `bound` cycles from reset
     int64_t     bound{0};        // the depth `bounded` refers to

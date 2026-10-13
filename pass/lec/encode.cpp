@@ -4865,6 +4865,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         const Memory_clocks::Lane* ref_lane = nullptr;
         if (auto it = mc.clocks.lanes.find(0); it != mc.clocks.lanes.end()) {
           ref_lane = &it->second;
+        } else if (!mc.clocks.lanes.empty()) {
+          // Port 0 is unclocked (an async read port): the schedule placed the
+          // memory on the design's single root (!multi_root() above), so the
+          // clocked ports must agree with EACH OTHER. Comparing against a
+          // missing lane 0 refused every port of minion's register file
+          // (prim_rf_2r1w_preview `rf_q`), all of them on `clk_i`.
+          ref_lane = &std::min_element(mc.clocks.lanes.begin(), mc.clocks.lanes.end(), [](const auto& a, const auto& b) {
+                        return a.first < b.first;
+                      })->second;
         }
         for (const auto& [k, lane] : mc.clocks.lanes) {
           if (ref_lane == nullptr || lane.name != ref_lane->name) {

@@ -24,6 +24,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/BasicBlock.h"
@@ -32,11 +33,11 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassInstrumentation.h"
@@ -48,6 +49,7 @@
 #include "llvm/Pass.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SHA256.h"
 #include "llvm/Support/raw_ostream.h"
@@ -234,6 +236,7 @@ public:
   struct Output {
     size_t index = 0;
     Value  value;
+    llvm::Instruction* anchor = nullptr;
   };
   struct State_output {
     size_t                  word;
@@ -750,6 +753,23 @@ Cgen_llvm::Value Cgen_llvm::dynamic_extract(Value source, Value count, uint32_t 
     }
     base = impl_->packed_alloca(cast_integer(builder, value, source.width, source.unsign), source.width, "extract.words");
   }
+  const auto count_bits = llvm::computeKnownBits(raw_count, impl_->module->getDataLayout());
+  const auto alignment  = std::min(6u, count_bits.countMinTrailingZeros());
+  if constexpr (std::endian::native == std::endian::little) {
+    if ((len == 8 || len == 16 || len == 32 || len == 64) && len <= (uint32_t{1} << alignment) && source.width % len == 0) {
+      // An array-style lane can load its native integer directly. The word
+      // path otherwise needs an indexed i64 load followed by another variable
+      // shift, even for the ubiquitous i*32 +: 32 mux/reduction loop.
+      auto* index  = builder.CreateLShr(cast_integer(builder, raw_count, 64, true), std::countr_zero(len));
+      auto* valid  = builder.CreateICmpULT(index, builder.getInt64(source.width / len));
+      auto* safe   = builder.CreateSelect(valid, index, builder.getInt64(0));
+      auto* start  = impl_->word_ptr(base, offset);
+      auto* ptr    = builder.CreateInBoundsGEP(builder.getIntNTy(len), start, safe);
+      auto* loaded = builder.CreateAlignedLoad(builder.getIntNTy(len), ptr, llvm::Align(len / 8));
+      auto* lane   = builder.CreateSelect(valid, loaded, llvm::ConstantInt::get(builder.getIntNTy(len), 0));
+      return impl_->remember(cast_integer(builder, lane, result_width, true), result_width, result_unsign);
+    }
+  }
   auto* i64       = builder.getInt64Ty();
   auto* n64       = cast_integer(builder, raw_count, 64, true);
   auto* word      = builder.CreateLShr(n64, llvm::ConstantInt::get(i64, 6), "extract.word");
@@ -764,9 +784,10 @@ Cgen_llvm::Value Cgen_llvm::dynamic_extract(Value source, Value count, uint32_t 
   };
   auto*        low = load_word(word);
   llvm::Value* lane;
-  if (len == 1) {
-    // A single bit never crosses a packed-word boundary. Loading the next
-    // word adds a bounds check and a funnel shift to every loop iteration.
+  if (len <= (uint32_t{1} << alignment) || nwords == 1) {
+    // Aligned lanes (for example i*32 +: 32), like single bits, never
+    // cross a word. Do not load an adjacent word and funnel-shift it only
+    // to discard all its bits. A one-word source has no adjacent data.
     lane = builder.CreateLShr(low, shift, "extract.bit");
   } else {
     auto* high = load_word(builder.CreateAdd(word, llvm::ConstantInt::get(i64, 1)));
@@ -1238,7 +1259,6 @@ bool Cgen_llvm::memory_stage_write(std::string_view symbol, Value enable, Value 
   }
   const auto&  m         = it->second;
   auto&        b         = impl_->builder;
-  auto*        pending   = impl_->pending_ptr(m, m.port);
   auto*        wen       = impl_->get(enable);
   auto*        mask_type = b.getIntNTy(m.bits);
   llvm::Value* mask      = llvm::ConstantInt::get(mask_type, 0);
@@ -1264,6 +1284,27 @@ bool Cgen_llvm::memory_stage_write(std::string_view symbol, Value enable, Value 
     impl_->undefined_if(b.CreateAnd(enabled, b.CreateNot(in_range)), m.warn_site);
   }
   auto* valid = b.CreateAnd(in_range, enabled);
+  if (m.direct_write) {
+    // ABI inputs are cached lazily. Materialize the data before branching so
+    // later reads/writes sharing this input are dominated by its definition.
+    auto* write_data = impl_->get(data);
+    auto* write      = llvm::BasicBlock::Create(impl_->context, "memory.write", impl_->function);
+    auto* done       = llvm::BasicBlock::Create(impl_->context, "memory.write.done", impl_->function);
+    b.CreateCondBr(valid, write, done);
+    b.SetInsertPoint(write);
+    auto*        index = cast_integer(b, impl_->get(address), 64, address.unsign);
+    auto*        ptr   = b.CreateGEP(b.getInt64Ty(), impl_->resource(m.data), b.CreateMul(index, b.getInt64(word_count(m.bits))));
+    llvm::Value* next  = write_data;
+    if (m.lanes > 1) {
+      auto* old = impl_->load_packed(ptr, 0, m.bits, "memory.old");
+      next      = b.CreateOr(b.CreateAnd(old, b.CreateNot(mask)), b.CreateAnd(write_data, mask));
+    }
+    impl_->store_packed(next, ptr, 0, m.bits);
+    b.CreateBr(done);
+    b.SetInsertPoint(done);
+    return true;
+  }
+  auto* pending = impl_->pending_ptr(m, m.port);
   impl_->store_packed(impl_->get(data), pending, 0, m.bits);
   impl_->store_packed(mask, pending, word_count(m.bits), m.bits);
   impl_->store_packed(llvm::ConstantInt::get(mask_type, 0), pending, 2 * word_count(m.bits), m.bits);
@@ -1290,7 +1331,13 @@ bool Cgen_llvm::add_output(size_t index, Value value, std::string& error) {
     error = impl_->error.empty() ? "invalid LLVM color output" : impl_->error;
     return false;
   }
-  impl_->output_values.push_back({index, value});
+  // Retain the publication point until the complete output layout is known.
+  // Packed buffers are disjoint from inputs/resources, so publishing here
+  // cannot change a later computation. Deferring every store/pack to the
+  // return kept all independent outputs live together (and caused spills).
+  // This marker is removed by seal, before verification or optimization.
+  auto* anchor = new llvm::FreezeInst(impl_->get(value), "output.anchor", impl_->builder.GetInsertBlock());
+  impl_->output_values.push_back({index, value, anchor});
   return true;
 }
 
@@ -1419,6 +1466,7 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
     error = impl_->error;
     return false;
   }
+  const auto publication_order = impl_->output_values;
   std::ranges::sort(impl_->output_values, {}, &Impl::Output::index);
   for (size_t i = 0; i < impl_->output_values.size(); ++i) {
     if (impl_->output_values[i].index != i) {
@@ -1473,15 +1521,30 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
     impl_->builder.CreateRet(result);
   } else {
     auto*        i64           = impl_->builder.getInt64Ty();
-    const size_t changed_words = std::max<size_t>(1, word_count(static_cast<uint32_t>(impl_->output_values.size())));
+    const size_t changed_words = (impl_->output_values.size() + 63) / 64;
+    const auto   end           = impl_->builder.saveIP();
+    const bool   publish_early = impl_->output_values.size() > 1;
     if (track_changed) {
+      if (publish_early) {
+        auto& entry = impl_->function->getEntryBlock();
+        impl_->builder.SetInsertPoint(&entry, entry.getFirstInsertionPt());
+      }
       for (size_t word = 0; word < changed_words; ++word) {
         auto* ptr = impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, word);
         impl_->builder.CreateStore(llvm::ConstantInt::get(i64, 0), ptr);
       }
     }
     size_t output_word_offset = 0;
+    std::vector<size_t> offsets;
     for (const auto& output : impl_->output_values) {
+      offsets.push_back(output_word_offset);
+      output_word_offset += word_count(output.value.width);
+    }
+    for (const auto& output : publication_order) {
+      if (publish_early) {
+        impl_->builder.SetInsertPoint(output.anchor);
+      }
+      output_word_offset = offsets[output.index];
       auto* value = impl_->get(output.value);
       if (track_changed) {
         auto*        old  = impl_->load_packed(impl_->outputs, output_word_offset, output.value.width, "out.old");
@@ -1493,9 +1556,14 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
         impl_->builder.CreateStore(bits, ptr);
       }
       impl_->store_packed(value, impl_->outputs, output_word_offset, output.value.width);
-      output_word_offset += word_count(output.value.width);
     }
+    impl_->builder.restoreIP(end);
     impl_->builder.CreateRetVoid();
+  }
+
+  for (auto& output : impl_->output_values) {
+    output.anchor->eraseFromParent();
+    output.anchor = nullptr;
   }
 
   if (llvm::verifyModule(*impl_->module, &llvm::errs())) {
@@ -1877,11 +1945,6 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   }
   impl_->module->setTargetTriple(triple);
   impl_->module->setDataLayout(machine->createDataLayout());
-  for (auto& function : *impl_->module) {
-    if (!function.isDeclaration()) {
-      function.addFnAttr(llvm::Attribute::OptimizeForSize);
-    }
-  }
   profile.mark("target-setup");
 
   const auto digest = [](llvm::StringRef bytes) {
@@ -1912,9 +1975,9 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
     }
   }
 
-  // Use the size-oriented pipeline for native colors as well as host C++.
-  // The explicit native-loop inlining has already run. Keep its body rolled
-  // even for constant trip counts; size optimization must not duplicate it.
+  // Optimize the native circuit for execution speed. Explicit loop inlining
+  // has already run; retain rolled bodies without restricting straight-line
+  // arithmetic and vector simplifications to size-oriented transforms.
   llvm::LoopAnalysisManager     loop_analyses;
   llvm::FunctionAnalysisManager function_analyses;
   llvm::CGSCCAnalysisManager    cgscc_analyses;
@@ -1928,7 +1991,7 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   pass_builder.registerFunctionAnalyses(function_analyses);
   pass_builder.registerLoopAnalyses(loop_analyses);
   pass_builder.crossRegisterProxies(loop_analyses, function_analyses, cgscc_analyses, module_analyses);
-  auto pipeline = pass_builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::Os);
+  auto pipeline = pass_builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
   pipeline.run(*impl_->module, module_analyses);
   if (impl_->loop_function != nullptr) {
     // Clean up hoisted loop expressions without perturbing straight-line

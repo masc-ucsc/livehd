@@ -1,0 +1,71 @@
+/*
+:name: ordered_state
+:type: simulation
+*/
+// Capture same-cycle memory reads so a post-edge-only observation cannot hide
+// a read/write ordering error. The register swap needs one staged endpoint.
+mod ordered_state(wa:U2, wd:U8, we:Bool, exchange:Bool) -> (old:U8@[1], forwarded:U8@[1], before:U8@[1], after:U8@[1], a:U8@[0], b:U8@[0]) {
+  reg mo:[4]U8:[ordering="old"] = nil
+  reg mf:[4]U8:[ordering="fwd"] = nil
+  reg mp:[4]U8:[ordering="program"] = nil
+  reg ro:U8 = 0
+  reg rf:U8 = 0
+  reg rp:U8 = 0
+  reg rn:U8 = 0
+  reg sa:U8 = 0x12
+  reg sb:U8 = 0xa5
+  old = ro
+  forwarded = rf
+  before = rp
+  after = rn
+  a = sa
+  b = sb
+  const saved_a = sa
+  const saved_b = sb
+  if exchange {
+    sa = saved_b
+    sb = saved_a
+  }
+  ro = mo[wa]
+  rf = mf[wa]
+  rp = mp[wa]
+  if we {
+    mo[wa] = wd
+    mf[wa] = wd
+    mp[wa] = wd
+  }
+  rn = mp[wa]
+}
+
+test ordered_state.reads_and_swap {
+  mut dut = ordered_state
+  mut previous:U8 = 0
+  mut expected_a:U8 = 0x12
+  mut expected_b:U8 = 0xa5
+  tick 12 {
+    const writing = (clock & 1) == 1
+    const exchanging = (clock & 2) != 0
+    const incoming:U8 = U8(clock * 17)
+    dut.reset = clock == 0
+    dut.wa = 1
+    dut.wd = incoming
+    dut.we = writing
+    dut.exchange = exchanging
+    if exchanging {
+      const temp = expected_a
+      expected_a = expected_b
+      expected_b = temp
+    }
+    step
+    if clock >= 2 {
+      const updated = if writing { incoming } else { previous }
+      assert(dut.old == previous, "old memory reads precede every write")
+      assert(dut.forwarded == updated, "forwarded memory reads follow every write")
+      assert(dut.before == previous, "program memory read before write")
+      assert(dut.after == updated, "program memory read after write")
+    }
+    assert(dut.a == expected_a, "swap preserves old B")
+    assert(dut.b == expected_b, "swap preserves old A")
+    if writing { previous = incoming }
+  }
+}

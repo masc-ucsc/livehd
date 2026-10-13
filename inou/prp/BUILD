@@ -26,6 +26,8 @@ exports_files([
     "tests/sim/color_kernel_unsigned_msb.prp",
     "tests/sim/color_kernel_llvm_scalar.prp",
     "tests/sim/color_kernel_llvm_reg.prp",
+    "tests/sim/ordered_state.prp",
+    "tests/sim/color_small_comb.prp",
     "tests/sim/color_kernel_llvm_reg_const.prp",
     "tests/sim/color_kernel_llvm_wide.prp",
     "tests/sim/reduce_wide.prp",

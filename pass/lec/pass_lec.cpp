@@ -181,6 +181,18 @@ void Pass_lec::setup() {
                        "counter (0 = off). The compile tier sets it (with timeout=0) so a verdict that elides a "
                        "runtime check is reproducible across binaries; verify/lec default to wall-clock timeout",
                        "0");
+  m.add_label_optional("effort",
+                       "LEC effort preset for designs a full proof cannot finish: quick-check (256 input vectors), test "
+                       "(2048) or long-check (16384), or verify (no resource cap or default timeout). Empty preserves "
+                       "existing behavior. Sampled presets first attempt an ordinary proof (effort_proof resource units "
+                       "per solver), then check random input vectors against the miter and report TESTED <level>, "
+                       "never PROVEN",
+                       "");
+  m.add_label_optional("effort_proof",
+                       "Per-solver cvc5 resource units of the proof a sampled effort preset attempts before sampling "
+                       "(default 5M / 50M / 500M for quick-check / test / long-check; deterministic across machines). "
+                       "PROVEN/REFUTED from it are ordinary verdicts; 0 skips the proof and only samples",
+                       "");
   m.add_label_optional("min_timeout",
                        "FLOOR in seconds under the soft `timeout` total: once the total is spent, a unit with no "
                        "verdict yet still gets at least this much solver time, so it earns a real UNKNOWN/CEX instead "
@@ -302,6 +314,26 @@ void Pass_lec::lec(Eprp_var& var) {
   o.split             = std::string{var.get("split", "auto")};
   o.allow_oversize    = parse_bool(var.get("allow_oversize", "false"));
   o.stats             = parse_bool(var.get("stats", "false"));  // cvc5 solve-insight accounting (~8x slower)
+  o.rlimit            = str_tools::to_i(var.get("rlimit", "0"));
+  try {
+    o.effort = lec::parse_effort(var.get("effort", ""));
+  } catch (const std::invalid_argument& error) {
+    livehd::diag::err("pass.lec", "bad-effort", "io").msg("{}", error.what()).fatal();
+    return;
+  }
+  if (o.effort == lec::Effort::Verify) {
+    if (o.rlimit > 0) {
+      livehd::diag::err("pass.lec", "bad-effort", "io").msg("effort=verify conflicts with a nonzero rlimit").fatal();
+      return;
+    }
+    o.timeout = str_tools::to_i(var.get("timeout", "0"));
+  }
+  if (lec::is_sampled(o.effort)) {
+    if (o.solver != "cvc5" || (o.engine != "auto" && o.engine != "bmc")) {
+      livehd::diag::err("pass.lec", "bad-effort", "io").msg("sampled effort requires cvc5 and engine=auto or bmc").fatal();
+      return;
+    }
+  }
   // formal.lec.collapse: comma-separated proven-module def names to force-blackbox.
   if (std::string cs{var.get("collapse", "")}; !cs.empty()) {
     size_t pos = 0;
@@ -357,11 +389,44 @@ void Pass_lec::lec(Eprp_var& var) {
     livehd::diag::err("pass.lec", "unresolved-match", "usage").msg("{}", error).fatal();
     return;
   }
-  auto r = lec::prove_equal(ref.get(), impl.get(), o);
-  // int_blast=auto second leg: a solver-give-up Unknown earns one int-blasted
-  // re-solve at the min_timeout floor (driver-level, so the recursion inside
-  // prove_equal never multiplies it).
-  r      = lec::int_blast_retry(ref.get(), impl.get(), o, std::move(r));
+  // Coverage presets are proof-first (see lec_command): a bounded ordinary
+  // proof attempt, then sampled traces only when it is inconclusive.
+  const auto effort       = o.effort;
+  uint64_t   proof_rlimit = 0;
+  if (lec::is_sampled(effort)) {
+    try {
+      proof_rlimit = lec::parse_effort_proof(var.get("effort_proof", ""), effort);
+    } catch (const std::invalid_argument& error) {
+      livehd::diag::err("pass.lec", "bad-effort", "io").msg("{}", error.what()).fatal();
+      return;
+    }
+  }
+  lec::Query_result r;
+  r.verdict = lec::Verdict::Unknown;
+  if (!lec::is_sampled(effort) || proof_rlimit > 0) {
+    auto po = o;
+    if (lec::is_sampled(effort)) {
+      po.effort = lec::Effort::Legacy;
+      if (po.rlimit == 0) {
+        po.effort_rlimit = proof_rlimit;
+      }
+      if (o.timeout > 0) {
+        po.timeout = std::max(1, o.timeout / 2);
+      }
+    }
+    r = lec::prove_equal(ref.get(), impl.get(), po);
+    // int_blast=auto second leg: a solver-give-up Unknown earns one int-blasted
+    // re-solve at the min_timeout floor (driver-level, so the recursion inside
+    // prove_equal never multiplies it).
+    r = lec::int_blast_retry(ref.get(), impl.get(), po, std::move(r));
+  }
+  if (lec::is_sampled(effort) && r.verdict == lec::Verdict::Unknown && !r.oversize_refused) {
+    auto co          = o;
+    co.engine        = "bmc";
+    co.partitions    = 1;
+    co.split         = "none";
+    r                = lec::prove_equal(ref.get(), impl.get(), co);
+  }
 
   // BEFORE the switch: the Refuted/Unknown arms below are .fatal(), so a report
   // printed after them would be lost in exactly the two cases where knowing how hard
@@ -369,6 +434,14 @@ void Pass_lec::lec(Eprp_var& var) {
   // direct pipe step would pay the ~8x plugin cost and print nothing at all.
   if (o.stats) {
     livehd::lec::report_cvc5_stats("lec", r.cvc5);
+  }
+
+  if (r.tested && !r.unsupported && !r.nothing_compared) {
+    std::print("lec: '{}' TESTED {} ({} input vectors, no mismatch; equivalence not proven)\n",
+               mod,
+               lec::effort_name(r.sampling.reached),
+               r.sampling.vectors);
+    return;
   }
 
   switch (r.verdict) {

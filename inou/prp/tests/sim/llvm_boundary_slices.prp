@@ -52,3 +52,31 @@ test llvm_signed_boundary_slices.sign_extension {
     assert(dut.negative == value)
   }
 }
+
+// Several fixed lanes share each ABI word. Keep their consumer offsets exact
+// for both state and top inputs, including a slice whose high bit is the sign
+// of the underlying Slop carrier.
+pub mod llvm_shared_word_lanes(d:U128) -> (a:U4@[0], b:U4@[0], c:U4@[0], e:U4@[0]) {
+  reg saved:U128 = 0x9876543210fedcba0123456789abcdef
+  a = saved#[0..=3] ^ d#[4..=7]
+  b = saved#[60..=63] ^ d#[56..=59]
+  c = saved#[64..=67] ^ d#[68..=71]
+  e = saved#[124..=127] ^ d#[120..=123]
+  saved = d
+}
+
+test llvm_shared_word_lanes.offsets {
+  mut dut = llvm_shared_word_lanes
+  const initial = 0x9876543210fedcba0123456789abcdef
+  tick 16 {
+    dut.reset = clock == 0
+    dut.d = initial ^ (clock * 0x11111111111111111111111111111111)
+    step
+    // The zero-latency outputs after step see the just-updated register.
+    const saved_value = if clock == 0 { initial } else { dut.d }
+    assert(dut.a == (saved_value#[0..=3] ^ dut.d#[4..=7]))
+    assert(dut.b == (saved_value#[60..=63] ^ dut.d#[56..=59]))
+    assert(dut.c == (saved_value#[64..=67] ^ dut.d#[68..=71]))
+    assert(dut.e == (saved_value#[124..=127] ^ dut.d#[120..=123]))
+  }
+}

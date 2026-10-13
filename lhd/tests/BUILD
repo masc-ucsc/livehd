@@ -1126,12 +1126,23 @@ sh_test(
 )
 
 sh_test(
+    name = "sim_small_comb_smoke",
+    srcs = ["sim_small_comb_smoke.sh"],
+    data = [
+        "//inou/prp:tests/sim/color_small_comb.prp",
+        "//lhd",
+    ],
+    tags = ["cpu:4"],
+)
+
+sh_test(
     name = "sim_color_llvm_smoke",
     size = "large",
     srcs = ["sim_color_llvm_smoke.sh"],
     data = [
         "//inou/prp:tests/sim/color_kernel_llvm_mem_whole.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_reg.prp",
+        "//inou/prp:tests/sim/ordered_state.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_reg_const.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_scalar.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_wide.prp",
@@ -1491,6 +1502,13 @@ sh_test(
     name = "lhd_sta_critical_smoke",
     srcs = ["lhd_sta_critical_smoke.py"],
     data = ["//lhd", "//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_effort_smoke",
+    size = "small",
+    srcs = ["lhd_effort_smoke.py"],
+    data = ["//lhd"],
 )
 
 # INCREMENTAL pass.opentimer: the whole-design STA result cache under --workdir,

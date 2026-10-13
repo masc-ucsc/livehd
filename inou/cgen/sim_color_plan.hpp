@@ -120,6 +120,9 @@ public:
     hhds::Occurrence_node node;
     uint64_t              gate_equivalents = 0;
     bool                  live             = false;
+    // The version DAG proves that all old-state users precede the update.
+    // Emitters may store directly only while preserving that DAG inside colors.
+    bool                  in_place         = false;
   };
 
   struct Dependency {
@@ -187,6 +190,7 @@ public:
     bool          top_input           = false;
     bool          preextracted        = false;  // consumer Get_mask is the identity on this lane
     std::string   literal;                      // fixed packed lane selected at an occurrence boundary
+    uint32_t      lane_offset = 0;               // selected lane within a shared ABI word
   };
 
   struct Boundary_consumer {
@@ -196,6 +200,7 @@ public:
     uint32_t      input        = 0;  // exact inp_edges() position within the consumer
     uint32_t      width        = 1;  // consumer-visible width after boundary casting
     bool          preextracted = false;
+    uint32_t      lane_offset  = 0;
   };
 
   // Direct color ABI. Each slot has exactly one writer. For color values the
@@ -424,6 +429,8 @@ public:
   // verified kernel class. Equal kernel signatures therefore have an exact,
   // name-free member correspondence for generated ABI binding.
   [[nodiscard]] const std::vector<std::vector<size_t>>& canonical_members() const noexcept { return canonical_members_; }
+  // Semantic execution order, distinct from the canonical kernel-ABI order.
+  [[nodiscard]] std::vector<size_t>                     ordered_members(size_t color) const;
   [[nodiscard]] const Summary&                          summary() const noexcept { return summary_; }
   [[nodiscard]] const std::vector<std::string>&         errors() const noexcept { return errors_; }
   [[nodiscard]] bool                                    complete() const noexcept { return summary_.complete; }

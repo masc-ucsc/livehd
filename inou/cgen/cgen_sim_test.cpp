@@ -468,7 +468,7 @@ TEST(CgenSim, EmitsNativeCountedReductions) {
 // and no flop ever captured). The flop members of a big module therefore live
 // in bounded base structs, each with its own constructor.
 TEST(CgenSim, HugeFlopSetSplitsIntoBoundedStateBases) {
-  constexpr int     kFlops = 16400;  // Q + _din per flop: just past one 2^15-member chunk
+  constexpr int     kFlops = 32784;  // in-place Q only: just past one 2^15-member chunk
   const std::string name   = "huge_flop_set";
   auto&             lib    = livehd::Hhds_graph_library::instance("lgdb_" + name);
   auto              io     = lib.create_io(name);

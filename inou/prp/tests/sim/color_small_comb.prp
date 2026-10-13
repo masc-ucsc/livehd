@@ -1,0 +1,28 @@
+/*
+:name: color_small_comb
+:type: simulation
+*/
+comb color_leaf(a:U8, b:U8) -> (y:U8) {
+  y = ((a ^ b) + 1)#[0..=7]
+}
+comb color_middle(a:U8, b:U8) -> (y:U8) {
+  y = color_leaf(a=a, b=b) ^ color_leaf(a=b, b=a ^ 0x5a)
+}
+mod color_small_comb(a:U8, b:U8) -> (y:U8@[0]) {
+  const first = color_middle(a=a, b=b)
+  const last = color_leaf(a=a ^ 0xa5, b=b ^ 0x3c)
+  y = ((first + last) ^ 0x96)#[0..=7]
+}
+test color_small_comb.nested_and_repeated {
+  mut dut = color_small_comb
+  tick 256 {
+    const a = clock#[0..=7]
+    const b = (clock * 37 + 19)#[0..=7]
+    dut.a = a
+    dut.b = b
+    step
+    const first = ((a ^ b) + 1)#[0..=7] ^ ((b ^ a ^ 0x5a) + 1)#[0..=7]
+    const last = ((a ^ 0xa5 ^ b ^ 0x3c) + 1)#[0..=7]
+    assert(dut.y == ((first + last) ^ 0x96)#[0..=7])
+  }
+}

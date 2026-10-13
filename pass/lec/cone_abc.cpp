@@ -918,11 +918,66 @@ uint32_t get_u32(const unsigned char* p) {
   return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8U) | (static_cast<uint32_t>(p[2]) << 16U)
          | (static_cast<uint32_t>(p[3]) << 24U);
 }
+
+// One batch pass. stall_override_ms > 0 replaces the per-cone stall budget;
+// stalled (when non-null) collects the cones the stall timer killed.
+std::vector<Cone_verdict> batch_pass(const std::vector<cvc5::Term>& diffs, int64_t backtrack_limit, int64_t deadline_ms,
+                                     std::vector<Cone_stats>* st, const Cone_merge_map* merge, int64_t stall_override_ms,
+                                     std::vector<size_t>* stalled);
 }  // namespace
 
 std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& diffs, int64_t backtrack_limit,
                                                 int64_t deadline_ms, std::vector<Cone_stats>* st,
                                                 const Cone_merge_map* merge) {
+  const auto          t0 = std::chrono::steady_clock::now();
+  std::vector<size_t> stalled;
+  auto                out = batch_pass(diffs, backtrack_limit, deadline_ms, st, merge, 0, &stalled);
+  if (deadline_ms <= 0 || stalled.empty()) {
+    return out;
+  }
+  // Only where ABC is clearly effective on this obligation and the stalls are
+  // outliers; on a cone set ABC cannot crack, the retry would just burn the
+  // rest of the carve-out before cvc5 gets its turn.
+  const auto proven = static_cast<size_t>(std::count(out.begin(), out.end(), Cone_verdict::Proven));
+  if (proven < 4 * stalled.size()) {
+    return out;
+  }
+  // SECOND CHANCE. The stall budget (deadline / kConeStallShare) keeps one hard
+  // cone from starving the queue, but a pass that then finishes early leaves
+  // the rest of its deadline unused while the stalled cone goes to cvc5, which
+  // is usually far worse at exactly these cones. Measured on XiangShan's
+  // RenameTable_1 (124 cones): at a 30 s def budget one cone stalled at its
+  // 375 ms share, the pass ended after 1.6 s of 7.5 s, and cvc5 then spent
+  // 40 s without a verdict; at 150 s the same cone took ABC under 2 s. Retry
+  // the stalled cones with the leftover deadline split evenly among them.
+  const auto left
+      = deadline_ms - std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+  const int64_t share = left / static_cast<int64_t>(stalled.size());
+  if (share <= std::max<int64_t>(kConeStallMs, deadline_ms / kConeStallShare)) {
+    return out;  // no more per cone than the first attempt had
+  }
+  std::vector<cvc5::Term> retry;
+  retry.reserve(stalled.size());
+  for (const auto idx : stalled) {
+    retry.push_back(diffs[idx]);
+  }
+  std::vector<Cone_stats> retry_st;
+  const auto              again = batch_pass(retry, backtrack_limit, left, st != nullptr ? &retry_st : nullptr, merge, share, nullptr);
+  for (size_t k = 0; k < stalled.size(); ++k) {
+    if (again[k] != Cone_verdict::Unknown) {
+      out[stalled[k]] = again[k];
+      if (st != nullptr && k < retry_st.size()) {
+        (*st)[stalled[k]] = retry_st[k];
+      }
+    }
+  }
+  return out;
+}
+
+namespace {
+std::vector<Cone_verdict> batch_pass(const std::vector<cvc5::Term>& diffs, int64_t backtrack_limit, int64_t deadline_ms,
+                                     std::vector<Cone_stats>* st, const Cone_merge_map* merge, int64_t stall_override_ms,
+                                     std::vector<size_t>* stalled) {
   // Unknown = "not proven" = the cut stays in the cvc5 obligation, so every
   // early return below degrades soundly.
   std::vector<Cone_verdict> out(diffs.size(), Cone_verdict::Unknown);
@@ -941,7 +996,9 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
   // deadline): on a stall the child is killed, that cone stays Unknown, and a
   // fresh child resumes with the next.
   const int64_t cone_ms
-      = deadline_ms > 0 ? std::min<int64_t>(deadline_ms, std::max<int64_t>(kConeStallMs, deadline_ms / kConeStallShare)) : 0;
+      = deadline_ms <= 0        ? 0
+        : stall_override_ms > 0 ? std::min<int64_t>(deadline_ms, stall_override_ms)
+                                : std::min<int64_t>(deadline_ms, std::max<int64_t>(kConeStallMs, deadline_ms / kConeStallShare));
   // A word-level arithmetic proof needs longer than a cheap SAT sweep. Reserve
   // time for every other cone, while letting one arithmetic cone use a useful
   // fraction of the existing batch deadline.
@@ -1085,9 +1142,13 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
     if (expire || !stall) {
       break;
     }
+    if (stalled != nullptr) {
+      stalled->push_back(next);
+    }
     ++next;  // the stalled cone stays Unknown for cvc5
   }
   return out;
 }
+}  // namespace
 
 }  // namespace livehd::lec

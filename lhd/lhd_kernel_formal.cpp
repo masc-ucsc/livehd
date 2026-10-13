@@ -823,7 +823,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                                                   const livehd::lec::Lec_options&                     base,
                                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
                                                   livehd::formal::Verdict_cache* vcache, bool retry_all, bool fail_fast_refute,
-                                                  bool top_down, std::vector<std::pair<std::string, int64_t>>* cvc5_hot = nullptr) {
+                                                  bool top_down, std::vector<std::pair<std::string, int64_t>>* cvc5_hot = nullptr,
+                                                  std::vector<std::tuple<std::string, hhds::Graph*, hhds::Graph*>>* open_defs
+                                                  = nullptr,
+                                                  livehd::lec::Clock_forest* open_forest = nullptr) {
   using livehd::lec::Verdict;
   namespace gu = livehd::graph_util;
 
@@ -2969,6 +2972,35 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           }
         }
       }
+      if (open_forest != nullptr) {
+        // The open defs are re-checked standalone; they must resolve clocks
+        // (a `reg` with no clock_pin commits on its module's own clock) from
+        // the same design-wide forest as their per-def proofs did, or each
+        // one's implicit clock becomes a separate synthetic root.
+        ensure_forests();
+        *open_forest = ref_forest;
+        for (const auto& [dname, row] : impl_forest.port_root) {
+          auto& dst = open_forest->port_root[dname];
+          for (const auto& [pn, r] : row) {
+            dst.emplace(pn, r);
+          }
+        }
+      }
+      if (open_defs != nullptr) {
+        // The premises a sampled effort preset tests instead of the flat top:
+        // every def with no verdict of its own (a def proven only
+        // conditionally is covered by testing its open descendants).
+        for (size_t i = 0; i < order.size(); ++i) {
+          if (order[i] == top_key || proven[i] != 0 || refuted[i] != 0 || parents[order[i]].empty()) {
+            continue;
+          }
+          auto ri = ref_by_name.find(order[i]);
+          auto ii = impl_by_name.find(order[i]);
+          if (ri != ref_by_name.end() && ii != impl_by_name.end()) {
+            open_defs->emplace_back(order[i], ri->second, ii->second);
+          }
+        }
+      }
       top_result.verdict = Verdict::Unknown;
       top_result.detail  = std::format(
           "INCONCLUSIVE: '{}' proved with every child BOXED, but {} premise(s) never discharged ({}) — the top's own "
@@ -4356,6 +4388,21 @@ void lec_command(Options& opts, Result& res) {
   }
   const bool        yosys_comparison = requested_solver == "lgyosys";
   const std::string solver           = yosys_comparison ? "cvc5" : requested_solver;
+  livehd::lec::Effort effort;
+  try {
+    effort = livehd::lec::parse_effort(label("effort", ""));
+  } catch (const std::invalid_argument& error) {
+    throw Lhd_error{"usage", error.what(), "choose quick-check, test, long-check, or verify"};
+  }
+  const bool sampled_effort = livehd::lec::is_sampled(effort);
+  if (sampled_effort && (requested_solver != "cvc5" || (label("engine", "auto") != "auto" && label("engine", "auto") != "bmc"))) {
+    throw Lhd_error{"usage",
+                    "sampled effort presets require cvc5 and engine=auto or bmc",
+                    "use formal.effort=verify for proof engines"};
+  }
+  if (sampled_effort && label("cross", "false") != "false" && label("cross", "false") != "0") {
+    throw Lhd_error{"usage", "sampled effort presets do not produce a verdict for proof cross-checking", "omit formal.cross"};
+  }
 
   // Formal BLOCKS are a `lhd formal verify` construct, not a lec one: a block
   // is an independent test, while lec has a single
@@ -4450,6 +4497,33 @@ void lec_command(Options& opts, Result& res) {
   o.jobs                = std::max(1, std::atoi(label("jobs", "4").c_str()));
   o.split               = label("split", "auto");
   o.rlimit              = std::atoi(label("rlimit", "0").c_str());  // deterministic per-query budget (0=off; CI/repro)
+  o.effort              = effort;
+  if (effort == livehd::lec::Effort::Verify) {
+    if (o.rlimit > 0) {
+      throw Lhd_error{"usage",
+                      "formal.effort=verify conflicts with a nonzero formal.rlimit",
+                      "remove formal.rlimit for an uncapped proof attempt"};
+    }
+    o.timeout = std::atoi(label("timeout", "0").c_str());
+  }
+  // PROOF FIRST. A sampled preset (quick-check | test | long-check) is for a
+  // design whose full proof is hard or impossible, and it must never cost more
+  // than the proof it replaces: an identical-structure comparison proves in
+  // about a second. So each preset first runs the ordinary proof flow with a
+  // DETERMINISTIC per-solver cvc5 resource cap (formal.effort_proof units,
+  // machine independent, unlike seconds) and at most half of formal.timeout;
+  // PROVEN / PASS(n) / REFUTED from it are ordinary verdicts. Only an
+  // inconclusive attempt falls back to sampling input vectors (effort.hpp),
+  // which then reports TESTED at the effort level it reached.
+  const int total_timeout = o.timeout;
+  uint64_t  proof_rlimit  = 0;
+  if (sampled_effort) {
+    try {
+      proof_rlimit = livehd::lec::parse_effort_proof(label("effort_proof", ""), effort);
+    } catch (const std::invalid_argument& error) {
+      throw Lhd_error{"usage", error.what(), "0 skips the proof attempt and only samples"};
+    }
+  }
   // `timeout` is a SOFT TOTAL; `min_timeout` is the per-def floor beneath it, so
   // a def dispatched after the total is spent still earns a real verdict instead
   // of a silent skip. Budget accounting is on iff timeout>0 && rlimit==0 — the
@@ -4849,7 +4923,7 @@ void lec_command(Options& opts, Result& res) {
   // a prover change invalidates every stored verdict automatically. v1 wires
   // it into the hierarchical driver (the default path).
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
-  if (workdir_set && opts.incremental) {
+  if (workdir_set && opts.incremental && (!sampled_effort || proof_rlimit > 0)) {
     // MATERIALIZE the workdir before the cache opens it. Verdict_cache::save()
     // treats an unopenable path as "the cache is only ever a speedup" and
     // returns silently -- so without this, every run stored to memory, wrote
@@ -4871,7 +4945,31 @@ void lec_command(Options& opts, Result& res) {
   // lhd.stats: per-def (name, conflicts) ranking, filled by the hierarchical
   // driver only (the flat path is one def, so the totals already say it all).
   std::vector<std::pair<std::string, int64_t>> cvc5_hot;
-  if (label("hier", "true") != "false" && label("hier", "true") != "0") {
+  // The sampled leg's options: sampled traces are traces of the requested
+  // top, including its concrete children. A tested child is never an
+  // assume-guarantee premise, so no hierarchy decomposition and no pairing.
+  livehd::lec::Lec_options sample_opts = o;
+  if (sampled_effort) {
+    sample_opts.engine        = "bmc";
+    sample_opts.partitions    = 1;
+    sample_opts.split         = "none";
+    o.effort                    = livehd::lec::Effort::Legacy;  // the proof attempt is an ordinary proof
+    if (o.rlimit == 0) {
+      o.effort_rlimit = proof_rlimit;
+    }
+    if (total_timeout > 0) {
+      o.timeout = std::max(1, total_timeout / 2);  // the other half is the sampled leg's
+    }
+  }
+  // Defs the proof attempt left open while proving the top over them (boxed);
+  // the sampled leg tests exactly these premises instead of the flat top.
+  std::vector<std::tuple<std::string, hhds::Graph*, hhds::Graph*>> open_defs;
+  livehd::lec::Clock_forest                                        open_forest;
+  const auto proof_t0  = std::chrono::steady_clock::now();
+  const bool run_proof = !sampled_effort || proof_rlimit > 0;
+  if (!run_proof) {
+    r.verdict = livehd::lec::Verdict::Unknown;
+  } else if (label("hier", "true") != "false" && label("hier", "true") != "0") {
     // Bottom-up: LEC every def leaves-first under `auto`, collapsing proven
     // children. The driver emits a per-def progress line itself; the TOP def's
     // verdict drives the exit policy below (like the single-design path).
@@ -4944,7 +5042,9 @@ void lec_command(Options& opts, Result& res) {
                          retry_all,
                          /*fail_fast_refute=*/hier_refute == "fail",
                          /*top_down=*/top_down_hier,
-                         o.stats ? &cvc5_hot : nullptr);
+                         o.stats ? &cvc5_hot : nullptr,
+                         sampled_effort ? &open_defs : nullptr,
+                         sampled_effort ? &open_forest : nullptr);
     if (vcache) {
       vcache->save();
       if (vcache->hits() > 0 || vcache->stores() > 0 || vcache->skips() > 0) {
@@ -5234,6 +5334,123 @@ void lec_command(Options& opts, Result& res) {
     emit_lec_block_progress(impl_g->get_name(), r, o, ms);
   }
 
+  if (sampled_effort && r.verdict == livehd::lec::Verdict::Unknown && !r.oversize_refused) {
+    const long long proof_ms
+        = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - proof_t0).count();
+    // formal.timeout stays the TOTAL: the sampled leg gets what the proof left,
+    // but never less than a floor -- quick-check is the minimum outcome, and a
+    // soft-budget proof attempt can overrun its half (minion bug1: 382 s of a
+    // 300 s total), which left sampling 1 s and the run UNKNOWN on a design
+    // with a refuted block.
+    const int sample_floor = total_timeout > 0 ? std::max(30, total_timeout / 4) : 0;
+    if (total_timeout > 0) {
+      sample_opts.timeout
+          = static_cast<int>(std::max<long long>(sample_floor, total_timeout - proof_ms / 1000));
+    }
+    if (run_proof) {
+      std::print("lec[effort]: proof attempt inconclusive after {:.1f}s; sampling input vectors ({}: {} vectors)\n",
+                 static_cast<double>(proof_ms) / 1000.0,
+                 livehd::lec::effort_name(effort),
+                 livehd::lec::effort_vectors(effort));
+    }
+    res.recipe_steps.emplace_back(std::format("pass.lec effort:{} engine:bmc", livehd::lec::effort_name(effort)));
+    livehd::lec::Query_result sampled;
+    if (open_defs.empty()) {
+      sampled = livehd::lec::prove_equal_isolated(ref_g.get(), impl_g.get(), sample_opts, &sub_lib);
+    } else {
+      // The top proved CONDITIONAL on these defs being equal. Sample each
+      // open def and report the lowest level reached. A child mismatch is
+      // only a boundary counterexample: its caller may never supply that
+      // input, so the normal policy must confirm it at the requested top.
+      sampled.verdict            = livehd::lec::Verdict::Unknown;
+      sampled.tested             = true;
+      sampled.sampling.requested = effort;
+      sampled.sampling.reached   = livehd::lec::Effort::Long;
+      std::string names;
+      bool        sampled_any = false;
+      bool        checked_top = false;
+      sample_opts.clock_forest = open_forest;
+      for (const auto& [name, ref_def, impl_def] : open_defs) {
+        auto one = livehd::lec::prove_equal_isolated(ref_def, impl_def, sample_opts, &sub_lib);
+        if (one.verdict != livehd::lec::Verdict::Refuted && !one.tested && one.verdict != livehd::lec::Verdict::Proven) {
+          // The sampled BMC cannot encode this def (e.g. a phase schedule over
+          // several unrelated clock roots), yet the ordinary proof engines may.
+          // Such defs are small premises: give them an UNCAPPED proof attempt
+          // on the remaining budget rather than leaving the run unknown.
+          auto       po      = o;
+          const auto left_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - proof_t0).count();
+          po.effort_rlimit   = 0;
+          po.clock_forest    = open_forest;
+          po.timeout         = total_timeout > 0 ? static_cast<int>(std::max<long long>(sample_floor, total_timeout - left_ms / 1000)) : 0;
+          auto proof         = livehd::lec::prove_equal_isolated(ref_def, impl_def, po, &sub_lib);
+          proof.detail       = "unsampleable (" + one.detail + "); uncapped proof: " + proof.detail;
+          one                = std::move(proof);
+        }
+        std::print("lec[effort]: open def '{}' {}\n",
+                   name,
+                   one.verdict == livehd::lec::Verdict::Refuted ? std::string{"REFUTED"}
+                   : one.tested ? std::format("TESTED {} ({} vectors)",
+                                              livehd::lec::effort_name(one.sampling.reached),
+                                              one.sampling.vectors)
+                   : one.verdict == livehd::lec::Verdict::Proven ? std::string{one.bounded ? "PASS (bounded check)" : "PROVEN"}
+                                                                 : "UNKNOWN (" + one.detail + ")");
+        names += (names.empty() ? "" : ", ") + name;
+        if (one.verdict == livehd::lec::Verdict::Refuted) {
+          if (label("hier_refute", "escalate") == "fail") {
+            one.detail = std::format("open def '{}' refuted at its boundary (hier_refute=fail): {}", name, one.detail);
+            sampled    = std::move(one);
+          } else {
+            auto top_opts         = sample_opts;
+            top_opts.clock_forest = o.clock_forest;
+            sampled        = livehd::lec::prove_equal_isolated(ref_g.get(), impl_g.get(), top_opts, &sub_lib);
+            sampled.detail = std::format("open def '{}' differs at its boundary; top-level confirmation: {}", name, sampled.detail);
+            checked_top = true;
+          }
+          break;
+        }
+        if (one.verdict == livehd::lec::Verdict::Proven) {
+          continue;  // proven (or no free data input: the bounded check decided it)
+        }
+        if (!one.tested) {
+          sampled.tested = false;
+          sampled.detail = std::format("open def '{}' could not be sampled: {}", name, one.detail);
+        }
+        const auto& s1 = one.sampling;
+        sampled_any    = true;
+        sampled.sampling.vectors += s1.vectors;
+        sampled.sampling.traces += s1.traces;
+        sampled.sampling.partial += s1.partial;
+        sampled.sampling.queries += s1.queries;
+        sampled.sampling.unknown += s1.unknown;
+        sampled.sampling.leads += s1.leads;
+        sampled.sampling.watched += s1.watched;
+        sampled.sampling.solve_us += s1.solve_us;
+        if (static_cast<int>(s1.reached) < static_cast<int>(sampled.sampling.reached)) {
+          sampled.sampling.reached = s1.reached;
+        }
+      }
+      if (!checked_top && sampled.verdict != livehd::lec::Verdict::Refuted) {
+        if (!sampled_any) {
+          // Every open def was decided by its bounded check: nothing sampled.
+          sampled.verdict = livehd::lec::Verdict::Proven;
+          sampled.bounded = true;
+          sampled.tested  = false;
+        }
+        sampled.tested = sampled.tested && sampled.sampling.passed();
+        if (sampled.detail.empty()) {
+          sampled.detail = std::format("top proven over {} boxed def(s) left open by the proof attempt ({}); each sampled",
+                                       open_defs.size(),
+                                       names);
+        }
+      }
+    }
+    if (run_proof) {
+      sampled.detail = std::format("proof attempt inconclusive in {}ms; {}", proof_ms, sampled.detail);
+      sampled.cvc5 += r.cvc5;
+    }
+    r = std::move(sampled);
+  }
+
   // lhd.stats: the cvc5 solve-insight report, one run total. Both paths funnel
   // into `r` — the hierarchical driver already summed every def into r.cvc5 (and
   // filled cvc5_hot); the flat path carries its single solver's numbers.
@@ -5264,6 +5481,9 @@ void lec_command(Options& opts, Result& res) {
   //   PASS      proved INDUCTIVELY: holds for all cycles          -> exit 0
   //   PASS(n)   BMC ran to completion, no counterexample, and is
   //             EXHAUSTIVE OVER INPUTS for n cycles from reset    -> exit 0
+  //   TESTED    a sampled effort preset checked at least quick-check's input
+  //             vectors with no mismatch (level reached is reported) -> exit 0
+  //             (no exhaustive equivalence claim)
   //
   // PASS(n) is a real pass, not an "undecided": it decided something definitive
   // and complete, just to a depth. Reporting it as UNKNOWN conflated it with a
@@ -5318,12 +5538,45 @@ void lec_command(Options& opts, Result& res) {
                                                 o.bound,
                                                 o.bound)
                                           : std::string{"PROVEN equivalent"};
-  const char*       verdict   = lec_known ? (lec_equiv ? pass_word.c_str() : "REFUTED (not equivalent)") : "UNKNOWN";
+  const auto&       sampling  = r.sampling;
+  const std::string tested_word
+      = r.tested ? std::format("TESTED {} ({} input vectors, no mismatch{}; equivalence not proven)",
+                               livehd::lec::effort_name(sampling.reached),
+                               sampling.vectors,
+                               sampling.reached != sampling.requested
+                                   ? std::format("; requested {}", livehd::lec::effort_name(sampling.requested))
+                                   : std::string{})
+                 : std::string{};
+  const char* verdict = r.tested    ? tested_word.c_str()
+                        : lec_known ? (lec_equiv ? pass_word.c_str() : "REFUTED (not equivalent)")
+                                    : "UNKNOWN";
   std::print("lec: '{}' {} ({})\n", impl_g->get_name(), verdict, r.detail);
-  // The same three states, machine-readable: `status`/exit code alone cannot
+  // Machine-readable verdicts: `status`/exit code alone cannot
   // tell a proof from a solver give-up (see Result::Lec_verdict).
   res.lec.present = true;
-  res.lec.verdict = lec_known ? (lec_equiv ? "proven" : "refuted") : "unknown";
+  res.lec.verdict = r.tested ? "tested" : lec_known ? (lec_equiv ? "proven" : "refuted") : "unknown";
+  res.lec.effort  = std::string{livehd::lec::effort_name(effort)};
+  if (sampling.ran()) {
+    res.lec.sampled          = true;
+    res.lec.effort_reached   = std::string{livehd::lec::effort_name(sampling.reached)};
+    res.lec.sample_vectors   = sampling.vectors;
+    res.lec.sample_traces    = sampling.traces;
+    res.lec.sample_partial   = sampling.partial;
+    res.lec.sample_queries   = sampling.queries;
+    res.lec.sample_unknown   = sampling.unknown;
+    res.lec.sample_solve_us  = sampling.solve_us;
+    std::print(
+        "lec[effort]: {} input vectors over {} traces ({} partially pinned), {} queries ({} capped), "
+        "{} register lead(s) over {} watched, {}us solving\n",
+        sampling.vectors,
+        sampling.traces,
+        sampling.partial,
+        sampling.queries,
+        sampling.unknown,
+        sampling.leads,
+        sampling.watched,
+        sampling.solve_us);
+  }
   res.lec.solver  = o.solver;
   res.lec.bounded = lec_equiv && r.bounded;
   res.lec.bound   = lec_equiv && r.bounded ? static_cast<int64_t>(o.bound) : int64_t{0};
@@ -5377,6 +5630,9 @@ void lec_command(Options& opts, Result& res) {
   }
 
   auto require_native_verdict = [&]() {
+    if (r.tested && sampled_effort && !r.unsupported && !r.nothing_compared) {
+      return;
+    }
     if (r.verdict == livehd::lec::Verdict::Refuted) {
       throw Lhd_error{"equiv_fail",
                       std::format("'{}' is not equivalent ({} vs {})", impl_g->get_name(), opts.impl_path, opts.ref_path),
@@ -6490,6 +6746,22 @@ void formal_verify_command(Options& opts, Result& res) {
   o.jobs                = std::max(1, std::atoi(label("jobs", "4").c_str()));
   o.split               = label("split", "auto");
   o.rlimit              = std::atoi(label("rlimit", "0").c_str());  // deterministic per-query budget (0=off; CI/repro)
+  try {
+    o.effort = livehd::lec::parse_effort(label("effort", ""));
+  } catch (const std::invalid_argument& error) {
+    throw Lhd_error{"usage", error.what(), "choose quick-check, test, long-check, or verify"};
+  }
+  if (livehd::lec::is_sampled(o.effort)) {
+    throw Lhd_error{"usage",
+                    "sampled effort presets apply to lhd lec comparisons",
+                    "omit formal.effort for property verification, or use verify for an uncapped attempt"};
+  }
+  if (o.effort == livehd::lec::Effort::Verify) {
+    if (o.rlimit > 0) {
+      throw Lhd_error{"usage", "formal.effort=verify conflicts with a nonzero formal.rlimit", "remove formal.rlimit"};
+    }
+    o.timeout = std::atoi(label("timeout", "0").c_str());
+  }
   // Soft total (on iff timeout>0 && rlimit==0): `timeout` is a TOTAL cvc5-time budget spent
   // across every obligation-check, not `timeout` per check (the O×C hazard) —
   // the verify analogue of the hier-lec scheduler. rlimit>0 (deterministic tier)

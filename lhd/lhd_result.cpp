@@ -1013,6 +1013,29 @@ void write_result(const Options& opts, const Result& res) {
     w.StartObject();
     w.Key("verdict");
     w.String(res.lec.verdict.c_str());
+    if (!res.lec.effort.empty()) {
+      w.Key("effort");
+      w.String(res.lec.effort.c_str());
+    }
+    if (res.lec.sampled) {
+      w.Key("sampling");
+      w.StartObject();
+      w.Key("effort_reached");
+      w.String(res.lec.effort_reached.c_str());
+      w.Key("vectors");
+      w.Uint64(res.lec.sample_vectors);
+      w.Key("traces");
+      w.Uint64(res.lec.sample_traces);
+      w.Key("partial");
+      w.Uint64(res.lec.sample_partial);
+      w.Key("queries");
+      w.Uint64(res.lec.sample_queries);
+      w.Key("unknown");
+      w.Uint64(res.lec.sample_unknown);
+      w.Key("solve_us");
+      w.Uint64(res.lec.sample_solve_us);
+      w.EndObject();
+    }
     if (!res.lec.solver.empty()) {
       w.Key("solver");
       w.String(res.lec.solver.c_str());

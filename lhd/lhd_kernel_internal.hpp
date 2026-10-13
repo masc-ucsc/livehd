@@ -61,6 +61,8 @@ inline constexpr std::string_view kFormalCommonFlags[] = {
     "assume_check",
     "bound",
     "engine",
+    "effort",
+    "effort_proof",
     "hard_timeout_mult",
     "ignore_memory",
     "jobs",

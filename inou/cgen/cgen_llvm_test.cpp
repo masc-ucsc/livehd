@@ -26,6 +26,30 @@
 #include "sim_compile_workers.hpp"
 #include "sim_native_rt.hpp"
 
+TEST(CgenLlvm, EmptyPackedKernelCanBeSealed) {
+  for (bool track_changed : {false, true}) {
+    Cgen_llvm   kernel("empty_packed", std::vector<std::pair<uint32_t, bool>>{});
+    std::string error;
+    const auto  path = std::filesystem::temp_directory_path() / "livehd-empty-packed.bc";
+    ASSERT_TRUE(kernel.write_bitcode(path.string(), error, track_changed)) << error;
+    auto buffer = llvm::MemoryBuffer::getFile(path.string());
+    ASSERT_TRUE(buffer);
+    llvm::LLVMContext context;
+    auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+    ASSERT_TRUE(module);
+    EXPECT_FALSE(llvm::verifyModule(**module));
+    for (const auto& function : **module) {
+      for (const auto& block : function) {
+        for (const auto& instruction : block) {
+          EXPECT_FALSE(llvm::isa<llvm::LoadInst>(instruction));
+          EXPECT_FALSE(llvm::isa<llvm::StoreInst>(instruction));
+        }
+      }
+    }
+    std::filesystem::remove(path);
+  }
+}
+
 TEST(CgenLlvm, ConcatCoalescesRepeatedContiguousSlices) {
   Cgen_llvm                     kernel("concat_slices", Cgen_llvm::State_layout{9, {{0, 64, true}}});
   std::vector<Cgen_llvm::Value> lanes;
@@ -222,6 +246,99 @@ TEST(CgenLlvm, DynamicSingleBitExtractionUsesOneSourceWord) {
   }
   std::filesystem::remove(path);
   std::filesystem::remove(object);
+}
+
+TEST(CgenLlvm, AlignedDynamicLanesUseOneLoadAndPreserveBounds) {
+  const auto dir = std::filesystem::temp_directory_path();
+  for (uint32_t width : {8u, 16u, 32u, 64u}) {
+    Cgen_llvm   kernel("aligned_lane",
+                     Cgen_llvm::State_layout{
+                         6,
+                           {{0, 256, true}, {4, 64, true}}
+    });
+    const auto  offset = kernel.binary(Cgen_llvm::Binary_op::mul, kernel.input(1), kernel.constant(64, width), 64, true);
+    const auto  lane   = kernel.dynamic_extract(kernel.input(0), offset, width, 64, true);
+    std::string error;
+    ASSERT_TRUE(kernel.add_state_output(5, 5, lane, {}, error)) << error;
+    const auto path = dir / ("livehd-aligned-lane-" + std::to_string(width) + ".bc");
+    ASSERT_TRUE(kernel.write_bitcode(path.string(), error, false)) << error;
+    auto buffer = llvm::MemoryBuffer::getFile(path.string());
+    ASSERT_TRUE(buffer);
+    llvm::LLVMContext context;
+    auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+    ASSERT_TRUE(module);
+    size_t loads = 0;
+    for (const auto& block : *(*module)->getFunction("aligned_lane")) {
+      for (const auto& instruction : block) {
+        loads += llvm::isa<llvm::LoadInst>(instruction);
+      }
+    }
+    EXPECT_EQ(loads, 2u);  // index plus selected lane, without an adjacent-word read
+    const auto object = path.string() + ".o";
+    ASSERT_TRUE(kernel.write_object(object, error, false)) << error;
+    livehd::sim::Native_objects objects;
+    ASSERT_TRUE(objects.load(object, error)) << error;
+    const auto fn = objects.lookup("aligned_lane", error);
+    ASSERT_NE(fn, nullptr) << error;
+    for (uint64_t index = 0; index < 320 / width; ++index) {
+      uint64_t state[]  = {0x8000000000000001, 0xaaaaaaaaaaaaaaaa, 0x5555555555555555, 0xfedcba9876543210, index, 0};
+      uint64_t expected = index * width < 256 ? state[index * width / 64] >> (index * width % 64) : 0;
+      if (width < 64) {
+        expected &= (uint64_t{1} << width) - 1;
+      }
+      fn(state, nullptr);
+      EXPECT_EQ(state[5], expected) << width << ":" << index;
+    }
+    std::filesystem::remove(path);
+    std::filesystem::remove(object);
+  }
+}
+
+TEST(CgenLlvm, OutputPublicationPreservesIndexedLayoutAndChangeBits) {
+  for (const bool scalar : {false, true}) {
+    Cgen_llvm   kernel("publish_outputs",
+                       {
+                         {32, true}
+    },
+                     scalar);
+    std::string error;
+    // Deliberately publish in a different order from the external ABI.
+    ASSERT_TRUE(
+        kernel.add_output(2, kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.constant(32, 7), 32, true), error));
+    ASSERT_TRUE(kernel.add_output(0, kernel.resize(kernel.input(0), 8, true), error));
+    const auto quotient = kernel.binary(Cgen_llvm::Binary_op::div,
+                                        kernel.constant(32, 65535),
+                                        kernel.binary(Cgen_llvm::Binary_op::add, kernel.input(0), kernel.constant(32, 1), 32, true),
+                                        16,
+                                        true);
+    ASSERT_TRUE(kernel.add_output(1, quotient, error));
+    const auto path = std::filesystem::temp_directory_path() / (scalar ? "livehd-publish-scalar.o" : "livehd-publish-packed.o");
+    ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
+    livehd::sim::Native_objects objects;
+    ASSERT_TRUE(objects.load(path.string(), error)) << error;
+    const auto address = objects.lookup("publish_outputs", error);
+    ASSERT_NE(address, nullptr) << error;
+    using Scalar        = uint64_t (*)(uint64_t, void*);
+    using Packed        = void (*)(const uint64_t*, uint64_t*, uint64_t*, void*);
+    uint64_t outputs[3] = {0, 0, 0};
+    for (uint64_t input = 0; input < 512; ++input) {
+      const uint64_t expected[] = {input & 255, 65535 / (input + 1), input + 7};
+      if (scalar) {
+        EXPECT_EQ(std::bit_cast<Scalar>(address)(input, nullptr), expected[0] | (expected[1] << 8) | (expected[2] << 24));
+      } else {
+        uint64_t changed = ~uint64_t{0}, expected_changes = 0;
+        for (size_t i = 0; i < 3; ++i) {
+          expected_changes |= uint64_t{outputs[i] != expected[i]} << i;
+        }
+        std::bit_cast<Packed>(address)(&input, outputs, &changed, nullptr);
+        EXPECT_EQ(changed, expected_changes);
+        for (size_t i = 0; i < 3; ++i) {
+          EXPECT_EQ(outputs[i], expected[i]);
+        }
+      }
+    }
+    std::filesystem::remove(path);
+  }
 }
 
 TEST(CgenLlvm, ComputedExtractionScratchIsLocalToTheLoopFrame) {
@@ -516,8 +633,8 @@ TEST(CgenLlvm, EmitsBitcode) {
   ASSERT_TRUE(module);
   const auto* function = (*module)->getFunction("lhd_llvm_add");
   ASSERT_NE(function, nullptr);
-  EXPECT_TRUE(function->hasFnAttribute(llvm::Attribute::OptimizeForSize));
-  EXPECT_FALSE(function->hasFnAttribute(llvm::Attribute::MinSize));  // Os, not Oz.
+  EXPECT_FALSE(function->hasFnAttribute(llvm::Attribute::OptimizeForSize));
+  EXPECT_FALSE(function->hasFnAttribute(llvm::Attribute::MinSize));  // Native circuits optimize for speed.
   std::filesystem::remove(path);
 }
 
@@ -898,6 +1015,104 @@ TEST(CgenLlvm, NativeMemoryCommitsAtThePhaseBarrierWithoutCppWrappers) {
   std::filesystem::remove(commit_path);
 }
 
+TEST(CgenLlvm, OrderedMemoryWritesNeedNoPendingStorage) {
+  Cgen_llvm::Memory memory;
+  memory.data         = 0;
+  memory.direct_write = true;
+  memory.bits         = 16;
+  memory.size         = 4;
+  memory.lanes        = 2;
+  Cgen_llvm kernel("ordered_memory",
+                   Cgen_llvm::State_layout{
+                       5,
+                       {{0, 2, true}, {1, 8, true}, {2, 16, true}}
+  });
+  kernel.bind_memory("mem", memory);
+  // Read, masked write, read is one ordered color. No pending resource exists.
+  auto old = kernel.memory_read("mem", kernel.input(1), 16, true);
+  ASSERT_TRUE(kernel.memory_stage_write("mem", kernel.input(0), kernel.input(1), kernel.input(2)));
+  auto next = kernel.memory_read("mem", kernel.input(1), 16, true);
+  // Reusing data after a conditional write must not reuse a load defined only
+  // on its taken branch.
+  ASSERT_TRUE(kernel.memory_stage_write("mem", kernel.input(0), kernel.input(1), kernel.input(2)));
+  std::string error;
+  ASSERT_TRUE(kernel.add_state_output(3, 3, old, {}, error)) << error;
+  ASSERT_TRUE(kernel.add_state_output(4, 4, next, {}, error)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-ordered-memory.o";
+  ASSERT_TRUE(kernel.write_object(path.string(), error)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(path.string(), error)) << error;
+  const auto fn = objects.lookup("ordered_memory", error);
+  ASSERT_NE(fn, nullptr) << error;
+  uint64_t data[]      = {0, 0xabcd, 0, 0};
+  void*    resources[] = {data};
+  uint64_t state[]     = {1, 1, 0x1234, 0, 0};
+  fn(state, resources);
+  EXPECT_EQ(state[3], 0xabcdu);
+  EXPECT_EQ(state[4], 0xab34u);
+  EXPECT_EQ(data[1], 0xab34u);
+  fn(state, resources);
+  EXPECT_EQ(data[1], 0xab34u);
+  state[0] = 2;
+  fn(state, resources);
+  EXPECT_EQ(data[1], 0x1234u);
+  state[0] = 0;
+  state[2] = 0xffff;
+  fn(state, resources);
+  EXPECT_EQ(data[1], 0x1234u);
+  state[0] = 3;
+  state[1] = 4;
+  fn(state, resources);
+  EXPECT_EQ(state[3], 0u);
+  EXPECT_EQ(state[4], 0u);
+  std::filesystem::remove(path);
+}
+
+TEST(CgenLlvm, OrderedMemoryAccessesArePlainLoadsAndStores) {
+  for (const bool write : {false, true}) {
+    Cgen_llvm::Memory memory;
+    memory.data         = 0;
+    memory.direct_write = true;
+    memory.bits         = 64;
+    memory.size         = 4;
+    Cgen_llvm kernel("plain_memory", Cgen_llvm::State_layout{2, {{0, 2, true}}});
+    kernel.bind_memory("mem", memory);
+    std::string error;
+    if (write) {
+      ASSERT_TRUE(kernel.memory_stage_write("mem", kernel.constant(1, 1), kernel.input(0), kernel.constant(64, 42)));
+    } else {
+      auto value = kernel.memory_read("mem", kernel.input(0), 64, true);
+      ASSERT_TRUE(kernel.add_state_output(1, 1, value, {}, error)) << error;
+    }
+    const auto path = std::filesystem::temp_directory_path() / "livehd-plain-memory.bc";
+    ASSERT_TRUE(kernel.write_bitcode(path.string(), error, false)) << error;
+    auto buffer = llvm::MemoryBuffer::getFile(path.string());
+    ASSERT_TRUE(buffer);
+    llvm::LLVMContext context;
+    auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+    ASSERT_TRUE(module);
+    size_t loads = 0, stores = 0;
+    for (const auto& function : **module) {
+      for (const auto& block : function) {
+        for (const auto& instruction : block) {
+          EXPECT_FALSE(llvm::isa<llvm::CallBase>(instruction));
+          EXPECT_FALSE(llvm::isa<llvm::SelectInst>(instruction));
+          if (const auto* branch = llvm::dyn_cast<llvm::BranchInst>(&instruction)) {
+            EXPECT_FALSE(branch->isConditional());
+          }
+          loads  += llvm::isa<llvm::LoadInst>(instruction);
+          stores += llvm::isa<llvm::StoreInst>(instruction);
+        }
+      }
+    }
+    // Address and array pointer loads are ABI plumbing. A write must not load
+    // the old element or a change flag; a read adds exactly one element load.
+    EXPECT_EQ(loads, write ? 2u : 3u);
+    EXPECT_EQ(stores, 1u);
+    std::filesystem::remove(path);
+  }
+}
+
 TEST(CgenLlvm, ObjectOwnedStateIsPrivateAndIndependentAcrossInstances) {
   livehd::sim::Compile_workers          workers(2);
   std::vector<std::future<std::string>> jobs;
@@ -1241,7 +1456,12 @@ TEST(CgenLlvm, NativeReductionStaysRolledWithNoBodyCall) {
     unsigned rolled = 0;
     for (const auto& block : *fn) {
       for (const auto& inst : block) {
-        EXPECT_FALSE(llvm::isa<llvm::CallBase>(inst));
+        if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
+          // Vector reductions lower to instructions, never an external body
+          // call. O2 may pair a vector loop with a scalar remainder.
+          ASSERT_NE(call->getCalledFunction(), nullptr);
+          EXPECT_TRUE(call->getCalledFunction()->isIntrinsic());
+        }
         EXPECT_FALSE(llvm::isa<llvm::AllocaInst>(inst));
         if (const auto* md = inst.getMetadata(llvm::LLVMContext::MD_loop)) {
           for (unsigned i = 1; i < md->getNumOperands(); ++i) {
@@ -1257,7 +1477,8 @@ TEST(CgenLlvm, NativeReductionStaysRolledWithNoBodyCall) {
         }
       }
     }
-    EXPECT_EQ(rolled, 1u);
+    EXPECT_GE(rolled, 1u);
+    EXPECT_LE(rolled, 2u);
     const auto object = path.string() + ".o";
     ASSERT_TRUE(kernel.write_object(object, error)) << error;
     livehd::sim::Native_objects objects;

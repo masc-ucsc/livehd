@@ -586,7 +586,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "lec" || name == "formal lec") {
     print_json_line(
-        R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (Verilog always via native Slang; Yosys debug comparisons must first use lhd compile --reader yosys --emit-dir lg:DIR). The --set formal.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). Other engine knobs are --set formal.* / formal.lec.* (`lhd lec --help`)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang"],"default":"slang"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind","lhd compile ref.v --reader yosys --emit-dir lg:ref_lg; lhd lec --impl lg:ref_lg --ref ref.v"]})json");
+        R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (Verilog always via native Slang; Yosys debug comparisons must first use lhd compile --reader yosys --emit-dir lg:DIR). The --set formal.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). --set formal.effort=quick-check|test|long-check is for designs a full proof cannot finish: an ordinary proof attempt capped at formal.effort_proof cvc5 resource units per solver (PROVEN/PASS(n)/REFUTED as usual), then 256|2048|16384 sampled input vectors checked against the miter (TESTED <level reached>, not PROVEN); formal.timeout stays the total backstop; verify removes the resource cap and default timeout. Unset preserves proof defaults. Other engine knobs are --set formal.* / formal.lec.*","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang"],"default":"slang"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind","lhd compile ref.v --reader yosys --emit-dir lg:ref_lg; lhd lec --impl lg:ref_lg --ref ref.v"]})json");
     return 0;
   }
   // `formal` names the FAMILY (a dispatcher); the runnable thing is the
@@ -1604,6 +1604,13 @@ int help_command(const Options& opts) {
         "                     (the escape hatch for a cell the encoder cannot model) (repeatable)\n"
         "  --stats            (= --set lhd.stats=true) cvc5 solve insight, off by default\n"
         "  --set formal.flag=value   engine knobs (the options block below)\n"
+        "  --set formal.effort=quick-check|test|long-check|verify\n"
+        "                     For designs a full proof cannot finish. Proof first (formal.effort_proof\n"
+        "                     cvc5 resource units per solver, 5M/50M/500M; 0 = skip), then 256 / 2048 /\n"
+        "                     16384 sampled input vectors checked against the miter. Outcome: PROVEN,\n"
+        "                     PASS(n), REFUTED, or TESTED <level reached> (exit 0, not a proof).\n"
+        "                     verify = uncapped proof. formal.timeout stays the total backstop.\n"
+        "                     Unset preserves the existing proof-oriented defaults.\n"
         "\n"
         "  Extra .prp files supply impl-side formal helpers. Internal/output facts are\n"
         "  proven unbounded before use; input-only assumes are environment constraints;\n"

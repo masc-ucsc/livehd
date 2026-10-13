@@ -19,6 +19,8 @@ filegroup(
         "cone_expand.cpp",
         "encode.cpp",
         "encode.hpp",
+        "effort.cpp",
+        "effort.hpp",
         "fork_race.hpp",
         "lib_cell_prep.cpp",
         "lib_cell_prep.hpp",
@@ -70,6 +72,7 @@ cc_library(
     srcs = [
         "cone_digest.cpp",
         "cone_expand.cpp",
+        "effort.cpp",
         "observe.cpp",
         "query.cpp",
         "solve_stats.cpp",
@@ -80,6 +83,7 @@ cc_library(
     hdrs = [
         "cone_abc.hpp",
         "cone_expand.hpp",
+        "effort.hpp",
         "fork_race.hpp",
         "observe.hpp",
         "query.hpp",
@@ -166,6 +170,19 @@ cc_test(
     copts = COPTS,
     deps = [
         ":lec_query",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Packed toggle coverage, legal traces, and bounded effort.
+cc_test(
+    name = "effort_test",
+    size = "small",
+    srcs = ["tests/effort_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":lec_query",
+        "@cvc5",
         "@googletest//:gtest_main",
     ],
 )

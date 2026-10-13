@@ -10,6 +10,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "effort.hpp"
 #include "hhds/graph.hpp"
 #include "phase_sched.hpp"
 #include "property_types.hpp"
@@ -93,6 +94,9 @@ struct Query_result {
   // inductive proof. This qualifier must survive cache replay and hierarchical
   // composition: a bounded child makes the composed result bounded too.
   bool bounded = false;
+
+  bool          tested = false;  // sampled effort level reached; NOT an equivalence theorem
+  Sample_report sampling;
 
   // A name-independent packed-register <-> scalar-replica relation can prove
   // the inductive STEP, but it is not a complete proof until BMC from reset
@@ -232,6 +236,11 @@ struct Monitor;
 
 // Discharge / engine knobs (filled from the lec.* set-options).
 struct Lec_options {
+  Effort   effort        = Effort::Legacy;
+  // Cumulative cvc5 resource cap (rlimit) of a sampled preset's PROOF
+  // attempt. Unlike `rlimit` it leaves formal.timeout's soft-total accounting
+  // on: the deterministic cap bounds each solver, timeout stays the backstop.
+  uint64_t effort_rlimit = 0;
   // Canonical assumption policy shared by compile, verify, and LEC.
   // true: checked assumptions are proof obligations before use. A checked
   // assumption over the selected top's primary IO is necessarily uncheckable
@@ -717,6 +726,9 @@ inline constexpr int kLecMaxUnroll = 100000;
 
 // "" if bound/reset_cycles are in [0, kLecMaxUnroll], else a human message.
 inline std::string lec_options_range_error(const Lec_options& o) {
+  if (is_sampled(o.effort) && o.phase != "after_reset") {
+    return "sampled effort presets require formal.phase=after_reset";
+  }
   if (o.bound < 0 || o.bound > kLecMaxUnroll) {
     return "formal.bound out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.bound);
   }

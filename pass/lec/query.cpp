@@ -647,6 +647,19 @@ std::string serialize_result(const Query_result& r) {
   b.push_back(static_cast<char>(r.packed_scalar_step_proven ? 1 : 0));
   b.push_back(static_cast<char>(r.packed_scalar_base_proven ? 1 : 0));
   put_str(b, r.step_cex);  // best-effort tail: the induction-step CEX behind a weak verdict
+  b.push_back(static_cast<char>(r.tested));
+  b.push_back(static_cast<char>(r.sampling.requested));
+  b.push_back(static_cast<char>(r.sampling.reached));
+  for (auto value : {r.sampling.vectors,
+                     r.sampling.traces,
+                     r.sampling.partial,
+                     r.sampling.queries,
+                     r.sampling.unknown,
+                     r.sampling.watched,
+                     r.sampling.leads,
+                     r.sampling.solve_us}) {
+    put_i64(b, static_cast<int64_t>(value));
+  }
   return b;
 }
 
@@ -932,6 +945,34 @@ bool deserialize_result(std::string_view b, Query_result& r) {
     b.remove_prefix(1);
   }
   (void)get_str(b, r.step_cex);  // best-effort tail (mirror serialize)
+  if (b.size() >= 3) {
+    const bool tested = b[0] != 0;
+    const auto req    = static_cast<unsigned char>(b[1]);
+    const auto got    = static_cast<unsigned char>(b[2]);
+    b.remove_prefix(3);
+    if (req > static_cast<unsigned char>(Effort::Verify) || got > static_cast<unsigned char>(Effort::Verify)) {
+      return true;
+    }
+    Sample_report sampling;
+    sampling.requested = static_cast<Effort>(req);
+    sampling.reached   = static_cast<Effort>(got);
+    for (auto* value : {&sampling.vectors,
+                        &sampling.traces,
+                        &sampling.partial,
+                        &sampling.queries,
+                        &sampling.unknown,
+                        &sampling.watched,
+                        &sampling.leads,
+                        &sampling.solve_us}) {
+      int64_t decoded = 0;
+      if (!get_i64(b, decoded) || decoded < 0) {
+        return true;
+      }
+      *value = static_cast<uint64_t>(decoded);
+    }
+    r.sampling = sampling;
+    r.tested   = tested && sampling.passed();
+  }
   return true;
 }
 
@@ -3516,7 +3557,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // function has 21 return points past this line; a tail capture would silently
   // miss most of them. A null `acc` makes all three no-ops.
   cvc5::TermManager tm;
-  Solve_probe       probe(tm, acc);
+  Solve_probe       probe(tm, is_sampled(opts.effort) ? nullptr : acc);
   cvc5::Solver      solver(tm);
   probe.attach(solver);
   Stats_guard stats_guard(solver, probe, acc);
@@ -4198,6 +4239,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // SOUND degrade). The compile tier sets this with timeout=0; both may be set.
   if (opts.rlimit > 0) {
     solver.setOption("rlimit-per", std::to_string(opts.rlimit));
+  } else if (opts.effort_rlimit > 0) {
+    // CUMULATIVE over this solver (one proof attempt of one def/engine leg),
+    // not per query: a per-query cap still let an attempt issue unbounded
+    // queries (picorv32: 160 s of a 150 s soft budget at 5M per query).
+    solver.setOption("rlimit", std::to_string(opts.effort_rlimit));
   }
 
   // ── One shared solver allowance for this query ──────────────────────────────
@@ -4274,7 +4320,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   if (!has_mem && state_boxes_ptr == nullptr && comb_boxes_ptr == nullptr && !int_blast) {
     solver.setOption("bv-solver", "bitblast-internal");  // UF/array/int-blast queries keep the default solver
   }
-  if (opts.witness) {
+  if (opts.witness || is_sampled(opts.effort)) {
     solver.setOption("produce-models", "true");
   }
 
@@ -4773,7 +4819,26 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // reachable within N cycles are explored — sound for that bound (this is what
   // yosys' own lgcheck does with its bounded miter).
   if (opts.engine == "bmc") {
-    const int N = opts.bound > 0 ? opts.bound : 6;
+    int           N             = opts.bound > 0 ? opts.bound : 6;
+    const bool    sample_effort = is_sampled(opts.effort);
+    Input_sampler sampler(tm);
+    // Clock inputs keep their free/scheduled role; sampling pins data inputs
+    // only (reset inputs are already pinned by the phase).
+    absl::flat_hash_set<std::string> sample_clocks;
+    if (sample_effort) {
+      for (auto* g : {ref, impl}) {
+        for (const auto& n : design_clock_inputs(g, collapse_ptr)) {
+          sample_clocks.insert(input_of(n));
+        }
+      }
+    }
+    if (sample_effort
+        && (!shared_bbox.empty() || state_boxes_ptr != nullptr || comb_boxes_ptr != nullptr || !opts.collapse.empty()
+            || !opts.trust.empty() || !opts.ignore_memory.empty())) {
+      res.unsupported  = true;
+      res.detail      += "; sampled testing needs concrete hierarchy and modeled memories (no collapsed/trusted/opaque boxes)";
+      return res;
+    }
     Encoder   enc(tm);
     enc.set_sub_lib(sub_lib);
     enc.set_name_alias(&name_alias);
@@ -5002,6 +5067,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       int flush = std::max(pipeline_flush_latency(ref), pipeline_flush_latency(impl));
       if (flush > reset_hold) {
         reset_hold = flush;  // flush the deepest pipeline before checking
+        if (sample_effort) {
+          // A divergence can need up to the flush depth more cycles to reach an
+          // output (the hierarchical driver deepens its flat confirmation by the
+          // same amount). Sampling only `bound` cycles past a 70-cycle flush
+          // never saw lhdsuite matched_filter's broken tap product.
+          N += flush;
+        }
       }
     }
     const int total_cyc = N + reset_hold;  // run: prologue + checked window
@@ -5994,6 +6066,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             // 2-bit declaration got pinned to 2'b11 rather than 1.)
             cvc5::Term lvl          = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0) : top_in_ones(tm, info);
             solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
+          } else if (sample_effort && !sample_clocks.contains(std::string(name))) {
+            sampler.add_input(t, cyc);
           }
           snap_ins[name] = Val{t, info.w, info.sgn};
           if (opts.witness) {
@@ -6225,6 +6299,25 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
         }
       }
+      if (sample_effort && checking && observe) {
+        // Name-paired register next states: sampling LEADS (effort.hpp), never
+        // part of `bad`. Ref-X bits are don't-care, exactly as for outputs.
+        for (const auto& [k, rv] : rn) {
+          auto it = in.find(k);
+          if (it == in.end() || rv.term.isNull() || it->second.term.isNull()) {
+            continue;
+          }
+          const int  w    = std::max(rv.width, it->second.width);
+          cvc5::Term rfit = fit_to(tm, rv, w);
+          cvc5::Term ifit = fit_to(tm, it->second, w);
+          if (cvc5::Term u = fit_x_mask_to(tm, rv, w); !u.isNull()) {
+            cvc5::Term keep = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {u});
+            rfit            = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {rfit, keep});
+            ifit            = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {ifit, keep});
+          }
+          sampler.add_state_diff(k, cyc, tm.mkTerm(cvc5::Kind::DISTINCT, {rfit, ifit}));
+        }
+      }
       if (std::getenv("LEC_DUMP_WIT") != nullptr) {
         auto keep = [&](const std::string& k) {
           return k.find("exmem") != std::string::npos || k.find("ex_mem") != std::string::npos
@@ -6290,7 +6383,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     const bool has_state = !ref_state.empty() || !impl_state.empty() || !ref_mem.empty() || !impl_mem.empty() || !ref_reads.empty()
                            || !impl_reads.empty();
     res.bounded          = has_state;
-    res.detail = "solver=cvc5 (bmc, phase=" + opts.phase + ", " + std::to_string(N) + " checked steps"
+    res.detail = std::string{sample_effort ? "solver=cvc5 (sampled, phase=" : "solver=cvc5 (bmc, phase="} + opts.phase + ", "
+                 + std::to_string(N) + (sample_effort ? " trace steps" : " checked steps")
                  + (reset_hold ? " after " + std::to_string(reset_hold) + " reset-hold" : "")
                  + (init_no_reset ? (opts.gold_x == "zero" ? "; synthetic zero initialization (no reset)"
                                                            : "; synthetic ? initialization (no reset)")
@@ -6400,6 +6494,52 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                                          : "; nothing to compare: neither side exposes an output or state cell";
       return res;
     }
+    cvc5::Result sampled_mismatch;
+    if (sample_effort && !blocking_incomplete && sampler.input_count() > 0) {
+      // formal.timeout stays the TOTAL backstop: the loop stops on wall time
+      // once it is spent (solve_check's min_timeout floor would otherwise keep
+      // granting each further query a fresh slice).
+      const auto sample_check = [&](long long cap_ms) {
+        // cap_ms 0 = no extra cap: the remaining total, or unbounded (tlimit-per 0).
+        long long ms = budget_on ? (cap_ms > 0 ? std::min(budget_left_ms(), cap_ms) : budget_left_ms()) : cap_ms;
+        solver.setOption("tlimit-per", std::to_string(ms > 0 ? ms : (budget_on ? 1 : 0)));
+        if (acc != nullptr) {
+          ++acc->checks;
+        }
+        const auto t0  = std::chrono::steady_clock::now();
+        auto       cr  = solver.checkSat();
+        solve_spent   += std::chrono::steady_clock::now() - t0;
+        res.solve_ms   = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
+        return cr;
+      };
+      const auto sample_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(budget_ms) - solve_spent;
+      const auto sample_expired  = [&]() { return budget_on && std::chrono::steady_clock::now() >= sample_deadline; };
+      sampler.set_cycles(static_cast<uint64_t>(N));
+      auto outcome = sampler.run(solver, bad, opts.effort, sample_check, sample_expired);
+      solver.setOption("tlimit-per", std::to_string(static_cast<long long>(std::max(0, opts.timeout)) * 1000));
+      res.sampling = outcome.report;
+      if (outcome.mismatch) {
+        sampled_mismatch = outcome.result;  // keep the same model for the normal witness path
+      } else {
+        res.tested         = outcome.report.passed();
+        res.verdict        = Verdict::Unknown;
+        res.bounded        = false;
+        res.checked_steps  = 0;  // sampled traces are not an exhaustive BMC check
+        res.detail        += std::format("; {} input vector(s) over {} sampled trace(s) ({} partially pinned), no mismatch",
+                                  outcome.report.vectors,
+                                  outcome.report.traces,
+                                  outcome.report.partial);
+        if (!outcome.reason.empty()) {
+          res.detail += "; stopped: " + outcome.reason;
+          if (outcome.reason == "hit formal.timeout") {
+            res.detail += std::format("={}s", opts.timeout);  // the spelling every budget gate greps for
+          }
+        }
+        return res;
+      }
+      // A design with no free data input has exactly one trace per reset: the
+      // ordinary bounded check below is already exhaustive for it.
+    }
     // Decomposed proof: a monolithic `bad` = OR of every (output,cycle) diff is a
     // single huge miter that cvc5's eager bitblast can choke on (UNKNOWN) for a
     // complex pipeline. Proving each diff UNSAT independently is the SAME proof
@@ -6407,7 +6547,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // the easy outputs discharge instantly and only the genuinely-hard cone is
     // ever the bottleneck. Opt-in via LEC_DECOMP; on the first SAT/unknown we fall
     // through to the monolithic solve so the existing witness path is unchanged.
-    if (lec_decompose_try(opts.decompose) || std::getenv("LEC_DECOMP") != nullptr) {
+    if (sampled_mismatch.isNull() && (lec_decompose_try(opts.decompose) || std::getenv("LEC_DECOMP") != nullptr)) {
       bool all_unsat = true;
       for (const auto& [dn, dt] : decomp_diffs) {
         solver.push();
@@ -6443,9 +6583,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       // auto: fall through to the monolithic solve for a definitive verdict + witness.
     }
-    solver.push();
-    solver.assertFormula(bad);
-    cvc5::Result r = solve_check();
+    cvc5::Result r = sampled_mismatch;
+    if (r.isNull()) {
+      solver.push();
+      solver.assertFormula(bad);
+      r = solve_check();
+    }
     if (r.isUnsat()) {
       solver.pop();
       if (blocking_incomplete) {
@@ -11149,8 +11292,8 @@ Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_opti
   // genuine solver give-up -- exactly what this retry exists for -- and the
   // retry's race trusts an ind Proven at once, so a stuck bmc cannot hold it past
   // the retry's own (min_timeout-sized) deadline.
-  if (opts.int_blast != "auto" || first.verdict != Verdict::Unknown || first.oversize_refused || first.unsupported
-      || first.nothing_compared || first.ind_wall_killed) {
+  if (is_sampled(opts.effort) || opts.int_blast != "auto" || first.verdict != Verdict::Unknown || first.oversize_refused
+      || first.unsupported || first.nothing_compared || first.ind_wall_killed) {
     return first;
   }
   // The min_timeout floor is the retry's WHOLE budget (the user's soft total is

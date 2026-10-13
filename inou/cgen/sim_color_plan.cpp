@@ -3900,6 +3900,152 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // each complete memory-evaluation color with one runtime critical section;
   // the serial backend needs neither an edge nor a lock.
 
+  // Move eligible array updates into the pre-edge DAG. A read's forwarding
+  // matrix row specifies which writes it must observe. With one write group,
+  // zero-prefix reads precede the group and full-prefix reads follow it. This
+  // covers read-first, write-first, and program order around a single write.
+  // Partial prefixes, resets, synchronous read ports, and derived clocks keep
+  // the staged protocol until their individual actions can be represented.
+  // A compact loop is one atomic consumer in this DAG. Its presence does not
+  // prevent ordering state outside the loop; only its private, per-iteration
+  // state is owned by a different schedule.
+  // Observation snapshots run at the pre-commit barrier, outside this DAG.
+  // Retain staging until those reads are represented in the storage proof.
+  if (!include_observations && rise_only && clocks.n_clock_inputs() <= 1 && plan.summary_.conditional_regions == 0) {
+    struct Ordered_memory {
+      size_t                                 base;
+      size_t                                 update;
+      std::vector<std::pair<size_t, size_t>> edges;
+    };
+    std::vector<Ordered_memory> candidates;
+    for (size_t base = 0; base < plan.sites_.size(); ++base) {
+      const auto update = state_updates[base];
+      if (update == invalid_index || gu::type_op_of(plan.sites_[base].node) != Ntype_op::Memory
+          || under_compact_loop(plan.sites_[base])) {
+        continue;
+      }
+      struct Port {
+        bool present = false;
+        bool read    = false;
+      };
+      std::vector<Port>    ports;
+      hhds::Occurrence_pin forwarding;
+      bool                 eligible = true;
+      bool                 clocked  = false;
+      for (const auto& sink : plan.sites_[base].node.inp_sorted_pins()) {
+        const auto   name = Ntype::get_sink_name(Ntype_op::Memory, sink.get_port_id());
+        const size_t port = sink.get_port_id() / Ntype::Memory_port_stride;
+        for (const auto& driver : sink.get_driver_pins()) {
+          if (name == "reset" || name == "update") {
+            eligible = false;
+          } else if (name == "type") {
+            eligible &= driver.is_const() && gu::const_of(driver).is_just_i64() && gu::const_of(driver).to_just_i64() != 1;
+          } else if (name == "undef") {
+            eligible &= driver.is_known_false();
+          } else if (name == "fwd") {
+            forwarding  = driver;
+            eligible   &= driver.is_const() && !gu::const_of(driver).has_unknowns();
+          } else if (name.ends_with("clock_pin")) {
+            clocked   = true;
+            eligible &= gu::is_graph_input_pin(driver)
+                        && (clocks.n_clock_inputs() == 0 ? gu::pin_name_of(driver) == "clock"
+                                                         : clocks.is_flop_clock_input(gu::pin_name_of(driver)));
+          } else if (name.ends_with("addr") || name.ends_with("rdport")) {
+            if (ports.size() <= port) {
+              ports.resize(port + 1);
+            }
+            if (name.ends_with("addr")) {
+              ports[port].present = true;
+            } else {
+              ports[port].read = driver.is_const() && !driver.is_known_false();
+            }
+          }
+        }
+      }
+      if (!eligible || !clocked) {
+        continue;
+      }
+      const auto writes = static_cast<int>(std::ranges::count_if(ports, [](const Port& p) { return p.present && !p.read; }));
+      if (writes == 0) {
+        continue;
+      }
+      Ordered_memory candidate{base, update, {}};
+      for (const size_t read : versions_by_base[base]) {
+        const auto& version = plan.version_sites_[read];
+        if (version.role != Version_role::data || version.version != State_version::pre_rise) {
+          continue;
+        }
+        int prefix = 0;
+        if (version.output_port != Ntype::Memory_readall_pid) {
+          const int row = static_cast<int>(version.output_port) - writes;
+          if (row < 0) {
+            eligible = false;
+            break;
+          }
+          if (!forwarding.is_invalid()) {
+            const auto& matrix = gu::const_of(forwarding);
+            for (int write = 0; write < writes; ++write) {
+              if (matrix.bit_test(row * writes + write)) {
+                ++prefix;
+              }
+            }
+          }
+        }
+        if (prefix == 0) {
+          candidate.edges.emplace_back(read, update);
+        } else if (prefix == writes) {
+          candidate.edges.emplace_back(update, read);
+        } else {
+          eligible = false;
+          break;
+        }
+      }
+      if (eligible) {
+        candidates.push_back(std::move(candidate));
+      }
+    }
+    // Propose all storage edges together. Kahn's residual conservatively rejects
+    // updates on or downstream of a cycle, so two individually legal proposals
+    // can never combine into an illegal schedule. No quadratic reachability walk.
+    std::vector<std::vector<size_t>> successors(plan.version_sites_.size());
+    std::vector<size_t>              indegree(plan.version_sites_.size(), 0);
+    const auto                       propose = [&](size_t producer, size_t consumer) {
+      successors[producer].push_back(consumer);
+      ++indegree[consumer];
+    };
+    for (const auto& edge : plan.version_dependencies_) {
+      propose(edge.producer, edge.consumer);
+    }
+    for (const auto& candidate : candidates) {
+      for (const auto& [producer, consumer] : candidate.edges) {
+        propose(producer, consumer);
+      }
+    }
+    std::vector<size_t> ready_memory;
+    for (size_t v = 0; v < indegree.size(); ++v) {
+      if (indegree[v] == 0) {
+        ready_memory.push_back(v);
+      }
+    }
+    for (size_t i = 0; i < ready_memory.size(); ++i) {
+      for (const size_t consumer : successors[ready_memory[i]]) {
+        if (--indegree[consumer] == 0) {
+          ready_memory.push_back(consumer);
+        }
+      }
+    }
+    for (const auto& candidate : candidates) {
+      if (indegree[candidate.update] != 0) {
+        continue;
+      }
+      plan.sites_[candidate.base].in_place       = true;
+      plan.version_sites_[candidate.update].slot = Execution_slot::pre_rise_eval;
+      for (const auto& [producer, consumer] : candidate.edges) {
+        add_version_edge(producer, consumer, 0);
+      }
+    }
+  }
+
   // Validate and order the fine-color DAG. Slot order is a hard legality
   // constraint even when two colors have no explicit value edge; the later
   // Schedule construction uses one barrier/control boundary between slots
@@ -4023,16 +4169,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // an idle module saves work in proportion to its SITES; its seam costs in
   // proportion to its INTERFACE WORDS. A module used once (no shared kernel)
   // therefore keeps its fence only when sites / interface_words reaches
-  // `fence_ratio` (sim.tune.fence; 0 = always). Reused or very large bodies
-  // always keep it.
-  constexpr size_t                                kSingleBodyFenceSites = 1024;
-  const int64_t                                   single_body_ratio     = fence_ratio >= 0 ? fence_ratio : kDefaultFenceRatio;
-  absl::flat_hash_map<const hhds::Graph*, size_t> body_occurrences;
-  for (const auto& body : bodies) {
-    if (!body.path.steps().empty() && body.graph != nullptr) {
-      ++body_occurrences[body.graph];
-    }
-  }
+  // `fence_ratio` (sim.tune.fence; 0 = always). Apply the same profitability
+  // rule to reused bodies: reuse saves compilation but does not remove the
+  // runtime ABI traffic at each instance. Only very large bodies force a fence.
+  constexpr size_t kLargeBodyFenceSites = 1024;
+  const int64_t    body_ratio = fence_ratio >= 0 ? fence_ratio : kDefaultFenceRatio;
   std::vector<Control_trie_node> module_trie(1);
   for (const auto& body : bodies) {
     if (body.path.steps().empty() || body.graph == nullptr) {
@@ -4042,11 +4183,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     if (fence_ratio == kNoFences || shape.sites < 32 || (shape.height > 1 && shape.interface_words > 20)) {
       continue;
     }
-    // A single-occurrence body keeps its fence only when it is big for its seam.
-    const bool single = body_occurrences[body.graph] < 2 && shape.sites < kSingleBodyFenceSites;
-    const bool fenced = !single
+    const bool fenced = shape.sites >= kLargeBodyFenceSites
                         || static_cast<int64_t>(shape.sites)
-                               >= single_body_ratio * static_cast<int64_t>(std::max<uint64_t>(1, shape.interface_words));
+                               >= body_ratio * static_cast<int64_t>(std::max<uint64_t>(1, shape.interface_words));
     if (!fenced) {
       continue;
     }
@@ -4430,6 +4569,117 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         blocked_count > max_cycle_witnesses ? ",..." : "",
         cycle_desc));
   }
+  // Prove destructive updates against the concrete topological order. Keeping
+  // the existing order makes this pass linear, and avoids lengthening live
+  // ranges just to eliminate a small pending register. A failed proof retains
+  // the staged protocol. Add the accepted anti-dependencies to the DAG itself:
+  // they must survive both coarsening and the emitter's intra-color ordering.
+  // Compact-loop register carriers retain staging: extending their old-Q
+  // live ranges through loop adapters currently costs more than the saved copy.
+  if (!include_observations && plan.summary_.version_dag_acyclic && rise_only && clocks.n_clock_inputs() <= 1
+      && plan.summary_.compact_loops == 0 && plan.summary_.conditional_regions == 0) {
+    std::vector<std::vector<size_t>> old_users(plan.sites_.size());
+    for (size_t version = 0; version < plan.version_sites_.size(); ++version) {
+      const auto& read = plan.version_sites_[version];
+      if (read.version == State_version::pre_rise
+          && (read.role == Version_role::state_read
+              || (read.role == Version_role::data && gu::type_op_of(plan.sites_[read.base_site].node) == Ntype_op::Memory))) {
+        old_users[read.base_site].push_back(version);
+      }
+    }
+    // Register operands bind Q directly, rather than the state_read version's
+    // result. Their actual consumers, not just the read anchors, must finish.
+    for (const auto& use : plan.value_uses_) {
+      if (use.top_input || !use.literal.empty() || use.producer_version == invalid_index) {
+        continue;
+      }
+      const auto& read = plan.version_sites_[use.producer_version];
+      if (read.role == Version_role::state_read && read.version == State_version::pre_rise) {
+        old_users[read.base_site].push_back(use.consumer_version);
+      }
+    }
+    for (size_t base = 0; base < plan.sites_.size(); ++base) {
+      const auto update = state_updates[base];
+      if (update == invalid_index || under_compact_loop(plan.sites_[base])) {
+        continue;
+      }
+      const auto& node = plan.sites_[base].node;
+      const auto  op   = gu::type_op_of(node);
+      if (op != Ntype_op::Flop && op != Ntype_op::Memory) {
+        continue;
+      }
+      bool eligible    = true;
+      bool plain_clock = false;
+      for (const auto& sink : node.inp_sorted_pins()) {
+        const auto name = Ntype::get_sink_name(op, sink.get_port_id());
+        for (const auto& driver : sink.get_driver_pins()) {
+          if (name.ends_with("clock_pin")) {
+            plain_clock = gu::is_graph_input_pin(driver)
+                          && (clocks.n_clock_inputs() == 0 ? gu::pin_name_of(driver) == "clock"
+                                                           : clocks.is_flop_clock_input(gu::pin_name_of(driver)));
+            eligible &= plain_clock;
+          } else if (op == Ntype_op::Flop && name == "pipe_min") {
+            eligible &= driver.is_const() && gu::const_of(driver).is_just_i64() && gu::const_of(driver).to_just_i64() == 1;
+          } else if (op == Ntype_op::Flop && name == "async") {
+            eligible &= driver.is_known_false();
+          } else if (op == Ntype_op::Memory) {
+            if (name == "update" || name == "reset") {
+              eligible = false;
+            } else if (name == "type") {
+              eligible &= driver.is_const() && gu::const_of(driver).is_just_i64() && gu::const_of(driver).to_just_i64() != 1;
+            } else if (name == "fwd" || name == "undef") {
+              eligible &= driver.is_known_false();
+            }
+          }
+        }
+      }
+      if (!eligible || !plain_clock) {
+        continue;
+      }
+      const auto precedes_update = [&](size_t user) {
+        return user == update || plan.version_sites_[user].execution_order < plan.version_sites_[update].execution_order;
+      };
+      if (!std::ranges::all_of(old_users[base], precedes_update)) {
+        continue;
+      }
+      plan.sites_[base].in_place = true;
+      for (const size_t user : old_users[base]) {
+        if (user != update) {
+          add_version_edge(user, update, 0);
+        }
+      }
+    }
+  }
+  // Transport fixed slices of one machine word together. A bit-level imported
+  // netlist otherwise spends a whole ABI word (and dirty comparison) per bit.
+  // Preserve each consumer's selected lane separately from the shared carrier;
+  // this also preserves rebased slices across packed hierarchy interfaces.
+  using Lane_key = std::tuple<size_t, State_version, hhds::Port_id, bool, uint32_t>;
+  std::map<Lane_key, std::vector<size_t>> word_lanes;
+  for (size_t i = 0; i < plan.value_uses_.size(); ++i) {
+    const auto& use = plan.value_uses_[i];
+    if (!use.preextracted || !use.literal.empty() || use.producer_shift != 0
+        || use.producer_extract_hi <= use.producer_extract_lo
+        || use.producer_extract_lo / 64 != (use.producer_extract_hi - 1) / 64) {
+      continue;
+    }
+    word_lanes[{use.producer_version, use.version, use.producer_port, use.top_input, use.producer_extract_lo / 64}].push_back(i);
+  }
+  for (const auto& [key, lanes] : word_lanes) {
+    uint32_t lo = std::numeric_limits<uint32_t>::max();
+    uint32_t hi = 0;
+    for (const auto i : lanes) {
+      lo = std::min(lo, plan.value_uses_[i].producer_extract_lo);
+      hi = std::max(hi, plan.value_uses_[i].producer_extract_hi);
+    }
+    for (const auto i : lanes) {
+      auto& use               = plan.value_uses_[i];
+      use.lane_offset         = use.producer_extract_lo - lo;
+      use.producer_extract_lo = lo;
+      use.producer_extract_hi = hi;
+      use.width               = hi - lo;
+    }
+  }
   plan.summary_.version_sites = plan.version_sites_.size();
   plan.summary_.version_edges = plan.version_dependencies_.size();
   plan.summary_.fine_colors   = plan.version_sites_.size();
@@ -4515,11 +4765,72 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   };
 
   constexpr uint64_t kSoftColorGe  = 50'000;
+  std::vector<bool>  computed_wide_input(plan.sites_.size());
+  for (const auto& dep : plan.dependencies_) {
+    const auto& producer = plan.sites_[dep.producer];
+    if (!dep.cut && producer.kind == Site_kind::data && plan.sites_[dep.consumer].kind == Site_kind::loop_control
+        && gu::bits_of(producer.node.base_node().get_driver_pin(dep.producer_port)) > 64) {
+      computed_wide_input[dep.consumer] = true;
+    }
+  }
+  std::vector<bool> narrow_loop(plan.sites_.size());
+  for (size_t i = 0; i < plan.sites_.size(); ++i) {
+    const auto& site = plan.sites_[i];
+    if (site.kind != Site_kind::loop_control || !computed_wide_input[i]) {
+      continue;
+    }
+    if (const auto body = site.node.get_subnode_graph()) {
+      const bool scheduled_body = std::ranges::any_of(body->body().nodes(), [](const auto& node) {
+        return node.subnode_loop().has_value() || gu::is_type_register(node) || gu::type_op_of(node) == Ntype_op::Memory;
+      });
+      uint64_t   bits           = 0;
+      for (const auto& port : body->get_io()->get_output_pin_decls()) {
+        bits += port.bits ? port.bits : 65;
+      }
+      narrow_loop[i] = !scheduled_body && bits <= 64;
+    }
+  }
+  std::vector<bool> separate_memory_update(plan.sites_.size());
+  for (size_t i = 0; i < plan.sites_.size(); ++i) {
+    const auto& site = plan.sites_[i];
+    if (!site.in_place || gu::type_op_of(site.node) != Ntype_op::Memory) {
+      continue;
+    }
+    uint64_t interface_words = 0;
+    bool     dynamic_enable  = false;
+    for (const auto& sink : site.node.inp_sorted_pins()) {
+      const auto name = Ntype::get_sink_name(Ntype_op::Memory, sink.get_port_id());
+      for (const auto& driver : sink.get_driver_pins()) {
+        if (!driver.is_const()) {
+          interface_words += (std::max(1, gu::bits_of(driver)) + 63) / 64;
+          dynamic_enable  |= name.ends_with("enable");
+        }
+      }
+    }
+    // Large decoded write banks are cheaper alongside their enable logic:
+    // exporting every row's predicate costs more than conservative activation.
+    separate_memory_update[i] = dynamic_enable && interface_words <= 16;
+  }
   const auto         runtime_owner = [&](size_t version) {
     const auto& site         = plan.sites_[plan.version_sites_[version].base_site];
     const auto  op           = gu::type_op_of(site.node);
-    // Keep the loop opaque and indivisible, but let its surrounding cones
-    // share the color instead of forcing their values through stored slots.
+    // Keep write enables visible to activation scheduling. Folding their
+    // producers into the store color would require per-access write records
+    // or unconditional reader invalidation, which repeatedly wakes idle arrays.
+    // The write group itself remains ordered and lowers to plain array stores.
+    if (separate_memory_update[plan.version_sites_[version].base_site]
+        && plan.version_sites_[version].role == Version_role::state_update) {
+      return plan.version_sites_[version].base_site;
+    }
+    // Isolate leaf reductions of computed wide inputs so an opaque call does not force
+    // surrounding wide packing into Slop. Adjacent loops can share
+    // this runtime color. Already-packed inputs and wide loop carries retain their surrounding cones:
+    // spilling the whole carry at each seam can cost more than native lowering
+    // saves, especially for chains of packed-state updates. Both backends use
+    // this same rule, and the loop itself always remains compact.
+    if (narrow_loop[plan.version_sites_[version].base_site]) {
+      return Color_plan::invalid_index - 1;
+    }
     const bool  separate_sub = op == Ntype_op::Sub && site.kind != Site_kind::loop_control;
     return (separate_sub || (separate_runtime_calls && op == Ntype_op::Clock_cell)) ? plan.version_sites_[version].base_site
                                                                                     : Color_plan::invalid_index;
@@ -4747,7 +5058,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     Id_hash signature("color");
     signature.u(static_cast<uint64_t>(plan.version_sites_[color_members.front()].slot));
     for (const size_t member : identity_members) {
-      signature.id(plan.version_sites_[member].structural_id);
+      signature.id(plan.version_sites_[member].structural_id).u(plan.sites_[plan.version_sites_[member].base_site].in_place);
     }
     // Allocate activation storage by the interval's terminal value, not by
     // its whole implementation. An internal cone edit must not move the dirty
@@ -4878,17 +5189,25 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                 hhds::Port_id port,
                                 uint32_t      input,
                                 uint32_t      consumer_width,
-                                bool          preextracted) {
+                                bool          preextracted,
+                                uint32_t      lane_offset = 0) {
     auto&                   slot = plan.boundary_slots_[slot_index_value];
-    const Boundary_consumer consumer{version, color_of_version(version), port, input, consumer_width, preextracted};
+    const Boundary_consumer consumer{version, color_of_version(version), port, input, consumer_width, preextracted, lane_offset};
     const auto              duplicate = std::ranges::find_if(slot.consumers, [&](const Boundary_consumer& existing) {
-      return std::tie(existing.version_site, existing.color, existing.port, existing.input, existing.width, existing.preextracted)
+      return std::tie(existing.version_site,
+                      existing.color,
+                      existing.port,
+                      existing.input,
+                      existing.width,
+                      existing.preextracted,
+                      existing.lane_offset)
              == std::tie(consumer.version_site,
                          consumer.color,
                          consumer.port,
                          consumer.input,
                          consumer.width,
-                         consumer.preextracted);
+                         consumer.preextracted,
+                         consumer.lane_offset);
     });
     if (duplicate == slot.consumers.end()) {
       slot.consumers.push_back(consumer);
@@ -5090,7 +5409,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         slot.producer_extract_hi = use.producer_extract_hi;
         slot.producer_shift      = 0;
       }
-      add_consumer(source_slot, use.consumer_version, use.consumer_port, use.consumer_input, use.consumer_width, use.preextracted);
+      add_consumer(source_slot,
+                   use.consumer_version,
+                   use.consumer_port,
+                   use.consumer_input,
+                   use.consumer_width,
+                   use.preextracted,
+                   use.lane_offset);
     }
   }
   for (const auto& output : output_uses) {
@@ -5326,6 +5651,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                          version.output_port,
                                          execution_slot_name(version.slot));
       seeds[i]            += version.control_owner == Color_plan::invalid_index ? "|control:unconditional" : "|control:conditional";
+      seeds[i]             += base.in_place ? "|state:in-place" : "|state:staged";
       auto abi_roles       = abi_roles_by_version[color.members[i]];
       std::ranges::sort(abi_roles);
       for (const auto& role : abi_roles) {
@@ -6016,6 +6342,13 @@ bool Color_plan::validate_retained_handles() const {
   return edge_count >= summary_.carry_edges_cut;
 }
 
+std::vector<size_t> Color_plan::ordered_members(size_t color) const {
+  auto members = colors_.at(color).members;
+  std::ranges::sort(members,
+                    [&](size_t a, size_t b) { return version_sites_[a].execution_order < version_sites_[b].execution_order; });
+  return members;
+}
+
 std::string Color_plan::report() const {
   std::string result;
   result += "sim-color-plan v2\n";
@@ -6027,6 +6360,10 @@ std::string Color_plan::report() const {
   result += std::format("boundary-one-writer {}\n", summary_.boundary_one_writer ? "true" : "false");
   result += std::format("boundary-dominance {}\n", summary_.boundary_dominance ? "true" : "false");
   result += std::format("runtime-random {}\n", summary_.runtime_random ? "true" : "false");
+  result += std::format(
+      "in-place-state registers={} memories={}\n",
+      std::ranges::count_if(sites_, [](const Site& s) { return s.in_place && gu::type_op_of(s.node) == Ntype_op::Flop; }),
+      std::ranges::count_if(sites_, [](const Site& s) { return s.in_place && gu::type_op_of(s.node) == Ntype_op::Memory; }));
   // sim.tune support (name-free, like everything above the observation map).
   if (support_.available) {
     result += std::format(
@@ -6246,14 +6583,15 @@ std::string Color_plan::report() const {
           slot.unsign);
       for (size_t i = 0; i < slot.consumers.size(); ++i) {
         const auto& consumer  = slot.consumers[i];
-        result               += std::format("{}{}:{}:p{}:i{}:b{}:preextracted={}",
+        result               += std::format("{}{}:{}:p{}:i{}:b{}:preextracted={}:lane-offset={}",
                                             i == 0 ? "" : ",",
                                             colors_[consumer.color].structural_id,
                                             version_sites_[consumer.version_site].structural_id,
                                             consumer.port,
                                             consumer.input,
                                             consumer.width,
-                                            consumer.preextracted ? "true" : "false");
+                                            consumer.preextracted ? "true" : "false",
+                                            consumer.lane_offset);
       }
       result += "\n";
     }

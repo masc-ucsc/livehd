@@ -35,24 +35,43 @@ struct Flop_latch_fixture {
   hhds::Node_class             latch;
 };
 
-Loop_fixture make_compact_loop(std::string_view tag, uint64_t count, bool surrounding_cones = false) {
+Loop_fixture make_compact_loop(std::string_view tag, uint64_t count, bool surrounding_cones = false, uint32_t bits = 8,
+                               bool wide_input = false, bool computed_input = false) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
 
   auto body_io = lib.create_io(std::string(tag) + "_body");
   body_io->add_input("acc_in", 0);
   body_io->add_output("acc_out", 1);
-  body_io->set_bits("acc_in", 8);
-  body_io->set_bits("acc_out", 8);
+  body_io->set_bits("acc_in", bits);
+  body_io->set_bits("acc_out", bits);
+  if (wide_input) {
+    body_io->add_input("packed", 2);
+    body_io->set_bits("packed", 256);
+  }
   auto body = body_io->create_graph();
   auto inv  = gu::create_typed_node(*body, Ntype_op::Not);
   body->get_input_pin("acc_in").connect_sink(inv.create_sink_pin(0));
-  inv.create_driver_pin(0).connect_sink(body->get_output_pin("acc_out"));
+  auto next = inv.create_driver_pin(0);
+  if (wide_input) {
+    auto lane = gu::create_get_mask(*body, body->get_input_pin("packed"), 0, bits);
+    gu::set_bits(lane.create_driver_pin(0), bits);
+    auto mix = gu::create_typed_node(*body, Ntype_op::Xor);
+    next.connect_sink(mix.create_sink_pin(0));
+    lane.create_driver_pin(0).connect_sink(mix.create_sink_pin(1));
+    next = mix.create_driver_pin(0);
+    gu::set_bits(next, bits);
+  }
+  next.connect_sink(body->get_output_pin("acc_out"));
 
   auto parent_io = lib.create_io(std::string(tag) + "_parent");
   parent_io->add_input("seed", 0);
   parent_io->add_output("result", 1);
-  parent_io->set_bits("seed", 8);
-  parent_io->set_bits("result", 8);
+  parent_io->set_bits("seed", bits);
+  parent_io->set_bits("result", bits);
+  if (wide_input) {
+    parent_io->add_input("packed", 2);
+    parent_io->set_bits("packed", 256);
+  }
   auto parent = parent_io->create_graph();
 
   auto compact = gu::create_typed_node(*parent, Ntype_op::Sub);
@@ -60,22 +79,32 @@ Loop_fixture make_compact_loop(std::string_view tag, uint64_t count, bool surrou
   hhds::Subnode_loop loop;
   loop.count = count;
   compact.set_subnode(body_io, loop);
+  if (wide_input) {
+    auto packed = parent->get_input_pin("packed");
+    if (computed_input) {
+      auto inverted = gu::create_typed_node(*parent, Ntype_op::Not);
+      packed.connect_sink(inverted.create_sink_pin(0));
+      packed = inverted.create_driver_pin(0);
+      gu::set_bits(packed, 256);
+    }
+    packed.connect_sink(compact.create_sink_pin(2));
+  }
   auto seed = parent->get_input_pin("seed");
   if (surrounding_cones) {
     auto before = gu::create_typed_node(*parent, Ntype_op::Not);
     seed.connect_sink(before.create_sink_pin(0));
     seed = before.create_driver_pin(0);
-    gu::set_bits(seed, 8);
+    gu::set_bits(seed, bits);
   }
   seed.connect_sink(compact.create_sink_pin(0));
   auto output = compact.create_driver_pin(1);
-  gu::set_bits(output, 8);
+  gu::set_bits(output, bits);
   auto result = output;
   if (surrounding_cones) {
     auto after = gu::create_typed_node(*parent, Ntype_op::Not);
     result.connect_sink(after.create_sink_pin(0));
     result = after.create_driver_pin(0);
-    gu::set_bits(result, 8);
+    gu::set_bits(result, bits);
   }
   result.connect_sink(parent->get_output_pin("result"));
   output.connect_sink(compact.create_sink_pin(0));
@@ -753,18 +782,34 @@ TEST(SimColorPlan, CompactLoopDiscoveryIsConstantSizeAndCutsCarry) {
   EXPECT_NE(text.find("kind=loop-carry cut=true"), std::string::npos);
 }
 
-TEST(SimColorPlan, LoopSharesColorWithSurroundingLogicWithoutExpanding) {
-  auto fixture = make_compact_loop("loop_with_cones", 1'000'000'000ULL, true);
-  for (bool llvm_runtime_calls : {false, true}) {
-    const auto plan = livehd::sim::Color_plan::discover(fixture.parent.get(), true, llvm_runtime_calls);
-    ASSERT_TRUE(plan.complete()) << plan.report();
-    EXPECT_EQ(plan.summary().grouped_sites, 3u);
-    EXPECT_EQ(plan.summary().compact_loops, 1u);
-    EXPECT_TRUE(std::ranges::any_of(plan.colors(), [&](const auto& color) {
-      return color.members.size() > 1 && std::ranges::any_of(color.members, [&](size_t member) {
-               return plan.sites()[plan.version_sites()[member].base_site].kind == livehd::sim::Color_plan::Site_kind::loop_control;
-             });
-    })) << plan.report();
+TEST(SimColorPlan, LoopBoundaryBalancesNativeConesAgainstWideCarryTransport) {
+  for (uint32_t bits : {8, 256}) {
+    for (bool wide_input : {false, true}) {
+      for (bool computed_input : {false, true}) {
+        auto fixture = make_compact_loop("loop_with_cones_" + std::to_string(bits) + (wide_input ? "_wide" : "_scalar")
+                                             + (computed_input ? "_computed" : "_input"),
+                                         1'000'000'000ULL,
+                                         true,
+                                         bits,
+                                         wide_input,
+                                         computed_input);
+        for (bool llvm_runtime_calls : {false, true}) {
+          const auto plan = livehd::sim::Color_plan::discover(fixture.parent.get(), true, llvm_runtime_calls);
+          ASSERT_TRUE(plan.complete()) << plan.report();
+          EXPECT_EQ(plan.summary().grouped_sites, wide_input && computed_input ? 4u : 3u);
+          EXPECT_EQ(plan.summary().compact_loops, 1u);
+          EXPECT_EQ(bits > 64 || !wide_input || !computed_input,
+                    std::ranges::any_of(plan.colors(),
+                                        [&](const auto& color) {
+                                          return color.members.size() > 1 && std::ranges::any_of(color.members, [&](size_t member) {
+                                                   return plan.sites()[plan.version_sites()[member].base_site].kind
+                                                          == livehd::sim::Color_plan::Site_kind::loop_control;
+                                                 });
+                                        }))
+              << plan.report();
+        }
+      }
+    }
   }
 }
 
@@ -1164,6 +1209,268 @@ TEST(SimColorPlan, ChildPortCastKeepsProducerStorageAndConsumerWidthsSeparate) {
       << plan.report();
   EXPECT_EQ(top_outputs, 2u) << "pre-rise and post-fall public output versions must both be published\n" << plan.report();
   EXPECT_EQ(plan.report().find("observe output port=2 name=\"y\" site=unbound"), std::string::npos);
+}
+
+TEST(SimColorPlan, MemoryStorageOrderSurvivesColorCoarsening) {
+  using Plan = livehd::sim::Color_plan;
+  for (int forwarding : {0, 3, 1}) {
+    const auto name = "ordered_memory_" + std::to_string(forwarding);
+    auto&      lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+    auto       io   = lib.create_io(name);
+    io->add_input("clock", 0);
+    io->add_input("address", 1);
+    io->add_input("data", 2);
+    io->add_output("q", 3);
+    io->set_bits("clock", 1);
+    io->set_bits("address", 2);
+    io->set_bits("data", 8);
+    io->set_bits("q", 8);
+    auto       graph    = io->create_graph();
+    auto       memory   = gu::create_typed_node(*graph, Ntype_op::Memory);
+    const auto constant = [&](std::string_view field, int value) {
+      gu::create_const(*graph, *Dlop::create_integer(value)).connect_sink(gu::setup_sink_by_name(memory, field));
+    };
+    constant("bits", 8);
+    constant("size", 4);
+    constant("type", 0);
+    constant("fwd", forwarding);
+    constant("undef", 0);
+    graph->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(memory, "clock_pin"));
+    for (hhds::Port_id port = 0; port < 3; ++port) {
+      const auto offset = port * Ntype::Memory_port_stride;
+      graph->get_input_pin("address").connect_sink(memory.create_sink_pin(offset));
+      if (port < 2) {
+        graph->get_input_pin("data").connect_sink(memory.create_sink_pin(offset + 3));
+      } else {
+        gu::create_const(*graph, *Dlop::create_integer(1)).connect_sink(memory.create_sink_pin(offset + 10));
+      }
+    }
+    auto q = memory.create_driver_pin(2);
+    gu::set_ubits(q, 8);
+    q.connect_sink(graph->get_output_pin("q"));
+    for (uint64_t budget : {1, 256}) {
+      const auto plan = Plan::discover(graph.get(), false, false, budget);
+      ASSERT_TRUE(plan.complete()) << plan.report();
+      size_t read   = Plan::invalid_index;
+      size_t update = Plan::invalid_index;
+      for (size_t v = 0; v < plan.version_sites().size(); ++v) {
+        const auto& version = plan.version_sites()[v];
+        if (version.role == Plan::Version_role::state_update) {
+          update = v;
+        } else if (version.version == Plan::State_version::pre_rise) {
+          read = v;
+        }
+      }
+      ASSERT_NE(read, Plan::invalid_index);
+      ASSERT_NE(update, Plan::invalid_index);
+      EXPECT_EQ(plan.sites()[plan.version_sites()[update].base_site].in_place, forwarding != 1);
+      if (forwarding == 1) {
+        continue;  // the interleaved write prefix retains staging
+      }
+      const auto producer = forwarding == 0 ? read : update;
+      const auto consumer = forwarding == 0 ? update : read;
+      EXPECT_TRUE(std::ranges::any_of(plan.version_dependencies(),
+                                      [&](const auto& edge) { return edge.producer == producer && edge.consumer == consumer; }));
+      std::vector<size_t> colors(plan.version_sites().size());
+      std::vector<size_t> positions(plan.version_sites().size());
+      for (size_t color = 0; color < plan.colors().size(); ++color) {
+        const auto members = plan.ordered_members(color);
+        for (size_t i = 0; i < members.size(); ++i) {
+          colors[members[i]]    = color;
+          positions[members[i]] = i;
+        }
+      }
+      if (colors[producer] == colors[consumer]) {
+        EXPECT_LT(positions[producer], positions[consumer]);
+      } else {
+        EXPECT_TRUE(std::ranges::any_of(plan.color_dependencies(), [&](const auto& edge) {
+          return edge.producer == colors[producer] && edge.consumer == colors[consumer];
+        }));
+      }
+    }
+  }
+}
+
+TEST(SimColorPlan, InPlaceRegisterProofOrdersConsumersInsideAndAcrossColors) {
+  using Plan = livehd::sim::Color_plan;
+  auto& lib  = livehd::Hhds_graph_library::instance("lgdb_color_plan_ordered_swap");
+  auto  io   = lib.create_io("ordered_swap");
+  io->add_input("clock", 0);
+  io->set_bits("clock", 1);
+  io->add_output("a", 1);
+  io->add_output("b", 2);
+  io->set_bits("a", 8);
+  io->set_bits("b", 8);
+  auto graph = io->create_graph();
+  auto a     = gu::create_typed_node(*graph, Ntype_op::Flop);
+  auto b     = gu::create_typed_node(*graph, Ntype_op::Flop);
+  for (auto node : {a, b}) {
+    graph->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(node, "clock_pin"));
+    gu::set_ubits(node.create_driver_pin(0), 8);
+  }
+  a.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(b, "din"));
+  b.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(a, "din"));
+  a.create_driver_pin(0).connect_sink(graph->get_output_pin("a"));
+  b.create_driver_pin(0).connect_sink(graph->get_output_pin("b"));
+  for (uint64_t budget : {1, 256}) {
+    const auto plan = Plan::discover(graph.get(), false, false, budget);
+    ASSERT_TRUE(plan.complete()) << plan.report();
+    size_t              direct = 0;
+    std::vector<size_t> colors(plan.version_sites().size());
+    std::vector<size_t> positions(plan.version_sites().size());
+    for (size_t color = 0; color < plan.colors().size(); ++color) {
+      const auto ordered = plan.ordered_members(color);
+      for (size_t i = 0; i < ordered.size(); ++i) {
+        colors[ordered[i]]    = color;
+        positions[ordered[i]] = i;
+      }
+    }
+    for (size_t update = 0; update < plan.version_sites().size(); ++update) {
+      const auto& version = plan.version_sites()[update];
+      if (version.role != Plan::Version_role::state_update || !plan.sites()[version.base_site].in_place) {
+        continue;
+      }
+      ++direct;
+      for (const auto& use : plan.value_uses()) {
+        if (use.producer_version == Plan::invalid_index) {
+          continue;
+        }
+        const auto& read = plan.version_sites()[use.producer_version];
+        if (read.base_site != version.base_site || read.role != Plan::Version_role::state_read
+            || read.version != Plan::State_version::pre_rise || use.consumer_version == update) {
+          continue;
+        }
+        ASSERT_TRUE(std::ranges::any_of(plan.version_dependencies(), [&](const auto& edge) {
+          return edge.producer == use.consumer_version && edge.consumer == update;
+        }));
+        if (colors[use.consumer_version] == colors[update]) {
+          EXPECT_LT(positions[use.consumer_version], positions[update]);
+        } else {
+          EXPECT_TRUE(std::ranges::any_of(plan.color_dependencies(), [&](const auto& edge) {
+            return edge.producer == colors[use.consumer_version] && edge.consumer == colors[update];
+          }));
+        }
+      }
+    }
+    // Both destructive updates would make a cycle. Exactly one uses a pending
+    // value; the other may overwrite after that capture has consumed its Q.
+    EXPECT_EQ(direct, 1u) << plan.report();
+    const auto observed = Plan::discover(graph.get(), true, false, budget);
+    ASSERT_TRUE(observed.complete()) << observed.report();
+    EXPECT_TRUE(std::ranges::none_of(observed.sites(), [](const auto& site) { return site.in_place; }))
+        << "pre-commit observation reads are outside the storage-order DAG";
+  }
+}
+
+TEST(SimColorPlan, CompactLoopDoesNotDisableOrderingOfSurroundingMemory) {
+  using Plan = livehd::sim::Color_plan;
+  auto fixture = make_compact_loop("ordered_state_around_loop", 3);
+  auto graph = fixture.parent;
+  auto io = graph->get_io();
+  io->add_input("clock", 3);
+  io->set_bits("clock", 1);
+  io->add_output("memory_q", 4);
+  io->set_bits("memory_q", 8);
+  auto state = gu::create_typed_node(*graph, Ntype_op::Flop);
+  auto q = state.create_driver_pin(0);
+  gu::set_ubits(q, 8);
+  graph->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(state, "clock_pin"));
+  for (const auto& edge : graph->get_input_pin("seed").out_edges()) {
+    if (edge.sink == fixture.compact.get_sink_pin(0)) {
+      edge.del_edge();
+      break;
+    }
+  }
+  q.connect_sink(fixture.compact.get_sink_pin(0));
+  fixture.compact.get_driver_pin(1).connect_sink(gu::setup_sink_by_name(state, "din"));
+
+  auto memory = gu::create_typed_node(*graph, Ntype_op::Memory);
+  const auto constant = [&](std::string_view name, int value) {
+    gu::create_const(*graph, *Dlop::create_integer(value)).connect_sink(gu::setup_sink_by_name(memory, name));
+  };
+  constant("bits", 8);
+  constant("size", 4);
+  constant("type", 0);
+  constant("fwd", 0);
+  constant("undef", 0);
+  graph->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(memory, "clock_pin"));
+  gu::create_const(*graph, *Dlop::create_integer(0)).connect_sink(memory.create_sink_pin(0));
+  graph->get_input_pin("seed").connect_sink(memory.create_sink_pin(3));
+  gu::create_const(*graph, *Dlop::create_integer(0)).connect_sink(memory.create_sink_pin(Ntype::Memory_port_stride));
+  gu::create_const(*graph, *Dlop::create_integer(1)).connect_sink(memory.create_sink_pin(Ntype::Memory_port_stride + 10));
+  gu::set_ubits(memory.create_driver_pin(1), 8);
+  memory.create_driver_pin(1).connect_sink(graph->get_output_pin("memory_q"));
+
+  for (uint64_t budget : {1, 256}) {
+    const auto plan = Plan::discover(graph.get(), false, false, budget);
+    ASSERT_TRUE(plan.complete()) << plan.report();
+    ASSERT_EQ(plan.summary().compact_loops, 1u);
+    size_t direct = 0;
+    for (const auto& site : plan.sites()) {
+      if (site.node.base_node() == state || site.node.base_node() == memory) {
+        EXPECT_EQ(site.in_place, site.node.base_node() == memory) << plan.report();
+        direct += site.in_place;
+      }
+    }
+    EXPECT_EQ(direct, 1u);
+    for (const auto& dep : plan.version_dependencies()) {
+      EXPECT_LT(plan.version_sites()[dep.producer].execution_order, plan.version_sites()[dep.consumer].execution_order);
+    }
+  }
+}
+
+TEST(SimColorPlan, MemoryBitConsumersShareOneNativeWord) {
+  using Plan = livehd::sim::Color_plan;
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_memory_word_boundary");
+  auto io = lib.create_io("memory_word_boundary");
+  io->add_input("address", 0);
+  io->set_bits("address", 2);
+  for (int bit = 0; bit < 64; ++bit) {
+    const auto name = "bit_" + std::to_string(bit);
+    io->add_output(name, bit + 1);
+    io->set_bits(name, 1);
+  }
+  auto graph = io->create_graph();
+  auto memory = gu::create_typed_node(*graph, Ntype_op::Memory);
+  for (const auto& [name, value] : std::vector<std::pair<std::string_view, int>>{{"bits", 64}, {"size", 4}, {"type", 0}}) {
+    gu::create_const(*graph, *Dlop::create_integer(value)).connect_sink(gu::setup_sink_by_name(memory, name));
+  }
+  graph->get_input_pin("address").connect_sink(memory.create_sink_pin(0));
+  gu::create_const(*graph, *Dlop::create_integer(1)).connect_sink(memory.create_sink_pin(10));
+  graph->get_input_pin("address").connect_sink(memory.create_sink_pin(Ntype::Memory_port_stride));
+  gu::create_const(*graph, *Dlop::create_integer(1)).connect_sink(memory.create_sink_pin(Ntype::Memory_port_stride + 10));
+  gu::set_ubits(memory.create_driver_pin(0), 64);
+  // Only the first port is stamped, as in imported memories. Every read port
+  // still has the word width specified by the memory's bits parameter.
+  auto word = memory.create_driver_pin(1);
+  for (int bit = 0; bit < 64; ++bit) {
+    auto select = gu::create_get_mask(*graph, word, bit, bit + 1);
+    gu::set_ubits(select.create_driver_pin(0), 1);
+    select.create_driver_pin(0).connect_sink(graph->get_output_pin("bit_" + std::to_string(bit)));
+  }
+  const auto plan = Plan::discover(graph.get(), false, false, 1);
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  size_t read_words = 0;
+  for (const auto& slot : plan.boundary_slots()) {
+    if (slot.kind != Plan::Boundary_kind::color_value || slot.owner_site == Plan::invalid_index
+        || plan.sites()[slot.owner_site].node.base_node() != memory) {
+      continue;
+    }
+    EXPECT_EQ(slot.width, 64u);
+    EXPECT_EQ(slot.producer_extract_hi, 64u);
+    for (const auto& consumer : slot.consumers) {
+      EXPECT_TRUE(consumer.preextracted);
+      EXPECT_EQ(consumer.width, 1u);
+      EXPECT_LT(consumer.lane_offset, 64u);
+      const auto& version = plan.version_sites()[consumer.version_site];
+      const auto node = plan.sites()[version.base_site].node.base_node();
+      const auto range = gu::bit_range(node);
+      ASSERT_TRUE(range.has_value());
+      EXPECT_EQ(consumer.lane_offset, range->first);
+    }
+    ++read_words;
+  }
+  EXPECT_EQ(read_words, 2u) << "one memory word per observation phase, rather than one word per bit\n" << plan.report();
 }
 
 TEST(SimColorPlan, SiteFreeChildOutputAliasResolvesOccurrenceInput) {
@@ -1692,6 +1999,25 @@ TEST(SimColorPlan, IndivisibleWideValuesRemainSingletons) {
   for (const auto& color : plan.colors()) {
     EXPECT_EQ(color.members.size(), 1u);
     EXPECT_GT(color.peak_live_words, 20u);
+  }
+}
+
+TEST(SimColorPlan, ReusedBodiesMustAmortizeTheirInterfaceFence) {
+  using Plan = livehd::sim::Color_plan;
+  for (const size_t depth : {40, 64}) {
+    const auto graph = make_lfsr_with_idle_children("reused_fence_" + std::to_string(depth), depth);
+    const auto automatic = Plan::discover(graph.get(), false, false, 256);
+    const auto unfenced = Plan::discover(graph.get(), false, false, 256, Plan::kNoFences);
+    const auto forced = Plan::discover(graph.get(), false, false, 256, 0);
+    ASSERT_TRUE(automatic.complete()) << automatic.report();
+    ASSERT_TRUE(unfenced.complete()) << unfenced.report();
+    ASSERT_TRUE(forced.complete()) << forced.report();
+    EXPECT_GT(forced.colors().size(), unfenced.colors().size());
+    if (depth == 40) {
+      EXPECT_EQ(automatic.colors().size(), unfenced.colors().size());
+    } else {
+      EXPECT_EQ(automatic.colors().size(), forced.colors().size());
+    }
   }
 }
 

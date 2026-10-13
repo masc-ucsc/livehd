@@ -147,6 +147,46 @@ lhd_sim "$W/h.prp" --set sim.vcd=true --set sim.vcd_fake_delay=false --workdir "
   || fail "vcdfakedelay=false run failed"
 VCD2="$W/run2/h.vcd"
 [ -s "$VCD2" ] || fail "no traditional-mode VCD produced"
+python3 - "$VCD" "$VCD2" <<'PY'
+import pathlib, sys
+
+# The output is the counter's pre-commit value. Internal state must use the
+# same observation instant, even when an untraced plan can update it in-place.
+for filename in sys.argv[1:]:
+    scope, signals, values, pairs = [], {}, {}, []
+    lines = pathlib.Path(filename).read_text().splitlines()
+    for line in lines:
+        fields = line.split()
+        if line.startswith('$scope '):
+            scope.append(fields[2])
+        elif line.startswith('$upscope'):
+            scope.pop()
+        elif line.startswith('$var '):
+            signals[tuple(scope), fields[4].split('[')[0]] = fields[3]
+        elif line.startswith('$enddefinitions'):
+            break
+    for (path, name), ident in signals.items():
+        if name.endswith('count') and (path, 'value') in signals:
+            pairs.append((ident, signals[path, 'value']))
+    assert pairs, filename
+    checked = 0
+    def check():
+        global checked
+        for state, output in pairs:
+            a, b = values.get(state, 'x'), values.get(output, 'x')
+            if set(a + b) <= {'0', '1'}:
+                assert int(a, 2) == int(b, 2), (filename, state, output, a, b)
+                checked += 1
+    for line in lines:
+        if line.startswith('#'):
+            check()
+        elif line.startswith('b'):
+            bits, ident = line[1:].split()
+            values[ident] = bits
+    check()
+    assert checked >= 8, (filename, checked)
+PY
+if [ "$?" -ne 0 ]; then fail "VCD state/output observation instants differ"; fi
 grep -qE '^(x.|bx )' "$VCD2" && fail "vcdfakedelay=false VCD must not contain X"
 # edge-aligned: every timestamp is a clock edge (multiple of 5); +3 offsets are absent
 grep -E '^#[0-9]+' "$VCD2" | grep -qvE '^#[0-9]*[05]$' && fail "traditional VCD has off-edge timestamps"
