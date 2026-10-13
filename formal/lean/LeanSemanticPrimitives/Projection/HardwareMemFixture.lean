@@ -14,7 +14,7 @@ theorem's premises DISCHARGED rather than merely computed against:
 The returned `ResultM` is decoded and its state fed to a SECOND `mainM` step,
 with reachable-state preservation supplied by the theorem itself.
 -/
-import LeanSemanticPrimitives.Projection.HardwareMemAdmit
+import LeanSemanticPrimitives.Projection.HardwareMemSlotTy
 
 namespace Projection
 namespace HwMem
@@ -171,6 +171,26 @@ theorem full_addr_width (i : RuntimeInput) (st : StateM) :
         (k := 2) (by simp [fullDesign])]
   simp [fullDesign, sourceValue, CertVal.asBV, bv_resize, mk_bv]
 
+/-- The checker's own assignment is `fullG`, EVERYWHERE -- so `fullG_fits`
+below is a control, not a dependency: `fullStep` takes its write-fit from
+`admits_writeAddrFits`. -/
+theorem geomAt_full : geomAt fullDesign = fullG := by
+  obtain ⟨ts, hts⟩ := admitsB_infer fullDesign_admits
+  have hsz : ts.size = 12 := by
+    rw [admitsB_size fullDesign_admits hts]; rfl
+  funext k
+  rcases k with _|_|_|_|_|_|_|_|_|_|_|_|n
+  all_goals first
+    | decide +kernel
+    | (rw [geomAt_out hts (by omega)]; rfl)
+
+/-- `fullG_fits`, with the hand case analysis deleted -- the generic theorem
+proves exactly the statement the hand proof below proves. -/
+theorem full_fits_checked (i : RuntimeInput) (st : StateM) :
+    ∀ c ∈ fullDesign.nodes.toList, WriteAddrFits fullDesign i st fullG c := by
+  rw [← geomAt_full]
+  exact admits_writeAddrFits fullDesign_admits i st
+
 theorem fullG_fits (i : RuntimeInput) (st : StateM) :
     ∀ c ∈ fullDesign.nodes.toList, WriteAddrFits fullDesign i st fullG c := by
   intro c hc bw hop d0 d1 d3 hd0 hd1 hd3 _hen
@@ -188,7 +208,12 @@ theorem fullG_fits (i : RuntimeInput) (st : StateM) :
     subst h0; subst h1
     exact ⟨5, rfl, by simp [full_addr_width]⟩
 
-/-! ## 3. One step, with every premise discharged -/
+/-! ## 3. One step, from the CHECKER
+
+`fullG_fits` below is the hand-written write-fit this fixture used to carry.
+It is retained as documentation that the hand route and the checked route
+agree, but `fullStep` no longer uses it: the premise now comes from
+`admits_writeAddrFits`, derived from the inferred widths. -/
 
 /-- The whole entry, on the RESOLVED program, for any state that carries the
 declared geometry.  The returned state carries it too, so the step composes. -/
@@ -225,12 +250,8 @@ theorem fullStep (i : RuntimeInput) (hi : i.size = 5)
     revert hmd; revert md; decide
   have hfsize : fullDesign.flops.size ≤ st.flops.size := by
     simpa [fullDesign] using hfl
-  obtain ⟨r, hev, hden, hpres⟩ :=
-    mainM_adequate_resolved (G := fullG)
-      (designCertWF_of_semwf fullDesign_semwf) fullDesign_semwf hshape
-      fullG_src fullDesign_admitted fullDesign_arity fullG_prop (fullG_fits i st)
-      hin hstb hfclk hmclk hfsize
-  exact ⟨r, hev, hden, hpres fullG_nextImg⟩
+  -- the write-fit is now the GENERIC checker-derived theorem, not a hand proof
+  exact admits_mainM_resolved fullDesign_admits hshape hin hstb hfclk hmclk hfsize
 
 /-! ## 4. A state, and two steps -/
 
@@ -376,6 +397,8 @@ private def eAll : ClockEdges := #[true,  true]
 #print axioms fullG_src
 #print axioms fullG_nextImg
 #print axioms fullG_prop
+#print axioms geomAt_full
+#print axioms full_fits_checked
 #print axioms fullG_fits
 #print axioms fullState_shape
 #print axioms fullStep

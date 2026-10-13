@@ -8979,3 +8979,90 @@ state/input/edge policy, its codec correspondence and preservation, and the
 admission-to-resolved-main composition.  `FullTable`/`StateShapeOK` still prove
 length only.  `SourceSupported`, `OpSupported` and `memFree` untouched.
 PicoRV32 **BLOCKED**; matrix **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.43 — scalar slot widths, and `WriteAddrFits` DERIVED from the check
+
+`LeanSemanticPrimitives/Projection/HardwareMemSlotTy.lean` (new, builds clean;
+`fullDesign`/`HardwareMemFixture` and `HardwareMemWidth` rebuilt on top of it).
+
+### The circularity that had to be avoided
+
+`sourcesThenNodes` and `evalNodesM_agree` **assume** `WriteAddrFits`, so neither
+can be used to prove it: an induction over the dense order that invoked the fold
+lemmas would be arguing in a circle.  It turned out no such induction is needed.
+`eval_op_cert_width_nonMem` says every admitted non-write operator returns the
+NODE WIDTH **at any argument list whatsoever** — it never inspects the
+arguments — and `eval_op_cert_memRead_width` says the same for `Op_MemRead`.
+The dense-order case analysis therefore collapses to a source/node split with no
+recursive hypothesis:
+
+| slot | inferred type | value width |
+|---|---|---|
+| source | `srcTy sd` | `srcTy_bv_width` — all four scalar source families, async reset on **both** branches |
+| node | `nodeTy ty c` | `nodeTy_bv_width` forces `w = c.width`; the operator lemmas give the width unconditionally |
+
+* `admits_slot_width : admitsB D = true → k < D.numSlots → tyAt D k = some (.bv w)
+  → (slotValM D i st k).asBV.width = w`.
+
+### The derived premise
+
+* `admits_writeAddrFits : admitsB D = true →
+   ∀ c ∈ D.nodes.toList, WriteAddrFits D i st (geomAt D) c`.
+
+`nodeTy_write_geom` hands back the inferred `tbl aw dw` of the written image
+together with `ty addr = some (.bv wa)` and `wa ≤ aw`; `admits_slot_width` turns
+that inferred `wa` into the runtime width of the actual address value.  The
+address fit is **read off the checker's own inference**, not assumed.  It is
+enabled-only, exactly as `WriteAddrFits` is stated.
+
+### Composition
+
+* `admits_mainM_resolved` — `admitsB D = true` plus the runtime premises
+  (`SourceInputBound`, `SourceFlopBound`, flop/memory clock bounds, flop-array
+  size, `StateShapeOK`) gives the **actual resolved `mainM`** evaluation, with
+  `r.denote = Compiler.interpretDesign D e i (StateM.denote st)` and
+  `StateShapeOK D r.nextState`, at `G = geomAt D`.  Every static antecedent
+  comes from `admits_static_premises` (§63.42); the write-fit from the theorem
+  above.
+
+### The hand-written geometries are gone from the proof path
+
+`geomAt` agrees with each hand assignment **everywhere**, not just at the
+guarded slots — by `funext` with a finite kernel split under `numSlots` and
+`geomAt_out` above it:
+
+| control | theorem |
+|---|---|
+| `geomAt fullDesign = fullG` | `geomAt_full` |
+| `geomAt mixedDesign = mixedG` | `geomAt_mixed` |
+| `geomAt twoMemDesign = twoMemG` | `geomAt_twoMem` |
+
+So the three hand `WriteAddrFits` case analyses are re-proved from the generic
+theorem alone — `full_fits_checked`, `mixed_fits_checked`,
+`twoMem_fits_checked` — and the instantiated fold is re-proved from
+`admits_static_premises` alone: `mixed_fold_checked` and `twoMem_fold_checked`
+use **no** `*G_src`, `*_admitted`, `*_arity`, `*G_prop` or `*G_fits`.
+`fullStep` now takes the checker route outright (`admits_mainM_resolved
+fullDesign_admits`), so the full fixture carries no hand write-fit at all;
+`fullG_fits` and the other `fullG` lemmas are retained below it purely as
+independent controls, and the decoded two-step changing-memory and quiet/reset
+`#guard`s are unchanged.
+
+`HardwareMemFold` and `HardwareMemCommit` sit BELOW the checker, so their own
+`mixedG_fits` / `twoMemG_fits` cannot call it; those hand proofs stay where they
+are, superseded by the checked versions proved above them.
+
+Axioms: `propext`, `Classical.choice`, `Quot.sound` only — no `sorryAx`
+anywhere in the chain.
+
+### Still open
+
+This is the **conditional** admission wrapper.  `FullTable` and `StateShapeOK`
+still prove LENGTH only: the complete executable runtime state/input/edge policy
+— real image presence, table/word/default widths, flop and input bounds, edge
+discipline, memory initialisation, exact active/quiet/disabled behaviour and the
+full clock/reset/async metadata through the real codecs, plus initialisation and
+returned-state preservation and the codec/`RuntimeState` correspondence — is the
+next increment.  `SourceSupported`, `OpSupported` and `memFree` untouched; the
+public route still refuses memory-bearing designs.  PicoRV32 **BLOCKED**;
+matrix **12 YES / 11 NO / 37 BLOCKED**.

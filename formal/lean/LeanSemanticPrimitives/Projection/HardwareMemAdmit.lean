@@ -76,6 +76,12 @@ def bvWidthOf : Option SlotTy → Nat
   | some (.bv w) => w
   | _            => 0
 
+theorem isBvTy_elim {o : Option SlotTy} (h : isBvTy o = true) :
+    o = some (.bv (bvWidthOf o)) := by
+  cases o with
+  | none   => simp [isBvTy] at h
+  | some t => cases t <;> simp_all [isBvTy, bvWidthOf]
+
 /-- One node's type, from its dependencies' types.  The lookup is consulted
 ONLY through `c.deps.toList.map ty`, which makes congruence immediate. -/
 def nodeTy (ty : Nat → Option SlotTy) (c : DenseNodeCert) : Option SlotTy :=
@@ -378,7 +384,8 @@ theorem nodeTy_write_geom {ty : Nat → Option SlotTy} {c : DenseNodeCert}
     {bw d0 d1 d2 d3 : Nat} {t : SlotTy}
     (hop : c.op = .Op_MemWriteBE bw) (hdeps : c.deps.toList = [d0, d1, d2, d3])
     (h : nodeTy ty c = some t) :
-    ∃ aw dw, t = .tbl aw dw ∧ ty d0 = some (.tbl aw dw) := by
+    ∃ aw dw wa, t = .tbl aw dw ∧ ty d0 = some (.tbl aw dw)
+              ∧ ty d1 = some (.bv wa) ∧ wa ≤ aw := by
   have hb : nodeAdmittedB c = true := by
     cases hbb : nodeAdmittedB c with
     | false => exfalso; unfold nodeTy at h; rw [hbb] at h; simp at h
@@ -389,11 +396,15 @@ theorem nodeTy_write_geom {ty : Nat → Option SlotTy} {c : DenseNodeCert}
   rw [hop, hdeps] at h
   simp only [List.map_cons, List.map_nil] at h
   split at h
-  · split at h
+  · rename_i hguard
+    split at h
     · rename_i aw' dw' heq
       split at h
-      · simp only [Option.some.injEq] at h
-        exact ⟨aw', dw', h.symm, heq⟩
+      · rename_i hcond
+        simp only [Bool.and_eq_true, decide_eq_true_eq] at hguard hcond
+        simp only [Option.some.injEq] at h
+        refine ⟨aw', dw', bvWidthOf (ty d1), h.symm, heq, isBvTy_elim hguard.1.1, ?_⟩
+        exact hcond.1.1.1.1
       · simp at h
     · simp at h
   · simp at h
@@ -434,7 +445,7 @@ theorem admits_writePropagates {D : DesignCert} (h : admitsB D = true) :
     rw [admitsB_size h hts]; unfold DesignCert.numSlots; omega
   have hty := admits_node_ty hts (admits_wf h) hc
   rw [Array.getElem?_eq_getElem hlt] at hty
-  obtain ⟨aw, dw, hres, hop0⟩ := nodeTy_write_geom hop hdeps hty
+  obtain ⟨aw, dw, wa, hres, hop0, -, -⟩ := nodeTy_write_geom hop hdeps hty
   have he0 : e0 = d0 := by
     have : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
     rw [this] at hd0
