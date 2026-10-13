@@ -10442,3 +10442,59 @@ Two things the header said that the code does not do:
   are now stated in the header and at `buildState`.
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.64 — REFUTED: the Pico write was asserting and executing all along
+
+Kernel-checked controls (`audits/pico_mask_cone_ef77dfab_20261013_1050`,
+propext only, exit 0) on the exact fresh certificate `ef77dfab`, slots
+3185 → 3186 → 3208:
+
+```lean
+cone select = Or w32 [ GetMask w32 [ MuxBool w1 [select, 0, -1], 0xffffffff ] ]
+
+cone_on          : cone (mk_bv 1 1) = mk_bv 32 1          -- NOT 0xffffffff
+cone_on_not_full : cone (mk_bv 1 1) ≠ mk_bv 32 4294967295
+enabled_no_change : writeBE 32 image (mk_bv 5 1) (mk_bv 32 1) (cone (mk_bv 1 1)) 1 = image
+full_mask_changes_word : (writeBE 32 image … 0xffffffff 1).get 1 = mk_bv 32 1
+even_word_bit_only : cert_masked_update 32 (mk_bv 32 2309737966) (mk_bv 32 1) (cone …) 1
+                       = mk_bv 32 2309737967
+```
+
+### What this overturns
+
+**§63.62 said the write's condition "does not assert".  That is false.**  The
+selected mask is **1**, not `0xffffffff`, so at `byte_w = 1` the write touches
+**bit 0 only**.  The supplied word 1 is `2309737967`, which is ODD — bit 0 is
+already set — so an ENABLED, EXECUTED write of datum 1 leaves the word
+bit-identical.  `even_word_bit_only` closes it from the other side: on an EVEN
+word the very same write DOES change it.
+
+So the gate asserted, the write executed, and the image was unchanged anyway.
+Every "memory 0: 0 word(s) differ" line in §§63.55, 63.57, 63.59 and 63.60 is
+consistent with a write that ran — and my reading of them as "the register file
+does not commit" was the exact error §63.63 had just warned about, committed
+one section earlier and not caught by writing the warning down.
+
+`§63.62`'s claim that the enable is `GetMask(cond, 0xFFFFFFFF)` producing an
+all-ones mask is withdrawn: it read the CONSTANT operand as the result.
+
+### The real candidate: operand signedness at the translation boundary
+
+Read-only queries against the source-bound binary: retained normalized graph
+origin 1284 is a **SIGNED one-bit mux**; origin 21124 is an **unsigned 32-bit
+Get_mask**.  Native `cgen_sim.cpp` (~2690) explicitly SIGN-EXTENDS a signed
+input for an over-wide `Get_mask` window.  The certificate path preserves input
+WIDTH but does not carry operand SIGNEDNESS, so the width-1 `-1` stays 1 instead
+of extending to `0xffffffff`.
+
+That is a widening/provenance candidate at the translation boundary, and it is
+NOT yet established as the fault layer: old `pass_lean.cpp` (~1305) also keeps
+the source width, so it cannot simply be copied, and the matched old/master
+graph has to be compared before anything is changed.  `GetMask`/SHL/SRA/Sext
+meanings are preserved; only the translation boundary is in question.
+
+Pico's required initialized changing-memory transition remains OPEN, now with a
+specific candidate instead of a stimulus guess.  No further speculative
+stimulus runs.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.

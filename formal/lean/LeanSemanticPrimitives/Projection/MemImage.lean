@@ -1052,6 +1052,46 @@ theorem valMemWriteBE_eq (w : Nat) (m : MemImg) (a d bev : BV) (bw : Nat)
   rw [valMemSet_encListG m.words (bv_uint a) _, if_pos h0]
   simp [hen, h0, hl]
 
+/-! ### The PLAIN write, at the encoding
+
+The same three statements as the byte-enabled write, for the primitive that
+stores the datum RAW under a whole-operand `bv_nonzero` enable. -/
+
+/-- **The plain write primitive is `MemImg.writeEn`**, on an admitted operand. -/
+theorem valMemWrite_eq (m : MemImg) (a d en : BV)
+    (hen : bv_nonzero en) (hr : InRange m (bv_uint a)) :
+    valMemWrite (encMemImg m) (ofBV a) (ofBV d) (ofBV en)
+      = some (encMemImg (writeEn m a d en)) := by
+  have hrange : valInRange (encListG ofBV m.words) (bv_uint a) = true :=
+    (valInRange_iff m (bv_uint a)).mpr hr
+  unfold valMemWrite encMemImg
+  simp only [asBV_ofBV, memImgTag, tagMemImg, valAllBV_encListG, Bool.and_true, if_true,
+             hen, hrange]
+  unfold writeEn setAt
+  obtain ⟨h0, hl⟩ := hr
+  rw [valMemSet_encListG m.words (bv_uint a) _]
+  simp [hen, h0, hl]
+
+/-- A DISABLED plain write is admitted and returns the EXACT prior image value
+-- the same `Val`, not a reconstruction of it. -/
+theorem valMemWrite_disabled (m : MemImg) (a d en : BV) (hen : ¬ bv_nonzero en) :
+    valMemWrite (encMemImg m) (ofBV a) (ofBV d) (ofBV en) = some (encMemImg m) := by
+  unfold valMemWrite encMemImg
+  simp [asBV_ofBV, memImgTag, tagMemImg, valAllBV_encListG, hen]
+
+/-- **An enabled plain write outside the table is REFUSED** by the primitive,
+not dropped. -/
+theorem valMemWrite_refuses_outOfRange (m : MemImg) (a d en : BV)
+    (hen : bv_nonzero en) (hr : ¬ InRange m (bv_uint a)) :
+    valMemWrite (encMemImg m) (ofBV a) (ofBV d) (ofBV en) = none := by
+  have hrange : valInRange (encListG ofBV m.words) (bv_uint a) = false := by
+    have := (valInRange_iff m (bv_uint a))
+    cases h : valInRange (encListG ofBV m.words) (bv_uint a)
+    · rfl
+    · exact absurd (this.mp h) hr
+  unfold valMemWrite encMemImg
+  simp [asBV_ofBV, memImgTag, tagMemImg, valAllBV_encListG, hen, hrange]
+
 /-- A DISABLED write is admitted and leaves the encoded image alone. -/
 theorem valMemWriteBE_disabled (w : Nat) (m : MemImg) (a d bev : BV) (bw : Nat)
     (hen : ¬ bv_nonzero bev) :

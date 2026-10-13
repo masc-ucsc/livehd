@@ -94,6 +94,19 @@ def nodeTy (ty : Nat → Option SlotTy) (c : DenseNodeCert) : Option SlotTy :=
         | some (.rom _ _)  => some (.bv c.width)
         | _                => none
       else none
+  | .Op_MemWrite, [tm, ta, td, ten] =>
+      -- The PLAIN write.  The enable is tested whole by `bv_nonzero`, so there
+      -- is no `0 < bw` and no `dw ≤ width(enable) * bw` condition here: an
+      -- enable of ANY width is admissible, including one whose bit 0 is clear.
+      -- The datum's width is still pinned, because an image whose words must
+      -- all be `dw` wide only stays that way when the datum is.
+      if isBvTy ta && isBvTy td && isBvTy ten then
+        match tm with
+        | some (.tbl aw dw) =>
+            if bvWidthOf ta ≤ aw && c.width == dw && bvWidthOf td == dw
+            then some (.tbl aw dw) else none
+        | _ => none
+      else none
   | .Op_MemWriteBE bw, [tm, ta, td, tbe] =>
       if isBvTy ta && isBvTy td && isBvTy tbe then
         match tm with
