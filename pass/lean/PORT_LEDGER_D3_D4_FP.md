@@ -9621,3 +9621,63 @@ here fakes it.  **PicoRV32 remains BLOCKED on `pass.lean: latch`.**
 
 Matrix unchanged: **12 YES / 11 NO / 37 BLOCKED**.  No whole-unit admission
 credit is taken from any fixture, certificate or compile above.
+
+## §63.51 — B09 and B10: the blocker was a CAP, and it is cleared
+
+Continuing the master FP units after the Pico increment.  Of the thirteen unit
+directories under `cov12x5`, three had a recorded `verified_compiler` attempt
+and all three failed:
+
+| unit | recorded refusal | kind |
+|---|---|---|
+| B09 `cva6_issue_scoreboard` | `pass.lean: node n_684 (node) has width 3536 > max_width=1024` | **cap** |
+| B10 `cva6_frontend` | `pass.lean: node n_10692 (node) has width 2080 > max_width=1024` | **cap** |
+| B12 `picorv32` | `pass.lean: unsupported certificate op(s): latch` | **semantic** |
+
+`max_width` is a documented, configurable label on `pass.lean`
+(`pass/lean/pass_lean.cpp:31`, "Hard cap on node Bits width; 0 or 'unlimited' =
+no cap (default 1024)").  A cap is not a semantic refusal, so B09 and B10 were
+re-run from their own retained `s2_single_edge/lg` at the pinned top and mode
+with `--set formal.lean.max_width=unlimited`:
+
+| unit | producer exit | wall | user+sys | peak RSS | `pass.lean` | emitted |
+|---|---|---|---|---|---|---|
+| B09 `issue_stage_gate` | **0** | 4.90 s | 4.82 + 0.04 s | 203,140 KiB | 312.0 ms | `issue_stage_gate_Lgraph.lean` 1,252,028 B, sha256 `4afcfb50…` |
+| B10 `frontend_gate` | **0** | 5.82 s | 5.71 + 0.07 s | 211,820 KiB | 248.7 ms | `frontend_gate_Lgraph.lean` 970,752 B, sha256 `cb73b273…` |
+
+Both now emit the verified-compiler certificate module where they previously
+refused.  Nothing was weakened to get there: `max_width` bounds the WIDTH a node
+may carry in the emitted certificate, and raising it admits wider nodes rather
+than relaxing any check.
+
+**A caution recorded with it.**  The same parameter also bounds a memory's
+ADDRESS width (`pass/lean/graph_access.cpp:313`).  Removing the cap outright
+would admit an `aw` whose `2 ^ aw`-word table cannot exist, and the memory-route
+driver builds such a table for `init=zero`/`init=ramp`.  These two units declare
+no memories, so the run above is unaffected, but `max_width=unlimited` must not
+be adopted as a blanket default for a memory-bearing design without an address
+bound of its own.
+
+### What is NOT claimed
+
+Generation is the first gate, not the unit.  The emitted modules have **not**
+been built: `d3_guarded_build.py` refuses in this session —
+
+```
+d3_guarded_build: REFUSING -- no delegated cgroup v2 base.
+The build would run unguarded, which is what this wrapper exists to prevent.
+```
+
+— and the session's own cgroup (`/user.slice/user-1008.slice/session-*.scope`)
+is root-owned with `cgroup.subtree_control` not writable, so there is no
+delegation to use.  A bare `lean` on a real design is exactly what the guarded
+runner exists to prevent, so the build gate was **not** run and no result is
+claimed for it.  That is an environment limitation, not a refusal and not a
+pass.
+
+The ten remaining unit directories have no recorded `verified_compiler` attempt
+at all, so they are untouched here.
+
+Matrix unchanged: **12 YES / 11 NO / 37 BLOCKED**.  B09 and B10 advance from a
+generation refusal to a generation PASS awaiting the guarded build; B12 stays
+BLOCKED on `pass.lean: latch`.
