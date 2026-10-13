@@ -10277,3 +10277,55 @@ the memory.  The route is not in question in any of them.  **No claim of
 meaningful initialized memory transitions is made for Pico.**
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.61 — `Op_MemWrite` groundwork, and what was already there
+
+`LeanSemanticPrimitives/Projection/HardwareMemWrite.lean` (new, builds clean,
+5 executed guards).  Strictly additive: it touches no existing definition,
+admits nothing and changes no route.
+
+### Already proved, before this module
+
+The image semantics of the missing operator were done:
+
+* `MemImg.writeEn m a d en` — the word write with an enable;
+* `MemImg.denote_writeEn` — it denotes `cert_mem_write` whenever the address is
+  in range.
+
+So the gap is not in the semantics.  It is the ROUTE: an object primitive, an
+`applyOpM` dispatch, the checker's admission and typing, and the node/fold
+lemmas.  Those move `ObjectLanguage`, `hwMemS`, `hwMemP`, `hwMemAP` and the two
+kernel reductions that pin them, which is the next checkpoint and is NOT
+started here.
+
+### Added
+
+| fact | statement |
+|---|---|
+| `eval_op_cert_memWrite` | the certificate evaluator on a four-operand write, definitionally |
+| `cert_mem_write_disabled` | disabled ⇒ the memory function is returned UNCHANGED |
+| `cert_mem_write_width` | pointwise width, with the datum's width as a HYPOTHESIS |
+| `writeEn_disabled_eq` | disabled ⇒ the IMAGE is unchanged, not merely equivalent |
+| `writeEn_length` / `writeEn_dflt` / `writeEn_FullTable` | geometry survives |
+| `writeEn_MemShapeOK` | §63.45's word-and-default shape survives, given `d.width = dw` |
+| `writeEn_denote` | the three facts a write node needs, stated together |
+
+`mem_set_cases` is proved by induction rather than by library name, so the
+module does not depend on which spelling of "a member of `l.set n b` is `b` or
+was already in `l`" this toolchain ships.
+
+### The side condition, carried not assumed
+
+§63.58's addendum found that `cert_mem_write` stores `d` **raw** — unlike
+`cert_mem_read` and the byte-enabled write, which both end in `mk_bv`.  So an
+image whose words must all be `dw` wide stays that way only when the datum IS
+`dw` wide.  That appears here as an explicit hypothesis on
+`cert_mem_write_width` and `writeEn_MemShapeOK`, which is exactly what the
+checker's existing `bvWidthOf td == dw` would supply.  Nothing assumes it.
+
+Executed controls: an enabled write changes the addressed word and nothing
+else; a disabled write returns the SAME image; the default is untouched either
+way; and an out-of-range write is a no-op that does not extend the table.
+
+Axioms: `propext`, `Quot.sound` only.  Matrix stays **12 YES / 11 NO /
+37 BLOCKED**.
