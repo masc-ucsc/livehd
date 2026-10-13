@@ -11077,3 +11077,111 @@ column **2 YES / 10 BLOCKED → 3 YES / 9 BLOCKED**.  Verified mechanically that
 refusal is retained verbatim.  The nine remaining FP blockers are upstream
 refusals — eight never emit a certificate, B11 emits then fails `single_edge` —
 and they remain in scope for the twelve-unit objective.
+
+## §63.71 — the ordinary `Op_MemWrite` route: typing, admission, object and node layers
+
+`HardwareMemWrite` listed what the plain write still needed: "an object
+primitive, an `applyOpM` dispatch, the checker's admission and typing, and the
+node/fold lemmas."  The primitive and the dispatch landed with the object
+layer.  This checkpoint adds **the typing, the admission, the object-level
+bridges, the node theorems and the fold step**, in one new module
+`Projection/HardwareMemWriteAdmit.lean` (≈700 lines).  It compiles with no
+`sorry`: every theorem reports only `propext`, `Quot.sound` and
+`Classical.choice` — the same three the existing byte-enabled route uses.
+
+### The original contract is preserved, and checked to be
+
+`NodeAdmitted`, `nodeAdmittedB`, `NodeAdmitted_ne_memWrite` and `nodeTy` are
+**untouched**.  `nodeTy_memWrite_none` restates the original refusal as a
+theorem rather than leaving it implicit.  The extension is a separate
+`nodeTyW`, written so the delegation is an `if`, not a match arm:
+
+```lean
+def nodeTyW ty c := if c.op = .Op_MemWrite then nodeTyWBody ty c else nodeTy ty c
+```
+
+so "off the plain write this IS `nodeTy`" is `if_neg`, not a 30-case analysis
+that could silently drift.  From that: `inferTysW_eq` and `admitsWB_eq` prove a
+design with no plain write gets **the same answer on both routes**.
+
+`admitsWB_eq` needed `tysOK` and `admitsB_tysOK` first: a `match` written twice
+elaborates to two DIFFERENT auxiliary functions, so two inline copies that read
+identically are not `rfl`-equal.  The original tail is pinned to a named
+function and the extended checker reuses it.
+
+### The plain write's own semantics, typed directly
+
+`Op_MemWriteBE`'s typing enforces a lane geometry (`0 < bw`,
+`dw ≤ bvWidthOf tbe * bw`).  The plain write has no lanes, and its typing says
+so:
+
+* the **enable** must be a bit vector and nothing more — no width relation,
+  because `bv_nonzero` reads the whole operand and no width relation is true of
+  it.  A one-bit enable is NOT demanded and the write is NOT reduced to a
+  one-lane `Op_MemWriteBE`;
+* the **datum** must be EXACTLY `dw` wide (`==`, not `≤`), because
+  `cert_mem_write` stores it raw — precisely the side condition
+  `cert_mem_write_width` was left holding.
+
+`nodeTyW_write_geom` reports the address and datum geometry and deliberately
+says nothing about the enable, because there is nothing to say.
+
+### What is proved
+
+| layer | theorem |
+|---|---|
+| object | `evalPrim_memWrite`, `evalPrim_memWrite_disabled` |
+| dispatch | `applyOpM_memWrite`, `applyOpM_memWrite_disabled` (opcode 27, one `ite` earlier than BE) |
+| node | `evalNodeM_memWrite`, `evalNodeM_memWrite_disabled` |
+| fold | `memWrite_deps`, `node_step_memWrite`, `node_stepW` |
+| typing | `nodeTyW_result`, `nodeTyW_bv_width`, `nodeTyW_bv_ne_memWrite`, `nodeTyW_admits`, `nodeTyW_write_geom` |
+| checker | `inferTysW_eq`, `admitsWB_eq`, `admitsWB_infer`, `admitsWB_acceptsDesign`, `tyAtW_source` |
+
+`node_stepW` **reuses the original `node_step` untouched** for everything it
+already covered and adds only the plain-write branch.  `WritePropagatesW` and
+`WriteAddrFitsW` CONJOIN the plain write's obligation onto the originals rather
+than generalising them, so a caller holding the original still holds exactly
+what it held.
+
+`nodeTyW_bv_ne_memWrite` is worth naming: a node that types `.bv` is not a
+plain write, derived FROM THE TYPING exactly as the byte-enabled exclusion is.
+That is what lets the extended route keep `NodeAdmitted_ne_memWrite` untouched
+— the scalar-width agreement never needed the exclusion theorem, only the fact
+that a write types a table.
+
+### Controls
+
+Ten `#guard`s on the extended typing, each exposing a distinction rather than
+re-checking the happy path: the original checker still refuses the same node; a
+**four-bit** and a **32-bit** enable are both accepted; a datum narrower OR
+wider than `dw` is refused; an over-wide address is refused; a MEMORY enable is
+refused; `Op_Sub`/`Op_UDiv` are still refused on the extended route too; and an
+admitted scalar operator types identically on both routes.
+
+### On the RETAINED refused certificates
+
+`formal/lean/scripts/plainwrite_admit.lean`, run on the five certificates
+§63.58 named — exit 0, `ALL CONTROLS PASS`:
+
+| certificate | nodes | `Op_MemWrite` | `admitsB` | `admitsWB` |
+|---|---|---|---|---|
+| `tiny_ram` | 7 | 1 | **false** | **true** |
+| `tiny_sync_ram` | 8 | 1 | **false** | **true** |
+| `mem_domain` | 12 | 1 | **false** | **true** |
+| `mem_nondefault` | 12 | 1 | **false** | **true** |
+| `memfix_b` | 12 | 1 | **false** | **true** |
+
+and, in the other direction, on five designs with no plain write — whole Pico
+(2,332 nodes, one `Op_MemWriteBE`), `tiny`, `SingleCycleCPU` (1,113 nodes),
+`two_domain`, `memfix_a` — **both routes agree**, as `admitsWB_eq` proves.  The
+driver fails loudly if the original ever admits a plain write or if a
+no-plain-write design disagrees.
+
+### What is NOT yet done, and so is NOT admitted
+
+The production route is **unchanged**: `dcert2_memroute` still runs `admitsB`,
+and plain-write support is still REFUSED there.  `admitsWB` is defined and
+sound at the layers above, but the `mainM` entry, the runtime policy and
+preservation, the codec correspondence and the checked specialization have not
+been carried over, so no design is admitted through it.  That is the next
+work, and it is required before any plain-write design is run.
