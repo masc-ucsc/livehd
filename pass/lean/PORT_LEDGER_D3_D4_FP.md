@@ -9338,3 +9338,78 @@ execution with genuine transitions and phase metrics.  `SourceSupported`,
 `OpSupported` and `memFree` untouched; the public route still refuses
 memory-bearing designs.  PicoRV32 **BLOCKED**; matrix
 **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.48 — the memory route's checked support answer, and its actual entry
+
+`LeanSemanticPrimitives/Projection/MemSupport.lean` (new, builds clean, 12
+executed guards).  Dependency chain built to reach it: `PartialEvaluatorCorrect`,
+`ProjectionCorrect`, `ResidualFragment`, `ProjectedStep`, `CertLoad` — all
+producer 0.
+
+### The scalar route is untouched
+
+`CertLoad.supportReport`, `SupportReport.allOK`, `runOne`, `SourceSupported`,
+`OpSupported` and `SupportedByProjection` are unchanged.  `memFree` is still a
+REFUSAL there, and `scalar_refuses_memory` proves it has to be: a design with a
+memory makes that conjunct false, so the scalar verdict is `false` whatever else
+holds.  Broadening those predicates would subtract meaning from the scalar
+adequacy theorems, so the alternative is stated BESIDE them, not in them.
+
+### The alternative answer
+
+`MemSupport.Report` carries the scalar verdict and the conjunct that decides it
+(`scalar`, `memFree`) together with the three components of the memory admission
+check (`accepts`, `sized`, `nextImgs`, plus `typed` as a diagnostic), so a
+refusal names the part that failed.
+
+* `admitOK_eq : (report D).admitOK = admitsB D` — the report **is** the check,
+  not a summary of it.
+
+### The entry and codec correspondence
+
+`mainM` is a function ADDED to `hwS`; the scalar `main` is still there, unedited,
+under its own name.  `entry_name`, `entry_index` and `entry_distinct`
+(`idOf "main" ≠ idOf "mainM"`) record that the memory route is a different entry
+of the same program, not a replacement.
+
+* `run_of_report` — a report-admitted design, run on a state/input/edge vector
+  `runtimeFullOKB` accepts, evaluates at the ACTUAL resolved entry
+  `hwMemP.entry` on the real `encDesign`/`encEdges`/`encInput`/`encStateM`
+  literals to a value that DECODES through `StateM.decResultM`, and the decoded
+  result denotes `Compiler.interpretDesign`'s — with the returned state passing
+  the same strengthened policy.
+* `run_of_report_init` — the same from the design's own canonical state.
+
+### Readiness
+
+`Report.line` and `verdict` are pure, so they are guarded; `sayReport` wraps
+them in `CertLoad.say`'s shape so a driver can print them without any change to
+`runOne`.  Executed:
+
+| design | verdict |
+|---|---|
+| `fullDesign` | `SCALAR ROUTE: refused (memFree) -- MEMORY ROUTE: admitted` |
+| `scalarDesign` (memory-free) | `SCALAR ROUTE: supported` — unchanged where it was already right |
+| `mixedDesign` whose write target is a ROM | `REFUSED BY BOTH ROUTES` |
+
+`mixedDesign`, `twoMemDesign` and `laneDesign` (`byte_w = 8`) all report
+`admitOK`.
+
+### Scope
+
+No whole-unit admission credit follows from this.  A design passing `report` is
+a design the memory route's own theorems apply to, nothing more; `initStateOf`
+remains a legal-state witness and not an RTL startup contract, and a driver with
+real initial contents must pass them in as the dynamic state.
+
+Axioms: `propext`, `Classical.choice`, `Quot.sound` — no `sorryAx`.
+
+### Still open
+
+Wiring the readiness lines into a production DCERT2 driver that preserves
+imported initialised contents, actual-size ROM bounds/defaults and
+reset/async/clock/component metadata and refuses unsupported initialisation;
+BTA with the design static and exactly edges/input/state dynamic; annotation
+erasure and proved specialisation; production arity-3 residual checking at its
+returned bound; whole PicoRV32 generation and execution with genuine transitions
+and phase metrics.  PicoRV32 **BLOCKED**; matrix **12 YES / 11 NO / 37 BLOCKED**.
