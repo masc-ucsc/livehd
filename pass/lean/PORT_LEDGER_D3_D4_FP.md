@@ -8853,3 +8853,75 @@ and the rejection controls are NOT in this commit.**  `StateShapeOK` still
 proves table length only; `SourceSupported`, `OpSupported` and `memFree` are
 untouched; `Op_MemWrite` and `Op_Sub` stay refused.  PicoRV32 remains
 **BLOCKED**; matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.41 — The executable static admission checker, and what it does not yet prove
+
+Header correction, import re-layering, and a new
+`formal/lean/LeanSemanticPrimitives/Projection/HardwareMemAdmit.lean`
+(377 lines, **24 `#guard`s**), `PRODUCER_EXIT=0`, 0 errors, no unsafe axioms.
+
+### Two corrections first
+
+`HardwareMemWidth`'s header said the width facts were "lifted to `slotValM` by
+induction over the dense order".  **They were not**, and the claim is withdrawn
+in the source.  The module also imported `HardwareMemFixture`, i.e. upward; it
+now imports `HardwareMemMain`, so the width and admission layers sit BELOW the
+fixtures and a fixture can import and instantiate the checker without a cycle.
+
+### The checker
+
+A slot-type inference over the dense source/node order:
+`SlotTy := bv w | tbl aw dw | rom dw n`.  `tbl` and `rom` are deliberately
+distinct — a `memConst` keeps its real `contents.size` and its own default and
+is typed `rom`, so it can be READ but never written.
+
+* `Op_MemRead [m,a,en]` — `m` an image of either kind, `a`/`en` scalars, and
+  against a `tbl aw _` the address no wider than `aw`.
+* `Op_MemWriteBE bw [m,a,d,be]` — `m` must be `tbl aw dw`; address no wider than
+  `aw`; node width and data width exactly `dw`; `0 < bw`; and the mask must
+  cover every data bit, `dw ≤ wb * bw`.  At `bw = 1` that is Pico's bit-enable
+  rule (32-bit mask for 32-bit data at `aw = 5`); at `bw = 8` it is the lane
+  rule (4 mask bits suffice).  The result propagates `tbl aw dw`.
+* Anything else — `OpSupported` with all-scalar dependencies.  `Op_MemWrite` and
+  `Op_Sub` have no rule and are REFUSED.
+* Every `MemoryDesc.nextImg` is checked against that memory's `aw` and `dw`.
+
+`Direct.checkDesign` is **retained**, not replaced: `admitsB` conjoins it.
+
+### Soundness — proved
+
+`admits_semwf`, `admits_wf`, `admits_geom_src` (the source-consistent geometry
+assignment, via the `infer_foldl_prefix` lemma that the source prefix survives
+the whole walk) and `admits_nextImgGeom`.  That is three of
+`mainM_adequate_resolved`'s antecedents plus the WF facts.
+
+### Executed controls
+
+`mixedDesign`, `twoMemDesign` and a new `byte_w = 8` `laneDesign` all pass.
+Refused, each a small changed-source variant: a ROM write target; a `nextImg`
+geometry mismatch in `aw`; one in `dw`; an address wider than the table; a data
+width that is not `dw`; a node width that is not `dw`; plain `Op_MemWrite`;
+`Op_Sub`; a memory operand in a scalar position; an out-of-range `nextImg`; an
+undeclared clock ordinal (caught by the retained `checkDesign`); and the lane
+design with `byte_w = 1`, where a 4-bit mask cannot cover 32 data bits.
+
+### NOT proved here — stated plainly
+
+* **`NodeAdmitted`/arity and `WritePropagates` from the checker** — these need
+  the node-type recurrence and are not claimed.
+* **The `slotValM` width/kind induction and the DERIVED `WriteAddrFits`** — the
+  per-operator and per-source width facts exist (§63.40) but are not yet
+  carried to the value the interpreter computes at a slot.
+* **Applying soundness to a concrete design.**  `admitsB D = true` is currently
+  carried by `#guard` (compiler evaluation) for the concrete designs: neither
+  `decide` nor `rfl` reduces `admitsB` to a literal, because the fold over the
+  node list does not evaluate in the kernel here.  That is executed evidence,
+  **not** a theorem, it is said so in the module, and no theorem depends on it.
+* The runtime state/input/edge policy, its codec correspondence and
+  preservation, and the admission-to-resolved-main composition.
+
+`FullTable`/`StateShapeOK` still prove table length only.  `SourceSupported`,
+`OpSupported` and `memFree` are untouched.  PicoRV32 stays **BLOCKED**; matrix
+unchanged at **12 YES / 11 NO / 37 BLOCKED**.

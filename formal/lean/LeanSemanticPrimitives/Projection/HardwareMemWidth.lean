@@ -4,14 +4,22 @@
 The checked admission policy has to DERIVE the enabled write's address fit, not
 assume it.  That needs one fact the repository did not have: every operator
 returns a value of the node's declared width, and every source returns a value
-of its declared width.  Both are proved here, and then lifted to
-`slotValM` — the value the interpreter actually computes at a slot — by
-induction over the dense order.
+of its declared width.  Both are proved here.
+
+**They are NOT yet lifted to `slotValM`.**  An earlier version of this header
+said the dense-slot lift was present; it was not, and the claim is withdrawn.
+What this module gives is the per-operator and per-source width facts; carrying
+them to the value the interpreter actually computes at a slot is the induction
+in `HardwareMemAdmit`, over the checked slot types.
 
 Nothing here is specific to memories; it is the width discipline the whole
 certificate already intends, made available as a theorem.
+
+This module sits BELOW the fixtures: it imports only production proof modules,
+so the admission layer and the fixtures that instantiate it can import it
+without a cycle.
 -/
-import LeanSemanticPrimitives.Projection.HardwareMemFixture
+import LeanSemanticPrimitives.Projection.HardwareMemMain
 
 namespace Projection
 namespace HwMem
