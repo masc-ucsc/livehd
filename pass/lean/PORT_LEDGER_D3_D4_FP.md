@@ -10160,3 +10160,63 @@ checkpoint does not discover them late.
 Neither condition weakens anything; they are two obligations the next
 checkpoint owes, and stating them is why the reduction is worth recording
 before it is attempted.
+
+## §63.59 — 24 cycles with the handshake: still no commit, and why
+
+The reactive handshake run, on the fresh certificate, supplied image, 24
+cycles:
+
+```
+stimulus: 8 input(s) pinned, 1 reactive (from the previous cycle's outputs)
+step outcomes: ok × 24
+reference comparison: COMPLETE (array length, every table word, default and out-of-range)
+distinct output vectors 2 of 24; distinct flop vectors 16 of 24
+memory 0: 0 word(s) differ from the initial image
+final returned-state policy: stateFullOKB true
+ms: support 82  specialize 640063  check 2504  execute 4025031
+```
+
+producer exit 0, 1:18:03 wall, 4671.0 s user, peak RSS 6,945,540 KiB.
+
+**Still no commit** — and `distinct output vectors 2 of 24` is the diagnosis.
+Sixteen distinct flop vectors means parts of the design are moving, but two
+output vectors over twenty-four cycles means the fetch address is NOT advancing:
+the core is in a two-state loop, not executing.
+
+The cause is the reset, not the handshake.  This certificate's flops carry
+`resetPin none` — picorv32's state registers are not reset-pinned, so `resetn`
+initialises them THROUGH THE LOGIC.  Holding it high from cycle 0, starting
+from the declared reset values, never takes the state machine through the
+initialisation its logic expects.  A constant stimulus cannot express a reset
+PULSE, which is what both previous runs supplied.
+
+### `at`, the third kind of stimulus entry
+
+```
+at <cycle> in <ordinal> <width> <value>
+```
+
+A per-cycle override, which beats a reactive input, which beats a constant.
+The retained stimulus now holds `resetn` LOW for cycles 0-1 and high after, and
+the provenance line reports the three kinds separately:
+`8 constant(s), 2 per-cycle override(s), 1 reactive`.
+
+### Accounting
+
+Three Pico runs so far, all producer exit 0, all COMPLETE reference
+comparison, and **none has moved the memory**:
+
+| run | certificate | cycles | stimulus | flop vectors | memory |
+|---|---|---|---|---|---|
+| §63.55 | retained | 6 | generated | 3 of 6 | 0 words |
+| §63.57 | fresh | 12 | constant supplied | 8 of 12 | 0 words |
+| §63.59 | fresh | 24 | + reactive handshake | 16 of 24 | 0 words |
+
+The route is not in question in any of them — admitted, specialized, checked at
+the returned bound, executed, reference-agreeing.  What has been missing each
+time is a stimulus that makes the core execute, and each run has named the
+reason rather than rounding the result up.  A fourth run with the reset pulse
+is under way; **no claim of meaningful initialized memory transitions is made
+for Pico unless and until one is observed.**
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.

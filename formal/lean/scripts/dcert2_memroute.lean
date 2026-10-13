@@ -372,8 +372,12 @@ in <ordinal> <width> <value>
 Every cycle uses it; unlisted ordinals keep their declared width and value 0.
 It is SUPPLIED, like the state file, and the report says so. -/
 
+/-- A stimulus is three things: constants, per-cycle overrides (`at`), and
+reactive inputs (`react`).  A core that needs a RESET PULSE cannot be driven by
+constants alone, which is what `at` is for. -/
 def parseStim (txt : String) :
-    Except String (List (Nat × Nat × Int) × List (Nat × Nat)) := do
+    Except String (List (Nat × Nat × Int) × List (Nat × Nat)
+                   × List (Nat × Nat × Nat × Int)) := do
   let body := ((txt.splitOn "\n").map (fun l => (l.splitOn "\r").headD "")).filter
                 (fun l => l != "" && !l.startsWith "#")
   match body with
@@ -383,10 +387,17 @@ def parseStim (txt : String) :
     else
       let mut out : List (Nat × Nat × Int) := []
       let mut rx : List (Nat × Nat) := []
+      let mut ats : List (Nat × Nat × Nat × Int) := []
       let mut n := 1
       for l in rest do
         n := n + 1
         match (l.splitOn " ").filter (fun w => w != "") with
+        | ["at", c, "in", i, w, v] =>
+            let some c' := c.toNat? | throw s!"line {n}: cycle {repr c} is not a number"
+            let some i' := i.toNat? | throw s!"line {n}: ordinal {repr i} is not a number"
+            let some w' := w.toNat? | throw s!"line {n}: width {repr w} is not a number"
+            let some v' := v.toInt? | throw s!"line {n}: value {repr v} is not an integer"
+            ats := ats ++ [(c', i', w', v')]
         | ["react", i, o] =>
             let some i' := i.toNat? | throw s!"line {n}: input ordinal {repr i} is not a number"
             let some o' := o.toNat? | throw s!"line {n}: output ordinal {repr o} is not a number"
@@ -397,19 +408,25 @@ def parseStim (txt : String) :
             let some v' := v.toInt? | throw s!"line {n}: value {repr v} is not an integer"
             out := out ++ [(i', w', v')]
         | _ => throw s!"line {n}: unrecognised {repr l}"
-      .ok (out, rx)
+      .ok (out, rx, ats)
 
 /-- The supplied vector, with any `react` input taken from the PREVIOUS cycle's
 output -- the handshake a core needs, and the only part of the stimulus that is
 not a constant.  On the first cycle there is no previous output, so a reactive
 input is 0. -/
 def stimInput (D : DesignCert) (spec : List (Nat × Nat × Int))
-    (rx : List (Nat × Nat)) (prevOuts : Array BV) : RuntimeInput :=
+    (rx : List (Nat × Nat)) (ats : List (Nat × Nat × Nat × Int))
+    (prevOuts : Array BV) (cyc : Nat) : RuntimeInput :=
   let n := max (maxInputIdx D) ((spec.map (fun t => t.1 + 1)).foldl max 0)
   (List.range n).toArray.map (fun i =>
     let w := match spec.find? (fun t => t.1 == i) with
              | some (_, w, _) => w
              | none           => inputWidth D i
+    -- a per-cycle override wins over everything; then a reactive input; then
+    -- the constant; then zero at the declared width
+    match ats.find? (fun t => t.1 == cyc && t.2.1 == i) with
+    | some (_, _, w', v) => mk_bv w' v
+    | none =>
     match rx.find? (fun t => t.1 == i) with
     | some (_, o) => bv_resize w (prevOuts[o]?.getD (mk_bv w 0))
     | none =>
@@ -426,6 +443,7 @@ structure Cfg where
   /-- a supplied stimulus, applied every cycle, or `none` for the generated one -/
   stim     : Option (List (Nat × Nat × Int)) := none
   react    : List (Nat × Nat) := []
+  ats      : List (Nat × Nat × Nat × Int) := []
   stimProv : String := "generated: mkInputFor (synthetic, width-derived)"
   /-- stop after the support report -- used to compare two certificates'
   admission without paying for specialization -/
@@ -546,7 +564,7 @@ unchanged -- refusing rather than running on a state the encoder altered"
       for k in List.range cfg.cycles do
         let e := edgeSchedule D k
         let i := match cfg.stim with
-                 | some spec => stimInput D spec cfg.react prevOuts
+                 | some spec => stimInput D spec cfg.react cfg.ats prevOuts k
                  | none      => mkInputFor D k
         if runtimeFullOKB D i st e != true then
           tags := "policy-refused" :: tags
@@ -638,9 +656,9 @@ def resolveStim (cfg : Cfg) : IO (Except String Cfg) := do
       | some txt =>
         match parseStim txt with
         | .error e => pure (.error s!"{path}: {e}")
-        | .ok (spec, rx) =>
-            let prov := s!"SUPPLIED file {path}, {bytes.size} bytes, fnv1a {fnv1a bytes}, {spec.length} input(s) pinned, {rx.length} reactive (from the previous cycle's outputs)"
-            pure (.ok { cfg with stim := some spec, react := rx, stimProv := prov })
+        | .ok (spec, rx, ats) =>
+            let prov := s!"SUPPLIED file {path}, {bytes.size} bytes, fnv1a {fnv1a bytes}, {spec.length} constant(s), {ats.length} per-cycle override(s), {rx.length} reactive (from the previous cycle's outputs)"
+            pure (.ok { cfg with stim := some spec, react := rx, ats := ats, stimProv := prov })
 
 /-- Build the initial state.  Synthetic modes are generated here and SAID to be
 synthetic; a supplied file is read, parsed and used AS IT IS -- no field is
@@ -695,7 +713,7 @@ contents or use init=zero, which is a legal-state witness only."
     let prov := match stimTok with
                 | some t => s!"PENDING {t}"
                 | none   => "generated: mkInputFor (synthetic, width-derived)"
-    .ok ⟨sf, wf, cyc, im, cmp, none, [], prov, sup⟩
+    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup⟩
   | _ => .error usage
 
 /-! ## Comparison self-test
