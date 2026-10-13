@@ -11711,3 +11711,100 @@ generation and readiness, not a changing-memory demonstration.
 
 **Counts are unchanged: 13 YES / 11 NO / 36 BLOCKED, FP 3 YES / 9 BLOCKED.**
 No row credit before its required gates pass.
+
+## §63.77 — a stale-binary conclusion withdrawn, the native enable contract, and a frozen plan
+
+### 1. WITHDRAWN: "width inference defeats removing `set_bits`"
+
+§63.76 reported that removing the explicit `set_bits` was NOT enough — that the
+shared zero still reached width 69 — and concluded the connection itself
+carried the width.  **That measurement was made with a stale executable and the
+conclusion is withdrawn.**
+
+`pass/single_edge/BUILD` declares a `cc_library` and no binary, so
+`bazel build //pass/single_edge:all` compiles the library and **does not relink
+`lhd`**.  The source changed at 22:36:17 UTC; the `bazel-bin/lhd/lhd` those runs
+used was linked at 22:31:36, i.e. **before the fix**.  The 0→9 and 0→69
+observations therefore describe the PRE-fix gate.  They establish nothing about
+width inference, and they are not a reason to touch the constant pool, the
+`Dlop` representation or any global width rule — none of which was changed.
+
+What remains true, and is source-bound: the later `//lhd:lhd` link validates the
+`Sext`/`And` implementation, B11's generation is pass/exit 0, and its
+certificate is `1f83897e…`.  Whether the simpler Mux-with-unstamped-zero form
+would also have sufficed is **open and not re-litigated**; the shipped gate is
+the mask idiom.
+
+The failed runs are retained with this provenance note attached.
+
+**A staleness guard now lives in the test itself**: it fails if `lhd` is older
+than `pass_single_edge.cpp`, so this cannot recur silently.
+
+### 2. CORRECTED: the native contract for an absent write enable
+
+§63.76 said the native contract "does not say absent means always".  **That is
+false.**  Both the pinned old and the master simulator's `emit_wen` spell an
+invalid enable pin as `Slop<wensize>::create_integer(-1)` — *all lanes write* —
+and the LLVM path agrees.
+
+The refusal is replaced by the real semantics, and it needs no wide constant:
+when the enable is absent the gated enable IS the slot mask, which is already an
+all-ones vector of the right width whenever the slot is active.
+
+```
+enable' = enable AND sext(phase == slot, 1)      (enable present)
+enable' =           sext(phase == slot, 1)       (enable ABSENT)
+```
+
+### 3. The per-port plan is now frozen
+
+At 7439f30ea the gate still recomputed `mem_shape_of` and
+`commit_class_of_clock`, and kept an `int slot = 0` fallback.  Now the refusal
+scan records each validated port into `mem_gate_plans` — node, port, enable
+driver, `wensize`, slot — and the gate consumes only those.  Nothing is
+reclassified at mutation time and **there is no fallback**: a port reaches the
+vector only after its class resolved, sat on the reference net AND bit, was not
+gated, and was rising.
+
+### 4. The regression, strengthened
+
+The earlier version had an optional census, an arbitrary `width <= 8` threshold,
+and leaned on successful emission.  Now it:
+
+* **requires** the census, and fails without it;
+* asserts the fixture really carries **two distinct wide write-enable widths**
+  (16 and 27) — and the fixture was rebuilt, because the first one's lane had
+  **folded away**, which the new assertion caught;
+* asserts a **narrow anchor**: at least one constant-zero consumer is narrower
+  than the smallest wide enable, so restamping could break it;
+* compares **per pin, width AND signedness**, for every surviving constant-zero
+  operand against the pre-pass census — a pin that DISAPPEARS is a rewiring the
+  pass does by design (a retyped flop's `posclk`, a memory's `enable`), a pin
+  that REMAINS must be unchanged;
+* carries **no emission leg**, deliberately: emission succeeding does not
+  establish the property, and this fixture stops later at an unrelated
+  "RAM with initial contents" refusal.
+
+**Rejection proved with a source-bound binary** (lhd 16:06:26 newer than source
+16:04:23): with the stamping reinjected it exits 1 and names the pins —
+`CHANGED node 1340 (get_mask) pid 2: width 0->27`.
+
+Honest scope: on B03/B11 the narrow consumer is a `concat` lane (B11 node 3600
+pid 2, a 9-bit window); **this frontend lowers the same source to `get_mask`**,
+so the test asserts the property on whatever consumer exists and reports the
+concat count, which is 0 here.  The property is identical; the Concat window
+check is where it bites on the real units.
+
+### 5. State after the repair
+
+Both retained inputs re-normalize with the frozen-plan build — B11 `1 memory
+over 1 write port`, B03 `11 memories over 519 write ports` — and **B11 re-emits
+a byte-identical certificate `1f83897e…`**, matching the independently verified
+result, so the refactor is behaviour-preserving.
+
+B11's retained chain is NOT repeated: certificate `1f83897e…`, 258,278 residual
+terms, arity 3, bound 1127, four steps, COMPLETE comparison, `stateFullOKB
+true`, exit 0 — on synthetic zero state and generated input, changing zero
+words.  That is progress, **not whole-row acceptance**.
+
+Counts unchanged: **13 YES / 11 NO / 36 BLOCKED**, FP **3 YES / 9 BLOCKED**.

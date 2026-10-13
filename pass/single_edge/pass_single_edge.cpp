@@ -202,6 +202,20 @@ Mem_shape mem_shape_of(const hhds::Node_class& n) {
   return ms;
 }
 
+// ONE VALIDATED WRITE PORT, FROZEN BEFORE ANY MUTATION.
+//
+// Every fact the gate needs is decided and checked during the refusal pass and
+// then CONSUMED from here: nothing is recomputed at mutation time, and there is
+// no slot fallback.  A port that could not be classified never reaches this
+// vector -- the pass has already returned a refusal.
+struct Mem_gate_plan {
+  hhds::Node_class node;
+  uint32_t         port     = 0;
+  hhds::Pin_class  enable;            // INVALID means "absent" -> all lanes write
+  uint32_t         wensize  = 0;
+  int              slot     = 0;
+};
+
 // A cell with no committing port: an immutable asynchronous ROM.  `update`,
 // `update_enable` and whole-array reset cells all carry a write port and are
 // NOT this.
@@ -1101,6 +1115,11 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   }
 
   // Fail closed on shapes a partial lowering would silently mis-time.
+  //
+  // Every memory write port that survives this scan is recorded in
+  // `mem_gate_plans` with the facts the gate will use.  The gate below consumes
+  // them and recomputes nothing.
+  std::vector<Mem_gate_plan> mem_gate_plans;
   for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Fflop) {
@@ -1166,17 +1185,15 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         if (port.rdport) {
           continue;  // an async read is combinational: re-evaluated every sub-step
         }
-        // A committing port with NO enable: refused rather than given an
-        // invented default.  The native contract does not say "absent means
-        // always", and minting an all-ones vector here would be this pass
-        // deciding a semantics it does not own.
-        if (port.enable.is_invalid()) {
-          r.error  = true;
-          r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port) + " has no enable";
-          refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
-                 "a slot gate needs an enable to gate; an absent one is not given a default here");
-          return r;
-        }
+        // AN ABSENT ENABLE MEANS ALL LANES WRITE.
+        //
+        // That is the native contract, not a default invented here: both the
+        // pinned old and the master simulator's `emit_wen` spell an invalid
+        // enable pin as `Slop<wensize>::create_integer(-1)`
+        // (inou/cgen/cgen_sim.cpp), and the LLVM path agrees.  An earlier
+        // comment here claimed the contract was silent; it is not, and that
+        // claim is withdrawn.  The gate below needs no wide constant for it:
+        // the slot mask IS the gated enable when every lane is enabled.
         const auto clk_pin = port.clock.is_invalid() ? plan.ref_clk_pin : port.clock;
         // A GATED clock is refused.  `commit_class_of_clock` resolves an ICG to
         // its ROOT net and drops the gate's enable conditions -- which the flop
@@ -1249,6 +1266,16 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
                  "single-edge design");
           return r;
         }
+        // THE SLOT, decided here and FROZEN.  There is no fallback: the class
+        // resolved, is on the reference net and bit, and is rising, so either
+        // the key is in `slot_of_key` or the rise/fall map gives it.
+        int slot = 0;
+        if (auto it = plan.slot_of_key.find(cc->key()); it != plan.slot_of_key.end()) {
+          slot = it->second;
+        } else {
+          slot = cc->rising ? 0 : 1;  // the same map build_plan uses
+        }
+        mem_gate_plans.push_back({n, port.port, port.enable, ms.wensize, slot});
       }
       // everything else is handled by the slot gate below
     }
@@ -1438,96 +1465,72 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   // A write port must commit ONLY on the sub-step its memory owns.  The flop
   // form above is `enable &= (phase == slot)` on a ONE-BIT enable; a write
   // enable is a VECTOR -- one bit per lane, `wensize` wide, and on the retained
-  // B03/B11 graph that is 16, 27, 34, 70 or 8224 bits, never 1.  ANDing a
+  // B03/B11 graphs that is 16, 27, 34, 69, 70 or 8224 bits, never 1.  ANDing a
   // 1-bit predicate into it would keep lane 0 and silently drop every higher
-  // lane, which is a different design, so the gate is a width-preserving
-  // SELECT instead:
+  // lane, which is a different design.
   //
-  //     enable' = (phase == slot) ? enable : 0^wensize
+  // NO WIDE CONSTANT IS MINTED.  `gu::create_const` returns a CANONICAL SHARED
+  // pin (`create_constant` deduplicates by value representation;
+  // graph/node_util.hpp:326 and pinned HHDS hhds/graph.hpp:1815) and
+  // `gu::set_bits` (node_util.hpp:838) writes that pin's own attribute, so a
+  // `wensize` zero arm stamped with `set_bits` restamps the ONE zero every
+  // other reader shares -- measured at b6b0a5cb6 as B11's shared zero going raw
+  // width 0 -> 69 and B03's 0 -> 27, against Concat lanes of 9 and 1.
   //
-  // Active: the ORIGINAL vector, bit for bit, so byte-lane meaning is
-  // untouched.  Quiet: a width-correct zero, so no lane commits.  Nothing else
-  // on the cell is touched -- geometry, initial/default contents, `fwd`,
-  // `posclk`, read latency and the clock pins all stay exactly as they were.
-  if (plan.slots > 1) {
-    for (auto n : g->body().nodes()) {
-      if (gu::type_op_of(n) != Ntype_op::Memory) {
-        continue;
+  // The mask is therefore built from the predicate with the repository's own
+  // sizing idiom (pass/abc/abc_satopt_test's `a AND Sext(c, 1)`): a SIGNED
+  // sign-extension of the 1-bit predicate is all-ones when it holds and
+  // all-zeros when it does not, at whatever width its own driver declares.
+  // Every pin stamped below is this gate's OWN driver pin.
+  //
+  //     enable' = enable AND sext(phase == slot, 1)      (enable present)
+  //     enable' =           sext(phase == slot, 1)       (enable ABSENT)
+  //
+  // The second line is the NATIVE contract for an absent enable -- all lanes
+  // write, `Slop<wensize>::create_integer(-1)` in both the pinned old and the
+  // master `emit_wen` (inou/cgen/cgen_sim.cpp) -- expressed without a wide
+  // constant, because the mask already IS an all-ones vector of the right
+  // width whenever the slot is active.
+  //
+  // Active: the ORIGINAL vector bit for bit, so every high lane survives.
+  // Quiet: a width-correct all-zero vector, so no lane commits.  Geometry,
+  // initial/default contents, `fwd`, `posclk`, read latency and the clock pins
+  // are untouched.
+  //
+  // EVERY FACT HERE IS FROZEN.  `mem_gate_plans` was filled during the refusal
+  // scan; nothing is reclassified here and there is no slot fallback.
+  for (const auto& mp : mem_gate_plans) {
+    auto sx = gu::create_typed_node(*g, Ntype_op::Sext);
+    slot_pred[mp.slot].connect_sink(sx.create_sink_pin(0));
+    gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(sx.create_sink_pin(1));
+    auto sxq = sx.create_driver_pin(0);
+    gu::set_sbits(sxq, mp.wensize);
+
+    hhds::Pin_class gated;
+    if (mp.enable.is_invalid()) {
+      gated = sxq;  // the native all-lanes default, already the right width
+    } else {
+      auto andn = gu::create_typed_node(*g, Ntype_op::And);
+      mp.enable.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
+      sxq.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
+      gated = andn.create_driver_pin(0);
+      gu::set_bits(gated, mp.wensize);
+      gu::set_unsign(gated);
+    }
+    mem_drop_port_sink(mp.node, "enable", mp.port);
+    const auto stride = static_cast<uint32_t>(Ntype::Memory_port_stride);
+    gated.connect_sink(mp.node.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, "enable") + mp.port * stride));
+    ++r.mem_ports_slotted;
+  }
+  {
+    absl::flat_hash_set<hhds::Class_index> seen;
+    for (const auto& mp : mem_gate_plans) {
+      if (seen.insert(mp.node.get_class_index()).second) {
+        ++r.mems_slotted;
       }
-      const auto ms = mem_shape_of(n);
-      if (mem_is_immutable_rom(ms)) {
-        continue;  // an immutable ROM commits nothing; the plan above let it through
-      }
-      for (const auto& mport : ms.ports) {
-        if (mport.rdport) {
-          continue;  // an async read is combinational and is deliberately NOT gated
-        }
-        const auto port = mport.port;
-        // THE SLOT IS THE PORT'S OWN COMMITTING EDGE.
-        //
-        // `commit_class_of` returns nullopt for a Memory by contract, so asking
-        // it here would hard-code slot 0 for every port whatever its clock or
-        // `posclk` said -- a falling-edge write would have been gated to the
-        // RISING slot and committed half a period early.  The per-port clock
-        // driver goes through `commit_class_of_clock`, the SAME root-net /
-        // inversion / ICG resolution a flop gets, with the cell's own `posclk`
-        // as the edge policy.  The refusal pass above already proved this
-        // resolves and is on the reference net.
-        auto cc = lc::commit_class_of_clock(mport.clock.is_invalid() ? plan.ref_clk_pin : mport.clock, ms.rising,
-                                            &clocks);
-        int  slot = 0;
-        if (cc) {
-          if (auto it = plan.slot_of_key.find(cc->key()); it != plan.slot_of_key.end()) {
-            slot = it->second;
-          } else {
-            slot = cc->rising ? 0 : 1;  // the same rise=0 / fall=1 map build_plan uses
-          }
-        }
-        auto old_en = mem_port_driver(n, "enable", port);
-        auto pred   = slot_pred[slot];
-        // NO WIDE CONSTANT IS MINTED HERE.
-        //
-        // `gu::create_const` returns a CANONICAL SHARED pin (`create_constant`
-        // deduplicates by value representation; graph/node_util.hpp:326 and
-        // pinned HHDS hhds/graph.hpp:1815), and widths written onto it -- by
-        // `gu::set_bits` or by feeding it to a wide consumer -- change the ONE
-        // pin every other reader shares.  Measured at b6b0a5cb6: a `wensize`
-        // zero arm drove B11's shared zero from raw width 0 to 69 and B03's to
-        // 27, and unrelated narrow Concat lanes reading that pin were refused
-        // by pass.bitwidth.  Removing the explicit `set_bits` was NOT enough;
-        // the connection itself carried the width.
-        //
-        // So the mask is built from the predicate with the repository's own
-        // sizing idiom (pass/abc/abc_satopt.cpp's `a AND Sext(c, 1)`): a SIGNED
-        // sign-extension of the 1-bit predicate is all-ones when it holds and
-        // all-zeros when it does not, at whatever width its driver declares.
-        // Every pin stamped below is this gate's OWN driver pin.
-        //
-        //     enable' = enable AND sext(phase == slot, 1)
-        //
-        // Active: the ORIGINAL vector, bit for bit, so every high lane
-        // survives.  Quiet: a width-correct all-zero vector, so no lane
-        // commits.  An absent enable was refused in the plan above, so there is
-        // always a vector to AND with.
-        auto sx = gu::create_typed_node(*g, Ntype_op::Sext);
-        pred.connect_sink(sx.create_sink_pin(0));
-        gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(sx.create_sink_pin(1));
-        auto sxq = sx.create_driver_pin(0);
-        gu::set_sbits(sxq, ms.wensize);
-        auto andn = gu::create_typed_node(*g, Ntype_op::And);
-        old_en.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
-        sxq.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
-        auto mq = andn.create_driver_pin(0);
-        gu::set_bits(mq, ms.wensize);
-        gu::set_unsign(mq);
-        mem_drop_port_sink(n, "enable", port);
-        const auto stride = static_cast<uint32_t>(Ntype::Memory_port_stride);
-        mq.connect_sink(n.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, "enable") + port * stride));
-        ++r.mem_ports_slotted;
-      }
-      ++r.mems_slotted;
     }
   }
+
 
   std::vector<hhds::Pin_class> orphaned_clocks;  // old clock_pin drivers the rebind below disconnects
   for (const auto& e : plan.elems) {
