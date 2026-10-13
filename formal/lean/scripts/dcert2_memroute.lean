@@ -31,12 +31,33 @@ refusal is not a generation failure, a generation failure is not a checker
 rejection, and none of them is an execution failure.  A fuel exhaustion is
 reported as a failure AT THAT BUDGET and never as a semantic refusal.
 
-BINDING.  The bundle is built only by `MemProjection.mkMemSimAt`, which
-re-derives the residual and the bound from the design it is handed;
-`mkMemSimAt_design` proves the result is bound to that design.  An arbitrary
-`MemSimulator` value is not a checked one and this driver cannot be handed one.
+BINDING.  The bundle is built by `MemProjection.mkMemSimOf`, which takes the
+residual this driver has JUST specialized and does only the admission check and
+the production residual check -- so the reported check time is a check and not a
+second specialization.  `mkMemSimOf_wf` is what makes that honest: it requires
+the caller to EXHIBIT the specialization that produced the residual, so an
+arbitrary `Program` cannot be laundered into a checked bundle.  (`mkMemSimAt`,
+which specializes for itself, remains available and `mkMemSimAt_design` proves
+its result is bound to the design it was handed; this driver does not use it,
+because it would pay for specialization twice.)
 The certificate's own bytes are digested and printed, so the artifact says which
 certificate it describes.
+
+STATE FILE, exactly.  A supplied file is READ and used, but two things in it
+are the driver's and must not be mistaken for the caller's:
+
+  * EVERY numeric field goes through `mk_bv`, so a value is stored reduced
+    modulo `2 ^ width`.  `BV(8, 300)` supplied as a word is stored as
+    `mk_bv 8 300`, i.e. 44.  The file supplies the number; `mk_bv` decides the
+    representation.
+  * A `mem` line FILLS the whole `2 ^ aw`-word table with its declared default,
+    and `word` lines then overwrite the addresses they name.  An address the
+    file does not mention is the DEFAULT, not something the file said.  The
+    default's own width is the memory's `dw`, and `setWord` stores a word at
+    that same width.
+
+So "supplied" means the words and defaults the file names are the ones used,
+not that the table contains only what the file wrote.
 
 STARTUP CONTRACT.  `initStateOf` is zero tables and reset-valued flops.  That is
 a LEGAL-STATE WITNESS -- it shows the policy is not vacuous -- and it is NOT an
@@ -661,8 +682,9 @@ def resolveStim (cfg : Cfg) : IO (Except String Cfg) := do
             pure (.ok { cfg with stim := some spec, react := rx, ats := ats, stimProv := prov })
 
 /-- Build the initial state.  Synthetic modes are generated here and SAID to be
-synthetic; a supplied file is read, parsed and used AS IT IS -- no field is
-defaulted and nothing is manufactured. -/
+synthetic; a supplied file is read and used, with the two caveats the header
+states: every value is `mk_bv`-normalised, and unnamed addresses hold the
+declared default rather than anything the file wrote. -/
 def buildState (D : DesignCert) (im : InitMode) : IO (Except String (StateM × String)) := do
   match im with
   | .zeroWitness   => pure (.ok (initStateOf D, "generated: initStateOf (synthetic)"))

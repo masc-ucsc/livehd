@@ -10394,3 +10394,51 @@ a route question.  No claim of meaningful initialized memory transitions is
 made for PicoRV32.
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.63 — CORRECTIONS to §63.62, and the driver header
+
+### "only a stimulus problem" is withdrawn
+
+§63.62 concluded that the open Pico item "is a stimulus question, not a route
+question".  That is not established, and the evidence behind it does not carry
+that weight:
+
+* **The probe compares resulting words to the INITIAL image.**  It does not
+  observe the write enable and it does not observe attempted writes.  Unchanged
+  words do NOT establish that the gate never asserted — a write that stored the
+  value already at that address, or an enabled write the interpreter dropped,
+  would both look identical to "never wrote".
+* **An advancing fetch address does not establish instruction RETIREMENT.**
+  `mem_addr` stepping 0,4,8,12,16 shows the fetch path moving; it does not show
+  that any instruction reached a register write.
+* **The static cone trace shows SHAPE, not correctness.**  It cannot rule out a
+  lowering error, an emission error, or an error in the reference itself.
+
+So PicoRV32's required initialized changing-memory transition **stays open**,
+with the cause unidentified among stimulus, lowering, emission and reference.
+`tiny_byte_ram` is NOT a substitute for it: a transition on one small retained
+certificate is evidence about that certificate, not about Pico.
+
+### The operator census is scoped to the named fixtures
+
+§63.58's "exactly one operator gap remains across the whole retained corpus"
+means across **the named retained certificates it lists**.  It is not a
+statement about all designs, and it is not a statement about the twelve whole
+units — ten of which never reach a certificate at all.
+
+### Driver header
+
+Two things the header said that the code does not do:
+
+* It attributed binding to `mkMemSimAt`.  The driver uses `mkMemSimOf`, whose
+  honesty comes from `mkMemSimOf_wf` requiring the caller to exhibit the
+  specialization that produced the residual.  `mkMemSimAt` remains available
+  and is simply not what this driver calls.
+* It claimed a supplied state file is used with "no field defaulted and nothing
+  manufactured".  Two parts of it ARE the driver's: every numeric field goes
+  through `mk_bv`, so `BV(8,300)` is stored as 44; and a `mem` line fills the
+  whole `2 ^ aw`-word table with its declared default, so an address the file
+  does not name holds the default rather than anything the file wrote.  Both
+  are now stated in the header and at `buildState`.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
