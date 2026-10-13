@@ -8300,3 +8300,125 @@ the enabled-write range obligation against real admitted shapes (including Pico
 `aw=5`/`dw=32` and `byte_w=1`), outputs/flops/per-memory active-and-quiet
 commits, and generic `mainM` adequacy through `StateRelR`/`ResultRelR`.
 PicoRV32 stays **BLOCKED**; matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.34 — Build-status correction, then source/node preservation and real write shapes
+
+### Correction first: two of my build claims were not evidence
+
+**The background notification was not a successful build.**  Task `b0d087ay1`
+was my own `kill -KILL`: the lake producer exited **143**, and the `[exited with
+code 0]` was the SHELL's exit, because my trailing `grep`/`head` masked the
+producer.  I treated the notification as a compile; it was not one.  The same
+hazard recurred at the end of the verification chain, where a zero-match
+`grep -c` made the shell exit 1 on a run whose producer exited 0.
+
+Fixed, not noted: every compile below goes through a helper that runs the
+producer with its output REDIRECTED (never piped), captures `$?` immediately and
+appends `PRODUCER_EXIT=<rc>` to the log.  The producer exit is read from that
+line.  A pipe success, an empty error grep, a missing process in a broad
+`pgrep` or an observation timeout is not a compile.
+
+**My "lake is starved, not deadlocked" attribution was unsupported.**  Load 47
+with 14 users does not establish CPU starvation and does not exclude I/O.  I
+reproduced the real condition on my own producer (pid 2714602): main thread
+`futex_wait_queue`, a worker in **D** state at `rpc_wait_bit_killable`,
+`io_sq_thread` present, **0.72 s** CPU consumed and **151 KB** read after
+minutes — an NFS RPC wait during import loading, not computation.  The oleans
+themselves read fine (`dd` of `DirectCheck.olean`, `DesignSemantics.olean`,
+`HardwareMemSlots.olean` all OK), so it is not file unavailability.  I retained
+the single owned producer rather than relaunching, and it completed.
+
+Two of my own polling helpers were self-matching (their `pgrep -f` patterns
+appear in their own argv).  Both were identified by exact pid AND start_ticks
+(2606370/218897387, 2611443/218904485), confirmed to be the `until pgrep` loops,
+and stopped by pid.  No broad `pkill`, no lock deletion.
+
+### Verified compiles (producer exits, this session)
+
+| module | lines | `PRODUCER_EXIT` | errors | `#guard`s |
+|---|---|---|---|---|
+| `HardwareMemSlots` | 1086 | **0** | 0 | 2 |
+| `HardwareMemShapes` | 195 | **0** | 0 | — |
+| `HardwareMemTraversal` | 241 | **0** | 0 | — |
+| `HardwareMemNodes` | 243 | **0** | 0 | 5 |
+
+Unsafe-axiom scan across all four logs: **0** matches for `sorryAx`,
+`Lean.ofReduceBool`, `Lean.trustCompiler`.  `propext`, `Quot.sound` and
+`Classical.choice` are Lean's own.
+
+### `HardwareMemTraversal` — the typed slot and general source traversal
+
+`SlotV` makes the slot choice explicit — a bit vector OR a representable memory
+image, never a coercion — with `SlotV.enc` (what the object holds) and
+`SlotV.denote` (what the reference holds) kept apart.  `SrcRel_enc` proves they
+agree for every slot, so `SlotV` IS §63.31's `SrcRel` in list form.
+
+* `srcSlotV_denote` — the typed source value denotes `Compiler.sourceValue` on
+  all six forms, with **no** supportedness premise.
+* `srcSlotV_isMem` — its kind is `Direct.sourceKind`'s, on all six forms, and
+  `srcSlots_slotKind` lifts that to `Direct.slotIsMem` at a source index.
+* `mkSourcesM_agree` — general source traversal: arbitrary source list,
+  arbitrary `StateM`, arbitrary input, **source order preserved**, accumulator
+  reversal as `List.reverseAux` (the object's own recursion, not a separate
+  `reverse` step), under the ORIGINAL input/flop bounds alone.
+  `mkSourcesM_objEnv` lands it as `objEnv` of the typed slot list.
+
+### `HardwareMemNodes` — node preservation and checker-derived kinds
+
+`evalNodeM_scalar` / `_memRead` / `_memWriteBE` are the three node cases.  The
+part that matters is where the operand kinds come from: **`Direct.DesignSemWF`
+already carries `nodeKinds`**, so the kind at every dependency position is the
+CHECKER's.  What is added connects it to the interpreter:
+`depIsMem_false_of_supported` (decided over the operator type: a supported
+operator has no memory operand at any position — which is exactly `SlotHere`'s
+content), `depIsMem_memRead/_memWriteBE` (position 0 is the image, the rest are
+bit vectors), `opKind_isMem_*` and `nodeSlot_slotIsMem` (the node's RESULT kind
+at the slot it occupies, read off `slotKind`'s own definition).
+
+**`Op_MemWrite` (27) is refused**, not given a defined-and-unproved answer: it
+has no primitive and no `applyOpM` case.  `NodeAdmitted_ne_memWrite` proves an
+admitted node is never it, and `nodeAdmittedB` is the same policy as a runnable
+check — `#guard`s confirm it refuses `Op_MemWrite` and `Op_Sub` and admits
+`Op_MemRead`, `Op_MemWriteBE 1` and `Op_SRA`.
+
+### `HardwareMemShapes` — the enabled write's range, discharged from shapes
+
+`FullTable aw m := m.words.length = 2 ^ aw` is the admitted MUTABLE shape.
+`InRange_of_FullTable` discharges the write premise for **every** `aw`-bit
+address with no condition on its value, because `bv_uint` is a remainder modulo
+`2 ^ aw`.  So `InRange` now **follows from admission** instead of being carried
+as an unexplained hypothesis (`writeInRange_of_FullTable`).
+
+* **A ROM is not a mutable table.**  `ofMemConst_FullTable_iff` proves
+  `ofMemConst dw contents` is a `FullTable aw` exactly when
+  `contents.size = 2 ^ aw`; `romNotFull_example` is the real Pico-shaped
+  counterexample (a 3-word 32-bit ROM at `aw = 5`); and
+  `rom_write_outOfRange_refused` shows the primitive REFUSES the write rather
+  than extending the table.
+* **The shape survives.**  `setAt` is a `List.set`, so `writeBE_length`,
+  `writeBE_dflt` and `writeBE_FullTable` keep the word count, the default and
+  the admission across a write; `writeBE_other` shows no other address drifts.
+* **A disabled write is an exact no-op** — `writeBE_disabled_eq` gives the
+  image back unchanged, with no range premise.
+* **Pico.**  `picoImg_FullTable` (`aw = 5`, `dw = 32`, 32 words),
+  `pico_InRange` for every 5-bit address, `pico_InRange_after` across a write,
+  and `pico_byte_w_one` recording that `Op_MemWriteBE 1` is BIT-enable
+  semantics against the reference's own `cert_masked_update` (mask bit `i`
+  selects data bit `i`, since `i / 1 = i`).  Two executed `example`s confirm
+  `byte_w = 1` with mask 8 stores exactly 8, and `byte_w = 8` with mask 1 stores
+  lane 0.
+
+### Still owed on this chain
+
+The `evalNodesM` fold itself — topological prefix, reversed environment,
+dependency bounds and arity carried through, with the per-node kind
+re-established from `nodeSlot_slotIsMem` — and a non-vacuous mixed case with a
+real memory read, a real write and an intervening scalar node; then resolved
+`Eval` statements through the production transfer; then
+outputs/flops/active-and-quiet per-memory clock commits and generic `mainM`
+adequacy against `StateRelR`/`ResultRelR`.  Public support stays refused:
+`SourceSupported`, `OpSupported` and `memFree` are untouched.  PicoRV32 stays
+**BLOCKED**; matrix unchanged at **12 YES / 11 NO / 37 BLOCKED** (FP 2 YES /
+10 BLOCKED).
