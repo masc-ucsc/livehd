@@ -112,6 +112,31 @@ theorem evalNodeM_memWriteBE {vals : List Val} {c : DenseNodeCert}
   · refine .ref ?_
     simp [slookup, encArr, hdeps]
 
+/-- The DISABLED byte-enabled write at node level: the image comes back
+exactly, and no range premise is needed. -/
+theorem evalNodeM_memWriteBE_disabled {vals : List Val} {c : DenseNodeCert}
+    {σ : SEnv} {end_ eenv en : SExp} {bw d0 d1 d2 d3 : Nat}
+    {m : MemImg} {a dat be : BV}
+    (hop : c.op = .Op_MemWriteBE bw) (hdeps : c.deps.toList = [d0, d1, d2, d3])
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length)
+    (hb2 : d2 < vals.length) (hb3 : d3 < vals.length)
+    (hv0 : vals[d0]'hb0 = MemImg.encMemImg m)
+    (hv1 : vals[d1]'hb1 = encBV a)
+    (hv2 : vals[d2]'hb2 = encBV dat)
+    (hv3 : vals[d3]'hb3 = encBV be)
+    (hen : ¬ bv_nonzero be)
+    (hnd : SEval hwMemS σ end_ (encNode c))
+    (henv : SEval hwMemS σ eenv (objEnv vals))
+    (hlen : SEval hwMemS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwMemS σ (.call "evalNodeM" [end_, eenv, en]) (MemImg.encMemImg m) := by
+  refine SEval_call3 hnd henv hlen rfl rfl ?_
+  refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+  refine (applyOpM_memWriteBE_disabled (w := c.width) (bw := bw)
+    hb0 hb1 hb2 hb3 hv0 hv1 hv2 hv3 hen ?_ (.ref rfl) ?_ (.ref rfl) (.ref rfl)).1
+  · rw [← hop]; exact .ref rfl
+  · refine .ref ?_
+    simp [slookup, encArr, hdeps]
+
 /-! ## 2. Checker-to-kind facts
 
 These are what turn `Direct.DesignSemWF.nodeKinds` into the operand premises the
@@ -229,6 +254,7 @@ theorem rom_not_admitted_write : ¬ MemImg.FullTable 5 (MemImg.ofMemConst 32 #[1
 #print axioms evalNodeM_scalar
 #print axioms evalNodeM_memRead
 #print axioms evalNodeM_memWriteBE
+#print axioms evalNodeM_memWriteBE_disabled
 #print axioms depIsMem_false_of_supported
 #print axioms opKind_isMem_of_supported
 #print axioms nodeSlot_slotIsMem

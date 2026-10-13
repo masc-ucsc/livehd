@@ -8422,3 +8422,84 @@ adequacy against `StateRelR`/`ResultRelR`.  Public support stays refused:
 `SourceSupported`, `OpSupported` and `memFree` are untouched.  PicoRV32 stays
 **BLOCKED**; matrix unchanged at **12 YES / 11 NO / 37 BLOCKED** (FP 2 YES /
 10 BLOCKED).
+
+---
+
+## §63.35 — The node fold, checker-derived kinds, and a checker-accepted mixed design
+
+New module `formal/lean/LeanSemanticPrimitives/Projection/HardwareMemFold.lean`
+(651 lines), plus `evalNodeM_memWriteBE_disabled` added to `HardwareMemNodes`.
+Both verified with the producer's own exit: `PRODUCER_EXIT=0`, 0 errors,
+7 + 5 `#guard`s, 0 matches for `sorryAx`/`Lean.ofReduceBool`/
+`Lean.trustCompiler`.
+
+### The invariant, and where each half comes from
+
+```
+slotValM D i st k := evalGraphG D.toGraphCert.topo D.toGraphCert (srcEnv …) k
+```
+
+is the reference slot value **with memories** — a `CertVal`, not projected
+through `asBV`, so a memory slot keeps its function.  `Hw.slotVal` is this
+projected, which is only correct where there are no memories.
+
+```
+PrefixRelM D i st m ss  :=  ss.length = m
+                          ∧ ∀ k, (ss[k]).denote = slotValM D i st k
+                          ∧ ∀ k, Direct.slotIsMem D k = some (ss[k]).isMem
+```
+
+* **Values**: `prefixRelM_sources` establishes it for the source prefix from
+  `slotValM_source`; `nodeValM_rec` re-establishes it per node from
+  `evalGraphG`'s own fixpoint property (`Hw.evalGraphG_rec`), at `CertVal`
+  level — `Hw.nodeVal_rec` is the same fact with `asBV` applied and
+  `OpSupported` assumed, so the projection step is **dropped rather than
+  widened**.
+* **Kinds**: `dep_kind_of_semwf` is literally `Direct.DesignSemWF.nodeKinds`,
+  and `opArity_of_semwf` is literally `nodeShapes`.  Nothing about kinds or
+  arities is a new hypothesis: both are what `checkDesign` already establishes.
+  `dep_scalar` and `dep_mem` read a dependency out of the invariant at the kind
+  the checker assigned it.
+
+### The three node steps, and the fold
+
+`node_step_scalar` / `_memRead` / `_memWriteBE`, dispatched by `node_step` on
+`NodeAdmitted`.  Each is stated so the slot VALUE is produced independently of
+the evaluation context — the `SEval` fact is a universally quantified conjunct —
+which is what lets the fold pick the witness before fixing an environment.
+
+`evalNodesM_agree` walks the dense node order (already topological, since
+`topo` is `slotsFrom`), extends the witness list with `prefixRelM_snoc`, and
+conses onto the object's newest-first environment via `objEnv_snoc` — the same
+reversal the memory-free route uses.  `sourcesThenNodes` composes it with
+`mkSourcesM`'s output with no gap, and `sourcesThenNodes_resolved` crosses to
+`hwMemP` through the production bridge with **no `resolve` hypothesis left to
+the caller** (`evalNodesM_id = some 47`, checked by reduction — the id the
+executed checks call).
+
+The `Op_MemWriteBE` step splits: the ENABLED branch consumes `NodeWriteRange`,
+which is named rather than assumed away and is discharged by
+`writeInRange_of_FullTable` from the admitted table shape; the DISABLED branch
+needs no range premise and returns the image exactly, matching
+`cert_mem_write_be`'s own else-branch.
+
+### Non-vacuity — accepted by the REAL checker
+
+`mixedDesign` has five sources (a mutable `memImg 0 5 32`, an address, a mask,
+an enable and a scalar operand) and **three nodes in dependency order: a memory
+`Op_MemRead`, an intervening scalar `Op_And` on its result, and an
+`Op_MemWriteBE 1` whose data operand is that scalar node.**  `#guard`s confirm
+`Direct.acceptsDesign mixedDesign`, that every node passes `nodeAdmittedB`, and
+that `Direct.slotIsMem` reports image at slots 0 and 7 and bit vector at slots
+1, 5 and 6 — i.e. the read's result is scalar and the write's is an image.
+`mixedDesign_semwf` obtains `DesignSemWF` from `Direct.checkDesign_sound`, so
+every kind premise above is instantiated from the checker's own output at a
+shape that genuinely contains memories.
+
+### Still owed
+
+`mkOutputs`, `flopNexts` and `memNext(s)` on active **and** quiet domains, then
+generic `mainM` adequacy against `StateRelR`/`ResultRelR`.  Public support stays
+refused — `SourceSupported`, `OpSupported` and `memFree` are untouched and no
+design is admitted by the public route.  PicoRV32 stays **BLOCKED**; matrix
+unchanged at **12 YES / 11 NO / 37 BLOCKED** (FP 2 YES / 10 BLOCKED).
