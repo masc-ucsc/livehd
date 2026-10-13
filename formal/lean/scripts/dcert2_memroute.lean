@@ -356,12 +356,62 @@ def narrowStateOf (D : DesignCert) : StateM :=
   , mems  := D.memories.map (fun md => rampImg md.aw md.dw) }
 
 
+/-! ### Supplied stimulus
+
+`mkInputFor` generates a deterministic pattern from each input's WIDTH.  That
+exercises the route, but it cannot drive a design that needs a particular input
+to do anything -- a CPU held in reset never writes its register file, and
+reporting "0 words differ" for it is honest but uninformative.  A stimulus file
+supplies the vector instead:
+
+```
+stim v1
+in <ordinal> <width> <value>
+```
+
+Every cycle uses it; unlisted ordinals keep their declared width and value 0.
+It is SUPPLIED, like the state file, and the report says so. -/
+
+def parseStim (txt : String) : Except String (List (Nat × Nat × Int)) := do
+  let body := ((txt.splitOn "\n").map (fun l => (l.splitOn "\r").headD "")).filter
+                (fun l => l != "" && !l.startsWith "#")
+  match body with
+  | [] => .error "empty stimulus file"
+  | hdr :: rest =>
+    if hdr != "stim v1" then .error s!"line 1: expected \"stim v1\", got {repr hdr}"
+    else
+      let mut out : List (Nat × Nat × Int) := []
+      let mut n := 1
+      for l in rest do
+        n := n + 1
+        match (l.splitOn " ").filter (fun w => w != "") with
+        | ["in", i, w, v] =>
+            let some i' := i.toNat? | throw s!"line {n}: ordinal {repr i} is not a number"
+            let some w' := w.toNat? | throw s!"line {n}: width {repr w} is not a number"
+            let some v' := v.toInt? | throw s!"line {n}: value {repr v} is not an integer"
+            out := out ++ [(i', w', v')]
+        | _ => throw s!"line {n}: unrecognised {repr l}"
+      .ok out
+
+def stimInput (D : DesignCert) (spec : List (Nat × Nat × Int)) : RuntimeInput :=
+  let n := max (maxInputIdx D) ((spec.map (fun t => t.1 + 1)).foldl max 0)
+  (List.range n).toArray.map (fun i =>
+    match spec.find? (fun t => t.1 == i) with
+    | some (_, w, v) => mk_bv w v
+    | none           => mk_bv (inputWidth D i) 0)
+
 structure Cfg where
   stepFuel : Nat
   workFuel : Nat
   cycles   : Nat
   init     : InitMode
   compare  : Bool
+  /-- a supplied stimulus, applied every cycle, or `none` for the generated one -/
+  stim     : Option (List (Nat × Nat × Int)) := none
+  stimProv : String := "generated: mkInputFor (synthetic, width-derived)"
+  /-- stop after the support report -- used to compare two certificates'
+  admission without paying for specialization -/
+  supportOnly : Bool := false
 
 def say (s : String) : IO Unit := IO.println s
 
@@ -403,6 +453,10 @@ nextImgs {mr.nextImgs} | ADMITTED {mr.admitOK}"
     say s!"  ms: support {t1 - t0}"
     say "  RESULT: MEMROUTE ADMISSION REFUSED"
     return 6
+  if cfg.supportOnly then
+    say s!"  ms: support {t1 - t0}"
+    say "  RESULT: MEMROUTE SUPPORT ONLY (admitted; no generation attempted)"
+    return 0
   -- 3/4. specialize at the requested budget, then the production checker
   say s!"  specializing hwMemAP (division [.stat,.dyn,.dyn,.dyn]: design static; \
 edges, input, state dynamic) at fuel {cfg.stepFuel}/{cfg.workFuel}"
@@ -459,6 +513,7 @@ unchanged -- refusing rather than running on a state the encoder altered"
         return 7
       say s!"  initial memory 0 words [{(match st0.mems[0]? with
              | some m => preview m 6 | none => "-")}]"
+      say s!"  stimulus: {cfg.stimProv}"
       say s!"  executing {cfg.cycles} cycle(s) of the residual at the checked bound"
       (← IO.getStdout).flush
       let t5 ← IO.monoMsNow
@@ -471,7 +526,9 @@ unchanged -- refusing rather than running on a state the encoder altered"
       let mut cmp : CmpStatus := if cfg.compare then .complete else .disabled
       for k in List.range cfg.cycles do
         let e := edgeSchedule D k
-        let i := mkInputFor D k
+        let i := match cfg.stim with
+                 | some spec => stimInput D spec
+                 | none      => mkInputFor D k
         if runtimeFullOKB D i st e != true then
           tags := "policy-refused" :: tags
           policyBad := true
@@ -545,6 +602,26 @@ def fixtureOf (n : String) : Option DesignCert :=
                        , .input 2 1, .input 3 32 ] }
   else none
 
+/-- Resolve a `stim:<path>` request into the supplied vector, or leave the
+generated one in place. -/
+def resolveStim (cfg : Cfg) : IO (Except String Cfg) := do
+  if !(cfg.stimProv.startsWith "PENDING stim:") then pure (.ok cfg)
+  else
+    let path := cfg.stimProv.drop "PENDING stim:".length |>.toString
+    let bytes? ← try (do let b ← IO.FS.readBinFile path; pure (some b))
+                  catch e => do IO.eprintln s!"stimulus unreadable: {e}"; pure none
+    match bytes? with
+    | none => pure (.error s!"cannot read stimulus file {path}")
+    | some bytes =>
+      match String.fromUTF8? bytes with
+      | none => pure (.error s!"{path}: not valid UTF-8")
+      | some txt =>
+        match parseStim txt with
+        | .error e => pure (.error s!"{path}: {e}")
+        | .ok spec =>
+            let prov := s!"SUPPLIED file {path}, {bytes.size} bytes, fnv1a {fnv1a bytes}, {spec.length} input(s) pinned, applied every cycle"
+            pure (.ok { cfg with stim := some spec, stimProv := prov })
+
 /-- Build the initial state.  Synthetic modes are generated here and SAID to be
 synthetic; a supplied file is read, parsed and used AS IT IS -- no field is
 defaulted and nothing is manufactured. -/
@@ -591,8 +668,14 @@ def parseCfg (rest : List String) : Except String Cfg := do
       | .error s!"startup contract {repr initArg} is NOT supported by this driver. \
 It is refused rather than silently replaced by zeros; supply the real initial \
 contents or use init=zero, which is a legal-state witness only."
-    let cmp := !((more.drop 2).contains "nocompare")
-    .ok ⟨sf, wf, cyc, im, cmp⟩
+    let tl := more.drop 2
+    let cmp := !(tl.contains "nocompare")
+    let sup := tl.contains "support-only"
+    let stimTok := tl.find? (fun t => t.startsWith "stim:")
+    .ok ⟨sf, wf, cyc, im, cmp, none,
+         match stimTok with
+         | some t => s!"PENDING {t}"
+         | none   => "generated: mkInputFor (synthetic, width-derived)", sup⟩
   | _ => .error usage
 
 /-! ## Comparison self-test
@@ -673,14 +756,21 @@ def main (args : List String) : IO UInt32 := do
       match fixtureOf name, parseCfg rest with
       | none, _ => do IO.eprintln s!"REFUSING: unknown fixture {repr name}"; return 2
       | _, .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
-      | some D, .ok cfg => do
-          match ← buildState D cfg.init with
+      | some D, .ok cfg0 => do
+          match ← resolveStim cfg0 with
           | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
-          | .ok (st0, prov) => runRoute s!"fixture:{name}" "n/a(in-repo fixture)" D cfg st0 prov
+          | .ok cfg =>
+            match ← buildState D cfg.init with
+            | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
+            | .ok (st0, prov) => runRoute s!"fixture:{name}" "n/a(in-repo fixture)" D cfg st0 prov
   | path :: rest =>
       match parseCfg rest with
       | .error e => do IO.eprintln s!"REFUSING: {e}"; return 2
-      | .ok cfg => do
+      | .ok cfg0 => do
+          let cfgE ← resolveStim cfg0
+          let .ok cfg := cfgE | do
+            IO.eprintln s!"REFUSING: {match cfgE with | .error e => e | _ => ""}"
+            return 2
           let bytes? ← try (do let b ← IO.FS.readBinFile path; pure (some b))
                        catch e => do IO.eprintln s!"LOAD FAILED: {e}"; pure none
           let some bytes := bytes? | return (8 : UInt32)

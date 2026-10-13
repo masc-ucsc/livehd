@@ -9890,3 +9890,82 @@ as the next candidate in this area; nothing is claimed for it yet, and no
 component is erased to get past it.
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.55 — whole Pico, measured; the check metric; fresh source-bound emission
+
+### The double specialization, measured away
+
+Same certificate, same fuel, the only change being `mkMemSimOf`:
+
+| phase | before | after |
+|---|---|---|
+| specialize | 676,932 ms | 949,243 ms |
+| **check** | **659,085 ms** | **2,590 ms** |
+| execute | 756,889 ms (4 cycles) | 1,048,206 ms (6 cycles) |
+
+The "check" was a second full specialization.  It is now a check: **659 s → 2.6 s**.
+(The specialize figures are two different runs of the same work, not a
+regression claim; the point is the check column.)
+
+### Whole PicoRV32, on the retained normalized certificate
+
+`vc_opt/lean/picorv32.dcert`, 70,067 B, sha256 `f85a2a9d…`:
+
+```
+shape: sources 1302 nodes 2279 outputs 18 flops 174 memories 1 clocks 1
+memory 0: aw 5 dw 32 nextImg slot 3225 clock 0 (table 32 words)
+memory route: accepts true typed true sized true nextImgs true | ADMITTED true
+residual 4,670,254 terms, 1 function(s), arity [3], checker bound 99,236
+step outcomes: ok,ok,ok,ok,ok,ok
+reference comparison: COMPLETE (array length, every table word, default and out-of-range)
+final returned-state policy: stateFullOKB true
+```
+
+producer exit 0; 34:52 wall, 1956.9 s user + 15.9 s sys, peak RSS 6,965,844 KiB.
+
+The SUPPLIED image survives the whole route — the file's nonzero default
+`4294967295` and its words are intact at the end:
+`[19088743,2309737967,305419896,2882400001,4294967295,4294967295]`, and the
+`encStateM`/`decStateM` round trip was checked, not assumed.  The file's
+`flops reset` directive is reported as the synthetic part it is.
+
+**What did NOT happen, stated plainly: `memory 0: 0 word(s) differ`.**  Under
+the generated width-derived stimulus the register file never commits, so this
+run has NO memory transition.  The driver reports that rather than describing
+motion that did not occur.  A `stim` file was added for exactly this reason —
+`mkInputFor` cannot drive a core that needs `resetn` deasserted and a ready
+memory interface — and a run with `resetn = 1`, `mem_ready = 1` and
+`mem_rdata = 0x00100093` (`addi x1, x0, 1`, which writes the 32×32 register
+file this certificate declares as its aw5/dw32 memory) is the one that can
+produce a transition.
+
+### Fresh emission, from a source-bound build
+
+`bazel build -c opt //lhd:lhd` at repo HEAD `1b180a422`: 10,279 actions,
+completed successfully.  New binary sha256
+`9ea9245ee4e3f8ac01176bcf9be003b04212a2abbb1f809b0487732a8d798a97` — **not**
+the `414d5dcb…` of §63.51, whose missing `.dcert` sidecar was the symptom.
+
+Re-emitted from the MATCHED `s2_single_edge` LGraph with the same
+`formal.lean.mode=verified_compiler` invocation `vc_opt` used: producer exit 0,
+0.98 s, 77,076 KiB, and it **does** emit the sidecar.
+
+| certificate | bytes | sha256 | sources | nodes | flops | memory | admitted |
+|---|---|---|---|---|---|---|---|
+| retained `vc_opt` | 70,067 | `f85a2a9d…` | 1302 | 2279 | 174 | aw5 dw32 | **yes** |
+| fresh, current emitter | 69,657 | `ef77dfab…` | 1292 | 2269 | 174 | aw5 dw32 | **yes** |
+
+They are NOT byte-identical and are not claimed to be: the current emitter
+produces ten fewer sources and ten fewer nodes.  Both are retained separately,
+and both are admitted by the memory route with the same memory geometry.
+
+### Driver additions
+
+* `stim:<path>` — a SUPPLIED input vector (`stim v1` / `in <ordinal> <width>
+  <value>`), applied every cycle, provenance and hash reported; unlisted
+  ordinals keep their declared width at 0.  The generated stimulus remains the
+  default and is labelled synthetic.
+* `support-only` — stop after the support report, so two certificates'
+  admission can be compared without paying for specialization.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
