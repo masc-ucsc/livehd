@@ -1099,7 +1099,7 @@ interpreter is a comparison oracle, never the FP implementation.
 | Original native frontend | Fresh old-source build succeeded; binary SHA256 `1c089c4edf0f817bcd5cd15833feba0967e0ab45a505778e6764c8da9b87e030`. It uses a fresh dependency closure with explicitly recorded protobuf yanked-version admission, not a reproduced historical binary closure. |
 | DCache comparison | Same frozen whole RTL/filelist/options: old frontend passes; retained master binary reproduces Concat width refusal in its second bitwidth pass. Pass sequences and reader versions differ; root cause is not yet localized. Old `single_edge` then actually refuses a memory commit under a phase divider. Neither result is old FP admission. |
 | I-cache comparison | Old and master both reject the same first ambiguous `PaSize` imports on the frozen 31-source input. This is observed shared raw-source/configuration refusal, not established master-only regression. |
-| Current table | 13 YES / 11 NO / 36 BLOCKED. FP has 3 YES / 9 BLOCKED: B12 PicoRV32 moved BLOCKED -> YES on the proved MEMORY route (scalar support still refuses it, correctly, on memFree/sources/ops -- that refusal is retained, not superseded), under the same INTERPRETED generation/readiness standard as B09/B10. The nine remaining FP blockers are upstream input/frontend refusals (eight never emit a certificate at all; B11 emits then fails `single_edge` on memory slot enables), and they remain in scope for the twelve-unit objective. This is NOT full-project acceptance: every cell has a disposition, and not every emitter was reached. |
+| Current table | 13 YES / 11 NO / 36 BLOCKED. FP has 3 YES / 9 BLOCKED: B12 PicoRV32 moved BLOCKED -> YES on the proved MEMORY route (scalar support still refuses it, correctly, on memFree/sources/ops -- that refusal is retained, not superseded), under the same INTERPRETED generation/readiness standard as B09/B10. The nine remaining FP blockers are upstream input/frontend refusals and NONE of them emits a certificate: seven stop at `s1_compile`, while B03 and B11 pass compilation and are then refused by `pass.single_edge`, which runs BEFORE certificate emission -- a later STAGE, not a later artifact. They remain in scope for the twelve-unit objective. This is NOT full-project acceptance: every cell has a disposition, and not every emitter was reached. |
 
 The old native build and phase attempts are under
 `livehd-futamura/baseline_frontend_build_9bb41a09d_20261012/`.
@@ -1116,16 +1116,42 @@ What the RETAINED evidence already answers — two of the nine:
 | row | old branch | master | reading |
 | --- | --- | --- | --- |
 | B01 CORE-ET DCache | front end **passes** | refuses: Concat lane width, second bitwidth pass | a real asymmetry, but root cause NOT localized, and pass sequences and reader versions differ |
-| B03 CORE-ET I-cache | **rejects** | rejects | the SAME ambiguous `PaSize` imports — a shared raw-source/configuration refusal, NOT a master-only regression |
+| B03 CORE-ET I-cache | front end **passes** (adapted) | front end **passes** (adapted) | then BOTH refuse at `pass.single_edge`, identically — NOT a master-only regression and NOT an import problem any more |
 
-So the hypothesis is already half-refuted: it holds for B01 and fails for B03.
+**B03's import story is HISTORY, not its current state.**  The earlier row said
+old and master both reject the same ambiguous `PaSize` imports.  That was the
+raw-source configuration.  The checked explicit-import adapter repaired it, and
+the CURRENT retained evidence is
+`audits/icache_explicit_import_adapter_20261012_1710_r2/audit_result.json`
+(adapter sha256 `da7d07bf…`, source pin `c72b6a2f…`, 31 ordered sources, 944
+snapshot files):
+
+* **both** native front-end compiles PASS — old `producer_exit 0` (6.96 s), master `producer_exit 0`;
+* **both** `pass.single_edge` attempts then refuse with `producer_exit 7`, the
+  same `unsupported` class and the same message — *"memory
+  `…:$auto$proc_rom.cc:155:do_switch$10` would commit on every sub-step under a
+  phase divider"* (old `memory_29272`, master `memory_34720`);
+* the compiled graphs are preserved (`graph_164589746783/body.bin`, 3,980,549 B,
+  sha256 `9b741889…`, plus overflow/library/srcmap), so **this experiment must
+  be reused, not repeated**;
+* the audit's own `next_required_capability` names the gap: *"Slot-aware memory
+  normalization, with complete memory/clock/reset/init metadata preserved and
+  correctness evidence."*
+
+So B03 is blocked by the **same memory-slot lowering gap as B11**, on both
+branches equally.  There is nothing to rebase for it, and describing it as
+blocked by imports is out of date.
+
+That leaves the hypothesis half-refuted: it holds for B01 and fails for B03.
 And B01 shows that clearing the front end is **not** the same as unblocking the
 row — old then refuses at `single_edge` on a memory commit under a phase
 divider, so neither result is old FP admission.
 
-**Unmeasured against the old branch: seven rows** — B02, B04, B05, B06, B07,
-B08 and B11.  Nothing retained says how the old front end behaves on them, and
-no claim should be made until it is measured.
+**Unmeasured against the old branch: six rows** — B02, B04, B05, B06, B07 and
+B08.  B11 is not on that list in the sense that matters: it shares B03's
+lowering gap, which is a known gap to FIX, not an asymmetry to measure.
+Nothing retained says how the old front end behaves on the six, and no claim
+should be made until it is measured.
 
 One observation worth testing, stated as a HYPOTHESIS and not a conclusion:
 five of the blockers are combinational loops (B02, B04, B06, B07, B08) and
@@ -1138,9 +1164,14 @@ difference, or a genuine source loop is unknown.
 Plan, to execute AFTER the current twelve-unit FP work reaches its next
 checkpoint:
 
-1. Run the retained pinned old front end (`1c089c4e…`) on the seven unmeasured
+1. Run the retained pinned old front end (`1c089c4e…`) on the six unmeasured
    rows, on the SAME frozen inputs and options the master attempts used.  This
    is a measurement pass; it produces a per-row asymmetry table, not a rebase.
+   **Source comparison and retained evidence come first for every remaining
+   unit**, and a broad old-branch sweep is NOT a prerequisite to fixing a gap
+   that is already localized — B03 and B11's memory-slot lowering is already
+   localized and is being fixed inside the twelve-unit objective, using the
+   existing `slot_pred` machinery to gate the ENTIRE enable vector.
 2. Classify each row: shared refusal (like B03 — nothing to integrate),
    master-only regression (like B01 — a candidate), or old-only failure.
 3. For candidates only, localize the actual differing stage before porting

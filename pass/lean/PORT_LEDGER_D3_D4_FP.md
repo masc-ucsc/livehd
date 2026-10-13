@@ -11075,8 +11075,12 @@ Counts move **12 YES / 11 NO / 37 BLOCKED → 13 YES / 11 NO / 36 BLOCKED**, FP
 column **2 YES / 10 BLOCKED → 3 YES / 9 BLOCKED**.  Verified mechanically that
 `B12/Futamura projection` is the ONLY changed cell and that the historical
 refusal is retained verbatim.  The nine remaining FP blockers are upstream
-refusals — eight never emit a certificate, B11 emits then fails `single_edge` —
-and they remain in scope for the twelve-unit objective.
+refusals, and **none of them emits a certificate**.  An earlier wording here
+said B11 "emits then fails `single_edge`"; that is **wrong and withdrawn**.
+B11 passes front-end compilation and is then refused by `pass.single_edge`,
+which runs BEFORE certificate emission — so B11 reaches a later STAGE than the
+other eight, not a later artifact.  B03 is in the same position.  They remain
+in scope for the twelve-unit objective.
 
 ## §63.71 — the ordinary `Op_MemWrite` route: typing, admission, object and node layers
 
