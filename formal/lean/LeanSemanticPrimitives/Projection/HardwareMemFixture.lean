@@ -337,6 +337,29 @@ theorem fullRunTwo (i₁ i₂ : RuntimeInput) (e₁ e₂ : ClockEdges) (st : Sta
 #guard inputOKB fullDesign 5 == true
 #guard edgesOKB fullDesign #[true, true] == true
 
+/-- …and from the state the design itself builds, with no state hypothesis at
+all: only the input and the edge vector are checked. -/
+theorem fullRunInit (i : RuntimeInput) (e : ClockEdges)
+    (hin : inputOKB fullDesign i.size = true)
+    (hed : edgesOKB fullDesign e = true) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign fullDesign, encEdges e, encInput i,
+            StateM.encStateM (initStateOf fullDesign)].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign fullDesign e i
+                     (StateM.denote (initStateOf fullDesign))
+      ∧ stateOKB fullDesign r.nextState = true :=
+  admits_run_init fullDesign_admits hin hed
+
+#guard stateOKB fullDesign (initStateOf fullDesign) == true
+#guard (initStateOf fullDesign).flops.size == 2
+#guard (initStateOf fullDesign).mems.size == 1
+#guard ((initStateOf fullDesign).mems[0]!).words.length == 32
+
+#print axioms fullRunInit
+
 #print axioms fullRunTwo
 
 #print axioms fullRun

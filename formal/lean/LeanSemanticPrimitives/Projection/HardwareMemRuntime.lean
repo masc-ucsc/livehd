@@ -642,6 +642,129 @@ theorem admits_run_two {D : DesignCert} {i₁ i₂ : RuntimeInput} {st : StateM}
 #print axioms admits_run_pres
 #print axioms admits_run_two
 
+
+/-! ## 8. Initialisation: every admitted design HAS a legal state
+
+Checking a state is only half of a policy.  If no state passed, `admits_run`
+would be vacuous.  `initStateOf` builds one from the design alone — each flop at
+its declared reset value, each memory a zero table of its declared geometry —
+and it passes. -/
+
+def initFlopsOf (D : DesignCert) : Array BV :=
+  D.flops.map (fun f => mk_bv f.width f.resetValue)
+
+def initMemsOf (D : DesignCert) : Array MemImg :=
+  D.memories.map (fun md => MemImg.zeroImg md.aw md.dw)
+
+def initStateOf (D : DesignCert) : StateM :=
+  { flops := initFlopsOf D, mems := initMemsOf D }
+
+@[simp] theorem initStateOf_flops_size (D : DesignCert) :
+    (initStateOf D).flops.size = D.flops.size := by simp [initStateOf, initFlopsOf]
+
+@[simp] theorem initStateOf_mems_size (D : DesignCert) :
+    (initStateOf D).mems.size = D.memories.size := by simp [initStateOf, initMemsOf]
+
+theorem zeroImg_shape (md : MemoryDesc) :
+    MemShapeOK md (MemImg.zeroImg md.aw md.dw) := by
+  refine ⟨by simp [MemImg.zeroImg], ?_, by simp [MemImg.zeroImg, mk_bv]⟩
+  intro w hw
+  have hmem : w ∈ List.replicate (2 ^ md.aw) (mk_bv md.dw 0) := by
+    simpa [MemImg.zeroImg] using hw
+  rw [List.eq_of_mem_replicate hmem]; simp [mk_bv]
+
+theorem initStateOf_word (D : DesignCert) : StateWordOK D (initStateOf D) := by
+  intro idx md hmd
+  have hlt : idx < D.memories.size := mem_lt_of_getElem? hmd
+  have hmd' : D.memories[idx] = md := by
+    rw [Array.getElem?_eq_getElem hlt] at hmd; exact Option.some.inj hmd
+  refine ⟨MemImg.zeroImg md.aw md.dw, ?_, zeroImg_shape md⟩
+  simp [initStateOf, initMemsOf, hlt, hmd']
+
+/-- **The canonical state passes.** -/
+theorem initStateOf_ok (D : DesignCert) : stateOKB D (initStateOf D) = true :=
+  stateOKB_complete (by simp) (initStateOf_word D)
+
+/-- …and it is `RuntimeWF` for the ORIGINAL reference, exactly — not merely
+long enough.  `stateOKB` deliberately allows a longer vector, because the
+interpreter reads by index; `RuntimeWF` wants the sizes on the nose, and the
+canonical state has them. -/
+theorem initStateOf_runtimeWF (D : DesignCert) (i : RuntimeInput) :
+    Compiler.RuntimeWF D i (StateM.denote (initStateOf D)) where
+  flopsSized := by simp [StateM.denote]
+  memsSized  := by simp [StateM.denote]
+
+/-- Any state the policy accepts whose vectors are exactly the declared sizes is
+`RuntimeWF` too. -/
+theorem runtimeWF_of_sizes {D : DesignCert} {st : StateM} {i : RuntimeInput}
+    (hf : st.flops.size = D.flops.size) (hm : st.mems.size = D.memories.size) :
+    Compiler.RuntimeWF D i (StateM.denote st) where
+  flopsSized := by simpa [StateM.denote] using hf
+  memsSized  := by simpa [StateM.denote] using hm
+
+/-- **Every admitted design can actually be run**, from a state built for it:
+the state premise is discharged by construction and the flop bound follows from
+`checkSource`, so only the input and the edge vector remain. -/
+theorem admits_run_init {D : DesignCert} {i : RuntimeInput} {e : ClockEdges}
+    (hA : admitsB D = true) (hin : inputOKB D i.size = true)
+    (hed : edgesOKB D e = true) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign D, encEdges e, encInput i,
+            StateM.encStateM (initStateOf D)].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote
+          = Compiler.interpretDesign D e i (StateM.denote (initStateOf D))
+      ∧ stateOKB D r.nextState = true := by
+  refine admits_run_pres hA ?_
+  unfold runtimeOKB
+  simp only [Bool.and_eq_true]
+  refine ⟨⟨⟨initStateOf_ok D, hin⟩, ?_⟩, hed⟩
+  exact flopBoundOKB_of_flopSize (admits_semwf hA) (by simp)
+
+/-! ### …and the shape survives the codec
+
+`StateM.decStateM_encStateM` is the round trip.  What matters for the policy is that
+the state that comes BACK out of the encoder is the one that went in, so it
+passes the same check and denotes the same `RuntimeState`: the interpreter's
+literal argument carries the shape, it is not re-established on the far side. -/
+
+theorem stateOKB_codec {D : DesignCert} {st : StateM} (h : stateOKB D st = true) :
+    ∃ st', StateM.decStateM (StateM.encStateM st) = some st'
+         ∧ stateOKB D st' = true
+         ∧ StateM.denote st' = StateM.denote st :=
+  ⟨st, StateM.decStateM_encStateM st, h, rfl⟩
+
+theorem initStateOf_codec (D : DesignCert) :
+    ∃ st, StateM.decStateM (StateM.encStateM (initStateOf D)) = some st
+        ∧ stateOKB D st = true
+        ∧ StateM.denote st = StateM.denote (initStateOf D) :=
+  stateOKB_codec (initStateOf_ok D)
+
+/-- The `RuntimeState` relation the interpreter's correctness statements use,
+at the canonical state. -/
+theorem StateRelR_initStateOf (D : DesignCert) :
+    StateM.StateRelR (StateM.encStateM (initStateOf D))
+      (StateM.denote (initStateOf D)) :=
+  StateM.StateRelR_encStateM _
+
+/-! ### Executed -/
+
+#guard stateOKB mixedDesign (initStateOf mixedDesign) == true
+#guard stateOKB twoMemDesign (initStateOf twoMemDesign) == true
+#guard (initStateOf twoMemDesign).mems.size == 2
+#guard (initStateOf mixedDesign).mems.size == 1
+#guard ((initStateOf mixedDesign).mems[0]!).words.length == 32
+#guard runtimeOKB mixedDesign #[mk_bv 5 20, mk_bv 32 0xFFFFFFFF, mk_bv 1 1, mk_bv 32 0xF]
+         (initStateOf mixedDesign) #[true] == true
+#guard runtimeOKB twoMemDesign #[mk_bv 5 3, mk_bv 32 0xFFFFFFFF, mk_bv 1 1, mk_bv 32 0xF]
+         (initStateOf twoMemDesign) #[true, true] == true
+
+#print axioms initStateOf_ok
+#print axioms admits_run_init
+#print axioms initStateOf_codec
+
 #print axioms memImgOKB_sound
 #print axioms stateOKB_shape
 #print axioms admits_run

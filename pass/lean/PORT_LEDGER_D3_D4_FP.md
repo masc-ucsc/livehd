@@ -9198,3 +9198,51 @@ shape are the next increment, then the public support/DCERT2 generation and
 readiness drivers.  `SourceSupported`, `OpSupported` and `memFree` untouched;
 the public route still refuses memory-bearing designs.  PicoRV32 **BLOCKED**;
 matrix **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.46 — initialisation, and the codec correspondence
+
+`HardwareMemRuntime` §8; `HardwareMemFixture` gains `fullRunInit`.
+
+Checking a state is half a policy.  If no state passed, `admits_run` would be
+vacuous — so the design itself must be able to produce one.
+
+* `initStateOf D` — each flop at its DECLARED reset value, each memory a zero
+  table of its declared geometry, built from the design alone.
+* `initStateOf_ok : stateOKB D (initStateOf D) = true` — via `zeroImg_shape`,
+  so the canonical state passes the word-level check, not merely the length one.
+* `admits_run_init` — **every admitted design can actually be run.**  The state
+  premise is discharged by construction and the flop bound by
+  `flopBoundOKB_of_flopSize`, so only the input and the edge vector remain.
+  `fullRunInit` instantiates it with no state hypothesis at all.
+
+### `RuntimeWF`, on the nose
+
+`stateOKB` deliberately accepts a LONGER vector than the design declares,
+because the interpreter reads by index.  `RuntimeWF` wants the sizes exactly,
+and the canonical state has them: `initStateOf_runtimeWF`, with
+`runtimeWF_of_sizes` for any other state whose vectors are the declared sizes.
+The two are kept separate on purpose — neither is weakened to fit the other.
+
+### The codec
+
+`StateM.decStateM_encStateM` is the round trip and was already proved.  What the
+policy needs is that the state coming BACK out of the encoder is the one that
+went in, so it passes the SAME check and denotes the same `RuntimeState`:
+`stateOKB_codec`, `initStateOf_codec`, and `StateRelR_initStateOf` for the
+relation the interpreter's correctness statements use.  The shape rides through
+the literal argument; it is not re-established on the far side.
+
+Eleven further executed guards (7 in `HardwareMemRuntime`, 4 in the fixture):
+the canonical state of `mixedDesign`, `twoMemDesign` and `fullDesign` passes,
+with the right memory count, flop count and 32-word tables, and `runtimeOKB`
+accepts it against a real input and edge vector.
+
+### Still open
+
+Public support / DCERT2 generation and the readiness drivers; BTA with the
+design static and exactly edges/input/state dynamic; annotation erasure and
+proved specialisation; production arity-3 residual checking at its returned
+bound; whole PicoRV32 execution with genuine memory transitions and phase
+metrics.  `SourceSupported`, `OpSupported` and `memFree` untouched; the public
+route still refuses memory-bearing designs.  PicoRV32 **BLOCKED**; matrix
+**12 YES / 11 NO / 37 BLOCKED**.
