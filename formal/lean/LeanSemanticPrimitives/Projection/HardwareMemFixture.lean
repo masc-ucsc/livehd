@@ -14,7 +14,7 @@ theorem's premises DISCHARGED rather than merely computed against:
 The returned `ResultM` is decoded and its state fed to a SECOND `mainM` step,
 with reachable-state preservation supplied by the theorem itself.
 -/
-import LeanSemanticPrimitives.Projection.HardwareMemSlotTy
+import LeanSemanticPrimitives.Projection.HardwareMemRuntime
 
 namespace Projection
 namespace HwMem
@@ -271,6 +271,46 @@ theorem fullState_shape : StateShapeOK fullDesign fullState := by
       simpa [fullDesign] using hmd
     subst hmd'; exact ⟨initTable, rfl, initTable_full⟩
   · simp [fullDesign] at hmd
+
+/-! ### …and the same step from TWO Booleans
+
+`fullStep` above still takes its runtime facts as hypotheses.  `fullRun` takes
+none: the design is decided by `admitsB` and the state, input and edge vector by
+`runtimeOKB`, which pins the image's word and default widths as well as its
+length. -/
+
+theorem fullRun (i : RuntimeInput) (st : StateM) (e : ClockEdges)
+    (hR : runtimeOKB fullDesign i st e = true) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign fullDesign, encEdges e, encInput i,
+            StateM.encStateM st].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign fullDesign e i (StateM.denote st)
+      ∧ StateShapeOK fullDesign r.nextState :=
+  admits_run fullDesign_admits hR
+
+/-! The fixture's own state, input and edge vector pass the policy -- and the
+near misses do not. -/
+
+#guard stateOKB fullDesign fullState == true
+#guard runtimeOKB fullDesign #[mk_bv 5 20, mk_bv 32 0xFFFFFFFF, mk_bv 1 1,
+                               mk_bv 1 1, mk_bv 1 0] fullState #[true, true] == true
+#guard runtimeOKB fullDesign #[mk_bv 5 20, mk_bv 32 0xFFFFFFFF, mk_bv 1 1,
+                               mk_bv 1 1] fullState #[true, true] == false
+#guard runtimeOKB fullDesign #[mk_bv 5 20, mk_bv 32 0xFFFFFFFF, mk_bv 1 1,
+                               mk_bv 1 1, mk_bv 1 0] fullState #[true] == false
+#guard runtimeOKB fullDesign #[mk_bv 5 20, mk_bv 32 0xFFFFFFFF, mk_bv 1 1,
+                               mk_bv 1 1, mk_bv 1 0]
+         { flops := #[mk_bv 32 0], mems := #[initTable] } #[true, true] == false
+#guard runtimeOKB fullDesign #[mk_bv 5 20, mk_bv 32 0xFFFFFFFF, mk_bv 1 1,
+                               mk_bv 1 1, mk_bv 1 0]
+         { flops := #[mk_bv 32 0, mk_bv 32 0]
+         , mems := #[⟨(List.range 32).map (fun k => mk_bv 7 (Int.ofNat k)), mk_bv 32 0⟩] }
+         #[true, true] == false
+
+#print axioms fullRun
 
 /-- The returned state has as many flops as the design declares — read off the
 adequacy equation, not assumed. -/

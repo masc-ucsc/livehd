@@ -9066,3 +9066,65 @@ returned-state preservation and the codec/`RuntimeState` correspondence — is t
 next increment.  `SourceSupported`, `OpSupported` and `memFree` untouched; the
 public route still refuses memory-bearing designs.  PicoRV32 **BLOCKED**;
 matrix **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.44 — the executable runtime state / input / edge policy
+
+`LeanSemanticPrimitives/Projection/HardwareMemRuntime.lean` (new, builds clean,
+22 executed guards); `HardwareMemFixture` re-pointed onto it.
+
+`admitsB` decides the DESIGN.  Six premises of `admits_mainM_resolved` were
+still runtime facts carried by hand at every call site.  They are now one
+Boolean.
+
+### The shape is no longer length-only
+
+`StateShapeOK` says `words.length = 2 ^ aw` and nothing else — which is all the
+address fit needs, so it was all that was proved.  It is not what a real state
+must satisfy.  `MemShapeOK md m` adds the two missing facts:
+
+* every word is `md.dw` wide, and
+* so is `m.dflt` — the word EVERY out-of-range read returns.
+
+`MemShapeOK.toFullTable` discharges the length statement every existing proof
+consumes, so nothing below had to change.  The executed control is explicit:
+`narrowImg` has 32 words of width **7** against a `dw = 32` memory —
+`#guard MemImg.FullTable 5 narrowImg` passes, `memImgOKB … narrowImg == false`.
+
+### The four checks
+
+| check | premise discharged |
+|---|---|
+| `stateOKB D st` | `StateShapeOK D st` (via `stateOKB_shapeW`, which gives the stronger `MemShapeOK`) and `D.flops.size ≤ st.flops.size` |
+| `inputOKB D i.size` | `SourceInputBound` for every source — `input idx`, and `flopQAsync`'s reset index, which reads the INPUT vector |
+| `flopBoundOKB D st.flops.size` | `SourceFlopBound` for every source |
+| `edgesOKB D e` | `f.clock < e.size` and `md.clock < e.size`, so `firesAt` never reads past the edge vector |
+
+`runtimeOKB` is their conjunction, and
+
+* `admits_run : admitsB D = true → runtimeOKB D i st e = true → ∃ r, Eval … ∧
+  r.denote = Compiler.interpretDesign D e i (StateM.denote st) ∧
+  StateShapeOK D r.nextState`
+
+takes **two Booleans and nothing else**.  `fullRun` is the full fixture's
+instantiation; `fullStep`/`fullTwoSteps` keep the hypothesis form unchanged.
+
+### Refusals that bite
+
+Executed, all `== false`: wrong word width, wrong default width, a table half
+the declared length, a declared image ABSENT from the state, a two-memory design
+given one image, `input 3` against a 3-element input vector, clock 1 against a
+one-element edge vector, an empty edge vector, a flop vector shorter than the
+design's flop array, and the two `runtimeOKB` compositions of those.
+
+### Still open
+
+**Returned-state preservation at the WORD level.**  `admits_run` concludes the
+length-level `StateShapeOK` for `r.nextState`, exactly as
+`admits_mainM_resolved` does — not `stateOKB D r.nextState`.  Unlike §63.43's
+scalar width lift, that one IS a recurrence: a `tbl` slot produced by a write
+has the shape of the image it wrote into, so the dense order has to be walked.
+It is the next increment, together with the memory-initialisation statement and
+the codec/`RuntimeState` correspondence for the strengthened shape.
+`SourceSupported`, `OpSupported` and `memFree` untouched; the public route still
+refuses memory-bearing designs.  PicoRV32 **BLOCKED**; matrix
+**12 YES / 11 NO / 37 BLOCKED**.
