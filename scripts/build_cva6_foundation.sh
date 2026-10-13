@@ -3,7 +3,7 @@
 # wrappers, and a manifest that pins every input by hash.
 #
 # WHY THIS EXISTS.  The old route (`run_cva6_vc_sweep.sh`) hardcodes
-# `R=/soe/czeng14/projects/livehd-new` and reads that checkout's frozen
+# `R=/HOMEROOT/projects/livehd-new` and reads that checkout's frozen
 # filelists and its UNTRACKED `temp/wrap_all`.  Emitting `alu` from those
 # wrappers gives 429 sources / 436 nodes against a corpus certificate of
 # 6,137 / 6,597 -- a 5x discrepancy that looks like a result and is really a
@@ -26,10 +26,10 @@
 #     module-list   default pass/lean/tests/d4/cva6_78.list
 #
 # Env:
-#   CVA6_ROOT       CVA6 checkout (default /soe/czeng14/projects/cva6-blockfinding,
+#   CVA6_ROOT       CVA6 checkout (default /HOMEROOT/projects/cva6-blockfinding,
 #                   the revision the tracked module inventory was derived from)
 #   CVA6_TARGET     bender/config target (default cv64a6_imafdc_sv39_hpdcache_wb)
-#   SLANG           slang binary (default /soe/czeng14/projects/slang/build/bin/slang)
+#   SLANG           slang binary (default /HOMEROOT/projects/slang/build/bin/slang)
 #   BENDER          bender binary (default: PATH)
 #   FOUNDATION_OUT  output root (default <worktree>/generated).  Controls build
 #                   into a scratch root so they never disturb the real corpus.
@@ -39,9 +39,9 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 die() { printf 'FATAL: %s\n' "$*" >&2; exit 2; }
 
 LIST="${1:-$ROOT/pass/lean/tests/d4/cva6_78.list}"
-CVA6_ROOT="${CVA6_ROOT:-/soe/czeng14/projects/cva6-blockfinding}"
+CVA6_ROOT="${CVA6_ROOT:-/HOMEROOT/projects/cva6-blockfinding}"
 CVA6_TARGET="${CVA6_TARGET:-cv64a6_imafdc_sv39_hpdcache_wb}"
-SLANG="${SLANG:-/soe/czeng14/projects/slang/build/bin/slang}"
+SLANG="${SLANG:-/HOMEROOT/projects/slang/build/bin/slang}"
 BENDER="${BENDER:-$(command -v bender 2>/dev/null || true)}"
 OUTBASE="${FOUNDATION_OUT:-$ROOT/generated}"
 

@@ -4,7 +4,7 @@
 #   pin side    -> the extracted 9bb41a09d tree + gen_probe.pin.lean
 # Same Lean 4.31.0 (both trees pin it), same leanc, same -O2.
 set -uo pipefail
-R=/mada/users/czeng14/projects/livehd-pass-lean-master
+R=/WORKROOT/projects/livehd-pass-lean-master
 G=$R/generated/master_port/fp/genprobe
 export LEAN_NUM_THREADS=4
 

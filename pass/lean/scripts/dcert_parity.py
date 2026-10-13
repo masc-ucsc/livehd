@@ -167,7 +167,7 @@ def main() -> int:
                     help="build root holding CertIOParity.olean")
     ap.add_argument("--out", required=True, help="directory for the probe and its log")
     ap.add_argument("--toolchain",
-                    default="/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0")
+                    default="/WORKROOT/.elan/toolchains/leanprover--lean4---v4.31.0")
     a = ap.parse_args()
 
     lean_src = pathlib.Path(a.lean).read_text(encoding="utf-8")

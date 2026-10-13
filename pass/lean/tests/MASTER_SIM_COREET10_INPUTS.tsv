@@ -3,7 +3,7 @@
 # freeze, recorded before any generation.
 #
 # CORRECTION to MASTER_SIM_PAIRED_GENERATION.tsv: core-et is NOT dirty.
-# `git -C /mada/users/czeng14/projects/core-et diff --name-only HEAD` is EMPTY.
+# `git -C /WORKROOT/projects/core-et diff --name-only HEAD` is EMPTY.
 # Its only status entry is `?? core_et_blocks.txt`, an untracked 16,674-byte text
 # inventory dated 2026-08-19.  No runner in this pipeline consumes it (the only
 # mentions anywhere are coreet_preflight.sh / coreet_preflight_controls.sh and a
@@ -55,7 +55,7 @@
 #
 # HOW THE FILELISTS WERE PRODUCED (read-only; no build ran)
 #   TMPDIR=TMP=TEMP=<repo>/generated/master_port/sim_inputs/tmp \
-#   COREET_ROOT=/mada/users/czeng14/projects/core-et \
+#   COREET_ROOT=/WORKROOT/projects/core-et \
 #   bash <snapshot>/scripts/coreet_filelist.sh <block> <out>.f
 #   GNU Make 4.4.1, TECH=generic.  Order is dependency order and is preserved;
 #   the lists are make-expanded, never text-parsed.

@@ -86,9 +86,9 @@ done
 # A sweep over zero certificates is not a successful sweep.
 [ "$#" -gt 0 ] || { echo "REFUSING: no certificate given; a sweep with no target is not a pass"; exit 2; }
 
-R=${FP_REPO_ROOT:-/mada/users/czeng14/projects/livehd-pass-lean-master}
-LEANBIN=${FP_LEAN_BIN:-/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean}
-TOOLCHAIN=${FP_TOOLCHAIN_ROOT:-/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0}
+R=${FP_REPO_ROOT:-/WORKROOT/projects/livehd-pass-lean-master}
+LEANBIN=${FP_LEAN_BIN:-/WORKROOT/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean}
+TOOLCHAIN=${FP_TOOLCHAIN_ROOT:-/WORKROOT/.elan/toolchains/leanprover--lean4---v4.31.0}
 [ -x "$LEANBIN" ] || { echo "REFUSING: no lean at $LEANBIN"; exit 2; }
 PABS=$(readlink -e "$P") || { echo "REFUSING: cannot resolve $P"; exit 2; }
 TCABS=$(readlink -e "$TOOLCHAIN") || { echo "REFUSING: cannot resolve toolchain $TOOLCHAIN"; exit 2; }

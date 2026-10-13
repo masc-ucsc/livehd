@@ -9,7 +9,7 @@
 # figure is the MEDIAN of the repetitions.
 #   measure_genprobe.sh <out-subdir> <reps> <block>...
 set -uo pipefail
-R=/mada/users/czeng14/projects/livehd-pass-lean-master
+R=/WORKROOT/projects/livehd-pass-lean-master
 G=$R/generated/master_port/fp/genprobe
 SUB=${1:?out subdir}; REPS=${2:?reps}; shift 2
 O=$G/runs/$SUB; mkdir -p "$O"

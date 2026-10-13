@@ -1854,7 +1854,7 @@ serializer; **no runtime coverage is claimed from this pilot.**
 
 I reported that no clean CVA6 checkout existed and that the frozen-30
 procedure was blocked. **That was my error.**
-`/mada/users/czeng14/projects/cva6-blockfinding` is clean at
+`/WORKROOT/projects/cva6-blockfinding` is clean at
 `6cb200105fb9441d170e45786125a737fab98e91` — exactly the revision
 `verify_d4_run.sh` expects, and already the default `CVA6_ROOT` in
 `build_cva6_foundation.sh`. It was in my `ls cva6*` output and I simply did not
@@ -3474,7 +3474,7 @@ measurement.
 
 ## 38. FP checkpoint 1: installed, adapted, built, and two real reconciliation gaps
 
-Source: read-only `/mada/users/czeng14/projects/livehd-futamura/livehd` at
+Source: read-only `/WORKROOT/projects/livehd-futamura/livehd` at
 `9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6`, semantic pin
 `90583be1349acbd25f740b176a406aa8bbe1251c`. Asset list and pinned digests from
 `audits/fp_original_procedure_baseline_20261010/result.json` -- named in
@@ -4756,7 +4756,7 @@ integrated summary, there is nothing for the prototype to beat. That is the
 cross-build comparison, and it is exactly the half that is missing.
 
 The S1 tree is reachable: `0f175676b` and the pin `9bb41a09d` are both in
-`/mada/users/czeng14/projects/livehd-futamura/livehd`, branch `projection`.
+`/WORKROOT/projects/livehd-futamura/livehd`, branch `projection`.
 Building against it is a branch-history performance study, not a statement
 about master's behaviour, so it is left open rather than attempted here.
 
@@ -4810,7 +4810,7 @@ column is unusable as a peak in both builds, for two different reasons.
 ### 47.7 Two repository findings from the same pass
 
 **The pin is not reachable from this repository.** `9bb41a09d` is the head of
-branch `projection` in `/mada/users/czeng14/projects/livehd-futamura/livehd`;
+branch `projection` in `/WORKROOT/projects/livehd-futamura/livehd`;
 `git cat-file` fails on it here. `fp_entrypoint_inventory.tsv` claimed its
 `pinned_sha256` column was read with `git show` without saying where, which is
 not reproducible. The header now names the repository and the exact command.
@@ -5696,7 +5696,7 @@ job is launched ahead of this.
 
 ## Final stage requested by the user: 12 × 5 simulator generation matrix
 
-Execute after the existing plan and acceptance obligations. [Plan section 15](PASS_LEAN_RESTRUCTURE_PLAN.md#15-final-stage-simulator-generation-across-five-approaches-and-twelve-blockscores) and the [live progress table](../../todo/livehd/simulator-generation-matrix.html) define all twelve rows and five approach columns. Prioritize standalone generation latency and complete block coverage. Every cell is PENDING until its own generation evidence exists. Only when all 60 cells are YES, make the final checkpoint and commit locally; the user will push. PicoRV32 uses `/soe/czeng14/projects/picorv32`. Current generation-first experiments continue unchanged.
+Execute after the existing plan and acceptance obligations. [Plan section 15](PASS_LEAN_RESTRUCTURE_PLAN.md#15-final-stage-simulator-generation-across-five-approaches-and-twelve-blockscores) and the [live progress table](../../todo/livehd/simulator-generation-matrix.html) define all twelve rows and five approach columns. Prioritize standalone generation latency and complete block coverage. Every cell is PENDING until its own generation evidence exists. Only when all 60 cells are YES, make the final checkpoint and commit locally; the user will push. PicoRV32 uses `/HOMEROOT/projects/picorv32`. Current generation-first experiments continue unchanged.
 
 ## 56. Generation latency, measured matched against the exact pin
 
@@ -5995,7 +5995,7 @@ profiling or `ProtoShift` proof work happens until coverage is done.
 
 ### 58.1 PicoRV32 whole core, the first row attempted
 
-RTL `/soe/czeng14/projects/picorv32/picorv32.v`, 94,657 bytes, sha256
+RTL `/HOMEROOT/projects/picorv32/picorv32.v`, 94,657 bytes, sha256
 `0836050971b3c6cd…`, pin `ef203c2b0a3f…`, tracked tree clean. Top is
 `picorv32`, the **whole core**. Shape: 1,302 sources, 2,279 nodes.
 

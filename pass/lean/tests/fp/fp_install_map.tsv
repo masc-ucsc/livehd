@@ -1,6 +1,6 @@
-# source	/mada/users/czeng14/projects/livehd-futamura/livehd
+# source	/WORKROOT/projects/livehd-futamura/livehd
 # pin	9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6
-# baseline	/mada/users/czeng14/projects/automate_workspace/master_rebase/audits/fp_original_procedure_baseline_20261010/result.json
+# baseline	/WORKROOT/projects/automate_workspace/master_rebase/audits/fp_original_procedure_baseline_20261010/result.json
 # verbatim=1 means the installed bytes equal the pinned source bytes.
 # destination_sha256 is READ BACK from the installed file, so the map
 # records what is on disk rather than what was intended.

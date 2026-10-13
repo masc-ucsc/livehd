@@ -25,7 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIVEHD_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 LHD="${LHD:-$LIVEHD_ROOT/bazel-bin/lhd/lhd}"
-ISABELLE="${ISABELLE:-/soe/czeng14/.local/Isabelle2025-2/bin/isabelle}"
+ISABELLE="${ISABELLE:-/HOMEROOT/.local/Isabelle2025-2/bin/isabelle}"
 
 RUN_ISABELLE="${RUN_ISABELLE:-true}"
 RUN_LEC_GATE="${RUN_LEC_GATE:-false}"
@@ -49,7 +49,7 @@ THREADS="${THREADS:-8}"
 PARALLEL_PROOFS="${PARALLEL_PROOFS:-1}"
 NICE=(nice -n 19 ionice -c 3)
 
-HAGENT_BUILD="${HAGENT_BUILD:-/mada/users/czeng14/projects/hagent/.cache/setup_simplechisel_mcp_2025.11/build}"
+HAGENT_BUILD="${HAGENT_BUILD:-/WORKROOT/projects/hagent/.cache/setup_simplechisel_mcp_2025.11/build}"
 SC_DIR="${SC_DIR:-$HAGENT_BUILD/build_singlecyclecpu_d}"
 PIPE_DIR="${PIPE_DIR:-$HAGENT_BUILD/build_pipelined_d}"
 DUAL_DIR="${DUAL_DIR:-$HAGENT_BUILD/build_dualissue_d}"

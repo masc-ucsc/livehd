@@ -30,7 +30,7 @@ MAN="$ROOT/generated/cva6_foundation/provenance.txt"
 L78="$HERE/cva6_78.list"
 L30="$HERE/cva6_30.list"
 TARGET="${CVA6_TARGET:-cv64a6_imafdc_sv39_hpdcache_wb}"
-REAL_ROOT="${CVA6_ROOT:-/soe/czeng14/projects/cva6-blockfinding}"
+REAL_ROOT="${CVA6_ROOT:-/HOMEROOT/projects/cva6-blockfinding}"
 FL="$ROOT/generated/cva6_filelists/${TARGET}.flistplus.f"
 
 mkdir -p "$ROOT/temp"

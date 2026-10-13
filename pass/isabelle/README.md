@@ -58,7 +58,7 @@ The current CVA6 stress path uses the static sv2v/filelist plan documented in
 driven by:
 
 ```bash
-cd /mada/users/czeng14/projects/livehd-new
+cd /WORKROOT/projects/livehd-new
 bazel build //lhd:lhd
 
 OUT_ROOT=$PWD/generated/cva6_cache_memory_lec_runN \

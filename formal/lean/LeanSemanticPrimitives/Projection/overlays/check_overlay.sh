@@ -20,7 +20,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$HERE/../../../../.." && pwd)
 
 BASE_REV=90583be1349acbd25f740b176a406aa8bbe1251c
-BASE_REPO=${BASE_REPO:-/mada/users/czeng14/projects/livehd-d2-ir-semantics}
+BASE_REPO=${BASE_REPO:-/WORKROOT/projects/livehd-d2-ir-semantics}
 SRC=$ROOT/formal/lean/LeanSemanticPrimitives
 PATCHFILE=$HERE/bv_shl_step.patch
 EXPECTED_LGRAPHMODEL_SHA256=8a4fc7ea4132b3d845a8871c614bd36fa6d710ce1c63c2d783b81525813d6c4b

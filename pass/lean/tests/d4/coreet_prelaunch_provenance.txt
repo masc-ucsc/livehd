@@ -1,7 +1,7 @@
 # CORE-ET prelaunch wiring evidence -- NOT coverage.
 #
-coreet_root=/soe/czeng14/projects/core-et
-coreet_root_canonical=/mada/users/czeng14/projects/core-et
+coreet_root=/HOMEROOT/projects/core-et
+coreet_root_canonical=/WORKROOT/projects/core-et
 coreet_rev=c72b6a2fe4aaad5a9eef437776864ff71f4b55d7
 coreet_tech=generic
 coreet_relevant_paths=hw dv mk
@@ -11,7 +11,7 @@ coreet_outside_scope_untracked=1
 coreet_clean_scope=tracked AND untracked under hw dv mk only; the checkout as a whole is NOT claimed porcelain-clean
 coreet_patch_script=scripts/coreet_patch_srcs.py
 coreet_patch_script_sha256=2cce04803dab485c2c4c61aeb2a1575829773371170cbcaccddf3657b3659c54
-coreet_derived_dir=/mada/users/czeng14/projects/livehd-d4-incremental/generated/core-et/patched_src
+coreet_derived_dir=/WORKROOT/projects/livehd-d4-incremental/generated/core-et/patched_src
 coreet_derived_mode=four outputs AND map authenticated byte-for-byte against a fresh derivation
 coreet_derived_map_sha256=e94a6d333c282431c4a1632e4fb0045c3b352c70ffd8ce962b9e1a8156dd5508
 coreet_derived_aggregate_sha256=ee945429d58898f9e9555dd487f4f83c7d630ef8b7b25073c1d45a07d82cb4f4

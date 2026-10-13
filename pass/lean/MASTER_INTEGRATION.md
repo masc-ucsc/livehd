@@ -3963,10 +3963,10 @@ uses verilator instead, for modules whose RTL the native gate cannot elaborate;
 porting it is a separate item, and it does not substitute for the iverilog
 fixtures.)
 
-Other roots in use: DINO `HAGENT_BUILD=/soe/czeng14/projects/hagent/.cache/setup_simplechisel_mcp_2025.11/build`
+Other roots in use: DINO `HAGENT_BUILD=/HOMEROOT/projects/hagent/.cache/setup_simplechisel_mcp_2025.11/build`
 (the only one carrying all three of `build_singlecyclecpu_d`, `build_pipelined_d`,
-`build_dualissue_d`); CVA6 `/mada/users/czeng14/projects/cva6`; CORE-ET
-`/mada/users/czeng14/projects/core-et`.
+`build_dualissue_d`); CVA6 `/WORKROOT/projects/cva6`; CORE-ET
+`/WORKROOT/projects/core-et`.
 
 ## R28. The three standalone DINO fast-model procedures
 

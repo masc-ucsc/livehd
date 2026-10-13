@@ -31,7 +31,7 @@ pairs. Recomputing it from the imported rows reproduces that digest exactly, so
 the names and hashes copied into `cva6_30.list` are not garbled.
 
 **The caveat that must travel with the number.** The freeze was taken on
-2026-09-30 from `/soe/czeng14/projects/livehd-new/generated/cva6_vc/lean`, and
+2026-09-30 from `/HOMEROOT/projects/livehd-new/generated/cva6_vc/lean`, and
 `pass/lean/manifests/PROVENANCE.tsv` labels that corpus
 `IMPORTED: compatibility evidence only. Passing a gate here does NOT show this
 branch can generate the certificate end to end.` The **names** are authoritative
@@ -53,7 +53,7 @@ is measured below, not inherited.
 
 ## The authoritative 78: two independent derivations, exact match
 
-**Source of truth:** `/soe/czeng14/projects/cva6-blockfinding/cva6_blocks.txt`,
+**Source of truth:** `/HOMEROOT/projects/cva6-blockfinding/cva6_blocks.txt`,
 an inventory of openhwgroup/cva6 at commit **`6cb200105`** ("Fix Zcmt JVT index
 calculation (#3451)", master). Section 16 TOTALS:
 
@@ -75,7 +75,7 @@ coverage figure must name its configuration or it is not a figure.
 
 `scripts/build_cva6_foundation.sh` produces the whole input set in this worktree
 and writes `generated/cva6_foundation/provenance.txt`. It reads **nothing** from
-`/soe/czeng14/projects/livehd-new`: not its frozen filelists, not its untracked
+`/HOMEROOT/projects/livehd-new`: not its frozen filelists, not its untracked
 `temp/wrap_all`.
 
 That is not hygiene for its own sake. Emitting `alu` from that stale wrapper
