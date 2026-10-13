@@ -8743,3 +8743,72 @@ checking, its soundness and reachable-state preservation all remain before
 public support can broaden.  `SourceSupported`, `OpSupported` and `memFree` are
 untouched; `Op_MemWrite`/`Op_Sub` still refused.  PicoRV32 stays **BLOCKED**;
 matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.39 — The resolved whole-cycle entry, instantiated and executed
+
+`HardwareMemMain.lean` extended and a new `HardwareMemFixture.lean` (354 lines),
+both `PRODUCER_EXIT=0`, 0 errors, **19 `#guard`s**, no unsafe axioms.
+
+### The resolved entry — verified, not relabelled
+
+`hwMemS_entry : hwMemS.entry = "mainM"` and `mainM_id : idOf "mainM" = some 50`
+are checked by reduction, and `main_ne_mainM` records that this is a DIFFERENT
+function from the memory-free `main`.  `mainM_adequate_resolved` crosses to
+`hwMemP` through the production transfer `Surface.SEval_entry`, which resolves
+the entry and all four literal arguments itself — no `resolve` hypothesis is
+left to the caller.
+
+`mainM_adequate` also now concludes
+`NextImgGeomOK D G → StateShapeOK D r.nextState`: the RETURNED state carries the
+declared geometry, which is what lets a second step run.
+
+### The fixture, with premises DISCHARGED
+
+`fullDesign` — accepted by `Direct.checkDesign` — has **two clock domains**, a
+**mutable** `aw = 5`/`dw = 32` table and a **read-only `memConst` ROM** whose
+table is its actual `contents.size = 3`, a flop with an **enable** and a
+**synchronous** reset on clock 0, a second flop with an **asynchronous** reset
+on clock 1, and a `byte_w = 1` write — PicoRV32's bit-enable shape.
+
+Every antecedent of `mainM_adequate_resolved` is proved for it: `DesignSemWF`
+from `checkDesign_sound`, node admission, arity, `fullG_src` against the
+sources, `fullG_prop` across the write, `fullG_fits` from `full_addr_width`, the
+state's shape, the input/flop bounds, both clock bounds and the flop count.
+**Computational agreement is not instantiation**, and this is the instantiation.
+The ROM gets geometry `none`, so a write to it could not be discharged.
+
+`fullTwoSteps` chains two steps: the second runs on the state the FIRST
+returned, and both agree with `Compiler.interpretDesign` on their own inputs and
+edges.  `flops_size_of_denote` reads the returned flop count off the adequacy
+equation rather than assuming it.
+
+### Executed controls
+
+At address 1 the table holds 2 and the ROM holds 8, so `Op_Xor` gives 10.
+
+| case | observed |
+|---|---|
+| clock A only | output 10, word 1 → 10, flop 0 captures 10, flop 1 holds |
+| both quiet | flops and the image preserved **exactly** |
+| **negative control** | the quiet state **differs** from the active one |
+| async reset, both clocks quiet | flop 1 → 255; flop 0's SYNC reset does **not** fire |
+| **negative control** | with the reset low, flop 1 is **not** 255 |
+| sync reset, clock A firing | flop 0 loads 0 rather than din 10 |
+| zero byte-enable | image **exactly** preserved despite clock A firing |
+| **two steps** | decoded state fed back: reads 10, xors with the ROM's 8, writes 2 |
+
+The ROM's actual contents (8 at address 1) and its DEFAULT above them (0 at
+address 20) are both checked.
+
+### Still owed — the next checkpoint
+
+The checked ADMISSION POLICY: `FullTable`/`StateShapeOK` remain **length only**.
+Word/default/data/mask/address widths, mutable-versus-ROM images, source and
+slot bounds, clock/reset/async metadata and static next-image geometry all need
+a checker, its soundness, and initialization/preservation lemmas, with runtime
+address-fit DERIVED from checked shape and typing.  Until then
+`SourceSupported`, `OpSupported` and `memFree` stay untouched and
+`Op_MemWrite`/`Op_Sub` stay refused.  PicoRV32 remains **BLOCKED**; matrix
+unchanged at **12 YES / 11 NO / 37 BLOCKED**.

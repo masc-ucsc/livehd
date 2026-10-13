@@ -143,7 +143,8 @@ theorem mainM_adequate {D : DesignCert} {i : RuntimeInput} {st : StateM}
         (.call "mainM" [.lit (encDesign D), .lit (encEdges e), .lit (encInput i),
                         .lit (StateM.encStateM st)])
         (StateM.encResultM r)
-      ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st) := by
+      ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ (NextImgGeomOK D G → StateShapeOK D r.nextState) := by
   obtain ⟨ss, hss, hfold⟩ :=
     sourcesThenNodes hwf hsem hstate hGsrc hadm harity hprop hfits
   have hlen : ss.length = D.sources.size + D.nodes.size := hss.len
@@ -165,7 +166,7 @@ theorem mainM_adequate {D : DesignCert} {i : RuntimeInput} {st : StateM}
           , outputs :=
               (D.outputs.toList.map
                  (fun o => bv_resize o.width ((slotValM D i st) o.slot).asBV)).toArray },
-          ?_, ?_⟩
+          ?_, ?_, ?_⟩
   · -- THE OBJECT
     refine SEval_call4 .lit .lit .lit .lit rfl rfl ?_
     refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
@@ -233,6 +234,9 @@ theorem mainM_adequate {D : DesignCert} {i : RuntimeInput} {st : StateM}
     rw [href]
     simp only [StateM.ResultM.denote]
     rw [hns, houts]
+  · -- REACHABLE-STATE PRESERVATION
+    intro hpol
+    exact stepState_shape hss hstate hpol hmnext hmkind _
 
 /-- **The same, through the runtime denotation relation.**  `ResultRelR v r`
 says `v` decodes to a representable witness whose denotation IS the reference
@@ -258,14 +262,61 @@ theorem mainM_resultRel {D : DesignCert} {i : RuntimeInput} {st : StateM}
         (.call "mainM" [.lit (encDesign D), .lit (encEdges e), .lit (encInput i),
                         .lit (StateM.encStateM st)]) v
       ∧ StateM.ResultRelR v (Compiler.interpretDesign D e i (StateM.denote st)) := by
-  obtain ⟨r, hev, hden⟩ :=
+  obtain ⟨r, hev, hden, -⟩ :=
     mainM_adequate hwf hsem hstate hGsrc hadm harity hprop hfits hin hstb hfclk hmclk hfsize
   refine ⟨StateM.encResultM r, hev, ?_⟩
   rw [← hden]
   exact StateM.ResultRelR_encResultM r
 
+/-! ## 4. The resolved entry
+
+`mainM` is the program's ENTRY, at the index `resolveProgram` assigned it.  Both
+are checked by reduction, and `main_ne_mainM` records that this is a different
+function from the memory-free `main` — the resolved theorem below is not the old
+one relabelled. -/
+
+theorem hwMemS_entry : hwMemS.entry = "mainM" := rfl
+
+theorem mainM_id : idOf "mainM" = some 50 := rfl
+
+theorem main_ne_mainM : idOf "main" ≠ idOf "mainM" := by decide
+
+/-- **Whole-cycle adequacy on the RESOLVED program.**  Crossed through the
+production transfer `Surface.SEval_entry`, which resolves the entry and all four
+literal arguments itself; no `resolve` hypothesis is left to the caller. -/
+theorem mainM_adequate_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {e : ClockEdges} {G : Nat → Option Nat}
+    (hwf : DesignCert.DesignCertWF D) (hsem : Direct.DesignSemWF D)
+    (hstate : StateShapeOK D st)
+    (hGsrc : ∀ k, k < D.sources.size → G k = srcGeomOf D k)
+    (hadm : ∀ c ∈ D.nodes.toList, NodeAdmitted c)
+    (harity : ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList)
+    (hprop : ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c →
+               WritePropagates D G j c)
+    (hfits : ∀ c ∈ D.nodes.toList, WriteAddrFits D i st G c)
+    (hin : ∀ sd ∈ D.sources.toList, SourceInputBound sd i.size)
+    (hstb : ∀ sd ∈ D.sources.toList, SourceFlopBound sd st.flops.size)
+    (hfclk : ∀ f ∈ D.flops.toList, f.clock < e.size)
+    (hmclk : ∀ md ∈ D.memories.toList, md.clock < e.size)
+    (hfsize : D.flops.size ≤ st.flops.size) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign D, encEdges e, encInput i, StateM.encStateM st].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ (NextImgGeomOK D G → StateShapeOK D r.nextState) := by
+  obtain ⟨r, hev, hden, hpres⟩ :=
+    mainM_adequate hwf hsem hstate hGsrc hadm harity hprop hfits hin hstb hfclk hmclk hfsize
+  refine ⟨r, ?_, hden, hpres⟩
+  refine SEval_entry hwMemP_resolves ?_
+  simpa [hwMemS_entry] using hev
+
 #print axioms mainM_adequate
 #print axioms mainM_resultRel
+#print axioms mainM_id
+#print axioms main_ne_mainM
+#print axioms mainM_adequate_resolved
 
 #print axioms outputs_scalar
 #print axioms flops_scalar
