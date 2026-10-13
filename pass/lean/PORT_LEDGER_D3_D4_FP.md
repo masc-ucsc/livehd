@@ -11328,13 +11328,24 @@ without reference to a checker and is **reused verbatim**, not duplicated.
 (`mk_bv 4 8`, zero in bit 0); step 2 runs on the state step 1 returned, decoded
 through the codec, with the clock QUIET.
 
-The comparison is complete — length, every word's value, every word's width,
-and the default:
+**What the `refImg` guards beside it are, exactly.**  They are HELPER/IMAGE
+checks: `refImg` is a small local function that applies `MemImg.writeEn` (or
+returns the incoming image when the clock is quiet), and the `#guard`s compare
+its result.  They do **not** execute `interpretDesign`, they do **not** execute
+`mainM`, and they do **not** compare against the state the entry actually
+returned.  An earlier wording here implied otherwise; that is corrected.  They
+are worth keeping because they pin the expected image independently of the
+route, but the **actual execution evidence is elsewhere**: the `runMemSim`
+controls in §63.74 and the five production `cycleCheck` runs, which do run the
+residual and do compare against the returned state.
+
+With that scope stated, the helper comparison is complete over length, every
+word's value, every word's width, and the default:
 
 * enabled: `4` words, `[11,99,33,44]`, widths `[8,8,8,8]`, default `7` at width 8;
-* **quiet clock** on the returned state: the whole ENCODED image comes back identical;
-* **disabled enable with the clock FIRING**: the image comes back identical too
-  — a different reason from the quiet clock, and both hold;
+* **quiet clock**: the whole ENCODED image is the incoming one;
+* **disabled enable with the clock FIRING**: likewise — a different reason, and
+  both hold;
 * the committed image still passes `memImgOKB` and `stateFullOKB`, so the run
   composes.
 
@@ -11376,10 +11387,17 @@ Acceptance run on the five retained certificates: exit **0**,
 ### 6. Still refused in production
 
 `dcert2_memroute` still runs `admitsB`, and plain-write support is still
-REFUSED there.  What remains: the checked specialization — `projectMemDesignAt`
-and `mkMemSimOf` gate on `admitsB` inside their own definitions, so the W route
-needs its own specialization entry before any plain-write design is RUN through
-the production arity-3 checker at its returned bound.
+REFUSED there.  What remains: the checked specialization.
+
+**Correction.**  This paragraph first said `projectMemDesignAt` gates on
+`admitsB` inside its own definition.  It does **not** — it is
+`mixDriver sf wf hwMemAP [encDesign D]` and consults no checker, as §63.74 and
+the code show.  What gates on `admitsB` is the BUNDLE: `mkMemSimAt`,
+`mkMemSimOf` and `MemSimWFAt`, together with the correctness theorems that take
+`admitsB D = true` as a hypothesis.  So the same ungated specializer is reused,
+and only W-specific bundle constructors and correctness proofs are needed
+before a plain-write design is RUN through the production arity-3 checker at
+its returned bound.
 
 ## §63.74 — the checked specialization lands, and the five retained certificates RUN
 
