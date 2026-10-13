@@ -50,16 +50,21 @@ rm -rf "$W/lg"
 # STALENESS GUARD.  `pass/single_edge/BUILD` declares a cc_library, so
 # `bazel build //pass/single_edge:all` does NOT relink lhd.  A run against an
 # lhd older than the pass source measures the OLD gate and proves nothing.
-PASS_SRC="$(cd "$(dirname "$0")/.." && pwd)/pass/single_edge/pass_single_edge.cpp"
-if [ -f "$PASS_SRC" ] && [ "$PASS_SRC" -nt "$LHD" ]; then
+PASS_SRC="$(cd "$(dirname "$0")/../.." && pwd)/pass/single_edge/pass_single_edge.cpp"
+[ -f "$PASS_SRC" ] || fail "staleness guard cannot find $PASS_SRC -- it would otherwise skip silently"
+if [ "$PASS_SRC" -nt "$LHD" ]; then
   fail "$LHD is OLDER than $PASS_SRC -- relink //lhd:lhd before running this test (a cc_library build does not)"
 fi
+echo "ok: $LHD is newer than the pass source (staleness guard armed and passing)"
 
-census() { # <lgdir> -> stdout
-  "$CENSUS" "$1" mem_slot_constant_alias 2>/dev/null \
-    || "$CENSUS" "$1" mem_slot_constant_alias.mem_slot_constant_alias 2>/dev/null
+# The census must SUCCEED.  Tolerating a nonzero exit or partial output would
+# let this test pass on an empty comparison.
+census() { # <lgdir> <out>
+  if "$CENSUS" "$1" mem_slot_constant_alias > "$2" 2>/dev/null; then return 0; fi
+  if "$CENSUS" "$1" mem_slot_constant_alias.mem_slot_constant_alias > "$2" 2>/dev/null; then return 0; fi
+  return 1
 }
-census "$W/lg" > "$W/census_src.tsv" || true
+census "$W/lg" "$W/census_src.tsv" || fail "the census of the SOURCE graph FAILED (nonzero exit)"
 [ -s "$W/census_src.tsv" ] || fail "the census of the SOURCE graph is empty"
 
 # THE FIXTURE MUST REALLY BE THE ONE THIS TEST DESCRIBES.
@@ -112,7 +117,7 @@ grep -q "memory(ies) slotted" "$W/pass.log" \
   || { grep -o "P=[0-9]* slots[^\"]*" "$W/pass.log" | head -1; fail "no memory was slotted -- the fixture exercises nothing"; }
 echo "ok: the fixture lowered, with its memories slotted"
 
-census "$W/lg_norm" > "$W/census_norm.tsv" || true
+census "$W/lg_norm" "$W/census_norm.tsv" || fail "the census of the NORMALIZED graph FAILED (nonzero exit)"
 [ -s "$W/census_norm.tsv" ] || fail "the census of the NORMALIZED graph is empty"
 
 # THE PROPERTY: every Concat lane that was driven by a constant zero keeps the
@@ -129,36 +134,78 @@ for line in open(sys.argv[2]):
     f = line.rstrip('\n').split('\t')
     if f[0] == 'operand':
         got[(f[1], f[2])] = (f[4], f[5], f[6], f[8])
+# THE EXCEPTIONS ARE NAMED, not "anything that disappeared".  This pass rewires
+# exactly two kinds of pin, and nothing else may move:
+#   * a retyped flop's `posclk` (pid 6), which the retype drops by design;
+#   * a memory write port's `enable` sink (pid 4 + port*16), which the gate
+#     replaces with the gated cone.
+# Every OTHER consumer of the shared zero -- scalar logic included -- must still
+# be there, still constant, still ZERO, and still at its original width and
+# signedness.
+STRIDE, ENABLE_BASE, FLOP_POSCLK = 16, 4, 6
+def is_expected_rewrite(op, pid):
+    if op == 'memory' and (int(pid) % STRIDE) == ENABLE_BASE:
+        return True
+    if op == 'flop' and int(pid) == FLOP_POSCLK:
+        return True
+    return False
+
+survivors = 0
 for k, (w, sg, op) in sorted(want.items()):
     g = got.get(k)
-    # A pin that DISAPPEARS is a rewiring, which this pass does by design: it
-    # drops a retyped flop's `posclk` and replaces a memory write port's
-    # `enable` sink.  What must never happen is a pin that REMAINS changing its
-    # declared width or signedness -- that is precisely what restamping the
-    # shared constant does, and what the Concat window check refuses on.
-    if g is None or g[2] != 'constant':
+    if is_expected_rewrite(op, k[1]):
         rewired += 1
         continue
-    if g[0] != w or g[1] != sg:
-        print(f"CHANGED  node {k[0]} ({op}) pid {k[1]}: width {w}->{g[0]} signed {sg}->{g[1]} (value {g[3]})")
+    if g is None:
+        print(f"MISSING  node {k[0]} ({op}) pid {k[1]}: an unrelated constant-zero consumer vanished")
         bad.append(k)
+        continue
+    if g[2] != 'constant':
+        print(f"REWIRED  node {k[0]} ({op}) pid {k[1]}: no longer a constant (now {g[2]}) -- not an allowed rewrite")
+        bad.append(k)
+        continue
+    if g[3] != '0':
+        print(f"VALUE    node {k[0]} ({op}) pid {k[1]}: constant value 0 -> {g[3]}")
+        bad.append(k)
+        continue
+    if g[0] != w or g[1] != sg:
+        print(f"CHANGED  node {k[0]} ({op}) pid {k[1]}: width {w}->{g[0]} signed {sg}->{g[1]}")
+        bad.append(k)
+        continue
+    survivors += 1
 if bad:
-    print(f"{len(bad)} constant-zero operand(s) changed metadata")
+    print(f"{len(bad)} constant-zero operand(s) changed")
     sys.exit(1)
-print(f"all {len(want) - rewired} surviving constant-zero operand(s) kept their width and signedness "
-      f"({rewired} rewired by the pass, as intended)")
+if survivors == 0:
+    print("NO surviving constant-zero consumer was checked -- this test would prove nothing")
+    sys.exit(1)
+print(f"{survivors} surviving constant-zero consumer(s) kept kind, value, width and signedness "
+      f"({rewired} named rewrite(s): memory enable / flop posclk)")
 PYEOF
 [ $? -eq 0 ] || fail "a constant-zero operand changed width or signedness -- the shared pin was restamped"
 echo "ok: every constant-zero operand kept its exact width and signedness"
 
-# NO GENERATION LEG HERE, DELIBERATELY.
+# END TO END.  The generation gate is what refused B03 and B11 at b6b0a5cb6,
+# so it is run here too.
 #
-# Emission succeeding does NOT establish this property -- a lane can fold away,
-# or an unrelated limit can stop the run, and either way the constant metadata
-# would go unchecked.  (This fixture does stop later, at pass.lean's "RAM with
-# initial contents" refusal, which is unrelated to constants.)  The assertion
-# above is the property, checked per surviving operand against the pre-pass
-# census.  B03 and B11 exercise the same property through a Concat window, and
-# their generation gates are run separately.
+# A NOTE ON AN EARLIER MISTAKE: this leg was once removed on the grounds that
+# the fixture hit a "RAM with initial contents" refusal.  That refusal was
+# SELF-INFLICTED -- `we0` was declared [3:0] while the write loop read
+# `we0[i]` for i = 0..15, and those out-of-range selectors introduced X.  The
+# X/Z diagnostic was then misattributed to an uninitialized memory, and the
+# `initial` block added to "fix" it is what produced the initial-contents
+# refusal.  Both are corrected: `we0` is [15:0] and there is no `initial`
+# block, and the generation gate passes.
+rm -rf "$W/lean"
+if ! "$LHD" compile "lg:$W/lg_norm" --top mem_slot_constant_alias \
+      --workdir "$W/lw" --emit-dir "lean:$W/lean" \
+      --set formal.lean.strict=true --set formal.lean.emit_cert=true \
+      --set formal.lean.mode=verified_compiler >"$W/lean.log" 2>&1; then
+  grep -oiE "Concat lane[^\"]*" "$W/lean.log" | head -1
+  grep -oE '"message":"[^"]*"' "$W/lean.log" | tail -1 | cut -c1-200
+  fail "generation from the normalized alias fixture failed"
+fi
+[ -s "$W/lean/mem_slot_constant_alias.dcert" ] || fail "generation reported success but emitted no certificate"
+echo "ok: generation from the normalized graph succeeds and emits a certificate"
 
 echo "PASS: single_edge_memory_constant_alias_test"

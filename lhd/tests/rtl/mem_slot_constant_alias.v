@@ -10,7 +10,7 @@
 module mem_slot_constant_alias(
     input             clk,
     input             sel,
-    input      [3:0]  we0,
+    input      [15:0] we0,
     input      [1:0]  a0,
     input      [15:0] d0,
     input      [26:0] we1,
@@ -23,18 +23,6 @@ module mem_slot_constant_alias(
   reg [15:0] m0 [0:3];
   reg [26:0] m1 [0:3];
   integer    i;
-
-  // Initialized so the strict certificate sees no four-valued logic; this test
-  // is about constant METADATA, not about X propagation.
-  initial begin
-    for (i = 0; i < 4; i = i + 1) begin
-      m0[i] = 16'h0;
-      m1[i] = 27'h0;
-    end
-    q0 = 16'h0;
-    q1 = 27'h0;
-    qn = 1'b0;
-  end
 
   // write-enable width 16 (one lane per bit)
   always @(posedge clk) begin

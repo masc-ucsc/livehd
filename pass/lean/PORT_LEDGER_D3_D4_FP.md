@@ -11808,3 +11808,83 @@ true`, exit 0 — on synthetic zero state and generated input, changing zero
 words.  That is progress, **not whole-row acceptance**.
 
 Counts unchanged: **13 YES / 11 NO / 36 BLOCKED**, FP **3 YES / 9 BLOCKED**.
+
+## §63.78 — the D4 fixtures reused, and three self-inflicted errors corrected
+
+### 1. The RTL fixture was malformed, and my diagnosis of it was wrong
+
+`mem_slot_constant_alias.v` declared `we0` as `[3:0]` while the write loop read
+`we0[i]` for **i = 0..15**.  Those out-of-range selectors introduced X.
+
+The consequences were a chain of wrong conclusions, all withdrawn:
+
+* `alias_v8`'s *"Const node n_12 has X/Z bits"* was attributed to an
+  **uninitialized memory**.  It was not; its exact origin is still not
+  established, but the out-of-range selectors are a sufficient X source and the
+  uninitialized-memory claim is retracted;
+* the `initial` block added to "fix" that is what produced `alias_v9`'s
+  separate *"RAM with initial contents"* refusal;
+* that refusal was then used to **drop the end-to-end generation leg**.  That
+  reasoning is void.
+
+Corrected: `we0` is `[15:0]`, the `initial` block is gone, and **the generation
+leg is restored and passes**, emitting a certificate.  No runtime
+initialization policy was broadened.
+
+### 2. Three harness defects
+
+* **The staleness guard never ran.**  `dirname(lhd/tests/x.sh)/..` is `lhd/`,
+  so the path resolved to `lhd/pass/single_edge/...`, which does not exist, and
+  `[ -f ]` skipped it silently.  Fixed to `../..`, and a missing path is now a
+  FAILURE rather than a skip.  It is also announced when it passes.
+* **The census was tolerated.**  `|| true` plus an emptiness check let a
+  nonzero exit through.  Both censuses must now exit 0.
+* **The comparator was too permissive.**  After node 24 turned out to be a flop
+  whose `posclk` is legitimately dropped, it skipped ANY missing or
+  non-constant operand, allowed zero survivors, and never checked the value.
+  The exceptions are now NAMED and only two: a memory write port's `enable`
+  (pid 4 + port*16) and a retyped flop's `posclk` (pid 6).  Everything else
+  must still be present, still constant, still **zero**, and at its original
+  width and signedness — and **at least one survivor is required**.
+
+Re-verified against the stamping mutant with a source-bound binary and the
+guard armed: exit 1, naming `node 1388 (get_mask) pid 2: width 0->27`.
+
+### 3. The real narrow Concat consumer, from the D4 fixtures
+
+Three successive `.v` rewrites each lost the narrow constant-zero lane to a
+different front-end fold, so "raw unstamped width 0" was standing in for a
+declared narrow window — which it is not.  The pinned **D4 revision
+`f6ad1fe29`** solved this the same way: its `pass_single_edge_test.cpp` builds
+memories directly as LGraphs.
+
+`pass/single_edge/pass_single_edge_test.cpp` now exists on master, adapted to
+master's schema (uniform `type` 0/1; no per-read mask in `type`) and HHDS API
+(`gu::inp_sink_drivers`, since `Node_class::inp_edges` is gone).  Historical
+presence is reuse material, not test credit — every assertion runs against the
+CURRENT pass.  Four controls, all passing:
+
+| test | what it pins |
+|---|---|
+| `NarrowConcatLaneOfTheSharedZeroIsUntouched` | a **5-bit Concat window** fed by the canonical zero keeps its driver's kind, value, width and signedness, and the window is unaltered |
+| `ActiveStepKeepsTheWholeEnableVector` | the gated enable is the ORIGINAL vector ANDed with the mask at full `wensize`, so every high lane survives |
+| `QuietStepMaskIsAWidthCorrectSignExtension` | the mask is a `Sext` of a ONE-BIT predicate at `wensize`, so a quiet step zeroes every lane, with no wide constant |
+| `AbsentEnableWritesEveryLaneOnTheActiveStep` | an absent enable lowers to the mask itself at full width — the native all-lanes contract |
+
+**Discrimination proved**: under the stamping mutant the Concat test fails with
+exactly the B03/B11 shape — *"the narrow Concat lane's driver is now WIDER than
+its 5-bit window … actual: 16 vs 5"*.
+
+### 4. Scope and what remains
+
+Counts unchanged: **13 YES / 11 NO / 36 BLOCKED**, FP **3 YES / 9 BLOCKED**.
+B11's four-cycle run keeps **only its recorded scope** — synthetic zero state,
+generated input, zero words changed — and was not repeated.
+
+Still outstanding, in order: B11's **initialized-transition acceptance** from a
+source-derived validated stimulus with decoded-state reuse, complete reference
+comparison and quiet/disabled preservation; then B03's **forwarding matrix**,
+reusing native `Dlop.bit_test(r*n_wr+w)` per read/write pair across
+`graph_access`, `DesignScan` and lowering, preserving write priority and the
+unknown/undef refusals rather than deleting the guard around the i64 shift or
+adopting the FP pin's global `fwd==1` shortcut.
