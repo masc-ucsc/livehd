@@ -8681,3 +8681,65 @@ host-created source slots.  Public support stays refused:
 `SourceSupported`, `OpSupported` and `memFree` are untouched and
 `Op_MemWrite`/`Op_Sub` remain refused.  PicoRV32 stays **BLOCKED**; matrix
 unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.38 — Mixed-environment outputs and flops, and generic `mainM` adequacy
+
+Two new modules, both `PRODUCER_EXIT=0`, 0 errors, no unsafe axioms:
+`HardwareMemOutFlop.lean` (228 lines) and `HardwareMemMain.lean` (244 lines).
+
+### Outputs and flops, localized
+
+`Hw.mkOutputs_agree` and the flop family take the GLOBAL `SlotVals`, which
+§63.33 proved unsatisfiable wherever an `encMemImg` is present.  All five —
+`mkOutputs_agreeOn`, `rstActive_agreeOn`, `capture_agreeOn`, `flopNext_agreeOn`,
+`flopNexts_agreeOn` — are mirrored with the local `SlotHere`, exactly as the 27
+operator lemmas were.  `SlotVals` is unchanged and every original theorem keeps
+its meaning; each mirrored proof is the original with the slot read localized,
+so **no scalar behaviour is restated**: active/quiet clocks, the flop ENABLE,
+SYNCHRONOUS reset, ASYNCHRONOUS reset with its polarity and the old-state hold
+are the same code running.
+
+### The premises are the checker's
+
+`outputs_scalar` and `flops_scalar` derive `SlotHere` at exactly the slots these
+lemmas read, from `Direct.DesignSemWF.outputKinds` and `flopKinds` together with
+`DesignCertWF.slotsInRange` — not from assumptions.
+
+### The array bridge
+
+`memNextsOf_denote_array` lifts the pointwise `srcMemNext` lemmas to the
+COMPLETE `RuntimeState` memory array: same length, same `Int → BV` function at
+every index.  That is the length/index bridge the pointwise lemmas needed.
+
+### `mainM_adequate`
+
+```
+∃ r, SEval hwMemS [] (.call "mainM" [encDesign D, encEdges e, encInput i, encStateM st]) (encResultM r)
+   ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+```
+
+`mkSourcesM`, the corrected node fold, `mkOutputs`, `flopNexts` and `memNexts`
+are composed into one cycle.  **The node fold's evaluation witness is retained
+and used** — the environment `mainM` hands to the output, flop and memory stages
+is the one `evalNodesM` actually produced, not one assumed to exist.  §63.37's
+`twoMem_commit` discarded that witness; this does not.
+
+`mainM_resultRel` restates it through `StateM.ResultRelR`, i.e. the object's
+value decodes to a representable witness whose denotation **is** the reference
+`RuntimeResult`.
+
+No host interpreter is called as the implementation, and nothing stops at a
+helper-only fixture: the statement is about `hwMemS`'s own `mainM`.
+
+### Still owed
+
+The whole-`mainM` fixture instantiation — decoding the returned state and
+feeding it to a SECOND step, with a negative control that detects a
+quiet-domain commit or lost reset.  `FullTable`/`StateShapeOK` still describe
+length only; word/default/data/mask/address/ROM and next-image geometry
+checking, its soundness and reachable-state preservation all remain before
+public support can broaden.  `SourceSupported`, `OpSupported` and `memFree` are
+untouched; `Op_MemWrite`/`Op_Sub` still refused.  PicoRV32 stays **BLOCKED**;
+matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
