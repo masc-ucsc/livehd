@@ -10220,3 +10220,60 @@ is under way; **no claim of meaningful initialized memory transitions is made
 for Pico unless and until one is observed.**
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.60 — the reset pulse: the core starts executing
+
+Fourth Pico run, fresh certificate, supplied image, 20 cycles, with `resetn`
+held LOW for cycles 0-1 by the new `at` overrides:
+
+```
+stimulus: 8 constant(s), 2 per-cycle override(s), 1 reactive
+step outcomes: ok × 20
+reference comparison: COMPLETE (array length, every table word, default and out-of-range)
+distinct output vectors 12 of 20; distinct flop vectors 13 of 20
+memory 0: 0 word(s) differ from the initial image
+final returned-state policy: stateFullOKB true
+ms: support 87  specialize 650044  check 2548  execute 3560724
+```
+
+producer exit 0, peak RSS 7,006,000 KiB.
+
+**The diagnosis was right.**  Distinct output vectors go from **2 of 24** to
+**12 of 20**: with a reset pulse the core leaves its two-state loop and the
+fetch address advances.  That is the behavioural difference a constant
+stimulus could not produce, and it came from the stimulus, not from any change
+to the route.
+
+**And the register file still has not committed in 20 cycles.**  Reported as
+it stands.  Fetching is not retiring: each memory transaction takes at least
+two cycles under the one-cycle-lagged `mem_ready` this stimulus supplies, so
+twenty cycles buys fewer instructions than it looks like.
+
+### A cheaper way to ask the question
+
+`scripts/pico_stim_probe.lean` — the same stimulus against
+`Compiler.interpretDesign` ALONE.  A driver cycle costs ~168 s because it
+evaluates a 4.67-million-term residual *and* the reference; the question "does
+this stimulus ever make the register file commit, and at which cycle" is a
+question about the reference only.  The probe reports the first committing
+cycle and the `mem_addr` trace, so a stimulus is validated BEFORE an hour of
+specialization is spent on it.
+
+It is a diagnostic and says so in its own header: reference only, no
+specialization, no residual, **no readiness credit**.  The driver remains the
+thing that executes the projection.
+
+### Accounting, updated
+
+| run | cycles | stimulus | distinct outputs | memory |
+|---|---|---|---|---|
+| §63.55 | 6 | generated | 3 of 6 | 0 words |
+| §63.57 | 12 | constant supplied | 2 of 12 | 0 words |
+| §63.59 | 24 | + reactive handshake | 2 of 24 | 0 words |
+| §63.60 | 20 | + reset pulse | **12 of 20** | 0 words |
+
+Four runs, all producer exit 0, all COMPLETE reference comparison, none moving
+the memory.  The route is not in question in any of them.  **No claim of
+meaningful initialized memory transitions is made for Pico.**
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
