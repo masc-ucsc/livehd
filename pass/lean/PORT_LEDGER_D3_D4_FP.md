@@ -10671,3 +10671,86 @@ statement about arbitrary unsigned inputs, and §63.66's "inert where the native
 path says no extension is needed" overstates it.
 
 Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.68 — the signed-mask translation adapter, reusing the existing widening
+
+### Reused, not invented
+
+The rule comes from the implementations, in both pins:
+
+* OLD `inou/cgen/cgen_sim.cpp` 1253-1298: the `mask == -1` to-positive idiom
+  reads UNSIGNED and **stays zero-extending**; a non-negative finite mask takes
+  the zero-extending fast path only when `in_width || is_unsign(driver)`.
+* OLD 1346-1374: otherwise the slow path sets `val_sign = 0` — a SIGNED read —
+  for a finite mask reaching past the value width, with `mask == -1` excepted.
+* MASTER ~2677-2718: the same rule in the endpoint representation, and it names
+  the carrier: `read_cw = max(me, wbits_of(driver), 1)`.
+
+The shared old/master `GetMask` semantics are identical and are PRESERVED.
+Nothing in `bv_get_mask`, SHL, SRA or Sext changes.
+
+### The adapter
+
+`pass/lean/design_scan.cpp`, at the `Get_mask` scan site: when the window's HIGH
+ENDPOINT exceeds a **signed, non-constant** source's width, widen that source
+with `ScanOp::Sext` to the endpoint before the mask — the SAME idiom this file
+already applies to a signed Concat lane (≈197) and a signed Hotmux arm (≈274),
+with the same `!is_unsign` guard and the same `natural_operand(width)` amount.
+
+`Set_mask` is untouched (this is the value-READ rule), constants are untouched
+(their value carries their sign), unsigned sources are untouched, and the
+synthesized mask on this path is always a finite window from `bit_range`, so
+the `mask == -1` idiom cannot arise here.
+
+**The target is the endpoint, not the result width** — and on the real
+certificate that distinction is not academic:
+
+| | |
+|---|---|
+| `Get_mask` nodes given a `Sext` operand | **63** |
+| …whose window is SHIFTED (`lo > 0`) | **62** |
+| …whose extension width DIFFERS from the node's result width | **62** |
+
+e.g. emitted node 2201 has **result width 1** and window **[17,18)**: extending
+to the result width would have put the sign nowhere near bit 17.
+
+### Controls, on ACTUALLY EMITTED certificates
+
+Re-emitted from the matched `s2_single_edge` LGraph with the adapter build
+(exit 0, 0.72 s, 74,552 KiB); certificate `ba5aee83…`, 71,703 B.  The enable
+cone is evaluated by parsing the real `.dcert` and forcing only the `MuxBool`
+selector — every other width, constant and operator is read from the file:
+
+| certificate | selector on | selector off |
+|---|---|---|
+| retained `vc_opt` | `1` | — |
+| fresh pre-adapter `ef77dfab` | `1` | `0` |
+| **with adapter `ba5aee83`** | **`4294967295`** | **`0`** |
+
+That is the gate this run was required to clear before any whole-Pico attempt.
+The cone evaluator OVERRIDES the selector rather than observing it, so it says
+what the enable WOULD be at that value and asserts nothing about reachability.
+
+Selectivity: `Op_GetMask` count is **unchanged at 180**, `Op_Sext` goes 213 →
+276, so the adapter fired on 63 of 180 and left 117 alone.
+
+Existing immutable controls, run UNCHANGED on the new artifact:
+
+* `pass/lean/tests/legacy_semantic_audit/MaskEndpointPort.lean` — exit 0, no errors;
+* `pass/lean/tests/d4/getmask_const_width_regress.sh` — `ALL CONTROLS PASS`,
+  180 `Op_GetMask` nodes checked, 0 violations, and the planted pre-fix shape
+  still rejected by both gates.
+
+### Provenance limit, recorded
+
+The signedness observation (`origin 1284` a signed one-bit mux, `origin 21124`
+an unsigned 32-bit `Get_mask`) came from read-only queries against the
+normalized graph, and the emission recipe runs further passes after
+`s2_single_edge` whose final graph is not separately retained — `work/` holds
+logs only.  So that part is PRE-RECIPE origin matching, not final-graph
+provenance.  What IS final-artifact evidence is everything above: the adapter's
+effect is measured on the emitted certificate itself.  This limit is recorded
+rather than closed, and it is not turned into an old-Pico rebuild prerequisite.
+
+The original certificates and their records are retained separately and
+untouched.  Matrix stays **12 YES / 11 NO / 37 BLOCKED**.

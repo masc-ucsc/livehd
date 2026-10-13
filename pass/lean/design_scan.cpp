@@ -937,9 +937,58 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
                 mask.width               = std::max(static_cast<uint32_t>(range->second), mask.intrinsic_width);
                 mask.minimum_shift_width = minimal_unsigned_const_width(value);
                 mask.value               = value.is_just_i64() ? std::to_string(value.to_just_i64()) : value.to_decimal_string();
+                auto a_pin = capture_pin(ctx, a);
+                // A SIGNED source under an OUT-OF-WIDTH window.
+                //
+                // The native lowering reads such a value at a carrier wide
+                // enough to hold the window -- `read_cw = max(me, width(src))`
+                // in inou/cgen/cgen_sim.cpp -- precisely so a SIGNED read
+                // replicates the sign into the positions the window selects
+                // above the source. The old implementation does the same thing
+                // by the other route: its finite-mask arm falls off the
+                // zero-extending fast path when `me > wbits` on a signed value
+                // and takes the slow path with `val_sign = 0`, a signed read.
+                //
+                // `PinRef` carries a width and NO signedness, so neither test is
+                // expressible downstream and the sign has to be made explicit
+                // here -- with the SAME `Sext` idiom this file already applies
+                // to a signed Concat lane and a signed Hotmux arm.
+                //
+                // THE TARGET IS THE WINDOW'S HIGH ENDPOINT, not the node's
+                // result width: a shifted window selects bits up to `me`, and
+                // the result width says nothing about how far the sign must
+                // reach.
+                //
+                // Unsigned sources are untouched: the positions above an
+                // unsigned value are zero, which the existing zero-extending
+                // read already reproduces, and the native code says so.
+                // Constants are untouched: their value carries their own sign.
+                // `Set_mask` is untouched: this is the value-READ rule.
+                //
+                // The mask here is always a FINITE window synthesized from
+                // `bit_range`, so the old `mask == -1` to-positive idiom -- which
+                // stays zero-extending -- cannot arise on this path.
+                if (n.op == ScanOp::GetMask && a_pin.kind != PinKind::Constant
+                    && a_pin.width < static_cast<uint32_t>(range->second)
+                    && !livehd::graph_util::is_unsign(a)) {
+                  if (next_lowered_id >= 1000000000) {
+                    fatal(ctx, "Get_mask sign widening exhausted the graph-node ID range");
+                  }
+                  check_width(ctx, node, a_pin.width, "Get_mask signed source");
+                  const auto target = static_cast<uint32_t>(range->second);
+                  PinRef     ext;
+                  ext.id    = static_cast<uint32_t>(next_lowered_id++);
+                  ext.width = target;
+                  design.nodes.push_back({ext.id,
+                                          ScanOp::Sext,
+                                          target,
+                                          false,
+                                          {{0, 0, a_pin}, {1, 1, natural_operand(a_pin.width)}}});
+                  a_pin = ext;
+                }
                 // Get_mask/Set_mask are unbanked, so bank == port on each slot.
                 n.operands               = {
-                    {0, 0, capture_pin(ctx, a)},
+                    {0, 0, std::move(a_pin)},
                     {1, 1, std::move(mask)}
                 };
                 if (n.op == ScanOp::SetMask) {
