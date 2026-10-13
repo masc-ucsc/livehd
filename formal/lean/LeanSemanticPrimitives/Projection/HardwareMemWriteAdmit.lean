@@ -103,24 +103,28 @@ theorem nodeTyW_admits {ty : Nat → Option SlotTy} {c : DenseNodeCert} {t : Slo
   · rw [nodeTyW_eq_of_ne hop] at h
     exact NodeAdmitted_toW (nodeTy_admits h)
 
+/-- The plain write's body only ever answers a TABLE. -/
+theorem nodeTyWBody_result {ty : Nat → Option SlotTy} {c : DenseNodeCert} {t : SlotTy}
+    (h : nodeTyWBody ty c = some t) : ∃ aw dw, t = .tbl aw dw := by
+  unfold nodeTyWBody at h
+  split at h
+  · split at h
+    · split at h
+      · split at h
+        · rename_i aw' dw' _ _
+          exact ⟨aw', dw', (Option.some.inj h).symm⟩
+        · simp at h
+      · simp at h
+    · simp at h
+  · simp at h
+
 /-- The result shape, for the extended typing. -/
 theorem nodeTyW_result {ty : Nat → Option SlotTy} {c : DenseNodeCert} {t : SlotTy}
     (h : nodeTyW ty c = some t) : t = .bv c.width ∨ ∃ aw dw, t = .tbl aw dw := by
   by_cases hop : c.op = .Op_MemWrite
-  · -- the plain write types a table
-    rw [nodeTyW_memWrite hop] at h
-    unfold nodeTyWBody at h
-    split at h
-    · rename_i tm ta td ten _
-      split at h
-      · split at h
-        · split at h
-          · rename_i aw' dw' _ _
-            exact Or.inr ⟨aw', dw', (Option.some.inj h).symm⟩
-          · simp at h
-        · simp at h
-      · simp at h
-    · simp at h
+  · rw [nodeTyW_memWrite hop] at h
+    obtain ⟨aw, dw, ht⟩ := nodeTyWBody_result h
+    exact Or.inr ⟨aw, dw, ht⟩
   · rw [nodeTyW_eq_of_ne hop] at h
     exact nodeTy_result h
 
@@ -136,23 +140,11 @@ theorem.  This is what lets the extended route keep `NodeAdmitted_ne_memWrite`
 untouched: the scalar-width agreement never needed the exclusion, only the
 fact that a write types a table. -/
 theorem nodeTyW_bv_ne_memWrite {ty : Nat → Option SlotTy} {c : DenseNodeCert}
-    {w d0 d1 d2 d3 : Nat} (hdeps : c.deps.toList = [d0, d1, d2, d3])
-    (h : nodeTyW ty c = some (.bv w)) : c.op ≠ .Op_MemWrite := by
+    {w : Nat} (h : nodeTyW ty c = some (.bv w)) : c.op ≠ .Op_MemWrite := by
   intro hop
-  rcases nodeTyW_result h with h' | ⟨aw, dw, h'⟩
-  · -- a plain write's body only ever answers `.tbl` or `none`
-    rw [nodeTyW_memWrite hop] at h
-    unfold nodeTyWBody at h
-    rw [hdeps] at h
-    simp only [List.map_cons, List.map_nil] at h
-    split at h
-    · split at h
-      · split at h
-        · simp at h
-        · simp at h
-      · simp at h
-    · simp at h
-  · simp at h'
+  rw [nodeTyW_memWrite hop] at h
+  obtain ⟨aw, dw, ht⟩ := nodeTyWBody_result h
+  simp at ht
 
 /-- The plain write's geometry, read off a successful typing.  The ENABLE is
 deliberately absent from the conclusion: there is no width relation to report,
@@ -625,6 +617,387 @@ theorem node_stepW {D : DesignCert} {i : RuntimeInput} {st : StateM}
   · exact node_step hwf hsem hc hj hadm harity hprop.1 hfits.1 hpre
   · exact node_step_memWrite hwf hsem hc hj hop hprop.2 hfits.2 hpre
 
+/-! ## 3f. Soundness of the extended walk, and the static premises
+
+The same recurrence `HardwareMemAdmit` proves for `nodeTy`/`inferStep`, for
+`nodeTyW`/`inferStepW`.  None of it looks inside the typing, so the plain write
+rides along; what differs is only that the conclusions name `NodeAdmittedW`,
+`WritePropagatesW` and `WriteAddrFitsW`. -/
+
+theorem nodeTyW_congr {ty ty' : Nat → Option SlotTy} {c : DenseNodeCert}
+    (h : ∀ d ∈ c.deps.toList, ty d = ty' d) : nodeTyW ty c = nodeTyW ty' c := by
+  unfold nodeTyW nodeTyWBody
+  rw [List.map_congr_left h, nodeTy_congr h]
+
+theorem inferStepW_size {ts ts' : Array SlotTy} {c : DenseNodeCert}
+    (h : inferStepW ts c = some ts') : ts'.size = ts.size + 1 := by
+  unfold inferStepW at h
+  cases hn : nodeTyW (fun d => ts[d]?) c with
+  | none   => rw [hn] at h; simp at h
+  | some t =>
+      rw [hn] at h
+      simp only [Option.map_some, Option.some.injEq] at h
+      subst h; simp
+
+theorem infer_foldlW_size :
+    ∀ (ns : List DenseNodeCert) (init ts : Array SlotTy),
+      ns.foldl (fun acc c => acc.bind (fun t => inferStepW t c)) (some init) = some ts →
+      ts.size = init.size + ns.length
+  | [],      init, ts, h => by
+      simp only [List.foldl_nil, Option.some.injEq] at h; subst h; simp
+  | c :: cs, init, ts, h => by
+      simp only [List.foldl_cons, Option.bind_some] at h
+      cases hs : inferStepW init c with
+      | none   => rw [hs, infer_foldlW_none] at h; simp at h
+      | some t =>
+          rw [hs] at h
+          have hsz := inferStepW_size hs
+          rw [infer_foldlW_size cs t ts h, hsz, List.length_cons]
+          omega
+
+theorem infer_foldlW_node :
+    ∀ (ns : List DenseNodeCert) (init ts : Array SlotTy),
+      ns.foldl (fun acc c => acc.bind (fun t => inferStepW t c)) (some init) = some ts →
+      ∀ (j : Nat) (c : DenseNodeCert), ns[j]? = some c →
+        (∀ d ∈ c.deps.toList, d < init.size + j) →
+        nodeTyW (fun d => ts[d]?) c = ts[init.size + j]?
+  | [],       _,    _,  _, j, _, hj, _ => by simp at hj
+  | c0 :: cs, init, ts, h, j, c, hj, hb => by
+      simp only [List.foldl_cons, Option.bind_some] at h
+      cases hs : inferStepW init c0 with
+      | none   => rw [hs, infer_foldlW_none] at h; simp at h
+      | some t =>
+          rw [hs] at h
+          have hsz := inferStepW_size hs
+          have hpre := infer_foldlW_prefix cs t ts h
+          cases j with
+          | zero =>
+              have hc0 : c0 = c := by simpa using hj
+              subst hc0
+              have hx : nodeTyW (fun d => init[d]?) c0 = t[init.size]? := by
+                unfold inferStepW at hs
+                cases hn : nodeTyW (fun d => init[d]?) c0 with
+                | none   => rw [hn] at hs; simp at hs
+                | some x =>
+                    rw [hn] at hs
+                    simp only [Option.map_some, Option.some.injEq] at hs
+                    subst hs
+                    simp
+              have hcong : nodeTyW (fun d => ts[d]?) c0 = nodeTyW (fun d => init[d]?) c0 := by
+                refine nodeTyW_congr ?_
+                intro d hd
+                have hdlt : d < init.size := by simpa using hb d hd
+                rw [hpre d (by omega), (inferStepW_prefix hs).2 d hdlt]
+              rw [hcong, hx, Nat.add_zero]
+              exact (hpre init.size (by omega)).symm
+          | succ q =>
+              have hq : cs[q]? = some c := by simpa using hj
+              have hb' : ∀ d ∈ c.deps.toList, d < t.size + q := by
+                intro d hd
+                have := hb d hd
+                omega
+              have := infer_foldlW_node cs t ts h q c hq hb'
+              rw [this]
+              congr 1
+              omega
+
+theorem admits_node_tyW {D : DesignCert} {ts : Array SlotTy}
+    (hts : inferTysW D = some ts) (hwf : DesignCert.DesignCertWF D)
+    {j : Nat} {c : DenseNodeCert} (hc : D.nodes[j]? = some c) :
+    nodeTyW (fun d => ts[d]?) c = ts[D.sources.size + j]? := by
+  have hlist : D.nodes.toList[j]? = some c := by rw [← hc]; simp
+  have hb : ∀ d ∈ c.deps.toList, d < (D.sources.map srcTy).size + j := by
+    intro d hd
+    simpa using hwf.depsBounded j c hc d hd
+  simpa using infer_foldlW_node D.nodes.toList _ ts hts j c hlist hb
+
+theorem admitsWB_size {D : DesignCert} {ts : Array SlotTy}
+    (h : admitsWB D = true) (hts : inferTysW D = some ts) : ts.size = D.numSlots := by
+  unfold admitsWB at h
+  rw [hts] at h
+  simp only [tysOK, Bool.and_eq_true, beq_iff_eq] at h
+  exact h.2.1
+
+/-! ### The static premises, from one Boolean check
+
+`DesignSemWF` and `DesignCertWF` come from `Direct.acceptsDesign`, which the
+extended checker demands exactly as the original does, so those two are the
+original proofs applied to the extended hypothesis. -/
+
+theorem admitsW_semwf {D : DesignCert} (h : admitsWB D = true) : Direct.DesignSemWF D := by
+  have hacc := admitsWB_acceptsDesign h
+  cases hd : Direct.designErrors D with
+  | none =>
+      exact Direct.checkDesign_sound (u := ()) (by unfold Direct.checkDesign; rw [hd])
+  | some e =>
+      exfalso
+      unfold Direct.acceptsDesign at hacc
+      rw [hd] at hacc
+      simp at hacc
+
+theorem admitsW_wf {D : DesignCert} (h : admitsWB D = true) : DesignCert.DesignCertWF D :=
+  designCertWF_of_semwf (admitsW_semwf h)
+
+theorem admitsW_geom_src {D : DesignCert} (h : admitsWB D = true) :
+    ∀ k, k < D.sources.size → geomAtW D k = srcGeomOf D k := by
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  intro k hk
+  unfold geomAtW srcGeomOf
+  rw [tyAtW_source hk hts, Array.getElem?_eq_getElem hk]
+  cases D.sources[k]'hk <;> rfl
+
+theorem admitsW_nextImgGeom {D : DesignCert} (h : admitsWB D = true) :
+    NextImgGeomOK D (geomAtW D) := by
+  intro idx md hmd
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  have hmem : md ∈ D.memories.toList := by
+    obtain ⟨h1, h2⟩ := List.getElem?_eq_some_iff.mp
+      (show D.memories.toList[idx]? = some md by rw [← hmd]; simp)
+    exact h2 ▸ List.getElem_mem h1
+  unfold admitsWB at h
+  rw [hts] at h
+  simp only [tysOK, Bool.and_eq_true] at h
+  have hthis := List.all_eq_true.mp h.2.2 md hmem
+  unfold geomAtW tyAtW
+  rw [hts]
+  simp only [Option.bind_some]
+  cases hty : ts[md.nextImg]? with
+  | none => rw [hty] at hthis; simp at hthis
+  | some t =>
+      cases t with
+      | bv w     => rw [hty] at hthis; simp at hthis
+      | rom dw n => rw [hty] at hthis; simp at hthis
+      | tbl aw dw =>
+          rw [hty] at hthis
+          simp only [Bool.and_eq_true, beq_iff_eq] at hthis
+          rw [hthis.1]
+
+/-- **Every node of an extended-admitted design is admitted by the EXTENDED
+predicate.**  Note what this does NOT say: it does not say `NodeAdmitted`, and
+the original theorem continues to say that for the original checker. -/
+theorem admitsW_nodeAdmitted {D : DesignCert} (h : admitsWB D = true) :
+    ∀ c ∈ D.nodes.toList, NodeAdmittedW c := by
+  intro c hc
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  obtain ⟨j, hj⟩ := array_mem_getElem? hc
+  have hjlt : j < D.nodes.size := Direct.lt_of_getElem?_some hj
+  have hlt : D.sources.size + j < ts.size := by
+    rw [admitsWB_size h hts]; unfold DesignCert.numSlots; omega
+  have hty := admits_node_tyW hts (admitsW_wf h) hj
+  rw [Array.getElem?_eq_getElem hlt] at hty
+  exact nodeTyW_admits hty
+
+theorem admitsW_arity {D : DesignCert} (h : admitsWB D = true) :
+    ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList := by
+  intro c hc
+  obtain ⟨j, hj⟩ := array_mem_getElem? hc
+  have hsh := opArity_of_semwf (admitsW_semwf h) hj
+  refine arityOK_of_opArity ?_
+  simpa using hsh
+
+/-- Both writes propagate their image's geometry to their output slot.  The
+byte-enabled half is the original obligation, unchanged. -/
+theorem admitsW_writePropagates {D : DesignCert} (h : admitsWB D = true) :
+    ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c →
+      WritePropagatesW D (geomAtW D) j c := by
+  intro j c hc
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  have hsem := admitsW_semwf h
+  have hjlt : j < D.nodes.size := Direct.lt_of_getElem?_some hc
+  have hlt : D.sources.size + j < ts.size := by
+    rw [admitsWB_size h hts]; unfold DesignCert.numSlots; omega
+  have hty := admits_node_tyW hts (admitsW_wf h) hc
+  rw [Array.getElem?_eq_getElem hlt] at hty
+  constructor
+  · -- the ORIGINAL byte-enabled obligation
+    intro bw hop d0 hd0
+    obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWriteBE_deps hsem hc hop
+    have hne : c.op ≠ .Op_MemWrite := by rw [hop]; simp
+    rw [nodeTyW_eq_of_ne hne] at hty
+    obtain ⟨aw, dw, wa, hres, hop0, -, -⟩ := nodeTy_write_geom hop hdeps hty
+    have he0 : e0 = d0 := by
+      have : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
+      rw [this] at hd0
+      exact (Option.some.inj hd0)
+    subst he0
+    unfold geomAtW tyAtW
+    rw [hts]
+    simp only [Option.bind_some]
+    rw [hop0, Array.getElem?_eq_getElem hlt, hres]
+  · -- the PLAIN write's own obligation
+    intro hop d0 hd0
+    obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWrite_deps hsem hc hop
+    obtain ⟨aw, dw, wa, hres, hop0, -, -, -, -⟩ := nodeTyW_write_geom hop hdeps hty
+    have he0 : e0 = d0 := by
+      have : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
+      rw [this] at hd0
+      exact (Option.some.inj hd0)
+    subst he0
+    unfold geomAtW tyAtW
+    rw [hts]
+    simp only [Option.bind_some]
+    rw [hop0, Array.getElem?_eq_getElem hlt, hres]
+
+/-! ## 3g. The runtime width agreement, the derived write-fit, and the entry
+
+The same two steps the byte-enabled route takes: a `.bv` typing means a
+reference value of that width, and from that the ENABLED write's address fits
+the table it updates.  Nothing is assigned by hand. -/
+
+theorem admits_slot_widthW {D : DesignCert} (h : admitsWB D = true)
+    (i : RuntimeInput) (st : StateM) :
+    ∀ (k w : Nat), k < D.numSlots → tyAtW D k = some (.bv w) →
+      (slotValM D i st k).asBV.width = w := by
+  intro k w hk hty
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  by_cases hs : k < D.sources.size
+  · rw [tyAtW_source hs hts] at hty
+    rw [slotValM_source hs]
+    exact srcTy_bv_width (Option.some.inj hty) i _
+  · have hj : k - D.sources.size < D.nodes.size := by
+      unfold DesignCert.numSlots at hk; omega
+    have hk' : k = D.sources.size + (k - D.sources.size) := by omega
+    obtain ⟨c, hc⟩ : ∃ c, D.nodes[k - D.sources.size]? = some c :=
+      ⟨D.nodes[k - D.sources.size], by rw [Array.getElem?_eq_getElem hj]⟩
+    have hlt : D.sources.size + (k - D.sources.size) < ts.size := by
+      rw [admitsWB_size h hts]; unfold DesignCert.numSlots; omega
+    have hnode := admits_node_tyW hts (admitsW_wf h) hc
+    rw [Array.getElem?_eq_getElem hlt] at hnode
+    have htyk : tyAtW D (D.sources.size + (k - D.sources.size)) = some (.bv w) := by
+      rw [← hk']; exact hty
+    unfold tyAtW at htyk
+    rw [hts] at htyk
+    simp only [Option.bind_some] at htyk
+    rw [Array.getElem?_eq_getElem hlt] at htyk
+    have hres : nodeTyW (fun d => ts[d]?) c = some (.bv w) := by
+      rw [hnode]; exact htyk
+    have hw : w = c.width := nodeTyW_bv_width hres
+    -- BOTH writes are excluded by the TYPING, not by an exclusion theorem:
+    -- each answers a table, and `.bv` is not a table.
+    have hne1 : c.op ≠ .Op_MemWrite := nodeTyW_bv_ne_memWrite hres
+    have hne2 : ∀ bw, c.op ≠ .Op_MemWriteBE bw := by
+      intro bw hbw
+      rw [nodeTyW_eq_of_ne hne1] at hres
+      obtain ⟨d0, d1, d2, d3, hdeps⟩ := memWriteBE_deps (admitsW_semwf h) hc hbw
+      obtain ⟨aw', dw', wa', hr, -, -, -⟩ := nodeTy_write_geom hbw hdeps hres
+      simp at hr
+    rw [hk', ← nodeValM_rec (i := i) (st := st) (admitsW_wf h) hj hc, hw]
+    exact eval_op_cert_width_nonMem c.op c.width _ hne1 hne2
+
+theorem admits_writeAddrFitsW {D : DesignCert} (h : admitsWB D = true)
+    (i : RuntimeInput) (st : StateM) :
+    ∀ c ∈ D.nodes.toList, WriteAddrFitsW D i st (geomAtW D) c := by
+  intro c hc
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  obtain ⟨j, hj⟩ := array_mem_getElem? hc
+  have hsem := admitsW_semwf h
+  have hjlt : j < D.nodes.size := Direct.lt_of_getElem?_some hj
+  have hlt : D.sources.size + j < ts.size := by
+    rw [admitsWB_size h hts]; unfold DesignCert.numSlots; omega
+  have hty := admits_node_tyW hts (admitsW_wf h) hj
+  rw [Array.getElem?_eq_getElem hlt] at hty
+  -- one shared tail: the address slot's width, from the checker's own typing
+  have tail : ∀ (e0 e1 : Nat) (aw wa : Nat),
+      c.deps.toList.length = 4 → e1 ∈ c.deps.toList →
+      ts[D.sources.size + j]? = some (.tbl aw wa) →
+      (fun d => ts[d]?) e0 = some (.tbl aw wa) →
+      (fun d => ts[d]?) e1 = some (.bv wa) → True := fun _ _ _ _ _ _ _ _ _ => trivial
+  constructor
+  · -- the ORIGINAL byte-enabled obligation
+    intro bw hop d0 d1 d3 hd0 hd1 hd3 _hen
+    obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWriteBE_deps hsem hj hop
+    have hne : c.op ≠ .Op_MemWrite := by rw [hop]; simp
+    rw [nodeTyW_eq_of_ne hne] at hty
+    obtain ⟨aw, dw, wa, hres, hop0, hop1, hwle⟩ := nodeTy_write_geom hop hdeps hty
+    have he0 : e0 = d0 := by
+      have hx : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
+      rw [hx] at hd0; exact Option.some.inj hd0
+    have he1 : e1 = d1 := by
+      have hx : c.deps[1]? = some e1 := by rw [deps_get c hdeps 1]; rfl
+      rw [hx] at hd1; exact Option.some.inj hd1
+    subst he0; subst he1
+    refine ⟨aw, ?_, ?_⟩
+    · unfold geomAtW tyAtW
+      rw [hts]
+      simp only [Option.bind_some]
+      rw [hop0]
+    · have hmem1 : e1 ∈ c.deps.toList := by rw [hdeps]; simp
+      have hd1lt : e1 < D.numSlots := by
+        have hb := (admitsW_wf h).depsBounded j c hj e1 hmem1
+        unfold DesignCert.numSlots; omega
+      have hty1 : tyAtW D e1 = some (.bv wa) := by
+        unfold tyAtW
+        rw [hts]
+        simp only [Option.bind_some]
+        exact hop1
+      rw [admits_slot_widthW h i st e1 wa hd1lt hty1]
+      exact hwle
+  · -- the PLAIN write's own obligation, with the SAME address rule
+    intro hop d0 d1 d3 hd0 hd1 hd3 _hen
+    obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWrite_deps hsem hj hop
+    obtain ⟨aw, dw, wa, hres, hop0, hop1, hwle, -, -⟩ := nodeTyW_write_geom hop hdeps hty
+    have he0 : e0 = d0 := by
+      have hx : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
+      rw [hx] at hd0; exact Option.some.inj hd0
+    have he1 : e1 = d1 := by
+      have hx : c.deps[1]? = some e1 := by rw [deps_get c hdeps 1]; rfl
+      rw [hx] at hd1; exact Option.some.inj hd1
+    subst he0; subst he1
+    refine ⟨aw, ?_, ?_⟩
+    · unfold geomAtW tyAtW
+      rw [hts]
+      simp only [Option.bind_some]
+      rw [hop0]
+    · have hmem1 : e1 ∈ c.deps.toList := by rw [hdeps]; simp
+      have hd1lt : e1 < D.numSlots := by
+        have hb := (admitsW_wf h).depsBounded j c hj e1 hmem1
+        unfold DesignCert.numSlots; omega
+      have hty1 : tyAtW D e1 = some (.bv wa) := by
+        unfold tyAtW
+        rw [hts]
+        simp only [Option.bind_some]
+        exact hop1
+      rw [admits_slot_widthW h i st e1 wa hd1lt hty1]
+      exact hwle
+
+/-- **Admission to the ACTUAL resolved entry, on the extended route.**
+
+The same conditional shape as `admits_mainM_resolved`: the remaining conditions
+are ORDINARY RUNTIME ones — the incoming state's table geometry, the source
+input/flop bounds, the clock ordinals and the flop count — and they are listed,
+not hidden.  `StateShapeOK`/`FullTable` are still LENGTH-ONLY, so this is a
+conditional admission-to-main theorem, not full production admission. -/
+theorem admitsW_mainM_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {e : ClockEdges} (h : admitsWB D = true)
+    (hstate : StateShapeOK D st)
+    (hin : ∀ sd ∈ D.sources.toList, SourceInputBound sd i.size)
+    (hstb : ∀ sd ∈ D.sources.toList, SourceFlopBound sd st.flops.size)
+    (hfclk : ∀ f ∈ D.flops.toList, f.clock < e.size)
+    (hmclk : ∀ md ∈ D.memories.toList, md.clock < e.size)
+    (hfsize : D.flops.size ≤ st.flops.size) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign D, encEdges e, encInput i, StateM.encStateM st].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ StateShapeOK D r.nextState := by
+  have hwf   := admitsW_wf h
+  have hsem  := admitsW_semwf h
+  have hgsrc := admitsW_geom_src h
+  have hadm  := admitsW_nodeAdmitted h
+  have harit := admitsW_arity h
+  have hprop := admitsW_writePropagates h
+  have hpol  := admitsW_nextImgGeom h
+  have hfits := admits_writeAddrFitsW h i st
+  obtain ⟨r, hev, hden, hpres⟩ :=
+    mainM_adequate_resolved_gen (G := geomAtW D) hwf hsem hstate hgsrc
+      (fun j c hcj hj hmemc ss hpre =>
+        node_stepW hwf hsem hcj hj (hadm _ hmemc) (harit _ hmemc)
+          (hprop j _ hcj) (hfits _ hmemc) hpre)
+      hin hstb hfclk hmclk hfsize
+  exact ⟨r, hev, hden, hpres hpol⟩
+
 /-! ## 4. Controls
 
 The distinctions the plain write must keep, as executable checks on the
@@ -705,6 +1078,89 @@ def plainWriteDesign : DesignCert :=
        = nodeTy (fun _ => some (.bv 8))
          { op := .Op_SRA, width := 8, deps := #[1,2], origin := 0 }
 
+/-! ## 5. A WHOLE DESIGN with an ordinary write, through the real checker
+
+`plainWriteDesign` above exercises the typing at one node.  This is a complete
+certificate with a DECLARED memory whose next image IS the plain write, so the
+extended checker's memory clause is exercised too, and the answers are decided
+in the kernel. -/
+
+def plainRamDesign : DesignCert :=
+  { sources  := #[ .memImg 0 2 8      -- 0 : the mutable image, aw 2, dw 8
+                 , .input 0 2         -- 1 : address
+                 , .input 1 8         -- 2 : datum, EXACTLY dw
+                 , .input 2 4 ]       -- 3 : enable, FOUR bits -- no lanes
+    nodes    := #[ { op := .Op_MemWrite, width := 8, deps := #[0,1,2,3], origin := 0 } ]
+    outputs  := #[]
+    flops    := #[]
+    memories := #[ { aw := 2, dw := 8, nextImg := 4, clock := 0 } ]
+    clocks   := #[ { name := "clk" } ] }
+
+/- The ORIGINAL checker refuses the whole design, and says so for the right
+   reason: its node is not an admitted node. -/
+#guard admitsB plainRamDesign = false
+#guard nodeAdmittedB plainRamDesign.nodes[0]! = false
+
+/- The EXTENDED checker admits it, in the kernel. -/
+theorem plainRamDesign_admitsW : admitsWB plainRamDesign = true := by decide +kernel
+
+/- …and the geometry it produces is the declared one. -/
+#guard geomAtW plainRamDesign 4 = some 2
+#guard tyAtW plainRamDesign 4 = some (.tbl 2 8)
+
+/- A DATUM of the wrong width sinks the whole design, not just the node. -/
+def plainRamDesign_badDatum : DesignCert :=
+  { plainRamDesign with sources := #[ .memImg 0 2 8, .input 0 2, .input 1 4, .input 2 4 ] }
+#guard admitsWB plainRamDesign_badDatum = false
+
+/- An ADDRESS wider than the table's sinks it too. -/
+def plainRamDesign_badAddr : DesignCert :=
+  { plainRamDesign with sources := #[ .memImg 0 2 8, .input 0 5, .input 1 8, .input 2 4 ] }
+#guard admitsWB plainRamDesign_badAddr = false
+
+/- A declared memory whose geometry disagrees with the write's table is refused
+   by the memory clause, even though the node itself types. -/
+def plainRamDesign_badMem : DesignCert :=
+  { plainRamDesign with memories := #[ { aw := 3, dw := 8, nextImg := 4, clock := 0 } ] }
+#guard admitsWB plainRamDesign_badMem = false
+
+/-! ### Disabled and quiet preservation, at the image
+
+`writeEn_disabled_eq` proves a disabled write returns the EXACT image.  These
+run it. -/
+
+/- enabled: the word changes, and only that word -/
+#guard (MemImg.writeEn (MemImg.ofMemConst 8 #[11, 22, 33, 44])
+          (mk_bv 2 1) (mk_bv 8 99) (mk_bv 4 8)).words.map (fun v => v.value)
+       = [11, 99, 33, 44]
+
+/- DISABLED with a zero enable: every word survives, including the default -/
+#guard (MemImg.writeEn (MemImg.ofMemConst 8 #[11, 22, 33, 44])
+          (mk_bv 2 1) (mk_bv 8 99) (mk_bv 4 0)).words.map (fun v => v.value)
+       = [11, 22, 33, 44]
+
+/- the WHOLE enable operand is read: value 8 is zero in bit 0 but nonzero as a
+   vector, so the write fires.  A one-bit-enable reading would have dropped it. -/
+#guard bv_nonzero (mk_bv 4 8) = true
+#guard bv_nonzero (mk_bv 4 0) = false
+
+/- the datum is stored RAW: a datum at dw lands unchanged, with no resize -/
+#guard (MemImg.writeEn (MemImg.ofMemConst 8 #[11, 22, 33, 44])
+          (mk_bv 2 3) (mk_bv 8 255) (mk_bv 4 1)).words.map (fun v => v.value)
+       = [11, 22, 33, 255]
+
+/- an ENABLED write out of range is REFUSED by the primitive, not dropped -/
+#guard (evalPrim .memWrite
+          [MemImg.encMemImg (MemImg.ofMemConst 8 #[11, 22]), ofBV (mk_bv 4 9),
+           ofBV (mk_bv 8 1), ofBV (mk_bv 4 1)]).isOk = false
+
+/- …while a DISABLED out-of-range write is admitted and changes nothing, which
+   is what `valMemWrite_disabled` says and the quiet branch needs -/
+#guard (evalPrim .memWrite
+          [MemImg.encMemImg (MemImg.ofMemConst 8 #[11, 22]), ofBV (mk_bv 4 9),
+           ofBV (mk_bv 8 1), ofBV (mk_bv 4 0)]).isOk = true
+
+#print axioms plainRamDesign_admitsW
 #print axioms nodeTy_memWrite_none
 #print axioms nodeTyW_eq_of_ne
 #print axioms nodeTyW_admits
@@ -723,6 +1179,12 @@ def plainWriteDesign : DesignCert :=
 #print axioms memWrite_deps
 #print axioms node_step_memWrite
 #print axioms node_stepW
+#print axioms admits_node_tyW
+#print axioms admitsW_nodeAdmitted
+#print axioms admitsW_writePropagates
+#print axioms admits_slot_widthW
+#print axioms admits_writeAddrFitsW
+#print axioms admitsW_mainM_resolved
 
 end HwMem
 end Projection

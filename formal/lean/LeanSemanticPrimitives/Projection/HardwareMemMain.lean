@@ -123,16 +123,18 @@ The node fold's EVALUATION witness is used here — the environment `mainM` hand
 to `mkOutputs`, `flopNexts` and `memNexts` is the one `evalNodesM` actually
 produced, not one assumed to exist. -/
 
-theorem mainM_adequate {D : DesignCert} {i : RuntimeInput} {st : StateM}
+/-- The whole cycle, GENERALIZED over the per-node step, exactly as
+`evalNodesM_agree_gen` is.  `mainM_adequate` below keeps its ORIGINAL statement
+as an instantiation at `node_step`. -/
+theorem mainM_adequate_gen {D : DesignCert} {i : RuntimeInput} {st : StateM}
     {e : ClockEdges} {G : Nat → Option Nat}
     (hwf : DesignCert.DesignCertWF D) (hsem : Direct.DesignSemWF D)
     (hstate : StateShapeOK D st)
     (hGsrc : ∀ k, k < D.sources.size → G k = srcGeomOf D k)
-    (hadm : ∀ c ∈ D.nodes.toList, NodeAdmitted c)
-    (harity : ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList)
-    (hprop : ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c →
-               WritePropagates D G j c)
-    (hfits : ∀ c ∈ D.nodes.toList, WriteAddrFits D i st G c)
+    (hstep : ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c → j < D.nodes.size →
+               c ∈ D.nodes.toList →
+               ∀ ss : List SlotV, PrefixRelM D i st G (D.sources.size + j) ss →
+                 ∃ v : SlotV, NodeStepOK D i st G j c ss v)
     (hin : ∀ sd ∈ D.sources.toList, SourceInputBound sd i.size)
     (hstb : ∀ sd ∈ D.sources.toList, SourceFlopBound sd st.flops.size)
     (hfclk : ∀ f ∈ D.flops.toList, f.clock < e.size)
@@ -146,7 +148,7 @@ theorem mainM_adequate {D : DesignCert} {i : RuntimeInput} {st : StateM}
       ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
       ∧ (NextImgGeomOK D G → StateShapeOK D r.nextState) := by
   obtain ⟨ss, hss, hfold⟩ :=
-    sourcesThenNodes hwf hsem hstate hGsrc hadm harity hprop hfits
+    sourcesThenNodes_gen hsem hstate hGsrc hstep
   have hlen : ss.length = D.sources.size + D.nodes.size := hss.len
   have hlenMap : (ss.map SlotV.enc).length = D.sources.size + D.nodes.size := by
     simpa using hlen
@@ -238,6 +240,35 @@ theorem mainM_adequate {D : DesignCert} {i : RuntimeInput} {st : StateM}
     intro hpol
     exact stepState_shape hss hstate hpol hmnext hmkind _
 
+/-- **The original whole-cycle adequacy, statement unchanged.** -/
+theorem mainM_adequate {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {e : ClockEdges} {G : Nat → Option Nat}
+    (hwf : DesignCert.DesignCertWF D) (hsem : Direct.DesignSemWF D)
+    (hstate : StateShapeOK D st)
+    (hGsrc : ∀ k, k < D.sources.size → G k = srcGeomOf D k)
+    (hadm : ∀ c ∈ D.nodes.toList, NodeAdmitted c)
+    (harity : ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList)
+    (hprop : ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c →
+               WritePropagates D G j c)
+    (hfits : ∀ c ∈ D.nodes.toList, WriteAddrFits D i st G c)
+    (hin : ∀ sd ∈ D.sources.toList, SourceInputBound sd i.size)
+    (hstb : ∀ sd ∈ D.sources.toList, SourceFlopBound sd st.flops.size)
+    (hfclk : ∀ f ∈ D.flops.toList, f.clock < e.size)
+    (hmclk : ∀ md ∈ D.memories.toList, md.clock < e.size)
+    (hfsize : D.flops.size ≤ st.flops.size) :
+    ∃ r : StateM.ResultM,
+      SEval hwMemS []
+        (.call "mainM" [.lit (encDesign D), .lit (encEdges e), .lit (encInput i),
+                        .lit (StateM.encStateM st)])
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ (NextImgGeomOK D G → StateShapeOK D r.nextState) :=
+  mainM_adequate_gen hwf hsem hstate hGsrc
+    (fun j c hcj hj hmemc ss hpre =>
+      node_step (i := i) (st := st) hwf hsem hcj hj (hadm _ hmemc) (harity _ hmemc)
+        (hprop j _ hcj) (hfits _ hmemc) hpre)
+    hin hstb hfclk hmclk hfsize
+
 /-- **The same, through the runtime denotation relation.**  `ResultRelR v r`
 says `v` decodes to a representable witness whose denotation IS the reference
 `RuntimeResult` — so this is adequacy against `interpretDesign` stated in the
@@ -284,6 +315,34 @@ theorem main_ne_mainM : idOf "main" ≠ idOf "mainM" := by decide
 /-- **Whole-cycle adequacy on the RESOLVED program.**  Crossed through the
 production transfer `Surface.SEval_entry`, which resolves the entry and all four
 literal arguments itself; no `resolve` hypothesis is left to the caller. -/
+theorem mainM_adequate_resolved_gen {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {e : ClockEdges} {G : Nat → Option Nat}
+    (hwf : DesignCert.DesignCertWF D) (hsem : Direct.DesignSemWF D)
+    (hstate : StateShapeOK D st)
+    (hGsrc : ∀ k, k < D.sources.size → G k = srcGeomOf D k)
+    (hstep : ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c → j < D.nodes.size →
+               c ∈ D.nodes.toList →
+               ∀ ss : List SlotV, PrefixRelM D i st G (D.sources.size + j) ss →
+                 ∃ v : SlotV, NodeStepOK D i st G j c ss v)
+    (hin : ∀ sd ∈ D.sources.toList, SourceInputBound sd i.size)
+    (hstb : ∀ sd ∈ D.sources.toList, SourceFlopBound sd st.flops.size)
+    (hfclk : ∀ f ∈ D.flops.toList, f.clock < e.size)
+    (hmclk : ∀ md ∈ D.memories.toList, md.clock < e.size)
+    (hfsize : D.flops.size ≤ st.flops.size) :
+    ∃ r : StateM.ResultM,
+      Eval hwMemP []
+        (.call hwMemP.entry
+          ([encDesign D, encEdges e, encInput i, StateM.encStateM st].map Term.lit))
+        (StateM.encResultM r)
+      ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+      ∧ (NextImgGeomOK D G → StateShapeOK D r.nextState) := by
+  obtain ⟨r, hev, hden, hpres⟩ :=
+    mainM_adequate_gen hwf hsem hstate hGsrc hstep hin hstb hfclk hmclk hfsize
+  refine ⟨r, ?_, hden, hpres⟩
+  refine SEval_entry hwMemP_resolves ?_
+  simpa [hwMemS_entry] using hev
+
+/-- **The original resolved entry, statement unchanged.** -/
 theorem mainM_adequate_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM}
     {e : ClockEdges} {G : Nat → Option Nat}
     (hwf : DesignCert.DesignCertWF D) (hsem : Direct.DesignSemWF D)
@@ -305,14 +364,16 @@ theorem mainM_adequate_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM
           ([encDesign D, encEdges e, encInput i, StateM.encStateM st].map Term.lit))
         (StateM.encResultM r)
       ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
-      ∧ (NextImgGeomOK D G → StateShapeOK D r.nextState) := by
-  obtain ⟨r, hev, hden, hpres⟩ :=
-    mainM_adequate hwf hsem hstate hGsrc hadm harity hprop hfits hin hstb hfclk hmclk hfsize
-  refine ⟨r, ?_, hden, hpres⟩
-  refine SEval_entry hwMemP_resolves ?_
-  simpa [hwMemS_entry] using hev
+      ∧ (NextImgGeomOK D G → StateShapeOK D r.nextState) :=
+  mainM_adequate_resolved_gen hwf hsem hstate hGsrc
+    (fun j c hcj hj hmemc ss hpre =>
+      node_step (i := i) (st := st) hwf hsem hcj hj (hadm _ hmemc) (harity _ hmemc)
+        (hprop j _ hcj) (hfits _ hmemc) hpre)
+    hin hstb hfclk hmclk hfsize
 
 #print axioms mainM_adequate
+#print axioms mainM_adequate_gen
+#print axioms mainM_adequate_resolved_gen
 #print axioms mainM_resultRel
 #print axioms mainM_id
 #print axioms main_ne_mainM

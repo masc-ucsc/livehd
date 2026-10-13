@@ -596,14 +596,18 @@ theorem objEnv_snoc (ss : List SlotV) (v : SlotV) :
 
 /-! ## 10. The fold -/
 
-theorem evalNodesM_agree {D : DesignCert} {i : RuntimeInput} {st : StateM}
+/-- The fold, GENERALIZED over the per-node step.
+
+The body never looks inside `node_step`; it only needs "every node can take a
+step".  Naming that as a hypothesis lets the ordinary-write route reuse this
+proof instead of copying it, and leaves `evalNodesM_agree` below with its
+ORIGINAL statement, as a one-line instantiation. -/
+theorem evalNodesM_agree_gen {D : DesignCert} {i : RuntimeInput} {st : StateM}
     {G : Nat → Option Nat}
-    (hwf : DesignCert.DesignCertWF D) (hsem : Direct.DesignSemWF D)
-    (hadm : ∀ c ∈ D.nodes.toList, NodeAdmitted c)
-    (harity : ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList)
-    (hprop : ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c →
-               WritePropagates D G j c)
-    (hfits : ∀ c ∈ D.nodes.toList, WriteAddrFits D i st G c) :
+    (hstep : ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c → j < D.nodes.size →
+               c ∈ D.nodes.toList →
+               ∀ ss : List SlotV, PrefixRelM D i st G (D.sources.size + j) ss →
+                 ∃ v : SlotV, NodeStepOK D i st G j c ss v) :
     ∀ (r j : Nat), j + r = D.nodes.size →
       ∀ (ss : List SlotV), PrefixRelM D i st G (D.sources.size + j) ss →
         ∃ ss' : List SlotV,
@@ -633,15 +637,12 @@ theorem evalNodesM_agree {D : DesignCert} {i : RuntimeInput} {st : StateM}
       have hcj : D.nodes[j]? = some D.nodes.toList[j] := by
         rw [Array.getElem?_eq_getElem hj]; simp
       have hmemc : D.nodes.toList[j] ∈ D.nodes.toList := List.getElem_mem hjl
-      obtain ⟨v, hvden, hvkind, hvgeom, hv⟩ :=
-        node_step (i := i) (st := st) hwf hsem hcj hj (hadm _ hmemc) (harity _ hmemc)
-          (hprop j _ hcj) (hfits _ hmemc) hpre
+      obtain ⟨v, hvden, hvkind, hvgeom, hv⟩ := hstep j _ hcj hj hmemc ss hpre
       have hpre' : PrefixRelM D i st G (D.sources.size + (j + 1)) (ss ++ [v]) := by
         have hx := prefixRelM_snoc hpre hvden hvkind hvgeom
         simpa [Nat.add_assoc] using hx
       obtain ⟨ss', hss', hrec⟩ :=
-        evalNodesM_agree hwf hsem hadm harity hprop hfits r (j + 1) (by omega)
-          (ss ++ [v]) hpre'
+        evalNodesM_agree_gen hstep r (j + 1) (by omega) (ss ++ [v]) hpre'
       refine ⟨ss', hss', ?_⟩
       intro σ eno eenv en hno henv hlen
       rw [hdrop] at hno
@@ -654,8 +655,58 @@ theorem evalNodesM_agree {D : DesignCert} {i : RuntimeInput} {st : StateM}
         (hv _ _ _ _ (SEval_hd (.ref rfl)) (.ref rfl)
           (by rw [hpre.len]; exact .ref rfl)) (.ref rfl)
 
+/-- **The original fold, statement unchanged**, as an instantiation of the
+generalized one at `node_step`. -/
+theorem evalNodesM_agree {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {G : Nat → Option Nat}
+    (hwf : DesignCert.DesignCertWF D) (hsem : Direct.DesignSemWF D)
+    (hadm : ∀ c ∈ D.nodes.toList, NodeAdmitted c)
+    (harity : ∀ c ∈ D.nodes.toList, ArityOK c.op c.deps.toList)
+    (hprop : ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c →
+               WritePropagates D G j c)
+    (hfits : ∀ c ∈ D.nodes.toList, WriteAddrFits D i st G c) :
+    ∀ (r j : Nat), j + r = D.nodes.size →
+      ∀ (ss : List SlotV), PrefixRelM D i st G (D.sources.size + j) ss →
+        ∃ ss' : List SlotV,
+          PrefixRelM D i st G (D.sources.size + D.nodes.size) ss'
+          ∧ ∀ (σ : SEnv) (eno eenv en : SExp),
+              SEval hwMemS σ eno (encListG encNode (D.nodes.toList.drop j)) →
+              SEval hwMemS σ eenv (objEnv (ss.map SlotV.enc)) →
+              SEval hwMemS σ en (.int (Int.ofNat (D.sources.size + j))) →
+              SEval hwMemS σ (.call "evalNodesM" [eno, eenv, en])
+                (objEnv (ss'.map SlotV.enc)) :=
+  evalNodesM_agree_gen (fun j c hcj hj hmemc ss hpre =>
+    node_step (i := i) (st := st) hwf hsem hcj hj (hadm _ hmemc) (harity _ hmemc)
+      (hprop j _ hcj) (hfits _ hmemc) hpre)
+
 /-! ## 11. Sources then nodes, composed -/
 
+theorem sourcesThenNodes_gen {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {G : Nat → Option Nat}
+    (hsem : Direct.DesignSemWF D)
+    (hstate : StateShapeOK D st)
+    (hGsrc : ∀ k, k < D.sources.size → G k = srcGeomOf D k)
+    (hstep : ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c → j < D.nodes.size →
+               c ∈ D.nodes.toList →
+               ∀ ss : List SlotV, PrefixRelM D i st G (D.sources.size + j) ss →
+                 ∃ v : SlotV, NodeStepOK D i st G j c ss v) :
+    ∃ ss' : List SlotV,
+      PrefixRelM D i st G (D.sources.size + D.nodes.size) ss'
+      ∧ ∀ (σ : SEnv) (eno eenv en : SExp),
+          SEval hwMemS σ eno (encListG encNode D.nodes.toList) →
+          SEval hwMemS σ eenv
+            (objEnv ((D.sources.toList.map (srcSlotV i st)).map SlotV.enc)) →
+          SEval hwMemS σ en (.int (Int.ofNat D.sources.size)) →
+          SEval hwMemS σ (.call "evalNodesM" [eno, eenv, en])
+            (objEnv (ss'.map SlotV.enc)) := by
+  obtain ⟨ss', hss', hrec⟩ :=
+    evalNodesM_agree_gen hstep D.nodes.size 0 (by omega)
+      (D.sources.toList.map (srcSlotV i st))
+      (by simpa using prefixRelM_sources (G := G) hsem hstate hGsrc)
+  refine ⟨ss', hss', ?_⟩
+  intro σ eno eenv en hno henv hlen
+  exact hrec σ eno eenv en (by simpa using hno) henv (by simpa using hlen)
+/-- **The original composition, statement unchanged.** -/
 theorem sourcesThenNodes {D : DesignCert} {i : RuntimeInput} {st : StateM}
     {G : Nat → Option Nat}
     (hwf : DesignCert.DesignCertWF D) (hsem : Direct.DesignSemWF D)
@@ -674,14 +725,11 @@ theorem sourcesThenNodes {D : DesignCert} {i : RuntimeInput} {st : StateM}
             (objEnv ((D.sources.toList.map (srcSlotV i st)).map SlotV.enc)) →
           SEval hwMemS σ en (.int (Int.ofNat D.sources.size)) →
           SEval hwMemS σ (.call "evalNodesM" [eno, eenv, en])
-            (objEnv (ss'.map SlotV.enc)) := by
-  obtain ⟨ss', hss', hrec⟩ :=
-    evalNodesM_agree hwf hsem hadm harity hprop hfits D.nodes.size 0 (by omega)
-      (D.sources.toList.map (srcSlotV i st))
-      (by simpa using prefixRelM_sources (G := G) hsem hstate hGsrc)
-  refine ⟨ss', hss', ?_⟩
-  intro σ eno eenv en hno henv hlen
-  exact hrec σ eno eenv en (by simpa using hno) henv (by simpa using hlen)
+            (objEnv (ss'.map SlotV.enc)) :=
+  sourcesThenNodes_gen hsem hstate hGsrc (fun j c hcj hj hmemc ss hpre =>
+    node_step (i := i) (st := st) hwf hsem hcj hj (hadm _ hmemc) (harity _ hmemc)
+      (hprop j _ hcj) (hfits _ hmemc) hpre)
+
 /-! ## 12. Non-vacuity: a real mixed design, accepted by the REAL checker
 
 Three nodes in dependency order: a memory READ, an intervening SCALAR node on

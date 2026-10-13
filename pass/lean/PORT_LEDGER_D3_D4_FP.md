@@ -11185,3 +11185,89 @@ sound at the layers above, but the `mainM` entry, the runtime policy and
 preservation, the codec correspondence and the checked specialization have not
 been carried over, so no design is admitted through it.  That is the next
 work, and it is required before any plain-write design is run.
+
+## §63.72 — the ordinary write reaches the resolved entry
+
+Continues §63.71.  The chain is now carried through the fold, `mainM` and the
+resolved entry, and a whole plain-write design is admitted by the extended
+checker in the kernel.  Module is ≈1,190 lines with **25 `#guard`s**; every
+theorem reports only `propext`, `Quot.sound` and `Classical.choice`.
+
+### The composition is REUSED, not copied
+
+`evalNodesM_agree`, `sourcesThenNodes`, `mainM_adequate` and
+`mainM_adequate_resolved` each had one use of `node_step` buried in a long
+proof.  Rather than transcribe those proofs for the extended route, each is now
+generalised over its per-node step:
+
+```lean
+theorem evalNodesM_agree_gen … (hstep : ∀ j c, D.nodes[j]? = some c → … →
+    ∃ v, NodeStepOK D i st G j c ss v) : …
+```
+
+and **the original keeps its exact statement as a one-line instantiation at
+`node_step`**.  Nothing downstream changed: `HardwareMemSlotTy`,
+`HardwareMemRuntime` and the fixtures all rebuilt unchanged against the
+original names.  The extended route instantiates the same `_gen` theorems at
+`node_stepW`.
+
+### What that buys
+
+`admitsW_mainM_resolved` — admission to the ACTUAL resolved entry
+(`Eval hwMemP`), with `r.denote = interpretDesign D e i (denote st)` and
+`StateShapeOK D r.nextState` — on a design containing ordinary writes.  Its
+supporting premises all come from the one Boolean check:
+
+| premise | from |
+|---|---|
+| `DesignCertWF`, `DesignSemWF` | `admitsW_wf`, `admitsW_semwf` (via `Direct.acceptsDesign`, which the extended checker demands exactly as the original does) |
+| source geometry | `admitsW_geom_src` |
+| every node admitted | `admitsW_nodeAdmitted` → `NodeAdmittedW` |
+| arity | `admitsW_arity` |
+| write propagation | `admitsW_writePropagates` → `WritePropagatesW` (BOTH writes) |
+| address fits | `admits_writeAddrFitsW` → `WriteAddrFitsW`, derived from `admits_slot_widthW` |
+| next-image geometry | `admitsW_nextImgGeom` |
+
+`admits_slot_widthW` is where the preserved contract pays off.  The original
+proof excluded the plain write with `NodeAdmitted_ne_memWrite`.  The extended
+one cannot — the plain write is admitted now — so it excludes it the way the
+byte-enabled write was always excluded: **from the typing**, by
+`nodeTyW_bv_ne_memWrite`, because a write answers a table and `.bv` is not a
+table.  `NodeAdmitted_ne_memWrite` is untouched and still means what it meant.
+
+### A whole design, decided in the kernel
+
+`plainRamDesign` — a declared memory `aw 2, dw 8` whose **next image IS the
+plain write**, so the checker's memory clause is exercised, not just the node:
+
+* `#guard admitsB plainRamDesign = false` — the original still refuses it;
+* `theorem plainRamDesign_admitsW : admitsWB plainRamDesign = true := by decide +kernel`;
+* `geomAtW … 4 = some 2` and `tyAtW … 4 = some (.tbl 2 8)` — the produced
+  geometry is the declared one.
+
+Three changed-source rejections, each sinking the WHOLE design rather than one
+node: a datum of the wrong width, an over-wide address, and a declared memory
+whose geometry disagrees with the write's table.
+
+### Disabled and quiet preservation, run
+
+* enabled: `[11,22,33,44] → [11,99,33,44]` — that word, and only that word;
+* disabled (`mk_bv 4 0`): `[11,22,33,44]` unchanged, default included;
+* `bv_nonzero (mk_bv 4 8) = true` — **the whole enable operand is read.**  Value
+  8 is zero in bit 0; a one-bit-enable reading would have dropped this write.
+  This is the distinction §63.67 asked to be kept, now executable;
+* the datum is stored RAW: `255` at `dw = 8` lands unchanged, no resize;
+* an ENABLED out-of-range write is REFUSED by the primitive (`isOk = false`),
+  while a DISABLED out-of-range write is admitted and changes nothing — the
+  quiet branch, which needs no range premise.
+
+### Still not done, and still not admitted
+
+The production route is **unchanged**: `dcert2_memroute` runs `admitsB`, and
+plain-write support is still REFUSED there.  What remains before any
+plain-write design is RUN: the full runtime policy and preservation
+(`runtimeFullOKB` / `admits_run_full` have no W form yet), the codec
+correspondence at the returned state, and the checked specialization.
+`StateShapeOK` here is still LENGTH-ONLY, so `admitsW_mainM_resolved` is a
+conditional admission-to-main theorem, exactly as `admits_mainM_resolved` is
+for the byte-enabled route — not full production admission.
