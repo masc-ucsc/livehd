@@ -118,6 +118,14 @@ describes, independently of the path it was read from. -/
 def fnv1a (b : ByteArray) : UInt64 :=
   b.foldl (fun h c => (h ^^^ c.toUInt64) * 1099511628211) 14695981039346656037
 
+/-- EVERY word, with its width, plus the default.  `preview` truncates, which
+is fine for a progress line but cannot support a preservation claim: an
+eight-word memory printed six words wide hid addresses 6 and 7 from the first
+acceptance gate entirely. -/
+def fullImage (m : MemImg) : String :=
+  let ws := String.intercalate "," (m.words.map (fun v => s!"{v.value}:{v.width}"))
+  s!"[{ws}] dflt {m.dflt.value}:{m.dflt.width}"
+
 /-- A few words of a table, so the report SHOWS the contents rather than
 asserting that they survived. -/
 def preview (m : MemImg) (n : Nat) : String :=
@@ -470,6 +478,12 @@ structure Cfg where
   /-- stop after the support report -- used to compare two certificates'
   admission without paying for specialization -/
   supportOnly : Bool := false
+  /-- emit a COMPLETE per-step trace: the loaded image with every width and the
+  default, each cycle's inputs and edges, the memory's phase/write-enable state,
+  and each DECODED next image.  A preservation gate needs the intermediate
+  states; a final-image comparison cannot see a quiet-step write that is
+  overwritten before the end. -/
+  trace : Bool := false
   /-- run the EXTENDED route, which additionally admits ordinary `Op_MemWrite`.
   OFF by default: the default route is the original one, unchanged, and it
   still refuses a plain write.  When on, admission is `admitsWB` and the bundle
@@ -588,6 +602,9 @@ unchanged -- refusing rather than running on a state the encoder altered"
         return 7
       say s!"  initial memory 0 words [{(match st0.mems[0]? with
              | some m => preview m 6 | none => "-")}]"
+      if cfg.trace then
+        for (m, idx) in st0.mems.toList.zipIdx do
+          say s!"  TRACE loaded memory {idx} {fullImage m}"
       say s!"  stimulus: {cfg.stimProv}"
       say s!"  executing {cfg.cycles} cycle(s) of the residual at the checked bound"
       (← IO.getStdout).flush
@@ -619,6 +636,21 @@ unchanged -- refusing rather than running on a state the encoder altered"
               if cfg.compare then
                 let ref := Compiler.interpretDesign D e i (StateM.denote st)
                 cmp := cmp.meet (cycleCheck D r ref)
+              if cfg.trace then
+                -- the memory's own commit condition for this step, read from
+                -- the SAME `fires`/enable semantics the gate uses, plus the
+                -- decoded next image.  `fires e md.clock` is the quiet/active
+                -- classification; it is derived from the edge vector and the
+                -- declared clock, never from the final image.
+                let edges := String.intercalate "," (e.toList.map (fun b => if b then "1" else "0"))
+                let ivals := String.intercalate "," (i.toList.map (fun v => s!"{v.value}"))
+                for (md, idx) in D.memories.toList.zipIdx do
+                  let act := if fires e md.clock then "active" else "quiet"
+                  say s!"  TRACE step {k} mem {idx} {act} edges [{edges}] inputs [{ivals}]"
+                  match r.nextState.mems[idx]? with
+                  | some m => say s!"  TRACE step {k} mem {idx} next {fullImage m}"
+                  | none   => say s!"  TRACE step {k} mem {idx} next MISSING"
+                say s!"  TRACE step {k} policy {runtimeFullOKB D i r.nextState e}"
               -- the DECODED next state is what the following cycle runs on
               st := r.nextState
       let t6 ← IO.monoMsNow
@@ -630,6 +662,9 @@ unchanged -- refusing rather than running on a state the encoder altered"
 distinct flop vectors {(flops.eraseDups).length} of {flops.length}"
       say s!"  final memory 0 words [{(match st.mems[0]? with
              | some m => preview m 6 | none => "-")}]"
+      if cfg.trace then
+        for (m, idx) in st.mems.toList.zipIdx do
+          say s!"  TRACE final memory {idx} {fullImage m}"
       for k in List.range D.memories.size do
         match st0.mems[k]?, st.mems[k]? with
         | some a, some b =>
@@ -750,11 +785,12 @@ contents or use init=zero, which is a legal-state witness only."
     let cmp := !(tl.contains "nocompare")
     let sup := tl.contains "support-only"
     let pw  := tl.contains "plain-write"
+    let tr  := tl.contains "trace"
     let stimTok := tl.find? (fun t => t.startsWith "stim:")
     let prov := match stimTok with
                 | some t => s!"PENDING {t}"
                 | none   => "generated: mkInputFor (synthetic, width-derived)"
-    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, pw⟩
+    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw⟩
   | _ => .error usage
 
 /-! ## Comparison self-test

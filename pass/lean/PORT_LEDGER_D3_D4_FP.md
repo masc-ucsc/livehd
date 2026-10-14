@@ -12061,3 +12061,88 @@ Scope, stated: INTERPRETED, `hproj` TRUSTED, not equivalence and not RTL
 acceptance.  The expected word is source-derived and was then observed; the run
 shows that THIS residual, on THIS supplied state and THIS source-derived
 stimulus, commits that word at that address.
+
+## §63.81 — the acceptance gate was insufficient; replaced with a per-step trace
+
+### 1. WITHDRAWN: the first gate's preservation claim
+
+§63.80's gate said "quiet/disabled preservation".  It did not establish that.
+It compared only the INITIAL and FINAL images, so:
+
+* a write on a quiet step that is **overwritten before the end** is invisible;
+* the written address itself was excluded from the loop;
+* and it read the driver's **six-word preview of an eight-word memory**, so
+  addresses 6 and 7 were never compared at all.
+
+Synthetic log controls confirmed it also accepted a 12-step log missing the
+clear/quiet tail and a two-word preview.  **The transition finding was correct;
+the preservation claim was not supported**, so B11 was returned to BLOCKED and
+the counts to 13/11/36 until this passed.
+
+Also corrected: `artifact_bytes` is measured from the bound file — the
+certificate is **13,364** bytes, not the 13,285 carried over from v3/v4.
+
+### 2. The driver now retains the intermediate states
+
+A `trace` token on `dcert2_memroute` records, inside the existing production
+driver and with no new simulator:
+
+* the loaded image, **every word with its width, plus the default**;
+* each step's edge vector and input vector;
+* each step's **active/quiet classification from `fires e md.clock`** — actual
+  state, never the final image;
+* each **decoded next image** in full;
+* the returned-state policy at each step.
+
+### 3. The gate is per-step
+
+It requires all eight supplied words and the default loaded unchanged at width
+69; a complete 18-step trace with every step `ok` and policy true; **at most one
+commit across the entire run**; that commit at address 1 to `0x223600abcde` at
+width 69 with bits above 31 changed; **whole-image equality on every non-active
+step, including address 1 and the default**; and a final image equal to the
+supplied image plus exactly that commit.
+
+Result — the commit lands at **step 15**, the `clear_ptw_resp` tick, which is
+consistent with `rf_latch_wr_en` reading the still-high `ptw_resp_valid_q`:
+
+```
+ok: all 8 supplied words and the default loaded unchanged, each at width 69
+ok: a complete 18-step trace, policy checked on every step
+ok: exactly one commit, at step 15: address 1  1152921504606846977 -> 2350958427358
+ok: bits above 31 changed (268435456 -> 547)
+ok: every other address AND the default are bit-for-bit preserved on ALL 18 steps
+ok: the final image is exactly the supplied image with the one expected commit
+```
+
+### 4. Five verifier controls, each failing
+
+**Synthetic log mutations — verifier controls, NOT execution evidence:**
+
+| control | gate's answer |
+|---|---|
+| steps 16-17 removed | missing/malformed trace for [16, 17] |
+| every image truncated to two words | loaded image has 2 words, supplied declares 8 |
+| committed word off by one bit | step 15 wrote 2350958427359 |
+| no transition at all | NO memory transition occurred |
+| **transient quiet write at addr 5, step 2, restored** | step 2 is quiet but changed [5] |
+| **transient default change, step 2, restored** | step 2 CHANGED THE DEFAULT |
+
+The last two are exactly what the withdrawn gate could not see.
+
+The retained v4 negative still passes in `--expect-no-transition` mode: the
+pre-repair certificate holds `1152921504606846976` at address 1 — one bit off
+the initial value — and never produces the expected word.  Neither the v6 nor
+the v4 run was repeated; the single changed-driver run is justified because the
+earlier run retained no intermediate states.
+
+### 5. B11 reconciled
+
+**BLOCKED → YES**, with certificate, emitter, driver, state, stimulus, gate,
+trace and verifier controls bound by sha256.  Counts **13 YES / 11 NO / 36
+BLOCKED → 14 YES / 11 NO / 35 BLOCKED**, FP **3 YES / 8 BLOCKED → 4 YES / 8
+BLOCKED**; `B11/Futamura projection` is mechanically the only changed cell.
+
+Not gates for this cell, and recorded as such: the three `pass/single_edge`
+gtests are STRUCTURAL and run before bitwidth/cprop, and the memory-hierarchy
+external-simulator leg was skipped.
