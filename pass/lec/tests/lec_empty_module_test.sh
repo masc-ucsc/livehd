@@ -74,7 +74,7 @@ EOF
 
 # --- helpers ----------------------------------------------------------------
 run() {  # run <ref> <impl> [extra args...]; sets OUT and RC
-  OUT=$("$LHD" lec --ref "verilog:$WORK/$1" --impl "verilog:$WORK/$2" --top m "${@:3}" 2>&1)
+  OUT=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/$1" --impl "verilog:$WORK/$2" --top m "${@:3}" 2>&1)
   RC=$?
 }
 ck() { if eval "$2"; then echo "ok: $1"; else echo "FAIL: $1 (rc=$RC)"; echo "$OUT" | tail -3; fail=1; fi; }

@@ -89,7 +89,7 @@ run_lec() {  # $1=name $2=formal.timeout secs $3=outer kill secs
   local name=$1 tmo=$2 outer=$3 start end of pid wd
   of="$WORK/out_$name.txt"
   start=$(date +%s)
-  "$LHD" lec --ref "$WORK/${name}_ref.v" --impl "$WORK/${name}_impl.v" \
+  "$LHD" lec --set formal.effort=proof --ref "$WORK/${name}_ref.v" --impl "$WORK/${name}_impl.v" \
          --top foo --set formal.lec.hier=false --set formal.engine=bmc --set formal.lec.decompose=false \
          --set formal.timeout="$tmo" --set formal.min_timeout=1 --workdir "$WORK/w_$name" > "$of" 2>&1 &
   pid=$!
@@ -134,7 +134,7 @@ endmodule
 EOF2
 (
   s0=$(date +%s)
-  LIVEHD_LEC_RACER_STALL_S=60 "$LHD" lec --ref "$WORK/stall_ref.v" --impl "$WORK/stall_impl.v" --top foo \
+  LIVEHD_LEC_RACER_STALL_S=60 "$LHD" lec --set formal.effort=proof --ref "$WORK/stall_ref.v" --impl "$WORK/stall_impl.v" --top foo \
     --set formal.lec.hier=false --set formal.lec.decompose=false --set formal.timeout=1 --set formal.min_timeout=1 \
     --workdir "$WORK/w_stall_race" > "$WORK/out_stall.txt" 2>&1 &
   spid=$!
@@ -171,7 +171,7 @@ endmodule
 EOF2
 (
   s0=$(date +%s)
-  LIVEHD_LEC_RACER_STALL_ONLY=1 LIVEHD_LEC_RACER_STALL_S=60 "$LHD" lec --ref "$WORK/ibstall_ref.v" --impl "$WORK/ibstall_impl.v" \
+  LIVEHD_LEC_RACER_STALL_ONLY=1 LIVEHD_LEC_RACER_STALL_S=60 "$LHD" lec --set formal.effort=proof --ref "$WORK/ibstall_ref.v" --impl "$WORK/ibstall_impl.v" \
     --top foo --set formal.lec.hier=false --set formal.lec.decompose=false --set formal.timeout=1 --set formal.min_timeout=1 \
     --workdir "$WORK/w_ibstall" > "$WORK/out_ibstall.txt" 2>&1 &
   ipid=$!

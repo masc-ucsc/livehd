@@ -57,7 +57,7 @@ compile b2.v b2_lg dut
 verdict() {
   phase_args=()
   [ "$4" = "after_reset" ] || phase_args=(${phase_args[@]+"${phase_args[@]}"})
-  $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" \
+  $LHD lec --set formal.effort=proof --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" \
        --set formal.lec.hier=false --set formal.engine=bmc --set formal.bound=8 --set "formal.phase=$4" \
        --workdir "$WORK/q_${3}_$4_$$_$RANDOM" 2>&1 \
     | grep -oE "PASS\\([0-9]+\\)|PROVEN equivalent|REFUTED \\(not equivalent\\)|UNKNOWN" | head -1 \
@@ -116,7 +116,7 @@ elif ! $LHD compile "$WORK/c_prp/latch_pair.prp" --top latch_pair \
        --emit-dir "lg:$WORK/c_impl_lg" --workdir "$WORK/w_c_impl" >/dev/null 2>&1; then
   echo "FAIL: recompile emitted latch_pair Pyrope"; fail=1
 else
-  c_out=$($LHD lec --impl "lg:$WORK/c_impl_lg" --ref "lg:$WORK/c_ref_lg" --top latch_pair \
+  c_out=$($LHD lec --set formal.effort=proof --impl "lg:$WORK/c_impl_lg" --ref "lg:$WORK/c_ref_lg" --top latch_pair \
           --set formal.engine=ind --set formal.timeout=10 --workdir "$WORK/q_c" 2>&1)
   if ! grep -qa "PROVEN equivalent" <<<"$c_out"; then
     echo "FAIL: latch round trip was not PROVEN"; fail=1
@@ -174,7 +174,7 @@ if ! $LHD compile "$WORK/d.v" --reader slang --top latch_pair \
        --emit-dir "lg:$WORK/d_lg" --workdir "$WORK/w_d" >/dev/null 2>&1; then
   echo "FAIL: compile latch_pair (conditional-fill spelling)"; fail=1
 else
-  d_out=$($LHD lec --impl "lg:$WORK/d_lg" --ref "lg:$WORK/c_ref_lg" --top latch_pair \
+  d_out=$($LHD lec --set formal.effort=proof --impl "lg:$WORK/d_lg" --ref "lg:$WORK/c_ref_lg" --top latch_pair \
           --set formal.engine=ind --set formal.timeout=10 --workdir "$WORK/q_d" 2>&1)
   if ! grep -qa "PROVEN equivalent" <<<"$d_out"; then
     echo "FAIL: latch spelling pair was not PROVEN"; fail=1
@@ -233,7 +233,7 @@ EOF
 everdict() {
   local impl=$1 ref=$2 tag=$3
   shift 3
-  $LHD lec --impl "$WORK/$impl" --ref "$WORK/$ref" --top e_gated --set formal.simfail_run=false "$@" \
+  $LHD lec --set formal.effort=proof --impl "$WORK/$impl" --ref "$WORK/$ref" --top e_gated --set formal.simfail_run=false "$@" \
        --workdir "$WORK/q_e_$tag" 2>&1 \
     | grep -oE "PROVEN equivalent|REFUTED \\(not equivalent\\)|UNKNOWN" | head -1 | cut -d' ' -f1
 }

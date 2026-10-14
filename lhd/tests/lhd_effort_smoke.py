@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LEC sampled effort presets: proof first, then input-vector sampling with its own verdict."""
+"""LEC sampled effort presets: immediate input-vector sampling with its own verdict."""
 import json
 import os
 from pathlib import Path
@@ -25,18 +25,15 @@ implementation = W / 'implementation.v'
 implementation.write_text(reference.read_text().replace('a ^ b', '(a | b) & ~(a & b)'))
 
 
-def run(preset=None, *, impl=implementation, ref=reference, extra=(), expect=0, name='run', proof=False):
+def run(preset=None, *, impl=implementation, ref=reference, extra=(), expect=0, name='run', env=None):
     result = W / f'{name}.json'
     args = [str(LHD), 'lec', '--impl', str(impl), '--ref', str(ref), '--top', 'top',
             '--workdir', str(W / 'work'), '--result-json', str(result),
             '--set', 'formal.simfail=false', '--set', 'formal.simfail_run=false']
     if preset is not None:
         args += ['--set', f'formal.effort={preset}']
-        if not proof and preset in ('quick-check', 'test', 'long-check'):
-            # Sampled presets are proof-first; pin the sampled leg directly.
-            args += ['--set', 'formal.effort_proof=0']
     args += list(extra)
-    proc = subprocess.run(args, text=True, capture_output=True, timeout=12)
+    proc = subprocess.run(args, text=True, capture_output=True, timeout=12, env=env)
     assert proc.returncode == expect, (args, proc.returncode, proc.stdout, proc.stderr)
     return proc, json.loads(result.read_text())
 
@@ -78,29 +75,35 @@ rare.write_text(reference.read_text().replace('q <= a ^ b;', "q <= (a == 8'h5a &
 proc, result = run('quick-check', impl=rare, expect=10, name='rare')
 assert result['lec']['verdict'] == 'refuted', result
 
-# Proof first: a design the ordinary engines settle quickly is PROVEN (or
-# REFUTED) under every sampled preset, never left to sampling.
-for preset in ('quick-check', 'test', 'long-check'):
-    proc, result = run(preset, name=f'{preset}-proof', proof=True)
-    assert result['lec']['verdict'] == 'proven', (proc.stdout, result)
-    assert result['lec']['effort'] == preset, result
-    assert 'sampling' not in result['lec'], result
-proc, result = run('test', impl=wrong, expect=10, name='wrong-proof', proof=True)
-assert result['lec']['verdict'] == 'refuted', result
-proc, result = run('test', extra=['--set', 'formal.effort_proof=-1'], expect=2, name='bad-proof', proof=True)
-run('test', extra=['--set', 'formal.effort_proof=18446744073709551616'], expect=2,
-    name='overflow-proof', proof=True)
-proc, result = run('test', impl=rare, expect=10, name='rare-proof', proof=True)
-assert result['lec']['verdict'] == 'refuted', result
+# Removed resource controls are rejected even when spelled through aliases.
+for flag in ('formal.rlimit', 'formal.lec.rlimit',
+             'formal.effort_proof', 'formal.lec.effort_proof'):
+    _, result = run('test', extra=['--set', f'{flag}=0'], expect=2, name='removed')
+    assert 'removed' in result['error']['message'], (flag, result)
+    assert 'formal.timeout' in result['error']['hint'], (flag, result)
 
 _, result = run('verify', name='verify')
 assert result['lec']['verdict'] == 'proven', result
 assert 'sampling' not in result['lec'], result
-_, result = run(None, name='legacy')
+# DEFAULT samples fresh inputs even after verify has populated the proof cache.
+_, result = run(None, name='default')
+assert result['lec']['verdict'] == 'tested', result
+assert result['lec'].get('effort') == 'test', result
+# `proof` restores the proof-only defaults: no preset, no sampling.
+_, result = run('proof', name='proof')
 assert result['lec']['verdict'] == 'proven', result
+assert not result['lec'].get('effort') and 'sampling' not in result['lec'], result
+# An UNSET effort with an option sampling cannot serve falls back to proof
+# (only an EXPLICIT sampled preset with it is a usage error, checked below).
+for extra in (['--set', 'formal.engine=ind'], ['--set', 'formal.phase=full']):
+    _, result = run(None, extra=extra, name='fallback')
+    assert result['lec']['verdict'] == 'proven', (extra, result)
+    assert not result['lec'].get('effort'), (extra, result)
+# An unset effort on a sampled-only path still samples (the default, not proof).
+proc, result = run(None, impl=wrong, expect=10, name='default-sampled')
+assert result['lec']['verdict'] == 'refuted', result
 
 run('fast', expect=2, name='invalid')
-run('verify', extra=['--set', 'formal.rlimit=10'], expect=2, name='conflict')
 run('test', extra=['--set', 'formal.engine=ind'], expect=2, name='engine')
 run('test', extra=['--set', 'formal.cross=true'], expect=2, name='cross')
 run('test', extra=['--set', 'formal.phase=full'], expect=2, name='phase')
@@ -122,4 +125,15 @@ always @(posedge clk) if (rst) q <= 0; else q <= q + 1;
 endmodule\n''')
 _, result = run('long-check', impl=counter, ref=counter, name='counter')
 assert result['lec']['verdict'] == 'proven' and result['lec']['bounded'], result
+
+# The parent enforces timeout even when the solver has not started sampling.
+# Existing worker-stall hook makes this independent of CPU speed or design cost.
+stall_env = dict(os.environ, LIVEHD_LEC_RACER_STALL_S='4', LIVEHD_LEC_RACER_STALL_ONLY='1')
+proc, result = run('test', extra=['--set', 'formal.timeout=1', '--set', 'formal.min_timeout=10',
+                                '--set', 'formal.hard_timeout_mult=0'],
+                   env=stall_env, expect=7, name='sample-timeout')
+assert result['lec']['verdict'] == 'unknown', result
+assert result['lec']['sampling']['vectors'] == 0, result
+assert 'hit formal.timeout=1s' in proc.stdout + proc.stderr + json.dumps(result), (proc.stdout, proc.stderr, result)
+
 print('formal.effort smoke passed')

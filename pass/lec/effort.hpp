@@ -12,12 +12,16 @@
 
 namespace livehd::lec {
 
-// Effort presets for designs a full proof cannot finish. Each preset is a
+// Effort presets select immediate sampling or proof-only solving. Each preset is a
 // WORK count, not a wall-clock budget: how many input vectors were checked
 // against the equivalence miter without a mismatch. formal.timeout is only
 // the total backstop. `verify` is the uncapped proof.
 enum class Effort { Legacy, Quick, Test, Long, Verify };
-Effort           parse_effort(std::string_view name);
+Effort                            parse_effort(std::string_view name);  // "" and "proof" -> Legacy
+// The `lhd lec` default preset. An UNSET formal.effort that meets options the
+// sampled presets cannot serve (non-cvc5 solver, a proof-only engine, cross
+// checking, a phase other than after_reset) falls back to Legacy instead.
+inline constexpr std::string_view kDefaultLecEffort = "test";
 std::string_view effort_name(Effort effort);
 bool             is_sampled(Effort effort);  // quick-check | test | long-check
 // Input vectors (one per cycle of a sampled trace) a preset must check.
@@ -25,12 +29,6 @@ uint64_t         effort_vectors(Effort effort);
 // The highest sampled preset whose vector count `vectors` satisfies (Legacy
 // when not even quick-check's).
 Effort           effort_reached(uint64_t vectors);
-// Per-solver cvc5 resource limit of the proof attempt that precedes sampling
-// (formal.effort_proof overrides; 0 = sample only). Deterministic, unlike
-// seconds: the same design spends the same proof effort on any machine.
-uint64_t         effort_proof_rlimit(Effort effort);
-uint64_t         parse_effort_proof(std::string_view value, Effort effort);
-
 // Kept separate from Verdict: a sampled test must never discharge a proof
 // obligation, enter the theorem cache, or become a hierarchical premise.
 struct Sample_report {

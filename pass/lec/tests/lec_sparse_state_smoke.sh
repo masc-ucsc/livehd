@@ -31,7 +31,7 @@ sed '/reg \\state/a\
   initial begin \\state[3].flop_16 = 0; \\state[1].flop_16 = 0; end' "$WORK/good.v" > "$WORK/init_bad.v"
 check() {
   local tag=$1 ref=$2 impl=$3 engine=$4 expected=$5 rc=0
-  "$LHD" lec --ref "verilog:$WORK/$ref.v" --impl "verilog:$WORK/$impl.v" --top dut \
+  "$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/$ref.v" --impl "verilog:$WORK/$impl.v" --top dut \
     --set "formal.engine=$engine" --set formal.bound=3 --set formal.timeout=3 \
     --set formal.lec.semdiff=none --set formal.lec.hier=false --set formal.simfail=false \
     --set lhd.incremental=false --workdir "$WORK/$tag" --result-json "$WORK/$tag.json" \

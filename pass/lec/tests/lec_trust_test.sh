@@ -66,7 +66,7 @@ C "$WORK/base"  "$WORK/lg_base"  "$WORK/c1"
 C "$WORK/rdiff" "$WORK/lg_rdiff" "$WORK/c2"
 
 run() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT (default hier driver)
-  OUT=$("$LHD" lec "${@:2}" --top top --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec --set formal.effort=proof "${@:2}" --top top --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) NO trust: the latch leaf is scheduled for proof and now PROVES on its own

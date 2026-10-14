@@ -42,7 +42,7 @@ EOF
 # H IMPL REF [EXTRA --set...] -> full stdout+stderr of a flat lec run against $WD.
 H() {
   local impl=$1 ref=$2; shift 2
-  "$LHD" lec --ref "$WORK/$ref" --impl "$WORK/$impl" --top foo \
+  "$LHD" lec --set formal.effort=proof --ref "$WORK/$ref" --impl "$WORK/$impl" --top foo \
          --set formal.lec.hier=false --workdir "$WD" "$@" 2>&1
 }
 has() { echo "$1" | grep -q "$2"; }
@@ -106,7 +106,7 @@ for mode in flat hier; do
   [ "$mode" = hier ] || args=(--set formal.lec.hier=false)
   scope_work="$WORK/scope_$mode"
   for run in cold warm; do
-    "$LHD" lec --ref "$WORK/bounded_ref.v" --impl "$WORK/bounded_impl.v" \
+    "$LHD" lec --set formal.effort=proof --ref "$WORK/bounded_ref.v" --impl "$WORK/bounded_impl.v" \
       --top bounded_top ${args[@]+"${args[@]}"} --workdir "$scope_work" \
       --result-json "$WORK/${mode}_${run}.json" >"$WORK/${mode}_${run}.log" 2>&1 \
       || { cat "$WORK/${mode}_${run}.log"; fail=1; }
@@ -133,7 +133,7 @@ strip_scope(cache)
 cache_file.write_text(json.dumps(cache))
 PY_CHECK
   [ $? -eq 0 ] || fail=1
-  "$LHD" lec --ref "$WORK/bounded_ref.v" --impl "$WORK/bounded_impl.v" \
+  "$LHD" lec --set formal.effort=proof --ref "$WORK/bounded_ref.v" --impl "$WORK/bounded_impl.v" \
     --top bounded_top ${args[@]+"${args[@]}"} --workdir "$scope_work" \
     --result-json "$WORK/${mode}_legacy.json" >"$WORK/${mode}_legacy.log" 2>&1 \
     || { cat "$WORK/${mode}_legacy.log"; fail=1; }

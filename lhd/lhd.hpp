@@ -337,7 +337,7 @@ struct Result {
     bool        present{false};
     std::string verdict{};  // proven | refuted | unknown | tested (sampled effort preset)
     std::string effort{};          // requested formal.effort preset ("" = legacy)
-    bool        sampled{false};    // the sampled leg ran (proof attempt inconclusive)
+    bool        sampled{false};    // input-vector sampling ran
     std::string effort_reached{};  // highest preset the sampled vectors satisfy ("" = none)
     uint64_t    sample_vectors{0}, sample_traces{0}, sample_partial{0}, sample_queries{0}, sample_unknown{0};
     uint64_t    sample_solve_us{0};

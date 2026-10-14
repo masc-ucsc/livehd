@@ -2,7 +2,6 @@
 #include "effort.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <chrono>
 #include <climits>
 #include <random>
@@ -26,7 +25,10 @@ Effort parse_effort(std::string_view name) {
   if (name == "verify") {
     return Effort::Verify;
   }
-  throw std::invalid_argument("formal.effort expects quick-check|test|long-check|verify");
+  if (name == "proof") {
+    return Effort::Legacy;  // the pre-preset proof-only defaults (timeout=120)
+  }
+  throw std::invalid_argument("formal.effort expects quick-check|test|long-check|verify|proof");
 }
 
 std::string_view effort_name(Effort effort) {
@@ -58,27 +60,6 @@ Effort effort_reached(uint64_t vectors) {
     }
   }
   return Effort::Legacy;
-}
-
-uint64_t effort_proof_rlimit(Effort effort) {
-  switch (effort) {
-    case Effort::Quick: return 5'000'000;
-    case Effort::Test : return 50'000'000;
-    case Effort::Long : return 500'000'000;
-    default           : return 0;
-  }
-}
-
-uint64_t parse_effort_proof(std::string_view value, Effort effort) {
-  if (value.empty()) {
-    return effort_proof_rlimit(effort);
-  }
-  uint64_t limit = 0;
-  const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), limit);
-  if (error != std::errc{} || end != value.data() + value.size()) {
-    throw std::invalid_argument("formal.effort_proof expects an unsigned cvc5 resource-unit count, got '" + std::string(value) + "'");
-  }
-  return limit;
 }
 
 void Input_sampler::add_input(const cvc5::Term& term, int cycle) {
@@ -187,7 +168,7 @@ Input_sampler::Outcome Input_sampler::run(cvc5::Solver& solver, const cvc5::Term
     const auto start        = Clock::now();
     solver.push();
     solver.assertFormula(goal);
-    // The first query also pays for bit-blasting the whole unrolling: uncapped.
+    // The first query pays for bit-blasting: only the total timeout caps it.
     const auto result = check ? check(q == 0 ? 0 : free_symbols ? kPartialCapMs : kFullCapMs) : solver.checkSat();
     ++report.queries;
     if (result.isSat() && solver.getValue(bad).getBooleanValue()) {
@@ -220,6 +201,11 @@ Input_sampler::Outcome Input_sampler::run(cvc5::Solver& solver, const cvc5::Term
         }
       }
       solver.pop();
+      if (expired && expired()) {
+        report.solve_us += micros(start);
+        out.reason       = "hit formal.timeout";
+        break;
+      }
       prefix.push_back(bad);
       solver.push();
       solver.assertFormula(prefix.size() == 1 ? prefix.front() : tm_.mkTerm(cvc5::Kind::AND, prefix));

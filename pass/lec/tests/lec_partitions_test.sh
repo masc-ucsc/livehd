@@ -37,7 +37,7 @@ module m(input [7:0] a, input [7:0] b, output [7:0] y);
 endmodule
 EOF
 
-run() { OUT=$("$LHD" lec "${@}" --top m --set formal.lec.semdiff=none 2>&1); RC=$?; }
+run() { OUT=$("$LHD" lec --set formal.effort=proof "${@}" --top m --set formal.lec.semdiff=none 2>&1); RC=$?; }
 
 # 1) auto case-split PROVES the equal pair (solver path forced via semdiff=none).
 run --ref "$WORK/good.sv" --impl "$WORK/good.sv"

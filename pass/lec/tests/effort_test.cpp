@@ -10,6 +10,7 @@ using cvc5::Kind;
 
 TEST(Effort, PresetsAndLevels) {
   EXPECT_EQ(parse_effort(""), Effort::Legacy);
+  EXPECT_EQ(parse_effort("proof"), Effort::Legacy);
   EXPECT_EQ(parse_effort("quick-check"), Effort::Quick);
   EXPECT_EQ(parse_effort("test"), Effort::Test);
   EXPECT_EQ(parse_effort("long-check"), Effort::Long);
@@ -19,23 +20,12 @@ TEST(Effort, PresetsAndLevels) {
   EXPECT_FALSE(is_sampled(Effort::Verify) || is_sampled(Effort::Legacy));
   EXPECT_LT(effort_vectors(Effort::Quick), effort_vectors(Effort::Test));
   EXPECT_LT(effort_vectors(Effort::Test), effort_vectors(Effort::Long));
-  EXPECT_LT(effort_proof_rlimit(Effort::Quick), effort_proof_rlimit(Effort::Test));
-  EXPECT_LT(effort_proof_rlimit(Effort::Test), effort_proof_rlimit(Effort::Long));
   // The reached level is the highest one whose vector count is met.
   EXPECT_EQ(effort_reached(0), Effort::Legacy);
   EXPECT_EQ(effort_reached(effort_vectors(Effort::Quick) - 1), Effort::Legacy);
   EXPECT_EQ(effort_reached(effort_vectors(Effort::Quick)), Effort::Quick);
   EXPECT_EQ(effort_reached(effort_vectors(Effort::Test)), Effort::Test);
   EXPECT_EQ(effort_reached(effort_vectors(Effort::Long) * 2), Effort::Long);
-}
-
-TEST(Effort, ProofResourceLimitRejectsMalformedAndOverflowingValues) {
-  EXPECT_EQ(parse_effort_proof("", Effort::Quick), effort_proof_rlimit(Effort::Quick));
-  EXPECT_EQ(parse_effort_proof("0", Effort::Test), 0u);
-  EXPECT_EQ(parse_effort_proof("5000000000", Effort::Test), 5'000'000'000ULL);
-  for (const auto value : {"-1", "+1", "1s", " 1", "18446744073709551616"}) {
-    EXPECT_THROW(parse_effort_proof(value, Effort::Quick), std::invalid_argument) << value;
-  }
 }
 
 struct SamplerFixture : testing::Test {
@@ -113,4 +103,27 @@ TEST_F(SamplerFixture, TimeoutStopsBeforeTheLevel) {
   EXPECT_EQ(out.report.queries, 0u);
   EXPECT_FALSE(out.report.passed());
   EXPECT_EQ(out.reason, "hit formal.timeout");
+}
+
+// Timeout during a state lead must not start another query or count the lead.
+TEST_F(SamplerFixture, TimeoutBeforeLeadConfirmation) {
+  const auto a = variable(8, "a");
+  sampler.add_input(a);
+  sampler.add_state_diff("q", 0, tm.mkTrue());
+  int        checks = 0;
+  const auto out    = sampler.run(
+      solver,
+      tm.mkFalse(),
+      Effort::Test,
+      [&](long long) {
+        ++checks;
+        return solver.checkSat();
+      },
+      [&] { return checks > 0; });
+  EXPECT_EQ(checks, 1);
+  EXPECT_EQ(out.report.leads, 1u);
+  EXPECT_EQ(out.report.vectors, 0u);
+  EXPECT_FALSE(out.report.passed());
+  EXPECT_EQ(out.reason, "hit formal.timeout");
+  EXPECT_TRUE(solver.checkSat().isSat());
 }

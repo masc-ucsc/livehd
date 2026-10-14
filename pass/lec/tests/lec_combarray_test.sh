@@ -65,7 +65,7 @@ compile good.sv g_ys     yosys-slang
 compile bad.sv  b_native slang
 
 check() {
-  $LHD lec --set formal.lec.hier=false --impl "verilog:$WORK/$1_all.v" --ref "verilog:$WORK/$2_all.v" --impl-top ca --ref-top ca \
+  $LHD lec --set formal.effort=proof --set formal.lec.hier=false --impl "verilog:$WORK/$1_all.v" --ref "verilog:$WORK/$2_all.v" --impl-top ca --ref-top ca \
        --workdir "$WORK/c_${1}_${2}_$$" 2>&1 | grep -o '"status":"[a-z]*"' | head -1
 }
 expect() { if [ "$2" != "$3" ]; then echo "FAIL: $1 -> got '$2', want '$3'"; fail=1; else echo "ok: $1 -> $2"; fi; }
@@ -92,7 +92,7 @@ module rom_diff(input logic [2:0] idx, output logic [7:0] val);
   assign val = 8'd$value;
 endmodule
 EOF
-  $LHD lec --impl "verilog:$WORK/rom_impl_$value.sv" --ref "verilog:$WORK/rom_ref.sv" \
+  $LHD lec --set formal.effort=proof --impl "verilog:$WORK/rom_impl_$value.sv" --ref "verilog:$WORK/rom_ref.sv" \
     --top rom_diff --workdir "$WORK/rom_check_$value" > "$WORK/rom_check_$value.log" 2>&1
   rc=$?
   if [ "$value" = 0 ]; then want_rc=0; want_verdict=proven; else want_rc=10; want_verdict=refuted; fi

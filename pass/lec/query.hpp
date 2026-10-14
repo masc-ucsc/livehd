@@ -237,10 +237,6 @@ struct Monitor;
 // Discharge / engine knobs (filled from the lec.* set-options).
 struct Lec_options {
   Effort   effort        = Effort::Legacy;
-  // Cumulative cvc5 resource cap (rlimit) of a sampled preset's PROOF
-  // attempt. Unlike `rlimit` it leaves formal.timeout's soft-total accounting
-  // on: the deterministic cap bounds each solver, timeout stays the backstop.
-  uint64_t effort_rlimit = 0;
   // Canonical assumption policy shared by compile, verify, and LEC.
   // true: checked assumptions are proof obligations before use. A checked
   // assumption over the selected top's primary IO is necessarily uncheckable
@@ -288,8 +284,8 @@ struct Lec_options {
   // summed budget would drain jobs-times faster than real time); the verify
   // engine spends it as total SOLVER time across the run. Either way one
   // `formal.timeout=T` is an actual total, not T per def / per obligation (the
-  // D×T hazard). 0 = unbounded. Accounting is ON iff `timeout > 0 && rlimit == 0`
-  // — `rlimit` is the deterministic CI path and owns the bound by itself, which
+  // D×T hazard). 0 = unbounded. Accounting is ON iff `timeout > 0 && compile_resource_limit == 0`
+  // — `compile_resource_limit` is the compiler-private deterministic path and owns the bound by itself, which
   // is why there is no separate mode knob.
   int         timeout             = 0;
   // FLOOR, in seconds, under the soft total: once `timeout` is spent, a unit
@@ -359,7 +355,7 @@ struct Lec_options {
   // this (with timeout=0) so a verdict that ELIDES a runtime check is
   // reproducible across `-c dbg`/`-c opt` binaries; the verify/lec CLIs default
   // to wall-clock `timeout`. 0 = off. Both may be set (each bounds a checkSat).
-  int         rlimit              = 0;
+  int         compile_resource_limit = 0;
   bool        witness             = true;    // print counterexample on Refuted
   std::string decompose           = "auto";  // prove each cut/output diff as a separate UNSAT query
                                              // instead of one monolithic OR-miter. Same proof (an OR

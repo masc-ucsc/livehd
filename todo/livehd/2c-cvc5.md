@@ -1,6 +1,8 @@
 # 2c-cvc5 — cvc5 1.4.2, source build, solver profiles, LEC portfolio
 
-Status: PLAN (2026-10-13). Nothing implemented. Baseline: cvc5 1.3.4 prebuilt
+Status: PLAN (2026-10-13). The effort-mode cleanup below is implemented;
+the cvc5 upgrade, profiles, and job manager remain planned.
+Baseline: cvc5 1.3.4 prebuilt
 (`packages/cvc5_repo.bzl`, `packages/cvc5.BUILD`), pass/lec + pass/formal talk to
 cvc5 through its C++ API only (`pass/lec/query.cpp`, `pass/formal/prove.cpp`).
 
@@ -72,6 +74,37 @@ cvc5 through its C++ API only (`pass/lec/query.cpp`, `pass/formal/prove.cpp`).
 5. Standing rules: tests < 30 s opt / 90 s dbg; LEC tests < 2 min with
    `formal.timeout <= 120`; timeout/Unknown = PASS, Refuted/crash = FAIL;
    prefer drop-in `.v`/`.prp` fixtures over new `*.sh` tests.
+6. Sampling is required for the sampled modes; **`formal.effort=test` is the
+   default and starts sampling immediately**. `quick-check`, `test`, and
+   `long-check` target 256, 2048, and 16384 completed input vectors. There is
+   no preliminary proof attempt. `formal.timeout` is a wall-clock backstop
+   if the target cannot be reached, not the definition of testing effort.
+   A timed-out query contributes no completed samples. Sampling does not
+   require incremental solvers: convert its repeated queries and state-lead
+   confirmations in M2 while reusing the encoded term DAG.
+7. **`formal.effort=proof` never samples**, including after a timeout or an
+   inconclusive proof. `formal.timeout` is its only effort limit. Remove the
+   public `formal.rlimit` and `formal.effort_proof` options; do not restore
+   them through solver profiles or portfolio configuration. Charge elapsed
+   wall-clock time, not the sum of concurrent solver times: parallel arms
+   share the same elapsed-time allowance.
+
+## Completed prerequisite — effort modes (2026-10-13)
+
+- Sampled modes enter the sampler directly and bypass the theorem cache.
+  `TESTED` is never a proof or a hierarchical premise; ordinary proof tests
+  now explicitly select `formal.effort=proof`.
+- The sampling worker has a parent-enforced wall timeout, including encoding;
+  neither `min_timeout` nor `hard_timeout_mult` extends its allowance.
+- Public `formal.rlimit` and `formal.effort_proof` are removed with directed
+  diagnostics. The compiler-private deterministic resource budget remains
+  separate and is not a public formal effort setting.
+- Hierarchical proof scheduling charges elapsed wall time instead of summed
+  worker solve time. The existing proof minimum-allowance/backstop policy
+  remains; M3 must carry a common deadline through portfolio dispatch.
+- Validation: 47 focused checks passed, covering sampling levels, rare
+  mismatches, proof-only mode, cache separation, removed options, stalled
+  worker timeout, LEC regressions, and compiler formal budgets.
 
 ## Milestones
 
@@ -122,9 +155,9 @@ cvc5 through its C++ API only (`pass/lec/query.cpp`, `pass/formal/prove.cpp`).
   `setOption` site: `prove_equal_impl` (query.cpp:4161..4278),
   `slice_solver` (:9564), `prove_properties_impl` (:11775..11810),
   `Prover::solve` / `assumes_consistent` (prove.cpp:817/:1334). The ctx
-  carries `has_mem`, `has_boxes`, `witness`, `timeout_ms`, `rlimit` so the
+  carries `has_mem`, `has_boxes`, `witness`, `timeout_ms`, `compile_resource_limit` so the
   existing gating (`bitblast-internal` only without arrays/UF, tlimit-per,
-  rlimit) moves into one place.
+  compiler-private resource limits) moves into one place.
 - Profiles (initial set; everything beyond `internal` is measured in M4):
   | name | options | use |
   |---|---|---|
@@ -141,13 +174,20 @@ cvc5 through its C++ API only (`pass/lec/query.cpp`, `pass/formal/prove.cpp`).
   10137 and the level-0 asserts at :5944/:5961/:5996/:6099/:6102/:7568/:7571/
   :7795/:7818/:8208/:8211. `solve_check` keeps counting checks and budget.
   `TermManager` stays shared (term DAG is not rebuilt).
+- Include `Input_sampler` (`pass/lec/effort.cpp`) in the fresh-solver
+  conversion: each pinned-input query and each state-lead confirmation
+  asserts the shared base plus its own restrictions in a fresh solver.
+  Keep a SAT solver alive through model extraction and witness construction.
+  Count completed samples independently of solver lifetime; repeated profile
+  attempts on the same sampled query do not multiply its coverage count.
 - BMC base slicing: per decomposed cut, assert only the base equalities in the
   cut's cone of influence over the term DAG (reuse the observability walk,
   :8063) so a fresh solver per cut does not re-preprocess the whole
   unrolling. Measure with and without; keep whichever is faster on lhdtrack.
 - Witness: a SAT from a non-model arm triggers one re-solve on the `witness`
   profile (SAT is the cheap direction); `build_witness` unchanged otherwise.
-- `rlimit` tier (prove.cpp, compile-time deterministic budget): measure that
+- Compiler-private resource tier (prove.cpp, compile-time deterministic
+  budget; no public `formal.rlimit`): measure that
   CaDiCaL's resource accounting is reproducible run-to-run on the satopt
   corpus; if not, pin that profile to `sat-solver=minisat` and say so in
   lec.md. (The CaDiCaL wrapper's SAT-level "solve with a budget" is
@@ -159,6 +199,10 @@ cvc5 through its C++ API only (`pass/lec/query.cpp`, `pass/formal/prove.cpp`).
   (`solve_stats.hpp:18` fixture). Existing lec `.sh` tests are the regression
   net; expect `lec_budget_test`/`lec_min_timeout_default_test` to need
   re-baselining if timing-sensitive.
+- Preserve the effort regressions (`effort_test`, `lhd_effort_smoke`): default
+  testing starts with sampling, proof mode never invokes the sampler even
+  after Unknown/timeout, capped queries do not count, and cached theorems do
+  not replace requested sampling. These must pass with fresh solvers too.
 
 ### M3a — shared job manager (load + memory admission) (3-4 days)
 
@@ -254,6 +298,10 @@ Design — `core/job_manager.{hpp,cpp}`, one process-wide instance:
 
 ### M3 — LEC portfolio race under the job manager (3-4 days)
 
+- Dispatch by effort before selecting arms. Proof mode runs only proof arms
+  and has no sampling fallback. Sampled modes start their restricted BMC
+  queries immediately; any profile race serves those queries, without an
+  unrestricted proof attempt before or after them.
 - Arms = engines x profiles. Extend `run_auto_portfolio` (query.cpp:2109) /
   `fork_race` (`pass/lec/fork_race.hpp`): today 2 arms (`ind`, `bmc`); new
   default arm list `bmc:internal, bmc:lazy, ind:internal` (+ `bmc:intblast`
@@ -271,24 +319,33 @@ Design — `core/job_manager.{hpp,cpp}`, one process-wide instance:
   own slot and each arm acquires one (through the fork-shared semaphore)
   before encoding and releases on exit/kill (parent releases on behalf of a
   SIGKILLed child and records its `ru_maxrss`). Arms beyond the admitted
-  count wait; the race deadline (`race_deadline_ms`) starts when the arm
-  actually starts, so queued arms do not burn their budget. `lhd.jobs` is
-  the only ceiling. Non-forking paths (`--workdir`,
+  count wait. Carry one parent-owned wall deadline through admission,
+  encoding, solving, retries, and witness confirmation. A queued or retried
+  arm receives only the time remaining; launching it must not restart the
+  timeout. Concurrent arms consume the same elapsed interval once, and the
+  parent cancels running and queued arms when the allowance expires.
+  `lhd.jobs` is the concurrency ceiling. Non-forking paths (`--workdir`,
   `lhd.incremental=false`) unchanged.
 - `--stats`: per-arm (engine, profile, verdict, ms, won/killed/queued) via the
   existing result codec (tail field, see the fork-codec warnings at
   query.cpp:622..640).
 - Tests: `fork_race_test` extended with a pool of 1 and 3 arms (serialization
   observed, winner still wins); `lec_auto_test.sh` with `formal.portfolio` set
-  to a single arm and to the default; a `formal.jobs=1` run of the hier test
+  to a single arm and to the default; a `lhd.jobs=1` run of the hier test
   (`lec_hier_test.sh`) must not deadlock (slot handoff between the def worker
-  and its arms).
+  and its arms). Check that parallel workers do not multiply time charges,
+  queued arms cannot extend the deadline, and proof-mode timeout never
+  dispatches sampling.
 
 ### M4 — option experiments (ongoing; each is a profile edit + a measurement)
 
 Corpora: `inou/prp/tests/equiv`, lhdtrack LEC sweep, logikbench, minion
 (few-minutes rule, never block on hour-long runs). Report per experiment:
 Proven/Refuted/Unknown counts, wall, cvc5 ms, vs the `internal` arm.
+Select `formal.effort=proof` explicitly for proof measurements. Measure
+sampled modes separately at fixed vector targets, reporting the requested
+and reached levels, completed vectors, capped queries, mismatches, and wall
+time. Keep solver-time sums as statistics only, never as the timeout charge.
 
 1. `bv-to-bool=true` + `ite-simp` (+ `early-ite-removal`): the encoder emits
    zero Boolean sorts (all control is BV1), so the ITE simplifier never sees
@@ -347,16 +404,20 @@ Skip (reviewed, not relevant to netlists): `bv-gauss-elim`, `bv-intro-pow2`,
   slicing is not enough, fall back to one non-incremental solver for the
   monolithic solve and keep the per-cut sweep on `internal` with
   `incremental=true` + `sat-solver=cadical` (still strictly better than today).
-- rlimit reproducibility with CaDiCaL (M2) — measured, not assumed.
+- Compiler-private resource-budget reproducibility with CaDiCaL (M2) —
+  measured, not assumed; public formal resource-limit options stay removed.
 - Source build on Linux arm64 and the glibc floor: confirm the oldest server
   we care about links the result (that is the whole point of M1).
 
 ## Checklist
 
+- [x] Effort prerequisite: immediate default sampling; proof never samples;
+  public `rlimit`/`effort_proof` removed; wall-time hierarchy accounting;
+  47 focused checks passed
 - [ ] M0 prebuilt 1.4.2 green; spurious-SAT re-test recorded
 - [ ] M1 source build green on linux-x86_64 / linux-arm64 / macos-arm64; kissat + cms linked
-- [ ] M2 profiles + fresh-solver LEC; verify on cadical incremental; rlimit reproducibility measured
+- [ ] M2 profiles + fresh-solver LEC including sampling and state-lead confirmation; verify on cadical incremental; compiler-private resource-budget reproducibility measured
 - [ ] M3a `core/job_manager` (load + memory EWMA admission, fork-shared semaphore); single `lhd.jobs` ceiling (default = available CPUs); `formal.jobs`/`sim.jobs`/`synth.threads` retired with directed renames; sim LLVM + usyn + formal on it; ABC excluded
-- [ ] M3 portfolio race under the job manager; `--stats` per arm; jobs=1 no deadlock
+- [ ] M3 portfolio race under the job manager; effort dispatch preserved; one shared wall deadline; `--stats` per arm; jobs=1 no deadlock
 - [ ] M4 experiments 1-9 measured and recorded here
 - [ ] M5 lec.md / 07-formal.md updated

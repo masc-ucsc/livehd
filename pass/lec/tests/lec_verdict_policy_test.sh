@@ -120,7 +120,7 @@ run() {  # $1=label $2..=lhd args ; sets RC/OUT
   case " ${*:2} " in
     *" --set formal.min_timeout="*) mt=() ;;
   esac
-  OUT=$("$LHD" lec "${@:2}" --top foo --set formal.lec.hier=false ${to[@]+"${to[@]}"} \
+  OUT=$("$LHD" lec --set formal.effort=proof "${@:2}" --top foo --set formal.lec.hier=false ${to[@]+"${to[@]}"} \
         ${mt[@]+"${mt[@]}"} --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 

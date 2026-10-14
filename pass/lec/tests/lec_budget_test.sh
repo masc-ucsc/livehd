@@ -5,9 +5,8 @@
 # for the whole hierarchical `lhd lec` command, not a budget PER def. With N hard
 # sub-defs and jobs=1 the OLD behavior spent N*timeout (each def got the full
 # budget); the scheduler caps the TOTAL at ~timeout by handing each def only the
-# budget REMAINING when it runs. Accounting is on whenever timeout>0 and
-# formal.rlimit==0 (the old budget_mode knob is gone — rlimit selects the
-# deterministic tier by itself). A fast, genuinely-equivalent hierarchy must still
+# budget REMAINING when it runs. Accounting is on whenever timeout>0. Concurrent workers spend elapsed wall
+# time, without summing their solve times. A fast, genuinely-equivalent hierarchy must still
 # PROVE under the scheduler (no regression).
 #
 # `timeout` is a SOFT target: `formal.min_timeout` is the floor every def gets even
@@ -29,7 +28,7 @@
 #
 # Timing claims are asserted on the run's OWN accounting (the `Ns actual` in its
 # budget report = the DAG dispatch window), never on the shell's `date` delta: the
-# reported window is stable to the second because it is a sum of solver grants,
+# reported window measures elapsed wall time across the proof DAG,
 # whereas end-to-end wall clock also carries RTL compile and varies by several
 # seconds under load — a raw-elapsed threshold tight enough to be meaningful here
 # is flaky by construction. Raw elapsed is kept only as a loose blowup guard.
@@ -99,7 +98,7 @@ run_lec() {  # $1=tag $2=basename $3=formal.timeout $4=outer_kill_s; $5.. = extr
   shift 4
   OUTFILE="$WORK/out_${mode}_${base}.txt"
   start=$(date +%s)
-  "$LHD" lec --ref "$WORK/${base}_ref.v" --impl "$WORK/${base}_impl.v" --top top \
+  "$LHD" lec --set formal.effort=proof --ref "$WORK/${base}_ref.v" --impl "$WORK/${base}_impl.v" --top top \
          --set formal.engine=ind --set formal.jobs=1 --set "formal.timeout=$to" "$@" \
          --workdir "$WORK/w_${mode}_${base}" > "$OUTFILE" 2>&1 &
   pid=$!
@@ -156,20 +155,16 @@ if grep -qE "budget 2s target / [0-9]+s actual over [0-9]+ def\(s\) solved, [1-9
 else
   echo "FAIL: a starved run must report target/actual/units and a NON-ZERO floored count (per-def budgeting floors nobody): $(cat "$OUTFILE")"; fail=1
 fi
-# Wall bound: the solving window is ~one budget, plus a floor per straggler, plus
-# the int-blast retry every unsettled def draws (~8s measured at these knobs).
-# The TOTAL-vs-PER-DEF discriminator is the FLOORED COUNT asserted just above —
-# deterministic, and no timing model can weaken it. This bound is the separate
-# "the cap was honored at all" guard: a def that ignores its grant does not
-# overshoot by a second, it FREEZES (these miters are still UNKNOWN at
-# formal.timeout=30), so 12s clears the grant sum with room to spare and still
-# fails loudly on a real blowup. It used to read `< 9s == 3*(2+1)`, which the
-# retry leg (~2*min_timeout per unsettled def — see the cost model) turned into a
-# coin flip: 8s measured against a 9s threshold. Plus a loose end-to-end guard.
-if [ "${ACTUAL:-99}" -lt 12 ]; then
-  echo "ok: budget bounded the solving window to ${ACTUAL}s (< 12s; an ungranted def would freeze)"
+# The TOTAL-vs-PER-DEF discriminator is the FLOORED COUNT asserted above.
+# The report now measures elapsed WALL time, including encoding, worker startup
+# and retry preparation. The former 12s solver-only guard is not comparable to
+# this metric (~13s wall at these grants). Bound the entire proof window by the
+# opt test's 20s allowance; an ungranted def freezes on this miter. Keep the
+# separate end-to-end guard, which also includes source compilation.
+if [ "${ACTUAL:-99}" -lt 20 ]; then
+  echo "ok: budget bounded the proof wall window to ${ACTUAL}s (< 20s)"
 else
-  echo "FAIL: solving window was ${ACTUAL:-<none>}s (want < 12s; total budget not honored)"; fail=1
+  echo "FAIL: proof wall window was ${ACTUAL:-<none>}s (want < 20s; total budget not honored)"; fail=1
 fi
 if [ "$ELAPSED" -ge 25 ]; then
   echo "FAIL: end-to-end took ${ELAPSED}s for a 2s budget (want < 25s)"; fail=1

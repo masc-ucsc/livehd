@@ -79,7 +79,7 @@ awk '/cell\(AND2x1\)/{c=1} /cell\(DLCLKPx1\)/{c=0} c{gsub(/"B"/,"\"BB\""); gsub(
 lec() {
   local d=$1 tag=$2 want=$3
   shift 3
-  "$LHD" lec "$@" --top "$TOP" --set formal.simfail_run=false --workdir "$d/W_$tag" -q \
+  "$LHD" lec --set formal.effort=proof "$@" --top "$TOP" --set formal.simfail_run=false --workdir "$d/W_$tag" -q \
     --result-json "$d/$tag.json" >"$d/$tag.log" 2>&1
   grep -q "\"verdict\":\"$want\"" "$d/$tag.json" || bad "$d: $tag is not $want: $(head -c 600 "$d/$tag.json")"
 }
@@ -89,7 +89,7 @@ lec() {
 refused() {
   local d=$1 tag=$2 want=$3
   shift 3
-  "$LHD" lec "$@" --top "$TOP" --set formal.simfail_run=false --workdir "$d/W_$tag" -q \
+  "$LHD" lec --set formal.effort=proof "$@" --top "$TOP" --set formal.simfail_run=false --workdir "$d/W_$tag" -q \
     --result-json "$d/$tag.json" >"$d/$tag.log" 2>&1
   grep -q '"class":"unsupported"' "$d/$tag.json" && grep -qF "$want" "$d/$tag.json" \
     && ! grep -q '"verdict"' "$d/$tag.json" || bad "$d: $tag must refuse ($want): $(head -c 600 "$d/$tag.json")"

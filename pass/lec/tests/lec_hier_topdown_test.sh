@@ -85,7 +85,7 @@ run() {  # <tag> <impl> <order> [extra...] -> RC/OUT
   order_args=()
   [ "$ord" = "top_down" ] || order_args=(${order_args[@]+"${order_args[@]}"})
   rm -rf "$W/wd_$tag"
-  OUT=$("$LHD" lec --ref "lg:$W/A" --impl "lg:$W/$impl" --top top \
+  OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/A" --impl "lg:$W/$impl" --top top \
          --set "formal.lec.hier_order=$ord" \
         --workdir "$W/wd_$tag" "$@" 2>&1); RC=$?
 }
@@ -160,14 +160,14 @@ done
 #    leaves-first notion of "a child already refuted".
 # ---------------------------------------------------------------------------
 rm -rf "$W/wd_bad"
-OUT=$("$LHD" lec --ref "lg:$W/A" --impl "lg:$W/B" --top top \
+OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/A" --impl "lg:$W/B" --top top \
       --set formal.lec.hier_order=sideways --workdir "$W/wd_bad" 2>&1); RC=$?
 if [ "$RC" -eq 0 ] || ! echo "$OUT" | grep -q "hier_order expects top_down|bottom_up"; then
   echo "FAIL: case 5 an unknown hier_order was accepted (rc=$RC)"; fail=1
 else echo "ok: hier_order rejects an unknown value"; fi
 
 rm -rf "$W/wd_ff"
-OUT=$("$LHD" lec --ref "lg:$W/A" --impl "lg:$W/B" --top top \
+OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/A" --impl "lg:$W/B" --top top \
        --set formal.lec.hier_refute=fail \
       --workdir "$W/wd_ff" 2>&1); RC=$?
 if ! echo "$OUT" | grep -q "forces the legacy bottom_up order"; then
@@ -199,7 +199,7 @@ for side in a b; do
     || { echo "FAIL: case 6 compile of deep_$side.v failed"; fail=1; }
 done
 if [ "$fail" -eq 0 ]; then
-  OUT=$("$LHD" lec --ref "lg:$W/deep_a" --impl "lg:$W/deep_b" --top deep_top \
+  OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/deep_a" --impl "lg:$W/deep_b" --top deep_top \
         --workdir "$W/wd_deep" 2>&1); RC=$?
   if [ "$RC" -ne 0 ] || ! echo "$OUT" | grep -q '82/82 def(s) proven'; then
     echo "FAIL: case 6 deep hierarchy traversal did not prove safely (rc=$RC)"; fail=1
@@ -227,7 +227,7 @@ for side in a b; do
     || { echo "FAIL: case 7 compile of empty_$side.v failed"; fail=1; }
 done
 if [ "$fail" -eq 0 ]; then
-  OUT=$("$LHD" lec --ref "lg:$W/empty_a" --impl "lg:$W/empty_b" --top empty_parent \
+  OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/empty_a" --impl "lg:$W/empty_b" --top empty_parent \
         --workdir "$W/wd_empty_parent" 2>&1); RC=$?
   # The compile pipeline may already erase a pure outputless instance. In that
   # case the hierarchy contains only the parent; otherwise LEC discharges the
@@ -237,7 +237,7 @@ if [ "$fail" -eq 0 ]; then
     echo "FAIL: case 7 an outputless child did not discharge the parent (rc=$RC)"; fail=1
   else echo "ok: an outputless DPI-style child is structurally unobservable to its parent"; fi
 
-  OUT=$("$LHD" lec --ref "lg:$W/empty_a" --impl "lg:$W/empty_b" --top sink \
+  OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/empty_a" --impl "lg:$W/empty_b" --top sink \
         --workdir "$W/wd_empty_top" 2>&1); RC=$?
   if [ "$RC" -ne 7 ] || ! echo "$OUT" | grep -q "selected top has no observable output ports"; then
     echo "FAIL: case 7 selected outputless top was not an explicit setup refusal (rc=$RC)"; fail=1
@@ -278,7 +278,7 @@ for side in a b; do
     || { echo "FAIL: case 8 compile of unknown_$side.v failed"; fail=1; }
 done
 if [ "$fail" -eq 0 ]; then
-  OUT=$("$LHD" lec --ref "lg:$W/unknown_a" --impl "lg:$W/unknown_b" --top unknown_parent \
+  OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/unknown_a" --impl "lg:$W/unknown_b" --top unknown_parent \
         --set formal.timeout=1 --set formal.min_timeout=1 --workdir "$W/wd_unknown_child" 2>&1); RC=$?
   if [ "$RC" -ne 0 ]; then
     echo "FAIL: case 8 an inconclusive child stranded a contextually equivalent parent (rc=$RC)"; fail=1
@@ -340,7 +340,7 @@ for side in a b; do
     || { echo "FAIL: case 9 compile of feedback_$side.v failed"; fail=1; }
 done
 if [ "$fail" -eq 0 ]; then
-  OUT=$("$LHD" lec --ref "lg:$W/feedback_a" --impl "lg:$W/feedback_b" --top feedback_top \
+  OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/feedback_a" --impl "lg:$W/feedback_b" --top feedback_top \
         --set formal.lec.semdiff=none --workdir "$W/wd_feedback_boundary" 2>&1); RC=$?
   # loop_o -> fb is a Moore feedback (loop_o = q): no cycle at arc level, so
   # pass.legalize keeps the instance (todo/livehd/legalize_acyclic.md) and the
@@ -384,7 +384,7 @@ module asym_top(input clock, input reset, input d, output q);
   assign q = state;
 endmodule
 EOF
-OUT=$("$LHD" lec --ref "$W/asym_ref.v" --impl "$W/asym_impl.v" --top asym_top \
+OUT=$("$LHD" lec --set formal.effort=proof --ref "$W/asym_ref.v" --impl "$W/asym_impl.v" --top asym_top \
       --set formal.lec.semdiff=none --set formal.simfail=false \
       --workdir "$W/wd_asym_hierarchy" 2>&1); RC=$?
 if [ "$RC" -ne 0 ]; then
@@ -425,7 +425,7 @@ module partition_top(input clock, input d, output [1:0] q);
   partition_top__c1 sub_16(.clock(clock), .d(d), .q(q));
 endmodule
 EOF
-OUT=$("$LHD" lec --ref "$W/partition_ref.v" --impl "$W/partition_impl.v" --top partition_top \
+OUT=$("$LHD" lec --set formal.effort=proof --ref "$W/partition_ref.v" --impl "$W/partition_impl.v" --top partition_top \
       --set formal.lec.semdiff=none --set formal.simfail=false \
       --workdir "$W/wd_partition_hierarchy" 2>&1); RC=$?
 if [ "$RC" -ne 0 ]; then
@@ -456,7 +456,7 @@ EOF
   C "unconfirmed_$side"
 done
 for order in top_down bottom_up; do
-  "$LHD" lec --ref "lg:$W/unconfirmed_ref" --impl "lg:$W/unconfirmed_impl" --top top \
+  "$LHD" lec --set formal.effort=proof --ref "lg:$W/unconfirmed_ref" --impl "lg:$W/unconfirmed_impl" --top top \
     --set "formal.lec.hier_order=$order" --workdir "$W/unconfirmed_$order" \
     --result-json "$W/unconfirmed_$order.json" > "$W/unconfirmed_$order.log" 2>&1
   python3 - "$W/unconfirmed_$order.json" <<'PYVERDICT'

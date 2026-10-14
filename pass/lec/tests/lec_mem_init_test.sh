@@ -82,18 +82,18 @@ sync_rom sb "(1,2,3,4)"
 sync_rom sc "(1,2,3,9)"  # wrong init
 
 verdict() {  # $1=ref.v $2=impl.prp $3=top -> PROVEN | REFUTED | UNKNOWN
-  $LHD lec --ref "verilog:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
+  $LHD lec --set formal.effort=proof --ref "verilog:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
        --set formal.engine=ind --workdir "$WORK/q_${1}_$$" 2>&1 \
     | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN\|INCONCLUSIVE" | head -1
 }
 verdict_pp() {  # $1=ref.prp $2=impl.prp $3=top -> PROVEN | REFUTED | UNKNOWN
-  $LHD lec --ref "pyrope:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
+  $LHD lec --set formal.effort=proof --ref "pyrope:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
        --set formal.engine=ind --workdir "$WORK/qpp_$$_${RANDOM}" 2>&1 \
     | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN\|INCONCLUSIVE" | head -1
 }
 
 verdict_pp_auto() {  # verdict_pp with the default (ind|bmc) engine
-  $LHD lec --ref "pyrope:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
+  $LHD lec --set formal.effort=proof --ref "pyrope:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
        --workdir "$WORK/qppa_$$_${RANDOM}" 2>&1 \
     | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN\|INCONCLUSIVE" | head -1
 }
@@ -134,7 +134,7 @@ expect "sync ROM wrong (sound)"  "$(verdict_pp_auto sa/srom.prp sc/srom.prp srom
 # its read register from the ROM, so use BMC across that state representation
 # change. The original memory-to-memory inductive checks above remain unbounded.
 verdict_rom_bmc() {  # $1=ref.v $2=impl.prp
-  $LHD lec --ref "verilog:$WORK/$1" --impl "pyrope:$WORK/$2" --top srom.srom \
+  $LHD lec --set formal.effort=proof --ref "verilog:$WORK/$1" --impl "pyrope:$WORK/$2" --top srom.srom \
        --set formal.engine=bmc --set formal.bound=6 --set formal.simfail_run=false \
        --workdir "$WORK/rom_bmc_$$_${RANDOM}" 2>&1 \
     | grep -o "PASS(6) equivalent\|REFUTED (not equivalent)\|UNKNOWN\|INCONCLUSIVE" | head -1
@@ -182,7 +182,7 @@ EOF
 verdict_eng() {  # $1=ref $2=impl $3=engine [extra --set...] -> PROVEN | REFUTED | UNKNOWN
   local r="$1" i="$2" e="$3"
   shift 3
-  $LHD lec --ref "$WORK/$r" --impl "$WORK/$i" --top romt --set "formal.engine=$e" "$@" \
+  $LHD lec --set formal.effort=proof --ref "$WORK/$r" --impl "$WORK/$i" --top romt --set "formal.engine=$e" "$@" \
        --set formal.simfail_run=false --workdir "$WORK/qe_$$_${RANDOM}" 2>&1 \
     | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN\|INCONCLUSIVE" | head -1
 }

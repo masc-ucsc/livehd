@@ -236,13 +236,13 @@ compile packed_select_bad.sv packed_select_bad slang packed_select
 # what makes the corrupted-RF case below a real refutation rather than a lead.
 verdict() {  # $1=impl $2=ref [$3=top] -> PROVEN | PASS(n) | REFUTED | UNKNOWN
   local top="${3:-rf}"
-  $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$top" --set formal.lec.hier=false \
+  $LHD lec --set formal.effort=proof --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$top" --set formal.lec.hier=false \
        --workdir "$WORK/q_${1}_${2}_$$" 2>&1 \
     | grep -oE "PASS\\([0-9]+\\)|PROVEN equivalent|REFUTED \\(not equivalent\\)|UNKNOWN" | head -1 \
     | sed -E "s/PASS\\([0-9]+\\)/PROVEN equivalent/"   # PASS(n) is a pass; depth is not what this test checks
 }
 verdict_ind() {  # $1=impl $2=ref $3=top -> PROVEN | REFUTED | UNKNOWN
-  $LHD lec --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" --set formal.lec.hier=false \
+  $LHD lec --set formal.effort=proof --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" --set formal.lec.hier=false \
        --set formal.engine=ind --workdir "$WORK/q_ind_${1}_${2}_$$" 2>&1 \
     | grep -oE "PROVEN equivalent|REFUTED \(not equivalent\)|UNKNOWN" | head -1
 }

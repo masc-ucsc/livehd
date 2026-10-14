@@ -8,6 +8,91 @@ Everything here is about `lhd lec --top T`. **Equivalence is a claim about `T`
 only.** Proving other modules is a separate request (`--top X`), never something
 the driver asserts on the user's behalf.
 
+## Effort presets (`formal.effort`)
+
+`quick-check` / `test` / `long-check` start sampling immediately. They select
+**work counts, not wall time**: 256 / 2048 / 16384 input vectors. **The default
+is `test`** (owner-approved 2026-10-13). `formal.timeout` caps elapsed wall
+time if the target cannot be reached; sampling never gets an extra minimum
+allowance or a proof attempt first. `proof` runs only the proof engines, with
+no solver resource limit and a default timeout of 120 seconds. `verify` also
+runs only proof engines, with no default timeout. Parallel proof workers share
+elapsed wall time; their solve times are not added together to spend the budget.
+
+An UNSET effort combined with an option the sampled presets cannot serve
+(a non-cvc5 solver including `lgyosys`, a proof-only engine such as `ind`,
+`formal.cross`, or a phase other than `after_reset`) falls back to `proof`.
+An EXPLICIT sampled preset with those options is a usage error.
+
+| verdict | meaning | exit |
+|---|---|---|
+| PROVEN / PASS(n) | no free data inputs: exhaustive check, unbounded / n cycles | 0 |
+| REFUTED | a real counterexample | 10 |
+| TESTED `<level>` | at least that level's vectors checked, no mismatch | 0 |
+| UNKNOWN | stopped before even quick-check's vectors | 7 |
+
+`lec.verdict` is `tested` and `lec.sampling.effort_reached` names the level.
+The reached level can be LOWER than requested when the timeout or repeated
+per-query caps stop sampling early. Capped queries do not count.
+
+**What is sampled.** One BMC unrolling of the requested top (`formal.bound`,
+`phase=after_reset`, concrete children, no decomposition). Sampling bypasses
+the theorem cache and never uses a tested child as a proof premise. When the
+pipeline-flush analysis extends the reset hold, the checked window is
+`bound + flush`, so delayed output differences remain observable.
+
+**Sampling (random-restricted BMC).** Each query pins a
+random subset of the free primary data-input symbols of every cycle to biased
+random constants (1/8 all-zero, 1/8 all-one, else uniform; clock and reset
+inputs keep their roles) and asserts the miter's `bad`:
+
+- UNSAT: no mismatch among the admitted traces -> counted;
+- SAT: a mismatch, reported as REFUTED with the ordinary witness;
+- per-query cap hit: not counted (32 in a row stop sampling).
+
+The schedule cycles pin rates 100/90/100/75/100/50%. A fully pinned query is
+one simulated trace by propagation (~55 ms on dino, no model read). A partially
+pinned query lets the solver search the free symbols for ANY mismatch, which
+finds bugs a random vector essentially never hits (the smoke test's 1-in-65536
+operand pair); it is capped at 250 ms because such queries are bimodal (cheap or
+a real search). Do not batch several traces as a disjunction of cubes: cvc5
+case-splits instead of propagating (8 cubes: >4 s per query).
+
+**Register leads.** Each query also watches the name-paired registers'
+next states (ref-X masked). A reachable register divergence whose outputs still
+agree is only a lead: the sampler pins that trace's inputs up to the divergence
+cycle and asks for an OUTPUT mismatch in the remaining cycles (2 s cap); only
+that is reported. An unconfirmed (register, cycle) is not chased again.
+
+Counting: a vector is one cycle of one trace. A fully pinned UNSAT adds
+`bound` vectors; a partially pinned UNSAT covers every assignment of its free
+symbols and adds `bound * (1 + free symbols)` (a floor, not 2^bits). Levels:
+quick-check 256, test 2048, long-check 16384 vectors. Seeded RNG: a run is
+reproducible. On dino (depth 6): quick-check ~5 s, test ~50 s.
+
+**Limits.** Sampling is a test, never a proof: it is never `proven`, never a
+bounded PASS, never a theorem-cache entry, never a hierarchical premise. It
+checks only what reaches an output within `bound` cycles of the sampled design.
+dino's `bug1` (ADDW-only ALU mutation, in a comb module `pass.legalize`
+inlines into the top) is not found: a random instruction word hits ADDW about
+1e-5 of the time, and even a targeted search (instruction words free, others
+pinned, register miter) does not decide in 350 s on the unrolled RV64 datapath.
+
+Found by it: lhdsuite's checked-in `minion_dcache_cache_op_unit.prp` had lost
+the per-call `dcache_way_encode = 0` at the `lock_way` site (a cleanup edit;
+the current `prp_writer` output is correct). The legacy flow only reported
+UNKNOWN for that def; a fully pinned random trace refuted it at once.
+Opaque/trusted/collapsed boxes and ignored memories are diagnosed (a box makes
+a sampled mismatch possibly spurious). A design with no free data input has one
+trace per reset, so the ordinary bounded check runs instead.
+
+The single-design `lhd formal verify` accepts the uncapped `verify` preset;
+the sampled presets are for `lhd lec` comparisons.
+
+Tests: `//pass/lec:effort_test` (levels, sampler accounting, rare-mismatch
+search, timeout); `//lhd/tests:lhd_effort_smoke` (immediate sampling, proof-only verdicts, level
+reporting, cache separation, diagnostics, sampled and rare failures).
+
 The ABC cone accelerator is optional. In the ABC-free CLI build
 (`--define=livehd_abc=false`), every accelerator request returns `Unsupported`;
 the original obligations remain for CVC5. Stable cone digests and verdict names

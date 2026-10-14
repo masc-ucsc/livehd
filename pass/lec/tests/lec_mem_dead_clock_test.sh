@@ -96,7 +96,7 @@ for shape in multi single neg; do
     }
     for other in nop live; do
       tag="$shape/$reader vs $other"
-      out=$("$LHD" lec --ref "lg:$lg" --impl "verilog:$W/${other}_$shape.sv" --ref-top top --impl-top top \
+      out=$("$LHD" lec --set formal.effort=proof --ref "lg:$lg" --impl "verilog:$W/${other}_$shape.sv" --ref-top top --impl-top top \
         --workdir "$W/wl_${shape}_${reader}_$other" --set lhd.incremental=false --set formal.timeout=20 2>&1)
       rc=$?
       verdict=$(echo "$out" | grep -E "^lec: 'top' " | tail -1)

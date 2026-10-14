@@ -86,7 +86,7 @@ rm -rf "$WT"
 ST="$WORK/rerun_t"
 rm -rf "$ST"
 (
-  $LHD lec --ref "$WORK/sref.prp" --impl "$WORK/simpl.prp" --workdir "$WT" >"$WORK/out2.log" 2>&1
+  $LHD lec --set formal.effort=proof --ref "$WORK/sref.prp" --impl "$WORK/simpl.prp" --workdir "$WT" >"$WORK/out2.log" 2>&1
 # The query follows the witness JSON's diverge_cycle rather than a fixed number.
 python3 - "$WT/simfail_dut.json" > "$WORK/qt.json" <<'PYQ'
 import json, sys
@@ -105,7 +105,7 @@ W="$WORK/w"
 rm -rf "$W"
 # sim.vcd_fake_delay=false also exercises the knob forwarding in the generator
 # (only a short allowlist of sim.* reaches the child `lhd sim`).
-OUT=$($LHD lec --ref "$WORK/mini.v" --impl "$WORK/mini_bug.prp" --workdir "$W" \
+OUT=$($LHD lec --set formal.effort=proof --ref "$WORK/mini.v" --impl "$WORK/mini_bug.prp" --workdir "$W" \
         --set sim.vcd_fake_delay=false 2>&1)
 
 ck "REFUTED"                 'echo "$OUT" | grep -q REFUTED'

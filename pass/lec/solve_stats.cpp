@@ -457,7 +457,7 @@ void report_cvc5_stats(std::string_view tag, const Cvc5_stats& st, const std::ve
   } else if (per_atom >= 10.0) {
     std::print(
         "{}[stats]: => search-bound: {:.1f} conflict(s) per SAT atom over {} check(s) -- raise "
-        "formal.timeout/formal.rlimit, or split the miter\n",
+        "formal.timeout, or split the miter\n",
         tag,
         per_atom,
         commas(st.checks));

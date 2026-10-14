@@ -523,7 +523,8 @@ void Pass_formal::work(Eprp_var& var) {
       // own min_timeout: a straggler still earns a real attempt, so a call with
       // many obligations may overrun the pass budget by up to one second each.
       ho.timeout = budget.bounded() ? std::max(1, static_cast<int>(budget.left_ms() / 1000)) : 0;
-      ho.rlimit  = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
+      ho.compile_resource_limit
+          = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
       ho.partitions     = 1;
       ho.split          = "none";
       ho.state_pairing  = false;
@@ -1040,7 +1041,8 @@ void Pass_formal::work(Eprp_var& var) {
       // behavior; a non-zero pass budget hands over what is left of it, with the
       // same one-second floor as the preflight above.
       po.timeout      = budget.bounded() ? std::max(1, static_cast<int>(budget.left_ms() / 1000)) : 0;
-      po.rlimit  = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
+      po.compile_resource_limit
+          = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
       po.witness = true;
       po.partitions     = 1;  // no case-split forks
       po.split          = "none";

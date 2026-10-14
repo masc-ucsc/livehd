@@ -38,7 +38,7 @@ mod m(inc:Bool, val:U8) -> (out:U8@[0]) {
 }
 EOF
 
-OUT=$($LHD lec --ref "pyrope:$WORK/a/m.prp" --impl "pyrope:$WORK/b/m.prp" --top m.m --workdir "$WORK/q_$$" 2>&1)
+OUT=$($LHD lec --set formal.effort=proof --ref "pyrope:$WORK/a/m.prp" --impl "pyrope:$WORK/b/m.prp" --top m.m --workdir "$WORK/q_$$" 2>&1)
 
 if echo "$OUT" | grep -q "REFUTED"; then
   echo "ok: REFUTED"

@@ -39,7 +39,7 @@ H() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT
   # semdiff=none: this test validates the hierarchical SOLVER + child-collapse path,
   # so the structurally-identical self-lec must reach the solver (not be skipped by
   # the default semdiff=structural pre-check — that path is covered by lec_semdiff_test).
-  OUT=$("$LHD" lec "${@:2}" --top top  --set formal.lec.semdiff=none --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec --set formal.effort=proof "${@:2}" --top top  --set formal.lec.semdiff=none --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) self-lec: every def proves leaves-first; mid collapses leaf, top collapses mid.
@@ -114,7 +114,7 @@ EOF
 for jobs in 1 4; do
   jobs_args=()
   [ "$jobs" = "4" ] || jobs_args=(--set "formal.jobs=$jobs")
-  "$LHD" lec --impl "lg:$WORK/fanlib" --ref "lg:$WORK/fanlib" --top fan \
+  "$LHD" lec --set formal.effort=proof --impl "lg:$WORK/fanlib" --ref "lg:$WORK/fanlib" --top fan \
      --set formal.lec.semdiff=none ${jobs_args[@]+"${jobs_args[@]}"} \
     --set lhd.incremental=false --workdir "$WORK/w_fan_$jobs" >"$WORK/fan_$jobs.out" 2>&1
   if [ $? -ne 0 ]; then echo "FAIL: fan hierarchy jobs=$jobs failed"; fail=1; fi

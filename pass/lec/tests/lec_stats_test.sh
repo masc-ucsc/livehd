@@ -85,7 +85,7 @@ EOF
 run_lec() {  # $1=tag; $2.. = extra args -> sets OUT
   local tag=$1; shift
   OUT="$W/out_$tag.txt"
-  "$LHD" lec --ref "$W/ref.v" --impl "$W/impl.v" --top top \
+  "$LHD" lec --set formal.effort=proof --ref "$W/ref.v" --impl "$W/impl.v" --top top \
     --set formal.timeout=20 --workdir "$W/w_$tag" "$@" > "$OUT" 2>&1
 }
 
@@ -147,7 +147,7 @@ fi
 #    to SAY that rather than print a wall of zeros -- and this is also the negative
 #    control for case 2 (this is exactly what a dropped codec field looks like).
 cp "$W/ref.v" "$W/same.v"
-"$LHD" lec --ref "$W/ref.v" --impl "$W/same.v" --top top --stats \
+"$LHD" lec --set formal.effort=proof --ref "$W/ref.v" --impl "$W/same.v" --top top --stats \
   --workdir "$W/w_same" > "$W/out_same.txt" 2>&1
 if grep -q "no cvc5 query ran" "$W/out_same.txt"; then
   echo "ok: a run with no solver call says so instead of reporting zeros"

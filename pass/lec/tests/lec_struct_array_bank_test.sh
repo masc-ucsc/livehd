@@ -20,12 +20,12 @@ always @(posedge clock) begin bank_0_bits_data<=a; bank_1_bits_data<=b; end
 assign y=sel ? bank_1_bits_data : bank_0_bits_data;
 endmodule
 RTL
-"$LHD" lec --impl "$W/bank.prp" --ref "$W/bank.v" --top array_field \
+"$LHD" lec --set formal.effort=proof --impl "$W/bank.prp" --ref "$W/bank.v" --top array_field \
   --set formal.engine=ind --set formal.lec.hier=false --workdir "$W/good" --result-json "$W/good.json"
 grep -q '"verdict":"proven".*"bounded":false' "$W/good.json"
 # The bridge must prove the next-state relation, not assume it.
 sed 's/bank_bits_data\[1\] = b/bank_bits_data[1] = a/' "$W/bank.prp" > "$W/bad.prp"
-if "$LHD" lec --impl "$W/bad.prp" --ref "$W/bank.v" --top array_field \
+if "$LHD" lec --set formal.effort=proof --impl "$W/bad.prp" --ref "$W/bank.v" --top array_field \
   --set formal.lec.hier=false --workdir "$W/bad" --result-json "$W/bad.json"; then
   echo 'FAIL: incorrect array write passed' >&2
   exit 1

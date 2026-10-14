@@ -58,7 +58,7 @@ endmodule
 EOF
 
 run() {  # $1=label ; $2..=lhd args ; sets RC/OUT
-  OUT=$("$LHD" lec "${@:2}" --top foo --set formal.lec.hier=false --set formal.timeout=20 --workdir "$WORK/w_$1" 2>&1); RC=$?
+  OUT=$("$LHD" lec --set formal.effort=proof "${@:2}" --top foo --set formal.lec.hier=false --set formal.timeout=20 --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
 # 1) auto on the equal COMBINATIONAL pair -> PROVEN. No state cell in either side,

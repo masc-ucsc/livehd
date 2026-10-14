@@ -29,7 +29,7 @@ sed '/reg lo, hi/a\
   initial begin lo = 0; hi = 0; end' "$WORK/good.v" > "$WORK/init_bad.v"
 check() {
   local tag=$1 ref=$2 impl=$3 expected=$4 policy=$5 code=0
-  "$LHD" lec --ref "verilog:$WORK/$ref.v" --impl "verilog:$WORK/$impl.v" --top dut \
+  "$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/$ref.v" --impl "verilog:$WORK/$impl.v" --top dut \
     --set formal.engine=bmc --set formal.bound=3 --set formal.timeout=10 \
     --set formal.simfail=false \
     --set "formal.lec.gold_x=$policy" --workdir "$WORK/$tag" \

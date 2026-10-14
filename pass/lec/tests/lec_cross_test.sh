@@ -56,7 +56,7 @@ mark_fail() { : > "$WORK/FAILED.$1"; }
 section_comb() {
 
 # Equivalent pair: both engine and lgcheck must say equivalent -> exit 0.
-out=$($LHD lec --impl "lg:$WORK/eq_lg" --ref "lg:$WORK/a_lg" --top foo \
+out=$($LHD lec --set formal.effort=proof --impl "lg:$WORK/eq_lg" --ref "lg:$WORK/a_lg" --top foo \
         --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/c_eq" 2>&1)
 rc=$?
 echo "$out" | grep -i "cross-check" || true
@@ -68,7 +68,7 @@ if [ $rc -ne 0 ]; then
 fi
 
 # Different pair: both must say different -> equiv_fail (exit 10), NO disagreement.
-out=$($LHD lec --impl "lg:$WORK/ne_lg" --ref "lg:$WORK/a_lg" --top foo \
+out=$($LHD lec --set formal.effort=proof --impl "lg:$WORK/ne_lg" --ref "lg:$WORK/a_lg" --top foo \
         --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/c_ne" 2>&1)
 rc=$?
 echo "$out" | grep -i "cross-check" || true
@@ -101,7 +101,7 @@ section_memory() {
     --workdir "$WORK/compile_$variant" > "$WORK/compile_$variant.log" 2>&1 || {
       cat "$WORK/compile_$variant.log"; mark_fail "compile_$variant"; return;
     }
-  $LHD lec --impl "verilog:$WORK/$variant.net.v" --ref "verilog:$WORK/memory.v" --top memory_check \
+  $LHD lec --set formal.effort=proof --impl "verilog:$WORK/$variant.net.v" --ref "verilog:$WORK/memory.v" --top memory_check \
     --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/check_$variant" \
     --result-json "$WORK/$variant.json" > "$WORK/check_$variant.log" 2>&1
   rc=$?
@@ -130,7 +130,7 @@ section_latch() {
     --workdir "$WORK/compile_$variant" > "$WORK/compile_$variant.log" 2>&1 || {
       cat "$WORK/compile_$variant.log"; mark_fail "compile_$variant"; return;
     }
-  $LHD lec --impl "$WORK/$variant.net.v" --ref "$WORK/latch.v" --top latch_check \
+  $LHD lec --set formal.effort=proof --impl "$WORK/$variant.net.v" --ref "$WORK/latch.v" --top latch_check \
     --set formal.lec.cross=true --workdir "$WORK/check_$variant" \
     --result-json "$WORK/$variant.json" > "$WORK/check_$variant.log" 2>&1
   rc=$?
@@ -167,7 +167,7 @@ endmodule
 EOF
 section_bounded() {
   local bound=$1 rc expected cross
-  $LHD lec --impl "$WORK/cnt_impl.v" --ref "$WORK/cnt_ref.v" --top cnt \
+  $LHD lec --set formal.effort=proof --impl "$WORK/cnt_impl.v" --ref "$WORK/cnt_ref.v" --top cnt \
     --set formal.solver=lgyosys --set formal.bound=$bound --set formal.simfail_run=false \
     --workdir "$WORK/cnt_$bound" --result-json "$WORK/cnt_$bound.json" > "$WORK/cnt_$bound.log" 2>&1
   rc=$?
@@ -193,7 +193,7 @@ section_status() {
   printf '#!/bin/sh\nexit %s\n' "$oracle_rc" > "$WORK/oracle_$oracle_rc"
   chmod +x "$WORK/oracle_$oracle_rc"
   for variant in eq ne; do
-    LHD_LGCHECK="$WORK/oracle_$oracle_rc" $LHD lec --impl "lg:$WORK/${variant}_lg" --ref "lg:$WORK/a_lg" --top foo \
+    LHD_LGCHECK="$WORK/oracle_$oracle_rc" $LHD lec --set formal.effort=proof --impl "lg:$WORK/${variant}_lg" --ref "lg:$WORK/a_lg" --top foo \
       --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/status_${oracle_rc}_$variant" \
       > "$WORK/status_${oracle_rc}_$variant.log" 2>&1
     rc=$?
@@ -211,7 +211,7 @@ section_status() {
 section_legacy() {
 printf '#!/bin/sh\nexit 2\n' > "$WORK/oracle_legacy"
 chmod +x "$WORK/oracle_legacy"
-LHD_LGCHECK="$WORK/oracle_legacy" $LHD lec --impl "lg:$WORK/eq_lg" --ref "lg:$WORK/a_lg" --top foo \
+LHD_LGCHECK="$WORK/oracle_legacy" $LHD lec --set formal.effort=proof --impl "lg:$WORK/eq_lg" --ref "lg:$WORK/a_lg" --top foo \
   --set formal.solver=lgyosys --workdir "$WORK/legacy_cross" --result-json "$WORK/legacy_cross.json" \
   > "$WORK/legacy_cross.log" 2>&1
 if [ "$?" -ne 7 ] || ! grep -q '"solver":"cvc5"' "$WORK/legacy_cross.json" \
@@ -230,7 +230,7 @@ EOF
 section_empty() {
 printf '#!/bin/sh\nexit 0\n' > "$WORK/oracle_empty"
 chmod +x "$WORK/oracle_empty"
-LHD_LGCHECK="$WORK/oracle_empty" $LHD lec --impl "$WORK/empty.v" --ref "$WORK/empty.v" --top empty \
+LHD_LGCHECK="$WORK/oracle_empty" $LHD lec --set formal.effort=proof --impl "$WORK/empty.v" --ref "$WORK/empty.v" --top empty \
   --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/empty_cross" \
   > "$WORK/empty_cross.log" 2>&1
 if [ "$?" -eq 0 ]; then

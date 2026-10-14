@@ -1564,7 +1564,7 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
   const auto                        t0 = std::chrono::steady_clock::now();
   absl::flat_hash_set<hhds::Graph*> seen;
   const bool combinational = graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen);
-  const bool split_budget  = !combinational && opts.timeout > 0 && opts.rlimit == 0;
+  const bool split_budget  = !combinational && opts.timeout > 0 && opts.compile_resource_limit == 0;
   long long  wall_ms       = race_deadline_ms(opts);
   if (wall_ms > 0) {
     // Never extend the isolated worker's existing hard backstop, even for tiny
@@ -3170,6 +3170,7 @@ bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl) { return !detect_port_
 // but not guaranteed; the engine writes through this pointer instead.
 static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                                      const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, Cvc5_stats* acc) {
+  const auto   query_start = std::chrono::steady_clock::now();
   Query_result res;
   res.detail = "solver=" + opts.solver + " (cvc5 direct, flop-cut inductive miter)";
   res.engine = opts.engine;  // the auto portfolio overrides this with the winning engine
@@ -4237,13 +4238,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // counter, so a verdict is reproducible across build modes / machines. Resets
   // per checkSat, like tlimit-per, and a resource-out returns `unknown` (the same
   // SOUND degrade). The compile tier sets this with timeout=0; both may be set.
-  if (opts.rlimit > 0) {
-    solver.setOption("rlimit-per", std::to_string(opts.rlimit));
-  } else if (opts.effort_rlimit > 0) {
-    // CUMULATIVE over this solver (one proof attempt of one def/engine leg),
-    // not per query: a per-query cap still let an attempt issue unbounded
-    // queries (picorv32: 160 s of a 150 s soft budget at 5M per query).
-    solver.setOption("rlimit", std::to_string(opts.effort_rlimit));
+  if (opts.compile_resource_limit > 0) {
+    solver.setOption("rlimit-per", std::to_string(opts.compile_resource_limit));
   }
 
   // ── One shared solver allowance for this query ──────────────────────────────
@@ -4257,7 +4253,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // instead of a 0 that would read as UNBOUNDED to cvc5.
   // OFF (byte-identical to the old per-phase behavior) for the deterministic
   // rlimit/compile tier and for timeout==0 (unbounded), so CI stays reproducible.
-  const bool                          budget_on       = opts.timeout > 0 && opts.rlimit == 0;
+  const bool                          budget_on       = opts.timeout > 0 && opts.compile_resource_limit == 0;
   const long long                     budget_ms       = static_cast<long long>(opts.timeout) * 1000;
   // formal.min_timeout: the floor this query never drops below once the shared
   // allowance is spent (>=1ms — 0 reads as UNBOUNDED to cvc5).
@@ -4279,7 +4275,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // makes `--stats` undercount.
   //
   // The increment is deliberately OUTSIDE the `if (budget_on)` body: budget_on is
-  // false whenever formal.timeout=0 or formal.rlimit>0, so counting inside would
+  // false whenever formal.timeout=0 or the compiler-private resource cap is active, so counting inside would
   // report 0 checks on the common configurations.
   auto solve_check = [&]() -> cvc5::Result {
     if (acc != nullptr) {
@@ -6496,13 +6492,18 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
     cvc5::Result sampled_mismatch;
     if (sample_effort && !blocking_incomplete && sampler.input_count() > 0) {
-      // formal.timeout stays the TOTAL backstop: the loop stops on wall time
-      // once it is spent (solve_check's min_timeout floor would otherwise keep
-      // granting each further query a fresh slice).
-      const auto sample_check = [&](long long cap_ms) {
-        // cap_ms 0 = no extra cap: the remaining total, or unbounded (tlimit-per 0).
-        long long ms = budget_on ? (cap_ms > 0 ? std::min(budget_left_ms(), cap_ms) : budget_left_ms()) : cap_ms;
-        solver.setOption("tlimit-per", std::to_string(ms > 0 ? ms : (budget_on ? 1 : 0)));
+      const auto sample_deadline = query_start + std::chrono::milliseconds(budget_ms);
+      const auto sample_expired  = [&]() { return budget_on && std::chrono::steady_clock::now() >= sample_deadline; };
+      const auto sample_check    = [&](long long cap_ms) {
+        // Zero means no extra per-query cap; the total deadline still applies.
+        long long ms = cap_ms;
+        if (budget_on) {
+          const auto left = std::max<long long>(
+              1,
+              std::chrono::duration_cast<std::chrono::milliseconds>(sample_deadline - std::chrono::steady_clock::now()).count());
+          ms = cap_ms > 0 ? std::min<long long>(left, cap_ms) : left;
+        }
+        solver.setOption("tlimit-per", std::to_string(ms));
         if (acc != nullptr) {
           ++acc->checks;
         }
@@ -6512,8 +6513,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         res.solve_ms   = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
         return cr;
       };
-      const auto sample_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(budget_ms) - solve_spent;
-      const auto sample_expired  = [&]() { return budget_on && std::chrono::steady_clock::now() >= sample_deadline; };
       sampler.set_cycles(static_cast<uint64_t>(N));
       auto outcome = sampler.run(solver, bad, opts.effort, sample_check, sample_expired);
       solver.setOption("tlimit-per", std::to_string(static_cast<long long>(std::max(0, opts.timeout)) * 1000));
@@ -11165,6 +11164,11 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
   // Unknown naming the backstop — never a verdict.
   long long hard_ms
       = (opts.timeout > 0 && opts.hard_timeout_mult > 0) ? static_cast<long long>(opts.timeout) * 1000 * opts.hard_timeout_mult : 0;
+  if (is_sampled(opts.effort) && opts.timeout > 0) {
+    // Sampling has a strict wall cap, including encoding. It never receives
+    // the proof worker's multiplier or the per-definition minimum allowance.
+    hard_ms = static_cast<long long>(opts.timeout) * 1000;
+  }
   if (hard_ms > 0 && opts._wall_timeout_ms > 0) {
     hard_ms = std::min(hard_ms, opts._wall_timeout_ms);
   }
@@ -11224,14 +11228,18 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
         // exactly, and name the knob — this is the ONE overrun cvc5's tlimit-per
         // cannot report itself, so a vague "worker died" here would read as a
         // host problem and send the reader hunting for memory.
-        why         = std::format(
-            "exceeded the {:.3f}s hard wall backstop (formal.timeout={}s x formal.hard_timeout_mult={}, reserved ceiling={}ms); "
-                    "cvc5's tlimit-per cannot preempt a single CaDiCaL solve, which is what a flat box-free "
-                    "miter compiles to — raise either knob, or 0 disables the backstop",
-            static_cast<double>(hard_ms) / 1000.0,
-            opts.timeout,
-            opts.hard_timeout_mult,
-            opts._wall_timeout_ms);
+        if (is_sampled(opts.effort)) {
+          why = std::format("hit formal.timeout={}s while sampling (wall-clock limit)", opts.timeout);
+        } else {
+          why = std::format(
+              "exceeded the {:.3f}s hard wall backstop (formal.timeout={}s x formal.hard_timeout_mult={}, reserved ceiling={}ms); "
+              "cvc5's tlimit-per cannot preempt a single CaDiCaL solve, which is what a flat box-free "
+              "miter compiles to — raise either knob, or 0 disables the backstop",
+              static_cast<double>(hard_ms) / 1000.0,
+              opts.timeout,
+              opts.hard_timeout_mult,
+              opts._wall_timeout_ms);
+        }
       } else if (sig == SIGKILL || sig == SIGABRT || sig == SIGBUS || sig == SIGSEGV) {
         // The usual causes at these signals on a big flat def: the RLIMIT_AS
         // memory backstop (malloc fails -> abort / the OS kills), or a genuine
@@ -11251,6 +11259,9 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
     out            = Query_result{};
     out.verdict    = Verdict::Unknown;
     out.engine     = "isolated-worker";
+    if (is_sampled(opts.effort)) {
+      out.sampling.requested = opts.effort;
+    }
     out.detail     = "isolated proof worker died: " + why;
     out.elapsed_ms = now_ms(t0);
     return out;
@@ -11920,8 +11931,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // Deterministic per-obligation budget (2f-formal compile tier): machine- and
   // build-mode-independent, so an elided runtime check is reproducible. rlimit-per
   // resets per checkSatAssuming, so each obligation gets the same budget.
-  if (opts.rlimit > 0) {
-    solver.setOption("rlimit-per", std::to_string(opts.rlimit));
+  if (opts.compile_resource_limit > 0) {
+    solver.setOption("rlimit-per", std::to_string(opts.compile_resource_limit));
   }
   // Same solver-config rules as prove_equal: the eager internal bit-blaster is
   // the trustworthy config (the lazy default has a spurious-SAT history) but has
@@ -11965,7 +11976,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // run strategies, each its own prove_properties call, so each self-bounds to
   // `timeout` (fork children can't share this in-process accumulator — that is
   // fine: two strategies budgeted to T apiece is the intended parallelism).
-  const bool                  solve_budget_on = opts.timeout > 0 && opts.rlimit == 0;
+  const bool                                   solve_budget_on = opts.timeout > 0 && opts.compile_resource_limit == 0;
   const long long             solve_budget_ms = static_cast<long long>(opts.timeout) * 1000;
   // The floor every unsettled obligation is guaranteed once the total is spent
   // (formal.min_timeout). Clamped to >=1ms because 0 reads as UNBOUNDED to cvc5,

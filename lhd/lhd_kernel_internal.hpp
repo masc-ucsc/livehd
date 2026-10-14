@@ -62,7 +62,6 @@ inline constexpr std::string_view kFormalCommonFlags[] = {
     "bound",
     "engine",
     "effort",
-    "effort_proof",
     "hard_timeout_mult",
     "ignore_memory",
     "jobs",
@@ -74,7 +73,6 @@ inline constexpr std::string_view kFormalCommonFlags[] = {
     "reset",
     "reset_cycles",
     "retry",
-    "rlimit",
     "solver",
     "spec_mining_timeout",
     "simfail",
@@ -171,18 +169,23 @@ inline constexpr std::pair<std::string_view, std::string_view> kRenamedFlags[] =
 // instead of the generic unknown-flag guess. Keyed on the flag leaf, so it
 // applies whatever namespace it was spelled under.
 inline constexpr std::pair<std::string_view, std::string_view> kRemovedFlags[] = {
-    {      "cache",
+    {       "cache",
      "incremental reuse is ONE kernel switch now: `--set lhd.incremental=false` turns the compile, pass.abc and "
      "formal/lec caches off together (they are on by default under a user --workdir). The per-tier "
-     "compile.cache / pass.abc.cache / formal.cache flags are gone"                                                  },
-    {      "yosys",
+     "compile.cache / pass.abc.cache / formal.cache flags are gone"                                                        },
+    {       "yosys",
      "yosys is linked in-process now (Yosys::Pass::call), so there is no external binary to point at. The label was "
-     "registered but never read; drop the flag"                                                                      },
-    {"budget_mode",
-     "the budget scheduler is no longer a mode: accounting is ON whenever formal.timeout>0 and formal.rlimit==0, and "
-     "the deterministic tier is selected by setting formal.rlimit (which owns the bound by itself). Drop the flag; use "
-     "--set formal.rlimit=N for the old budget_mode=rlimit behavior"                                                 },
-    {     "absorb",
+     "registered but never read; drop the flag"                                                                            },
+    { "budget_mode",
+     "the budget scheduler is no longer a mode. Use formal.effort to select testing or proof and "
+     "formal.timeout for the wall-clock allowance"                                                                         },
+    {      "rlimit",
+     "solver resource limits were removed. Use formal.effort=test for sampled testing or "
+     "formal.effort=proof with formal.timeout for a proof-only wall-clock allowance"                                       },
+    {"effort_proof",
+     "the separate proof resource budget was removed. Use formal.effort to select testing or proof and "
+     "formal.timeout for the wall-clock allowance"                                                                         },
+    {      "absorb",
      "the synth algorithms colour the flat view now, so crossing a module boundary is the default, not a size-triggered "
      "inline; min_ge no longer doubles as the absorb threshold (pass.color.synth.max_gate bounds a `cones` region instead)"},
 };

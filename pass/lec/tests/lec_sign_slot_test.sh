@@ -59,7 +59,7 @@ run_lec() {
 # then BUILDS AND RUNS it -- ~5.5s of host clang per refutation. Nothing below
 # reads that replay, so keep the witness (simfail_*.prp/.json is still written)
 # and skip only its host build.
-  "$LHD" lec "$@" --set formal.simfail_run=false --workdir "$WORK/wd_$tag" >"$OUT" 2>&1
+  "$LHD" lec --set formal.effort=proof "$@" --set formal.simfail_run=false --workdir "$WORK/wd_$tag" >"$OUT" 2>&1
   return 0
 }
 

@@ -44,7 +44,7 @@ EOF
 # ---- default: --workdir set => simfail_dut.prp written (VCD is best-effort). The lec
 # run must still exit REFUTED even if the reproduction sim can't host-compile. ----
 W1="$WORK/w1"
-OUT=$($LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W1" 2>&1)
+OUT=$($LHD lec --set formal.effort=proof --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W1" 2>&1)
 ck "REFUTED"                    'echo "$OUT" | grep -q REFUTED'
 ck "wrote simfail_dut.prp"      '[ -f "$W1/simfail_dut.prp" ]'
 ck "testbench has both modules" 'grep -q "mod dut" "$W1/simfail_dut.prp" && grep -q "lecref_dut" "$W1/simfail_dut.prp"'
@@ -93,32 +93,32 @@ ck "VCD __vcd is copyable (shared_ptr)" '! grep -rq "unique_ptr<vcd::VCDWriter>"
 
 # ---- formal.witness=false disables the whole feature ------------------------------
 W2="$WORK/w2"
-$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W2" --set formal.witness=false >/dev/null 2>&1
+$LHD lec --set formal.effort=proof --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W2" --set formal.witness=false >/dev/null 2>&1
 ck "witness=false => no prp"    '[ ! -f "$W2/simfail_dut.prp" ]'
 
 # ---- formal.simfail=false disables generation -----------------------------------------
 W3="$WORK/w3"
-$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W3" --set formal.simfail=false >/dev/null 2>&1
+$LHD lec --set formal.effort=proof --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W3" --set formal.simfail=false >/dev/null 2>&1
 ck "simfail=false => no prp"    '[ ! -f "$W3/simfail_dut.prp" ]'
 
 # ---- simfail is boolean; filenames are derived rather than user-supplied ---------------
 W4="$WORK/w4"
-OUT=$($LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W4" --set formal.simfail=mycex.prp 2>&1)
+OUT=$($LHD lec --set formal.effort=proof --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W4" --set formal.simfail=mycex.prp 2>&1)
 ck "simfail rejects a filename" 'echo "$OUT" | grep -q "expects true|false"'
 
 # ---- formal.simfail_run=false writes the .prp but never attempts the VCD sim ------------
 W5="$WORK/w5"
-$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W5" --set formal.simfail_run=false >/dev/null 2>&1
+$LHD lec --set formal.effort=proof --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W5" --set formal.simfail_run=false >/dev/null 2>&1
 ck "simfail_run=false => prp"    '[ -f "$W5/simfail_dut.prp" ]'
 ck "simfail_run=false => no vcd" '[ ! -f "$W5/simfail_dut.vcd" ]'
 
 # ---- no --workdir => the feature is off (nothing written / announced) ----------
-OUT=$($LHD lec --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" 2>&1)
+OUT=$($LHD lec --set formal.effort=proof --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" 2>&1)
 ck "no --workdir => no testbench" '! echo "$OUT" | grep -q "wrote counterexample testbench"'
 
 # ---- PROVEN (same design both sides) => nothing generated ----------------------
 W7="$WORK/w7"
-$LHD lec --impl "$WORK/impl.prp" --ref "$WORK/impl.prp" --workdir "$W7" >/dev/null 2>&1
+$LHD lec --set formal.effort=proof --impl "$WORK/impl.prp" --ref "$WORK/impl.prp" --workdir "$W7" >/dev/null 2>&1
 ck "PROVEN => no prp"           '[ ! -f "$W7/simfail_dut.prp" ]'
 
 # ---- hierarchical DUTs: re-emitted sub-module inputs must remain explicitly
@@ -147,7 +147,7 @@ mod topm(en:Bool) -> (o:U8@[0]) {
 }
 EOF
 WH="$WORK/wh"
-$LHD lec --impl "$WORK/h_impl.prp" --ref "$WORK/h_ref.prp" --impl-top h_impl.topm --ref-top h_ref.topm --workdir "$WH" --set formal.simfail_run=false >/dev/null 2>&1
+$LHD lec --set formal.effort=proof --impl "$WORK/h_impl.prp" --ref "$WORK/h_ref.prp" --impl-top h_impl.topm --ref-top h_ref.topm --workdir "$WH" --set formal.simfail_run=false >/dev/null 2>&1
 ck "hier: prp generated"        '[ -f "$WH/simfail_topm.prp" ]'
 ck "hier: sub-module input typed" 'grep -Eq "mod adder[^(]*\(en:(Bool|U[0-9]+)" "$WH/simfail_topm.prp"'
 SH="$WORK/sh"
@@ -174,7 +174,7 @@ pub mod dut(en:Bool) -> (value:U8@[0]) {
 }
 EOF
 WP="$WORK/wp"
-$LHD lec --impl "$WORK/pimpl.prp" --ref "$WORK/pref.prp" --workdir "$WP" --set formal.simfail_run=false >/dev/null 2>&1
+$LHD lec --set formal.effort=proof --impl "$WORK/pimpl.prp" --ref "$WORK/pref.prp" --workdir "$WP" --set formal.simfail_run=false >/dev/null 2>&1
 ck "import: prp generated"       '[ -f "$WP/simfail_dut.prp" ]'
 ck "import: imports impl origin" 'grep -q "import(\"pimpl.dut\")" "$WP/simfail_dut.prp"'
 ck "import: imports ref origin"  'grep -q "import(\"pref.dut\")" "$WP/simfail_dut.prp"'
@@ -190,7 +190,7 @@ ck "import: bool port stays bool"  'grep -q "__simfail_dut_pair(en:Bool)" "$WP/s
 ck "import: bool port driven"      'grep -q "_lec_dut.en = _drv_en\[\`clock\`\] != 0" "$WP/simfail_dut.prp"'
 sed 's/en:Bool/en:U1/; s/if en {/if en != 0 {/' "$WORK/pref.prp" > "$WORK/pkref.prp"
 WK="$WORK/wk"
-$LHD lec --impl "$WORK/pimpl.prp" --ref "$WORK/pkref.prp" --workdir "$WK" --set formal.simfail_run=false >/dev/null 2>&1
+$LHD lec --set formal.effort=proof --impl "$WORK/pimpl.prp" --ref "$WORK/pkref.prp" --workdir "$WK" --set formal.simfail_run=false >/dev/null 2>&1
 ck "kinds: u1 side gets a cast"    'grep -q "refmod(en = U1(en))" "$WK/simfail_dut.prp"'
 SK="$WORK/sk"
 $LHD sim "$WORK/pimpl.prp" "$WORK/pkref.prp" "$WK/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SK" >/dev/null 2>&1
@@ -198,7 +198,7 @@ ck "kinds: testbench sim-valid"    '[ -f "$SK/sim/drv.cpp" ]'
 # The other direction: the wrapper port takes the u1 impl's kind, so it is
 # driven as an integer and the bool side gets `Bool(...)`.
 WKR="$WORK/wkr"
-$LHD lec --impl "$WORK/pkref.prp" --ref "$WORK/pimpl.prp" --workdir "$WKR" --set formal.simfail_run=false >/dev/null 2>&1
+$LHD lec --set formal.effort=proof --impl "$WORK/pkref.prp" --ref "$WORK/pimpl.prp" --workdir "$WKR" --set formal.simfail_run=false >/dev/null 2>&1
 ck "kinds: u1 wrapper port"        'grep -q "__simfail_dut_pair(en:U1)" "$WKR/simfail_dut.prp"'
 ck "kinds: bool side gets a cast"  'grep -q "refmod(en = Bool(en))" "$WKR/simfail_dut.prp"'
 ck "kinds: u1 port driven as int"  'grep -Eq "_lec_dut.en = _drv_en\[\`clock\`\]$" "$WKR/simfail_dut.prp"'
@@ -225,7 +225,7 @@ pub comb dut(a:U8) -> (r:U8) {
 }
 EOF
 WQ="$WORK/wq"
-$LHD lec --impl "$WORK/qimpl.prp" --ref "$WORK/qref.prp" --workdir "$WQ" --set formal.simfail_run=false >"$WORK/wq.out" 2>&1
+$LHD lec --set formal.effort=proof --impl "$WORK/qimpl.prp" --ref "$WORK/qref.prp" --workdir "$WQ" --set formal.simfail_run=false >"$WORK/wq.out" 2>&1
 ck "comb: prp generated"        '[ -f "$WQ/simfail_dut.prp" ]'
 ck "comb: side was parsed"      '! grep -q "no Pyrope modules were re-emitted" "$WORK/wq.out"'
 ck "comb: mod side keeps cycle" 'grep -q "impl_r:U8@\[1\]" "$WQ/simfail_dut.prp"'
@@ -256,7 +256,7 @@ pub mod dut(`clock`:Clock, `reset`:Reset, io:(valid:U1, bits:(x:U4, y:U3))) -> (
 }
 EOF
 WS="$WORK/ws"
-$LHD lec --impl "$WORK/simpl.prp" --ref "$WORK/sref.prp" --workdir "$WS" --set formal.simfail_run=false >/dev/null 2>&1
+$LHD lec --set formal.effort=proof --impl "$WORK/simpl.prp" --ref "$WORK/sref.prp" --workdir "$WS" --set formal.simfail_run=false >/dev/null 2>&1
 ck "struct: prp generated"        '[ -f "$WS/simfail_dut.prp" ]'
 ck "struct: leaves are flat ports" 'grep -q "io__bits__x:U4" "$WS/simfail_dut.prp"'
 ck "struct: actuals are per-leaf"  'grep -q "io.bits.x = io__bits__x" "$WS/simfail_dut.prp"'
@@ -277,7 +277,7 @@ sed 's|if io.valid != 0 {|const pc:U4 = io.bits.x#+[..]\n  if io.valid != 0 {|; 
 ck "popcount: writer emits it" \
    '$LHD compile "$WORK/pcimpl.prp" --emit-dir "pyrope:$WORK/pcw_out" --workdir "$WORK/pcw" >/dev/null 2>&1'
 WC="$WORK/wc"
-$LHD lec --impl "$WORK/pcimpl.prp" --ref "$WORK/pcref.prp" --workdir "$WC" --set formal.simfail_run=false >/dev/null 2>&1
+$LHD lec --set formal.effort=proof --impl "$WORK/pcimpl.prp" --ref "$WORK/pcref.prp" --workdir "$WC" --set formal.simfail_run=false >/dev/null 2>&1
 ck "popcount: prp still generated" '[ -f "$WC/simfail_dut.prp" ]'
 ck "popcount: no writer round trip" '[ ! -d "$WC/lecfail_impl_prp" ] && [ ! -d "$WC/lecfail_ref_prp" ]'
 SC="$WORK/sc"

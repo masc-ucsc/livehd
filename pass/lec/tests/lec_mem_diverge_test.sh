@@ -57,7 +57,7 @@ endmodule
 EOF
 
 verdict() {  # $1=ref $2=impl $3=decompose -> PROVEN | REFUTED | UNKNOWN | INCONCLUSIVE
-  $LHD lec --ref "$WORK/$1" --impl "$WORK/$2" --top foo \
+  $LHD lec --set formal.effort=proof --ref "$WORK/$1" --impl "$WORK/$2" --top foo \
        --set formal.lec.hier=false --set formal.engine=ind --set formal.lec.decompose="$3" \
        --workdir "$WORK/q_${1}_${2}_${3}_$$" 2>&1 \
     | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN\|INCONCLUSIVE" | head -1

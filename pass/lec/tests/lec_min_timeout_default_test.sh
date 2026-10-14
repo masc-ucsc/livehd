@@ -55,7 +55,7 @@ mkhier wide ref; mkhier wide impl
 check_floor() {
   local label=$1 want=$2; shift 2
   local log="$WORK/$label.log"
-  "$LHD" lec --impl "verilog:$WORK/wide_impl.v" --ref "verilog:$WORK/wide_ref.v" \
+  "$LHD" lec --set formal.effort=proof --impl "verilog:$WORK/wide_impl.v" --ref "verilog:$WORK/wide_ref.v" \
     --top top --workdir "$WORK/wd_$label" \
     --set formal.timeout=1 "$@" >"$log" 2>&1
   # The budget line only prints once the soft total is spent (or a def floored),

@@ -101,7 +101,7 @@ run() {
   local ref=$1 impl=$2 eng=$3 wd
   shift 3
   wd=$(mktemp -d "$WORK/w.XXXXXX")  # a fresh workdir: no verdict cache shared between runs
-  env "$@" "$LHD" lec --ref "$WORK/$ref" --impl "$WORK/$impl" --top top --set formal.engine="$eng" \
+  env "$@" "$LHD" lec --set formal.effort=proof --ref "$WORK/$ref" --impl "$WORK/$impl" --top top --set formal.engine="$eng" \
     --set formal.timeout=20 --set formal.simfail_run=false --workdir "$wd" 2>&1 | grep "^lec: '" | head -1
 }
 expect() {  # $1=label $2=line $3=must-match regex [$4=must-also-match regex]

@@ -56,7 +56,7 @@ run_lec() {
   local eng=${3:-auto}
   engine_args=()
   [ "$eng" = "auto" ] || engine_args=(--set "formal.engine=$eng")
-  "$LHD" lec --ref "$SRC" --impl lg:"$WORK/$1.net" --lib lg:"$WORK/models" --top "$TOP" \
+  "$LHD" lec --set formal.effort=proof --ref "$SRC" --impl lg:"$WORK/$1.net" --lib lg:"$WORK/models" --top "$TOP" \
          --set formal.lec.cones="$2" ${engine_args[@]+"${engine_args[@]}"} > "$WORK/lec_$1_$2_$eng.txt" 2>&1
   RC=$?; OUT=$(cat "$WORK/lec_$1_$2_$eng.txt")
 }
@@ -118,7 +118,7 @@ fi
 # come back cached. This is the incremental property -- edit one stage, re-prove
 # only what actually moved.
 CW="$WORK/cachewd"; rm -rf "$CW"
-"$LHD" lec --ref "$SRC" --impl lg:"$WORK/good.net" --lib lg:"$WORK/models" --top "$TOP" \
+"$LHD" lec --set formal.effort=proof --ref "$SRC" --impl lg:"$WORK/good.net" --lib lg:"$WORK/models" --top "$TOP" \
        --set formal.engine=ind --workdir "$CW" > "$WORK/cache_cold.txt" 2>&1
 if grep -qE '"cones": \[' "$CW/formal_cache.json" 2>/dev/null && grep -q '"' "$CW/formal_cache.json"; then
   echo "ok: cold run persisted cone digests to formal_cache.json"
@@ -130,7 +130,7 @@ fi
 sed 's/p = (a & b) | (c \^ a)/p = (a | b) \& (c ^ a)/' "$SRC" > "$WORK/abc_seq_pmod.prp"
 grep -q 'p = (a | b) & (c \^ a)' "$WORK/abc_seq_pmod.prp" || { echo "FAIL: p mutation did not apply"; exit 1; }
 if netlist pmod "$WORK/abc_seq_pmod.prp"; then
-  "$LHD" lec --ref "$WORK/abc_seq_pmod.prp" --impl lg:"$WORK/pmod.net" --lib lg:"$WORK/models" --top "$TOP" \
+  "$LHD" lec --set formal.effort=proof --ref "$WORK/abc_seq_pmod.prp" --impl lg:"$WORK/pmod.net" --lib lg:"$WORK/models" --top "$TOP" \
          --set formal.engine=ind --workdir "$CW" > "$WORK/cache_warm.txt" 2>&1
   WRC=$?
   if [ "$WRC" = 0 ] && grep -qE "[1-9][0-9]* from cache\)" "$WORK/cache_warm.txt"; then
@@ -175,7 +175,7 @@ if [ -f "$MSRC" ]; then
   grep -q 'mem\[waddr \^ 1\] = wdata' "$WORK/abc_mem_bad.prp" || { echo "FAIL: memory mutation did not apply"; exit 1; }
 
   if mnetlist mgood "$MSRC" && mnetlist mbad "$WORK/abc_mem_bad.prp"; then
-    "$LHD" lec --ref "$MSRC" --impl lg:"$WORK/mgood.net" --lib lg:"$WORK/models" --top "$MTOP" \
+    "$LHD" lec --set formal.effort=proof --ref "$MSRC" --impl lg:"$WORK/mgood.net" --lib lg:"$WORK/models" --top "$MTOP" \
            --set formal.engine=ind --set formal.lec.cones=true > "$WORK/lec_mgood.txt" 2>&1
     MRC=$?
     # The array cut itself must come back PROVEN from the cone pass -- i.e. the
@@ -192,7 +192,7 @@ if [ -f "$MSRC" ]; then
     # state, so `ind` alone reports UNKNOWN for a stateful design rather than
     # exit 10 (only a SURE counterexample is a failure). `auto`'s bmc leg
     # confirms this one from reset, which is what makes it a real refutation.
-    "$LHD" lec --ref "$MSRC" --impl lg:"$WORK/mbad.net" --lib lg:"$WORK/models" --top "$MTOP" \
+    "$LHD" lec --set formal.effort=proof --ref "$MSRC" --impl lg:"$WORK/mbad.net" --lib lg:"$WORK/models" --top "$MTOP" \
            --set formal.lec.cones=true > "$WORK/lec_mbad.txt" 2>&1
     MBRC=$?
     if [ "$MBRC" != 0 ] && grep -q "REFUTED (not equivalent)" "$WORK/lec_mbad.txt"; then
@@ -211,7 +211,7 @@ if [ -f "$MSRC" ]; then
   # inductive flop-cut miter -- and the corrupted write address still REFUTES
   # (the tie is a name-directed correspondence, not an assumption about data).
   if mnetlist mgood_bb "$MSRC" true && mnetlist mbad_bb "$WORK/abc_mem_bad.prp" true; then
-    "$LHD" lec --ref "$MSRC" --impl lg:"$WORK/mgood_bb.net" --lib lg:"$WORK/models" --top "$MTOP" \
+    "$LHD" lec --set formal.effort=proof --ref "$MSRC" --impl lg:"$WORK/mgood_bb.net" --lib lg:"$WORK/models" --top "$MTOP" \
            --set formal.lec.cones=true > "$WORK/lec_mgood_bb.txt" 2>&1
     MRC=$?
     if [ "$MRC" = 0 ] && grep -q "PROVEN equivalent" "$WORK/lec_mgood_bb.txt" \
@@ -221,7 +221,7 @@ if [ -f "$MSRC" ]; then
       echo "FAIL: the bit-blasted memory was not proven unbounded (rc=$MRC)"
       grep -oE "(PROVEN|REFUTED|UNKNOWN)[^;]*" "$WORK/lec_mgood_bb.txt" | head -1; fail=1
     fi
-    "$LHD" lec --ref "$MSRC" --impl lg:"$WORK/mbad_bb.net" --lib lg:"$WORK/models" --top "$MTOP" \
+    "$LHD" lec --set formal.effort=proof --ref "$MSRC" --impl lg:"$WORK/mbad_bb.net" --lib lg:"$WORK/models" --top "$MTOP" \
            --set formal.lec.cones=true > "$WORK/lec_mbad_bb.txt" 2>&1
     MBRC=$?
     if [ "$MBRC" != 0 ] && grep -q "REFUTED (not equivalent)" "$WORK/lec_mbad_bb.txt"; then
