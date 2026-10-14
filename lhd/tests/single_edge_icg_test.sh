@@ -552,6 +552,7 @@ module tb;
   reg [7:0] d = 0;
   wire [7:0] sr, sf, nr, nf;
   integer errs = 0, checks = 0, hi = 0, lo_up = 0, lo_dn = 0, k = 0;
+  reg     prologue_bad = 0;
   always #10 clk_s = ~clk_s;
   initial begin clk_n = 0; #5; forever #5 clk_n = ~clk_n; end
   icgf   s(.clk(clk_s), .reset(reset), .en(en), .scan(scan), .len(len), .d(d), .qr(sr), .qf(sf));
@@ -569,9 +570,33 @@ module tb;
        hi  <= hi + 1;
        if (len) lo_dn <= lo_dn + 1; else lo_up <= lo_up + 1;
   end
+  // THE STARTUP BOUNDARY, asserted rather than chosen. `prim_clk_gate`'s latch
+  // is `always @(clk or en or scan) if (!clk) enl <= ...`; with clk starting LOW
+  // there is no EVENT until clk rises, so `enl` is x until the FIRST LOW PHASE
+  // AFTER that. During that window the source's `gclk = clk & enl` goes 0 -> x,
+  // which Verilog treats as a POSEDGE, so the source commits under an UNDEFINED
+  // gate while the normalized design (which has no gated clock) correctly does
+  // not. Comparing there compares undefined behaviour, not the rewrite.
+  //
+  // So comparison starts when the SOURCE's gate is established, and the run
+  // FAILS if it never is -- a boundary that cannot silently swallow the test.
+  // Retained evidence for the excluded observation:
+  // generated/master_port/b01_extsim_20261014/startup_evidence/.
+  //
+  // So the prologue is DRIVEN, not waited out: reset is held past the first
+  // rise that happens with a DEFINED gate, which is the rising consumer's own
+  // reset contract (`if (reset) fr <= 0`), so both designs enter the comparison
+  // from the same state. The falling consumer has no reset and is x on both
+  // sides until its first write, which compares equal.
+  reg gate_ready = 0;
+  always @(s.enl) if (s.enl !== 1'bx) gate_ready <= 1;
   always @(negedge clk_s) begin
-    #8 if (!reset && $time > 60) begin   // skip the power-on period
+    #8 if (!reset && gate_ready) begin
          checks <= checks + 1;
+         // The prologue must have WORKED: a reset commit under a defined gate
+         // leaves the rising output defined on both sides. If it is still x the
+         // comparison below would be vacuous or wrong, so say so.
+         if (checks == 1 && (sr === 8'bx || nr === 8'bx)) prologue_bad <= 1;
          if (sr !== nr) begin errs = errs + 1;
            if (errs < 8) $display("MISMATCH qr @%0t source=%0d normalized=%0d", $time, sr, nr); end
          if (sf !== nf) begin errs = errs + 1;
@@ -579,9 +604,11 @@ module tb;
        end
   end
   initial begin
-    #27 reset = 0;
+    #51 reset = 0;   // past the rise at t=30, which happens with enl defined
     #600;
-    if (checks < 20)               $display("DUAL_VACUOUS checks=%0d", checks);
+    if (!gate_ready)               $display("DUAL_GATE_NEVER_READY");
+    else if (prologue_bad)         $display("DUAL_PROLOGUE_BAD");
+    else if (checks < 20)          $display("DUAL_VACUOUS checks=%0d", checks);
     else if (hi < 20)              $display("DUAL_NO_HIGH_MOVES n=%0d", hi);
     else if (lo_up < 5 || lo_dn < 5) $display("DUAL_LOCAL_ONESIDED up=%0d dn=%0d", lo_up, lo_dn);
     else if (errs != 0)            $display("DUAL_FAIL errs=%0d", errs);
@@ -593,9 +620,9 @@ EOF
   iverilog -g2012 -o "$W/dual.vvp" "$W/icg_dual.sv" "$W/dual_norm.v" "$W/dual_tb.v" >"$W/iv_dual.log" 2>&1 \
     || { tail -5 "$W/iv_dual.log"; fail "iverilog could not elaborate the dual-edge pair"; }
   out="$(timeout 120 vvp "$W/dual.vvp" 2>&1)"
-  grep -qE "DUAL_OK|DUAL_FAIL|DUAL_VACUOUS|DUAL_NO_HIGH_MOVES|DUAL_LOCAL_ONESIDED" <<<"$out" \
+  grep -qE "DUAL_OK|DUAL_FAIL|DUAL_VACUOUS|DUAL_NO_HIGH_MOVES|DUAL_LOCAL_ONESIDED|DUAL_GATE_NEVER_READY|DUAL_PROLOGUE_BAD" <<<"$out" \
     || { echo "$out" | head -8; fail "the dual-edge differential did not run to a verdict"; }
-  grep -qE "DUAL_VACUOUS|DUAL_NO_HIGH_MOVES|DUAL_LOCAL_ONESIDED" <<<"$out" \
+  grep -qE "DUAL_VACUOUS|DUAL_NO_HIGH_MOVES|DUAL_LOCAL_ONESIDED|DUAL_GATE_NEVER_READY|DUAL_PROLOGUE_BAD" <<<"$out" \
     && { echo "$out" | head -4; fail "the dual-edge differential did not exercise what it claims"; }
   grep -q "DUAL_OK" <<<"$out" \
     || { echo "$out" | head -8; fail "the sampled-held falling consumer does not match its ORIGINAL RTL"; }
@@ -620,5 +647,53 @@ EOF
     || fail "reading the LIVE arm at the falling edge still matched the source -- the harness cannot see the sampling, so the agreement above is not evidence"
   echo "ok: reading the live arm instead of the held guard FAILS (the sampling is load-bearing)"
 fi
+
+# ---- one guard per GATE, not per consumer ----------------------------------
+#
+# The sampled guard is keyed on a PLANNED identity -- the gate's clock root, the
+# edge it is sampled against, and the guard cone's own pins -- built before any
+# node exists, which is what pass/lec/phase_sched.cpp does (root_key + polarity
+# + cone_digest, then guard_cones). Keying on the folded AND node instead would
+# give a COMPOUND guard a fresh id per consumer and so a separate held state.
+#
+# LIMIT, stated because the control below does not cover it: the only RTL shape
+# that puts MORE THAN ONE pin in a gate's enable list is a gate CHAIN
+# (`gate(gate(clk,en0),en1)`), and that shape is currently refused for an
+# unrelated reason -- the inner enable latch is clocked by the GATED clock, so
+# it is not opposite-phase against the root. So the compound case cannot be
+# exercised here, and no control pretends to. What IS checked is that two
+# consumers of one gate share a guard and a third on a DIFFERENT gate does not.
+cat > "$W/icg_share.sv" <<'EOF'
+module icgf(input clk, input reset, input en0, input en1, input en2, input [7:0] d,
+            output [7:0] qa, output [7:0] qb, output [7:0] qc, output [7:0] qr);
+  reg enlA, enlB;
+  always @(clk or en0 or en1) if (!clk) enlA <= en0 & en1;
+  always @(clk or en0 or en2) if (!clk) enlB <= en0 & en2;
+  wire gclkA = clk & enlA;
+  wire gclkB = clk & enlB;
+  reg [7:0] fa, fb, fc, fr;
+  always @(negedge gclkA) fa <= d;            // two falling consumers, ONE gate
+  always @(negedge gclkA) fb <= d + 8'd1;
+  always @(negedge gclkB) fc <= d + 8'd2;     // a third, DIFFERENT gate
+  always @(posedge gclkA) if (reset) fr <= 0; else fr <= d;
+  assign qa = fa; assign qb = fb; assign qc = fc; assign qr = fr;
+endmodule
+EOF
+build_top share "$W/icg_share.sv" icgf
+out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_share" --emit-dir "lg:$W/lg_share_norm" \
+       --workdir "$W/pw_share" 2>&1)"
+rc=$?
+[ $rc -eq 0 ] || { echo "$out" | tail -6; fail "two gates with three falling consumers were refused (rc=$rc)"; }
+grep -q "3 sampled-held" <<<"$out" \
+  || { echo "$out" | tail -4; fail "expected three sampled-held consumers"; }
+emit "$W/lg_share_norm" "$W/v_share"
+held=$(grep -cE "^reg flop_[0-9]+;" "$W"/v_share/*.v)
+[ "$held" = "2" ] \
+  || { grep -nE "^reg flop_[0-9]+;|flop_[0-9]+ & single_edge_phase" "$W"/v_share/*.v; \
+       fail "three held consumers across TWO gates produced $held held guard(s); expected 2 -- one per gate"; }
+shared=$(grep -oE "flop_[0-9]+ & single_edge_phase" "$W"/v_share/*.v | sort | uniq -c | awk '$1==2{n++} END{print n+0}')
+[ "$shared" = "1" ] \
+  || fail "no held guard is read by two consumers; the gate's guard was minted per consumer"
+echo "ok: one sampled guard per GATE (3 held consumers over 2 gates -> 2 guards, one shared by two)"
 
 echo "PASS: single_edge_icg_test"

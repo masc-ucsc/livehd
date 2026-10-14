@@ -1447,9 +1447,14 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     plan.ref_clk_pin = sel;
   }
   hhds::Pin_class slot_pred[2];
-  // One sampled gate guard per GATE, not per consumer: keyed by the folded gate
-  // enable cone, which is what `phase_sched`'s guard_key/guard_cones do.
-  absl::flat_hash_map<hhds::Class_index, hhds::Pin_class> held_guards;
+  // One sampled gate guard per GATE, not per consumer. The key is a PLANNED
+  // identity -- the gate's clock root, its reference edge, and the guard cone's
+  // own pins -- built BEFORE any node is created, which is what
+  // `pass/lec/phase_sched.cpp` does (`root_key` + polarity + `cone_digest` per
+  // guard, then `guard_cones`). Keying on a freshly built AND node instead
+  // would give every COMPOUND guard a fresh id and so a separate held state,
+  // sharing only the single-enable case by accident.
+  absl::flat_hash_map<std::string, hhds::Pin_class> held_guards;
   if (plan.slots > 1) {
     // Phase divider off the design's OWN clock: one free-running clock and a
     // CONCRETELY INITIALIZED counter, so at unroll step j the solver knows
@@ -1690,6 +1695,27 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         gu::set_unsign(aq);
         return aq;
       };
+      // THE PLANNED GUARD IDENTITY, from pins that already exist: the gate's
+      // clock root, the reference edge it is sampled against, and every pin of
+      // the guard cone, sorted so operand order cannot split one gate in two.
+      // Nothing here allocates, so two consumers of the SAME gate agree on it
+      // however many enables the gate has.
+      std::string guard_key;
+      {
+        std::vector<uint64_t> cone;
+        cone.reserve(e.icg->enables.size());
+        for (const auto& en : e.icg->enables) {
+          cone.push_back(en.is_invalid() ? 0 : static_cast<uint64_t>(en.get_class_index().value));
+        }
+        std::sort(cone.begin(), cone.end());
+        guard_key = std::format("ck:{}:{}",
+                                e.icg->clock.is_invalid() ? 0 : static_cast<uint64_t>(e.icg->clock.get_class_index().value),
+                                e.cc.rising ? '+' : '-');
+        for (const auto c : cone) {
+          guard_key += std::format("&{}", c);
+        }
+      }
+
       // THE GATE GUARD, on its own. Only the gate's own enables go in here --
       // the element's LOCAL enable is deliberately left out and combined after
       // any sampling below.
@@ -1723,8 +1749,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       // still given a concrete 0 so the encoder has a definite initial state
       // rather than a free one.
       if (e.icg_hold && !gate_acc.is_invalid() && plan.slots > 1 && !slot_pred[0].is_invalid()) {
-        const auto key = gate_acc.get_class_index();
-        auto       it  = held_guards.find(key);
+        auto       it  = held_guards.find(guard_key);
         if (it == held_guards.end()) {
           auto hold = gu::create_typed_node(*g, Ntype_op::Flop);
           gate_acc.connect_sink(gu::setup_sink_by_name(hold, "din"));
@@ -1736,7 +1761,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
           auto hq = hold.create_driver_pin(0);
           gu::set_bits(hq, 1);
           gu::set_unsign(hq);
-          it = held_guards.emplace(key, hq).first;
+          it = held_guards.emplace(guard_key, hq).first;
         }
         gate_acc = it->second;
         ++r.icg_held;

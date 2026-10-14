@@ -12763,9 +12763,42 @@ asserted rather than assumed:
 SLOT0 @10  SLOT1 @20  SLOT0 @30  SLOT1 @40  ...
 ```
 
-Recalibrated, the same comparison went **49 mismatches -> 1**, and the one was a
-power-on transient on the first observation. Skipping the power-on period:
-`DUAL_OK checks=28 high=31 up=16 dn=15`.
+Recalibrated, the same comparison went **49 mismatches -> 1**.
+
+That is scoped evidence about THIS artifact and this run. It does not prove that
+every earlier difference arose only from oscillator alignment -- the
+implementation changed between those runs too, so the two are not a controlled
+comparison.
+
+### 1a. The last mismatch, explained rather than excluded
+
+An earlier revision silenced it with `$time > 60` and called it a transient.
+That was an observation exclusion, not an explanation, and the "validated",
+"transient" and "exonerated" wording that rested on it is withdrawn. Traced
+(`generated/master_port/b01_extsim_20261014/startup_evidence/`):
+
+```
+ t     | src.enl src.fr | nrm.fr
+10000  |   x       x    |   x      <- source rise
+11000  |   x       0    |   x      <- the SOURCE committed
+21000  |   1       0    |   x      <- the gate is only now DEFINED
+31000  |   1      11    |  11      <- both agree from here
+```
+
+`prim_clk_gate`'s latch is `always @(clk or en or scan) if (!clk) enl <= ...`.
+With `clk` starting LOW there is no EVENT, so `enl` is x until the first low
+phase after the first rise. At t=10 the source's `gclk = clk & enl` goes
+`0 -> x`, which Verilog treats as a POSEDGE, so the source committed its reset
+arm under an UNDEFINED gate; the normalized design has no gated clock, its
+enable was x, and it correctly did not commit. The divergence is created there
+and persists until the next write.
+
+So it is a source-side X artifact before the gate exists -- not settling, and
+not a defect in the lowering. The harness now DRIVES the prologue instead of
+waiting it out: reset is held past the first rise that happens with a defined
+gate, which is the rising consumer's own `if (reset) fr <= 0` contract, and the
+run fails `DUAL_GATE_NEVER_READY` or `DUAL_PROLOGUE_BAD` if that does not take
+effect. The failing artifact and trace are retained.
 
 ### 2. What the repaired lowering does
 
@@ -12788,7 +12821,11 @@ commit. The differential moves it 31 times during the high phase, 16 up and 15
 down, and the harness refuses to pass if it ever stops exercising both
 directions.
 
-One guard per GATE, keyed on the folded gate cone (`held_guards`), which is the
+One guard per GATE, keyed on a PLANNED identity -- the gate's clock root, the
+reference edge, and the guard cone's own pins, sorted, built before any node is
+created. An earlier revision keyed on the FOLDED AND NODE, which shares only
+when a gate has a single enable: a compound guard mints a fresh node per
+consumer and so would have got separate held state. This is the
 `guard_key`/`guard_cones` separation `pass/lec/phase_sched.cpp` already uses --
 "a guard sampled on the inactive phase immediately before the CELL's own active
 edge, parity of the CELL, not of the consumer".
@@ -12806,6 +12843,16 @@ agreement above would prove nothing. The flop-only restriction, the rising
 bypass, the same-phase refusal and the L1 negative are all unchanged, and the
 two LEC oracles that caught the first attempt (`lib_cell_prep_test`,
 `lhd_abc_latch_test_usyn`) pass.
+
+**Limit, stated because the control does not cover it.** No discriminating test
+exists for the COMPOUND guard. The only RTL shape that puts more than one pin in
+a gate's enable list is a gate CHAIN, and that shape is currently refused for an
+unrelated reason (the inner enable latch is clocked by the GATED clock, so it is
+not opposite-phase against the root). A first attempt at a compound fixture
+passed under the OLD keying too, because `en0 & en1` collapses to a single
+enable pin. The fix is correct by construction, not by measurement, and the
+fixture says so. What IS checked: three held consumers over two gates produce
+two guards, one of them read by two consumers.
 
 350/350 on `//pass/single_edge //lhd/tests //pass/lec //graph`.
 

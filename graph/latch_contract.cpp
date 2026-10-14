@@ -683,12 +683,16 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
     //
     // ONE BIT ONLY, and that restriction is not decoration. A Sext or Get_mask
     // on a WIDER latch is doing real width/sign work, and returning the value
-    // from underneath it silently drops that: peeling unconditionally made
-    // `abc_latch_gated` LEC-refute with `qg(ref=15 impl=14)` -- a lost top bit
-    // on a 4-bit data latch -- and broke lib_cell_prep and the usyn latch
-    // tests the same way. A gate ENABLE is one bit, and at one bit both
-    // wrappers really are identity, so the unwrap is confined to exactly the
-    // case it was added for.
+    // from underneath it would silently drop that -- a lost top bit on a 4-bit
+    // data latch. A gate ENABLE is one bit, and at one bit both wrappers really
+    // are identity, so the unwrap is confined to exactly the case it was added
+    // for.
+    //
+    // (An earlier comment here cited `abc_latch_gated`'s
+    // `qg(ref=15 impl=14)` refutation as proof of this. That attribution is
+    // withdrawn: the only experiment that isolated anything disabled the
+    // single_edge HOLD path, and that made those tests pass. The restriction
+    // rests on the argument above, not on that measurement.)
     auto probe = din;
     const bool one_bit_window = gu::bits_of(din) == 1;
     if (one_bit_window) {
@@ -776,12 +780,16 @@ hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n) {
     //
     // ONE BIT ONLY, and that restriction is not decoration. A Sext or Get_mask
     // on a WIDER latch is doing real width/sign work, and returning the value
-    // from underneath it silently drops that: peeling unconditionally made
-    // `abc_latch_gated` LEC-refute with `qg(ref=15 impl=14)` -- a lost top bit
-    // on a 4-bit data latch -- and broke lib_cell_prep and the usyn latch
-    // tests the same way. A gate ENABLE is one bit, and at one bit both
-    // wrappers really are identity, so the unwrap is confined to exactly the
-    // case it was added for.
+    // from underneath it would silently drop that -- a lost top bit on a 4-bit
+    // data latch. A gate ENABLE is one bit, and at one bit both wrappers really
+    // are identity, so the unwrap is confined to exactly the case it was added
+    // for.
+    //
+    // (An earlier comment here cited `abc_latch_gated`'s
+    // `qg(ref=15 impl=14)` refutation as proof of this. That attribution is
+    // withdrawn: the only experiment that isolated anything disabled the
+    // single_edge HOLD path, and that made those tests pass. The restriction
+    // rests on the argument above, not on that measurement.)
     auto probe = din;
     const bool one_bit_window = gu::bits_of(din) == 1;
     if (one_bit_window) {
