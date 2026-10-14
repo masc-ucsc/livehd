@@ -496,38 +496,31 @@ grep -q "clock-gate-latch-phase" <<<"$out" \
 echo "ok: the same-phase twin is still refused by clock-gate-latch-phase"
 
 
-# ---- B01's remaining boundary, as a minimal reproducer ----------------------
+# ---- ONE GATE, a RISING and a FALLING consumer -----------------------------
 #
-# ONE gate driving BOTH a rising and a falling consumer. This is CORE-ET
-# minion_dcache_top's shape: `latch_50396:...u_clk_gate.en_latch` feeds
-# `flop_75936:...count_q` (posedge, accepted) AND
-# `flop_76000:...u_tmp_data.wr_data_del_q` (negedge, refused). The negedge half
-# is real RTL -- B01's filelist selects tech_generic/prim_rf_1r1w{,_reg,_par}_preview,
-# each `always_ff @(negedge rf_clk_i)` for wr_data_del_q against
+# This is CORE-ET minion_dcache_top's shape: `latch_50396:...u_clk_gate.en_latch`
+# feeds `flop_75936:...count_q` (posedge) AND
+# `flop_76000:...u_tmp_data.wr_data_del_q` (negedge). The negedge half is real
+# RTL -- B01's filelist selects tech_generic/prim_rf_1r1w{,_reg,_par}_preview,
+# each `always_ff @(negedge rf_clk_i)` for the data delay against
 # `always_ff @(posedge rf_clk_i)` for the array: a half-cycle register file.
 #
-# The arm bypass is NOT exact for the falling consumer. It swaps the latch's Q
-# for its transparent arm, which is only equal at an edge where the latch
-# CLOSES. A posedge consumer gets that; a negedge consumer hits the latch
-# OPENING, where Q is the value held across the high phase and D is the live
-# enable. So single_edge refuses, and refusing is correct GIVEN THE CURRENT
-# LOWERING -- this is a missing capability, not an invalid design.
-#
-# PINNED AS THE CURRENT BOUNDARY, not as desired behaviour. When the
-# sampled/held enable of ledger 63.84 lands, this leg flips to "recognized" and
-# grows the simulator differential (high-phase enable changes separate the held
-# guard from the live one). Until then it exists so the boundary cannot move
-# silently, and so B01's refusal is reproducible in a second rather than a
-# whole-unit compile.
+# The arm bypass is NOT exact for the falling consumer -- the latch OPENS at
+# that edge, so its Q is the value held across the high phase while its D is the
+# live enable. So the GATE GUARD (and only the gate guard) is sampled in the
+# rising slot and held; the consumer's OWN enable and the slot predicate combine
+# at its commit. Sampling the conjunction instead would freeze the local enable
+# half a period early, which is why `len` below moves in BOTH directions during
+# the high phase.
 cat > "$W/icg_dual.sv" <<'EOF'
-module icgf(input clk, input reset, input en, input scan, input [7:0] d,
+module icgf(input clk, input reset, input en, input scan, input len, input [7:0] d,
             output [7:0] qr, output [7:0] qf);
   reg enl;
   always @(clk or en or scan) if (!clk) enl <= en | scan;
   wire gclk = clk & enl;
   reg [7:0] fr, ff;
   always @(posedge gclk) if (reset) fr <= 0; else fr <= d;   // rising consumer
-  always @(negedge gclk) ff <= d;                            // falling consumer
+  always @(negedge gclk) if (len) ff <= d;                   // falling + LOCAL enable
   assign qr = fr;
   assign qf = ff;
 endmodule
@@ -536,13 +529,96 @@ build_top dual "$W/icg_dual.sv" icgf
 out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_dual" --emit-dir "lg:$W/lg_dual_norm" \
        --workdir "$W/pw_dual" 2>&1)"
 rc=$?
-if [ $rc -eq 0 ]; then
-  fail "the dual-edge gate NORMALIZED. If the sampled/held enable was implemented, this leg must be rewritten to assert recognition plus the iverilog differential (held vs live guard under high-phase enable changes) -- passing silently here would retire B01's boundary without testing the lowering that replaced it"
+[ $rc -eq 0 ] \
+  || { echo "$out" | tail -6; fail "one gate driving a rising AND a falling consumer was refused (rc=$rc)"; }
+grep -q "sampled-held" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the falling consumer normalized WITHOUT a sampled gate guard; its enable would be the live arm"; }
+grep -q "P=2 slots" <<<"$out" \
+  || { echo "$out" | tail -6; fail "a rising and a falling consumer need two slots"; }
+echo "ok: one gate drives both edges, the falling consumer on a sampled-held guard at P=2"
+
+if external_sim; then
+  emit "$W/lg_dual"      "$W/v_dual_src"
+  emit "$W/lg_dual_norm" "$W/v_dual_norm"
+  sed 's/^module icgf(/module icgf_n(/' "$W"/v_dual_norm/*.v > "$W/dual_norm.v"
+  cat > "$W/dual_tb.v" <<'EOF'
+`timescale 1ns/1ps
+// The normalized oscillator starts 5 ns LATE so its posedges land at
+// 10,20,30,... -- slot 0 on the source's rise (10+20p), slot 1 on its fall
+// (20+20p). With `always #5` from 0 they would be at 5,15,25,... i.e. a HALF
+// PHASE AHEAD of the source, and the two designs would sample different inputs.
+module tb;
+  reg clk_s = 0, clk_n = 0, reset = 1, en = 0, scan = 0, len = 1;
+  reg [7:0] d = 0;
+  wire [7:0] sr, sf, nr, nf;
+  integer errs = 0, checks = 0, hi = 0, lo_up = 0, lo_dn = 0, k = 0;
+  always #10 clk_s = ~clk_s;
+  initial begin clk_n = 0; #5; forever #5 clk_n = ~clk_n; end
+  icgf   s(.clk(clk_s), .reset(reset), .en(en), .scan(scan), .len(len), .d(d), .qr(sr), .qf(sf));
+  icgf_n n(.clk(clk_n), .reset(reset), .en(en), .scan(scan), .len(len), .d(d), .qr(nr), .qf(nf));
+  always @(negedge clk_s) begin          // LOW phase: the ICG's own contract
+    #6 d    <= (k * 8'd37 + 8'd11) & 8'hff;
+       en   <= (k % 3) != 0;
+       scan <= (k % 11) == 0;
+       len  <= (k % 2) == 0;
+       k    <= k + 1;
+  end
+  always @(posedge clk_s) begin          // HIGH phase: latch SHUT
+    #6 en  <= ~en;                       //   gate enable must be ignored
+       len <= ~len;                      //   LOCAL enable must NOT be
+       hi  <= hi + 1;
+       if (len) lo_dn <= lo_dn + 1; else lo_up <= lo_up + 1;
+  end
+  always @(negedge clk_s) begin
+    #8 if (!reset && $time > 60) begin   // skip the power-on period
+         checks <= checks + 1;
+         if (sr !== nr) begin errs = errs + 1;
+           if (errs < 8) $display("MISMATCH qr @%0t source=%0d normalized=%0d", $time, sr, nr); end
+         if (sf !== nf) begin errs = errs + 1;
+           if (errs < 8) $display("MISMATCH qf @%0t source=%0d normalized=%0d", $time, sf, nf); end
+       end
+  end
+  initial begin
+    #27 reset = 0;
+    #600;
+    if (checks < 20)               $display("DUAL_VACUOUS checks=%0d", checks);
+    else if (hi < 20)              $display("DUAL_NO_HIGH_MOVES n=%0d", hi);
+    else if (lo_up < 5 || lo_dn < 5) $display("DUAL_LOCAL_ONESIDED up=%0d dn=%0d", lo_up, lo_dn);
+    else if (errs != 0)            $display("DUAL_FAIL errs=%0d", errs);
+    else                           $display("DUAL_OK checks=%0d high=%0d up=%0d dn=%0d", checks, hi, lo_up, lo_dn);
+    $finish;
+  end
+endmodule
+EOF
+  iverilog -g2012 -o "$W/dual.vvp" "$W/icg_dual.sv" "$W/dual_norm.v" "$W/dual_tb.v" >"$W/iv_dual.log" 2>&1 \
+    || { tail -5 "$W/iv_dual.log"; fail "iverilog could not elaborate the dual-edge pair"; }
+  out="$(timeout 120 vvp "$W/dual.vvp" 2>&1)"
+  grep -qE "DUAL_OK|DUAL_FAIL|DUAL_VACUOUS|DUAL_NO_HIGH_MOVES|DUAL_LOCAL_ONESIDED" <<<"$out" \
+    || { echo "$out" | head -8; fail "the dual-edge differential did not run to a verdict"; }
+  grep -qE "DUAL_VACUOUS|DUAL_NO_HIGH_MOVES|DUAL_LOCAL_ONESIDED" <<<"$out" \
+    && { echo "$out" | head -4; fail "the dual-edge differential did not exercise what it claims"; }
+  grep -q "DUAL_OK" <<<"$out" \
+    || { echo "$out" | head -8; fail "the sampled-held falling consumer does not match its ORIGINAL RTL"; }
+  echo "ok: both consumers of one gate agree with the ORIGINAL RTL (gate moves high-phase, local enable both ways)"
+
+  # NEGATIVE: the falling consumer on the LIVE arm instead of the held guard --
+  # the very error the sampling exists to prevent. Derived from the netlist, not
+  # hardcoded, and required to apply, elaborate, run and MISMATCH.
+  hold="$(sed -n 's/^if ((\(flop_[0-9]*\) & single_edge_phase)) begin$/\1/p' "$W/dual_norm.v" | head -1)"
+  [ -n "$hold" ] || fail "no sampled-held guard found in the normalized netlist"
+  live="$(sed -n "s/^  ___next_${hold} = \([A-Za-z_][A-Za-z0-9_]*\);\$/\1/p" "$W/dual_norm.v" | head -1)"
+  [ -n "$live" ] || fail "could not find what the held guard samples"
+  sed "s/^if ((${hold} & single_edge_phase)) begin\$/if ((${live} \& single_edge_phase)) begin/" \
+      "$W/dual_norm.v" > "$W/dual_live.v"
+  cmp -s "$W/dual_norm.v" "$W/dual_live.v" \
+    && fail "the held-vs-live negative did not apply ($hold -> $live)"
+  iverilog -g2012 -o "$W/dual_live.vvp" "$W/icg_dual.sv" "$W/dual_live.v" "$W/dual_tb.v" >"$W/iv_dual_live.log" 2>&1 \
+    || { tail -5 "$W/iv_dual_live.log"; fail "could not build the held-vs-live negative"; }
+  out="$(timeout 120 vvp "$W/dual_live.vvp" 2>&1)"
+  grep -qE "DUAL_OK|DUAL_FAIL" <<<"$out" || { echo "$out" | head -6; fail "the held-vs-live negative did not run to a verdict"; }
+  grep -q "DUAL_FAIL" <<<"$out" \
+    || fail "reading the LIVE arm at the falling edge still matched the source -- the harness cannot see the sampling, so the agreement above is not evidence"
+  echo "ok: reading the live arm instead of the held guard FAILS (the sampling is load-bearing)"
 fi
-grep -q "clock-gate-latch-phase" <<<"$out" \
-  || { echo "$out" | tail -6; fail "the dual-edge gate was refused, but NOT by the phase guard; B01's boundary has moved and this reproducer no longer tracks it"; }
-grep -qE "flop_[0-9]+:ff" <<<"$out" \
-  || { echo "$out" | tail -6; fail "the refusal does not name the FALLING consumer -- the reproducer is not pinning the dual-edge case"; }
-echo "ok: the dual-edge gate is still refused on its FALLING consumer (B01's open boundary, pinned)"
 
 echo "PASS: single_edge_icg_test"

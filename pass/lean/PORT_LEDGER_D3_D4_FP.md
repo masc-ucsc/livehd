@@ -12743,3 +12743,97 @@ now leaves the mux with its value semantics instead of being peeled.
 
 B01 remains BLOCKED. Its boundary is unchanged and still pinned by the
 dual-edge leg; no certificate exists and no FP credit is claimed.
+
+## §63.86 — the sampled gate guard, and B01's frontier moves to the memory write port
+
+### 1. The harness was wrong, not the lowering
+
+§63.85 reported 49 mismatches from the dual-edge differential and did not
+attribute them. They were the harness. `dnorm7.v` initializes
+`single_edge_phase` to 0 and toggles it on every normalized posedge, so with
+`clk_n = 0` and `always #5` slot 0 landed at 5,25,... and slot 1 at 15,35,... --
+a HALF PHASE AHEAD of a source rising at 10 and falling at 20. The two designs
+were sampling different inputs, including on the rising consumer, which is why
+`qr` disagreed even though nothing in the lowering touches it.
+
+Starting the normalized oscillator 5 ns late pairs them exactly, and that is
+asserted rather than assumed:
+
+```
+SLOT0 @10  SLOT1 @20  SLOT0 @30  SLOT1 @40  ...
+```
+
+Recalibrated, the same comparison went **49 mismatches -> 1**, and the one was a
+power-on transient on the first observation. Skipping the power-on period:
+`DUAL_OK checks=28 high=31 up=16 dn=15`.
+
+### 2. What the repaired lowering does
+
+Only the GATE GUARD is sampled. The retained attempt folded the consumer's own
+enable into the guard BEFORE sampling, which freezes a local enable half a
+period early: with the gate on and the local enable 0@rise/1@fall that
+suppresses a commit the design makes, and 1@rise/0@fall invents one. B01's
+`wr_data_en_i` is exactly such a local enable.
+
+In the emitted netlist:
+
+```verilog
+flop_276 <= ___next_flop_276;          // the held guard, enabled by slot 0
+if ((flop_276 & single_edge_phase))    // falling consumer: HELD guard
+if ((sext_244 & eq_264))               // rising consumer: live arm, unchanged
+```
+
+and the local enable lands in the data mux, evaluated at the consumer's own
+commit. The differential moves it 31 times during the high phase, 16 up and 15
+down, and the harness refuses to pass if it ever stops exercising both
+directions.
+
+One guard per GATE, keyed on the folded gate cone (`held_guards`), which is the
+`guard_key`/`guard_cones` separation `pass/lec/phase_sched.cpp` already uses --
+"a guard sampled on the inactive phase immediately before the CELL's own active
+edge, parity of the CELL, not of the consumer".
+
+**Epoch, argued.** The divider initializes to 0, so slot 0 is the FIRST
+normalized step and the sampling commit always precedes the first slot-1 read;
+the held flop's power-on value is never observed. The concrete `0` is for a
+definite encoder initial state, not for correctness.
+
+### 3. The negative that makes it evidence
+
+Swapping the held guard for the live arm -- derived from the netlist, required
+to apply, elaborate and run -- gives `DUAL_FAIL errs=26`. Without that, the
+agreement above would prove nothing. The flop-only restriction, the rising
+bypass, the same-phase refusal and the L1 negative are all unchanged, and the
+two LEC oracles that caught the first attempt (`lib_cell_prep_test`,
+`lhd_abc_latch_test_usyn`) pass.
+
+350/350 on `//pass/single_edge //lhd/tests //pass/lec //graph`.
+
+### 4. B01's frontier, and it is a real advance
+
+One source-bound normalization of the RETAINED raw graph
+(`lhd` sha256 `dbdc86e4...`, frontend producer unchanged since the graph was
+emitted, so no recompile):
+
+```
+s2_single_edge  exit 7  memory-unsupported
+  memory `memory_107860:gen_offload_reduce.u_reduce.u_ba_alloc_fifo.mem`
+  write port 0 has a GATED clock
+  hint: the gate's enable conditions are not folded into a memory's write
+        enable by this pass, so accepting it would drop the gate
+```
+
+`clock-gate-latch-phase` is gone. The new stop is the **same memory** the
+projection branch stopped at -- `baseline_frontend_build_9bb41a09d_20261012/
+old_dcache_single_edge_attempt_20261012_1545` records
+`memory_91680:gen_offload_reduce.u_reduce.u_ba_alloc_fifo.mem` -- but with a
+different and later refusal: that run said the memory "would commit on every
+sub-step under a phase divider", which the memory-slot lowering cleared, and
+what remains is the GATE on its write port.
+
+So the next B01 step is the memory analogue of this section's work: fold a
+gate's enable into a memory's WRITE ENABLE the way it is now folded into a flop
+enable, preserving the slot gating the write port already has.
+
+**B01 remains BLOCKED.** It still produces no certificate, and no FP credit is
+claimed or implied.

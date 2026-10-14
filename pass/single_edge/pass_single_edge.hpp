@@ -57,6 +57,10 @@ struct Result {
   int  mem_ports_slotted = 0;
   int  mems_slotted      = 0;  // memories with at least one gated write port
   int  icg_folded      = 0;  // gated clocks rewritten into a flop enable
+  // Consumers served by a SAMPLED gate guard: a falling consumer of a
+  // low-transparent ICG, whose gate condition is the value held across the high
+  // phase rather than the live arm. One guard is shared per gate.
+  int  icg_held        = 0;
   // Identity of the REFERENCE clock the slots are expressed against (a graph
   // input's name when there is one; "" when the design has no clock at all).
   // A miter whose two sides normalize against DIFFERENT reference clocks is

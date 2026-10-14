@@ -64,6 +64,11 @@ struct Element {
   // reference clock's edge iff the enables hold, which is exactly what the
   // encoder models natively and strictly cheaper than a per-step commit term.
   std::optional<lc::Icg_cone> icg;
+  // This element samples on the edge the enable latch OPENS at -- a FALLING
+  // consumer of a low-transparent ICG. The arm bypass is not exact there, so
+  // the GATE GUARD (and only the gate guard) is sampled in the rising slot and
+  // held; see apply_icg's hold path.
+  bool                        icg_hold = false;
 };
 
 // Backward combinational reach to STATE elements (stops at any register), so a
@@ -622,8 +627,28 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
           // clock gate. The same phase rule pass/lec/phase_sched.cpp applies to
           // its own bypass; here it fails closed rather than mis-time.
           const bool closed_after = e.cc.rising;  // the reference level after the gated edge
-          if (!lc::gated_latch_closed_at(dn, e.icg->clock, closed_after)
-              || !lc::latch_open_at(dn, e.icg->clock, !closed_after)) {
+          const bool opposite_here
+              = lc::gated_latch_closed_at(dn, e.icg->clock, closed_after) && lc::latch_open_at(dn, e.icg->clock, !closed_after);
+          // THE OTHER EDGE OF THE SAME GATE. One ICG legitimately drives both a
+          // rising and a falling consumer: CORE-ET's half-cycle register file
+          // (tech_generic/prim_rf_1r1w_preview -- `always_ff @(negedge
+          // rf_clk_i)` for the data delay against `always_ff @(posedge
+          // rf_clk_i)` for the array) sits behind minion_dcache_top's
+          // `u_clk_gate`. For the FALLING consumer of a low-transparent gate
+          // the latch OPENS at the sampling edge, so Q != D there and the arm
+          // bypass is not exact -- but `clk & en_latch` still produces that
+          // falling edge iff the value held across the high phase was 1. A
+          // lowering question, not a refusal.
+          //
+          // FLOPS ONLY. A latch behind a gate has its own window and its own
+          // commit rules, and a sampled enable is the wrong instrument for it.
+          const bool opposite_for_other_edge = !e.cc.rising && !e.is_latch
+                                               && lc::gated_latch_closed_at(dn, e.icg->clock, /*closed_level=*/true)
+                                               && lc::latch_open_at(dn, e.icg->clock, /*level=*/false);
+          if (opposite_for_other_edge && !opposite_here) {
+            e.icg_hold = true;
+          }
+          if (!opposite_here && !opposite_for_other_edge) {
             plan.code = "clock-gate-latch-phase";
             plan.why  = "state element `" + label_of(n) + "` is clocked through a gate whose enable latch `" + label_of(dn)
                         + "` is not transparent exactly on the phase opposite the gated edge";
@@ -1422,6 +1447,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     plan.ref_clk_pin = sel;
   }
   hhds::Pin_class slot_pred[2];
+  // One sampled gate guard per GATE, not per consumer: keyed by the folded gate
+  // enable cone, which is what `phase_sched`'s guard_key/guard_cones do.
+  absl::flat_hash_map<hhds::Class_index, hhds::Pin_class> held_guards;
   if (plan.slots > 1) {
     // Phase divider off the design's OWN clock: one free-running clock and a
     // CONCRETELY INITIALIZED counter, so at unroll step j the solver knows
@@ -1647,22 +1675,78 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // rejects. Taking its transparent arm is the US7624363 L1->buffer rewrite,
     // applied exactly where it belongs.
     if (e.icg) {
-      std::vector<hhds::Pin_class> ens(e.icg->enables);  // already latch-bypassed in build_plan
-      if (auto old_en = sink_driver(e.node, "enable"); !old_en.is_invalid()) {
-        ens.push_back(old_en);
-      }
-      hhds::Pin_class acc;
-      for (const auto& en : ens) {
-        if (acc.is_invalid()) {
-          acc = en;
-          continue;
+      const auto and1 = [&](const hhds::Pin_class& a, const hhds::Pin_class& b) {
+        if (a.is_invalid()) {
+          return b;
+        }
+        if (b.is_invalid()) {
+          return a;
         }
         auto andn = gu::create_typed_node(*g, Ntype_op::And);
-        acc.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
-        en.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
-        acc = andn.create_driver_pin(0);
-        gu::set_bits(acc, 1);
-        gu::set_unsign(acc);
+        a.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
+        b.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
+        auto aq = andn.create_driver_pin(0);
+        gu::set_bits(aq, 1);
+        gu::set_unsign(aq);
+        return aq;
+      };
+      // THE GATE GUARD, on its own. Only the gate's own enables go in here --
+      // the element's LOCAL enable is deliberately left out and combined after
+      // any sampling below.
+      hhds::Pin_class gate_acc;
+      for (const auto& en : e.icg->enables) {  // already latch-bypassed in build_plan
+        gate_acc = and1(gate_acc, en);
+      }
+
+      // THE HOLD PATH, for a falling consumer of a low-transparent gate. The
+      // gate reproduces its falling edge iff the value captured before the rise
+      // and held across the high phase was 1, so that value -- not the live arm
+      // -- is this consumer's gate condition. It is SAMPLED in the rising slot.
+      //
+      // This is the parity pass/lec/phase_sched.cpp already uses: a guard
+      // sampled on the inactive phase immediately before the CELL's own active
+      // edge, "parity of the CELL, not of the consumer" (guard_before_fall /
+      // guard_sample), and keyed so one gate contributes ONE guard
+      // (guard_key / guard_cones) rather than one per consumer. `icg_held`
+      // counts the consumers served; `held_guards` is the sharing.
+      //
+      // WHY ONLY THE GATE GUARD. The consumer's own enable is evaluated at ITS
+      // commit, not at the rise. Sampling the conjunction instead would freeze
+      // the local enable half a period early: with the gate on and the local
+      // enable 0 at the rise and 1 at the fall it would suppress a commit the
+      // design makes, and 1-at-rise / 0-at-fall would invent one. B01's
+      // `wr_data_en_i` is exactly such a local enable.
+      //
+      // EPOCH. The divider initializes to 0 and slot 0 is therefore the FIRST
+      // normalized step, so the sampling commit always precedes the first
+      // slot-1 read and the held flop's power-on value is never observed. It is
+      // still given a concrete 0 so the encoder has a definite initial state
+      // rather than a free one.
+      if (e.icg_hold && !gate_acc.is_invalid() && plan.slots > 1 && !slot_pred[0].is_invalid()) {
+        const auto key = gate_acc.get_class_index();
+        auto       it  = held_guards.find(key);
+        if (it == held_guards.end()) {
+          auto hold = gu::create_typed_node(*g, Ntype_op::Flop);
+          gate_acc.connect_sink(gu::setup_sink_by_name(hold, "din"));
+          slot_pred[0].connect_sink(gu::setup_sink_by_name(hold, "enable"));
+          if (!plan.ref_clk_pin.is_invalid()) {
+            plan.ref_clk_pin.connect_sink(gu::setup_sink_by_name(hold, "clock_pin"));
+          }
+          gu::create_const(*g, *Dlop::create_integer(0)).connect_sink(gu::setup_sink_by_name(hold, "initial"));
+          auto hq = hold.create_driver_pin(0);
+          gu::set_bits(hq, 1);
+          gu::set_unsign(hq);
+          it = held_guards.emplace(key, hq).first;
+        }
+        gate_acc = it->second;
+        ++r.icg_held;
+      }
+
+      // The LOCAL enable joins here, unsampled, so it is read at this
+      // element's own commit. The slot predicate is ANDed in further below.
+      hhds::Pin_class acc = gate_acc;
+      if (auto old_en = sink_driver(e.node, "enable"); !old_en.is_invalid()) {
+        acc = and1(acc, old_en);
       }
       drop_sink(e.node, "enable");
       if (!acc.is_invalid()) {
@@ -1906,11 +1990,12 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   r.slots     = plan.slots;
   r.ref_clock = plan.ref_clock_name;
   r.reason    = std::format(
-      "P={} slots, {} latch(es) retyped, {} gated clock(s) folded into an enable, {} element(s) "
+      "P={} slots, {} latch(es) retyped, {} gated clock(s) folded into an enable ({} sampled-held), {} element(s) "
       "slotted, {} memory(ies) slotted over {} write port(s) ({})",
       r.slots,
       r.latches_retyped,
       r.icg_folded,
+      r.icg_held,
       r.flops_slotted,
       r.mems_slotted,
       r.mem_ports_slotted,
