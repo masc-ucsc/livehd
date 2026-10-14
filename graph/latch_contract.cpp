@@ -724,6 +724,87 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
       }
       return acc;
     }
+    // TWO EXACT PASS-THROUGHS, each width-guarded. A level question about a
+    // 1-bit control is unchanged by wiring that neither moves the bit nor mixes
+    // in another one, and refusing to look through such wiring is what turned a
+    // textbook ICG into `clock-gate-latch-phase`. Measured on CORE-ET
+    // minion_dcache_top: `prim_clk_gate` (hw/ip/tech_generic/prim_clk_gate) is
+    //
+    //     always @(clk_i or en_i or dft_i.scanmode)
+    //       if (!clk_i) en_latch <= en_i | dft_i.scanmode;
+    //     assign clk_o = clk_i & en_latch;
+    //
+    // i.e. open on the LOW phase of a RISING gated edge -- exactly opposite,
+    // exactly what the guard wants. But the reader lowers that window as
+    // `Get_mask(Mux(Ror(clk_i), c0, c1), [0,1))`. resolve_phase saw through the
+    // Get_mask and then STOPPED at the Mux, which was not handled here, so the
+    // window came back kAny and BOTH halves of the opposite-phase test failed.
+    // The latch was never wrong-phase; its shape was unreadable.
+    //
+    // These rules decide nothing a wrong-phase latch could pass: each returns
+    // the operand's own value set, so an actually-wrong window still yields the
+    // wrong set and still fails. Anything outside the guarded shapes keeps
+    // falling through to kAny below.
+    //
+    // Get_mask needs NO rule here: resolve_phase above already treats it (and
+    // Sext) as identity wiring, so `ph.net` is never one. Only the two ops
+    // resolve_phase stops at -- Ror and Mux -- have to be taught. Measured by
+    // deleting each in turn against single_edge_icg_test's yosys-reader leg.
+    if (op == Ntype_op::Ror) {
+      // Reduce-OR of ONE bit is that bit. Wider operands genuinely reduce, so
+      // they are not a pass-through and are left to kAny.
+      const auto a = gu::get_driver_of_sink_name(n, "a");
+      if (!a.is_invalid() && gu::bits_of(a) == 1) {
+        return values_with_root(a, root, level, depth + 1);
+      }
+      return kAny;
+    }
+    if (op == Ntype_op::Mux) {
+      // ONLY the two-arm form, and that restriction is load-bearing.
+      //
+      // A two-arm Mux is a TRUTH TEST, not an index: cgen emits
+      // `if (sel) <arm1> else <arm0>` (cgen_verilog.cpp process_mux, the
+      // `ordered_inp.size() == 3` branch), so "sel is 0 here" and "sel is
+      // nonzero here" select the two arms exactly, whatever the selector's
+      // width. That is what this rule reads, and `inp_sink_drivers` yields the
+      // sinks in ascending port order, so arms[0] is the false arm.
+      //
+      // Three or more arms is an INDEXED case whose labels are 0..n-2 plus
+      // `default: '0` whenever 2^width(sel) exceeds the arm count. So a sparse
+      // indexed mux can be ZERO at a selector value no arm covers, and a union
+      // over the arms alone would miss it -- three arms all equal to 1 under a
+      // two-bit selector would come back "provably 1" while selector 3 yields
+      // 0. Those forms return kAny instead of being analyzed; no out-of-range
+      // reasoning is attempted here, so none has to be controlled for.
+      const auto       sel_pid = Ntype::get_sink_pid(Ntype_op::Mux, "s");
+      Pin              sel;
+      int              n_sel = 0;
+      std::vector<Pin> arms;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        if (in.sink.get_port_id() == sel_pid) {
+          sel = in.driver;
+          ++n_sel;
+        } else {
+          arms.push_back(in.driver);
+        }
+      }
+      // `inp_sink_drivers` yields one entry per operand EDGE, and pass/legalize
+      // sanctions a sink with TWO drivers (a compact loop's carry-in). A
+      // selector reached that way is not a single value to reason about, so it
+      // is not reasoned about.
+      if (sel.is_invalid() || n_sel != 1 || arms.size() != 2) {
+        return kAny;
+      }
+      const uint8_t sv = values_with_root(sel, root, level, depth + 1);
+      if (sv == kCan0) {
+        return values_with_root(arms[0], root, level, depth + 1);
+      }
+      if (sv == kCan1) {
+        return values_with_root(arms[1], root, level, depth + 1);
+      }
+      return kAny;  // the selector is not decided at this level
+    }
+
     if (op == Ntype_op::Clock_cell) {
       // `clk_ref & en`, or the active-low flavour `clk_ref | ~en`. A divider has
       // no single-level answer at all.

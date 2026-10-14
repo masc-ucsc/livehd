@@ -187,20 +187,49 @@ EOF
     || { echo "$out" | head -8; fail "the normalized design does not match the real always_latch + gated-clock source under iverilog"; }
   echo "ok: source ICG and normalized flop-with-enable agree over 29 cycles under iverilog"
 
-  # NEGATIVE CONTROL: use the enable latch's HELD Q instead of the value it passes
-  # through. That is the L1 error the bypass exists to prevent, and it must fail
-  # here -- otherwise the agreement above proves nothing about the bypass.
-  sed 's/^if (en) begin/if (enl) begin/' "$W/norm.v" > "$W/norm_late.v"
-  if ! cmp -s "$W/norm.v" "$W/norm_late.v"; then
-    iverilog -g2012 -o "$W/late.vvp" "$W/src.v" "$W/norm_late.v" "$W/tb.v" >"$W/iv2.log" 2>&1 \
-      || { cat "$W/iv2.log"; fail "could not build the L1 negative control"; }
-    out="$(vvp "$W/late.vvp" 2>&1)"
-    grep -q "ICG_DIFF_FAIL" <<<"$out" \
-      || fail "reading the enable latch's HELD Q still matched the source -- the harness cannot see a one-cycle-late enable, so the agreement above is not evidence"
-    echo "ok: reading the enable latch's held Q instead FAILS (the bypass is load-bearing)"
-  else
-    fail "the L1 negative control did not apply (the normalized netlist does not spell its enable as expected)"
-  fi
+  # NEGATIVE CONTROL: use the enable latch's HELD Q instead of the value it
+  # passes through. That is the L1 error the bypass exists to prevent, and it
+  # must fail here -- otherwise the agreement above proves nothing about it.
+  #
+  # DERIVE the arm net; do NOT hardcode its spelling. The previous version ran
+  # `sed 's/^if (en) begin/if (enl) begin/'`, which never matched any emission
+  # and so silently tested nothing (the retained
+  # generated/master_port/d2_runtime/single_edge_icg_test_extsim.log records it
+  # as "did not apply", with the positive leg passing beside it). cgen does not
+  # spell the enable that way: the direct-slang shape emits
+  # `if ((en & ((reset) == ('sb0))))` and the yosys shape emits
+  # `if (sext_116)`. What IS stable in both is that the held latch survives as
+  # `reg enl` fed by `___next_enl = <arm>;`, so the arm is read off that line
+  # and every occurrence of it is swapped for the held `enl`.
+  l1_mutate() { # <norm.v> <out.v>  -> prints the arm net, or fails
+    local arm tgt cond
+    arm="$(sed -n 's/^[[:space:]]*___next_enl[[:space:]]*=[[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*;.*$/\1/p' "$1" | head -1)"
+    [ -n "$arm" ] || return 1
+    # The target is the GATED FLOP's enable only: the `if (...)` guarding
+    # `f <= ___next_f;`. Substituting the arm everywhere would also rewrite its
+    # own declaration and definition (the yosys shape defines the arm as
+    # `sext_116 = $signed(mux_56[0:0]);`), which would collide with the real
+    # `enl` and build a different design rather than the L1 defect.
+    tgt="$(grep -n 'f <= ___next_f;' "$1" | head -1 | cut -d: -f1)"
+    [ -n "$tgt" ] || return 1
+    cond="$(awk -v t="$tgt" 'NR < t && /if[ \t]*\(/ { l = NR } END { print l }' "$1")"
+    [ -n "$cond" ] || return 1
+    sed "${cond}s/\\b${arm}\\b/enl/g" "$1" > "$2"
+    printf '%s' "$arm"
+  }
+  arm_net="$(l1_mutate "$W/norm.v" "$W/norm_late.v")" \
+    || fail "the L1 negative could not find the enable latch's arm (`___next_enl = <net>;`) in the normalized netlist"
+  cmp -s "$W/norm.v" "$W/norm_late.v" \
+    && fail "the L1 negative control did not apply: arm net '$arm_net' was found but substituting it changed nothing"
+  echo "ok: the L1 mutation applied (arm net '$arm_net' -> held 'enl')"
+  iverilog -g2012 -o "$W/late.vvp" "$W/src.v" "$W/norm_late.v" "$W/tb.v" >"$W/iv2.log" 2>&1 \
+    || { cat "$W/iv2.log"; fail "could not build the L1 negative control (it must EXECUTE, not merely be generated)"; }
+  out="$(vvp "$W/late.vvp" 2>&1)"
+  grep -qE "ICG_DIFF_OK|ICG_DIFF_FAIL" <<<"$out" \
+    || { echo "$out" | head -8; fail "the L1 negative control did not run to a verdict"; }
+  grep -q "ICG_DIFF_FAIL" <<<"$out" \
+    || fail "reading the enable latch's HELD Q still matched the source -- the harness cannot see a one-cycle-late enable, so the agreement above is not evidence"
+  echo "ok: reading the enable latch's held Q instead FAILS (the bypass is load-bearing)"
 fi
 
 # ---- the shape REAL designs actually have: an INSTANTIATED ICG cell ---------
@@ -325,5 +354,132 @@ EOF
     || { echo "$out" | head -6; fail "the normalized clk-and-data latch does not match the real gated latch under iverilog"; }
   echo "ok: clk-AND-data latch agrees with the real gated latch over 23 cycles under iverilog"
 fi
+
+
+# ---- the CORE-ET prim_clk_gate shape, and its same-phase twin ---------------
+#
+# The fixture above writes the enable latch as `always_latch if (!clk) enl = en;`
+# -- a BLOCKING assignment in always_latch. CORE-ET's
+# hw/ip/tech_generic/prim_clk_gate/rtl/prim_clk_gate.sv writes the SAME latch in
+# the original cell's event-control form, with a NON-BLOCKING assignment and a
+# scan-mode term:
+#
+#     always @(clk_i or en_i or dft_i.scanmode)
+#       if (!clk_i) en_latch <= en_i | dft_i.scanmode;
+#     assign clk_o = clk_i & en_latch;
+#
+# Same contract, different spelling -- and the reader lowers this one's window as
+# `Get_mask(Mux(Ror(clk), c0, c1), [0,1))`. `values_with_root` understood And/Or/
+# Clock_cell and nothing else, so the window came back kAny and the
+# opposite-phase test failed BOTH halves: a textbook ICG was refused with
+# `clock-gate-latch-phase` on minion_dcache_top (`flop_75936:...count_q`
+# through `latch_50396:...u_clk_gate.en_latch`).
+#
+# The three pass-throughs added to values_with_root (1-bit Ror, identity
+# Get_mask, Mux with a decided selector) are exact, so a genuinely same-phase
+# latch must STILL be refused. That is the second design here, and it is what
+# makes this a discriminating control rather than a smoke test: if the fix ever
+# degrades into "unknown means fine", the same-phase leg passes and fails loudly.
+cat > "$W/icg_ec.sv" <<'EOF'
+module icgf(input clk, input reset, input en, input scan, input [7:0] d, output [7:0] q);
+  reg enl;
+  always @(clk or en or scan) if (!clk) enl <= en | scan;
+  wire gclk = clk & enl;
+  reg [7:0] f;
+  always @(posedge gclk) if (reset) f <= 0; else f <= d;
+  assign q = f;
+endmodule
+EOF
+# The ONLY change is the transparent phase: open while the gated clock is HIGH.
+sed 's/if (!clk) enl <= en | scan;/if (clk) enl <= en | scan;/' "$W/icg_ec.sv" > "$W/icg_ec_same.sv"
+cmp -s "$W/icg_ec.sv" "$W/icg_ec_same.sv" && fail "the same-phase mutation did not apply"
+
+# The YOSYS reader, deliberately: B01 is compiled with `--reader yosys-slang`,
+# and it is that reader which lowers this latch's window as
+# `Get_mask(Mux(Ror(clk), c0, c1), [0,1))`. The direct slang reader produces a
+# different, already-readable shape, so building these two designs with it would
+# make the control vacuous -- measured: with `--reader slang` both legs pass even
+# with the pass-throughs removed.
+build_top() { # <name> <src> <top>
+  rm -rf "$W/lg_$1"
+  "$LHD" compile "$2" --reader yosys-slang --top "$3" --emit-dir "lg:$W/lg_$1" --workdir "$W/cw_$1" >"$W/c_$1.log" 2>&1 \
+    || { tail -5 "$W/c_$1.log"; fail "compile of $2 failed"; }
+}
+build_top ec      "$W/icg_ec.sv"      icgf
+build_top ec_same "$W/icg_ec_same.sv" icgf
+
+# POSITIVE: the event-control / non-blocking / scan-OR spelling is recognized.
+rm -rf "$W/lg_ec_norm"
+out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_ec" --emit-dir "lg:$W/lg_ec_norm" \
+       --workdir "$W/pw_ec" 2>&1)"
+rc=$?
+[ $rc -eq 0 ] \
+  || { echo "$out" | tail -6; fail "the CORE-ET prim_clk_gate spelling was refused (rc=$rc); an opposite-phase ICG must be recognized whatever its RTL form"; }
+grep -q "gated clock(s) folded into an enable" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the event-control ICG was not folded into an enable"; }
+grep -q "P=1 slots" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the event-control ICG did not stay at P=1"; }
+echo "ok: the CORE-ET prim_clk_gate spelling (event control, non-blocking, scan OR) is recognized"
+
+# NEGATIVE, and it must fail for the RIGHT reason: a latch transparent on the
+# GATED phase passes an enable change through while the gated clock is high.
+out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_ec_same" --emit-dir "lg:$W/lg_ec_same_norm" \
+       --workdir "$W/pw_ec_same" 2>&1)"
+rc=$?
+[ $rc -eq 0 ] \
+  && { echo "$out" | tail -6; fail "a SAME-phase enable latch was accepted -- the opposite-phase guard has been defeated, not taught"; }
+grep -q "clock-gate-latch-phase" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the same-phase latch was refused, but not by the phase guard (wrong refusal: the control proves nothing)"; }
+echo "ok: the same-phase twin is still refused by clock-gate-latch-phase"
+
+
+# ---- B01's remaining boundary, as a minimal reproducer ----------------------
+#
+# ONE gate driving BOTH a rising and a falling consumer. This is CORE-ET
+# minion_dcache_top's shape: `latch_50396:...u_clk_gate.en_latch` feeds
+# `flop_75936:...count_q` (posedge, accepted) AND
+# `flop_76000:...u_tmp_data.wr_data_del_q` (negedge, refused). The negedge half
+# is real RTL -- B01's filelist selects tech_generic/prim_rf_1r1w{,_reg,_par}_preview,
+# each `always_ff @(negedge rf_clk_i)` for wr_data_del_q against
+# `always_ff @(posedge rf_clk_i)` for the array: a half-cycle register file.
+#
+# The arm bypass is NOT exact for the falling consumer. It swaps the latch's Q
+# for its transparent arm, which is only equal at an edge where the latch
+# CLOSES. A posedge consumer gets that; a negedge consumer hits the latch
+# OPENING, where Q is the value held across the high phase and D is the live
+# enable. So single_edge refuses, and refusing is correct GIVEN THE CURRENT
+# LOWERING -- this is a missing capability, not an invalid design.
+#
+# PINNED AS THE CURRENT BOUNDARY, not as desired behaviour. When the
+# sampled/held enable of ledger 63.84 lands, this leg flips to "recognized" and
+# grows the simulator differential (high-phase enable changes separate the held
+# guard from the live one). Until then it exists so the boundary cannot move
+# silently, and so B01's refusal is reproducible in a second rather than a
+# whole-unit compile.
+cat > "$W/icg_dual.sv" <<'EOF'
+module icgf(input clk, input reset, input en, input scan, input [7:0] d,
+            output [7:0] qr, output [7:0] qf);
+  reg enl;
+  always @(clk or en or scan) if (!clk) enl <= en | scan;
+  wire gclk = clk & enl;
+  reg [7:0] fr, ff;
+  always @(posedge gclk) if (reset) fr <= 0; else fr <= d;   // rising consumer
+  always @(negedge gclk) ff <= d;                            // falling consumer
+  assign qr = fr;
+  assign qf = ff;
+endmodule
+EOF
+build_top dual "$W/icg_dual.sv" icgf
+out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_dual" --emit-dir "lg:$W/lg_dual_norm" \
+       --workdir "$W/pw_dual" 2>&1)"
+rc=$?
+if [ $rc -eq 0 ]; then
+  fail "the dual-edge gate NORMALIZED. If the sampled/held enable was implemented, this leg must be rewritten to assert recognition plus the iverilog differential (held vs live guard under high-phase enable changes) -- passing silently here would retire B01's boundary without testing the lowering that replaced it"
+fi
+grep -q "clock-gate-latch-phase" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the dual-edge gate was refused, but NOT by the phase guard; B01's boundary has moved and this reproducer no longer tracks it"; }
+grep -qE "flop_[0-9]+:ff" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the refusal does not name the FALLING consumer -- the reproducer is not pinning the dual-edge case"; }
+echo "ok: the dual-edge gate is still refused on its FALLING consumer (B01's open boundary, pinned)"
 
 echo "PASS: single_edge_icg_test"

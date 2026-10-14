@@ -12341,3 +12341,271 @@ conditional on it and I have not changed the default.
 **B03's FP cell stays BLOCKED.**  Emission is necessary and not sufficient: the
 memory route still has to admit, specialize, check and execute against a
 reference the way B11's did.  The matrix limit is cleared; the cell is not.
+
+## §63.84 — B01's clock gate was readable all along, and the pin map behind that claim
+
+### 1. The three pins, and what master may actually reuse
+
+Pinned by commit, from the ORIGINAL checkouts. Master's own local `projection`
+ref is **`aa2f8134a` (2026-08-20)** and is NOT the recent FP baseline — quoting
+"the projection branch" from inside this repository names a seven-week-old tree.
+None of the three is an ancestor of master HEAD; they are independent lines.
+
+| pin | commit / date | relevant implementation | retained capability | reuse or gap |
+|---|---|---|---|---|
+| FP | `/mada/users/czeng14/projects/livehd-futamura/livehd` @ `9bb41a09d`, 2026-10-06, branch `projection` | `Projection/*.lean`: 25 top-level, 38 recursive; built specializer `gen_probe` | §56: 33 frozen rows vs master, 25 GENERATION OK, 8 refused | REUSE for an FP-level A/B on any `.dcert`. GAP: no CORE-ET **helper** route (0 `coreet*` scripts); its CORE-ET certificates came from a third repo (`livehd-new`). It DOES carry the generic yosys/slang reader (`inou/yosys/inou_yosys_api.cpp`), so this is `helpers-absent`, NOT "no frontend" |
+| D2 | `/mada/users/czeng14/projects/livehd-d2-ir-semantics` @ `c21200e0c`, 2026-10-03 | memory model / cgen memory semantics | generated-wrapper simulation, multi-read model | Stage 2 of the order; not consulted for B01 |
+| D3 | `/mada/users/czeng14/projects/livehd-d3-translation-validation` @ `78a3e0d8c`, 2026-10-04 | compileDesign kernel-evaluation measurements | two recorded REJECTED hypotheses | Stage 3; its value here is the negative results, which stop a re-run |
+
+Master has 50 top-level / 64 recursive `Projection/*.lean` to the FP pin's
+25 / 38 (top-level and recursive counted separately, because the recursive total
+includes `Proto/` and `overlays/` submodules). `pass/legalize` exists ONLY on
+master.
+
+**The guard this section is about is master-only too**, which settles a question
+that keeps recurring. `values_with_root`, `latch_window_at`, `latch_open_at` and
+`gated_latch_closed_at` appear **0 times** in all three pins' `latch_contract.cpp`
+and are master-only. So the FP pin accepting a design through this area says
+nothing about the guard being wrong — it has no such guard. Its acceptance is
+not evidence and was not used as any.
+
+### 2. What B01's clock gate actually is — measured, not inferred from a name
+
+`pass.single_edge` refused `minion_dcache_top` with `clock-gate-latch-phase` on
+`flop_75936:gen_offload.u_tensor_load_0.count_q` through
+`latch_50396:gen_offload.u_tensor_load_0.u_clk_gate.en_latch`.
+
+The RTL is `hw/ip/tech_generic/prim_clk_gate/rtl/prim_clk_gate.sv`, reached from
+B01's own filelist:
+
+```systemverilog
+always @(clk_i or en_i or dft_i.scanmode)
+  if (!clk_i) en_latch <= en_i | dft_i.scanmode;
+assign clk_o = clk_i & en_latch;
+```
+
+Open on the LOW phase, gated edge RISING — **exactly the opposite phase the
+guard requires.** It was never wrong-phase.
+
+A probe at the refusal site measured why it failed anyway:
+
+```
+latch=latch_50396:...en_latch rising=true icgclk=clk_i
+enable=get_mask_118492 enable_op=get_mask posclk_known_false=false
+closed_at_ok=false open_at_ok=false
+  get_mask_118492  bits=1  window=[0,1)
+    mux_99352  bits=1
+      ror_132056  bits=1
+        clk_i   <-- the root, a graph input
+      <const>
+      <const>
+```
+
+The window is `Get_mask(Mux(Ror(clk_i), c0, c1), [0,1))`. `Ror` of a one-bit
+clock is the clock; a mux over two constants selected by it is `!clk_i`.
+`resolve_phase` already saw through the `Get_mask`, but stopped at the `Mux`,
+and `values_with_root` understood only And / Or / Clock_cell — so the window
+came back `kAny` and BOTH halves of the opposite-phase test failed.
+
+**Unrecognized representation, not a phase error.**
+
+### 3. The extension, and why it cannot launder a bad latch
+
+Two rules added to `values_with_root`, each width-guarded:
+
+* `Ror` with a **one-bit** operand is that bit. Wider operands genuinely reduce
+  and keep falling through to `kAny`.
+* `Mux`, **two-arm only**: when the selector is decided at this root level, the
+  mux IS the arm it selects. A two-arm Mux is a TRUTH TEST -- cgen emits
+  `if (sel) arm1 else arm0` (`cgen_verilog.cpp` process_mux, the
+  `ordered_inp.size() == 3` branch) -- so this holds at any selector width.
+  Three or more arms is an INDEXED case with `default: '0` whenever
+  `2^width(sel)` exceeds the arm count, so a sparse indexed mux can be ZERO at a
+  selector value no arm covers; a union over its arms alone would call three
+  all-1 arms "provably 1" while selector 3 yields 0. Those forms return `kAny`
+  and are not analyzed, so no out-of-range control is owed.
+
+**Why `resolve_phase` did not already handle it -- WITHDRAWN as unsupported.**
+An earlier draft asserted that B01's mux has two nonzero constant arms, so that
+`resolve_phase`'s own Mux recognizer (which needs a constant-ZERO arm,
+`cond ? nonzero : 0`) could not fire. The retained probe prints only
+`const=true`; it never printed the arms' VALUES, and `is_const` alone does not
+establish "nonzero". The claim is withdrawn rather than patched: it is an
+explanation of why the older recognizer stops, and NOTHING in the fix depends on
+it -- the new rule reasons about the SELECTOR's level and is correct whatever
+the arms hold. If it is ever wanted, it needs one inspection of the frozen
+cone's actual port ids and constant values, not a re-reading of this probe.
+
+**What the deletion tests actually establish** (not re-run for prose): with ALL
+rules removed the fixture's yosys leg fails (`rc=7`); with the `Get_mask` rule
+removed ALONE it still passes, so that rule was dead and is gone. Those two runs
+do NOT individually establish that each of `Ror` and `Mux` is separately
+necessary -- no single-rule deletion was run for either. Both sit on the
+measured cone (`Get_mask -> Mux -> Ror -> clk_i`), which is why both were
+written, but "each is independently required" is not claimed here.
+
+Both return the operand's own value set, so a genuinely same-phase latch still
+computes the wrong set and is still refused. No rule returns "safe" for an
+unknown shape; everything outside the guarded forms still reaches `kAny`.
+
+A `Get_mask` rule was written first and then **deleted as dead code**:
+`resolve_phase` already treats Get_mask and Sext as identity wiring, so `ph.net`
+is never one. Confirmed by deleting each rule in turn against the fixture.
+
+### 4. The second flop, and B01's real frontier
+
+With the rules in, `latch_50396` reads `closed_at_ok=true open_at_ok=true` and
+`flop_75936` passes. `single_edge` still exits 7 — on a **different flop sharing
+the same latch**:
+
+```
+flop_76000:gen_offload.u_tensor_load_0.gen_tmp_data_rf
+           .gen_tmp_data_blk[0].u_tmp_data.wr_data_del_q     rising=FALSE
+```
+
+That is genuine, and the RTL **B01 actually compiled** says so. Its retained
+filelist selects three `tech_generic` preview variants --
+`prim_rf_1r1w_preview`, `prim_rf_1r1w_reg_preview` and
+`prim_rf_1r1w_par_preview` -- each carrying the same shape
+(`prim_rf_1r1w_preview.sv:40`):
+
+```systemverilog
+always_ff @(negedge rf_clk_i) if (wr_data_en_1p) wr_data_del_q <= wr_data_i;
+always_ff @(posedge rf_clk_i) if (wr_en_i)       rf_q[wr_addr_i] <= wr_data_del_q;
+```
+
+(An earlier draft of this section cited `tech_ecp5/prim_rf_1r1w`: the same
+structure, but NOT a file in B01's filelist. Corrected here.)
+
+A deliberate half-cycle register file: capture on the falling edge, commit to
+the array on the rising one. Its `clk_i` is the parent's GATED clock, so a
+**negedge flop sits on a gate built for posedge sampling**.
+
+For that flop the bypass is **not** exact, so refusing is correct GIVEN THE
+CURRENT LOWERING. That is a missing capability, not an invalid design: a
+dual-edge consumer behind a positive ICG is legal hardware, and the retained
+`result4.json` supports only that `single_edge` still exits 7 on `flop_76000`
+through `latch_50396`.
+The bypass replaces the latch's Q with its transparent arm, which is exact only
+when the latch CLOSES at the sampling edge:
+
+* posedge flop, low-transparent latch — closes at the edge, so `Q == D` there;
+* negedge flop, low-transparent latch — **opens** at the edge, so just before it
+  the latch was holding and `Q != D` in general.
+
+So this is a NEW semantic boundary, not another recognition gap, and it is not
+closed here.
+
+### 5. The lowering this needs, derived from `pass/lec/phase_sched.cpp`
+
+The scheduler already owns the right contract, and it is reusable rather than
+something to invent. `phase_sched.cpp:587` states it outright:
+
+> A recognized gate contributes a guard sampled on the INACTIVE PHASE
+> IMMEDIATELY BEFORE THE CELL'S OWN ACTIVE EDGE -- **parity of the CELL, not of
+> the consumer.**
+
+`guard_before_fall` is set from the CELL's own `invert` attribute
+(`phase_sched.cpp:211`), never from a consumer flop's edge, and
+`guard_sample = guard_before_fall ? Close_high : Close_low` (`:594`). For B01's
+gate (`clk & en_latch`, not inverted) that is `Close_low` -- precisely the
+latch's transparent window.
+
+The state-transition contract that follows, for ONE gate driving BOTH a rising
+and a falling consumer:
+
+1. the enable is captured while the latch is transparent (the LOW phase) and
+   HELD across the whole HIGH phase;
+2. the gated clock's rising edge occurs iff that held value is 1;
+3. the gated clock's falling edge occurs iff the SAME held value is 1 -- the
+   latch is shut through the high phase, so an enable change there can neither
+   cancel nor invent the following falling event;
+4. therefore **both consumers are governed by the same sampled guard**, and the
+   falling consumer's enable is the HELD value, not the live arm.
+
+That rules out all three shortcuts: removing the phase guard (loses 2-3),
+substituting the raw arm D at the falling edge (reads the live enable, which may
+have moved during the high phase), and reading Q blindly (the full-cycle-late
+error the bypass comment at `pass_single_edge.cpp` exists to prevent, since
+normalized state updates on one edge).
+
+The exact lowering is therefore a HELD GATE STATE -- the enable sampled at the
+preceding `Close_low` -- shared by both consumers, with the rising consumer
+keeping today's arm bypass (equivalent there, because the latch shuts at its
+edge). **Specified here, not implemented**: it adds a new sampled element to
+single_edge's slot machinery and must be proven against a dual-edge fixture with
+enable and scan changes during the high phase, which is the next B01 step.
+
+**CORRECTION -- the simulator IS provisioned, and the earlier "not installed"
+claim was wrong.** It was made after checking only system PATH directories
+(`/usr/bin`, `/usr/local/bin`, `~/.local/bin`). The retained tools live
+PROJECT-LOCALLY, as MASTER_INTEGRATION.md R34.1 records:
+
+```
+generated/validation-tools/iverilog-v13_0/bin/iverilog   Icarus 13.0, exit 0
+  sha256 5506c214f778cc5eb79e503c86b683216ebc0c7975b0d9228fa157fcb4e41e97
+generated/validation-tools/iverilog-v13_0/bin/vvp        Icarus 13.0, exit 0
+  sha256 ab92b3ffd910f0c3682ace1a0befa8f1b444bf98d4330483cf6afa46ff58a188
+```
+
+So the external leg is runnable here and the gate is open only until it is run,
+not blocked. **It has now been run, and the L1 negative repaired.** Note first
+what the RETAINED evidence showed about it
+(`generated/master_port/d2_runtime/single_edge_icg_test_extsim.log` and
+`master_rebase/audits/native_runtime_reproduction_20261010/result.json`): the
+older external ICG positive agreed for 29 cycles, but its L1 NEGATIVE FAILED TO
+APPLY -- so that run is not a full pass and must not be counted as one.
+
+**Why it could not apply, and the repair.** The mutation was
+`sed 's/^if (en) begin/if (enl) begin/'` on the normalized netlist. cgen never
+spells the enable that way: the direct-slang shape emits
+`if ((en & ((reset) == ('sb0))))` and the yosys shape emits `if (sext_116)`.
+The pattern matched nothing, `cmp` saw no change, and the leg reported "did not
+apply" while the positive passed beside it -- a negative control that tested
+nothing. What IS stable across both shapes is that the held latch survives as
+`reg enl` driven by `___next_enl = <arm>;`, so the arm is now READ OFF that
+line and substituted for the held `enl` on exactly one line: the `if (...)`
+guarding `f <= ___next_f;`. Substituting it everywhere would rewrite the arm's
+own definition (`sext_116 = $signed(mux_56[0:0]);`) and build a different
+design instead of the L1 defect. The leg now asserts the arm was found, that
+the substitution CHANGED the file, that the mutant ELABORATED, that it RAN to a
+verdict, and that the verdict is a mismatch.
+
+Measured with the retained Icarus 13.0
+(`generated/validation-tools/iverilog-v13_0/bin`), `LHD_EXTERNAL_SIM=1`:
+
+```
+ok: source ICG and normalized flop-with-enable agree over 29 cycles under iverilog
+ok: the L1 mutation applied (arm net 'en' -> held 'enl')
+ok: reading the enable latch's held Q instead FAILS (the bypass is load-bearing)
+ok: clk-AND-data latch agrees with the real gated latch over 23 cycles under iverilog
+```
+
+### 6. B01's boundary, reduced to a twelve-line reproducer
+
+The dual-edge shape is now a fixture leg of its own:
+
+```systemverilog
+always @(clk or en or scan) if (!clk) enl <= en | scan;
+wire gclk = clk & enl;
+always @(posedge gclk) if (reset) fr <= 0; else fr <= d;   // rising consumer
+always @(negedge gclk) ff <= d;                            // falling consumer
+```
+
+`pass.single_edge` refuses it exit 7, `clock-gate-latch-phase`, naming
+`flop_48:ff` through `latch_40:enl` -- the same code and the same shape as B01's
+`flop_76000:...wr_data_del_q` through `latch_50396:...en_latch`, in a design
+that compiles in under a second instead of a whole cache.
+
+The leg PINS the current refusal rather than endorsing it, and fails loudly if
+the design ever normalizes without the leg being rewritten to assert the
+recognition plus the simulator differential. So the boundary cannot move
+silently, and the lowering of section 5 now has a cheap target to be developed
+against. Closing it means deciding what a negedge flop on a posedge ICG
+should lower to — plausibly "take the enable from the latch's Q, not its arm",
+which is a different lowering with its own hazard (the comment at the bypass
+records why reading Q is otherwise a full-cycle error). That decision is not
+made unilaterally.
+
+**B01 remains BLOCKED.** It compiles and its first normalization refusal is
+gone; the certificate does not exist, so no FP credit is claimed or implied.
