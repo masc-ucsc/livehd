@@ -98,9 +98,11 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
   std::vector<uint32_t>      lowered_memories;
   for (const auto& n : design.nodes) {
     if (n.op == ScanOp::Memory) {
-      b.lowering_context = "memory n_" + std::to_string(n.id) + " (read side)";
-      detail::lower_memory_reads(b, design.memories.at(n.id));
-      lowered_memories.push_back(n.id);
+      b.lowering_context = "memory n_" + std::to_string(n.id) + " read port " + std::to_string(n.memory_read);
+      detail::lower_memory_read(b, design.memories.at(n.id), n.memory_read);
+      if (std::find(lowered_memories.begin(), lowered_memories.end(), n.id) == lowered_memories.end()) {
+        lowered_memories.push_back(n.id);
+      }
       continue;
     }
     b.lowering_context = "node n_" + std::to_string(n.id);

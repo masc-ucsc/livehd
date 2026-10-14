@@ -2,6 +2,7 @@
 #include "memory_lowering.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 
 #include "certificate_builder.hpp"
 
@@ -10,6 +11,26 @@ namespace {
 uint32_t resize(CertificateBuilder& b, const PinRef& pin, uint32_t width) {
   const auto id = b.dep(pin, width);
   return b.emit({Operation::Or, 0, {}}, width, {id});
+}
+
+// ONE image identity per memory, whatever order the read ports are scheduled
+// in. Sources are declared ahead of every node in the emitted certificate, so
+// creating this on first use is still a predeclaration as far as
+// `index_certificate` is concerned.
+MemoryLowering& state_of(CertificateBuilder& b, const Memory& m) {
+  auto& st = b.memory_state[m.id];
+  if (st.image == 0) {
+    Source image;
+    image.id           = b.next_id++;
+    image.kind         = m.is_rom ? SourceKind::RomConst : SourceKind::MemImage;
+    image.width        = m.bits;
+    image.addr_w       = m.addr_width;
+    image.ordinal      = m.id;  // resolved to runtime ordinal once all memories exist
+    image.rom_contents = m.rom_contents;
+    b.sources.emplace(image.id, image);
+    st.image = image.id;
+  }
+  return st;
 }
 
 // Share chains by the set of writes forwarded to each read port. A later
@@ -31,6 +52,8 @@ uint32_t chain(CertificateBuilder& b, const Memory& m, MemoryLowering& st, const
   return current;
 }
 
+// The writes read ordinal `r` forwards, as the certificate defines forwarding:
+// per CELL of the matrix, not per memory.
 std::vector<size_t> forwarded_to(const Memory& m, size_t r) {
   std::vector<size_t> forwarded;
   for (size_t w = 0; w < m.write_ports.size(); ++w) {
@@ -47,52 +70,48 @@ std::vector<size_t> forwarded_to(const Memory& m, size_t r) {
 }
 }  // namespace
 
-void lower_memory_reads(CertificateBuilder& b, const Memory& m) {
-  auto& st = b.memory_state[m.id];
-  Source image;
-  image.id           = b.next_id++;
-  image.kind         = m.is_rom ? SourceKind::RomConst : SourceKind::MemImage;
-  image.width        = m.bits;
-  image.addr_w       = m.addr_width;
-  image.ordinal      = m.id;  // resolved to runtime ordinal once all memories exist
-  image.rom_contents = m.rom_contents;
-  b.sources.emplace(image.id, image);
-  st.image = image.id;
-  for (size_t r = 0; r < m.read_ports.size(); ++r) {
-    const auto& p   = m.ports.at(m.read_ports[r]);
-    const auto  key = (static_cast<uint64_t>(m.id) << 32) | p.driver_pid;
-    if (m.sync) {
-      // A REGISTERED read presents last cycle's value, so the only thing it
-      // contributes here is the register itself. Its next-state cone -- the
-      // address, the enable and the read of the forwarded image -- is built in
-      // phase 2, where it may name any node, exactly like a flop's `din`.
-      Source reg;
-      reg.id    = b.next_id++;
-      reg.kind  = SourceKind::Flop;
-      reg.width = m.bits;
-      b.sources.emplace(reg.id, reg);
-      st.read_registers.emplace(r, reg.id);
-      b.memory_reads.emplace(key, reg.id);
-    } else {
-      const auto base   = chain(b, m, st, forwarded_to(m, r));
-      const auto addr   = resize(b, p.addr, m.addr_width);
-      const auto enable = resize(b, p.enable, b.pin_width(p.enable));
-      const auto read   = b.emit({Operation::MemRead, 0, {}}, m.bits, {base, addr, enable});
-      b.memory_reads.emplace(key, read);
-    }
+void lower_memory_read(CertificateBuilder& b, const Memory& m, uint32_t r) {
+  auto& st = state_of(b, m);
+  if (r >= m.read_ports.size()) {
+    throw std::runtime_error("[ERROR] pass.lean: memory n_" + std::to_string(m.id) + " has no read port ordinal "
+                             + std::to_string(r));
   }
+  const auto& p   = m.ports.at(m.read_ports[r]);
+  const auto  key = (static_cast<uint64_t>(m.id) << 32) | p.driver_pid;
+  if (b.memory_reads.contains(key)) {
+    return;
+  }
+  if (m.sync) {
+    // A REGISTERED read presents last cycle's value, so the only thing it
+    // contributes here is the register itself. Its next-state cone -- the
+    // address, the enable and the read of the forwarded image -- is built on
+    // the write side, where it may name any node, exactly like a flop's `din`.
+    Source reg;
+    reg.id    = b.next_id++;
+    reg.kind  = SourceKind::Flop;
+    reg.width = m.bits;
+    b.sources.emplace(reg.id, reg);
+    st.read_registers.emplace(r, reg.id);
+    b.memory_reads.emplace(key, reg.id);
+    return;
+  }
+  const auto base   = chain(b, m, st, forwarded_to(m, r));
+  const auto addr   = resize(b, p.addr, m.addr_width);
+  const auto enable = resize(b, p.enable, b.pin_width(p.enable));
+  const auto read   = b.emit({Operation::MemRead, 0, {}}, m.bits, {base, addr, enable});
+  b.memory_reads.emplace(key, read);
 }
 
 void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
-  auto& st = b.memory_state.at(m.id);
+  auto& st = state_of(b, m);
   for (size_t r = 0; r < m.read_ports.size(); ++r) {
     const auto it = st.read_registers.find(r);
     if (it == st.read_registers.end()) {
-      continue;
+      continue;  // a registered read whose output nothing consumes
     }
-    const auto& p      = m.ports.at(m.read_ports[r]);
-    const auto  base   = chain(b, m, st, forwarded_to(m, r));
-    const auto  addr   = resize(b, p.addr, m.addr_width);
+    const auto& p    = m.ports.at(m.read_ports[r]);
+    const auto  base = chain(b, m, st, forwarded_to(m, r));
+    const auto  addr = resize(b, p.addr, m.addr_width);
     Source      one;
     one.id              = b.next_id++;
     one.kind            = SourceKind::Const;

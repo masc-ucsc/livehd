@@ -8,7 +8,6 @@
 
 #include "graph/latch_contract.hpp"
 #include "graph_access.hpp"
-#include "port_reach.hpp"
 
 namespace lean_export {
 namespace {
@@ -876,7 +875,8 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
       }
     }
   }
-  // A MEMORY IS NOT ONE COMBINATIONAL VERTEX.
+  // A MEMORY IS NOT ONE COMBINATIONAL VERTEX, AND ITS READ PORTS ARE NOT ONE
+  // SCHEDULING UNIT EITHER.
   //
   // This walk used to join every memory INPUT to every memory OUTPUT, because
   // it expanded a node by `inp_edges_ordered` and cut only flops. That reports
@@ -885,51 +885,97 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   // array exactly like `always @(posedge clk) r <= f(r)`. Measured on CORE-ET
   // minion_dcache_top, which `pass.legalize` and `legalize.seal` both accept.
   //
-  // The dependencies now come from `Memory_deps`, the repository's one memory
-  // model -- the same one pass.legalize's loop check uses -- asked PER READ
-  // PORT. It is called with `writes = true`, and that is the soundness point,
-  // not a detail: `memory_lowering.cpp` builds FORWARDED writes into a read's
-  // value (`chain(forwarded)` feeding `MemRead`), so for a forwarding memory
-  // those write cones ARE genuine combinational dependencies of the read and
-  // must stay visible. `writes = false` -- legalize's loop-check policy --
-  // would drop them and could hide a real cycle through a forwarded write.
+  // Each READ PORT is now walked, and emitted, as its own unit, keyed by
+  // (memory node, read ordinal). Two read ports of one array are two
+  // independent values over one shared image, so `read 0 -> logic -> read 1's
+  // address` is an ordinary DAG edge; only a path that returns, `read 0 ->
+  // read 1's address` AND `read 1 -> read 0's address`, is a cycle. The image
+  // and the next-state write chain remain ONE identity per memory, created
+  // once in the builder.
   //
-  // What each kind yields: an ASYNC read reaches its own address and enable
-  // (plus the write cones when the memory forwards or is unclocked); a SYNC
-  // read reaches nothing, which is the state cut; a port the model does not
-  // decode makes the whole memory fall back to the conservative all-inputs
-  // join.
+  // WHAT A READ DEPENDS ON is taken from the same decoded `Memory_info` the
+  // certificate is built from, so the dependency set is exactly the set of pins
+  // `lower_memory_read` will reference -- no more and no less:
   //
-  // The memory stays ONE vertex and the union over ALL of its read ports is
-  // expanded, not just the port a consumer arrived by. That is not laziness:
-  // `lower_memory_reads` lowers every read port of a memory at the one place
-  // the Memory node sits in this post-order, so EVERY read port's address and
-  // enable cone has to be emitted before it. Tracking the ports separately
-  // would let a consumer of port 0 be emitted while port 1's address cone was
-  // still unemitted, and the certificate requires topological order. The cost
-  // is that a one-directional dependency BETWEEN two read ports of the same
-  // memory (port 1's address reading port 0's data) is reported as a cycle;
-  // that shape is genuinely not representable while one Memory node lowers
-  // both ports, so a refusal is the honest answer rather than a wrong order.
-  std::map<uint32_t, livehd::port_reach::Memory_deps> mem_deps;
-  std::set<uint32_t>                                  reached, active;
-  std::vector<std::pair<Node, bool>>                  stack;
+  //   * a SYNCHRONOUS read presents last cycle's value. It is a state source,
+  //     so it has no combinational operand at all; its address and enable cone
+  //     belong to the next-state side, which is scheduled after every node.
+  //   * an ASYNCHRONOUS read reaches its own address and enable, plus the
+  //     address, data and lane-enable cones of the writes ITS OWN ROW forwards.
+  //     `memory_lowering.cpp` really does chain `fwd_rows[r]`'s writes into the
+  //     image that feeds this port's `MemRead`, so those cones are genuine
+  //     combinational dependencies of the value and must stay visible.
+  //
+  // The ROW matters, not the cell. `port_reach.hpp`'s `Memory_deps` is the
+  // repository's shared decoder and `pass.legalize`'s loop check uses it, but
+  // its `fwd_nonzero` is a WHOLE-CELL flag: one forwarding read makes it join
+  // every write cone into every read. The certificate forwards per
+  // `fwd_rows[r][w]`, so asking the shared helper here would invent a cycle for
+  // a READ-FIRST port that merely shares an array with a forwarding one.
+  const auto read_deps = [&](const lean_pass::Memory_info& mi, size_t r, const auto& enqueue) {
+    if (mi.sync) {
+      return;
+    }
+    const auto& p = mi.ports.at(mi.read_ports.at(r));
+    enqueue(p.addr);
+    enqueue(p.enable);
+    for (size_t w = 0; w < mi.write_ports.size(); ++w) {
+      if (!lean_pass::memory_fwd_bit(mi, r, w)) {
+        continue;
+      }
+      const auto& wp = mi.ports.at(mi.write_ports[w]);
+      enqueue(wp.addr);
+      enqueue(wp.din);
+      enqueue(wp.enable);
+    }
+  };
+  // The visit key is (node, read ordinal); -1 is "not a memory read output",
+  // which is every other node and its single result.
+  const auto vkey = [](uint32_t nid, int read_ordinal) {
+    return (static_cast<uint64_t>(nid) << 32) | static_cast<uint32_t>(read_ordinal + 1);
+  };
+  const auto read_ordinal_of = [&](const Node_pin& pin) {
+    const auto node = pin_node(pin);
+    if (!node_is_memory(node)) {
+      return -1;
+    }
+    const auto id = node_id(node);
+    const auto it = ctx.memory_info.find(id);
+    if (it != ctx.memory_info.end()) {
+      const auto pid = static_cast<uint32_t>(pin.get_port_id());
+      for (size_t r = 0; r < it->second.read_ports.size(); ++r) {
+        if (it->second.ports.at(it->second.read_ports[r]).driver_pid == pid) {
+          return static_cast<int>(r);
+        }
+      }
+    }
+    // A memory OUTPUT that is not a decoded read port -- `readall`, or a pin
+    // the cell grew. There is no certificate value to bind it to, so refuse it
+    // by name rather than join every input and emit something unrelated.
+    fatal(ctx,
+          "memory n_" + std::to_string(id) + " drives output pin " + std::to_string(pin.get_port_id())
+              + ", which is not a decoded read port. A certificate binds a value per READ PORT.");
+    return -1;
+  };
+  std::set<uint64_t>                 reached, active;
+  std::vector<std::tuple<Node, bool, int>> stack;
   // Operator census: name -> first node that used it, plus a total node count.
   std::map<std::string, std::string> unsupported;
   size_t                             unsupported_nodes = 0;
   const auto leaf = [&](const Node_pin& pin) { return pin_is_input(pin) || pin_is_const(pin) || node_is_flop(pin_node(pin)); };
   for (const auto& pin : roots) {
     design.roots.push_back(capture_pin(ctx, pin));
-    if (leaf(pin) || reached.contains(node_id(pin_node(pin)))) {
+    if (leaf(pin) || reached.contains(vkey(node_id(pin_node(pin)), read_ordinal_of(pin)))) {
       continue;
     }
-    stack.emplace_back(pin_node(pin), false);
+    stack.emplace_back(pin_node(pin), false, read_ordinal_of(pin));
     while (!stack.empty()) {
       // Own the frame: growing stack invalidates references to stack.back().
-      const auto [node, visited] = stack.back();
-      const auto id              = node_id(node);
+      const auto [node, visited, read_ordinal] = stack.back();
+      const auto id                            = node_id(node);
+      const auto key                           = vkey(id, read_ordinal);
       if (visited) {
-        if (reached.insert(id).second) {
+        if (reached.insert(key).second) {
           if (node_op(node) == Ntype_op::Concat) {
             lower_concat(ctx, node, design, next_lowered_id);
           } else if (node_op(node) == Ntype_op::Hotmux) {
@@ -947,7 +993,10 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
             DesignNode n;
             n.id = id;
             n.op = *mapped;
-            if (n.op != ScanOp::Memory) {
+            if (n.op == ScanOp::Memory) {
+              // One entry per READ PORT, at that port's own place in the order.
+              n.memory_read = static_cast<uint32_t>(read_ordinal);
+            } else {
               n.width     = node_width(ctx, node);
               n.is_signed = node_output_is_signed(node);
               if (n.op == ScanOp::GetMask || n.op == ScanOp::SetMask) {
@@ -1058,47 +1107,33 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
             design.nodes.push_back(std::move(n));
           }
         }
-        active.erase(id);
+        active.erase(key);
         stack.pop_back();
         continue;
       }
-      if (reached.contains(id)) {
+      if (reached.contains(key)) {
         stack.pop_back();
         continue;
       }
-      if (!active.insert(id).second) {
-        fatal(ctx, "combinational cycle at node n_" + std::to_string(id));
+      if (!active.insert(key).second) {
+        fatal(ctx,
+              "combinational cycle at node n_" + std::to_string(id)
+                  + (read_ordinal >= 0 ? " read port " + std::to_string(read_ordinal) : ""));
       }
-      stack.back().second = true;
-      const auto push     = [&](const Node_pin& drv) {
-        if (drv.is_invalid() || leaf(drv) || reached.contains(node_id(pin_node(drv)))) {
+      std::get<1>(stack.back()) = true;
+      const auto push           = [&](const Node_pin& drv) {
+        if (drv.is_invalid() || leaf(drv)) {
           return;
         }
-        stack.emplace_back(pin_node(drv), false);
-      };
-      bool expanded = false;
-      if (node_is_memory(node)) {
-        const auto mi = ctx.memory_info.find(id);
-        if (mi != ctx.memory_info.end()) {
-          auto it = mem_deps.find(id);
-          if (it == mem_deps.end()) {
-            it = mem_deps.emplace(id, livehd::port_reach::Memory_deps(node)).first;
-          }
-          expanded = true;
-          for (const auto rp : mi->second.read_ports) {
-            // `writes = true`: forwarded write cones are REAL dependencies of
-            // the read value the certificate builds. See the note above.
-            const auto dpid = mi->second.ports.at(rp).driver_pid;
-            if (!it->second.deps(static_cast<hhds::Port_id>(dpid), push, /*writes=*/true)) {
-              expanded = false;  // a port the model cannot decode: join it all
-              break;
-            }
-          }
+        const auto r = read_ordinal_of(drv);
+        if (reached.contains(vkey(node_id(pin_node(drv)), r))) {
+          return;
         }
-      }
-      if (!expanded) {
-        // Not a memory the model decodes: the old conservative join over every
-        // input.
+        stack.emplace_back(pin_node(drv), false, r);
+      };
+      if (read_ordinal >= 0) {
+        read_deps(ctx.memory_info.at(id), static_cast<size_t>(read_ordinal), push);
+      } else {
         for (const auto& e : inp_edges_ordered(node)) {
           push(e.driver);
         }

@@ -52,6 +52,14 @@ struct DesignNode {
   uint32_t             width     = 0;
   bool                 is_signed = false;
   std::vector<Operand> operands;
+  // `op == ScanOp::Memory` ONLY: which READ PORT of memory `id` this entry
+  // schedules, as an ordinal into `Memory::read_ports`. One memory contributes
+  // one entry per read port whose output is consumed, each at its own place in
+  // the order, because two read ports of one array are two independent values
+  // over one shared image -- a dependency from one to the other's address is an
+  // ordinary DAG edge, not a cycle. The image itself, and the next-state write
+  // chain, stay ONE identity per memory.
+  uint32_t             memory_read = 0;
 };
 struct Port {
   std::string           name;
