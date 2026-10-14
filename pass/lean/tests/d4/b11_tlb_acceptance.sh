@@ -15,6 +15,22 @@
 # classification (from `fires e md.clock`, i.e. actual state, NOT the final
 # image), each DECODED next image, and the returned-state policy per step.
 #
+# CLOCK-FIRES IS NOT ENABLED.  An earlier version classified a step only by
+# `fires e md.clock`, so a planted image change on a step where the write was
+# DISABLED still passed.  Three independent reasons a fired clock commits
+# nothing, all visible in the trace of this very run:
+#
+#   step 13  pred 0      -- phase is 1, so EQ(0,phase) is false and the slot
+#                          mask zeroes the enable (origEn is the full 2^69-1)
+#   step 12  origEn 0    -- the design's own enable is low
+#   step 14  quiet       -- fully enabled (pred 1, effEn 2^69-1, datum ready)
+#                          but `edgeSchedule` suppresses k%3==2, so no edge
+#
+# So a step may commit only when the clock FIRES and the slot predicate is TRUE
+# and the effective write enable is NONZERO, and those come from the recorded
+# pre-step values -- evaluated by the driver from the real pre-state and input
+# through DesignSemantics' own `evalGraphG`/`srcEnv`, with no overrides.
+#
 # THE EXPECTATION IS SOURCE-DERIVED: address 1, word 0x223600abcde, packed from
 # the pinned CORE-ET DV fill_entry sequence for NrMinions=1, Entries=8.
 set -u
@@ -107,11 +123,35 @@ print(f"ok: all {len(SUPPLIED)} supplied words and the default loaded unchanged,
 steps = {}
 for k, act in re.findall(r"TRACE step (\d+) mem 0 (active|quiet) ", txt):
     steps[int(k)] = act
+# the recorded PRE-STEP values, from the design's own semantics
+pre = {}
+for k, ph, pr, oe, ee, ad, dt in re.findall(
+        r"TRACE step (\d+) pre phase (-?\d+) pred (-?\d+) origEn (-?\d+) effEn (-?\d+) addr (-?\d+) datum (-?\d+)", txt):
+    pre[int(k)] = dict(phase=int(ph), pred=int(pr), origEn=int(oe), effEn=int(ee), addr=int(ad), datum=int(dt))
+# The pre-step values are only meaningful if they were read off THE AUDITED
+# WRITE GATE.  The driver discovers the slots from the certificate itself; these
+# are the ids the independent audit recorded for this certificate (pinned by
+# sha256 in SHA256SUMS), so a mismatch means the diagnostics describe some other
+# node and every value below is about the wrong thing.  Re-derive both if the
+# certificate is regenerated -- do not relax this.
+AUDITED = dict(write=374, addr=371, datum=372, effEn=373, origEn=356,
+               mask=337, pred=334, phaseSrc=29)
+sl = re.search(r"TRACE slots (.+)", txt)
+if not sl:
+    fail("the trace does not record the discovered write-gate slots")
+if "UNRESOLVED" in sl.group(1):
+    fail(f"the driver could not resolve the write-gate slots: {sl.group(1).strip()} "
+         f"-- the per-step values cannot be attributed to the write gate")
+got = {k: int(v) for k, v in re.findall(r"(\w+) (\d+)", sl.group(1))}
+if got != AUDITED:
+    fail(f"the discovered write-gate slots {got} are not the audited {AUDITED} "
+         f"-- the per-step diagnostics describe a different node")
+print(f"ok: the per-step values are read off the AUDITED write gate {AUDITED}")
 nexts = {}
 for k, img in re.findall(r"TRACE step (\d+) mem 0 next (.+)", txt):
     nexts[int(k)] = parse_img(img)
 pol = {int(k): v for k, v in re.findall(r"TRACE step (\d+) policy (\w+)", txt)}
-missing = [k for k in range(STEPS) if k not in steps or k not in nexts or nexts[k] is None]
+missing = [k for k in range(STEPS) if k not in steps or k not in nexts or nexts[k] is None or k not in pre]
 if missing:
     fail(f"the trace is missing or malformed for step(s) {missing} -- a truncated trace cannot be accepted")
 badpol = [k for k in range(STEPS) if pol.get(k) != "true"]
@@ -121,7 +161,7 @@ print(f"ok: a complete {STEPS}-step trace, policy checked on every step")
 
 # ---- the ONLY permitted change, over the WHOLE image ---------------------
 prev_w, prev_d = lwords, ldflt
-changes = []
+changes, enabled = [], []
 for k in range(STEPS):
     ws, dd = nexts[k]
     if len(ws) != len(SUPPLIED):
@@ -129,13 +169,26 @@ for k in range(STEPS):
     diffs = [i for i in range(len(ws)) if ws[i] != prev_w[i]]
     if dd != prev_d:
         fail(f"step {k} ({steps[k]}) CHANGED THE DEFAULT {prev_d} -> {dd}")
+    p = pre[k]
+    # A COMMIT IS POSSIBLE ONLY IF all three hold.  Checked against the recorded
+    # values, not against the active/quiet label alone.
+    can = (steps[k] == "active") and p["pred"] != 0 and p["effEn"] != 0
+    if diffs and not can:
+        why = []
+        if steps[k] != "active": why.append("the clock is QUIET")
+        if p["pred"] == 0:       why.append(f"the slot predicate is FALSE (phase {p['phase']})")
+        if p["effEn"] == 0:      why.append(f"the write enable is ZERO (origEn {p['origEn']})")
+        fail(f"step {k} changed address(es) {diffs} but could not commit: " + ", ".join(why))
+    if can:
+        enabled.append(k)
     if diffs:
-        if steps[k] != "active":
-            fail(f"step {k} is {steps[k]} but changed address(es) {diffs} "
-                 f"-- quiet/disabled preservation is broken at the step, not merely at the end")
         changes.append((k, diffs, [ws[i][0] for i in diffs]))
     prev_w, prev_d = ws, dd
 
+if not enabled:
+    fail("NO step was an enabled commit (clock fires AND slot predicate true AND write enable nonzero)")
+print(f"ok: enabled-commit step(s) {enabled}; every other step could not commit, "
+      f"and none of them changed the image, the default or any width")
 if not changes:
     fail("NO memory transition occurred on any step")
 if len(changes) != 1:
@@ -152,7 +205,18 @@ if wrote_w != DW:
 before = SUPPLIED[EXP_ADDR]
 if (before >> 32) == (EXP_WORD >> 32):
     fail("nothing above bit 31 changed; a low-lane-only gate could have produced this")
-print(f"ok: exactly one commit, at step {k}: address {EXP_ADDR}  {before} -> {EXP_WORD} (0x223600abcde)")
+if k not in enabled:
+    fail(f"step {k} changed the image but is not an enabled commit")
+pk = pre[k]
+print(f"ok: exactly one commit, at step {k} (phase {pk['phase']}, pred {pk['pred']}, "
+      f"effEn {pk['effEn']}): address {EXP_ADDR}  {before} -> {EXP_WORD} (0x223600abcde)")
+if pk["effEn"] != (1 << DW) - 1:
+    fail(f"the committing step's effective enable is {pk['effEn']}, not the full {DW}-lane mask")
+print(f"ok: the committing step's effective enable is the FULL {DW}-lane mask")
+if pk["addr"] != EXP_ADDR or pk["datum"] != EXP_WORD:
+    fail(f"the committing step's address/datum are {pk['addr']}/{pk['datum']}, "
+         f"not the source-derived {EXP_ADDR}/{EXP_WORD}")
+print("ok: the committing step's recorded address and datum are the source-derived pair")
 print(f"ok: bits above 31 changed ({before >> 32} -> {EXP_WORD >> 32}): the high lanes were genuinely written")
 print(f"ok: every other address AND the default are bit-for-bit preserved on ALL {STEPS} steps, "
       f"including address {EXP_ADDR} on every step but {k}")

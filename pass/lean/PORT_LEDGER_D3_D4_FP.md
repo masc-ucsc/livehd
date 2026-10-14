@@ -12140,9 +12140,112 @@ earlier run retained no intermediate states.
 
 **BLOCKED → YES**, with certificate, emitter, driver, state, stimulus, gate,
 trace and verifier controls bound by sha256.  Counts **13 YES / 11 NO / 36
-BLOCKED → 14 YES / 11 NO / 35 BLOCKED**, FP **3 YES / 8 BLOCKED → 4 YES / 8
+BLOCKED → 14 YES / 11 NO / 35 BLOCKED**, FP **3 YES / 9 BLOCKED → 4 YES / 8
 BLOCKED**; `B11/Futamura projection` is mechanically the only changed cell.
+
+> **Withdrawn the same day.**  This reconcile did not hold: the gate described
+> above was itself insufficient, B11 went back to BLOCKED, and §63.82 records
+> the defect, the repair and the reconcile that did hold.  The FP before-count
+> above is also corrected here from "3 YES / 8 BLOCKED" — the FP column has
+> twelve cells, so the state before this change was 3 YES / 9 BLOCKED.
 
 Not gates for this cell, and recorded as such: the three `pass/single_edge`
 gtests are STRUCTURAL and run before bitwidth/cprop, and the memory-hierarchy
 external-simulator leg was skipped.
+
+## §63.82 — clock-fires is not enabled: the gate's second defect, and B11's reconcile
+
+§63.81's gate was still insufficient, and the supervisor's counterexamples are
+right.  It classified every step by `fires e md.clock` alone.  That predicate is
+**true on steps where the write does not happen**, so a planted image change on
+such a step passed with exit 0 — twice over, with the same final image and
+exactly one change:
+
+| counterexample | why the old gate accepted it | why it cannot occur |
+|---|---|---|
+| sole change moved to **step 13** | the clock fires there | `pred` is 0: phase is 1, so `EQ(0,phase)` is false and the slot mask zeroes a *fully set* `origEn` |
+| sole change moved to **step 0** | the clock fires there | `origEn` is 0: the design's own enable is low |
+
+Neither is execution evidence.  Both are **synthetic log mutations** — controls
+on the verifier — and the real run contradicts both.
+
+### 1. What the design actually does, recorded rather than argued
+
+The driver now discovers the write gate's slots **from the certificate** and
+reports `UNRESOLVED` rather than assuming anything:
+
+```
+TRACE slots write 374 addr 371 datum 372 effEn 373 origEn 356 mask 337 pred 334 phaseSrc 29
+```
+
+These match the independent audit exactly, and the gate **pins them** to the
+audited ids — otherwise the per-step numbers below describe some other node and
+prove nothing.  Each step's pre-state values are then computed by the design's
+own semantics, `evalGraphG` over `Compiler.srcEnv` applied to the real pre-state
+and input, with no internal overrides:
+
+| step | phase | pred | origEn | effEn | clock | commits? |
+|---|---|---|---|---|---|---|
+| 0 | 0 | 1 | **0** | 0 | fires | no — the design's enable is low |
+| 12 | 0 | 1 | **0** | 0 | fires | no — same |
+| 13 | 1 | **0** | 2⁶⁹−1 | **0** | fires | no — *the slot mask alone* disables a fully enabled write |
+| 14 | 0 | 1 | 2⁶⁹−1 | 2⁶⁹−1 | **quiet** | no — `edgeSchedule` suppresses `k%3==2` |
+| **15** | 0 | 1 | 2⁶⁹−1 | 2⁶⁹−1 | fires | **yes** — addr 1, datum 2350958427358 |
+
+**Step 14 is the one neither of us named.**  It is *fully* enabled — predicate
+true, all 69 lanes set, datum ready — and still commits nothing, because no edge
+fires.  A fires-only gate misses steps 0/12/13; an enable-only gate misses step
+14.  Three independent reasons a commit does not happen, all three live in this
+one 18-step trace.
+
+### 2. The rule the gate now enforces
+
+A step may commit only when the clock **fires** *and* `pred ≠ 0` *and*
+`effEn ≠ 0`, read off those recorded values rather than a free-form
+active/quiet label.  On every step that is not such an **enabled commit**, the
+gate requires **complete-image** equality — every word, every width, and the
+default.  An image-changing step is kept distinct from an enabled commit, since
+an idempotent write leaves no diff: the enabled set is reported separately and
+every image change must fall inside it.
+
+```
+ok: the per-step values are read off the AUDITED write gate {...}
+ok: enabled-commit step(s) [15]; every other step could not commit, and none of
+    them changed the image, the default or any width
+ok: exactly one commit, at step 15 (phase 0, pred 1, effEn 590295810358705651711)
+ok: the committing step's effective enable is the FULL 69-lane mask
+ok: the committing step's recorded address and datum are the source-derived pair
+```
+
+### 3. Ten planted defects, each rejected by its own message
+
+The five controls of §63.81 had a quiet problem: they were written against an
+older trace format and carried no `pre` lines, so against the new gate they
+failed for a **missing diagnostic line** rather than for the defect each was
+named for — testing nothing while still looking green.  They are now *derived
+from the real trace* by `pass/lean/tests/d4/b11_make_verifier_controls.py`, and
+`b11_tlb_acceptance_controls.sh` **pins each failure message** for exactly that
+reason.
+
+| control | the gate's answer |
+|---|---|
+| slots `UNRESOLVED` | could not resolve the write-gate slots |
+| slots resolved to another node | the discovered slots are not the audited ones |
+| quiet tail 14-17 absent | trace missing/malformed for [14, 15, 16, 17] |
+| six-word preview of an eight-word memory | loaded image has 6 words, supplied declares 8 |
+| committed word off by one bit | step 15 wrote 2350958427359 |
+| no transition at all | NO memory transition occurred |
+| transient write, **quiet** step 14, restored | step 14 changed [3] but the clock is QUIET |
+| transient default, step 7, restored | step 7 CHANGED THE DEFAULT |
+| **sole change at step 13** | could not commit: the slot predicate is FALSE (phase 1) |
+| **sole change at step 0** | could not commit: the write enable is ZERO (origEn 0) |
+
+All ten are rejected, the real trace is accepted, and the retained v4 log still
+reads as a negative under `--expect-no-transition`.  **No run was repeated**:
+the diagnostics were added to the driver and one fresh trace run was taken.
+
+### 4. B11 reconciled, this time on evidence that survives the counterexamples
+
+**BLOCKED → YES.**  Counts **13 YES / 11 NO / 36 BLOCKED → 14 YES / 11 NO / 35
+BLOCKED**; FP **3 YES / 9 BLOCKED → 4 YES / 8 BLOCKED**.
+`B11/Futamura projection` is mechanically the only changed cell.

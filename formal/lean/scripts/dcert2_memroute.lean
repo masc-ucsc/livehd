@@ -118,6 +118,55 @@ describes, independently of the path it was read from. -/
 def fnv1a (b : ByteArray) : UInt64 :=
   b.foldl (fun h c => (h ^^^ c.toUInt64) * 1099511628211) 14695981039346656037
 
+/-- THE WRITE GATE'S OWN SLOTS, discovered from the certificate rather than
+assumed.  A hard-coded slot id would silently describe a different design.
+
+From the declared memory's next image: the `Op_MemWriteBE` node, then its
+enable operand through any single-operand `Op_Or` wrapper, then the `Op_And`
+gate, whose two operands are the ORIGINAL enable and the slot MASK, and finally
+the `Op_EQ` in the mask's cone and the phase flop it compares. -/
+structure WriteSlots where
+  write    : Nat
+  addr     : Nat
+  datum    : Nat
+  effEn    : Nat     -- the enable the memory actually reads
+  origEn   : Nat     -- the design's own enable, before the slot gate
+  mask     : Nat     -- the slot mask
+  pred     : Nat     -- the Op_EQ slot predicate
+  phaseSrc : Nat     -- the phase flop source
+
+partial def findOp (D : DesignCert) (want : LGraphOp → Bool) (fuel k : Nat) : Option Nat :=
+  if fuel = 0 || k < D.sources.size then none
+  else match D.nodes[k - D.sources.size]? with
+       | none   => none
+       | some c =>
+         if want c.op then some k
+         else (c.deps.toList.map (findOp D want (fuel - 1))).foldl
+                (fun a r => match a with | some _ => a | none => r) none
+
+def writeSlots (D : DesignCert) : Option WriteSlots := do
+  let md ← D.memories[0]?
+  let wr ← D.nodes[md.nextImg - D.sources.size]?
+  let a ← wr.deps[1]?; let dt ← wr.deps[2]?; let en0 ← wr.deps[3]?
+  -- walk single-operand Or wrappers down to the gate
+  let rec peel (fuel k : Nat) : Nat :=
+    if fuel = 0 then k
+    else match D.nodes[k - D.sources.size]? with
+         | some c => if c.op == .Op_Or && c.deps.size == 1 then peel (fuel-1) (c.deps[0]!) else k
+         | none   => k
+  let gate := peel 8 en0
+  let gc ← D.nodes[gate - D.sources.size]?
+  if gc.op != .Op_And || gc.deps.size != 2 then none else do
+  let orig ← gc.deps[0]?; let msk ← gc.deps[1]?
+  let pr ← findOp D (fun o => o == .Op_EQ) 24 msk
+  let pc ← D.nodes[pr - D.sources.size]?
+  let ph ← (pc.deps.toList.filter (fun x => x < D.sources.size)).find?
+             (fun x => match D.sources[x]? with
+                       | some (.flopQ _ _) => true
+                       | some (.flopQAsync _ _ _ _ _) => true
+                       | _ => false)
+  some ⟨md.nextImg, a, dt, en0, orig, msk, pr, ph⟩
+
 /-- EVERY word, with its width, plus the default.  `preview` truncates, which
 is fine for a progress line but cannot support a preservation claim: an
 eight-word memory printed six words wide hid addresses 6 and 7 from the first
@@ -605,6 +654,10 @@ unchanged -- refusing rather than running on a state the encoder altered"
       if cfg.trace then
         for (m, idx) in st0.mems.toList.zipIdx do
           say s!"  TRACE loaded memory {idx} {fullImage m}"
+        match writeSlots D with
+        | none    => say "  TRACE slots UNRESOLVED"
+        | some ws => say s!"  TRACE slots write {ws.write} addr {ws.addr} datum {ws.datum} \
+effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.phaseSrc}"
       say s!"  stimulus: {cfg.stimProv}"
       say s!"  executing {cfg.cycles} cycle(s) of the residual at the checked bound"
       (← IO.getStdout).flush
@@ -642,6 +695,18 @@ unchanged -- refusing rather than running on a state the encoder altered"
                 -- decoded next image.  `fires e md.clock` is the quiet/active
                 -- classification; it is derived from the edge vector and the
                 -- declared clock, never from the final image.
+                -- THE PRE-STEP VALUES, from the actual pre-state and input
+                -- through the SAME semantics the reference uses
+                -- (DesignSemantics: evalGraphG over srcEnv).  No overrides.
+                match writeSlots D with
+                | none => say s!"  TRACE step {k} slots UNRESOLVED"
+                | some ws =>
+                  let G   := D.toGraphCert
+                  let rho := evalGraphG G.topo G (Compiler.srcEnv D i (StateM.denote st))
+                  let bv  := fun sl => (rho sl).asBV
+                  say s!"  TRACE step {k} pre phase {(bv ws.phaseSrc).value} pred {(bv ws.pred).value} \
+origEn {(bv ws.origEn).value} effEn {(bv ws.effEn).value} \
+addr {(bv ws.addr).value} datum {(bv ws.datum).value}"
                 let edges := String.intercalate "," (e.toList.map (fun b => if b then "1" else "0"))
                 let ivals := String.intercalate "," (i.toList.map (fun v => s!"{v.value}"))
                 for (md, idx) in D.memories.toList.zipIdx do
