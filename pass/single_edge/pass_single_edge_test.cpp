@@ -272,3 +272,166 @@ TEST(SingleEdgeMemoryGate, AbsentEnableWritesEveryLaneOnTheActiveStep) {
 }
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// A GATED write clock: `clk & enl`, with the enable latch on the opposite
+// phase. `gate_only` leaves the port's own enable off, so the absent-enable
+// path is exercised too.
+namespace {
+struct Gated {
+  Fixture          f;
+  hhds::Node_class latch;
+  hhds::Pin_class  arm;
+};
+
+// `invert` builds `~clk & enl` instead, which gates the FALLING root edge.
+Gated build_gated(hhds::GraphLibrary& lib, const std::string& mod, bool with_enable, bool invert,
+                  bool negedge_mem = false) {
+  Gated   r{build(lib, mod, with_enable, /*with_concat=*/false), {}, {}};
+  auto*   g   = r.f.g.get();
+  auto    clk = g->get_input_pin("clk");
+
+  // enl: transparent while clk is LOW, so it is shut at the rising edge.
+  auto notn = gu::create_typed_node(*g, Ntype_op::Not);
+  clk.connect_sink(notn.create_sink_pin(0));
+  auto nclk = notn.create_driver_pin(0);
+  gu::set_bits(nclk, 1);
+  gu::set_unsign(nclk);
+
+  auto lat = gu::create_typed_node(*g, Ntype_op::Latch);
+  lat.attr(hhds::attrs::name).set(std::string{"enl"});
+  nclk.connect_sink(gu::setup_sink_by_name(lat, "enable"));
+  auto arm = g->get_input_pin("we");            // a real pin, reused as the gate arm
+  arm.connect_sink(gu::setup_sink_by_name(lat, "din"));
+  auto lq = lat.create_driver_pin(0);
+  gu::set_bits(lq, 1);
+  gu::set_unsign(lq);
+
+  hhds::Pin_class clk_op = clk;
+  if (invert) {
+    auto ni = gu::create_typed_node(*g, Ntype_op::Not);
+    clk.connect_sink(ni.create_sink_pin(0));
+    clk_op = ni.create_driver_pin(0);
+    gu::set_bits(clk_op, 1);
+    gu::set_unsign(clk_op);
+  }
+  auto gate = gu::create_typed_node(*g, Ntype_op::And);
+  clk_op.connect_sink(livehd::graph_util::setup_sink_pid(gate, 0));
+  lq.connect_sink(livehd::graph_util::setup_sink_pid(gate, 0));
+  auto gq = gate.create_driver_pin(0);
+  gu::set_bits(gq, 1);
+  gu::set_unsign(gq);
+
+  if (negedge_mem) {
+    // posclk = 0: the CELL commits on the falling edge. With an INVERTED gate
+    // that is a double inversion, so `commit_class_of_clock` reports an
+    // effective ROOT-RISING class and the falling-edge refusal does NOT fire.
+    // That is precisely the combination the inverted-gate refusal exists for:
+    // rebinding to the root here would silently move the committing edge.
+    auto pk = r.f.mem.create_sink_pin(6);
+    pk.del_sink();
+    gu::create_const(*g, *Dlop::create_integer(0)).connect_sink(pk);
+  }
+  // Move the write port onto the GATED clock.
+  auto wclk = r.f.mem.create_sink_pin(mpid(0, 2));
+  wclk.del_sink();
+  gq.connect_sink(wclk);
+
+  r.latch = lat;
+  r.arm   = arm;
+  return r;
+}
+
+// A cheap structural fingerprint: node count plus, per node, its op and the
+// (sink pid -> driver) pairs it carries.
+std::string fingerprint(hhds::Graph* g) {
+  std::vector<std::string> rows;
+  for (auto n : g->body().nodes()) {
+    std::string row = std::string{Ntype::get_name(gu::type_op_of(n))};
+    for (const auto& sd : gu::inp_sink_drivers(n)) {
+      row += ":" + std::to_string(static_cast<int>(sd.sink.get_port_id())) + "->"
+             + std::to_string(static_cast<uint64_t>(sd.driver.is_invalid() ? 0 : sd.driver.get_class_index().value));
+    }
+    rows.push_back(row);
+  }
+  std::sort(rows.begin(), rows.end());
+  std::string out = std::to_string(rows.size());
+  for (const auto& x : rows) {
+    out += "|" + x;
+  }
+  return out;
+}
+
+single_edge::Result run_dry(hhds::Graph* g) {
+  single_edge::Options o;
+  o.quiet   = true;
+  o.dry_run = true;
+  return single_edge::normalize(g, {}, o);
+}
+}  // namespace
+
+// PLANNING MUST NOT TOUCH THE GRAPH. `dry_run` returns before the rewrite and
+// promises exactly that, and `proof_prep` relies on it. An earlier revision of
+// the gated-memory path built the gate's AND cone while still PLANNING, so a
+// dry run -- and any plan that was refused later -- left nodes and edges
+// behind.
+TEST(SingleEdgeMemoryGate, DryRunLeavesAGatedMemoryGraphUntouched) {
+  hhds::GraphLibrary lib;
+  auto               gz     = build_gated(lib, "dry_gated_mem", /*with_enable=*/true, /*invert=*/false);
+  const auto         before = fingerprint(gz.f.g.get());
+
+  auto r = run_dry(gz.f.g.get());
+  EXPECT_TRUE(r.applied) << r.reason << " (the plan itself must still succeed)";
+  EXPECT_EQ(fingerprint(gz.f.g.get()), before)
+      << "a dry run mutated the graph: planning allocated the gate cone instead of freezing its operands";
+}
+
+// The same promise for a plan that is REFUSED after the gate is resolved: an
+// inverted gate is declined, and nothing may be left behind on the way out.
+TEST(SingleEdgeMemoryGate, ARefusedInvertedGateLeavesTheGraphUntouched) {
+  hhds::GraphLibrary lib;
+  auto               gz     = build_gated(lib, "inv_gated_mem", /*with_enable=*/true, /*invert=*/true,
+                                          /*negedge_mem=*/true);
+  const auto         before = fingerprint(gz.f.g.get());
+
+  auto r = run(gz.f.g.get());
+  EXPECT_FALSE(r.applied) << "`~clk & en` gates the FALLING root edge; rebinding it to the root would move the "
+                             "committing edge, and this pass does not retype a memory's polarity";
+  EXPECT_NE(r.reason.find("INVERTED"), std::string::npos)
+      << "expected the inverted-gate refusal; got: " << r.reason;
+  EXPECT_EQ(fingerprint(gz.f.g.get()), before) << "a refused plan left nodes or edges behind";
+}
+
+// THE GATE REACHES EVERY LANE, and the clock stops being derived.
+TEST(SingleEdgeMemoryGate, AGatedWriteClockFoldsIntoTheFullWidthEnable) {
+  hhds::GraphLibrary lib;
+  auto               gz = build_gated(lib, "gated_mem", /*with_enable=*/true, /*invert=*/false);
+
+  auto r = run(gz.f.g.get());
+  ASSERT_TRUE(r.applied) << r.reason;
+  EXPECT_EQ(r.mem_ports_ungated, 1) << "the gated write clock was not rebound";
+
+  auto gated = driver_at(gz.f.mem, mpid(0, 4));
+  ASSERT_FALSE(gated.is_invalid());
+  EXPECT_EQ(gu::bits_of(gated), kWen) << "the gated enable is not the full lane width -- a high lane would be lost";
+
+  // The write clock must no longer be the AND: a derived clock survives the
+  // lowering otherwise, and the encoder refuses one.
+  auto wclk = driver_at(gz.f.mem, mpid(0, 2));
+  ASSERT_FALSE(wclk.is_invalid());
+  EXPECT_NE(gu::type_op_of(wclk.get_master_node()), Ntype_op::And)
+      << "the memory still commits on the gated net; folding alone leaves a derived clock";
+}
+
+// ABSENT ENABLE is the native all-lanes contract, and the gate must still reach
+// every one of those lanes.
+TEST(SingleEdgeMemoryGate, AGatedWriteClockWithNoPortEnableStillGatesEveryLane) {
+  hhds::GraphLibrary lib;
+  auto               gz = build_gated(lib, "gated_mem_noen", /*with_enable=*/false, /*invert=*/false);
+
+  auto r = run(gz.f.g.get());
+  ASSERT_TRUE(r.applied) << r.reason;
+  auto gated = driver_at(gz.f.mem, mpid(0, 4));
+  ASSERT_FALSE(gated.is_invalid()) << "the absent enable must become the width-correct gated mask";
+  EXPECT_EQ(gu::bits_of(gated), kWen);
+}

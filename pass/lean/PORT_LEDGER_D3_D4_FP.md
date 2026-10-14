@@ -12970,17 +12970,29 @@ P=2 slots, 12 latch(es) retyped, 305 gated clock(s) folded into an enable
 21 memory(ies) slotted over 21 write port(s)
 ```
 
-Both new capabilities are load-bearing at scale: **21** memory write ports, and
-**16** of the 305 gated clocks through the sampled-held guard -- the
-falling-consumer path of 63.86. Neither is fixture-only.
+Both new capabilities are exercised by the real design, but read the counters
+exactly as they are defined:
+
+* `21 memory(ies) slotted over 21 write port(s)` counts SLOTTED write ports, not
+  newly ungated ones. How many of those 21 had a GATED clock folded is
+  `mem_ports_ungated`, which this report line does not print -- so "21 gated
+  memory clocks" would be wrong, and is not claimed.
+* `16 sampled-held` counts CONSUMERS served by a sampled guard, not distinct
+  guards. The guards are shared per gate, so the number of guard registers is at
+  most 16 and may be fewer.
+
+What is established is that both paths fire on this unit at all, which no
+fixture could show.
 
 **B01 remains BLOCKED.** There is no certificate; emission refuses immediately
 after. No FP credit is claimed, and normalization is not equivalence.
 
 The new boundary is `pass.lean: combinational cycle at node n_144984` on the
-NORMALIZED graph -- the first boundary past normalization for this unit, and the
-same family as the `comb-loop` refusals that block B02/B04/B06/B07/B08 at
-`pass.legalize`. (The accompanying `onehot-deferred` is a warning, not the stop.)
+NORMALIZED graph -- the first boundary past normalization for this unit.
+(The accompanying `onehot-deferred` is a warning, not the stop.) It is diagnosed
+in 63.88; an earlier sentence here called it the same family as the `comb-loop`
+refusals blocking B02/B04/B06/B07/B08 and that is WITHDRAWN -- this graph passes
+`pass.legalize`, so it is a different checker and not a shown-shared cause.
 
 ### 5. A standing note on P=2 harnesses
 
@@ -12989,3 +13001,83 @@ clock and produced eight X mismatches; the 5 ns-late 2x oscillator fixed it.
 That is the second time this exact miscalibration has been mistaken for a
 transformation defect. Any new P=2 differential needs its slot schedule asserted
 before its results mean anything.
+
+## §63.88 — three memory-plan repairs, and B01's emission cycle localized
+
+### 1. What was wrong with the accepted memory rewrite
+
+| defect | why it mattered |
+|---|---|
+| **Planning mutated the graph.** The gate's AND cone was built during the refusal scan, before the `dry_run` return. | `dry_run` promises an untouched graph and `proof_prep` relies on it; a dry run, and any plan refused later, left nodes and edges behind. The plan now freezes only pre-existing operand PINS and the cone is built in the rewrite. |
+| **The rebind lost the clock-bus bit.** It bound the bare `icg->clock`. | The common rewrite selects `ref_clk_bit` into `ref_clk_pin` precisely because a rebound `clock_pin` reads bit 0 of its driver. A memory on bit k>0 would have passed the different-bit check and then been moved to bit 0 alone. It now rebinds to the validated selected pin. |
+| **The rebind could lose polarity.** `clock_inverted` was not consulted. | `commit_class_of_clock` folds `~clk & en` in, so a NEGEDGE memory on an inverted gate is a double inversion presenting as rising -- the falling-edge refusal does not fire. Rebinding to the root would have moved the committing edge, which `cgen_verilog`'s clock_expr still inverts. Now refused BY NAME before any mutation. |
+
+The gate is also resolved AFTER `cc` now, so the latch-window proof uses the
+EFFECTIVE edge rather than raw `ms.rising`.
+
+**Rule 4** walked `addr`/`din`/`enable` only. A folded gate is read
+combinationally by the commit too, so `check_rule4` now resolves the ICG itself
+and walks the (bypassed) gate cone -- it runs before the memory plan exists, so
+the cone is resolved there rather than read off the plan.
+
+Controls in `pass/single_edge/pass_single_edge_test.cpp` (a permitted
+non-contract harness; `graph/latch_contract_test.cpp` is untouched), each
+verified to FAIL when its repair is reverted:
+`DryRunLeavesAGatedMemoryGraphUntouched`,
+`ARefusedInvertedGateLeavesTheGraphUntouched`,
+`AGatedWriteClockFoldsIntoTheFullWidthEnable`,
+`AGatedWriteClockWithNoPortEnableStillGatesEveryLane`.
+
+354/354 on `//pass/single_edge //pass/lean //lhd/tests //graph //pass/lec`.
+
+### 2. B01's cycle, localized
+
+`pass.legalize` AND `pass.legalize.seal` both PASS on this graph -- seal re-scans
+with `check_acyclic=true`. Only `pass.lean` refuses, because the two checks are
+different instruments:
+
+* `pass/legalize/acyclic.cpp`: driver-pin-level, BIT-REFINED, hierarchical arc.
+* `pass/lean/design_scan.cpp:883`: node-level DFS, leaf = input | const | FLOP.
+  No bit refinement, and **a Memory is not a leaf**.
+
+The closing node is `n_144984[eq]`. The path is 55 `mux`, 37 `or`, 21 `and`, 7
+`get_mask`, 7 `eq`, 3 `ror`, 1 `lt` and ONE memory:
+
+```
+... -> n_332884[get_mask] -> n_107996[memory]{sink_pid=0 port=0 off=0}
+    -> n_361716[get_mask] -> n_419680[and] -> ...
+```
+
+Memory offset **0 is `addr`** (graph/cell.cpp:222), so the cycle is
+
+> memory dout -> a long mux/or/and cone -> that same memory's write ADDRESS
+
+the allocator FIFO computing its next address from what it just read.
+
+**This rules out the gated-memory fold**, which writes only offset 4 (`enable`)
+and offset 2 (`clock_pin`). The question was worth asking -- the fold does make
+a memory's enable depend on the gate arm, and a Memory is not a leaf here -- and
+the measurement answers it rather than an argument.
+
+Evidence: `generated/master_port/b01_cycle_20261014/` (`cycle_path.txt`,
+`DIAGNOSIS.md`).
+
+**The open decision is NOT taken here.** Whether `pass.lean` should treat a
+Memory read->write path as a cut, the way legalize already does ("an async read
+is combinational in its own address/enable; write cones are sequenced after the
+read by every consumer, so they are no loop"), or whether this design genuinely
+needs the address resolved before the write, is the next question. The check is
+not relaxed and no acceptance gate is substituted.
+
+### 3. Evidence corrections
+
+* `startup_evidence/startup_trace.log` held `timeout: failed to run command
+  'vvp'` -- captured without PATH. The real 68-line trace replaces it.
+* `21 memory(ies) slotted over 21 write port(s)` counts SLOTTED ports, not newly
+  ungated ones (`mem_ports_ungated` is not in that line). `16 sampled-held`
+  counts CONSUMERS, not distinct guards, which are shared per gate.
+* The B01 run under `b01_20261014/` is rebound to its RUN-TIME state --
+  `08a34eb93` plus uncommitted changes, later committed as `ca84bb0ec` -- rather
+  than relabelled "ca84bb0ec clean", which was a post-hoc equivalence.
+
+B01 remains BLOCKED: no certificate, no FP credit.

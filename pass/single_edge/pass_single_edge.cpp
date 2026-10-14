@@ -219,11 +219,12 @@ struct Mem_gate_plan {
   hhds::Pin_class  enable;            // INVALID means "absent" -> all lanes write
   uint32_t         wensize  = 0;
   int              slot     = 0;
-  // A GATED write clock, decided during the refusal scan and frozen here: the
-  // gate's 1-bit condition (already latch-bypassed and phase-checked) and the
-  // ROOT its clock resolves to. Invalid `gate` means the port was ungated.
-  hhds::Pin_class  gate;
-  hhds::Pin_class  clk_root;
+  // A GATED write clock, decided during the refusal scan and FROZEN here as the
+  // gate's already-latch-bypassed operand PINS. They are pins that already
+  // exist; nothing is allocated during planning, because planning must leave
+  // the graph untouched (`opts.dry_run` returns before any rewrite and promises
+  // exactly that). The AND cone over them is built in the rewrite.
+  std::vector<hhds::Pin_class> gate_ops;
 };
 
 // A cell with no committing port: an immutable asynchronous ROM.  `update`,
@@ -856,9 +857,15 @@ bool check_rule4(const Plan& plan, hhds::Graph* g, const lc::Design_clocks& cloc
   // Memory out of the candidate list would bypass rule 4 exactly where the new
   // support created the exposure.
   struct Mem_reader {
-    hhds::Node_class node;
-    lc::Commit_class cc;
-    uint32_t         port = 0;
+    hhds::Node_class             node;
+    lc::Commit_class             cc;
+    uint32_t                     port = 0;
+    // A GATED write clock is folded into this port's write enable, so the
+    // gate's own enable cone becomes a COMBINATIONAL input to the commit --
+    // exactly like `addr`/`din`/`enable`, and exposed to the same L1 hazard.
+    // Rule 4 runs before the memory plan exists, so the cone is resolved here
+    // rather than read off the plan.
+    std::vector<hhds::Pin_class> gate_cones;
   };
   std::vector<Mem_reader> mem_readers;
   if (g != nullptr) {
@@ -874,9 +881,29 @@ bool check_rule4(const Plan& plan, hhds::Graph* g, const lc::Design_clocks& cloc
         if (mp.rdport) {
           continue;
         }
-        auto cc = lc::commit_class_of_clock(mp.clock.is_invalid() ? plan.ref_clk_pin : mp.clock, ms.rising, &clocks);
+        const auto clk_pin = mp.clock.is_invalid() ? plan.ref_clk_pin : mp.clock;
+        auto       cc      = lc::commit_class_of_clock(clk_pin, ms.rising, &clocks);
         if (cc && cc->role == lc::Net_role::Clock) {
-          mem_readers.push_back({n, *cc, mp.port});
+          std::vector<hhds::Pin_class> cones;
+          if (!clk_pin.is_invalid()) {
+            if (const auto icg = lc::resolve_icg(clk_pin, clocks)) {
+              for (auto en : icg->enables) {
+                // The same arm the fold will use: the bypass is what the port
+                // actually reads, so that is the cone to walk.
+                if (!en.is_invalid() && !en.is_const() && !gu::is_graph_input_pin(en)) {
+                  if (auto dn = en.get_master_node(); gu::type_op_of(dn) == Ntype_op::Latch) {
+                    if (auto arm = lc::latch_transparent_arm(dn); !arm.is_invalid()) {
+                      en = arm;
+                    }
+                  }
+                }
+                if (!en.is_invalid()) {
+                  cones.push_back(en);
+                }
+              }
+            }
+          }
+          mem_readers.push_back({n, *cc, mp.port, std::move(cones)});
         }
       }
     }
@@ -932,6 +959,9 @@ bool check_rule4(const Plan& plan, hhds::Graph* g, const lc::Design_clocks& cloc
       absl::flat_hash_set<hhds::Class_index> hit;
       for (const char* field : {"addr", "din", "enable"}) {
         comb_state_reach(mem_port_driver(mr.node, field, mr.port), hit);
+      }
+      for (const auto& gc : mr.gate_cones) {
+        comb_state_reach(gc, hit);  // the folded gate is read combinationally too
       }
       if (!hit.contains(l.node.get_class_index())) {
         continue;
@@ -1230,85 +1260,6 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         // path then re-introduces by folding them into the element's `enable`.
         // This pass does no such folding for a Memory, so accepting a gated
         // memory clock would silently discard the gate.
-        // A GATED write clock is FOLDED INTO THE WRITE ENABLE, the same move the
-        // flop path makes -- `commit_class_of_clock` resolves an ICG to its
-        // ROOT and drops the gate's conditions, so they have to be
-        // re-introduced or the gate is silently discarded.
-        //
-        // The vector width is what makes this different from a flop. A write
-        // enable is `wensize` bits, one per lane, so the gate cannot simply be
-        // ANDed in: it is combined with the slot predicate and the pair is
-        // widened by the SAME Sext + Get_mask idiom the slot mask already uses
-        // (see the long note at the rewrite), which is what keeps every lane
-        // and mints no wide shared constant.
-        //
-        // Everything here is decided ONCE, during this scan, and frozen into
-        // the plan; the rewrite reclassifies nothing.
-        hhds::Pin_class port_gate;
-        hhds::Pin_class port_root;
-        if (!clk_pin.is_invalid()) {
-          if (const auto icg = lc::resolve_icg(clk_pin, clocks)) {
-            if (icg->div != 1) {
-              r.error  = true;
-              r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
-                         + " has a gated clock with div=" + std::to_string(icg->div);
-              refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
-                     "a divided memory clock is a second commit class, not a gate");
-              return r;
-            }
-            // THE ENABLE-LATCH BYPASS, with the SAME phase proof the flop path
-            // demands. A real ICG latches its enable on the opposite phase, so
-            // the latch CLOSES as the memory samples and the cell sees what it
-            // was passing through. Reading its held Q instead is a full cycle
-            // late. A latch that is not opposite-phase is refused here rather
-            // than mis-timed -- the sampled-held guard the flop path uses for a
-            // FALLING consumer is deliberately NOT extended to a Memory in this
-            // increment, and a falling memory is refused further down anyway.
-            for (auto en : icg->enables) {
-              if (!en.is_invalid() && !en.is_const() && !gu::is_graph_input_pin(en)) {
-                if (auto dn = en.get_master_node(); gu::type_op_of(dn) == Ntype_op::Latch) {
-                  const bool closed_after = ms.rising;
-                  if (!lc::gated_latch_closed_at(dn, icg->clock, closed_after)
-                      || !lc::latch_open_at(dn, icg->clock, !closed_after)) {
-                    r.error  = true;
-                    r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
-                               + " is clocked through a gate whose enable latch `" + label_of(dn)
-                               + "` is not transparent exactly on the phase opposite the gated edge";
-                    refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
-                           "edge normalization declines rather than half-transform: a partial lowering is a "
-                           "silent full-cycle error");
-                    return r;
-                  }
-                  if (auto arm = lc::latch_transparent_arm(dn); !arm.is_invalid()) {
-                    en = arm;
-                  }
-                }
-              }
-              if (en.is_invalid()) {
-                continue;
-              }
-              if (port_gate.is_invalid()) {
-                port_gate = en;
-              } else {
-                auto andn = gu::create_typed_node(*g, Ntype_op::And);
-                port_gate.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
-                en.connect_sink(livehd::graph_util::setup_sink_pid(andn, 0));
-                port_gate = andn.create_driver_pin(0);
-                gu::set_bits(port_gate, 1);
-                gu::set_unsign(port_gate);
-              }
-            }
-            if (port_gate.is_invalid()) {
-              r.error  = true;
-              r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
-                         + " has a gated clock whose gate carries no usable enable";
-              refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
-                     "folding a gate with no condition would drop it");
-              return r;
-            }
-            port_root = icg->clock;
-          }
-        }
         auto cc = lc::commit_class_of_clock(clk_pin, ms.rising, &clocks);
         if (!cc || cc->role != lc::Net_role::Clock) {
           r.error  = true;
@@ -1367,6 +1318,84 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
                  "single-edge design");
           return r;
         }
+        // A GATED write clock is FOLDED INTO THE WRITE ENABLE, the same move the
+        // flop path makes: `commit_class_of_clock` resolves an ICG to its ROOT
+        // and drops the gate's conditions, so they have to be re-introduced or
+        // the gate is silently discarded.
+        //
+        // RESOLVED HERE, AFTER `cc`, deliberately. `cc` is the EFFECTIVE commit
+        // class -- it already folds `icg->clock_inverted` in -- and the checks
+        // above have established that this port is on the reference net, on the
+        // reference BIT, and rising. Doing the gate work earlier would reason
+        // about `ms.rising` against a root whose polarity had not been settled.
+        //
+        // NOTHING IS ALLOCATED. Only existing pins are frozen into the plan;
+        // the AND cone over them is built in the rewrite, because `dry_run`
+        // returns before the rewrite and promises an untouched graph.
+        std::vector<hhds::Pin_class> port_gate_ops;
+        if (!clk_pin.is_invalid()) {
+          if (const auto icg = lc::resolve_icg(clk_pin, clocks)) {
+            if (icg->div != 1) {
+              r.error  = true;
+              r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
+                         + " has a gated clock with div=" + std::to_string(icg->div);
+              refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                     "a divided memory clock is a second commit class, not a gate");
+              return r;
+            }
+            // AN INVERTED GATE IS REFUSED, not rebound. `~root & en` gates the
+            // FALLING root edge, and `commit_class_of_clock` folds that in --
+            // so a negedge Memory on such a gate can present as rising here and
+            // pass the check above. Rebinding it to the root while leaving
+            // `posclk` alone would move it to the root's FALLING edge, which
+            // `cgen_verilog`'s clock_expr still inverts: a silent half-cycle
+            // change. This pass does not retype a Memory's polarity (see the
+            // falling-edge refusal above), so the combination is declined by
+            // name instead of half-lowered.
+            if (icg->clock_inverted) {
+              r.error  = true;
+              r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
+                         + " has an INVERTED gated clock (`~clk & en`)";
+              refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                     "rebinding to the root would change the committing edge, and this pass does not retype a "
+                     "memory's polarity");
+              return r;
+            }
+            for (auto en : icg->enables) {
+              if (!en.is_invalid() && !en.is_const() && !gu::is_graph_input_pin(en)) {
+                if (auto dn = en.get_master_node(); gu::type_op_of(dn) == Ntype_op::Latch) {
+                  // The enable-latch bypass, against the EFFECTIVE edge.
+                  const bool closed_after = cc->rising;
+                  if (!lc::gated_latch_closed_at(dn, icg->clock, closed_after)
+                      || !lc::latch_open_at(dn, icg->clock, !closed_after)) {
+                    r.error  = true;
+                    r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
+                               + " is clocked through a gate whose enable latch `" + label_of(dn)
+                               + "` is not transparent exactly on the phase opposite the gated edge";
+                    refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                           "edge normalization declines rather than half-transform: a partial lowering is a "
+                           "silent full-cycle error");
+                    return r;
+                  }
+                  if (auto arm = lc::latch_transparent_arm(dn); !arm.is_invalid()) {
+                    en = arm;
+                  }
+                }
+              }
+              if (!en.is_invalid()) {
+                port_gate_ops.push_back(en);
+              }
+            }
+            if (port_gate_ops.empty()) {
+              r.error  = true;
+              r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
+                         + " has a gated clock whose gate carries no usable enable";
+              refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                     "folding a gate with no condition would drop it");
+              return r;
+            }
+          }
+        }
         // THE SLOT, decided here and FROZEN.  There is no fallback: the class
         // resolved, is on the reference net and bit, and is rising, so either
         // the key is in `slot_of_key` or the rise/fall map gives it.
@@ -1376,7 +1405,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         } else {
           slot = cc->rising ? 0 : 1;  // the same map build_plan uses
         }
-        mem_gate_plans.push_back({n, port.port, port.enable, ms.wensize, slot, port_gate, port_root});
+        mem_gate_plans.push_back({n, port.port, port.enable, ms.wensize, slot, port_gate_ops});
       }
       // everything else is handled by the slot gate below
     }
@@ -1634,10 +1663,13 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // `wensize` -- the gate therefore reaches every lane, and no wide constant
     // is minted for it either.
     auto pred = slot_pred[mp.slot];
-    if (!mp.gate.is_invalid()) {
+    for (const auto& gop : mp.gate_ops) {
+      if (gop.is_invalid()) {
+        continue;
+      }
       auto gandn = gu::create_typed_node(*g, Ntype_op::And);
       pred.connect_sink(livehd::graph_util::setup_sink_pid(gandn, 0));
-      mp.gate.connect_sink(livehd::graph_util::setup_sink_pid(gandn, 0));
+      gop.connect_sink(livehd::graph_util::setup_sink_pid(gandn, 0));
       pred = gandn.create_driver_pin(0);
       gu::set_bits(pred, 1);
       gu::set_unsign(pred);
@@ -1677,9 +1709,17 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // a DERIVED clock in a design this pass exists to make single-edge -- the
     // encoder refuses one, so the cell would come back UNKNOWN after a
     // successful lowering. Rebind to the root the gate resolved to.
-    if (!mp.gate.is_invalid() && !mp.clk_root.is_invalid()) {
+    if (!mp.gate_ops.empty() && !plan.ref_clk_pin.is_invalid()) {
+      // REBIND TO THE VALIDATED REFERENCE PIN, not to the gate's bare root.
+      // When the reference edge is on bit k>0 of a bus, `plan.ref_clk_pin` has
+      // already been replaced by the SELECTED bit above -- every rebound
+      // clock_pin reads its edge on bit 0 of its driver, so binding the bare
+      // bus would move this memory onto bit 0 while the rest of the design sits
+      // on bit k. The scan has already refused a port on a DIFFERENT bit, so
+      // this port is on the reference bit by construction and the selected pin
+      // is the right one.
       mem_drop_port_sink(mp.node, "clock_pin", mp.port);
-      mp.clk_root.connect_sink(
+      plan.ref_clk_pin.connect_sink(
           mp.node.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin") + mp.port * stride));
       ++r.mem_ports_ungated;
     }
