@@ -1,0 +1,25 @@
+# A SUPPLIED TEST IMAGE for whole minion_tlb (B11).
+#
+# NOT hardware initialization provenance: these are chosen test values, and the
+# driver reports the state as supplied-from-file either way.
+#
+# The TLB cache RF is aw 3, dw 69.  Every word is (1 << 60) + address, which
+# FITS 69 bits, so `setWord`'s `mk_bv 69` normalisation leaves it unchanged --
+# an earlier version of this file used a 128-bit word 0 and 2^70..2^76 for the
+# rest, which `mk_bv 69` silently reduced to [2^69-1, 0, 0, 0, 0, 0, 0, 0].
+# That file is retained as a preflight negative.
+#
+# Every word differs from the source-derived expectation 0x223600abcde ABOVE
+# BIT 31, so a committed write cannot be confused with the initial contents and
+# a gate that only reaches the low lanes cannot produce it.
+memstate v1
+flops reset
+mem 3 69 295147905179352826879
+word 0 1152921504606846976
+word 1 1152921504606846977
+word 2 1152921504606846978
+word 3 1152921504606846979
+word 4 1152921504606846980
+word 5 1152921504606846981
+word 6 1152921504606846982
+word 7 1152921504606846983

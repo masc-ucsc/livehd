@@ -40,7 +40,7 @@ partial def evalWith (D : DesignCert) (ovr : List (Nat × BV)) (fuel k : Nat) : 
 
 def main (args : List String) : IO UInt32 := do
   match args with
-  | path :: rest => do
+  | path :: _rest => do
     let bytes ← IO.FS.readBinFile path
     match CertIO.admitAny bytes with
     | .error e => do IO.eprintln s!"PARSE FAILED: {e}"; return 8
@@ -53,6 +53,10 @@ def main (args : List String) : IO UInt32 := do
         match D.nodes[md.nextImg - D.sources.size]? with
         | none => do IO.eprintln "SHAPE FAILURE: next image is not a node"; return 2
         | some wr =>
+          -- THE EXPECTED GEOMETRY COMES FROM THE DECLARED MEMORY, NOT FROM THE
+          -- CANDIDATE GATE.  Deriving the expected width from the `And` would
+          -- let a NARROWED gate narrow its own expected answer and pass.
+          let dw := md.dw
           match wr.deps[3]? with
           | none => do IO.eprintln "SHAPE FAILURE: the write has no enable operand"; return 2
           | some en0 =>
@@ -67,11 +71,25 @@ def main (args : List String) : IO UInt32 := do
             match D.nodes[gate - D.sources.size]? with
             | none => do IO.eprintln "SHAPE FAILURE: the gate is not a node"; return 2
             | some gc => do
+              -- the WRITE's own shape, checked rather than assumed
+              let bw := match wr.op with | .Op_MemWriteBE b => b | _ => 0
+              IO.println s!"  write {repr wr.op} width {wr.width}; declared memory aw {md.aw} dw {dw}; byte_w {bw}"
+              if wr.width != dw then
+                IO.eprintln s!"SHAPE FAILURE: the write's result width {wr.width} is not the declared dw {dw}"
+                return 2
+              if bw == 0 then
+                IO.eprintln "SHAPE FAILURE: the next image is not an Op_MemWriteBE"
+                return 2
+              -- the lane count the ENABLE must carry, from the declared memory
+              let lanes := (dw + bw - 1) / bw
               IO.println s!"  gate slot {gate}: {repr gc.op} width {gc.width} deps {gc.deps.toList}"
               if gc.op != .Op_And || gc.deps.size != 2 then
                 IO.eprintln s!"SHAPE FAILURE: expected a two-operand Op_And gate, got {repr gc.op}"
                 return 2
-              let w := gc.width
+              if gc.width != lanes then
+                IO.eprintln s!"SHAPE FAILURE: the gate is {gc.width} bits but the declared memory needs {lanes} enable lane(s)"
+                return 2
+              let w := lanes
               -- the phase source: the EQ's non-constant dependency
               let maskSlot := gc.deps[1]!
               let enSlot   := gc.deps[0]!
@@ -111,9 +129,13 @@ def main (args : List String) : IO UInt32 := do
                 if q.value != 0 then
                   IO.eprintln s!"VALUE MISMATCH quiet: a quiet step does not zero the vector"; bad := bad + 1
                 if h.value != highBit.value then
-                  IO.eprintln s!"VALUE MISMATCH active/high: lane {w-1} cannot be enabled"; bad := bad + 1
+                  IO.eprintln s!"VALUE MISMATCH active/high: lane {w-1} is not preserved by the mask"; bad := bad + 1
                 if bad == 0 then do
-                  IO.println "SLOT MASK OK (full lane pass, quiet zero, high lane reachable)"
+                  -- SCOPE: the phase source and the gate's other operand are
+                  -- OVERRIDDEN, so this says what the gate WOULD pass at those
+                  -- values.  It is conditional preservation of the lanes, NOT
+                  -- evidence that any phase, enable or write is reachable.
+                  IO.println "SLOT MASK OK (conditional: every lane preserved when active, zeroed when quiet)"
                   return 0
                 else do
                   IO.eprintln s!"{bad} slot-mask check(s) FAILED"

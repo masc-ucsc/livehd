@@ -11965,3 +11965,99 @@ at all.  The initialized-transition acceptance is still **not done**, and the
 three structural gtests do not stand in for it.
 
 Counts unchanged: **13 YES / 11 NO / 36 BLOCKED**, FP **3 YES / 9 BLOCKED**.
+
+## §63.80 — B11's initialized transition, and four preflight defects corrected
+
+### 1. What I claimed and what the files held
+
+My end-of-turn report described stimulus and state files that **did not work**.
+Every defect named was real:
+
+* the stimulus had **no `stim v1` header**, and its trailing `#` comments break
+  `parseStim`, which strips only whole comment lines;
+* two decimals disagreed with their own hex.  Regenerated mechanically and
+  decoded back field by field: `req_data_i` is **96757023248656**
+  (`0x580000001110`) — I had written 96757023511824, which is `0x580000041510`
+  — and `ptw_resp_data_i` is **720599239** (`0x2af378c7`) — I had written
+  716267719, which is `0x2ab160c7`.  `satp_info_i` 2147549184 was right;
+* the "eight distinguishable 69-bit words" were not: word 0 was 128 bits and
+  the rest were 2^70…2^76, so `setWord`'s `mk_bv 69` loaded
+  `[2^69-1, 0, 0, 0, 0, 0, 0, 0]`.  Now `(1 << 60) + address`, which fits, and
+  the preflight **confirms the loaded values**;
+* the schedule held `ptw_req_ready_i` constantly high, dropped `req_valid_i`
+  after sub-step 3, omitted `clk_i`, and ended with the response still
+  asserted.
+
+Both bad files are retained under `preflight_negatives/`.
+
+**And one overclaim is withdrawn**: "the emitted cone carries it".  A set of
+reached inputs and flops is a **dependency inventory**; it does not establish a
+Boolean condition, an address or a datum.  It is recorded as an inventory, and
+the scope is discharged below by a source-derived expectation that was then
+observed.
+
+Jobs: the two duplicate checker producers had already exited; the queued
+acceptance launcher and its waiters were cancelled before firing — it waited on
+the text "retained exit", not on a validated result — so **nothing ran from the
+invalid files**.
+
+### 2. The corrected stimulus follows the pinned sequence
+
+`SimCtrl::tick()` drives `clk_i` LOW, evaluates, then HIGH — so one source tick
+is two P=2 sub-steps, and `clk_i` is driven explicitly because the emitted
+flop 0 enable is `(clk_i == 0 AND phase == 0)`.  The pinned `fill_entry` order
+is reproduced: ready LOW, **one** ack tick, LOW again; the PTW leaf presented
+with `ptw_resp_valid_i` held **two ticks** — because `rf_latch_wr_en` reads
+`ptw_resp_valid_q`, not `_i` — then `clear_ptw_resp` and a quiet tail.
+
+### 3. The transition, predicted then observed
+
+Expectation computed **before** the run from the pinned DV call and packed
+structs for this artifact's `NrMinions=1, Entries=8`: **address 1, word
+`0x223600abcde`**.
+
+```
+address 1   before 1152921504606846977 (2^60+1)
+            after  2350958427358       = 0x223600abcde
+```
+
+18 sub-steps, all ok, at checker bound **1131** on an **arity-[3]** residual of
+260,672 terms; COMPLETE reference comparison; supplied state surviving the
+codec and reused decoded each cycle; `stateFullOKB true`; producer exit **0**.
+Exactly one word changed and **every other address is bit-for-bit preserved**.
+
+### 4. The negative discriminates, and names the mechanism
+
+The SAME state and stimulus on the **pre-repair** certificate `1f83897e`, whose
+emitted mask was `Op_Sext width 1`:
+
+| | address 1 after | XOR with initial |
+|---|---|---|
+| pre-repair | 1152921504606846976 | **1** — only bit 0 |
+| repaired | 2350958427358 | `0x10000223600abcdf` — 21 bits across 0..60 |
+
+The one-bit mask wrote exactly lane 0 and could never produce the expected
+word.  That is the §63.79 defect reproduced dynamically.
+
+### 5. The gate is failure-enforcing
+
+`pass/lean/tests/d4/b11_tlb_acceptance.sh` reads the run log and FAILS on a
+missing or wrong transition — `dcert2_memroute` exits 0 and reports COMPLETE
+for a design whose memory never changes, so exit 0 alone cannot satisfy B11.
+It requires the route, the arity-3 residual at its checked bound, every step
+ok, COMPLETE, the codec, the policy, a SUPPLIED state, the exact address and
+word, a change **above bit 31**, exactly one changed word, and every other
+address preserved.  `--expect-no-transition` runs it as the negative.
+
+### 6. B11's FP cell moves
+
+**BLOCKED → YES**, with certificate, emitter, driver, state, stimulus, gate and
+logs bound by sha256.  Counts move **13 YES / 11 NO / 36 BLOCKED → 14 YES /
+11 NO / 35 BLOCKED**, FP **3 YES / 8 BLOCKED → 4 YES / 8 BLOCKED**.  Verified
+mechanically that `B11/Futamura projection` is the ONLY changed cell and that
+the historical scalar and single-edge refusals are retained verbatim.
+
+Scope, stated: INTERPRETED, `hproj` TRUSTED, not equivalence and not RTL
+acceptance.  The expected word is source-derived and was then observed; the run
+shows that THIS residual, on THIS supplied state and THIS source-derived
+stimulus, commits that word at that address.

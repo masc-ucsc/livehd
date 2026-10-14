@@ -2114,23 +2114,82 @@
    },
    "approaches": {
     "Futamura projection": {
-     "status": "BLOCKED",
+     "status": "YES",
      "evidence": {
-      "blocker": "Same inherited common-input blocker as the translation-validation column: no DCERT2 certificate was ever emitted for this row, so there is nothing for the projection to load. Not replayed.",
-      "upstream_stop": "s1_compile PASSED (exit 0, 0.27 s) but pass.single_edge refused exit 7: memory 'memory_1660:u_tlb_cache_rf.rf_q' would commit on every sub-step",
-      "manifest_module": "coreet_tlb"
+      "decode": "DCERT2 under readCertChecked; CertIO.admitAny routes by magic.",
+      "support": "SCALAR ROUTE REFUSED (memFree/sources/ops) -- retained verbatim under prior_attempts and still the correct scalar answer for a design with memory. MEMORY ROUTE: accepts true, typed true, sized true, nextImgs true -> ADMITTED. A separately proved admission predicate, not a relaxation.",
+      "upstream_unblock": "The row's historical blocker was pass.single_edge refusing every Memory at P>1. That refusal is replaced by a per-port slot gate whose clock/edge/bit classification runs BEFORE mutation, with named refusals retained for whole-array, mixed-polarity, gated, off-reference-bit, falling-edge and non-constant shapes. minion_tlb normalizes P=2, 1 latch retyped, 29 elements slotted, 1 memory over 1 write port.",
+      "generate": "dcert2_memroute specializes hwMemAP at fuel 20000/200, division [.stat,.dyn,.dyn,.dyn] (design static; edges, input, state dynamic). Residual 260,672 terms, 1 function, arity [3], checker bound 1131, check 330 ms.",
+      "readiness": "18 sub-steps executed AT THE CHECKED BOUND, all ok; 4 distinct output vectors and 10 distinct flop vectors of 18. The supplied state survives encStateM/decStateM unchanged and is decoded and reused each cycle; the final returned state satisfies stateFullOKB.",
+      "initialized_transition": "THE ACCEPTANCE GATE. Initial image SUPPLIED from file: eight 69-bit words (1<<60)+address with a nonzero default, every one differing from the expectation ABOVE BIT 31. Address 1 goes 1152921504606846977 -> 2350958427358 = 0x223600abcde, which is the SOURCE-DERIVED expectation computed BEFORE the run from the pinned CORE-ET DV sequence (minion_tlb_test.cc fill_entry, first call at :299) packed against minion_pkg.sv/tlb_pkg.sv for this artifact's NrMinions=1, Entries=8. Exactly one word changed; every other address is bit-for-bit preserved. Bits above 31 changed (268435456 -> 547), so the high lanes were genuinely written.",
+      "stimulus_provenance": "SUPPLIED file, generated mechanically from the pinned hex and decoded back field by field: req_data_i 0x580000001110, ptw_resp_data_i 0x2af378c7, satp_info_i 0x80010000. The pinned order is reproduced -- ready LOW, one ack tick, LOW again; the documented TWO-TICK response hold, because rf_latch_wr_en reads ptw_resp_valid_q and not _i; then clear_ptw_resp and a quiet tail. clk_i is driven explicitly, low then high per SimCtrl::tick(), one source tick per two P=2 sub-steps.",
+      "negative_control": "The SAME state and stimulus on the PRE-REPAIR certificate 1f83897e (whose emitted slot mask was Op_Sext width 1) changes address 1 by EXACTLY ONE BIT -- 2^60+1 -> 2^60, XOR = 1 -- and never produces 0x223600abcde. The repaired run's XOR spans bits 0..60, 21 bits. The gate run with --expect-no-transition passes on that log and would fail if the old certificate had produced the word.",
+      "reference_comparison": "COMPLETE -- array length, every table word, the default and out-of-range. B09/B10 carry no reference comparison.",
+      "respecialization": "NONE: mkMemSimOf binds the residual produced in the same process.",
+      "scope": "INTERPRETED (lean --run, ulimit -s unlimited, --tstack=1048576). NOT equivalence, NOT RTL acceptance, NOT kernel certification. hproj is TRUSTED: mixDriver does not kernel-reduce at nontrivial fuel. The expected word is SOURCE-DERIVED and was then OBSERVED; the run does not prove the RTL's own timing, only that this residual, on this supplied state and this source-derived stimulus, commits that word at that address.",
+      "entry_specific_gates_remaining": "NONE for this cell under the B09/B10 interpreted standard, now additionally carrying an initialized transition and a discriminating negative that neither B09, B10 nor B12 has."
      },
-     "generation_ms": null,
+     "generation_ms": 29742,
      "metrics": {
       "generation_wall_ms": null,
       "generation_user_cpu_ms": null,
       "generation_system_cpu_ms": null,
-      "peak_rss_kb": null,
+      "unavailable_note": "Generation and readiness share one process (no re-specialization), so only the driver's own phase timings are measured.",
+      "peak_rss_kb": 6603236,
       "observed_cgroup_peak_bytes": null,
-      "phase_times_ms": {},
-      "artifact_bytes": null,
+      "phase_times_ms": {
+       "memroute_single_run": {
+        "support_ms": 56,
+        "specialize_ms": 29742,
+        "check_ms": 330,
+        "execute_ms": 81816,
+        "driver_cpu_ticks": 13227,
+        "driver_peak_rss_kib": 6603236,
+        "exit_code": 0
+       }
+      },
+      "artifact_bytes": 13285,
       "environment_sha256": null,
-      "attempt_record": null
+      "attempt_record": "fp/dcert2/memroute/b11 (this run) + the retained synthetic-zero run, superseded by it",
+      "peak_rss_kib": 6603236,
+      "peak_rss_gib": 6.3
+     },
+     "prior_attempts": {
+      "scalar_and_single_edge_refusal": {
+       "status": "BLOCKED",
+       "evidence": {
+        "blocker": "Same inherited common-input blocker as the translation-validation column: no DCERT2 certificate was ever emitted for this row, so there is nothing for the projection to load. Not replayed.",
+        "upstream_stop": "s1_compile PASSED (exit 0, 0.27 s) but pass.single_edge refused exit 7: memory 'memory_1660:u_tlb_cache_rf.rf_q' would commit on every sub-step",
+        "manifest_module": "coreet_tlb"
+       },
+       "generation_ms": null,
+       "metrics": {
+        "generation_wall_ms": null,
+        "generation_user_cpu_ms": null,
+        "generation_system_cpu_ms": null,
+        "peak_rss_kb": null,
+        "observed_cgroup_peak_bytes": null,
+        "phase_times_ms": {},
+        "artifact_bytes": null,
+        "environment_sha256": null,
+        "attempt_record": null
+       }
+      },
+      "note": "Retained verbatim: the scalar refusal remains true, and the single_edge memory refusal is the historical blocker this row sat behind."
+     },
+     "bound_identities": {
+      "certificate_sha256": "d5bc40f92ecbb9ea60cb43bcd188aace8b954cdc5734e498e46adaad689e855f",
+      "emitter_lhd_sha256": "32df45c9a9b79e004d005b7f8941667550e0164ff06e245fe9d0d805edb4853a",
+      "driver": "formal/lean/scripts/dcert2_memroute.lean",
+      "driver_sha256": "c7a965fb33c71c1fe96099758aa1a480395eafee6c0653bf3b3345c2f98707d4",
+      "initial_state": "formal/lean/scripts/memstate/b11_tlb_image.memstate",
+      "initial_state_sha256": "050a505bcd3328d5e614da9d2c5b1bed81bedd2dba81ba15e152bfe299dd6b15",
+      "stimulus": "formal/lean/scripts/memstate/b11_tlb_fill.stim",
+      "stimulus_sha256": "bd650291fd726826e2050bc0bed7d36e0fbac32417968457f3d145c71b54fdfa",
+      "acceptance_gate": "pass/lean/tests/d4/b11_tlb_acceptance.sh",
+      "acceptance_gate_sha256": "ec31e765e3dd7cae585334615702e80247c3349046e219cd72da103a0f0193c7",
+      "source_pin": "CORE-ET c72b6a2fe4aaad5a9eef437776864ff71f4b55d7",
+      "logs": "generated/master_port/memslot_v6_20261013/acceptance/ (acceptance, negative, preflight + SHA256SUMS)"
      }
     },
     "Verified compiler": {

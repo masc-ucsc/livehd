@@ -1,0 +1,144 @@
+# SUPPLIED stimulus for whole minion_tlb (B11), from the PINNED CORE-ET DV
+# sequence -- hw/ip/minion/tlb/dv/minion_tlb_test.cc fill_entry (136-184), its
+# first call at :299.  Generated mechanically; values decode back to the
+# audited hex.
+#
+#   req_data_i      (ord  7, w48) = 0x580000001110
+#   ptw_resp_data_i (ord  5, w64) = 0x2af378c7
+#   satp_info_i     (ord 11, w32) = 0x80010000
+#
+# THE PINNED ORDER, one source tick per two sub-steps.  `SimCtrl::tick()` in
+# dv/common/sim_ctrl.h drives clk_i LOW, evaluates, then HIGH, evaluates -- so
+# the even sub-step is the low half and the odd one the high half, and clk_i is
+# driven EXPLICITLY here because the emitted flop 0 enable is
+# (clk_i == 0 AND phase == 0) and the memory commits at phase 0.
+#
+#   ticks 0-1  reset: rst_ni low
+#   tick  2    set_split_req: req_valid high, request presented; ready LOW
+#   tick  3    ptw_req_valid_o expected; ready still LOW
+#   tick  4    ptw_req_ready_i HIGH for exactly one tick -- the ack
+#   tick  5    ready LOW again, PTW leaf response presented, resp_valid HIGH
+#   tick  6    resp_valid HELD -- the documented two-tick hold, because
+#              rf_latch_wr_en reads ptw_resp_valid_q, not _i
+#   tick  7    clear_ptw_resp: response and valid cleared
+#   tick  8    quiet tail, for disabled/quiet preservation
+#
+# An earlier version held ready constantly high, dropped req_valid after
+# sub-step 3, omitted clk_i and ended with the response still asserted.  It is
+# retained as a preflight negative.
+stim v1
+in 12 1 0
+in 1 1 0
+in 13 2 0
+in 8 1 0
+in 3 32 0
+in 11 32 2147549184
+in 7 48 96757023248656
+at 0 in 0 1 0
+at 0 in 10 1 0
+at 0 in 9 1 0
+at 0 in 4 1 0
+at 0 in 6 1 0
+at 0 in 5 64 0
+at 1 in 0 1 1
+at 1 in 10 1 0
+at 1 in 9 1 0
+at 1 in 4 1 0
+at 1 in 6 1 0
+at 1 in 5 64 0
+at 2 in 0 1 0
+at 2 in 10 1 0
+at 2 in 9 1 0
+at 2 in 4 1 0
+at 2 in 6 1 0
+at 2 in 5 64 0
+at 3 in 0 1 1
+at 3 in 10 1 0
+at 3 in 9 1 0
+at 3 in 4 1 0
+at 3 in 6 1 0
+at 3 in 5 64 0
+at 4 in 0 1 0
+at 4 in 10 1 1
+at 4 in 9 1 1
+at 4 in 4 1 0
+at 4 in 6 1 0
+at 4 in 5 64 0
+at 5 in 0 1 1
+at 5 in 10 1 1
+at 5 in 9 1 1
+at 5 in 4 1 0
+at 5 in 6 1 0
+at 5 in 5 64 0
+at 6 in 0 1 0
+at 6 in 10 1 1
+at 6 in 9 1 1
+at 6 in 4 1 0
+at 6 in 6 1 0
+at 6 in 5 64 0
+at 7 in 0 1 1
+at 7 in 10 1 1
+at 7 in 9 1 1
+at 7 in 4 1 0
+at 7 in 6 1 0
+at 7 in 5 64 0
+at 8 in 0 1 0
+at 8 in 10 1 1
+at 8 in 9 1 1
+at 8 in 4 1 1
+at 8 in 6 1 0
+at 8 in 5 64 0
+at 9 in 0 1 1
+at 9 in 10 1 1
+at 9 in 9 1 1
+at 9 in 4 1 1
+at 9 in 6 1 0
+at 9 in 5 64 0
+at 10 in 0 1 0
+at 10 in 10 1 1
+at 10 in 9 1 1
+at 10 in 4 1 0
+at 10 in 6 1 1
+at 10 in 5 64 720599239
+at 11 in 0 1 1
+at 11 in 10 1 1
+at 11 in 9 1 1
+at 11 in 4 1 0
+at 11 in 6 1 1
+at 11 in 5 64 720599239
+at 12 in 0 1 0
+at 12 in 10 1 1
+at 12 in 9 1 1
+at 12 in 4 1 0
+at 12 in 6 1 1
+at 12 in 5 64 720599239
+at 13 in 0 1 1
+at 13 in 10 1 1
+at 13 in 9 1 1
+at 13 in 4 1 0
+at 13 in 6 1 1
+at 13 in 5 64 720599239
+at 14 in 0 1 0
+at 14 in 10 1 1
+at 14 in 9 1 1
+at 14 in 4 1 0
+at 14 in 6 1 0
+at 14 in 5 64 0
+at 15 in 0 1 1
+at 15 in 10 1 1
+at 15 in 9 1 1
+at 15 in 4 1 0
+at 15 in 6 1 0
+at 15 in 5 64 0
+at 16 in 0 1 0
+at 16 in 10 1 1
+at 16 in 9 1 1
+at 16 in 4 1 0
+at 16 in 6 1 0
+at 16 in 5 64 0
+at 17 in 0 1 1
+at 17 in 10 1 1
+at 17 in 9 1 1
+at 17 in 4 1 0
+at 17 in 6 1 0
+at 17 in 5 64 0
