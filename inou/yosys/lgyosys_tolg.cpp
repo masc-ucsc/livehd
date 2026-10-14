@@ -564,9 +564,35 @@ static hhds::Pin_class create_pick_concat_dpin(hhds::Graph* g, const RTLIL::SigS
   I(ss.chunks().size() != 0);
 
   const std::vector<RTLIL::SigChunk> chunk_list(ss.chunks().begin(), ss.chunks().end());
+
+  // WHERE THE SIGN BELONGS when there is more than one chunk: on the ASSEMBLED
+  // result, not on the top lane.
+  //
+  // The multi-chunk path below already sign-extends the finished Concat (`if
+  // (is_signed)`, further down), and it stamps the Concat itself `set_ubits(...,
+  // total)` -- "Always non-negative: the declared result width is exactly the
+  // sum of the positional lane widths". That is only true if every lane is a
+  // FINITE SELECTION of its own window, which is exactly what the unsigned arm
+  // of create_pick_operator builds (a Get_mask clamped to chunk.width, with the
+  // comment explaining it was introduced because forwarding a producer's width
+  // hint "used to put a 65-bit value into a one-bit Concat lane in picorv32").
+  //
+  // Signing the top chunk as well applied the sign TWICE and broke that
+  // invariant: a 1-bit top chunk became `Sext(x, 1)`, i.e. the 1-bit signed
+  // {-1, 0}. Mixed with ordinary 1-bit unsigned [0..1] values in a selection,
+  // the union is [-1..1], which needs two SIGNED bits -- so the value stamped 2
+  // bits and `concat_lane_violation` refused it for driving a 1-bit lane
+  // (minion_dcache_top: `mux_95536` into lane 0 of `concat_223984`, and
+  // `mux_94508` into lane 0 of `concat_264964`, the same defect by two routes).
+  //
+  // A SINGLE chunk keeps its signed read: there is no Concat and no outer Sext
+  // to carry the sign, and that sign is observable -- `inou/yosys/tests/
+  // issue_047.v` exists for it (`input signed [0:0] a; y = b ^ (a|a)` must
+  // sign-extend a to 'b11).
+  const bool sign_on_assembled_result = chunk_list.size() > 1;
   for (auto i = 0u; i < chunk_list.size(); ++i) {
     const auto& chunk       = chunk_list[i];
-    bool        signed_last = ((i + 1) == chunk_list.size()) && is_signed;
+    bool        signed_last = ((i + 1) == chunk_list.size()) && is_signed && !sign_on_assembled_result;
     if (chunk.wire == nullptr) {
       inp_pins.emplace_back(resolve_constant(g, chunk.data, signed_last));
     } else {

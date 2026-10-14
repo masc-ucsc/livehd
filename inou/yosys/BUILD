@@ -157,6 +157,20 @@ sh_test(
     data = [":scripts"],
 )
 
+# A multi-chunk SIGNED operand is assembled from finite selections and signed
+# ONCE, on the completed result. Signing the top chunk too made a 1-bit chunk
+# the 1-bit signed {-1, 0}; mixed with unsigned 1-bit values in a selection the
+# union [-1..1] needs two SIGNED bits, which concat_lane_violation then refused
+# for driving a 1-bit lane (CORE-ET minion_dcache_top). The width inference and
+# the refusal are both correct and stay as they are; a single-chunk signed read
+# keeps its sign (tests/issue_047.v).
+sh_test(
+    name = "yosys_concat_lane_sign_test",
+    srcs = ["tests/yosys_concat_lane_sign_test.sh"],
+    data = ["//lhd"],
+    deps = [":scripts"],
+)
+
 # Bounded-check reset protocol: the reset window must clock the design and
 # un-reset power-on state is X (a don't-care on gold), so a QN-flop netlist of
 # a synchronous-reset design is not falsely refuted while real post-reset

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -2087,38 +2088,67 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
           // The offending lane driver's OWN operands and their inferred ranges.
           // A too-wide lane driver is always inherited from an operand, so the
           // lane table alone stops one link short of the cause.
-          .note(std::format("offending driver's operands: {}",
+          // Walk the offending driver's cone, not just its immediate operands.
+          // An over-wide lane driver is almost never where the extra bit was
+          // MINTED: on minion_dcache_top the refused `mux_94508` merely
+          // inherited bits=2 from `mux_94504`, which inherited it in turn, and
+          // one level of operands named a node that looked innocent. The walk
+          // follows only operands AS WIDE AS the offender -- that is the chain
+          // the bit travelled -- and stops at kConeDepth so a wide cone cannot
+          // turn one internal error into an unreadable page.
+          .note(std::format("offending driver's cone (widest-operand chain): {}",
                             [&] {
-                              std::string t;
+                              constexpr int kConeDepth = 8;
+                              std::string   t;
+                              const auto    describe_pin = [&](const hhds::Pin_class& p) {
+                                const auto  it  = bwmap.find(p.get_class_index());
+                                std::string rng = "unmapped";
+                                if (it != bwmap.end()) {
+                                  rng = std::format(
+                                      "[{}..{}] ubits={} sbits={} pos={}",
+                                      it->second.get_min().to_pyrope(),
+                                      it->second.get_max().to_pyrope(),
+                                      it->second.is_always_positive() ? std::to_string(it->second.get_ubits()) : "n/a",
+                                      it->second.get_sbits(),
+                                      it->second.is_always_positive());
+                                }
+                                return std::format("drv={} bits={} unsign={} {}",
+                                                                         livehd::graph_util::wire_name(p),
+                                                                         livehd::graph_util::bits_of(p),
+                                                                         livehd::graph_util::is_unsign(p),
+                                                                         rng);
+                              };
+                              std::function<void(const hhds::Node_class&, int32_t, int)> walk
+                                  = [&](const hhds::Node_class& n, int32_t want_bits, int depth) {
+                                      if (n.is_invalid() || depth > kConeDepth) {
+                                        return;
+                                      }
+                                      t += std::format("\n    {} <= ", livehd::graph_util::debug_name(n));
+                                      hhds::Node_class next;
+                                      for (const auto& in_pin : n.inp_sorted_pins()) {
+                                        const auto in_drv = in_pin.get_driver_pin();
+                                        t += std::format("{{pid={} {}}} ",
+                                                         static_cast<int>(in_pin.get_port_id()),
+                                                         describe_pin(in_drv));
+                                        // The culprit chain: an operand already
+                                        // as wide as the result did not widen
+                                        // here, so keep walking into it.
+                                        if (next.is_invalid() && !in_drv.is_invalid() && !in_drv.is_const()
+                                            && livehd::graph_util::bits_of(in_drv) >= want_bits) {
+                                          next = in_drv.get_master_node();
+                                        }
+                                      }
+                                      walk(next, want_bits, depth + 1);
+                                    };
                               for (const auto& l : lanes) {
                                 if (livehd::graph_util::concat_lane_fits(l)) {
                                   continue;
                                 }
-                                auto drv = l.value.get_master_node();
+                                const auto drv = l.value.get_master_node();
                                 if (drv.is_invalid()) {
                                   return std::string{"<invalid master>"};
                                 }
-                                t += std::format("{} <= ", livehd::graph_util::debug_name(drv));
-                                for (const auto& in_pin : drv.inp_sorted_pins()) {
-                                  const auto  in_drv = in_pin.get_driver_pin();
-                                  const auto  it     = bwmap.find(in_drv.get_class_index());
-                                  std::string rng    = "unmapped";
-                                  if (it != bwmap.end()) {
-                                    rng = std::format(
-                                        "[{}..{}] ubits={} sbits={} pos={}",
-                                        it->second.get_min().to_pyrope(),
-                                        it->second.get_max().to_pyrope(),
-                                        it->second.is_always_positive() ? std::to_string(it->second.get_ubits()) : "n/a",
-                                        it->second.get_sbits(),
-                                        it->second.is_always_positive());
-                                  }
-                                  t += std::format("{{pid={} drv={} bits={} unsign={} {}}} ",
-                                                   static_cast<int>(in_pin.get_port_id()),
-                                                   livehd::graph_util::wire_name(in_drv),
-                                                   livehd::graph_util::bits_of(in_drv),
-                                                   livehd::graph_util::is_unsign(in_drv),
-                                                   rng);
-                                }
+                                walk(drv, livehd::graph_util::lane_value_bits(l.value), 0);
                                 break;
                               }
                               return t;
