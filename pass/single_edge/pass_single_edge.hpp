@@ -55,6 +55,9 @@ struct Result {
   // write ports gated to their memory's slot (a whole-vector select, not a
   // 1-bit AND: a write enable is `wensize` bits, one per lane)
   int  mem_ports_slotted = 0;
+  // Write ports whose GATED clock was folded into the write enable and whose
+  // clock_pin was rebound to the gate root.
+  int  mem_ports_ungated = 0;
   int  mems_slotted      = 0;  // memories with at least one gated write port
   int  icg_folded      = 0;  // gated clocks rewritten into a flop enable
   // Consumers served by a SAMPLED gate guard: a falling consumer of a

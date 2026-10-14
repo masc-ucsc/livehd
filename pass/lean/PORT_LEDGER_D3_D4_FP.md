@@ -12884,3 +12884,108 @@ enable, preserving the slot gating the write port already has.
 
 **B01 remains BLOCKED.** It still produces no certificate, and no FP credit is
 claimed or implied.
+
+## §63.87 — a gated memory write port, and B01 normalizes for the first time
+
+### 1. The contract, measured before anything was written
+
+`memory_107860:gen_offload_reduce.u_reduce.u_ba_alloc_fifo.mem`, write port 0:
+
+| fact | value |
+|---|---|
+| edge | **rising** |
+| `wensize` | **3 lanes** |
+| clock | `clkgt`, root `clk_i`, **div = 1** |
+| gate cone | ONE enable: `u_clk_gate.en_latch`, 1 bit, op = **latch** |
+| port enable | `get_mask_304088`, 3 bits |
+
+Two things follow. The guard is the latch **Q**, so it needs the same bypass and
+the same opposite-phase proof the flop path demands. And it is ONE BIT against a
+THREE-LANE enable, so it cannot simply be ANDed in.
+
+### 2. The lowering, reusing what exists
+
+The gate joins the **slot predicate** -- both one bit -- and the PAIR is widened
+by the Sext + `Get_mask` idiom the slot mask already uses. So the gate reaches
+every lane, no wide shared constant is minted, and the traps that note already
+records (a restamped shared zero, a `Sext` that bitwidth recomputes back to
+width 1) are avoided by construction rather than re-discovered.
+
+`div != 1` is refused by name. A latch that is not opposite-phase is refused
+rather than mis-timed. The sampled-held guard is deliberately NOT extended to a
+Memory in this increment, and a falling memory is still refused.
+
+**The write clock is REBOUND to the gate root.** The pass previously did not
+touch `clock_pin` on a Memory at all, and the falling-memory refusal says so.
+Folding the gate while leaving the gated net on the clock would apply it twice
+and leave a DERIVED clock in a design this pass exists to make single-edge --
+the encoder refuses one, so the cell would come back UNKNOWN after a successful
+lowering.
+
+Verified in the emitted netlist:
+
+```verilog
+.wr_clock_0(clk)             // the ROOT, not gclk
+.wr_enable_0(get_mask_320)   // reg [39:0] -- full width
+and_312 = eq_304 & sext_228  // slot AND gate, one bit
+get_mask_320 = sext_316      // widened to 40
+```
+
+### 3. Evidence, and where it lives
+
+Original RTL against normalized, 40-bit lanes so the TOP LANE IS BIT 39 (above
+31, where a 1-bit or 32-bit mask truncation shows), gate turning off every third
+step: **`MEM_OK checks=44 gate_off=15 gate_on=29`**. The gate-dropped mutant
+**`MEM_FAIL errs=9`**, diverging on real data (`b6deadbe00` vs `bedeadbe00`),
+not X -- writes the source suppresses get through.
+
+That differential is retained under `generated/master_port/b01_memgate_20261014/`
+rather than wired into CI, and the reason is recorded in the fixture:
+
+* the normalized memory instantiates `cgen_memory_multiclock_1rd_1wr` from
+  `ware/rtl`, which is not on the ICG test's data path; and
+* `lhd/tests/single_edge_memory_slot_test.sh`, the fixture that DOES host memory
+  differentials, is **in no bazel target** and is currently **RED** --
+  `SINGLE_EDGE_MEM_DIFF_FAIL errs=78` on its flop legs. That is PRE-EXISTING:
+  reverting this change to the committed source and rebuilding reproduces it
+  exactly. Nothing in CI has been running it.
+
+Burying a new differential behind a red unwired fixture would make it dead code,
+so the structural half -- root clock rebound, full-width enable -- went into the
+wired-in `single_edge_icg_test` instead, where it runs.
+
+354/354 on `//pass/single_edge //lhd/tests //pass/lec //graph //pass/lean`.
+
+### 4. B01 normalizes
+
+```
+s1_compile      exit 0    (the retained raw graph)
+s2_single_edge  exit 0    FIRST successful normalization of this unit
+lean emission   exit 1    pass.lean: combinational cycle at node n_144984
+```
+
+```
+P=2 slots, 12 latch(es) retyped, 305 gated clock(s) folded into an enable
+(16 sampled-held), 988 element(s) slotted,
+21 memory(ies) slotted over 21 write port(s)
+```
+
+Both new capabilities are load-bearing at scale: **21** memory write ports, and
+**16** of the 305 gated clocks through the sampled-held guard -- the
+falling-consumer path of 63.86. Neither is fixture-only.
+
+**B01 remains BLOCKED.** There is no certificate; emission refuses immediately
+after. No FP credit is claimed, and normalization is not equivalence.
+
+The new boundary is `pass.lean: combinational cycle at node n_144984` on the
+NORMALIZED graph -- the first boundary past normalization for this unit, and the
+same family as the `comb-loop` refusals that block B02/B04/B06/B07/B08 at
+`pass.legalize`. (The accompanying `onehot-deferred` is a warning, not the stop.)
+
+### 5. A standing note on P=2 harnesses
+
+The first memory differential drove the P=2 normalized design with the SOURCE
+clock and produced eight X mismatches; the 5 ns-late 2x oscillator fixed it.
+That is the second time this exact miscalibration has been mistaken for a
+transformation defect. Any new P=2 differential needs its slot schedule asserted
+before its results mean anything.

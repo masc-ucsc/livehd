@@ -696,4 +696,70 @@ shared=$(grep -oE "flop_[0-9]+ & single_edge_phase" "$W"/v_share/*.v | sort | un
   || fail "no held guard is read by two consumers; the gate's guard was minted per consumer"
 echo "ok: one sampled guard per GATE (3 held consumers over 2 gates -> 2 guards, one shared by two)"
 
+# ---- a memory whose WRITE CLOCK IS GATED ------------------------------------
+#
+# `commit_class_of_clock` resolves an ICG to its ROOT and drops the gate's
+# conditions, so a gated memory clock used to be refused outright: accepting it
+# would have discarded the gate. The flop path re-introduces those conditions by
+# folding them into the element's enable; a memory needs the same, but its
+# enable is a VECTOR -- `wensize` bits, one per lane -- so the gate joins the
+# 1-bit SLOT PREDICATE and the pair is widened by the Sext + Get_mask idiom the
+# slot mask already uses. That is what keeps every lane and mints no wide shared
+# constant.
+#
+# The write clock is REBOUND to the gate's root as well. Folding the gate while
+# leaving the gated net on `clock_pin` would apply it twice and leave a derived
+# clock in a design this pass exists to make single-edge.
+#
+# Lanes are 40 bits so the TOP LANE IS ABOVE BIT 31: a mask truncated to 1 or 32
+# bits shows up here as a clobbered or preserved word, not as a silent pass.
+cat > "$W/memgate.sv" <<'EOF'
+module memg(input clk, input en, input scan, input [2:0] addr,
+            input [39:0] din, input [39:0] wen, output [39:0] dout);
+  reg enl;
+  always @(clk or en or scan) if (!clk) enl <= en | scan;
+  wire gclk = clk & enl;
+  reg [39:0] mem [0:7];
+  always @(posedge gclk) mem[addr] <= (mem[addr] & ~wen) | (din & wen);
+  reg [7:0] nf;
+  always @(negedge clk) nf <= din[7:0];      // forces P=2, as B01 has
+  assign dout = mem[addr] ^ {32'd0, nf};
+endmodule
+EOF
+build_top mg "$W/memgate.sv" memg
+"$LHD" pass single_edge --top memg "lg:$W/lg_mg" --emit-dir "lg:$W/lg_mg_norm" \
+  --workdir "$W/pw_mg" >"$W/p_mg.log" 2>&1 \
+  || { tail -6 "$W/p_mg.log"; fail "a memory with a GATED write clock was refused"; }
+grep -q "1 memory(ies) slotted" "$W/p_mg.log" \
+  || { grep -o "P=[0-9]* slots[^\"]*" "$W/p_mg.log" | head -1; fail "the gated memory was not slot-gated"; }
+echo "ok: a memory with a gated write clock is accepted and slot-gated"
+
+"$LHD" compile "lg:$W/lg_mg_norm" --top memg --emit-dir "verilog:$W/v_mg" --workdir "$W/vw_mg" \
+  >"$W/e_mg.log" 2>&1 || { tail -6 "$W/e_mg.log"; fail "verilog emission of the gated memory failed"; }
+mgv="$(ls "$W"/v_mg/*.v | head -1)"
+# The write clock must be the ROOT, not the gated net.
+grep -qE "\.wr_clock_0\(clk\)" "$mgv" \
+  || { grep -nE "wr_clock_0|wr_enable_0" "$mgv"; fail "the write clock was not rebound to the gate root"; }
+# The widened enable must be a FULL-WIDTH vector, not a 1-bit predicate.
+wnet="$(sed -n 's/^  *,\.wr_enable_0(\([A-Za-z_][A-Za-z0-9_]*\))$/\1/p' "$mgv" | head -1)"
+[ -n "$wnet" ] || fail "could not find the memory's write-enable net"
+grep -qE "^reg \[39:0\] ${wnet};" "$mgv" \
+  || { grep -nE "reg .*${wnet};" "$mgv"; fail "the gated write enable is not 40 bits wide -- a lane above bit 31 would be truncated"; }
+echo "ok: the gate is folded into a full-width write enable and the clock is rebound to its root"
+
+# THE SIMULATION LEG LIVES OUTSIDE THIS TEST, deliberately. The normalized
+# memory instantiates `cgen_memory_multiclock_1rd_1wr`, which lives in
+# ware/rtl and is not on this test's data path; and the fixture that does host
+# memory differentials, lhd/tests/single_edge_memory_slot_test.sh, is in NO
+# bazel target and is currently RED for a pre-existing reason (its flop legs
+# report SINGLE_EDGE_MEM_DIFF_FAIL errs=78 against the COMMITTED source, with
+# this change reverted -- so nothing here caused it). Putting the differential
+# behind that failure would make it dead code.
+#
+# The original-RTL differential WAS run, and its evidence is retained with the
+# exact commands at
+# generated/master_port/b01_memgate_20261014/ (MEM_OK checks=44 gate_off=15,
+# 40-bit lanes; gate-dropped mutant MEM_FAIL errs=9). The structural checks
+# above -- root clock rebound, full-width enable -- are what this test guards.
+
 echo "PASS: single_edge_icg_test"
