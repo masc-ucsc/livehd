@@ -80,11 +80,20 @@ struct Memory_info {
   int64_t                       type       = 0;
   // Read-during-write forwarding MATRIX (graph/cell.cpp pid 5), NOT a bool: bit
   // (r * n_write_ports + w) set => read ordinal r sees write ordinal w's new data
-  // on a same-cycle same-address collision.  `fwd_known` is false when the pin is
-  // non-constant or the matrix does not fit an i64; the emitter then refuses any
-  // memory where the policy is observable (>=1 read and >=1 write port) rather
-  // than silently assuming read-first.
-  int64_t                       fwd        = 0;
+  // on a same-cycle same-address collision.
+  //
+  // Held as PER-READ ROWS of ARBITRARY WIDTH.  The matrix is reads x writes, so
+  // a 128-write-port memory needs 256 bits and could never fit the i64 window
+  // this used to be read through -- that window refused the design outright.
+  // The bits are read with `Dlop::bit_test`, which is arbitrary precision, the
+  // same call `cgen_verilog` and `cgen_sim` use on this very pin.
+  //
+  // `fwd_known` is false when the pin is non-constant OR any cell of the matrix
+  // is UNKNOWN; the emitter then refuses any memory where the policy is
+  // observable (>=1 read and >=1 write port) rather than silently assuming
+  // read-first.  An unknown cell is not a policy, and reading it as 0 would
+  // export a read-first proof about a window the design leaves undetermined.
+  std::vector<std::vector<bool>> fwd_rows;
   bool                          fwd_known  = true;
   int64_t                       posclk     = 1;
   // ordering="none" (graph/cell.cpp pid 15): is ANY (read,write) collision

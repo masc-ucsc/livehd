@@ -2832,5 +2832,182 @@ TEST(DesignScanClocks, TwoWriteTwoReadCollisionValueOracle) {
   }
   ASSERT_TRUE(out.good());
 }
+
+// ARBITRARY-WIDTH FORWARDING.  The matrix is reads x writes, so port counts
+// multiply: this memory's 2 reads and 32 writes need 64 cells, two past the 62
+// the old i64 window allowed, and the design it stands in for (a 128-write-port
+// memory) needs 256.  Those were refused outright with "the `fwd` matrix needs
+// N bits (reads x writes), which does not fit".
+//
+// A WIDE MATRIX IS NOT ENOUGH ON ITS OWN.  A 256-bit matrix whose value is zero
+// exercises no high bit at all -- every read would be read-first and the test
+// would pass against a reader that silently truncates.  So the matrix here has
+// its HIGHEST cell set (bit 63: read 1 <- write 31), which no 62-bit window can
+// even represent, and the two read rows are DIFFERENT, so a reader that shared
+// one row between reads would make the two registers agree.
+TEST(DesignScanClocks, WideMatrixHighBitForwardingValueOracle) {
+  constexpr uint32_t kWrites = 32;  // 2 reads x 32 writes = 64 cells
+  auto&              lib     = livehd::Hhds_graph_library::instance("lgdb_clk_mem_wide");
+  auto               io      = lib.create_io("widefwd");
+  uint32_t           pid     = 1;
+  for (const char* n : {"clk", "we0", "weN", "re0", "re1"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 1);
+  }
+  for (const char* n : {"wa0", "waN", "ra0", "ra1"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 2);
+  }
+  for (const char* n : {"wd0", "wdN"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 8);
+  }
+  io->add_output("rd0", 1);
+  io->set_bits("rd0", 8);
+  io->add_output("rd1", 2);
+  io->set_bits("rd1", 8);
+  auto       g       = io->create_graph();
+  auto       mem     = create_typed_node(*g, Ntype_op::Memory);
+  const auto mstride = static_cast<uint32_t>(Ntype::Memory_port_stride);
+  auto       sink    = [&](std::string_view n, uint32_t port) {
+    return mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + port * mstride);
+  };
+  auto konst = [&](std::string_view n, int64_t v, uint32_t port = 0) {
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(v)).connect_sink(sink(n, port));
+  };
+  konst("bits", 8);
+  konst("size", 4);
+  konst("type", 1);  // synchronous reads
+  konst("wensize", 1);
+  konst("posclk", 1);
+
+  // The matrix, MSB first: bit 63 (read 1 <- write 31) and bit 0 (read 0 <-
+  // write 0).  `from_binary` because the value is 2^63 + 1, which is not an
+  // int64 at all -- the representation this test exists for.
+  std::string bits(kWrites * 2, '0');
+  bits[0]                    = '1';  // bit 63, the HIGHEST cell
+  bits[kWrites * 2 - 1]      = '1';  // bit 0
+  livehd::graph_util::create_const(*g, *Dlop::from_binary(bits, true)).connect_sink(sink("fwd", 0));
+
+  // ports 0..kWrites-1 = writes; the last two = synchronous reads.
+  for (uint32_t w = 0; w < kWrites; ++w) {
+    konst("rdport", 0, w);
+    g->get_input_pin("clk").connect_sink(sink("clock_pin", w));
+    if (w == 0 || w == kWrites - 1) {
+      const char* a = w == 0 ? "wa0" : "waN";
+      const char* d = w == 0 ? "wd0" : "wdN";
+      const char* e = w == 0 ? "we0" : "weN";
+      g->get_input_pin(a).connect_sink(sink("addr", w));
+      g->get_input_pin(d).connect_sink(sink("din", w));
+      g->get_input_pin(e).connect_sink(sink("enable", w));
+    } else {
+      // The middle writes are HELD OFF so the expectations stay crisp: they
+      // sit in the committed chain but commit nothing.
+      konst("addr", 3, w);
+      konst("din", 0, w);
+      konst("enable", 0, w);
+    }
+  }
+  const char* raddr[] = {"ra0", "ra1"};
+  const char* ren[]   = {"re0", "re1"};
+  for (uint32_t r = 0; r < 2; ++r) {
+    const uint32_t port = kWrites + r;
+    konst("rdport", 1, port);
+    g->get_input_pin(raddr[r]).connect_sink(sink("addr", port));
+    g->get_input_pin(ren[r]).connect_sink(sink("enable", port));
+    g->get_input_pin("clk").connect_sink(sink("clock_pin", port));
+    mem.create_driver_pin(port).connect_sink(g->get_output_pin(r == 0 ? "rd0" : "rd1"));
+    set_bits(mem.create_driver_pin(port), 8);
+  }
+
+  DesignScan design;
+  try {
+    design = scan_design(*g, {});
+  } catch (const std::exception& e) {
+    FAIL() << "the scanner refused a 64-cell forwarding matrix: " << e.what();
+  }
+  // THE REGRESSION, checked directly on the scan: the high cell survived and
+  // the two rows differ.
+  ASSERT_EQ(design.memories.size(), 1u);
+  const auto& m = design.memories.begin()->second;
+  ASSERT_EQ(m.fwd_rows.size(), 2u) << "one row per read port";
+  ASSERT_EQ(m.fwd_rows[0].size(), kWrites);
+  EXPECT_TRUE(m.fwd_rows[1][kWrites - 1]) << "the HIGHEST cell (bit 63) was lost";
+  EXPECT_TRUE(m.fwd_rows[0][0]);
+  EXPECT_FALSE(m.fwd_rows[0][kWrites - 1]) << "read 0 must not inherit read 1's row";
+  EXPECT_FALSE(m.fwd_rows[1][0]) << "read 1 must not inherit read 0's row";
+
+  const auto cert = build_certificate(design, {});
+  ASSERT_EQ(cert.memories.size(), 1u);
+  ASSERT_EQ(cert.flops.size(), 2u) << "expected one read register per synchronous read port";
+
+  const char* path = std::getenv("LEAN_WIDE_COLLIDE_FIXTURE");
+  if (path == nullptr) {
+    GTEST_SKIP() << "set LEAN_WIDE_COLLIDE_FIXTURE to emit the Lean oracle";
+  }
+  std::ofstream out(path);
+  emit_design_cert(design, cert, out);
+
+  auto ordinal_of = [&](std::string_view name) -> size_t {
+    for (size_t i = 0; i < design.inputs.size(); ++i) {
+      if (design.inputs[i].name == name) {
+        return i;
+      }
+    }
+    ADD_FAILURE() << "no input " << name;
+    return 0;
+  };
+  struct In { const char* name; int value; };
+  auto inputs = [&](std::initializer_list<In> set) {
+    std::map<size_t, int> by;
+    for (const auto& v : set) {
+      by[ordinal_of(v.name)] = v.value;
+    }
+    std::ostringstream o;
+    for (size_t k = 0; k < design.inputs.size(); ++k) {
+      const auto it = by.find(k);
+      o << (k ? ", " : "") << "mk_bv " << design.inputs[k].width << " " << (it != by.end() ? it->second : 0);
+    }
+    return o.str();
+  };
+  const std::string fire  = "#[true]";
+  const std::string quiet = "#[false]";
+  const char*       st    = "(⟨#[mk_bv 8 99, mk_bv 8 99], "
+                            "#[fun a => if a = 0 then mk_bv 8 11 else if a = 1 then mk_bv 8 22 "
+                            "else if a = 2 then mk_bv 8 33 else mk_bv 8 44]⟩ : RuntimeState)";
+  // Both writes hit address 1; both reads read address 1.
+  const auto both = inputs({{"we0", 1}, {"weN", 1}, {"wa0", 1}, {"waN", 1},
+                            {"wd0", 55}, {"wdN", 77}, {"re0", 1}, {"re1", 1},
+                            {"ra0", 1}, {"ra1", 1}});
+
+  out << "\n-- WIDE MATRIX, HIGH CELL SET. 2 reads x 32 writes = 64 cells, two\n"
+      << "-- past the 62 the i64 window allowed. fwd = 2^63 + 1: read 1 <- write\n"
+      << "-- 31 (the HIGHEST cell) and read 0 <- write 0.\n"
+      << "-- The rows DIFFER, so the two read registers must disagree: 55 is\n"
+      << "-- write 0's datum and 77 is write 31's. A reader that truncated the\n"
+      << "-- matrix, or shared one row between reads, cannot produce this pair.\n";
+  out << "example : ((compileAndRun widefwd_designCert " << fire << " #[" << both << "] " << st
+      << ").nextState.flops[0]!) = mk_bv 8 55 := by native_decide\n";
+  out << "example : ((compileAndRun widefwd_designCert " << fire << " #[" << both << "] " << st
+      << ").nextState.flops[1]!) = mk_bv 8 77 := by native_decide\n";
+  out << "-- the LATER write still wins the committed image.\n";
+  out << "example : ((compileAndRun widefwd_designCert " << fire << " #[" << both << "] " << st
+      << ").nextState.mems[0]! (1 : Int)) = mk_bv 8 77 := by native_decide\n";
+  out << "-- the held-off middle writes commit nothing: address 3 is untouched.\n";
+  out << "example : ((compileAndRun widefwd_designCert " << fire << " #[" << both << "] " << st
+      << ").nextState.mems[0]! (3 : Int)) = mk_bv 8 44 := by native_decide\n";
+  out << "-- a QUIET clock commits nothing.\n";
+  for (int a = 0; a < 4; ++a) {
+    const int want = a == 0 ? 11 : (a == 1 ? 22 : (a == 2 ? 33 : 44));
+    out << "example : ((compileAndRun widefwd_designCert " << quiet << " #[" << both << "] " << st
+        << ").nextState.mems[0]! (" << a << " : Int)) = mk_bv 8 " << want << " := by native_decide\n";
+  }
+  out << "\n-- direct vs compiled, every tiny address.\n";
+  for (const auto& e : {fire, quiet}) {
+    out << "example : diffStep widefwd_designCert widefwd_residual " << e << " #[" << both << "] " << st
+        << " [0,1,2,3] = none := by native_decide\n";
+  }
+  ASSERT_TRUE(out.good());
+}
 }  // namespace
 }  // namespace lean_export

@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "graph_access.hpp"
 
+#include <limits>
 #include <sstream>
 
 namespace lean_pass {
@@ -205,10 +206,47 @@ int64_t const_pin_int_or(const Node_pin& pin, int64_t dflt) {
   return v.is_just_i64() ? v.to_just_i64() : dflt;
 }
 
+// The matrix no longer fits one integer, so render it: exact bits while they
+// are readable, and a shape-plus-census once they are not.  A diagnostic that
+// printed only a truncated low word would be worse than useless on exactly the
+// wide memories this representation exists for.
+std::string fwd_rows_text(const Memory_info& mi) {
+  size_t set = 0, cells = 0;
+  for (const auto& row : mi.fwd_rows) {
+    cells += row.size();
+    for (const auto bit : row) {
+      set += bit ? 1 : 0;
+    }
+  }
+  std::ostringstream oss;
+  if (cells == 0) {
+    return "none";
+  }
+  if (cells <= 64) {
+    for (size_t r = 0; r < mi.fwd_rows.size(); ++r) {
+      oss << (r ? "," : "");
+      for (const auto bit : mi.fwd_rows[r]) {
+        oss << (bit ? '1' : '0');
+      }
+    }
+    return oss.str();
+  }
+  oss << mi.fwd_rows.size() << "x" << (mi.fwd_rows.empty() ? 0 : mi.fwd_rows[0].size()) << " set=" << set;
+  for (size_t r = 0; r < mi.fwd_rows.size(); ++r) {
+    for (size_t w = 0; w < mi.fwd_rows[r].size(); ++w) {
+      if (mi.fwd_rows[r][w]) {
+        oss << " first=(" << r << "," << w << ")";
+        return oss.str();
+      }
+    }
+  }
+  return oss.str();
+}
+
 std::string memory_policy_summary(const Memory_info& mi) {
   std::ostringstream oss;
   oss << "memory node n_" << mi.nid << " bits=" << mi.bits << " size=" << mi.size << " addr_width=" << mi.addr_width
-      << " type=" << mi.type << " fwd=" << mi.fwd << " undef=" << (mi.undef ? 1 : 0) << " posclk=" << mi.posclk
+      << " type=" << mi.type << " fwd=" << fwd_rows_text(mi) << " undef=" << (mi.undef ? 1 : 0) << " posclk=" << mi.posclk
       << " wensize=" << mi.wensize << " rdports=" << mi.read_ports.size() << " wrports=" << mi.write_ports.size();
   return oss.str();
 }
@@ -217,6 +255,13 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   Memory_info mi;
   mi.node = node;
   mi.nid  = node_id(node);
+
+  // The `fwd` constant, kept WHOLE across the walk and shaped into rows after
+  // it.  `Dlop` is move-only and an Invalid one cannot be bit-tested, so the
+  // flag records whether a constant was actually seen -- an absent `fwd` pin
+  // means read-first, which is an all-clear matrix, not an unreadable one.
+  Dlop fwd_const;
+  bool fwd_seen = false;
 
   const auto stride = static_cast<size_t>(Ntype::Memory_port_stride);
   for (const auto& e : inp_edges_ordered(node)) {
@@ -250,16 +295,19 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
       mi.type = const_pin_int(ctx, e.driver, node, pname);
     } else if (pname == "fwd") {
       // NOT lenient: `fwd` IS load-bearing (memory_raw_read_port picks the
-      // pre- or post-write image from it).  A non-constant driver, or a matrix
-      // too wide for an i64, must be refused where it is observable -- see the
-      // post-loop check -- not defaulted to read-first.
+      // pre- or post-write image from it).  A non-constant driver must be
+      // refused where it is observable -- see the post-loop check -- not
+      // defaulted to read-first.
+      //
+      // The VALUE is kept WHOLE here and shaped into per-read rows after the
+      // walk: the row stride is the write-port count, and that is only known
+      // once every port pin has been seen.  No i64 window is taken, so a matrix
+      // of any width survives to be read bit by bit below.
       if (pin_is_const(e.driver)) {
-        const auto v = pin_const_value(e.driver);
-        mi.fwd_known = v.is_just_i64();
-        mi.fwd       = mi.fwd_known ? v.to_just_i64() : 0;
+        fwd_const = pin_const_value(e.driver);
+        fwd_seen  = true;
       } else {
         mi.fwd_known = false;
-        mi.fwd       = 0;
       }
     } else if (pname == "undef") {
       // ordering="none": the read-during-write window is UNDEFINED. The policy
@@ -462,6 +510,40 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
                 "the two DEFINED collision answers, so the certificate would assert a value in a window the emitted RTL "
                 "leaves x. Use ordering=\"old\"/\"fwd\"/\"program\" to export this design.");
   }
+  // Shape the forwarding matrix into PER-READ ROWS, now that both port counts
+  // are known.  This is where the i64 window used to refuse the design: a
+  // memory with 128 write ports and 2 read ports needs a 256-bit matrix, and
+  // `Dlop::bit_test` reads it exactly at any width.
+  {
+    const auto n_rd = mi.read_ports.size();
+    const auto n_wr = mi.write_ports.size();
+    mi.fwd_rows.assign(n_rd, std::vector<bool>(n_wr, false));
+    if (fwd_seen) {
+      // THE GUARD STAYS.  It used to keep `>> idx` inside the i64 window; the
+      // position now indexes a bit of an arbitrary-width constant, and
+      // `bit_test` takes an `int`, so the same guard keeps the product of two
+      // port counts from overflowing it.  Refusing beats wrapping.
+      const auto cells = static_cast<uint64_t>(n_rd) * static_cast<uint64_t>(n_wr);
+      if (cells > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+        fatal(ctx,
+              memory_policy_summary(mi) + ". the `fwd` matrix needs " + std::to_string(cells)
+                  + " bits (reads x writes), which overflows the bit position `Dlop::bit_test` accepts.");
+      }
+      for (size_t r = 0; r < n_rd; ++r) {
+        for (size_t w = 0; w < n_wr; ++w) {
+          const auto pos = static_cast<int>(r * n_wr + w);
+          // An UNKNOWN cell is not a policy.  Reading it as 0 would export a
+          // read-first proof about a window the design leaves undetermined, so
+          // it joins the non-constant case and is refused where observable.
+          if (fwd_const.unknown_bit_test(pos)) {
+            mi.fwd_known = false;
+          }
+          mi.fwd_rows[r][w] = fwd_const.bit_test(pos);
+        }
+      }
+    }
+  }
+
   // The read-during-write policy is only OBSERVABLE when some read can collide
   // with some write.  Where it is observable it must be known exactly: guessing
   // read-first would export a proof about a different design.
@@ -469,14 +551,9 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     if (!mi.fwd_known) {
       fatal(ctx,
             memory_policy_summary(mi)
-                + ". the `fwd` read-during-write matrix is not a readable constant, and this memory has both read and write "
-                  "ports, so the policy is observable. Refusing rather than assuming read-first.");
-    }
-    const auto cells = static_cast<uint64_t>(mi.read_ports.size()) * static_cast<uint64_t>(mi.write_ports.size());
-    if (cells > 62) {
-      fatal(ctx,
-            memory_policy_summary(mi) + ". the `fwd` matrix needs " + std::to_string(cells)
-                + " bits (reads x writes), which does not fit the i64 window used to read it.");
+                + ". the `fwd` read-during-write matrix is not a readable constant (non-constant driver, or an unknown "
+                  "cell), and this memory has both read and write ports, so the policy is observable. Refusing rather "
+                  "than assuming read-first.");
     }
   }
   mi.sync = (mi.type == 1);
@@ -519,10 +596,14 @@ size_t memory_read_ordinal(const Memory_info& mi, size_t port_idx) {
 }
 
 bool memory_fwd_bit(const Memory_info& mi, size_t r_ord, size_t w_ord) {
-  const auto idx = r_ord * mi.write_ports.size() + w_ord;
-  if (idx >= 63) {
-    return false;  // unreachable: parse refuses a matrix this wide
+  // THE GUARD STAYS, in the form the representation now needs.  It used to keep
+  // `>> idx` inside the i64 window; the rows are arbitrary width, so it now
+  // keeps an out-of-range ordinal from indexing past a row.  Out of range reads
+  // as read-first, which is the conservative answer: it never invents a forward
+  // that the design does not ask for.
+  if (r_ord >= mi.fwd_rows.size() || w_ord >= mi.fwd_rows[r_ord].size()) {
+    return false;
   }
-  return ((mi.fwd >> idx) & 1) != 0;
+  return mi.fwd_rows[r_ord][w_ord];
 }
 }  // namespace lean_pass

@@ -12249,3 +12249,95 @@ the diagnostics were added to the driver and one fresh trace run was taken.
 **BLOCKED → YES.**  Counts **13 YES / 11 NO / 36 BLOCKED → 14 YES / 11 NO / 35
 BLOCKED**; FP **3 YES / 9 BLOCKED → 4 YES / 8 BLOCKED**.
 `B11/Futamura projection` is mechanically the only changed cell.
+
+## §63.83 — B03's forwarding matrix, read at arbitrary width
+
+The `fwd` read-during-write matrix was read through an i64 window, so a memory
+with more than 62 (read x write) cells was refused outright:
+
+```
+memory node n_50820 bits=27 size=128 addr_width=7 type=0 fwd=0 undef=0
+posclk=1 wensize=27 rdports=2 wrports=128.
+the `fwd` matrix needs 256 bits (reads x writes), which does not fit the i64
+window used to read it.
+```
+
+Note `fwd=0`.  The matrix this design actually carries is **all zeros** — every
+read is read-first — and it was still refused, purely on width.  Which is also
+the trap in testing the fix: a 256-bit matrix whose value is zero exercises no
+high bit at all, and would pass against a reader that silently truncates.
+
+### 1. The native reader, reused rather than reinvented
+
+`cgen_verilog` and `cgen_sim` already read this pin per cell with
+`Dlop::bit_test`, which is arbitrary precision — `cgen_sim` says so in as many
+words ("Held as the const itself — Dlop::bit_test is arbitrary precision, and
+n_rd*n_wr overflows an int on wide shapes").  `pass.lean` now reads it the same
+way, and holds the result as **per-read rows**:
+
+* `Memory_info::fwd_rows` replaces `int64_t fwd`; the constant is kept whole
+  across the pin walk and shaped into rows afterwards, because the row stride is
+  the write-port count and that is not known until every port pin has been seen.
+* `DesignScan::Memory::fwd_rows` carries plain `bool` rows, keeping that struct
+  free of `Dlop` and so free of HHDS — the portability contract stated in its
+  own header.
+* An **UNKNOWN cell** now joins the non-constant case and is refused where the
+  policy is observable.  The old `is_just_i64()` test excluded unknowns only as
+  a side effect of the i64 window; dropping the window without this would have
+  started reading `x` as read-first.
+
+**The guard was kept, in the form the representation needs.**  It used to hold
+`>> idx` inside the i64 window.  `memory_fwd_bit` still bounds the ordinals
+against the row, and the shaping step still refuses a cell count that would
+overflow the `int` position `bit_test` accepts.  Out of range reads as
+read-first, which never invents a forward the design did not ask for.
+
+`memory_lowering` consumed the matrix as `(uint64_t)m.fwd >> (r * n_wr + w)`
+with **no guard at all** — undefined behaviour the moment the matrix passed 63
+cells, which is exactly the shape that got there.  It is a row lookup now.
+`forwarded` is still built in ascending write ordinal, so the chain still lets
+the LATER write win a collision, and per-lane priority still rides on the
+`MemWriteBE` enable.
+
+### 2. The oracle, extended where it was blind
+
+`TwoWriteTwoReadCollisionValueOracle` is a 2x2 matrix — it fits every window and
+cannot see this.  `WideMatrixHighBitForwardingValueOracle` is 2 reads x 32
+writes = **64 cells, two past the old limit**, with its **highest cell set**
+(bit 63: read 1 <- write 31) and read 0 <- write 0.  The value is 2^63 + 1,
+which is not an int64 at all, so it is built with `Dlop::from_binary`.
+
+The two rows DIFFER, and both reads read the address both writes target, so the
+read registers must disagree — 55 is write 0's datum, 77 is write 31's.  A
+reader that truncated the matrix, or shared one row between reads, cannot
+produce that pair.  `collide_oracle.sh` drives both fixtures through the same
+gates and adds two: the two read registers must carry DISTINCT expectations,
+and the wide fixture must really be wide (its write count is read back off the
+emitted certificate, not assumed).
+
+```
+[collide-oracle] wide fixture: 34 write op(s), top cell at bit 63
+[collide-oracle] CollideOracle: 18 case(s) decided
+[collide-oracle] WideCollideOracle: 10 case(s) decided
+[collide-oracle] PASS: all 28 case(s) decided across 2 fixture(s)
+```
+
+Decided by `native_decide` on the formal/lean 4.31.0 pin, no `sorry`.
+
+### 3. B03 moved, and where it now stands
+
+Against the real design the refusal is gone, and B03 reaches **DCERT2 emission**
+for the first time: `icache_top.dcert`, 956571 bytes, exit 0, alongside the
+model and the IO sidecar.  `single_edge` already passed (exit 0) after the
+memory-slot lowering, so the matrix was the last refusal in front of emission.
+
+One honest caveat, and it is not a gate I can wave through: emission needed
+`formal.lean.max_width` above the default 1024, because a memory data node in
+this design is **8224 bits** wide.  That option is a declared resource guard on
+the per-node `Bits` attribute, with an `unlimited` setting, not a soundness
+check — but it is a knob the default does not turn, so B03's emission is
+conditional on it and I have not changed the default.
+
+**B03's FP cell stays BLOCKED.**  Emission is necessary and not sufficient: the
+memory route still has to admit, specialize, check and execute against a
+reference the way B11's did.  The matrix limit is cleared; the cell is not.

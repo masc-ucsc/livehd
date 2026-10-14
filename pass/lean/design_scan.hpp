@@ -121,7 +121,14 @@ struct Memory {
   uint32_t                 addr_width = 1;
   uint64_t                 size       = 0;
   uint32_t                 wensize    = 1;
-  int64_t                  type = 0, fwd = 0, posclk = 1;
+  int64_t                  type = 0, posclk = 1;
+  // Read-during-write forwarding, as PER-READ ROWS: `fwd_rows[r][w]` means read
+  // ordinal r sees write ordinal w's new data on a same-address collision.
+  // Rows rather than one integer because the matrix is reads x writes, and a
+  // wide memory's does not fit any fixed-width window.  Plain `bool` rows keep
+  // this struct free of `Dlop` and so free of HHDS, which is the contract
+  // directly below.
+  std::vector<std::vector<bool>> fwd_rows;
   // The ONE domain this memory commits on. `DesignCert` carries a single
   // `MemoryDesc.clock`, which is a CERTIFICATE RESTRICTION, not a hardware
   // guarantee: cells have a per-port `clock_pin` and one global `posclk`, and a

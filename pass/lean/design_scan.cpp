@@ -686,7 +686,7 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     m.size         = info.size;
     m.wensize      = info.wensize;
     m.type         = info.type;
-    m.fwd          = info.fwd;
+    m.fwd_rows     = info.fwd_rows;
     m.posclk       = info.posclk;
     m.sync         = info.sync;
     m.is_rom       = info.is_rom;

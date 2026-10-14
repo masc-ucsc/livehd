@@ -42,7 +42,12 @@ void lower_memory(CertificateBuilder& b, const Memory& m) {
     const auto&         p = m.ports.at(m.read_ports[r]);
     std::vector<size_t> forwarded;
     for (size_t w = 0; w < m.write_ports.size(); ++w) {
-      if ((static_cast<uint64_t>(m.fwd) >> (r * m.write_ports.size() + w)) & 1ULL) {
+      // Per-read row lookup.  This was a `>> (r * n_wr + w)` on a uint64, which
+      // was undefined once the matrix passed 63 cells -- the very shape a wide
+      // memory has.  Out-of-range reads as read-first and never invents a
+      // forward; `forwarded` stays in ascending write-ordinal order, so the
+      // chain below still lets the LATER write win a collision.
+      if (r < m.fwd_rows.size() && w < m.fwd_rows[r].size() && m.fwd_rows[r][w]) {
         forwarded.push_back(w);
       }
     }

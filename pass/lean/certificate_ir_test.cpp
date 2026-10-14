@@ -203,7 +203,7 @@ TEST(CertificateIR, ReadForwardingSelectsWriteChainAndByteLanes) {
   auto old      = build_certificate(d, {});
   EXPECT_EQ(old.nodes[2].op.kind, Operation::MemRead);
   EXPECT_EQ(old.nodes[2].deps[0], old.sources[0].id);
-  m.fwd          = 1;
+  m.fwd_rows     = {{true}};  // read 0 forwards write 0
   auto forwarded = build_certificate(d, {});
   EXPECT_EQ(forwarded.nodes[3].op.kind, Operation::MemWriteBE);
   EXPECT_EQ(forwarded.nodes[3].op.parameter, 4);
