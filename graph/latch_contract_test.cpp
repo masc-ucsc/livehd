@@ -271,8 +271,9 @@ TEST(LatchContract, ClockNameHeuristicBoundaries) {
 // SHUT. The two designs below differ by exactly the arm mapping, and they must
 // get opposite answers -- a check that compares only the selector's ROOT
 // against the window's root accepts both, which is unsound: it hands back `d`
-// for a latch that really passes X while open. (Measured: a root-only check
-// stopped lgcheck_memory_poweron_smoke from REFUTING its planted break.)
+// for a latch that really passes X while open, a defined value the design never
+// passes. The open-phase case below is the counterexample, and it is what fails
+// against a root-only check.
 namespace {
 // enable = !clk (open while clk == 0); din = Mux(clk, arm0, arm1).
 // `x_on_true_arm` puts the don't-care on the sel==1 arm, i.e. on clk == 1 --
@@ -289,6 +290,7 @@ hhds::Node_class build_xhold(hhds::Graph& g, bool x_on_true_arm, hhds::Pin_class
   g.get_input_pin("clk").connect_sink(gu::setup_sink_pid(mux, 0));  // selector
   auto xk = gu::create_const(g, *Dlop::from_pyrope("0ub?"));
   auto dv = g.get_input_pin("d");
+  gu::set_ubits(dv, 1);  // a graph-IO pin carries no width attr until a pass stamps one
   // pid 1 is the sel==0 arm, pid 2 the sel==1 arm (cgen: `if (sel) a2 else a1`).
   (x_on_true_arm ? dv : xk).connect_sink(gu::setup_sink_pid(mux, 1));
   (x_on_true_arm ? xk : dv).connect_sink(gu::setup_sink_pid(mux, 2));
@@ -335,3 +337,77 @@ TEST(LatchContract, DontCareOnTheOpenPhaseIsNotAHoldArm) {
       << "a don't-care reached while the latch is OPEN is not a hold arm; peeling it "
          "hands back a value the latch never passes";
 }
+
+// The REAL shape is wrapped: the yosys reader hands the latch
+// `Sext(Get_mask(Mux(...), [0,1)))`, not a bare mux. Both entry points have to
+// walk that, and the don't-care rule has to survive it. The hierarchical
+// overload once had neither -- it tested only `din.get_master_node()` -- so a
+// hierarchical caller kept reading the clock-muxed value.
+namespace {
+hhds::Node_class build_xhold_wrapped(hhds::Graph& g, bool x_on_true_arm, hhds::Pin_class& d_out) {
+  auto notn = gu::create_typed_node(g, Ntype_op::Not);
+  g.get_input_pin("clk").connect_sink(notn.create_sink_pin(0));
+  auto nclk = notn.create_driver_pin(0);
+  gu::set_bits(nclk, 1);
+  gu::set_unsign(nclk);
+
+  auto l   = add_latch(g, "lw", nclk, /*active_low=*/false);
+  auto mux = gu::create_typed_node(g, Ntype_op::Mux);
+  g.get_input_pin("clk").connect_sink(gu::setup_sink_pid(mux, 0));
+  auto xk = gu::create_const(g, *Dlop::from_pyrope("0ub?"));
+  auto dv = g.get_input_pin("d");
+  gu::set_ubits(dv, 1);  // a graph-IO pin carries no width attr until a pass stamps one
+  (x_on_true_arm ? dv : xk).connect_sink(gu::setup_sink_pid(mux, 1));
+  (x_on_true_arm ? xk : dv).connect_sink(gu::setup_sink_pid(mux, 2));
+  auto mq = mux.create_driver_pin(0);
+  gu::set_bits(mq, 1);
+
+  // The wrapper the reader actually emits: a one-bit window starting at bit 0.
+  auto gm = gu::create_typed_node(g, Ntype_op::Get_mask, 1);
+  gu::connect_mask_operands(gm, mq, 0, 1);
+  auto gq = gm.create_driver_pin(0);
+  gu::set_ubits(gq, 1);
+  gq.connect_sink(gu::setup_sink_by_name(l, "din"));
+  d_out = dv;
+  return l;
+}
+}  // namespace
+
+TEST(LatchContract, WrappedDontCareOnTheClosedPhaseIsStillAHoldArm) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_lcontract_xwrap_ok");
+  auto  gio = lib.create_io("xwrap_ok");
+  gio->add_input("clk", 1);
+  gio->add_input("d", 2);
+  gio->set_bits("d", 1);
+  auto g = gio->create_graph();
+
+  hhds::Pin_class dv;
+  auto            l   = build_xhold_wrapped(*g, /*x_on_true_arm=*/true, dv);
+  const auto      arm = livehd::latch_contract::latch_transparent_arm(l);
+  ASSERT_FALSE(arm.is_invalid());
+  EXPECT_EQ(arm.get_class_index(), dv.get_class_index())
+      << "a Get_mask between the latch and its hold mux is identity for a one-bit window at bit 0";
+}
+
+TEST(LatchContract, WrappedDontCareOnTheOpenPhaseIsStillRefused) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_lcontract_xwrap_bad");
+  auto  gio = lib.create_io("xwrap_bad");
+  gio->add_input("clk", 1);
+  gio->add_input("d", 2);
+  gio->set_bits("d", 1);
+  auto g = gio->create_graph();
+
+  hhds::Pin_class dv;
+  auto            l   = build_xhold_wrapped(*g, /*x_on_true_arm=*/false, dv);
+  const auto      arm = livehd::latch_contract::latch_transparent_arm(l);
+  EXPECT_NE(arm.get_class_index(), dv.get_class_index())
+      << "the wrapper must not launder an open-phase don't-care into a hold arm";
+}
+
+// NOTE on the window-offset guard. `latch_transparent_arm` also refuses a
+// Get_mask whose window does not start at bit 0, because such a window answers
+// with a different bit. There is deliberately NO control for it here: in every
+// shape that reaches it the mux is wider than one bit, so the arm-width rule
+// refuses first and a test would pass without ever exercising the offset. A
+// control that cannot fail for its stated reason is worse than none -- the L1
+// negative in single_edge_icg_test sat broken for exactly that reason.

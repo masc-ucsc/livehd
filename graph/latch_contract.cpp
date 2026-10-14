@@ -570,16 +570,79 @@ std::string Commit_class::net_key() const {
 // latch is shut. Comparing the selector's ROOT against the window's root is not
 // enough, and is actively unsound: with enable `!clk`, selector `clk` and arms
 // {X, d}, the X is selected while the latch is OPEN -- so the latch passes X --
-// yet a root-only test accepts and hands back `d`. Measured, a root-only test
-// regressed two soundness negatives: lgcheck_memory_poweron_smoke stopped
-// REFUTING its planted break (returned 2, inconclusive, expected 1) and
-// yosys_clock_domain_test lost its whole-miter fallback.
+// yet a root-only test accepts and hands back `d`, a defined value the design
+// never passes. `DontCareOnTheOpenPhaseIsNotAHoldArm` in latch_contract_test is
+// exactly that design, and it fails against the root-only form.
 //
 // So the polarity and the ARM MAPPING both have to agree. `x_index` is 0 for
 // the sel-FALSE arm (sink pid 1) and 1 for the sel-TRUE arm (pid 2), which is
 // cgen's own two-arm mapping (`if (sel) arm1 else arm0`, cgen_verilog.cpp
 // process_mux). Anything this cannot decide returns false and the mux keeps its
 // value semantics.
+// The hold arm of a two-arm mux, resolved ONCE for both overloads.
+//
+// `q_arm` is the latch's own Q feedback (tolg's spelling); `x_index`/`x_drv`
+// describe a single don't-care arm (the yosys reader's spelling), and `other`
+// is the value arm that would be peeled to. Everything here fails CLOSED: a mux
+// that is not exactly two arms, an arm reached by more than one driver, a
+// selector reached by anything but exactly one driver, or more than one
+// don't-care, all leave `ok` false and the mux keeps its value semantics.
+//
+// The two overloads had already drifted apart once -- the don't-care spelling
+// was taught to the flat one alone -- so they share this now rather than
+// carrying two subtly different loops.
+template <typename Pin>
+struct Mux_arms {
+  bool ok        = false;  // exactly two arms, each with exactly one driver
+  bool has_q_arm = false;
+  int  n_arms    = 0;
+  int  x_index   = -1;  // -1 none, -2 ambiguous; else 0 = sel-FALSE arm, 1 = sel-TRUE
+  Pin  sel;
+  Pin  x_drv;
+  Pin  other;
+};
+
+template <typename Node, typename Pin>
+[[nodiscard]] Mux_arms<Pin> classify_mux_arms(const Node& mux, const Pin& q) {
+  Mux_arms<Pin> r;
+  int           n_sel_drv = 0;
+  for (auto sink : mux.inp_sorted_pins()) {  // read-only walk
+    const auto pid = static_cast<int>(sink.get_port_id());
+    int        n_drv = 0;
+    Pin        only;
+    for (auto driver : sink.get_driver_pins()) {
+      ++n_drv;
+      if (n_drv == 1) {
+        only = driver;
+      }
+    }
+    if (pid == 0) {
+      r.sel     = only;
+      n_sel_drv = n_drv;
+      continue;
+    }
+    ++r.n_arms;
+    if (n_drv != 1 || only.is_invalid()) {
+      r.x_index = -2;  // a multiply-driven or empty arm is not a single value
+      continue;
+    }
+    if (only == q) {
+      r.has_q_arm = true;
+      continue;
+    }
+    if (only.is_const() && gu::const_of(only).has_unknowns()) {
+      r.x_index = (r.x_index == -1) ? (pid - 1) : -2;  // pid1 -> 0, pid2 -> 1
+      r.x_drv   = only;
+      continue;
+    }
+    if (r.other.is_invalid()) {
+      r.other = only;
+    }
+  }
+  r.ok = r.n_arms == 2 && n_sel_drv == 1 && !r.sel.is_invalid();
+  return r;
+}
+
 template <typename Node, typename Pin>
 [[nodiscard]] bool x_arm_is_the_hold_arm(const Node& latch, const Pin& sel, int x_index) {
   const auto win = sink_driver_hier(latch, "enable");
@@ -666,42 +729,14 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
       // don't-care, which leaves every flop behind the gate emitting `q = x`.
       //
       // The X spelling is only accepted when the arm is PROVABLY the closed
-      // phase's (x_arm_is_the_hold_arm); a don't-care reached while the latch
-      // is OPEN is a value the latch really passes, and a mapped netlist is
-      // full of ordinary don't-care muxes that must keep their semantics.
-      bool            has_q_arm = false;
-      hhds::Pin_class other;
-      const auto      mux_sel  = gu::get_driver_of_sink_name(mux, "s");
-      int             n_arms   = 0;
-      int             x_index  = -1;
-      hhds::Pin_class x_drv;
-      for (auto sink : mux.inp_sorted_pins()) {  // read-only walk
-        if (sink.get_port_id() == 0) {
-          continue;  // the selector is the gate, not an arm
-        }
-        ++n_arms;
-        auto drv = sink.get_driver_pin();
-        if (!drv.is_invalid() && drv.get_class_index() == q.get_class_index()) {
-          has_q_arm = true;
-          continue;
-        }
-        if (!drv.is_invalid() && drv.is_const() && gu::const_of(drv).has_unknowns()) {
-          if (x_index >= 0) {
-            x_index = -2;  // more than one don't-care arm: nothing to peel to
-          } else {
-            x_index = static_cast<int>(sink.get_port_id()) - 1;  // pid1 -> 0, pid2 -> 1
-            x_drv   = drv;
-          }
-          continue;
-        }
-        if (other.is_invalid()) {
-          other = drv;
-        }
-      }
-      // Exactly two arms, exactly one of them the don't-care, and that one on
-      // the CLOSED phase.
-      if (!has_q_arm && n_arms == 2 && x_index >= 0 && !x_drv.is_invalid()
-          && x_arm_is_the_hold_arm(n, mux_sel, x_index)) {
+      // phase's; a don't-care reached while the latch is OPEN is a value the
+      // latch really passes, and a mapped netlist is full of ordinary
+      // don't-care muxes that must keep their semantics.
+      const auto      arms      = classify_mux_arms(mux, q);
+      bool            has_q_arm = arms.has_q_arm;
+      hhds::Pin_class other     = arms.other;
+      if (!has_q_arm && arms.ok && arms.x_index >= 0 && !arms.x_drv.is_invalid()
+          && x_arm_is_the_hold_arm(n, arms.sel, arms.x_index)) {
         has_q_arm = true;
       }
       if (has_q_arm) {
@@ -732,53 +767,63 @@ hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n) {
     return {};
   }
   if (!din.is_const() && !gu::is_graph_input_pin(din)) {
-    auto mux = din.get_master_node();
-    if (gu::type_op_of(mux) == Ntype_op::Mux) {
-      bool                 has_q_arm = false;
-      hhds::Occurrence_pin other;
-      // Same two-level walk as the flat overload above; see sink_driver_hier.
-      // The port-0 skip stays on the OUTER loop because it is a property of the
-      // SINK -- every edge of a pin shares that pin's port -- so skipping the
-      // pin drops exactly the edges the per-edge `continue` did.
-      //
-      // The DON'T-CARE hold arm is recognized here too, under the same proof.
-      // These two overloads answer the same question and had drifted apart once
-      // already -- the X spelling was taught to the flat one alone, so a
-      // hierarchical caller kept reading the clock-muxed value.
-      const auto           mux_sel = gu::get_driver_of_sink_name(mux, "s");
-      int                  n_arms  = 0;
-      int                  x_index = -1;
-      hhds::Occurrence_pin x_drv;
-      for (auto sink : mux.inp_sorted_pins()) {  // read-only walk
-        if (sink.get_port_id() == 0) {
-          continue;  // the selector is the gate, not an arm
-        }
-        // PLURAL: an arm with more than one driver contributed one edge each,
-        // and `other` must still take the first of them. An arm reached by more
-        // than one driver is not a single value, so it is never a hold arm.
-        int n_drv = 0;
-        for (auto driver : sink.get_driver_pins()) {
-          ++n_drv;
-          if (!driver.is_invalid() && driver == q) {
-            has_q_arm = true;
-          } else if (!driver.is_invalid() && driver.is_const() && gu::const_of(driver).has_unknowns() && n_drv == 1) {
-            if (x_index >= 0) {
-              x_index = -2;
-            } else {
-              x_index = static_cast<int>(sink.get_port_id()) - 1;
-              x_drv   = driver;
-            }
-          } else if (other.is_invalid()) {
-            other = driver;
+    // Look THROUGH identity wiring to find the hold mux. The yosys reader does
+    // not hand the latch a bare mux: CORE-ET's prim_clk_gate arrives as
+    // `Sext(Get_mask(Mux(Ror(clk), 1'sb?, en|scan), [0,1)))`, and testing only
+    // din's immediate master missed it entirely. resolve_phase already treats
+    // Get_mask and Sext as identity wrappers for exactly this reason; this is
+    // the same unwrap, bounded, and it stops at anything else.
+    //
+    // ONE BIT ONLY, and that restriction is not decoration. A Sext or Get_mask
+    // on a WIDER latch is doing real width/sign work, and returning the value
+    // from underneath it silently drops that: peeling unconditionally made
+    // `abc_latch_gated` LEC-refute with `qg(ref=15 impl=14)` -- a lost top bit
+    // on a 4-bit data latch -- and broke lib_cell_prep and the usyn latch
+    // tests the same way. A gate ENABLE is one bit, and at one bit both
+    // wrappers really are identity, so the unwrap is confined to exactly the
+    // case it was added for.
+    auto probe = din;
+    const bool one_bit_window = gu::bits_of(din) == 1;
+    if (one_bit_window) {
+      for (int hop = 0; hop < 8; ++hop) {
+        const auto pn = probe.get_master_node();
+        const auto po = gu::type_op_of(pn);
+        if (po == Ntype_op::Get_mask) {
+          // Only a window that STARTS at bit 0: the question is what drives the
+          // latch's single bit, and `Get_mask(x,[5,6))` answers it with bit 5.
+          const auto rng = gu::bit_range(pn);
+          if (!rng || rng->first != 0) {
+            break;
           }
+        } else if (po != Ntype_op::Sext) {
+          break;  // Sext preserves the low bits, so bit 0 survives it
         }
-        ++n_arms;
+        const auto inner = gu::first_value_driver(pn);
+        if (inner.is_invalid() || inner.is_const() || gu::is_graph_input_pin(inner)) {
+          break;
+        }
+        probe = inner;
       }
-      if (!has_q_arm && n_arms == 2 && x_index >= 0 && !x_drv.is_invalid()
-          && x_arm_is_the_hold_arm(n, mux_sel, x_index)) {
+    }
+    auto mux = probe.get_master_node();
+    if (gu::type_op_of(mux) == Ntype_op::Mux) {
+      // IDENTICAL to the flat overload above, through the same wrapper walk
+      // and the same shared classifier. These two answer the same question and
+      // had drifted apart once already, so neither the wrapper walk nor the
+      // don't-care spelling lives in only one of them any more.
+      const auto           arms      = classify_mux_arms(mux, q);
+      bool                 has_q_arm = arms.has_q_arm;
+      hhds::Occurrence_pin other     = arms.other;
+      if (!has_q_arm && arms.ok && arms.x_index >= 0 && !arms.x_drv.is_invalid()
+          && x_arm_is_the_hold_arm(n, arms.sel, arms.x_index)) {
         has_q_arm = true;
       }
       if (has_q_arm) {
+        // Same width rule as the flat overload: when the mux was reached
+        // THROUGH wrappers the arm replaces a 1-bit din, so it must be 1 bit.
+        if (probe.get_class_index() != din.get_class_index() && !other.is_invalid() && gu::bits_of(other) != 1) {
+          return din;
+        }
         return other;
       }
     }

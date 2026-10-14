@@ -12633,13 +12633,31 @@ the DIRECT-SLANG shape.
 
 ### 2. Two unsound attempts, and what caught each
 
-| attempt | caught by |
+| attempt | what actually established it was wrong |
 |---|---|
-| unwrap `Sext`/`Get_mask` unconditionally | `abc_latch_gated` LEC-refuted `qg(ref=15 impl=14)`: dropped real width work on a 4-bit data latch |
-| accept ANY don't-care arm as a hold arm | `lgcheck_memory_poweron_smoke` stopped REFUTING its planted break ("broken returned 2; expected 1") and `yosys_clock_domain_test` failed |
+| unwrap `Sext`/`Get_mask` unconditionally | Nothing measured. It drops real width work on a wider latch, which is an argument, not an observation; the run that refuted `abc_latch_gated` at `qg(ref=15 impl=14)` had the hold path in the tree too, and isolating ONLY the hold path made it pass. So that refutation is attributable to the hold path and NOT to the unwrap. The width restriction stands on its own reasoning. |
+| accept ANY don't-care arm as a hold arm | `DontCareOnTheOpenPhaseIsNotAHoldArm` — a deterministic unit counterexample. |
 
-The second is the important one: comparing only the selector's ROOT against the
-window's root is not a proof. With enable `!clk`, selector `clk` and arms
+**CORRECTION, and it matters.** An earlier draft of this section said that
+accepting any don't-care arm "stopped `lgcheck_memory_poweron_smoke` REFUTING
+its planted break" and failed `yosys_clock_domain_test`. **That causal claim is
+withdrawn.** Both retained logs
+(`master_rebase/audits/b01_instruction145_progress_20261014_0356.json`) show a
+BUDGET TIMEOUT, not a false verdict:
+
+```
+lgcheck_memory_poweron_smoke: starting equivalence checks (shared budget 3s)
+                              TIMEOUT: bounded miter exhausted the shared budget (3s)
+                              INCONCLUSIVE ... FAIL: broken returned 2; expected 1
+yosys_clock_domain_test:      exhausted its 8s budget the same way
+```
+
+Neither returned a false PROVEN. Both pass when re-run unloaded — the machine
+was at load average ~61 from other sessions. They are timing-sensitive under
+load and say nothing about this rewrite.
+
+What DOES establish the polarity bug is the paired control, and only that:
+comparing only the selector's ROOT against the window's root is not a proof. With enable `!clk`, selector `clk` and arms
 `{X, d}`, the don't-care is selected while the latch is **OPEN** -- the latch
 really passes X -- yet a root-only test accepts and hands back `d`.
 
@@ -12658,16 +12676,29 @@ plus exactly two arms, exactly one don't-care, and a single driver on it.
 `pid1`/`pid2` is cgen's own two-arm mapping (`if (sel) arm1 else arm0`).
 Anything undecidable returns false and the mux keeps its value semantics.
 
-Applied to **both** overloads. The flat and hierarchical copies had already
-drifted -- the X spelling was taught to the flat one alone, so a hierarchical
-caller kept reading the clock-muxed value.
+Applied to **both** overloads, which now share ONE arm classifier
+(`classify_mux_arms`) and ONE wrapper walk rather than two subtly different
+loops. They had drifted twice: the don't-care spelling was taught to the flat
+overload alone, and then the wrapper walk was too, so a hierarchical caller kept
+reading the clock-muxed value even after the first repair. The classifier also
+fails closed on the shapes the old hierarchical loop accepted loosely -- a
+selector or arm reached by more than one driver, or more than one don't-care,
+now leaves the mux with its value semantics instead of being peeled.
 
 ### 4. The gates, and what each would catch
 
-* `graph/latch_contract_test`: `DontCareOnTheClosedPhaseIsAHoldArm` /
-  `DontCareOnTheOpenPhaseIsNotAHoldArm` -- the same design twice, differing only
-  in which arm holds the X. Reverting to the root-only form fails exactly the
-  open-phase negative.
+* `graph/latch_contract_test`: four controls -- `DontCareOnTheClosedPhaseIsAHoldArm`
+  / `DontCareOnTheOpenPhaseIsNotAHoldArm` for the bare mux, and
+  `WrappedDontCareOnTheClosedPhaseIsStillAHoldArm` /
+  `WrappedDontCareOnTheOpenPhaseIsStillRefused` for the REAL shape, where the
+  mux sits under the `Get_mask` the reader emits. Each pair is the same design
+  twice, differing only in which arm holds the don't-care. Reverting to the
+  root-only form fails exactly the two open-phase negatives.
+* There is deliberately NO control for the window-OFFSET guard. One was written
+  and removed: in every shape that reaches it the mux is wider than one bit, so
+  the arm-width rule refuses first and the test passed without exercising the
+  offset at all. A control that cannot fail for its stated reason is worse than
+  none, which is what the L1 negative had been.
 * `single_edge_icg_test`: the CORE-ET spelling now runs its ORIGINAL RTL against
   the normalized output (P=1, same clock), `en`/`scan` moving in the low phase
   and `en` also moving MID-HIGH where the real latch is shut. 30 checks, with a
@@ -12692,9 +12723,10 @@ caller kept reading the clock-muxed value.
   is false for this artifact. **So the 49 mismatches do not implicate the hold
   lowering**, and that attribution is withdrawn. The fix is to start the
   normalized oscillator 5 ns late so its posedges pair with source rise/fall.
-* **The `qg(ref=15 impl=14)` isolation proves less than claimed.** Disabling the
-  hold path made those two tests pass, but the unwrap and X-arm changes were in
-  the tree throughout, so that experiment neither implicates nor clears them.
+* **The `qg(ref=15 impl=14)` isolation says one thing only:** disabling the hold
+  path made those two tests pass, so the hold path caused them. It does not
+  implicate the unwrap or the X-arm change, and this section no longer cites it
+  against either.
 * **`icg_hold` is retained, not shipped**
   (`generated/master_port/b01_extsim_20261014/icg_hold_ATTEMPT.patch`). Beyond
   the harness error it has a real source-level bug: `old_en` -- the consumer's
