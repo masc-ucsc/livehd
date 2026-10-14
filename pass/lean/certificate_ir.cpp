@@ -48,7 +48,9 @@ uint32_t detail::CertificateBuilder::dep(const PinRef& pin, uint32_t width) {
   if (pin.kind == PinKind::Memory) {
     const auto key = (static_cast<uint64_t>(pin.id) << 32) | pin.port;
     if (!memory_reads.contains(key)) {
-      fail("memory read pin has no certificate id");
+      fail("memory read pin has no certificate id (memory n_" + std::to_string(pin.id) + " read port " + std::to_string(pin.port)
+           + ") referenced while lowering " + (lowering_context.empty() ? std::string("<unknown>") : lowering_context)
+           + ": the memory was not lowered before a consumer referenced it");
     }
     return memory_reads.at(key);
   }
@@ -93,11 +95,15 @@ uint32_t detail::CertificateBuilder::emit(Op op, uint32_t width, std::vector<uin
 
 CertificateIR build_certificate(const DesignScan& design, const CertificateOptions&) {
   detail::CertificateBuilder b(design);
+  std::vector<uint32_t>      lowered_memories;
   for (const auto& n : design.nodes) {
     if (n.op == ScanOp::Memory) {
-      detail::lower_memory(b, design.memories.at(n.id));
+      b.lowering_context = "memory n_" + std::to_string(n.id) + " (read side)";
+      detail::lower_memory_reads(b, design.memories.at(n.id));
+      lowered_memories.push_back(n.id);
       continue;
     }
+    b.lowering_context = "node n_" + std::to_string(n.id);
     CertNode c;
     c.id     = n.id;
     c.width  = n.width;
@@ -293,6 +299,14 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
     }
     b.result.nodes.push_back(std::move(c));
   }
+  // The WRITE side, after every node -- see memory_lowering.hpp. A next-state
+  // cone may name any node in the design, including another memory's read, so
+  // it cannot be scheduled at the Memory node's own place in the order.
+  for (const auto id : lowered_memories) {
+    b.lowering_context = "memory n_" + std::to_string(id) + " (write side)";
+    detail::lower_memory_writes(b, design.memories.at(id));
+  }
+  b.lowering_context.clear();
   for (const auto& o : design.outputs) {
     if (o.driver) {
       b.result.outputs.push_back({b.dep(*o.driver, o.width), o.width});

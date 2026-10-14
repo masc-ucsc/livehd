@@ -8,6 +8,7 @@
 
 #include "graph/latch_contract.hpp"
 #include "graph_access.hpp"
+#include "port_reach.hpp"
 
 namespace lean_export {
 namespace {
@@ -875,8 +876,44 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
       }
     }
   }
-  std::set<uint32_t>                 reached, active;
-  std::vector<std::pair<Node, bool>> stack;
+  // A MEMORY IS NOT ONE COMBINATIONAL VERTEX.
+  //
+  // This walk used to join every memory INPUT to every memory OUTPUT, because
+  // it expanded a node by `inp_edges_ordered` and cut only flops. That reports
+  // a cycle for `read dout -> ... -> WRITE address`, which is not one: a write
+  // port samples its address AT THE EDGE, so that path is feedback through the
+  // array exactly like `always @(posedge clk) r <= f(r)`. Measured on CORE-ET
+  // minion_dcache_top, which `pass.legalize` and `legalize.seal` both accept.
+  //
+  // The dependencies now come from `Memory_deps`, the repository's one memory
+  // model -- the same one pass.legalize's loop check uses -- asked PER READ
+  // PORT. It is called with `writes = true`, and that is the soundness point,
+  // not a detail: `memory_lowering.cpp` builds FORWARDED writes into a read's
+  // value (`chain(forwarded)` feeding `MemRead`), so for a forwarding memory
+  // those write cones ARE genuine combinational dependencies of the read and
+  // must stay visible. `writes = false` -- legalize's loop-check policy --
+  // would drop them and could hide a real cycle through a forwarded write.
+  //
+  // What each kind yields: an ASYNC read reaches its own address and enable
+  // (plus the write cones when the memory forwards or is unclocked); a SYNC
+  // read reaches nothing, which is the state cut; a port the model does not
+  // decode makes the whole memory fall back to the conservative all-inputs
+  // join.
+  //
+  // The memory stays ONE vertex and the union over ALL of its read ports is
+  // expanded, not just the port a consumer arrived by. That is not laziness:
+  // `lower_memory_reads` lowers every read port of a memory at the one place
+  // the Memory node sits in this post-order, so EVERY read port's address and
+  // enable cone has to be emitted before it. Tracking the ports separately
+  // would let a consumer of port 0 be emitted while port 1's address cone was
+  // still unemitted, and the certificate requires topological order. The cost
+  // is that a one-directional dependency BETWEEN two read ports of the same
+  // memory (port 1's address reading port 0's data) is reported as a cycle;
+  // that shape is genuinely not representable while one Memory node lowers
+  // both ports, so a refusal is the honest answer rather than a wrong order.
+  std::map<uint32_t, livehd::port_reach::Memory_deps> mem_deps;
+  std::set<uint32_t>                                  reached, active;
+  std::vector<std::pair<Node, bool>>                  stack;
   // Operator census: name -> first node that used it, plus a total node count.
   std::map<std::string, std::string> unsupported;
   size_t                             unsupported_nodes = 0;
@@ -1033,11 +1070,38 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
         fatal(ctx, "combinational cycle at node n_" + std::to_string(id));
       }
       stack.back().second = true;
-      for (const auto& e : inp_edges_ordered(node)) {
-        if (leaf(e.driver) || reached.contains(node_id(pin_node(e.driver)))) {
-          continue;
+      const auto push     = [&](const Node_pin& drv) {
+        if (drv.is_invalid() || leaf(drv) || reached.contains(node_id(pin_node(drv)))) {
+          return;
         }
-        stack.emplace_back(pin_node(e.driver), false);
+        stack.emplace_back(pin_node(drv), false);
+      };
+      bool expanded = false;
+      if (node_is_memory(node)) {
+        const auto mi = ctx.memory_info.find(id);
+        if (mi != ctx.memory_info.end()) {
+          auto it = mem_deps.find(id);
+          if (it == mem_deps.end()) {
+            it = mem_deps.emplace(id, livehd::port_reach::Memory_deps(node)).first;
+          }
+          expanded = true;
+          for (const auto rp : mi->second.read_ports) {
+            // `writes = true`: forwarded write cones are REAL dependencies of
+            // the read value the certificate builds. See the note above.
+            const auto dpid = mi->second.ports.at(rp).driver_pid;
+            if (!it->second.deps(static_cast<hhds::Port_id>(dpid), push, /*writes=*/true)) {
+              expanded = false;  // a port the model cannot decode: join it all
+              break;
+            }
+          }
+        }
+      }
+      if (!expanded) {
+        // Not a memory the model decodes: the old conservative join over every
+        // input.
+        for (const auto& e : inp_edges_ordered(node)) {
+          push(e.driver);
+        }
       }
     }
   }
