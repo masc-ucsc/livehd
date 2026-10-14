@@ -12609,3 +12609,105 @@ made unilaterally.
 
 **B01 remains BLOCKED.** It compiles and its first normalization refusal is
 gone; the certificate does not exist, so no FP credit is claimed or implied.
+
+## §63.85 — the yosys ICG spelling normalized to X, and two unsound fixes on the way to the real one
+
+### 1. The defect a differential found and "recognized" was hiding
+
+§63.84's fixture leg declared the CORE-ET `prim_clk_gate` spelling recognized on
+the strength of `single_edge` exiting 0 and reporting a folded gate. It never
+simulated the result. The result was **`q = x`**.
+
+`latch_transparent_arm` peels a latch's hold mux only when one arm is the
+latch's own `Q`. tolg spells "holds" that way; the YOSYS reader spells it as a
+DON'T-CARE constant, and puts it two identity wrappers down:
+
+```
+din = Sext(Get_mask(Mux(Ror(clk), 1'sb?, en|scan), [0,1)))
+```
+
+So the mux was never found, the clock-muxed wrapper became the "transparent
+arm", and at the sampling edge that arm is X -- every flop behind the gate
+emitted `q = x`. Nothing caught it because the fixture's iverilog legs all ran
+the DIRECT-SLANG shape.
+
+### 2. Two unsound attempts, and what caught each
+
+| attempt | caught by |
+|---|---|
+| unwrap `Sext`/`Get_mask` unconditionally | `abc_latch_gated` LEC-refuted `qg(ref=15 impl=14)`: dropped real width work on a 4-bit data latch |
+| accept ANY don't-care arm as a hold arm | `lgcheck_memory_poweron_smoke` stopped REFUTING its planted break ("broken returned 2; expected 1") and `yosys_clock_domain_test` failed |
+
+The second is the important one: comparing only the selector's ROOT against the
+window's root is not a proof. With enable `!clk`, selector `clk` and arms
+`{X, d}`, the don't-care is selected while the latch is **OPEN** -- the latch
+really passes X -- yet a root-only test accepts and hands back `d`.
+
+### 3. The discriminator that holds
+
+Polarity AND the arm mapping, from `resolve_phase` alone:
+
+```
+open_level   = active_low ? wr.inverted : !wr.inverted
+closed_level = !open_level
+sel_at_close = (closed_level != sr.inverted) ? 1 : 0   // sel is 1 iff L != sr.inverted
+require        x_index == sel_at_close                 // pid1 -> 0, pid2 -> 1
+```
+
+plus exactly two arms, exactly one don't-care, and a single driver on it.
+`pid1`/`pid2` is cgen's own two-arm mapping (`if (sel) arm1 else arm0`).
+Anything undecidable returns false and the mux keeps its value semantics.
+
+Applied to **both** overloads. The flat and hierarchical copies had already
+drifted -- the X spelling was taught to the flat one alone, so a hierarchical
+caller kept reading the clock-muxed value.
+
+### 4. The gates, and what each would catch
+
+* `graph/latch_contract_test`: `DontCareOnTheClosedPhaseIsAHoldArm` /
+  `DontCareOnTheOpenPhaseIsNotAHoldArm` -- the same design twice, differing only
+  in which arm holds the X. Reverting to the root-only form fails exactly the
+  open-phase negative.
+* `single_edge_icg_test`: the CORE-ET spelling now runs its ORIGINAL RTL against
+  the normalized output (P=1, same clock), `en`/`scan` moving in the low phase
+  and `en` also moving MID-HIGH where the real latch is shut. 30 checks, with a
+  vacuity floor, keyed on markers because `$finish(1)` leaves vvp's exit at 0.
+  Against the pre-fix netlist: `ICG_EC_FAIL errs=30`, `normalized=x`.
+
+466/466 on `//graph //lhd/tests //pass/single_edge //pass/lec //inou/yosys`.
+
+### 5. Corrections to §63.84 and to the previous report
+
+* **The simulator was never unavailable.** `generated/validation-tools/iverilog-v13_0/bin`
+  holds Icarus 13.0; the earlier "not installed" came from checking only system
+  PATH. Already corrected in §63.84.
+* **`q = 37` is not an equivalence gate** and is no longer cited as one. It was
+  one normalized instance, constant inputs, one `$display`. The RTL differential
+  above replaces it.
+* **The dual-edge harness epoch was wrong.** `dnorm7.v` initializes
+  `single_edge_phase` to 0 and toggles every normalized posedge, so with
+  `clk_n = 0` and `always #5` slot 0 lands at 5,25,... and slot 1 at 15,35,...
+  -- the normalized design ran 5 ns AHEAD of a source rising at 10. The comment
+  claiming slot0@15/slot1@25 was copied from `single_edge_four_classes_test` and
+  is false for this artifact. **So the 49 mismatches do not implicate the hold
+  lowering**, and that attribution is withdrawn. The fix is to start the
+  normalized oscillator 5 ns late so its posedges pair with source rise/fall.
+* **The `qg(ref=15 impl=14)` isolation proves less than claimed.** Disabling the
+  hold path made those two tests pass, but the unwrap and X-arm changes were in
+  the tree throughout, so that experiment neither implicates nor clears them.
+* **`icg_hold` is retained, not shipped**
+  (`generated/master_port/b01_extsim_20261014/icg_hold_ATTEMPT.patch`). Beyond
+  the harness error it has a real source-level bug: `old_en` -- the consumer's
+  own local enable -- is folded into the gate enables BEFORE the sample, so it
+  gets frozen at the rise. A falling consumer evaluates its local enable at the
+  FALL; with gate on and local enable 0@rise/1@fall the sample suppresses a
+  required commit, and 1@rise/0@fall invents one. B01's `wr_data_en_i` is
+  exactly such a local enable. Only the GATE GUARD may be sampled; the local
+  enable and the slot predicate combine at the consumer's commit. The guard
+  should also be shared by gate/root/polarity the way
+  `pass/lec/phase_sched.cpp` keys `guard_key`/`guard_cones`, not minted per
+  consumer, and the added state's startup correspondence has to be argued rather
+  than asserted by an `initial = 0`.
+
+B01 remains BLOCKED. Its boundary is unchanged and still pinned by the
+dual-edge leg; no certificate exists and no FP credit is claimed.

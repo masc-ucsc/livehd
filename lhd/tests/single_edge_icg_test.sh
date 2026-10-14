@@ -421,6 +421,69 @@ grep -q "P=1 slots" <<<"$out" \
   || { echo "$out" | tail -6; fail "the event-control ICG did not stay at P=1"; }
 echo "ok: the CORE-ET prim_clk_gate spelling (event control, non-blocking, scan OR) is recognized"
 
+# ...AND IT SIMULATES. Recognition is not the gate: `single_edge` exiting 0 and
+# reporting a folded gate says the classifier read the phase, nothing about the
+# design it produced. It produced `q = x` -- the yosys reader spells the latch's
+# hold branch as a don't-care constant two identity wrappers down
+# (`Sext(Get_mask(Mux(Ror(clk), 1'sb?, en|scan)))`), so the "transparent arm"
+# the bypass took was the clock-muxed wrapper, which is X at the sampling edge.
+# Nothing caught it because the iverilog legs above run the DIRECT-SLANG shape.
+# This leg runs the ORIGINAL RTL against the normalized output, P=1 so both sit
+# on the same clock, with `en` and `scan` moving in the low phase and `en` also
+# moving MID-HIGH where the real latch is shut.
+if external_sim; then
+  emit "$W/lg_ec"      "$W/v_ec_src"
+  emit "$W/lg_ec_norm" "$W/v_ec_norm"
+  sed 's/^module icgf(/module icgf_n(/' "$W"/v_ec_norm/*.v > "$W/ec_norm.v"
+  cat > "$W/ec_tb.v" <<'EOF'
+`timescale 1ns/1ps
+module tb;
+  reg clk = 0, reset = 1, en = 0, scan = 0;
+  reg [7:0] d = 0;
+  wire [7:0] qs, qn;
+  integer errs = 0, checks = 0, k = 0;
+  always #10 clk = ~clk;                 // rise 10+20p, fall 20+20p
+  icgf   s(.clk(clk), .reset(reset), .en(en), .scan(scan), .d(d), .q(qs));
+  icgf_n n(.clk(clk), .reset(reset), .en(en), .scan(scan), .d(d), .q(qn));
+  // LOW-phase stimulus: the ICG's own contract, stable across the rise.
+  always @(negedge clk) begin
+    #6 d    <= (k * 8'd37 + 8'd11) & 8'hff;
+       en   <= (k % 3) != 0;
+       scan <= (k % 7) == 0;
+       k    <= k + 1;
+  end
+  // HIGH-phase disturbance: the latch is SHUT, so neither side may react.
+  always @(posedge clk) #6 en <= ~en;
+  always @(posedge clk) begin
+    #16 if (!reset) begin
+          checks <= checks + 1;
+          if (qs !== qn) begin
+            errs = errs + 1;
+            if (errs < 8) $display("MISMATCH @%0t source=%0d normalized=%0d", $time, qs, qn);
+          end
+        end
+  end
+  initial begin
+    #27 reset = 0;
+    #600;
+    if (checks < 20)    $display("ICG_EC_VACUOUS checks=%0d", checks);
+    else if (errs != 0) $display("ICG_EC_FAIL errs=%0d", errs);
+    else                $display("ICG_EC_OK checks=%0d", checks);
+    $finish;
+  end
+endmodule
+EOF
+  iverilog -g2012 -o "$W/ec.vvp" "$W/icg_ec.sv" "$W/ec_norm.v" "$W/ec_tb.v" >"$W/iv_ec.log" 2>&1 \
+    || { tail -5 "$W/iv_ec.log"; fail "iverilog could not elaborate the CORE-ET-spelling pair"; }
+  out="$(timeout 120 vvp "$W/ec.vvp" 2>&1)"
+  grep -qE "ICG_EC_OK|ICG_EC_FAIL|ICG_EC_VACUOUS" <<<"$out" \
+    || { echo "$out" | head -8; fail "the CORE-ET-spelling differential did not run to a verdict"; }
+  grep -q "ICG_EC_VACUOUS" <<<"$out" && { echo "$out" | head -4; fail "the CORE-ET-spelling differential observed too few cycles to mean anything"; }
+  grep -q "ICG_EC_OK" <<<"$out" \
+    || { echo "$out" | head -8; fail "the CORE-ET prim_clk_gate spelling normalizes to a design that does not match its own RTL"; }
+  echo "ok: the CORE-ET spelling agrees with its ORIGINAL RTL over 30 cycles under iverilog"
+fi
+
 # NEGATIVE, and it must fail for the RIGHT reason: a latch transparent on the
 # GATED phase passes an enable change through while the gated clock is high.
 out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_ec_same" --emit-dir "lg:$W/lg_ec_same_norm" \

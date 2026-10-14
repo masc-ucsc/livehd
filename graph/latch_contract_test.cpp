@@ -261,3 +261,77 @@ TEST(LatchContract, ClockNameHeuristicBoundaries) {
   EXPECT_FALSE(Design_clocks::name_looks_like_clock("gclk_gate"));
   EXPECT_FALSE(Design_clocks::name_looks_like_clock("clocked"));
 }
+
+// ---------------------------------------------------------------------------
+// A DON'T-CARE hold arm is a hold arm only on the CLOSED phase.
+//
+// tolg spells "the latch holds" as a Q feedback arm; the yosys reader spells it
+// as an undefined constant, so `latch_transparent_arm` has to recognize both.
+// But a don't-care is only the HOLD value when it is reached while the latch is
+// SHUT. The two designs below differ by exactly the arm mapping, and they must
+// get opposite answers -- a check that compares only the selector's ROOT
+// against the window's root accepts both, which is unsound: it hands back `d`
+// for a latch that really passes X while open. (Measured: a root-only check
+// stopped lgcheck_memory_poweron_smoke from REFUTING its planted break.)
+namespace {
+// enable = !clk (open while clk == 0); din = Mux(clk, arm0, arm1).
+// `x_on_true_arm` puts the don't-care on the sel==1 arm, i.e. on clk == 1 --
+// the phase the latch is CLOSED, which is the real ICG shape.
+hhds::Node_class build_xhold(hhds::Graph& g, bool x_on_true_arm, hhds::Pin_class& d_out) {
+  auto notn = gu::create_typed_node(g, Ntype_op::Not);
+  g.get_input_pin("clk").connect_sink(notn.create_sink_pin(0));
+  auto nclk = notn.create_driver_pin(0);
+  gu::set_bits(nclk, 1);
+  gu::set_unsign(nclk);
+
+  auto l   = add_latch(g, "l", nclk, /*active_low=*/false);
+  auto mux = gu::create_typed_node(g, Ntype_op::Mux);
+  g.get_input_pin("clk").connect_sink(gu::setup_sink_pid(mux, 0));  // selector
+  auto xk = gu::create_const(g, *Dlop::from_pyrope("0ub?"));
+  auto dv = g.get_input_pin("d");
+  // pid 1 is the sel==0 arm, pid 2 the sel==1 arm (cgen: `if (sel) a2 else a1`).
+  (x_on_true_arm ? dv : xk).connect_sink(gu::setup_sink_pid(mux, 1));
+  (x_on_true_arm ? xk : dv).connect_sink(gu::setup_sink_pid(mux, 2));
+  auto mq = mux.create_driver_pin(0);
+  gu::set_bits(mq, 1);
+  mq.connect_sink(gu::setup_sink_by_name(l, "din"));
+  d_out = dv;
+  return l;
+}
+}  // namespace
+
+TEST(LatchContract, DontCareOnTheClosedPhaseIsAHoldArm) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_lcontract_xhold_ok");
+  auto  gio = lib.create_io("xhold_ok");
+  gio->add_input("clk", 1);
+  gio->add_input("d", 2);
+  gio->set_bits("d", 1);
+  auto g = gio->create_graph();
+
+  hhds::Pin_class dv;
+  auto            l = build_xhold(*g, /*x_on_true_arm=*/true, dv);
+  const auto      arm = livehd::latch_contract::latch_transparent_arm(l);
+  ASSERT_FALSE(arm.is_invalid()) << "the hold mux must be peeled";
+  EXPECT_EQ(arm.get_class_index(), dv.get_class_index())
+      << "enable !clk with the don't-care on the clk==1 arm is the real ICG shape: "
+         "the latch passes `d` while open, so the arm is `d`";
+}
+
+TEST(LatchContract, DontCareOnTheOpenPhaseIsNotAHoldArm) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_lcontract_xhold_bad");
+  auto  gio = lib.create_io("xhold_bad");
+  gio->add_input("clk", 1);
+  gio->add_input("d", 2);
+  gio->set_bits("d", 1);
+  auto g = gio->create_graph();
+
+  hhds::Pin_class dv;
+  auto            l   = build_xhold(*g, /*x_on_true_arm=*/false, dv);
+  const auto      arm = livehd::latch_contract::latch_transparent_arm(l);
+  // The don't-care sits on clk == 0, which is when this latch is OPEN, so the
+  // value it passes through IS the don't-care. Returning `d` would invent a
+  // defined value the design never passes.
+  EXPECT_NE(arm.get_class_index(), dv.get_class_index())
+      << "a don't-care reached while the latch is OPEN is not a hold arm; peeling it "
+         "hands back a value the latch never passes";
+}
